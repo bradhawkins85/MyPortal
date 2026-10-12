@@ -161,6 +161,11 @@ include it in the repository path (for example `rmm/Files/Common/setup.exe`).
 - Common scripts can use files under `Files/Common/`. Company scripts can also use files
   under their own company's folder in `Files/Companies/`, including folders linked by a
   `.myportal-company` marker. Files from another company cannot be associated or delivered.
+- Common scripts can also use a company's files through `Files/Companies/{company}/`, for
+  example `Files/Companies/{company}/setup.exe`. The file picker lists the files of the
+  company you are viewing in this form. Each run uses `{company}` as the folder of the company
+  it runs for, so every company that runs the script needs its own copy of the file; a run
+  for a company without it fails before the script starts.
 - Each script may associate up to 20 files, up to 50 MB each. Every destination must be a
   different absolute local path for the endpoint's operating system. Windows paths must
   include the drive letter. UNC paths, relative paths and `..` are rejected.

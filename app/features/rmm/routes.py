@@ -328,14 +328,14 @@ async def summarise_script_api(script_id: int, request: Request):
     return state
 
 
-async def _editable_script_files(request: Request, script_id: int) -> tuple[dict, dict]:
+async def _editable_script_files(request: Request, script_id: int) -> tuple[dict, dict, int]:
     user, _company, company_id, _can_run = await _context(request, api=True)
     if await gitea_sign_in.access_level(user) != "write":
         raise HTTPException(status_code=403, detail="Script editing write access is required")
     script = await rmm_repo.get_script(script_id, with_content=True)
     if not rmm_repo.script_available_to(script, company_id):
         raise HTTPException(status_code=404, detail="Script not found")
-    return user, script
+    return user, script, company_id
 
 
 class ScriptFileAssociation(BaseModel):
@@ -349,9 +349,9 @@ class ScriptFilesRequest(BaseModel):
 
 @router.get("/api/rmm/scripts/{script_id:int}/files", summary="List associated and available Gitea files")
 async def script_files_api(script_id: int, request: Request):
-    _user, script = await _editable_script_files(request, script_id)
+    _user, script, company_id = await _editable_script_files(request, script_id)
     try:
-        available, warning = await rmm_script_files.file_choices(script)
+        available, warning = await rmm_script_files.file_choices(script, company_id)
     except gitea.GiteaError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"files": script.get("files") or [], "available": available, "warning": warning}
@@ -369,7 +369,7 @@ async def _save_script_files(request: Request, user: dict, script: dict, files: 
 
 @router.put("/api/rmm/scripts/{script_id:int}/files", summary="Set a script's Gitea files and endpoint paths")
 async def update_script_files_api(script_id: int, payload: ScriptFilesRequest, request: Request):
-    user, script = await _editable_script_files(request, script_id)
+    user, script, _company_id = await _editable_script_files(request, script_id)
     try:
         files = await _save_script_files(request, user, script, [item.model_dump() for item in payload.files])
     except rmm_script_files.ScriptFileError as exc:
@@ -381,7 +381,7 @@ async def update_script_files_api(script_id: int, payload: ScriptFilesRequest, r
 
 @router.post("/rmm/scripts/{script_id:int}/files", response_class=HTMLResponse, summary="Associate a Gitea file with a script")
 async def add_script_file(script_id: int, request: Request):
-    user, script = await _editable_script_files(request, script_id)
+    user, script, _company_id = await _editable_script_files(request, script_id)
     form = await request.form()
     files = list(script.get("files") or [])
     association = {"source_path": str(form.get("source_path") or ""), "destination": str(form.get("destination") or "")}
@@ -408,7 +408,7 @@ async def add_script_file(script_id: int, request: Request):
 
 @router.post("/rmm/scripts/{script_id:int}/files/{index:int}/remove", response_class=HTMLResponse, summary="Remove a script file association")
 async def remove_script_file(script_id: int, index: int, request: Request):
-    user, script = await _editable_script_files(request, script_id)
+    user, script, _company_id = await _editable_script_files(request, script_id)
     files = list(script.get("files") or [])
     if index < 0 or index >= len(files):
         raise HTTPException(status_code=404, detail="File association not found")
