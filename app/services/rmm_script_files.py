@@ -14,6 +14,7 @@ from app.repositories import companies as companies_repo
 from app.repositories import rmm as rmm_repo
 from app.security.encryption import decrypt_secret
 from app.services import gitea
+from app.services import rmm_script_layout as layouts
 
 MAX_FILES = 20
 MAX_FILE_BYTES = 50 * 1024 * 1024
@@ -60,29 +61,25 @@ def validate_associations(files: list[Mapping[str, Any]]) -> list[dict[str, str]
 
 
 def _allowed(
-    settings: gitea.GiteaSettings, files: list[gitea.GiteaFile], layout: Any, script: Mapping[str, Any],
+    settings: gitea.GiteaSettings, files: list[gitea.GiteaFile], layout: layouts.RepositoryLayout, script: Mapping[str, Any],
 ) -> dict[str, gitea.GiteaFile]:
-    from app.services import rmm_scripts
-
-    root = rmm_scripts._repo_path(rmm_scripts.FILES_FOLDER, settings.path)
+    root = layouts._repo_path(layouts.FILES_FOLDER, settings.path)
     allowed: dict[str, gitea.GiteaFile] = {}
     for item in files:
-        relative = rmm_scripts._relative(item.path, root)
-        if relative is None or relative.rsplit("/", 1)[-1] == rmm_scripts.COMPANY_MARKER:
+        relative = layouts._relative(item.path, root)
+        if relative is None or relative.rsplit("/", 1)[-1] == layouts.COMPANY_MARKER:
             continue
-        usable, company_id, _reason = rmm_scripts.script_scope(relative, layout)
+        usable, company_id, _reason = layouts.script_scope(relative, layout)
         if usable and (company_id is None or company_id == script.get("company_id")):
             allowed[item.path] = item
     return allowed
 
 
-async def _files_layout(settings: gitea.GiteaSettings) -> tuple[list[gitea.GiteaFile], Any]:
+async def _files_layout(settings: gitea.GiteaSettings) -> tuple[list[gitea.GiteaFile], layouts.RepositoryLayout]:
     # Reuse the established company markers, including renamed file folders.
-    from app.services import rmm_scripts
-
     files = await gitea.list_files(settings)
     companies = await companies_repo.list_companies(include_archived=True)
-    return files, await rmm_scripts._read_layout(settings, files, companies, files_folder=True)
+    return files, await layouts._read_layout(settings, files, companies, files_folder=True)
 
 
 async def available_files(settings: gitea.GiteaSettings, script: Mapping[str, Any]) -> dict[str, gitea.GiteaFile]:
@@ -93,15 +90,13 @@ async def available_files(settings: gitea.GiteaSettings, script: Mapping[str, An
 async def file_choices(script: Mapping[str, Any]) -> tuple[list[str], str | None]:
     """Files the editor can pick for ``script``, and a warning when the missing
     ``Files/`` folders could not be created first."""
-    from app.services import rmm_scripts
-
     settings = await gitea.load_settings()
     files, layout = await _files_layout(settings)
     warning = None
     if layout.missing:
-        missing = {f"{rmm_scripts.FILES_FOLDER}/{path}": content for path, content in layout.missing.items()}
+        missing = {f"{layouts.FILES_FOLDER}/{path}": content for path, content in layout.missing.items()}
         try:
-            await rmm_scripts._create_missing(settings, rmm_scripts.RepositoryLayout(missing=missing))
+            await layouts._create_missing(settings, layouts.RepositoryLayout(missing=missing))
         except gitea.GiteaError as exc:
             warning = f"The Files folders could not be created in Gitea. {exc}"
     choices = sorted(_allowed(settings, files, layout, script), key=str.casefold)

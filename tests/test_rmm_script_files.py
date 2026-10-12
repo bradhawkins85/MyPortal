@@ -101,7 +101,7 @@ async def test_file_choices_create_missing_files_folders_first(monkeypatch):
 
 @pytest.mark.anyio
 async def test_existing_files_are_never_recreated(monkeypatch):
-    from app.services import rmm_scripts
+    from app.services import rmm_script_layout
 
     settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
     # A marker naming a deleted company, in the folder a current company would use.
@@ -111,7 +111,7 @@ async def test_existing_files_are_never_recreated(monkeypatch):
         return b'{"company_id": 99}'
 
     monkeypatch.setattr(gitea, "fetch_file", fetch_file)
-    layout = await rmm_scripts._read_layout(settings, files, [{"id": 1, "name": "Contoso"}], files_folder=True)
+    layout = await rmm_script_layout._read_layout(settings, files, [{"id": 1, "name": "Contoso"}], files_folder=True)
     assert layout.company_folders == {"Contoso": 1}
     assert "Companies/Contoso/.myportal-company" not in layout.missing
     assert set(layout.missing) == {"Common/README.md"}
