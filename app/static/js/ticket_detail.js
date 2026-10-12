@@ -1739,7 +1739,12 @@
       ) {
         return;
       }
-      if (target.closest('a[href]')) {
+      // Action buttons and menus (RustDesk, RMM, chat, ...) do their own thing.
+      if (
+        target.closest(
+          'a[href], button, summary, details, input, select, textarea, .ticket-assets-linked__actions',
+        )
+      ) {
         return;
       }
 
