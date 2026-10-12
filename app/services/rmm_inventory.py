@@ -250,11 +250,9 @@ def format_bytes(value: Any) -> str:
     if size <= 0:
         return ""
     for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024:
+        if size < 1024 or unit == "TB":
             return f"{size:.0f} {unit}" if unit in ("B", "KB") or size >= 100 else f"{size:.1f} {unit}"
         size /= 1024
-        if unit == "TB":
-            return f"{size:.1f} {unit}"
     return ""
 
 
