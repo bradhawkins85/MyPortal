@@ -56,6 +56,8 @@ POLL_WAIT_SECONDS = 25
 # few polls has lost its connection.
 AGENT_CONNECTED_WINDOW = timedelta(seconds=POLL_WAIT_SECONDS * 4)
 SENSITIVE_MASK = "••••••"
+# rmm_script_runs.run_source for a run started from a tray menu item.
+TRAY_RUN_SOURCE = "tray"
 CUSTOM_VALUE_SCOPES = ("asset", "company", "session")
 
 _TRUE = {"1", "true", "yes", "on", "y", "$true"}
@@ -760,6 +762,49 @@ async def queue_runs(
             continue
         queued.append({"run_id": run_id, "asset_id": asset_id, "asset_name": asset.get("name")})
     return {"queued": queued, "problems": problems, "script": {"id": script["id"], "name": script["name"]}}
+
+
+async def queue_tray_run(*, device: Mapping[str, Any], node: Mapping[str, Any]) -> dict[str, Any]:
+    """Queue the script a tray menu item names on the tray device's own computer.
+
+    ``node`` is the ``rmm_script`` item from the device's resolved tray menu.
+    Its ``entries`` hold the values an administrator set for the script's
+    fields, keyed like the run form (``param:Name`` / ``env:NAME``). Raises
+    :class:`RunRequestError` with a message the person at the computer can read.
+    """
+
+    company_id = int(device.get("company_id") or 0)
+    asset_id = int(device.get("asset_id") or 0)
+    if not company_id or not asset_id:
+        raise RunRequestError({"device": "This computer is not linked to a device in MyPortal yet."})
+    script = await rmm_repo.get_script(int(node.get("script_id") or 0), with_content=True)
+    if not rmm_repo.script_available_to(script, company_id):
+        raise RunRequestError({"script": "This script is no longer available."})
+    agent = await rmm_repo.get_asset_agent(asset_id)
+    if not agent or int(agent.get("company_id") or 0) != company_id:
+        raise RunRequestError({"device": "The MyPortal RMM agent is not installed on this computer."})
+    if await rmm_repo.has_active_run(int(agent["id"]), int(script["id"]), run_source=TRAY_RUN_SOURCE):
+        raise RunRequestError({"busy": "This is already queued or running on this computer."})
+    raw_entries = node.get("entries")
+    submitted = {str(key): "" if value is None else str(value)
+                 for key, value in (raw_entries.items() if isinstance(raw_entries, Mapping) else [])}
+    try:
+        entries = validate_entries(script, submitted)
+        run_id = await queue_for_agent(
+            script=script,
+            agent={**agent, "company_id": company_id, "asset_id": asset_id},
+            entries=entries,
+            inputs=stored_inputs(script, entries),
+            timeout_seconds=clamp_timeout(None, int(script.get("default_timeout_seconds") or 600)),
+            requested_by_user_id=None,
+            run_source=TRAY_RUN_SOURCE,
+        )
+    except RunRequestError as exc:
+        if "device" in exc.errors:
+            raise
+        log_warning("Tray menu RMM script is missing values", script_id=script["id"], fields=sorted(exc.errors))
+        raise RunRequestError({"setup": "This menu item is not set up correctly. Please contact support."}) from exc
+    return {"run_id": run_id, "script": {"id": script["id"], "name": script["name"]}}
 
 
 # --------------------------------------------------------------------------- #

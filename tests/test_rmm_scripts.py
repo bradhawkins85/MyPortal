@@ -1209,3 +1209,42 @@ def test_library_folders_are_collapsed_except_those_holding_the_open_script():
     open_paths = re.findall(r'data-path="([^"]+)" open>', opened)
     # "Common/diskless" shares a prefix with "Common/disk" but stays closed.
     assert open_paths == ["Common", "Common/disk"]
+
+
+@pytest.mark.anyio
+async def test_tray_menu_item_runs_its_script_with_the_admins_values(sqlite_db, monkeypatch):
+    await _sync(monkeypatch, {"rmm/Common/Check-Disk.ps1": POWERSHELL, "rmm/Companies/Contoso/only.ps1": "Write-Output 2\n"})
+    scripts = {script["name"]: script for script in await rmm_repo.list_scripts()}
+    _result, agent = await _enrol(sqlite_db)
+    device = {"id": 5, "company_id": 1, "asset_id": 10}
+    node = {"type": "rmm_script", "script_id": scripts["Check-Disk"]["id"], "node_id": "abc"}
+
+    # A required parameter the administrator left empty is a setup problem, not the user's.
+    with pytest.raises(rmm_scripts.RunRequestError) as missing:
+        await rmm_scripts.queue_tray_run(device=device, node=node)
+    assert missing.value.errors == {"setup": "This menu item is not set up correctly. Please contact support."}
+
+    node["entries"] = {"param:Drive": "{{asset.serial_number}}", "env:TENANT_ID": "{{company.variables.Tenant}}"}
+    result = await rmm_scripts.queue_tray_run(device=device, node=node)
+    run = await rmm_repo.get_run(result["run_id"])
+    assert run["run_source"] == "tray" and run["requested_by_user_id"] is None and run["asset_id"] == 10
+    jobs = await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
+    assert jobs[0]["parameters"]["Drive"] == "SN1" and jobs[0]["env"] == {"TENANT_ID": "contoso"}
+
+    # Clicking again while it is still unfinished does not queue a second run.
+    with pytest.raises(rmm_scripts.RunRequestError) as busy:
+        await rmm_scripts.queue_tray_run(device=device, node=node)
+    assert "already" in busy.value.errors["busy"]
+
+    with pytest.raises(rmm_scripts.RunRequestError) as no_agent:
+        await rmm_scripts.queue_tray_run(device={"id": 6, "company_id": 1, "asset_id": 11}, node=node)
+    assert "not installed" in no_agent.value.errors["device"]
+
+    other_company = {"type": "rmm_script", "script_id": scripts["only"]["id"]}
+    with pytest.raises(rmm_scripts.RunRequestError) as unavailable:
+        await rmm_scripts.queue_tray_run(device={"id": 7, "company_id": 2, "asset_id": 20}, node=other_company)
+    assert "no longer available" in unavailable.value.errors["script"]
+
+    with pytest.raises(rmm_scripts.RunRequestError) as unlinked:
+        await rmm_scripts.queue_tray_run(device={"id": 8, "company_id": 1, "asset_id": None}, node=node)
+    assert "not linked" in unlinked.value.errors["device"]

@@ -73,6 +73,8 @@ from app.schemas.tray import (
     TrayTicketQuestionUpdate,
     TrayTicketSubmitRequest,
     TrayTicketSubmitResponse,
+    TrayRMMScriptRunRequest,
+    TrayRMMScriptRunResponse,
     TrayTRMMScriptRunRequest,
     TrayTRMMScriptRunResponse,
     TrayTRMMSyncRequest,
@@ -87,6 +89,7 @@ from app.services import chat_ntfy_notifications
 from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import matrix as matrix_service
 from app.services import matrix_ai_waiting_assistant
+from app.services import rmm_scripts
 from app.services import tacticalrmm as tacticalrmm_service
 from app.services import tray_installer
 from app.services import tickets as tickets_service
@@ -597,6 +600,92 @@ def _find_trmm_script_node(
             if found:
                 return found
     return None
+
+
+def _find_rmm_script_node(
+    nodes: list[dict[str, Any]], script_id: int, node_id: str | None
+) -> dict[str, Any] | None:
+    """The ``rmm_script`` menu item for ``script_id``; with ``node_id``, that item.
+
+    Items saved before ``node_id`` existed have none, so a request without one
+    takes the first item for the script.
+    """
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_type = str(node.get("type") or "").strip().lower()
+        try:
+            node_script_id = int(node.get("script_id") or 0)
+        except (TypeError, ValueError):
+            node_script_id = 0
+        if (
+            node_type == "rmm_script"
+            and node_script_id == int(script_id)
+            and (not node_id or str(node.get("node_id") or "") == node_id)
+        ):
+            return node
+        children = node.get("children")
+        if isinstance(children, list):
+            found = _find_rmm_script_node(children, script_id, node_id)
+            if found:
+                return found
+    return None
+
+
+@router.post(
+    "/rmm-script",
+    response_model=TrayRMMScriptRunResponse,
+    summary="Run a configured MyPortal RMM script on this tray device's computer",
+)
+async def run_rmm_script(
+    payload: TrayRMMScriptRunRequest,
+    device: dict = Depends(get_current_tray_device),
+) -> TrayRMMScriptRunResponse:
+    """Queue a menu-approved MyPortal RMM script on this computer's RMM agent.
+
+    Like ``/trmm-script``, the script must be an item in this device's resolved
+    tray menu, so a tray client cannot run anything an administrator did not
+    put there. The values the script runs with come from that menu item on the
+    server, never from the request. The run appears in RMM run history.
+    """
+
+    config = await tray_service.resolve_config_for_device(device)
+    node = _find_rmm_script_node(
+        config.get("menu") or [], int(payload.script_id), payload.node_id
+    )
+    if not node:
+        raise HTTPException(
+            status_code=403, detail="This script is not enabled for this computer"
+        )
+    try:
+        result = await rmm_scripts.queue_tray_run(device=device, node=node)
+    except rmm_scripts.RunRequestError as exc:
+        log_warning(
+            "Tray RMM script request refused",
+            device_id=device.get("id"),
+            asset_id=device.get("asset_id"),
+            script_id=payload.script_id,
+            reason=sorted(exc.errors),
+        )
+        raise HTTPException(
+            status_code=409, detail=" ".join(exc.errors.values())
+        ) from exc
+    log_info(
+        "Tray queued an RMM script",
+        device_id=device.get("id"),
+        asset_id=device.get("asset_id"),
+        script_id=payload.script_id,
+        run_id=result["run_id"],
+        console_user=device.get("console_user"),
+    )
+    script_name = str(node.get("label") or result["script"]["name"] or "")
+    return TrayRMMScriptRunResponse(
+        status="queued",
+        run_id=int(result["run_id"]),
+        script_id=int(payload.script_id),
+        script_name=script_name or None,
+        message=f"{script_name or 'The script'} will run on this computer shortly.",
+    )
 
 
 @router.post(

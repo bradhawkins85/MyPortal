@@ -307,6 +307,21 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 			}
 		}(node)
 
+	case "rmm_script":
+		label := node.Label
+		if label == "" {
+			label = node.ScriptName
+		}
+		if label == "" {
+			label = "Run Script"
+		}
+		item := addTrayMenuItem(parent, label, "Run a script on this computer")
+		go func(menuNode api.MenuNode) {
+			for range item.ClickedCh {
+				go runRMMScriptFromMenu(menuNode)
+			}
+		}(node)
+
 	case "scan_network":
 		if !cfg.NetworkScannerEnabled {
 			return

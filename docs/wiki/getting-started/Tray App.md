@@ -139,6 +139,7 @@ Each entry in `payload_json` is a JSON object:
 | `display_text` | `label`, `text_id` | Opens a small window with the configuration's `display_text` |
 | `env_var` | `label`, `name` | Reads the env var (must be on the allowlist) and shows the value in a popup |
 | `open_chat` | `label` | Opens the helpdesk chat window |
+| `rmm_script` | `label`, `script_id`, `entries`, `confirm`, `node_id` | Runs a MyPortal RMM script (from Gitea) on this computer through its RMM agent |
 | `separator` | — | Horizontal divider |
 
 A built-in default menu is returned when no configuration matches a
@@ -171,6 +172,36 @@ Example TRMM script node visible only for company IDs `12` and `34`:
 The **Admin → Tray → Configurations** menu-node editor exposes these as
 **Show only for companies** and **Hide for companies** dropdown fields on
 every row. Empty submenus are removed after their children are filtered out.
+
+### 4.1a Running a MyPortal RMM script from the tray
+
+Choose the `rmm_script` node type in **Admin → Tray → Configurations**, pick
+a script synced from Gitea and fill in its parameters and environment
+variables. Values can use MyPortal variables such as `{{asset.name}}`,
+`{{asset.custom.Name}}` or `{{company.variables.Name}}`, resolved for each
+computer when the item is clicked. Tick **Ask the user before running** to show
+a Yes/No prompt first.
+
+```json
+{
+  "type": "rmm_script",
+  "label": "Clear Teams cache",
+  "script_id": 12,
+  "script_name": "Clear-TeamsCache",
+  "node_id": "4cf9cfa49e6f3f8c",
+  "confirm": true,
+  "entries": {"param:Restart": "true", "env:TENANT_ID": "{{company.variables.TenantId}}"}
+}
+```
+
+When clicked, the tray calls `POST /api/tray/rmm-script` with only `script_id`
+and `node_id`. MyPortal checks the item is in that device's resolved menu,
+that the script is available to the device's company and that the computer has
+an active MyPortal RMM agent, then queues the run with the values saved on the
+item. `entries` are never sent to the tray. The run shows in RMM run history as
+started from the **Tray menu**; a second click while it is still queued or
+running is refused. Saved values are visible to anyone who can edit tray
+configurations, so put secrets in a company variable and reference it.
 
 ---
 

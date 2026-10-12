@@ -180,6 +180,7 @@ def test_event_log_database_is_left_out_by_default(tmp_path):
 def test_event_log_database_backed_up_when_enabled(tmp_path):
     output = _event_log_dry_run(tmp_path, EVENT_LOG_DB_BACKUP="true")
     assert "myportal_eventlogs@events.example.com:3306" in output
+    assert "(back up: true)" in output
     assert "eventlog-test-" in output
     assert "secret" not in output
 
@@ -236,6 +237,7 @@ def test_stats_database_is_left_out_by_default(tmp_path):
 def test_stats_database_backed_up_when_enabled(tmp_path):
     output = _stats_dry_run(tmp_path, STATS_DB_BACKUP="true")
     assert "myportal_stats@stats.example.com:3306" in output
+    assert "(back up: true)" in output
     assert "stats-test-" in output
     assert "secret" not in output
 

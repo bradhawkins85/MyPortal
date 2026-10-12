@@ -109,6 +109,8 @@ type MenuNode struct {
 	Color      string      `json:"color,omitempty"`
 	ScriptID   int         `json:"script_id,omitempty"`
 	ScriptName string      `json:"script_name,omitempty"`
+	NodeID     string      `json:"node_id,omitempty"`
+	Confirm    bool        `json:"confirm,omitempty"`
 	Children   []*MenuNode `json:"children,omitempty"`
 }
 

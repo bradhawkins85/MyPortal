@@ -9139,6 +9139,28 @@ async def _get_tray_trmm_scripts_for_form() -> tuple[list[dict], str | None]:
         return [], str(exc)
 
 
+async def _get_tray_rmm_scripts_for_form() -> list[dict]:
+    """MyPortal RMM scripts (from Gitea) with the fields a tray menu item can set."""
+    from app.repositories import rmm as rmm_repo
+    from app.services import rmm_scripts
+
+    try:
+        scripts = await rmm_repo.list_scripts()
+    except Exception as exc:  # pragma: no cover - RMM tables missing on old installs
+        log_warning("Tray configuration form could not load RMM scripts", error=str(exc))
+        return []
+    return [
+        {
+            "id": int(script["id"]),
+            "name": str(script.get("name") or f"Script #{script['id']}"),
+            "folder": str(script.get("folder") or ""),
+            "company_id": script.get("company_id"),
+            "fields": rmm_scripts.script_fields(script),
+        }
+        for script in scripts
+    ]
+
+
 async def _get_tray_companies_for_form() -> list[dict]:
     from app.repositories import companies as company_repo
 
@@ -9159,6 +9181,7 @@ async def admin_tray_new_configuration_page(request: Request):
     if redirect:
         return redirect
     trmm_scripts, trmm_scripts_error = await _get_tray_trmm_scripts_for_form()
+    rmm_scripts_for_form = await _get_tray_rmm_scripts_for_form()
     companies = await _get_tray_companies_for_form()
     extra = {
         "title": "New tray configuration",
@@ -9176,6 +9199,7 @@ async def admin_tray_new_configuration_page(request: Request):
         },
         "trmm_scripts": trmm_scripts,
         "trmm_scripts_error": trmm_scripts_error,
+        "rmm_scripts": rmm_scripts_for_form,
         "companies": companies,
     }
     return await _render_template(
@@ -9194,6 +9218,7 @@ async def admin_tray_edit_configuration_page(config_id: int, request: Request):
     if not record:
         return RedirectResponse(url="/admin/tray/configurations", status_code=303)
     trmm_scripts, trmm_scripts_error = await _get_tray_trmm_scripts_for_form()
+    rmm_scripts_for_form = await _get_tray_rmm_scripts_for_form()
     companies = await _get_tray_companies_for_form()
     extra = {
         "title": "Edit tray configuration",
@@ -9211,6 +9236,7 @@ async def admin_tray_edit_configuration_page(config_id: int, request: Request):
         },
         "trmm_scripts": trmm_scripts,
         "trmm_scripts_error": trmm_scripts_error,
+        "rmm_scripts": rmm_scripts_for_form,
         "companies": companies,
     }
     return await _render_template(

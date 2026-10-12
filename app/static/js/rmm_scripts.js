@@ -759,6 +759,8 @@
       source = ' · onboarding';
     } else if (run.run_source === 'remote_control') {
       source = ' · remote control' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
+    } else if (run.run_source === 'tray') {
+      source = ' · tray menu';
     }
     resultModal.querySelector('[data-rmm-result-subtitle]').textContent =
       (run.asset_name ? 'On ' + run.asset_name : 'Device removed') + source;

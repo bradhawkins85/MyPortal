@@ -407,7 +407,7 @@ func checksLoop(ctx context.Context, api *client.Client) {
 			refresh = checksOffWait
 		}
 		if fetched.IsZero() || time.Since(fetched) >= refresh {
-			next, err := api.CheckConfig(ctx)
+			next, err := api.GetCheckConfig(ctx)
 			if err != nil {
 				if ctx.Err() == nil && err.Error() != lastError {
 					log.Printf("checks: could not get settings: %v", err)

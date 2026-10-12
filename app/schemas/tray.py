@@ -70,6 +70,11 @@ class TrayMenuNode(BaseModel):
     * ``submit_ticket`` — opens the submit-a-ticket dialog.
     * ``submit_syncro_ticket`` — opens the same dialog and creates the ticket in Syncro.
     * ``TRMM_Script`` — asks MyPortal to run a selected Tactical RMM script on the linked asset.
+    * ``rmm_script`` — asks MyPortal to run a MyPortal RMM script (``script_id``)
+      on this computer through its RMM agent, after asking the user first when
+      ``confirm`` is set. ``node_id`` tells apart items that run the same script
+      with different values. The values themselves (``entries``) stay on the
+      server and are never sent to the tray.
     * ``scan_network`` — asks an enabled network-scanner device to scan now.
     * ``refresh_config`` — asks the tray service to pull the latest menu config.
     * ``separator`` — visual divider.
@@ -84,6 +89,8 @@ class TrayMenuNode(BaseModel):
     color: Optional[str] = Field(default=None, max_length=32)
     script_id: Optional[int] = Field(default=None, ge=1)
     script_name: Optional[str] = Field(default=None, max_length=200)
+    node_id: Optional[str] = Field(default=None, max_length=64)
+    confirm: Optional[bool] = None
     visible_company_ids: Optional[list[int]] = None
     hidden_company_ids: Optional[list[int]] = None
     children: Optional[list["TrayMenuNode"]] = None
@@ -223,6 +230,19 @@ class TrayTRMMScriptRunResponse(BaseModel):
     script_id: int
     script_name: Optional[str] = None
     event_id: Optional[int] = None
+    message: Optional[str] = None
+
+
+class TrayRMMScriptRunRequest(BaseModel):
+    script_id: int = Field(ge=1)
+    node_id: Optional[str] = Field(default=None, max_length=64)
+
+
+class TrayRMMScriptRunResponse(BaseModel):
+    status: str
+    run_id: int
+    script_id: int
+    script_name: Optional[str] = None
     message: Optional[str] = None
 
 
