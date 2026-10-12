@@ -1,8 +1,8 @@
 # RMM Event Logs
 
 Windows devices with the [RMM agent](RMM%20Scripts.md) send their Windows event logs to MyPortal.
-Every device sends its **Application** and **System** logs; technicians can add more logs for a
-whole company or for one device. Browse them from **Event logs** in the main menu
+Every device sends the logs in `EVENT_LOG_DEFAULT_LOGS` (**Application** and **System** unless you
+change it); technicians can add more logs for a whole company or for one device. Browse them from **Event logs** in the main menu
 (`/rmm/event-logs`), filtered by device, log, level, event ID, source, message text and
 date range (UTC days), or on an asset's page under **Event logs**. [Event log rules](#event-log-rules)
 drop events you do not want to keep, or run a script when an event arrives.
@@ -23,6 +23,7 @@ and restart MyPortal:
 | `EVENT_LOG_DB_PASSWORD` | empty | Password |
 | `EVENT_LOG_DB_NAME` | empty | Database name (letters, digits, `_` and `$`) |
 | `EVENT_LOG_DB_BACKUP` | `false` | `true` also backs up the event log database (see [Backups](Backups.md)) |
+| `EVENT_LOG_DEFAULT_LOGS` | `Application;System` | Logs every device sends, separated by `;` or `,`, for example `Application;System;Security`. Empty uses Application and System; invalid names are skipped and logged (at most 25) |
 | `EVENT_LOG_RETENTION_DAYS` | `30` | Days of entries to keep; a daily job (03:30) deletes older ones. `0` keeps everything |
 
 While `EVENT_LOG_DB_HOST`, `EVENT_LOG_DB_USER` or `EVENT_LOG_DB_NAME` is empty, event log
@@ -50,7 +51,9 @@ On the Event logs page, **Logs collected** lists extra logs, one per line:
 - **Extra logs for every device** in the company you are working in.
 - **Extra logs for this device**, beside each device with the RMM agent.
 
-A device collects Application and System, then its company's extra logs, then its own. Use the
+A device collects the default logs (`EVENT_LOG_DEFAULT_LOGS`), then its company's extra logs,
+then its own. Agents pick up a changed `EVENT_LOG_DEFAULT_LOGS` within a minute of MyPortal
+restarting; each new log starts from the last 24 hours. Use the
 log's full name as shown in Event Viewer → the log's **Properties** → **Full Name**, for example
 `Security`, `Windows PowerShell` or `Microsoft-Windows-PowerShell/Operational`. Changing the logs
 needs write access to Scripts (`menu.rmm_scripts`).

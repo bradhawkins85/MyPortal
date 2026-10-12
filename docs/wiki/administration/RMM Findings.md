@@ -18,8 +18,9 @@ Every `FINDINGS_INTERVAL_HOURS` (6 by default) MyPortal compares the last 24 hou
 | **Performance** | Devices whose average CPU or memory use is well above devices with the same processor, memory and operating system (at least three such devices). | [Device stats](RMM%20Checks.md) |
 | **Device health** | System drives with under 5 GB free, devices not restarted in 30 days, agents silent for 14 days, and checks failing on a quarter or more of the devices they cover. | Inventory and checks |
 
-Security events are only found when the Security log is collected; add it for a company or device
-on the **Event logs** page. Domain controllers' Security logs are where lockouts are recorded.
+Security events are only found when the Security log is collected: add it for every device with
+`EVENT_LOG_DEFAULT_LOGS=Application;System;Security`, or for a company or device on the
+**Event logs** page. Domain controllers' Security logs are where lockouts are recorded.
 
 Inventory keeps only each device's latest software, so the first analysis records what every
 device has and counts only programs whose install date falls in the look-back window. Later
