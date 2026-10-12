@@ -351,11 +351,10 @@ class ScriptFilesRequest(BaseModel):
 async def script_files_api(script_id: int, request: Request):
     _user, script = await _editable_script_files(request, script_id)
     try:
-        settings = await gitea.load_settings()
-        available = await rmm_script_files.available_files(settings, script)
+        available, warning = await rmm_script_files.file_choices(script)
     except gitea.GiteaError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"files": script.get("files") or [], "available": sorted(available, key=str.casefold)}
+    return {"files": script.get("files") or [], "available": available, "warning": warning}
 
 
 async def _save_script_files(request: Request, user: dict, script: dict, files: list[dict]) -> list[dict]:
