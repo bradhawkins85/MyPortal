@@ -60,7 +60,7 @@ rmm_automation.register_tick_job(rmm_checks.tick)
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.11.0",
+    version="1.12.0",
     routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router,
              event_log_rule_router, inventory_router, check_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),

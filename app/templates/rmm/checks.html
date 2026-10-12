@@ -32,7 +32,7 @@
             {% for check in checks %}
             <tr data-rmm-check="{{ check.id }}">
               <td data-label="Check" data-column-key="name"><strong>{{ check.name }}</strong><br><span class="text-muted">{{ check.type_label }}</span></td>
-              <td data-label="Applies to" data-column-key="scope">{{ check.scope_label }}{% if check.replaced %}<br><span class="text-muted">Some devices have their own</span>{% endif %}</td>
+              <td data-label="Applies to" data-column-key="scope">{{ check.scope_label }}{% if check.target_rules %}<br><span class="rmm-chip">Advanced rules</span>{% endif %}{% if check.replaced %}<br><span class="text-muted">Some devices have their own</span>{% endif %}</td>
               <td data-label="Fails when" data-column-key="when">{{ check.description }}</td>
               <td data-label="Then" data-column-key="action">{{ check.action_label }}{% if check.action == "run_script" %} <span class="text-muted">({{ "again every " ~ check.cooldown_minutes ~ " min while failing" if check.cooldown_minutes else "once per failure" }})</span>{% endif %}{% if check.action == "create_ticket" %} <span class="text-muted">(one open ticket per device)</span>{% endif %}</td>
               <td data-label="Devices" data-column-key="results" data-mobile-hidden="true">
@@ -81,7 +81,7 @@
         <div class="form-field">
           <label class="form-label" for="rmm-check-scope">Applies to</label>
           <select class="form-input" id="rmm-check-scope" name="scope">
-            {% if is_super_admin or e.scope == "global" %}<option value="global" {% if e.scope == "global" %}selected{% endif %}>Every company</option>{% endif %}
+            {% if is_super_admin %}<option value="global" {% if e.scope == "global" %}selected{% endif %}>Every company</option>{% endif %}
             <option value="company" {% if e.scope == "company" %}selected{% endif %}>Every device in {{ company.name if company else "this company" }}</option>
             <option value="asset" {% if e.scope == "asset" %}selected{% endif %}>One device</option>
           </select>
@@ -94,6 +94,42 @@
           </select>
         </div>
       </div>
+
+      <div class="form-field rmm-targeting__selection">
+        {% set targeting_mode = e.target_mode | default('rules' if e.target_rules or not e.id else 'all') %}
+        <label class="form-label" for="rmm-check-target-mode">Device selection</label>
+        <select class="form-input" id="rmm-check-target-mode" name="target_mode" data-rmm-check-target-mode>
+          <option value="rules" {% if targeting_mode == 'rules' %}selected{% endif %}>Devices matching advanced rules</option>
+          <option value="all" {% if targeting_mode == 'all' %}selected{% endif %}>Every device in the selected scope</option>
+        </select>
+        <p class="form-help">The selected company or device scope is the boundary. Advanced rules narrow which devices receive this check.</p>
+      </div>
+      <input type="hidden" name="target_rules" data-rmm-check-target-rules value="{{ e.target_rules | default(none) | tojson | forceescape }}">
+      <script type="application/json" id="rmm-check-targeting-config">{{ {"fields": targeting_fields | default([])} | tojson }}</script>
+      <noscript><p class="alert alert--warning">JavaScript is required to build and preview advanced device rules.</p></noscript>
+      <section class="rmm-targeting" data-rmm-rules-field hidden aria-labelledby="rmm-targeting-title">
+            <h3 class="rmm-section-title" id="rmm-targeting-title">Advanced device rules</h3>
+            <p class="form-help">Combine company, device, software, network and custom field conditions. AND requires every condition; OR requires any one. Groups can contain more groups.</p>
+            <div class="rmm-targeting__examples" aria-label="Start with an example">
+              <span class="form-help">Start with:</span>
+              <button type="button" class="button button--ghost button--small" data-rmm-rule-example="vip">VIP company servers</button>
+              <button type="button" class="button button--ghost button--small" data-rmm-rule-example="wireguard">WireGuard + asset custom field</button>
+            </div>
+            <div data-rmm-rule-builder></div>
+            <p class="form-help form-help--error" data-rmm-error="target_rules" role="alert" hidden></p>
+            <div class="rmm-targeting__preview-tools">
+              <button type="button" class="button button--small" data-rmm-rules-preview>Preview matching devices</button>
+              <p class="form-help">MyPortal reevaluates these rules as inventory and company details change.</p>
+            </div>
+            <p class="form-help" data-rmm-rules-preview-status role="status" aria-live="polite"></p>
+            <div class="rmm-targeting__results table-wrapper" data-rmm-rules-preview-results hidden>
+              <table class="table">
+                <caption class="visually-hidden">Devices currently matching the advanced rules</caption>
+                <thead><tr><th scope="col">Device</th><th scope="col">Company</th></tr></thead>
+                <tbody data-rmm-rules-preview-agents></tbody>
+              </table>
+            </div>
+          </section>
 
       <fieldset class="rmm-check__settings" data-rmm-check-fields="disk">
         <legend class="form-label">Disk space</legend>
@@ -358,4 +394,7 @@
   {% endif %}
 </section>
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/rmm_checks.js') }}" defer></script>{% endblock %}
+{% block scripts %}
+<script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
+<script src="{{ static_url('/static/js/rmm_checks.js') }}" defer></script>
+{% endblock %}
