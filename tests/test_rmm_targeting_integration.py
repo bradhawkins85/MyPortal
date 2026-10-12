@@ -348,7 +348,7 @@ async def test_invalid_or_empty_rule_mode_cannot_create_unrestricted_check(targe
 
 
 @pytest.mark.anyio
-async def test_asset_check_context_labels_filtered_checks_and_hides_old_results(target_db, monkeypatch):
+async def test_asset_check_context_hides_checks_whose_rules_do_not_match(target_db, monkeypatch):
     _script, first, _second, _other = await inventory(target_db, monkeypatch)
     check_id = await save(group("and", condition("software.name", "contains", "WireGuard")))
     await checks_repo.save_state(check_id, first["id"], {**checks._blank_state(), "status": "failing"})
@@ -358,11 +358,28 @@ async def test_asset_check_context_labels_filtered_checks_and_hides_old_results(
 
     monkeypatch.setattr(routes.rmm_stats, "asset_stats_context", stats)
     context = await routes.asset_checks_context(1, 10, can_edit=True, is_super_admin=False)
-    check = context["checks"][0]
-    assert check["filtered"] and not check["applies"] and not check["replaced"]
-    assert check["state"] is None
-    assert context["failing"] == 0
+    assert context["checks"] == [] and context["failing"] == 0
     await target_db.execute("INSERT INTO rmm_device_software (agent_id, name) VALUES (%s, 'WireGuard')", (first["id"],))
     context = await routes.asset_checks_context(1, 10, can_edit=True, is_super_admin=False)
-    assert context["checks"][0]["applies"] and not context["checks"][0]["filtered"]
+    assert context["checks"][0]["applies"] and not context["checks"][0]["replaced"]
     assert context["checks"][0]["state"]["status"] == "failing"
+
+
+@pytest.mark.anyio
+async def test_asset_page_lists_server_checks_only_on_servers(target_db, monkeypatch):
+    await inventory(target_db, monkeypatch)
+    await save(group("and", condition("asset.catalogue_type", value="server")), name="Server CPU")
+    await save(name="Every device CPU", check_type="memory", memory_metric="free_percent", memory_threshold="10")
+    # A workstation's own disk check replaces nothing on the server and still lists on the workstation.
+    await save(name="Workstation disk", scope="asset", asset_id="11", check_type="disk", disk_drive="C:",
+               disk_metric="free_percent", disk_operator="below", disk_threshold="10")
+
+    async def stats(_asset_id, _range=None):
+        return {}
+
+    monkeypatch.setattr(routes.rmm_stats, "asset_stats_context", stats)
+    server = await routes.asset_checks_context(1, 10, can_edit=True, is_super_admin=False)
+    workstation = await routes.asset_checks_context(1, 11, can_edit=True, is_super_admin=False)
+    assert sorted(row["name"] for row in server["checks"]) == ["Every device CPU", "Server CPU"]
+    assert sorted(row["name"] for row in workstation["checks"]) == ["Every device CPU", "Workstation disk"]
+    assert all(row["applies"] for row in server["checks"] + workstation["checks"])

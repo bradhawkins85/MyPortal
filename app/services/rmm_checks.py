@@ -223,12 +223,12 @@ def replaced_by(check: Mapping[str, Any], checks: Iterable[Mapping[str, Any]]) -
     return [dict(other) for other in checks if override_key(other) == key and _specificity(other) > level]
 
 
-async def targeted_checks_for_agents(
-    checks: Iterable[Mapping[str, Any]], agents: Iterable[Mapping[str, Any]], *, include_off: bool = False,
+async def matching_checks_for_agents(
+    checks: Iterable[Mapping[str, Any]], agents: Iterable[Mapping[str, Any]],
 ) -> dict[int, list[dict[str, Any]]]:
-    """Select checks against current inventory before resolving scope overrides.
+    """The checks in each agent's scope whose target rules match its device,
+    before scope overrides are resolved.
 
-    A disabled override only switches off checks on devices its rules match.
     Inventory is loaded in one batch for agents with valid scoped rule trees;
     legacy unrestricted checks require no additional inventory queries.
     """
@@ -251,14 +251,28 @@ async def targeted_checks_for_agents(
     rule_devices = [agent for agent_id, agent in devices.items()
                     if any(check.get("target_rules") is not None for check in scoped[agent_id])]
     contexts = await targeting_repo.contexts_for_agents(rule_devices) if rule_devices else {}
-    selected = {}
-    for agent_id, agent in devices.items():
-        matching = [check for check in scoped[agent_id]
-                    if check.get("target_rules") is None
-                    or matchers[int(check["id"])](contexts.get(agent_id))]
-        selected[agent_id] = effective_checks(matching, agent.get("company_id"), agent.get("asset_id"),
-                                               include_off=include_off)
-    return selected
+    return {
+        agent_id: [check for check in scoped[agent_id]
+                   if check.get("target_rules") is None or matchers[int(check["id"])](contexts.get(agent_id))]
+        for agent_id in devices
+    }
+
+
+async def targeted_checks_for_agents(
+    checks: Iterable[Mapping[str, Any]], agents: Iterable[Mapping[str, Any]], *, include_off: bool = False,
+) -> dict[int, list[dict[str, Any]]]:
+    """Select checks against current inventory before resolving scope overrides.
+
+    A disabled override only switches off checks on devices its rules match.
+    """
+
+    devices = {int(agent["id"]): dict(agent) for agent in agents}
+    matching = await matching_checks_for_agents(checks, devices.values())
+    return {
+        agent_id: effective_checks(matching[agent_id], agent.get("company_id"), agent.get("asset_id"),
+                                   include_off=include_off)
+        for agent_id, agent in devices.items()
+    }
 
 
 async def checks_for_agent(agent: Mapping[str, Any], *, with_secrets: bool = False,

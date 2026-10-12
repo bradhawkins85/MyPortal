@@ -294,15 +294,47 @@
     const trigger = editor.querySelector('summary');
     const errorNode = editor.querySelector('[data-rmm-file-error]');
     const loading = editor.querySelector('[data-rmm-file-loading]');
-    const list = editor.querySelector('[data-rmm-file-list]');
-    const empty = editor.querySelector('[data-rmm-file-empty]');
-    const source = form.elements.source_path;
+    // Keep the text input as a no-JavaScript fallback, but show a picker as
+    // soon as the modal opens rather than waiting for datalist suggestions.
+    const sourceInput = form.elements.source_path;
+    const source = document.createElement('select');
+    ['id', 'name', 'class', 'required', 'aria-describedby'].forEach((attribute) => {
+      source.setAttribute(attribute, sourceInput.getAttribute(attribute));
+    });
+    sourceInput.replaceWith(source);
+    const save = form.querySelector('[type="submit"]');
     const destination = form.elements.destination;
     const index = form.elements.index;
     let lastTrigger = trigger;
     let snapshot = '';
     let loaded = false;
+    let loadingFiles = false;
+    let available = [];
     let saving = false;
+    function renderSource(value, message) {
+      const placeholder = document.createElement('option');
+      placeholder.value = message ? value : '';
+      placeholder.textContent = message || (available.length ? 'Choose a file…' : 'No files available');
+      placeholder.disabled = true;
+      const options = message ? [] : available.map((path) => {
+        const option = document.createElement('option');
+        option.value = path;
+        option.textContent = path;
+        return option;
+      });
+      // Preserve an existing association even if its source was removed from
+      // Gitea; the server still validates the path when saving.
+      if (!message && value && !available.includes(value)) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value + ' (unavailable)';
+        options.push(option);
+      }
+      source.replaceChildren(placeholder, ...options);
+      source.value = value;
+      source.setAttribute('aria-busy', String(loadingFiles));
+      save.disabled = saving || !loaded || !available.length;
+    }
     modal.classList.add('modal');
     modal.hidden = true;
     form.classList.add('modal__panel', 'modal__panel--wide');
@@ -324,39 +356,34 @@
     async function open(button, rowIndex) {
       lastTrigger = button;
       index.value = rowIndex === undefined ? '' : String(rowIndex);
-      source.value = button.dataset.source || '';
+      renderSource(button.dataset.source || '', loaded ? '' : 'Loading…');
       destination.value = button.dataset.destination || '';
       snapshot = state();
-      list.value = source.value;
       errorNode.hidden = true;
       editor.open = true;
       modal.hidden = false;
       source.focus();
-      if (loaded) return;
+      if (loaded || loadingFiles) return;
+      loadingFiles = true;
+      source.setAttribute('aria-busy', 'true');
       loading.hidden = false;
       try {
         const response = await fetch('/api/rmm/scripts/' + editor.dataset.rmmFileEditor + '/files', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || 'Could not load Gitea files.');
-        list.replaceChildren(...data.available.map((path) => {
-          const option = document.createElement('option');
-          option.value = path;
-          option.textContent = path;
-          return option;
-        }));
-        list.value = source.value;
-        list.hidden = data.available.length === 0;
-        empty.hidden = data.available.length > 0;
+        available = data.available;
         // Retry next time while Gitea could not create the Files folders.
         loaded = !data.warning;
         if (data.warning) throw new Error(data.warning);
       } catch (error) {
         errorNode.textContent = error.message;
         errorNode.hidden = false;
-      } finally { loading.hidden = true; }
+      } finally {
+        loadingFiles = false;
+        loading.hidden = true;
+        renderSource(source.value, loaded ? '' : 'Could not load files');
+      }
     }
-    list.addEventListener('change', () => { source.value = list.value; });
-    source.addEventListener('input', () => { list.value = source.value; });
     trigger.addEventListener('click', (event) => { event.preventDefault(); open(trigger); });
     detail.querySelectorAll('[data-rmm-file-edit]').forEach((button) => {
       button.hidden = false;
@@ -367,16 +394,15 @@
     modal.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { event.preventDefault(); close(); }
       if (event.key !== 'Tab') return;
-      const focusable = Array.from(modal.querySelectorAll('button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([hidden])'));
+      const focusable = Array.from(modal.querySelectorAll('button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([hidden]):not([disabled])'));
       const first = focusable[0], last = focusable[focusable.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     });
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (saving || !form.reportValidity()) return;
+      if (saving || !loaded || !available.length || !form.reportValidity()) return;
       saving = true;
-      const save = form.querySelector('[type="submit"]');
       save.disabled = true;
       save.textContent = 'Saving…';
       errorNode.hidden = true;
