@@ -42,7 +42,7 @@ def history_page():
         browser.close()
 
 
-def mount(page, kinds=None, user_id=7, extra_filter=None, drop_filter=None):
+def mount(page, kinds=None, user_id=7, extra_filter=None, drop_filter=None, time_entries=None, recordings=''):
     kinds = kinds or ['customer', 'technician', 'internal', 'automation'] * 3
     controls = Environment().from_string(CONTROLS).render(current_user={'id': user_id})
     if drop_filter:
@@ -52,8 +52,12 @@ def mount(page, kinds=None, user_id=7, extra_filter=None, drop_filter=None):
         )
     if extra_filter:
         controls = controls.replace('</div>', f'<button data-history-filter="{extra_filter}" type="button"><span data-history-count></span>{extra_filter}</button></div>')
-    messages = ''.join(f'<article data-ticket-reply data-message-kind="{kind}">{index}</article>' for index, kind in enumerate(kinds))
-    page.set_content(controls + '<button data-show-split-hidden aria-pressed="false">Split history</button><div data-ticket-timeline>' + messages + '<p data-history-empty hidden>No replies match</p><button data-history-load-earlier hidden></button></div>')
+    time_entries = time_entries or [('', 'false')] * len(kinds)
+    messages = ''.join(
+        f'<article data-ticket-reply data-message-kind="{kind}" data-reply-minutes="{minutes}" data-reply-billable="{billable}">{index}</article>'
+        for index, (kind, (minutes, billable)) in enumerate(zip(kinds, time_entries))
+    )
+    page.set_content(controls + '<button data-show-split-hidden aria-pressed="false">Split history</button><div data-ticket-timeline>' + recordings + messages + '<p data-history-empty hidden>No replies match</p><button data-history-load-earlier hidden></button></div>')
     page.evaluate('() => {\n' + HISTORY_SCRIPT + '\ninitialiseTicketHistory();\n}')
 
 
@@ -166,3 +170,38 @@ def test_stat_strip_fits_responsive_widths(history_page):
             assert bounds and bounds['x'] >= 0 and bounds['x'] + bounds['width'] <= width
     tile(page, 'automation').focus()
     assert tile(page, 'automation').evaluate("element => getComputedStyle(element).outlineStyle") == 'solid'
+
+
+def billing_tile(page, value):
+    return page.locator(f'[data-history-billing-filter="{value}"]')
+
+
+def test_billing_filters_combine_with_reply_type_filters(history_page):
+    page = history_page
+    recordings = (
+        '<article data-call-recording data-recording-minutes="5" data-recording-billable="true">billable call</article>'
+        '<article data-call-recording data-recording-minutes="" data-recording-billable="true">untimed call</article>'
+    )
+    mount(
+        page,
+        kinds=['technician', 'technician', 'internal', 'customer'],
+        time_entries=[('10', 'true'), ('5', 'false'), ('15', 'true'), ('', 'true')],
+        recordings=recordings,
+    )
+    assert billing_tile(page, 'billable').get_attribute('aria-pressed') == 'false'
+    assert visible_count(page) == 4
+    billing_tile(page, 'billable').click()
+    assert billing_tile(page, 'billable').get_attribute('aria-pressed') == 'true'
+    assert visible_count(page) == 2
+    assert visible_count(page, 'customer') == 0
+    assert tile(page, 'technician').locator('[data-history-count]').inner_text() == '1'
+    assert page.locator('[data-call-recording]:visible').count() == 1
+    tile(page, 'internal').click()
+    assert visible_count(page) == 1
+    assert visible_count(page, 'technician') == 1
+    billing_tile(page, 'non-billable').click()
+    assert visible_count(page, 'technician') == 2
+    billing_tile(page, 'billable').click()
+    billing_tile(page, 'non-billable').click()
+    assert visible_count(page) == 3
+    assert page.locator('[data-call-recording]:visible').count() == 2

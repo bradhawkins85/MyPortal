@@ -432,14 +432,6 @@
                   </dd>
                 </div>
                 <div class="definition-list__item">
-                  <dt>Billable minutes</dt>
-                  <dd data-ticket-billable-total>{{ ticket_billable_minutes }}</dd>
-                </div>
-                <div class="definition-list__item">
-                  <dt>Non-billable minutes</dt>
-                  <dd data-ticket-non-billable-total>{{ ticket_non_billable_minutes }}</dd>
-                </div>
-                <div class="definition-list__item">
                   <dt><label class="form-label" for="ticket-shipment-tracking-url">Shipment tracking URL</label></dt>
                   <dd>
                     <input
@@ -1642,8 +1634,16 @@
                     <span class="stat-strip__stat-value" data-history-count>0</span>
                   </button>
                 {% endfor %}
+                <button type="button" class="stat-strip__stat stat-strip__stat--success" data-history-billing-filter="billable" aria-pressed="false" title="Show only billable time entries">
+                  <span class="stat-strip__stat-label">Billable minutes</span>
+                  <span class="stat-strip__stat-value" data-ticket-billable-total>{{ ticket_billable_minutes }}</span>
+                </button>
+                <button type="button" class="stat-strip__stat stat-strip__stat--neutral" data-history-billing-filter="non-billable" aria-pressed="false" title="Show only non-billable time entries">
+                  <span class="stat-strip__stat-label">Non-billable minutes</span>
+                  <span class="stat-strip__stat-value" data-ticket-non-billable-total>{{ ticket_non_billable_minutes }}</span>
+                </button>
               </div>
-              <p class="form-help">Toggle reply types to show or hide them. Your selection is saved across tickets in this browser.</p>
+              <p class="form-help">Toggle reply types to show or hide them. Your selection is saved across tickets in this browser. Select Billable or Non-billable minutes to show only matching time entries alongside the reply type filters.</p>
               {% if ticket_timeline_entries %}
                 <div class="timeline timeline--conversation" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
                   {% for timeline_entry in ticket_timeline_entries %}
