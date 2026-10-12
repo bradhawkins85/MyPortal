@@ -174,6 +174,36 @@ class Settings(BaseSettings):
         validation_alias="EVENT_LOG_RETENTION_DAYS",
         description="Days of RMM event log entries to keep. 0 keeps them forever.",
     )
+    # Secondary MySQL/MariaDB database for RMM device stats (the disk, ping,
+    # CPU, memory and network values behind checks). Off until host, user and
+    # name are all set; checks still run without it. See
+    # app/core/stats_database.py.
+    stats_database_host: str | None = Field(default=None, validation_alias="STATS_DB_HOST")
+    stats_database_port: int = Field(default=3306, validation_alias="STATS_DB_PORT", ge=1, le=65535)
+    stats_database_user: str | None = Field(default=None, validation_alias="STATS_DB_USER")
+    stats_database_password: str | None = Field(default=None, validation_alias="STATS_DB_PASSWORD")
+    stats_database_name: str | None = Field(default=None, validation_alias="STATS_DB_NAME")
+    stats_database_backup: bool = Field(
+        default=False,
+        validation_alias="STATS_DB_BACKUP",
+        description=(
+            "Include the stats database in scripts/backup.sh and myportal-docker "
+            "backups. Off by default: device stats are large and only history."
+        ),
+    )
+    stats_retention_days: int = Field(
+        default=90,
+        ge=0,
+        validation_alias="STATS_RETENTION_DAYS",
+        description="Days of RMM device stats to keep. 0 keeps them forever.",
+    )
+    stats_sample_minutes: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+        validation_alias="STATS_SAMPLE_MINUTES",
+        description="Minutes between the RMM device stats samples kept for each device.",
+    )
     migration_lock_timeout: int = Field(
         default=60, validation_alias="MIGRATION_LOCK_TIMEOUT"
     )

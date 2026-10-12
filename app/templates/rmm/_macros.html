@@ -46,6 +46,8 @@
     Remote control{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'event_log' -%}
     Event log rule
+  {%- elif run.run_source == 'check' -%}
+    Check
   {%- elif run.run_source == 'onboarding' -%}
     Onboarding{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- else -%}
@@ -159,6 +161,36 @@
       {% if asset_id %}<input type="hidden" name="asset_id" value="{{ asset_id }}">{% endif %}
       <button class="dropdown__item dropdown__item--danger" role="menuitem" type="submit">Delete</button>
     </form>
+  </div>
+</details>
+{%- endmacro %}
+
+{# Edit, turn on or off, and delete one RMM check. On an asset page
+   (asset_id) a company or every-company check can also be copied as the
+   device's own check, which replaces it on that device. #}
+{% macro check_menu(check, csrf_token=none, asset_id=none) -%}
+<details class="rmm-menu rmm-menu--end" data-rmm-menu>
+  <summary class="button button--ghost button--small rmm-menu__toggle" aria-label="Actions for {{ check.name }}">Action <span aria-hidden="true">▾</span></summary>
+  <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="Actions for {{ check.name }}">
+    {%- if check.can_edit %}
+    <a class="dropdown__item" role="menuitem" href="/rmm/checks?check={{ check.id }}#rmm-check-form">Edit</a>
+    {%- endif %}
+    {%- if asset_id and not check.asset_id %}
+    <a class="dropdown__item" role="menuitem" href="/rmm/checks?new=1&amp;asset_id={{ asset_id }}&amp;from={{ check.id }}#rmm-check-form">Change for this device</a>
+    {%- endif %}
+    {%- if check.can_edit %}
+    <form method="post" action="/rmm/checks/{{ check.id }}/enabled" class="rmm-menu__form">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+      <input type="hidden" name="enabled" value="{{ '0' if check.is_enabled else '1' }}">
+      {% if asset_id %}<input type="hidden" name="return_asset_id" value="{{ asset_id }}">{% endif %}
+      <button class="dropdown__item" role="menuitem" type="submit">{{ "Turn off" if check.is_enabled else "Turn on" }}{% if asset_id and not check.asset_id %} everywhere{% endif %}</button>
+    </form>
+    <form method="post" action="/rmm/checks/{{ check.id }}/delete" class="rmm-menu__form" data-confirm="Delete {{ check.name }}?">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+      {% if asset_id %}<input type="hidden" name="return_asset_id" value="{{ asset_id }}">{% endif %}
+      <button class="dropdown__item dropdown__item--danger" role="menuitem" type="submit">Delete</button>
+    </form>
+    {%- endif %}
   </div>
 </details>
 {%- endmacro %}

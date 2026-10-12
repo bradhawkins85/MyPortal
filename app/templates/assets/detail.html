@@ -84,6 +84,8 @@
           ("custom-fields", "asset-custom-fields", "Custom fields", custom_fields | length, not customer_safe),
           ("tags", "tags", "Tags", "", asset_tags is not none),
           ("scripts", "scripts", "Scripts", "", rmm),
+          ("checks", "checks", "Checks", rmm.checks.failing or "" if rmm and rmm.checks else "", rmm and rmm.checks),
+          ("machine-stats", "machine-stats", "Machine stats", "", rmm and rmm.checks),
           ("event-logs", "event-logs", "Event logs", "", rmm and rmm.event_logs),
           ("event-log-rules", "event-log-rules", "Event log automations", rmm.event_logs.rules | length if rmm and rmm.event_logs else "", rmm and rmm.event_logs),
           ("photos", "asset-photos", "Photos", asset_photos | length, can_view_asset_photos),
@@ -157,6 +159,83 @@
       </table></div>
       {% else %}
       <p class="text-muted">No scripts have run on this device yet.</p>
+      {% endif %}
+    </div>
+  </section>{% endif %}
+
+  {% if rmm and rmm.checks %}{% set chk = rmm.checks %}{% set CHECK_STATUS = {"failing": "error", "warning": "warning", "passing": "success", "pending": "neutral"} %}<section class="card card--panel ce-section" id="checks" data-asset-edit-section="checks" aria-labelledby="asset-checks-heading">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="asset-checks-heading">Checks</h2>
+        <p class="card__subtitle">Checks that reach this device: its own, its company's and those for every company. A device's own check replaces the company's for the same thing. <a href="/rmm/checks">All checks</a></p>
+      </div>
+      {% if chk.can_edit %}<a class="button button--primary button--small" href="/rmm/checks?new=1&amp;asset_id={{ asset.id }}#rmm-check-form">Add a check for this device</a>{% endif %}
+    </header>
+    <div class="ce-section__body">
+      {% if not chk.has_agent %}<p class="text-muted">The RMM agent is not installed on this device, so its checks have no results.</p>{% endif %}
+      {% if chk.checks %}
+      <div class="table-wrapper rmm-rule-table"><table class="table">
+        <caption class="visually-hidden">Checks for this device</caption>
+        <thead><tr><th scope="col">Check</th><th scope="col">Fails when</th><th scope="col">Result</th><th scope="col">Applies to</th><th scope="col" class="table__actions">Actions</th></tr></thead>
+        <tbody>
+          {% for check in chk.checks %}
+          <tr>
+            <td data-label="Check"><strong>{{ check.name }}</strong><br><span class="text-muted">{{ check.type_label }}</span></td>
+            <td data-label="Fails when">{{ check.description }}{% if check.action != "none" %}<br><span class="text-muted">Then: {{ check.action_label }}</span>{% endif %}</td>
+            <td data-label="Result">
+              {% if not check.is_enabled %}<span class="status status--neutral">Off</span>
+              {% elif not check.applies %}<span class="status status--neutral">Replaced</span> <span class="text-muted">by this device's own check</span>
+              {% elif check.state %}{% set st = check.state.status %}<span class="status status--{{ CHECK_STATUS.get(st, 'neutral') }}">{{ check.status_label }}</span>{% if check.state.value_text %} {{ check.state.value_text }}{% endif %}
+                <br><span class="text-muted">{% if st in ("failing", "warning") and check.state.problem_since %}Since <span data-utc="{{ check.state.problem_since }}">{{ check.state.problem_since }}</span>{% elif check.state.changed_at %}Since <span data-utc="{{ check.state.changed_at }}">{{ check.state.changed_at }}</span>{% endif %}{% if check.state.checked_at %} · checked <span data-utc="{{ check.state.checked_at }}">{{ check.state.checked_at }}</span>{% endif %}</span>
+              {% else %}<span class="status status--neutral">Waiting</span> <span class="text-muted">for the first result</span>{% endif %}
+            </td>
+            <td data-label="Applies to">{{ "This device" if check.asset_id else check.scope_label }}</td>
+            <td class="table__actions">{% if chk.can_edit %}{{ rmm_ui.check_menu(check, csrf_token, asset.id) }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table></div>
+      {% else %}
+      <p class="text-muted">No checks reach this device.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {% set stats = chk.stats %}<section class="card card--panel ce-section" id="machine-stats" data-asset-edit-section="machine-stats" aria-labelledby="asset-machine-stats-heading">
+    <header class="ce-section__header"><div class="ce-section__heading">
+      <h2 class="card__title" id="asset-machine-stats-heading">Machine stats</h2>
+      <p class="card__subtitle">CPU, memory, disk, network and ping values the RMM agent reports while those checks are on, one sample every {{ stats.sample_minutes }} minute{{ "s" if stats.sample_minutes != 1 }}{% if stats.retention_days %}, kept for {{ stats.retention_days }} days{% endif %}. Times are UTC.</p>
+    </div></header>
+    <div class="ce-section__body">
+      {% if not stats.database.configured %}
+      <p class="text-muted">No stats are kept: the stats database is not set up (<code>STATS_DB_*</code>).</p>
+      {% elif not stats.database.connected %}
+      <p class="text-muted">The stats database is not available right now.</p>
+      {% else %}
+      <nav class="rmm-stats__ranges" aria-label="Time range">
+        {% for item in stats.ranges %}<a class="button button--small {{ 'button--primary' if item.key == stats.range else 'button--ghost' }}" href="/assets/{{ asset.id }}?stats={{ item.key }}#machine-stats" {% if item.key == stats.range %}aria-current="true"{% endif %}>{{ item.label }}</a>{% endfor %}
+      </nav>
+      {% if stats.charts %}
+      <div class="rmm-stats">
+        {% for chart in stats.charts %}
+        <figure class="rmm-stats__chart">
+          <figcaption>{{ chart.title }}
+            <span class="rmm-stats__legend">{% for line in chart.series %}<span class="rmm-stats__key rmm-stats__series--{{ line.colour }}">{{ line.name }}: {{ line.latest }} <span class="text-muted">(peak {{ line.peak }})</span></span>{% endfor %}</span>
+          </figcaption>
+          <div class="rmm-stats__plot">
+            <div class="rmm-stats__axis" aria-hidden="true"><span>{{ chart.top }}</span><span>{{ chart.middle }}</span><span>0</span></div>
+            <svg class="rmm-stats__svg" viewBox="0 0 {{ chart.width }} {{ chart.height }}" preserveAspectRatio="none" role="img" aria-label="{{ chart.title }} over the selected time range">
+              <line x1="0" y1="{{ chart.height / 2 }}" x2="{{ chart.width }}" y2="{{ chart.height / 2 }}"></line>
+              {% for line in chart.series %}<g class="rmm-stats__series--{{ line.colour }}">{% for points in line.segments %}<polyline points="{{ points }}"></polyline>{% endfor %}{% for dot in line.dots %}{% set xy = dot.split(",") %}<circle cx="{{ xy[0] }}" cy="{{ xy[1] }}" r="1.5"></circle>{% endfor %}</g>{% endfor %}
+            </svg>
+            <div class="rmm-stats__times" aria-hidden="true"><span data-utc="{{ chart.since }}">{{ chart.since }}</span><span>now</span></div>
+          </div>
+        </figure>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-muted">No stats for this time range. Stats are kept while the device has disk space, ping, CPU, memory or network checks.</p>
+      {% endif %}
       {% endif %}
     </div>
   </section>{% endif %}

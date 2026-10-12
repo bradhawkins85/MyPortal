@@ -1940,6 +1940,12 @@ async def asset_detail_page(
             company_id, asset_id, can_edit=can_run_scripts, is_super_admin=bool(is_super_admin),
             filters=rmm_event_log_routes.asset_filters(request.query_params),
         )
+        from app.features.rmm import check_routes as rmm_check_routes
+
+        rmm_context["checks"] = await rmm_check_routes.asset_checks_context(
+            company_id, asset_id, can_edit=can_run_scripts, is_super_admin=bool(is_super_admin),
+            stats_range=request.query_params.get("stats"),
+        )
     # Tags belong to the tags pack; the card disappears with it.
     tags_context = None
     if not customer_safe and main_module._feature_pack_available("tags"):

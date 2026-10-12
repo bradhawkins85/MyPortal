@@ -14,6 +14,10 @@
 * ``GET /rmm/event-logs/rules`` rules that drop incoming event log entries or
   run an RMM script on the device that sent them
   (:mod:`app.services.rmm_event_log_rules`)
+* ``GET /rmm/checks`` checks for disk space, ping, CPU, memory, services,
+  network throughput, script results and agents that stop checking in, with
+  the same actions as event log rules; the agent reports what they need and
+  device stats go to the separate stats database (:mod:`app.services.rmm_checks`)
 * ``POST /api/rmm/assets/{id}/agent-install`` push the RMM agent to a device
   through its tray app, and the tray app's download and result APIs
   (:mod:`app.services.rmm_agent_deploy`)
@@ -21,7 +25,8 @@
 A background job keeps the Gitea repository's ``Common/`` and
 ``Companies/<company>/`` folders in place, adding a folder for each new
 company, and another runs due schedules and moves onboarding sequences on
-(each on one instance at a time; see :mod:`app.services.singleton_jobs`).
+and runs server-side checks (each on one instance at a time; see
+:mod:`app.services.singleton_jobs`).
 
 Disable it with ``DISABLED_FEATURE_PACKS=rmm``: the menu entry, the asset
 page's script card and every route above go away. Scripts, agents, schedules,
@@ -32,23 +37,27 @@ from __future__ import annotations
 
 from app.core.features import FeaturePack
 
-from app.services import rmm_automation, rmm_event_log_rules, rmm_scripts
+from app.services import rmm_automation, rmm_checks, rmm_event_log_rules, rmm_scripts
 
 from .agent_deploy_routes import router as agent_deploy_router
 from .automation_routes import router as automation_router
+from .check_routes import router as check_router
 from .event_log_routes import router as event_log_router
 from .event_log_rule_routes import router as event_log_rule_router
 from .remote_control_routes import router as remote_control_router
 from .routes import router
 
-# Event log rules that schedule a script are queued on the automation tick.
+# Event log rules that schedule a script are queued on the automation tick,
+# as are checks judged on the server (agent offline, script results) and
+# check actions scheduled for later.
 rmm_automation.register_tick_job(rmm_event_log_rules.run_due_scheduled)
+rmm_automation.register_tick_job(rmm_checks.tick)
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.8.0",
+    version="1.9.0",
     routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router,
-             event_log_rule_router),
+             event_log_rule_router, check_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),
 )
 

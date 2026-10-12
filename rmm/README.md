@@ -42,6 +42,13 @@ or device), reads new entries with `wevtutil` and posts them to
 `/api/rmm/agent/event-logs`, remembering its place in `eventlog-cursors.json`.
 See `internal/eventlog` and `docs/wiki/administration/RMM Event Logs.md`.
 
+For checks it asks `GET /api/rmm/agent/checks/config` what to measure (CPU,
+memory, disks, network, ping targets and services) every five minutes and, while
+the device has such checks, posts the measurements to
+`/api/rmm/agent/checks/report` once a minute. A service check can have it start,
+restart or stop the service. See `internal/checks` and
+`docs/wiki/administration/RMM Checks.md`.
+
 ## Develop
 
 ```sh

@@ -793,3 +793,26 @@ body.navigation--top .rmm-library {
 .rmm-rule-table { overflow: visible; }
 .rmm-menu__form { margin: 0; }
 .rmm-menu .dropdown__item--danger { color: var(--color-danger, #f87171); }
+
+/* Checks */
+.rmm-check__settings { border: 0; padding: 0; margin: 0 0 1rem; min-width: 0; }
+
+.rmm-stats { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); }
+.rmm-stats__chart { margin: 0; min-width: 0; }
+.rmm-stats__chart figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.25rem 1rem; font-weight: 600; margin-bottom: 0.35rem; }
+.rmm-stats__legend { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; font-weight: 400; font-size: 0.85rem; }
+.rmm-stats__key::before { content: ""; display: inline-block; width: 0.75rem; height: 0.2rem; margin-right: 0.3rem; vertical-align: middle; border-radius: 1px; background: currentColor; }
+.rmm-stats__plot { display: grid; grid-template-columns: auto 1fr; gap: 0 0.4rem; font-size: 0.75rem; color: var(--color-text-muted, #94a3b8); }
+.rmm-stats__axis { display: flex; flex-direction: column; justify-content: space-between; text-align: right; white-space: nowrap; }
+.rmm-stats__svg { width: 100%; height: 9rem; display: block; border-left: 1px solid var(--color-border, #334155); border-bottom: 1px solid var(--color-border, #334155); }
+.rmm-stats__svg line { stroke: var(--color-border, #334155); stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
+.rmm-stats__svg polyline { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.rmm-stats__svg circle { fill: currentColor; }
+.rmm-stats__times { grid-column: 2; display: flex; justify-content: space-between; }
+.rmm-stats__series--0 { color: var(--color-primary, #3b82f6); }
+.rmm-stats__series--1 { color: var(--color-success, #22c55e); }
+.rmm-stats__series--2 { color: var(--color-warning, #f59e0b); }
+.rmm-stats__series--3 { color: var(--color-danger, #ef4444); }
+.rmm-stats__series--4 { color: #a855f7; }
+.rmm-stats__series--5 { color: #14b8a6; }
+.rmm-stats__ranges { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }

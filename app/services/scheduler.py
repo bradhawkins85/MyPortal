@@ -542,6 +542,18 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Prune RMM device stats older than STATS_RETENTION_DAYS from the
+        # separate stats database. Daily at 03:45; a no-op when that database
+        # is not configured or the setting is 0.
+        if not self._scheduler.get_job("rmm-stats-prune"):
+            self._scheduler.add_job(
+                self._run_stats_prune,
+                CronTrigger(hour=3, minute=45, timezone=self._scheduler.timezone),
+                id="rmm-stats-prune",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         # Prune DMARC aggregate (RUA) and forensic (RUF) report rows older than
         # DMARC_RETENTION_DAYS. Runs daily at 04:15 store-local time. No-op when
         # DMARC_RETENTION_DAYS<=0. Mirrors the audit-log prune job above.
@@ -569,6 +581,21 @@ class SchedulerService:
                 await rmm_event_logs.prune()
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("RMM event log prune failed", error=str(exc))
+
+    async def _run_stats_prune(self) -> None:
+        """Prune old RMM device stats on one worker at a time."""
+        from app.services import rmm_checks
+
+        if get_settings().stats_retention_days <= 0:
+            return
+        async with db.acquire_lock("rmm_stats_prune", timeout=1) as lock_acquired:
+            if not lock_acquired:
+                log_info("RMM stats prune already running on another worker, skipping")
+                return
+            try:
+                await rmm_checks.prune_stats()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("RMM stats prune failed", error=str(exc))
 
     async def _run_audit_log_prune(self) -> None:
         """Prune expired audit log rows with distributed lock.
