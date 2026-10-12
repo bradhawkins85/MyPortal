@@ -26,7 +26,7 @@ type fakeAPI struct {
 func (f *fakeAPI) BaseURL() string   { return "https://portal.example.com" }
 func (f *fakeAPI) AuthToken() string { return f.token }
 
-func (f *fakeAPI) GetRMMAgentPackage(_ context.Context, goos, goarch string) (*api.RMMAgentPackage, error) {
+func (f *fakeAPI) GetRMMAgentPackage(_ context.Context, goos, goarch string, version ...string) (*api.RMMAgentPackage, error) {
 	f.goos, f.goarch = goos, goarch
 	return &api.RMMAgentPackage{Version: "1.2.3", Sha256: f.sha, DownloadPath: "/api/rmm/agent/package/download?os=x"}, nil
 }
@@ -100,7 +100,7 @@ func TestInstallEnrolsWithTheTrayTokenAndInstallsTheService(t *testing.T) {
 	if _, err := in.Install(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if (*calls)[0].args[0] != "uninstall" || len(*calls) != 3 {
+	if (*calls)[0].args[0] != "uninstall" || len(*calls) != 2 {
 		t.Fatalf("reinstall calls = %+v", *calls)
 	}
 }
@@ -137,5 +137,84 @@ func TestInstallReportsTheAgentsOutputWhenEnrolmentFails(t *testing.T) {
 	_, err := in.Install(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "boom") || len(*calls) != 1 {
 		t.Fatalf("err = %v, calls = %+v", err, *calls)
+	}
+}
+
+func TestEnsureVersionSkipsMissingAndMatchingAgents(t *testing.T) {
+	in, calls := newInstaller(t, &fakeAPI{token: "t"}, "")
+	if changed, err := in.EnsureVersion(context.Background(), "1.2.3"); changed || err != nil || len(*calls) != 0 {
+		t.Fatalf("missing agent: changed=%v err=%v calls=%v", changed, err, *calls)
+	}
+	if err := os.WriteFile(filepath.Join(in.Dir, binaryName()), []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in.Run = func(_ context.Context, _ string, args []string, _ []string) ([]byte, error) {
+		if args[0] != "version" {
+			t.Fatalf("matching agent was modified: %v", args)
+		}
+		return []byte("v1.2.3\n"), nil
+	}
+	if changed, err := in.EnsureVersion(context.Background(), "1.2.3"); changed || err != nil {
+		t.Fatalf("matching agent: changed=%v err=%v", changed, err)
+	}
+}
+
+func TestEnsureVersionUpgradesOldAgentWithoutReenrolling(t *testing.T) {
+	body := []byte("new")
+	in, calls := newInstaller(t, &fakeAPI{body: body, sha: digest(body), token: "t"}, "")
+	final := filepath.Join(in.Dir, binaryName())
+	if err := os.WriteFile(final, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := in.EnsureVersion(context.Background(), "v1.2.3"); !changed || err != nil {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if len(*calls) != 3 || (*calls)[0].args[0] != "version" || (*calls)[1].args[0] != "uninstall" || (*calls)[2].args[0] != "install" {
+		t.Fatalf("calls = %+v", *calls)
+	}
+	got, _ := os.ReadFile(final)
+	if string(got) != "new" {
+		t.Fatalf("binary = %q", got)
+	}
+}
+
+func TestInstallVersionRefusesDifferentReleaseBeforeStoppingAgent(t *testing.T) {
+	in, calls := newInstaller(t, &fakeAPI{body: []byte("new"), sha: digest([]byte("new")), token: "t"}, "")
+	final := filepath.Join(in.Dir, binaryName())
+	_ = os.WriteFile(final, []byte("old"), 0o755)
+	if _, err := in.InstallVersion(context.Background(), "1.2.4"); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("err = %v", err)
+	}
+	got, _ := os.ReadFile(final)
+	if len(*calls) != 0 || string(got) != "old" {
+		t.Fatalf("calls=%v binary=%q", *calls, got)
+	}
+}
+
+func TestUpgradeRestoresOldAgentWhenNewServiceFails(t *testing.T) {
+	body := []byte("new")
+	in, _ := newInstaller(t, &fakeAPI{body: body, sha: digest(body), token: "t"}, "")
+	final := filepath.Join(in.Dir, binaryName())
+	_ = os.WriteFile(final, []byte("old"), 0o755)
+	restartedOld := false
+	in.Run = func(_ context.Context, path string, args []string, _ []string) ([]byte, error) {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if args[0] == "install" {
+			if string(got) == "new" {
+				return nil, errors.New("new service failed")
+			}
+			restartedOld = true
+		}
+		return nil, nil
+	}
+	if _, err := in.InstallVersion(context.Background(), "1.2.3"); err == nil {
+		t.Fatal("expected startup failure")
+	}
+	got, _ := os.ReadFile(final)
+	if !restartedOld || string(got) != "old" {
+		t.Fatalf("restarted=%v binary=%q", restartedOld, got)
 	}
 }

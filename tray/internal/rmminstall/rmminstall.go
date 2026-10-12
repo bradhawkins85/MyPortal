@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 )
@@ -33,7 +34,7 @@ import (
 type API interface {
 	BaseURL() string
 	AuthToken() string
-	GetRMMAgentPackage(ctx context.Context, goos, goarch string) (*api.RMMAgentPackage, error)
+	GetRMMAgentPackage(ctx context.Context, goos, goarch string, version ...string) (*api.RMMAgentPackage, error)
 	DownloadRMMAgent(ctx context.Context, downloadPath string, w io.Writer) error
 }
 
@@ -81,13 +82,48 @@ func runCommand(ctx context.Context, path string, args []string, env []string) (
 // Install downloads, enrols and installs the agent. It returns the installed
 // version.
 func (in *Installer) Install(ctx context.Context) (string, error) {
+	return in.InstallVersion(ctx, "")
+}
+
+// EnsureVersion upgrades an existing agent to the tray version. Missing agents
+// are left to the portal's deployment policy. It also repairs unreadable versions.
+func (in *Installer) EnsureVersion(ctx context.Context, version string) (bool, error) {
+	final := filepath.Join(in.Dir, binaryName())
+	if _, err := os.Stat(final); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	out, err := in.Run(probeCtx, final, []string{"version"}, nil)
+	cancel()
+	if err == nil && sameVersion(string(out), version) {
+		return false, nil
+	}
+	if strings.TrimSpace(version) == "" || strings.Contains(version, "dev") {
+		return false, errors.New("the tray has no release version to match")
+	}
+	_, err = in.InstallVersion(ctx, version)
+	return err == nil, err
+}
+
+func sameVersion(a, b string) bool {
+	return strings.TrimPrefix(strings.TrimSpace(a), "v") == strings.TrimPrefix(strings.TrimSpace(b), "v")
+}
+
+// InstallVersion installs the matching release, refusing a different package.
+// An empty version preserves compatibility with older deployment callers.
+func (in *Installer) InstallVersion(ctx context.Context, version string) (installedVersion string, installErr error) {
 	token := in.API.AuthToken()
 	if token == "" {
 		return "", errors.New("the tray app is not enrolled")
 	}
-	pkg, err := in.API.GetRMMAgentPackage(ctx, runtime.GOOS, runtime.GOARCH)
+	pkg, err := in.API.GetRMMAgentPackage(ctx, runtime.GOOS, runtime.GOARCH, version)
 	if err != nil {
 		return "", fmt.Errorf("find the agent build: %w", err)
+	}
+	if version != "" && !sameVersion(pkg.Version, version) {
+		return "", fmt.Errorf("RMM package version %q does not match tray version %q", pkg.Version, version)
 	}
 	expected := strings.ToLower(strings.TrimSpace(pkg.Sha256))
 	if len(expected) != sha256.Size*2 {
@@ -120,19 +156,72 @@ func (in *Installer) Install(ctx context.Context) (string, error) {
 	}
 
 	final := filepath.Join(in.Dir, binaryName())
+	backup := ""
+	hadAgent := false
 	if _, err := os.Stat(final); err == nil {
-		// Stop and remove the old service so its binary can be replaced.
-		_, _ = in.Run(ctx, final, []string{"uninstall"}, nil)
+		hadAgent = true
+		file, err := os.CreateTemp(in.Dir, "myportal-rmm-*.previous")
+		if err != nil {
+			return "", fmt.Errorf("create agent backup: %w", err)
+		}
+		backup = file.Name()
+		if err := file.Close(); err != nil {
+			_ = os.Remove(backup)
+			return "", err
+		}
+		if err := os.Remove(backup); err != nil {
+			return "", err
+		}
+		if out, err := in.Run(ctx, final, []string{"uninstall"}, nil); err != nil {
+			// uninstall may have stopped the service before failing.
+			_, _ = in.Run(ctx, final, []string{"install"}, nil)
+			return "", fmt.Errorf("remove the old agent service: %w: %s", err, trim(out))
+		}
+		if err := os.Rename(final, backup); err != nil {
+			_, _ = in.Run(ctx, final, []string{"install"}, nil)
+			return "", fmt.Errorf("back up the agent: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
 	}
+	// Keep enrolment/state on upgrades. If replacement or startup fails, put
+	// the old binary back and restart it using an independent recovery timeout.
+	success := false
+	defer func() {
+		if hadAgent && !success {
+			recoveryCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if _, err := os.Stat(final); err == nil {
+				_, _ = in.Run(recoveryCtx, final, []string{"uninstall"}, nil)
+			}
+			if err := os.Remove(final); err != nil && !errors.Is(err, os.ErrNotExist) {
+				installErr = errors.Join(installErr, fmt.Errorf("restore old agent: %w (backup at %s)", err, backup))
+				return
+			}
+			if err := os.Rename(backup, final); err != nil {
+				installErr = errors.Join(installErr, fmt.Errorf("restore old agent: %w (backup at %s)", err, backup))
+				return
+			}
+			if out, err := in.Run(recoveryCtx, final, []string{"install"}, nil); err != nil {
+				installErr = errors.Join(installErr, fmt.Errorf("restart old agent: %w: %s", err, trim(out)))
+			}
+		}
+	}()
 	if err := os.Rename(tmpPath, final); err != nil {
 		return "", fmt.Errorf("put the agent in place: %w", err)
 	}
-	env := []string{"MYPORTAL_TRAY_TOKEN=" + token}
-	if out, err := in.Run(ctx, final, []string{"enrol", "--url", in.API.BaseURL()}, env); err != nil {
-		return "", fmt.Errorf("enrol the agent: %w: %s", err, trim(out))
+	if !hadAgent {
+		env := []string{"MYPORTAL_TRAY_TOKEN=" + token}
+		if out, err := in.Run(ctx, final, []string{"enrol", "--url", in.API.BaseURL()}, env); err != nil {
+			return "", fmt.Errorf("enrol the agent: %w: %s", err, trim(out))
+		}
 	}
 	if out, err := in.Run(ctx, final, []string{"install"}, nil); err != nil {
 		return "", fmt.Errorf("install the agent service: %w: %s", err, trim(out))
+	}
+	success = true
+	if hadAgent {
+		_ = os.Remove(backup)
 	}
 	return pkg.Version, nil
 }

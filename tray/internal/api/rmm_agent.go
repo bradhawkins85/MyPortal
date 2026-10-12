@@ -37,8 +37,11 @@ func (c *Client) AuthToken() string {
 }
 
 // GetRMMAgentPackage asks which RMM agent build to install on goos/goarch.
-func (c *Client) GetRMMAgentPackage(ctx context.Context, goos, goarch string) (*RMMAgentPackage, error) {
+func (c *Client) GetRMMAgentPackage(ctx context.Context, goos, goarch string, version ...string) (*RMMAgentPackage, error) {
 	query := url.Values{"os": {goos}, "arch": {goarch}}
+	if len(version) > 0 && version[0] != "" {
+		query.Set("version", version[0])
+	}
 	resp, err := c.get(ctx, "/api/rmm/agent/package?"+query.Encode())
 	if err != nil {
 		return nil, err
