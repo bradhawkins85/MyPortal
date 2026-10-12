@@ -7,7 +7,7 @@ work.  The agent authenticates with a MyPortal API key and:
 1. claims the next job, receiving the release tag, portal URL and the
    deployment link's install token;
 2. builds and signs ``myportal-tray.msi`` with those values as property
-   defaults, then wraps it in a signed ``setup.exe`` Burn bundle;
+   defaults, then wraps it in a signed Burn setup bundle;
 3. uploads both files and marks the job complete (or reports a failure).
 
 A build is queued when a deployment link is created, when an admin asks for a

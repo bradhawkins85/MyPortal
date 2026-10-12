@@ -8,7 +8,7 @@
     tray binaries for the job's release tag from source (cached per tag, signed
     with your certificate), builds myportal-tray.msi with the company's portal
     URL and install token baked in,
-    wraps it in a Burn setup.exe, signs both, uploads them and marks the job
+    wraps it in a Burn bundle (MyPortal-Tray-Setup.exe), signs both, uploads them and marks the job
     complete. Failures are reported back so they show on the admin page.
 
     Installed and scheduled by Install-MyPortalBuildAgent.ps1. Runs once per
@@ -217,7 +217,7 @@ function Invoke-Build($Job) {
             -d "DefaultPortalUrl=$url" -d "DefaultEnrolToken=$token" -o $msi
         Set-Signature $msi
 
-        $exe = Join-Path $out 'setup.exe'
+        $exe = Join-Path $out 'MyPortal-Tray-Setup.exe'
         $engine = Join-Path $out 'engine.exe'
         Invoke-Wix build -acceptEula wix7 (Join-Path $payload 'installer\myportal-tray-bundle.wxs') -arch x64 `
             -ext WixToolset.BootstrapperApplications.wixext `

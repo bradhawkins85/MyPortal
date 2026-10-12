@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  MyPortal Tray App — Windows setup.exe (WiX v7 Burn bundle)
+  MyPortal Tray App — Windows setup bundle (WiX v7 Burn bundle)
 
   Wraps a company-specific myportal-tray.msi in a standard setup wizard so end
   users get a familiar "Install" window. Built by the MyPortal build agent
