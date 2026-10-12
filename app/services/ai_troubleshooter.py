@@ -8,9 +8,12 @@ an internal (staff-only) note:
    ticket and pull matching articles from the internal knowledge base.
 2. **Plan** - process those articles into recommended troubleshooting steps,
    and decide which endpoint logs (if any) the steps call for and why.
-3. **Collect** - when logs are needed, send a ``collect_logs`` troubleshoot
-   command to the asset's tray device naming each allowlisted log source and
-   the reason for collecting it. The device uploads the redacted logs to
+3. **Collect** - when logs are needed, read the Windows event logs MyPortal
+   already stores for the asset (:mod:`app.services.rmm_event_logs`) from the
+   event log database instead of the endpoint, to save bandwidth. Anything
+   else goes in a ``collect_logs`` troubleshoot command to the asset's tray
+   device naming each allowlisted log source and the reason for collecting
+   it. The device uploads the redacted logs to
    ``/api/tickets/{id}/troubleshoot-complete``.
 4. **Analyse** - send the logs to the LLM with the reason each was collected
    and the recommended steps, and post its analysis of likely causes and
@@ -34,6 +37,7 @@ import tarfile
 import time
 import zlib
 from collections.abc import Awaitable, Mapping, Sequence
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -41,10 +45,13 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
+from app.repositories import rmm as rmm_repo
+from app.repositories import rmm_event_logs as rmm_event_logs_repo
 from app.services import ai_consent
 from app.services import ai_prompt_security
 from app.services import knowledge_base as knowledge_base_service
 from app.services import llm_usage
+from app.services import rmm_event_logs
 from app.services import tray as tray_service
 from app.services import troubleshoot_web_search
 from app.services.monitored_http import monitored_client
@@ -170,6 +177,35 @@ _IMPORTANT_LOG_LINE_RE = re.compile(
     re.IGNORECASE,
 )
 _LOG_SECTION_RE = re.compile(r"^### (.+?) Log\s*$", re.MULTILINE)
+
+# Stored event logs stand in for the endpoint's only while the asset's RMM
+# agent is still sending them (it sends every minute).
+STORED_LOG_AGENT_FRESH_MINUTES = 10
+# Same caps as the tray agent's own event log reads (winevent.go).
+_STORED_LOG_MAX_EVENTS = 500
+_STORED_LOG_MAX_MESSAGE = 400
+STORED_LOGS_KEY = "stored_logs"
+
+# The tray agent's redaction rules (tray/internal/agent/safety.go), applied to
+# stored event logs so they reach the LLM scrubbed like endpoint logs.
+_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
+        "[REDACTED_PRIVATE_KEY]",
+    ),
+    (re.compile(r"(?i)\b(authorization)\s*[:=]\s*\S+[^\r\n]*"), "Authorization: [REDACTED]"),
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]+"), "Bearer [REDACTED_TOKEN]"),
+    (re.compile(r"\b(A3T[A-Z0-9]|AKIA|ASIA|AGPA|AIDA|AROA)[0-9A-Z]{16}\b"), "[REDACTED_AWS_KEY]"),
+    (
+        re.compile(
+            r"(?i)\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?key|auth[_-]?token|client[_-]?secret"
+            r"|private[_-]?key)\s*(:|=)\s*(\"[^\"]*\"|'[^']*'|\S+)"
+        ),
+        r"\1 \2 [REDACTED]",
+    ),
+    (re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"), "[REDACTED_EMAIL]"),
+    (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "[REDACTED_IP]"),
+)
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
@@ -847,7 +883,9 @@ def _web_steps_note(sources: Sequence[Mapping[str, Any]]) -> str:
     return "".join(parts)
 
 
-def _plan_note(plan: Mapping[str, Any], *, can_collect: bool) -> str:
+def _plan_note(
+    plan: Mapping[str, Any], *, can_collect: bool, stored_sources: frozenset[str] = frozenset()
+) -> str:
     parts = [NOTE_HEADER + "Stage 2 of 4: recommended troubleshooting steps.</p>"]
     if plan.get("summary"):
         parts.append(f"<p><strong>Likely cause:</strong> {html.escape(plan['summary'])}</p>")
@@ -863,18 +901,153 @@ def _plan_note(plan: Mapping[str, Any], *, can_collect: bool) -> str:
     requests = plan.get("log_requests") or []
     if requests:
         log_items = [
-            f"<strong>{html.escape(r['source'])}</strong> (last {int(r['hours'])} h): "
-            f"{html.escape(r['reason'])}"
+            f"<strong>{html.escape(r['source'])}</strong> (last {int(r['hours'])} h"
+            + (", stored in MyPortal" if r["source"] in stored_sources else "")
+            + f"): {html.escape(r['reason'])}"
             for r in requests
         ]
-        heading = (
-            "Logs to collect from the endpoint"
-            if can_collect
-            else "Logs that would help (the endpoint has no active tray agent to collect them)"
-        )
+        if can_collect or len(stored_sources) == len(requests):
+            heading = "Logs to collect"
+        else:
+            heading = "Logs that would help (the endpoint has no active tray agent to collect them)"
         parts.append(f"<p><strong>{heading}</strong></p>" + _html_list(log_items))
     else:
         parts.append("<p>The steps do not call for endpoint logs, so the troubleshooter is finished.</p>")
+    return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Stored event logs - read from MyPortal instead of the endpoint
+# ---------------------------------------------------------------------------
+
+
+def scrub_log_text(text: str) -> str:
+    """Redact secrets and personal data the way the tray agent does."""
+
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _as_naive_utc(value: Any) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+async def split_stored_log_requests(
+    requests: Sequence[Mapping[str, Any]],
+    *,
+    company_id: Any,
+    asset_id: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split log requests into ``(stored, remote)``.
+
+    A Windows event log request is served from MyPortal's event log database
+    when the asset's RMM agent collects that log, has checked in within
+    :data:`STORED_LOG_AGENT_FRESH_MINUTES` and retention keeps the whole
+    window. Everything else (log files, macOS sources, logs MyPortal does not
+    store) still goes to the endpoint. Any lookup failure sends every request
+    to the endpoint, as before.
+    """
+
+    all_remote: tuple[list[dict[str, Any]], list[dict[str, Any]]] = ([], [dict(r) for r in requests])
+    candidates = [
+        r for r in requests
+        if not str(r.get("source") or "").startswith((FILE_SOURCE_PREFIX, "macos:"))
+    ]
+    if not candidates:
+        return all_remote
+    try:
+        company = int(company_id)
+        asset = int(asset_id)
+    except (TypeError, ValueError):
+        return all_remote
+    try:
+        if not await rmm_event_logs.enabled():
+            return all_remote
+        agent = await rmm_repo.get_asset_agent(asset)
+        if not agent or agent.get("company_id") is None or int(agent["company_id"]) != company:
+            return all_remote
+        last_seen = _as_naive_utc(agent.get("last_seen_utc"))
+        if last_seen is None or _utcnow() - last_seen > timedelta(minutes=STORED_LOG_AGENT_FRESH_MINUTES):
+            return all_remote
+        stored_names = {
+            name.casefold(): name for name in await rmm_event_logs.logs_for(company, asset)
+        }
+    except Exception as exc:  # noqa: BLE001 - fall back to the endpoint
+        log_warning("AI troubleshooter could not check stored event logs", error=str(exc)[:300])
+        return all_remote
+    retention_days = int(get_settings().event_log_retention_days or 0)
+    stored: list[dict[str, Any]] = []
+    remote: list[dict[str, Any]] = []
+    for request in requests:
+        log_name = stored_names.get(str(request.get("source") or "").casefold())
+        hours = int(request.get("hours") or DEFAULT_LOG_HOURS)
+        if log_name and (retention_days <= 0 or retention_days * 24 >= hours):
+            stored.append({**request, "log_name": log_name})
+        else:
+            remote.append(dict(request))
+    return stored, remote
+
+
+def _format_stored_entry(entry: Mapping[str, Any]) -> str:
+    created = _as_naive_utc(entry.get("time_created"))
+    when = created.strftime("%Y-%m-%d %H:%M:%S UTC") if created else str(entry.get("time_created") or "")
+    line = f"{when} [{rmm_event_logs.level_label(entry.get('level'))}] id={entry.get('event_id')}"
+    provider = str(entry.get("provider") or "").strip()
+    if provider:
+        line += " " + provider
+    message = " ".join(str(entry.get("message") or "").split())[:_STORED_LOG_MAX_MESSAGE]
+    if message:
+        line += ": " + message
+    return line
+
+
+async def read_stored_logs(stored: Mapping[str, Any] | None) -> str:
+    """Read stored event logs as a bundle-style text, one ``### <source> Log`` section each."""
+
+    if not isinstance(stored, Mapping):
+        return ""
+    requests = [r for r in stored.get("requests") or [] if isinstance(r, Mapping)]
+    if not requests:
+        return ""
+    try:
+        company_id = int(stored["company_id"])
+        asset_id = int(stored["asset_id"])
+    except (KeyError, TypeError, ValueError):
+        return ""
+    now = _utcnow()
+    parts: list[str] = []
+    for request in requests:
+        source = str(request.get("source") or "")
+        log_name = str(request.get("log_name") or source)
+        try:
+            hours = max(1, min(MAX_LOG_HOURS, int(request.get("hours") or DEFAULT_LOG_HOURS)))
+            entries = await rmm_event_logs_repo.list_entries(
+                company_id=company_id,
+                asset_id=asset_id,
+                log_name=log_name,
+                since=now - timedelta(hours=hours),
+                limit=_STORED_LOG_MAX_EVENTS,
+            )
+        except Exception as exc:  # noqa: BLE001 - noted in the section
+            log_warning("AI troubleshooter could not read stored event logs", source=source, error=str(exc)[:300])
+            parts.append(f"### {source} Log\n[unavailable: the stored event log could not be read]\n\n")
+            continue
+        lines = "\n".join(_format_stored_entry(entry) for entry in entries)
+        parts.append(f"### {source} Log\n{scrub_log_text(lines)}\n\n")
     return "".join(parts)
 
 
@@ -1030,28 +1203,73 @@ async def run_research_and_plan(
     web_sources = _parse_web_sources(plan_data, web_pages)
     device_uid = str(device.get("device_uid") or "").strip()
     can_collect = bool(device_uid) and device.get("status") == "active"
-    await _note(ticket_id, _plan_note(plan, can_collect=can_collect))
+    # Event logs MyPortal already stores are read from its database, not the
+    # endpoint, to save bandwidth.
+    company_id = ticket.get("company_id") if ticket.get("company_id") is not None else device.get("company_id")
+    stored_requests, remote_requests = (
+        await split_stored_log_requests(plan["log_requests"], company_id=company_id, asset_id=asset.get("asset_id"))
+        if plan["log_requests"]
+        else ([], [])
+    )
+    stored_sources = frozenset(r["source"] for r in stored_requests)
+    await _note(ticket_id, _plan_note(plan, can_collect=can_collect, stored_sources=stored_sources))
     if web_sources:
         await _note(ticket_id, _web_steps_note(web_sources))
     plan["web_sources"] = web_sources
 
-    if not plan["log_requests"] or not can_collect:
+    if not plan["log_requests"] or not (can_collect or stored_requests):
         return plan
     if await _consent_withdrawn(ticket_id):
         return None
 
     # --- Stage 3: collect logs ---------------------------------------------
+    server_context: dict[str, Any] = {
+        "problem": problem,
+        "model": str(llm.get("model") or ""),
+        "summary": plan["summary"],
+        "steps": [step["action"] for step in plan["steps"]],
+    }
+    if stored_requests:
+        server_context[STORED_LOGS_KEY] = {
+            "company_id": int(company_id),
+            "asset_id": int(asset["asset_id"]),
+            "requests": stored_requests,
+        }
+    endpoint_label = str(device.get("hostname") or device_uid or asset.get("name") or "endpoint")
+    stored_html = (
+        f"<p>Read {len(stored_requests)} event log(s) from MyPortal's stored copies instead of the "
+        "endpoint: " + html.escape(", ".join(r["source"] for r in stored_requests)) + ".</p>"
+        if stored_requests
+        else ""
+    )
+    if not remote_requests or not can_collect:
+        # Everything that can be collected is already stored: analyse now.
+        skipped_html = (
+            "<p>The other logs could not be collected: the endpoint has no active tray agent.</p>"
+            if remote_requests
+            else "<p>Nothing needs to be collected from the endpoint.</p>"
+        )
+        await _note(ticket_id, NOTE_HEADER + "Stage 3 of 4: logs collected.</p>" + stored_html + skipped_html)
+        log_info(
+            "AI troubleshooter used stored event logs",
+            ticket_id=ticket_id,
+            sources=sorted(stored_sources),
+        )
+        await analyse_collected_logs(
+            ticket_id=ticket_id,
+            command={"payload_json": {"log_requests": [], tray_service.SERVER_CONTEXT_KEY: server_context}},
+            log_text="",
+            endpoint_label=endpoint_label,
+            llm=llm,
+        )
+        return plan
+
     payload = {
         "ticket_id": ticket_id,
         "mode": MODE_COLLECT_LOGS,
-        "log_requests": plan["log_requests"],
+        "log_requests": remote_requests,
         "extra_log_folders": extra_log_folders(platform),
-        tray_service.SERVER_CONTEXT_KEY: {
-            "problem": problem,
-            "model": str(llm.get("model") or ""),
-            "summary": plan["summary"],
-            "steps": [step["action"] for step in plan["steps"]],
-        },
+        tray_service.SERVER_CONTEXT_KEY: server_context,
     }
     try:
         user_id = int(initiated_by_user_id) if initiated_by_user_id is not None else None
@@ -1066,16 +1284,18 @@ async def run_research_and_plan(
     await _note(
         ticket_id,
         NOTE_HEADER
-        + f"Stage 3 of 4: requested {len(plan['log_requests'])} log source(s) from "
+        + f"Stage 3 of 4: requested {len(remote_requests)} log source(s) from "
         + html.escape(str(device.get("hostname") or device_uid))
         + f" (command #{int(command_id)}).</p>"
+        + stored_html
         + tray_service.troubleshoot_delivery_html(delivered=delivered, device=device),
     )
     log_info(
         "AI troubleshooter requested endpoint logs",
         ticket_id=ticket_id,
         command_id=command_id,
-        sources=[r["source"] for r in plan["log_requests"]],
+        sources=[r["source"] for r in remote_requests],
+        stored_sources=sorted(stored_sources),
         delivered=delivered,
     )
     return plan
@@ -1270,19 +1490,30 @@ async def analyse_collected_logs(
     context = context if isinstance(context, Mapping) else {}
     requests = [r for r in payload.get("log_requests") or [] if isinstance(r, Mapping)]
     sections = split_log_sections(log_text)
+    stored = context.get(STORED_LOGS_KEY)
+    stored_requests = (
+        [r for r in stored.get("requests") or [] if isinstance(r, Mapping)] if isinstance(stored, Mapping) else []
+    )
+    stored_sections = split_log_sections(await read_stored_logs(stored)) if stored_requests else {}
 
-    ordered: list[tuple[str, str, str]] = []
+    # (source, reason, body, read from MyPortal's stored event logs)
+    ordered: list[tuple[str, str, str, bool]] = []
+    for request in stored_requests:
+        source = str(request.get("source") or "")
+        if source in stored_sections:
+            ordered.append((source, str(request.get("reason") or ""), stored_sections.pop(source), True))
+            sections.pop(source, None)
     for request in requests:
         source = str(request.get("source") or "")
         reason = str(request.get("reason") or "")
         if source in sections:
-            ordered.append((source, reason, sections.pop(source)))
+            ordered.append((source, reason, sections.pop(source), False))
         # A file request can match several files, each in its own section.
         for section in [key for key in sections if file_source_matches(source, key)]:
-            ordered.append((section, reason, sections.pop(section)))
+            ordered.append((section, reason, sections.pop(section), False))
     # Sources the device read without being asked (older agents read defaults).
     for source, body in sections.items():
-        ordered.append((source, "Collected by the endpoint agent's default log set.", body))
+        ordered.append((source, "Collected by the endpoint agent's default log set.", body, False))
 
     if not ordered:
         await _note(
@@ -1294,13 +1525,19 @@ async def analyse_collected_logs(
     budget = max(2048, _LOG_PROMPT_CHARS // len(ordered))
     log_records = []
     truncated_any = False
-    for source, reason, body in ordered:
+    for source, reason, body, from_store in ordered:
         sample, truncated = _sample_log(body, budget)
         truncated_any = truncated_any or truncated
+        provenance = (
+            f"Redacted event log stored by MyPortal's RMM agent (times in UTC; event log rules may "
+            f"have dropped some entries): {source}"
+            if from_store
+            else f"Redacted endpoint log: {source}"
+        )
         log_records.append(
             ai_prompt_security.UntrustedRecord(
                 record_id=f"log-{source}",
-                provenance=f"Redacted endpoint log: {source}",
+                provenance=provenance,
                 content={
                     "source": source,
                     "reason_collected": reason,
@@ -1335,14 +1572,18 @@ async def analyse_collected_logs(
             NOTE_HEADER
             + "Stage 4 of 4 failed: the AI model could not analyse the logs ("
             + html.escape(str(exc)[:300])
-            + "). The log bundle is attached to the ticket.</p>",
+            + ")."
+            + (" The log bundle is attached to the ticket." if log_text.strip() else "")
+            + "</p>",
         )
         return
     body = _analysis_note(_extract_json_object(analysis_text), analysis_text, endpoint_label)
     if truncated_any:
         body += (
             "<p><em>Some logs were too long to send in full; error and warning "
-            "lines were sent first. The full bundle is attached.</em></p>"
+            "lines were sent first."
+            + (" The full bundle is attached." if log_text.strip() else "")
+            + "</em></p>"
         )
     await _note(ticket_id, body)
 
@@ -1354,12 +1595,17 @@ def schedule_log_analysis(
     log_bytes: bytes,
     endpoint_label: str,
 ) -> bool:
-    """Queue stage 4 for an uploaded bundle. Returns False when there is nothing to analyse."""
+    """Queue stage 4 for an uploaded bundle. Returns False when there is nothing to analyse.
+
+    Event logs read from MyPortal's stored copies are analysed even when the
+    endpoint sent no bundle.
+    """
 
     log_text = decompress_log_bundle(log_bytes)
-    if not log_text.strip():
-        return False
     context = command_payload(command).get(tray_service.SERVER_CONTEXT_KEY)
+    stored = context.get(STORED_LOGS_KEY) if isinstance(context, Mapping) else None
+    if not log_text.strip() and not (isinstance(stored, Mapping) and stored.get("requests")):
+        return False
     model = str(context.get("model") or "") if isinstance(context, Mapping) else ""
     llm = tray_service.build_troubleshoot_llm_config(model or None)
     _schedule(
@@ -1393,6 +1639,9 @@ __all__ = [
     "is_tar_bundle",
     "run_research_and_plan",
     "schedule_log_analysis",
+    "read_stored_logs",
+    "scrub_log_text",
     "split_log_sections",
+    "split_stored_log_requests",
     "start_asset_troubleshoot",
 ]

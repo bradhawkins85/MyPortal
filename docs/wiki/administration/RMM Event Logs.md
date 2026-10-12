@@ -123,6 +123,13 @@ The agent reads logs with Windows' `wevtutil`, which gives each entry its messag
 shows it. Logs that do not exist on a device are reported once in the agent's log and skipped.
 macOS and Linux agents do not send event logs.
 
+## AI troubleshooter
+
+When the AI troubleshooter on a ticket asset needs a Windows event log that is stored here, it
+reads the stored entries instead of asking the endpoint for them, as long as the asset's agent
+has checked in within the last 10 minutes and retention keeps the whole window it asked for. See
+[Tray App](../getting-started/Tray%20App.md#multi-stage-troubleshooter-ticket-assets).
+
 ## API
 
 - `GET /api/rmm/event-logs` the current company's entries, newest first. Filters: `asset_id`,

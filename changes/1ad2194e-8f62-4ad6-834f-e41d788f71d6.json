@@ -1,0 +1,7 @@
+{
+  "guid": "1ad2194e-8f62-4ad6-834f-e41d788f71d6",
+  "occurred_at": "2026-10-12T13:30Z",
+  "change_type": "Feature",
+  "summary": "AI troubleshooter: reads Windows event logs MyPortal already stores for the asset instead of collecting them from the endpoint, saving bandwidth; only logs not stored are requested from the device",
+  "content_hash": "e0eedecb51fd0ad8251f0aefd5d896fd9ba373fc899495d8924bcb3a893eb448"
+}

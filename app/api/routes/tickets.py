@@ -1706,13 +1706,13 @@ async def receive_troubleshoot_result(
     endpoint_label = html.escape(raw_endpoint_label)
     analysis_scheduled = False
     if collect_mode:
-        if log_bytes:
-            analysis_scheduled = ai_troubleshooter.schedule_log_analysis(
-                ticket_id=ticket_id,
-                command=command,
-                log_bytes=log_bytes,
-                endpoint_label=raw_endpoint_label,
-            )
+        # Runs without a bundle too when stored event logs were requested.
+        analysis_scheduled = ai_troubleshooter.schedule_log_analysis(
+            ticket_id=ticket_id,
+            command=command,
+            log_bytes=log_bytes,
+            endpoint_label=raw_endpoint_label,
+        )
         header_html = (
             "<p><strong>AI Troubleshooting Agent</strong> - logs received from "
             f"{endpoint_label} (command #{command_id}).</p>"
