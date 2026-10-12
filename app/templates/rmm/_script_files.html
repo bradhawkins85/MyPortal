@@ -40,10 +40,11 @@
               <p class="alert alert--error" data-rmm-file-error role="alert" hidden></p>
               <div class="form-field">
                 <label class="form-label" for="rmm-file-source">Gitea file</label>
-                <input class="form-input" id="rmm-file-source" name="source_path" list="rmm-file-options" maxlength="1024" required autocomplete="off" aria-describedby="rmm-file-source-help">
-                <datalist id="rmm-file-options"></datalist>
-                <p class="form-help" id="rmm-file-source-help">Use the repository path under Files/Common{% if script.scope == 'company' %} or this company's folder under Files/Companies{% endif %}.</p>
+                <input class="form-input" id="rmm-file-source" name="source_path" maxlength="1024" required autocomplete="off" aria-describedby="rmm-file-source-help">
+                <p class="form-help" id="rmm-file-source-help">Pick a file below, or enter its repository path under Files/Common or {% if script.scope == 'company' %}this company's folder under Files/Companies{% else %}Files/Companies/{company}/. {company} uses the folder of the company each run is for, so every company needs its own copy{% endif %}.</p>
                 <p class="form-help" data-rmm-file-loading role="status" hidden>Loading files from Gitea…</p>
+                <p class="form-help" data-rmm-file-empty hidden>No files yet. Upload files to Files/Common or this company's folder under Files/Companies in Gitea, then reopen this editor.</p>
+                <select class="form-input" size="8" data-rmm-file-list aria-label="Files in Gitea" hidden></select>
               </div>
               <div class="form-field">
                 <label class="form-label" for="rmm-file-destination">Endpoint file path</label>

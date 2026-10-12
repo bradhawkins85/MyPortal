@@ -302,7 +302,6 @@
       source.setAttribute(attribute, sourceInput.getAttribute(attribute));
     });
     sourceInput.replaceWith(source);
-    editor.querySelector('datalist').remove();
     const save = form.querySelector('[type="submit"]');
     const destination = form.elements.destination;
     const index = form.elements.index;
@@ -373,7 +372,9 @@
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || 'Could not load Gitea files.');
         available = data.available;
-        loaded = true;
+        // Retry next time while Gitea could not create the Files folders.
+        loaded = !data.warning;
+        if (data.warning) throw new Error(data.warning);
       } catch (error) {
         errorNode.textContent = error.message;
         errorNode.hidden = false;
@@ -393,7 +394,7 @@
     modal.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { event.preventDefault(); close(); }
       if (event.key !== 'Tab') return;
-      const focusable = Array.from(modal.querySelectorAll('button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled])'));
+      const focusable = Array.from(modal.querySelectorAll('button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([hidden]):not([disabled])'));
       const first = focusable[0], last = focusable[focusable.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }

@@ -14,9 +14,12 @@ from app.repositories import companies as companies_repo
 from app.repositories import rmm as rmm_repo
 from app.security.encryption import decrypt_secret
 from app.services import gitea
+from app.services import rmm_script_layout as layouts
 
 MAX_FILES = 20
 MAX_FILE_BYTES = 50 * 1024 * 1024
+# Stands for the company folder of the company a Common script runs for.
+COMPANY_TOKEN = "{company}"
 
 
 class ScriptFileError(ValueError):
@@ -59,23 +62,64 @@ def validate_associations(files: list[Mapping[str, Any]]) -> list[dict[str, str]
     return result
 
 
-async def available_files(settings: gitea.GiteaSettings, script: Mapping[str, Any]) -> dict[str, gitea.GiteaFile]:
-    # Reuse the established company markers, including renamed file folders.
-    from app.services import rmm_scripts
+def _allowed(
+    settings: gitea.GiteaSettings, files: list[gitea.GiteaFile], layout: layouts.RepositoryLayout,
+    script: Mapping[str, Any], company_ids: set[int] | None = None,
+) -> dict[str, gitea.GiteaFile]:
+    """Files ``script`` may use, keyed by association path.
 
-    files = await gitea.list_files(settings)
-    companies = await companies_repo.list_companies(include_archived=True)
-    layout = await rmm_scripts._read_layout(settings, files, companies, files_folder=True)
-    root = rmm_scripts._repo_path(rmm_scripts.FILES_FOLDER, settings.path)
+    A company script uses Files/Common and its own company's folder. A Common
+    script reaches a company's files as ``Files/Companies/{company}/...``, which
+    each run resolves to the company it runs for; ``company_ids`` limits those
+    to the given companies (``None`` means any company).
+    """
+    root = layouts._repo_path(layouts.FILES_FOLDER, settings.path)
+    owner = script.get("company_id")
     allowed: dict[str, gitea.GiteaFile] = {}
     for item in files:
-        relative = rmm_scripts._relative(item.path, root)
-        if relative is None or relative.rsplit("/", 1)[-1] == rmm_scripts.COMPANY_MARKER:
+        relative = layouts._relative(item.path, root)
+        if relative is None or relative.rsplit("/", 1)[-1] == layouts.COMPANY_MARKER:
             continue
-        usable, company_id, _reason = rmm_scripts.script_scope(relative, layout)
-        if usable and (company_id is None or company_id == script.get("company_id")):
+        usable, company_id, _reason = layouts.script_scope(relative, layout)
+        if not usable:
+            continue
+        if company_id is None or (owner is not None and company_id == int(owner)):
             allowed[item.path] = item
+        elif owner is None and (company_ids is None or company_id in company_ids):
+            parts = relative.split("/")
+            parts[1] = COMPANY_TOKEN
+            allowed.setdefault(layouts._repo_path("/".join(parts), root), item)
     return allowed
+
+
+async def _files_layout(settings: gitea.GiteaSettings) -> tuple[list[gitea.GiteaFile], layouts.RepositoryLayout]:
+    # Reuse the established company markers, including renamed file folders.
+    files = await gitea.list_files(settings)
+    companies = await companies_repo.list_companies(include_archived=True)
+    return files, await layouts._read_layout(settings, files, companies, files_folder=True)
+
+
+async def available_files(
+    settings: gitea.GiteaSettings, script: Mapping[str, Any], company_ids: set[int] | None = None,
+) -> dict[str, gitea.GiteaFile]:
+    files, layout = await _files_layout(settings)
+    return _allowed(settings, files, layout, script, company_ids)
+
+
+async def file_choices(script: Mapping[str, Any], company_id: int) -> tuple[list[str], str | None]:
+    """Files the editor can pick for ``script`` while viewing ``company_id``, and
+    a warning when the missing ``Files/`` folders could not be created first."""
+    settings = await gitea.load_settings()
+    files, layout = await _files_layout(settings)
+    warning = None
+    if layout.missing:
+        missing = {f"{layouts.FILES_FOLDER}/{path}": content for path, content in layout.missing.items()}
+        try:
+            await layouts._create_missing(settings, layouts.RepositoryLayout(missing=missing))
+        except gitea.GiteaError as exc:
+            warning = f"The Files folders could not be created in Gitea. {exc}"
+    choices = sorted(_allowed(settings, files, layout, script, {int(company_id)}), key=str.casefold)
+    return choices, warning
 
 
 async def validate_sources(script: Mapping[str, Any], files: list[Mapping[str, Any]]) -> list[dict[str, str]]:
@@ -87,7 +131,11 @@ async def validate_sources(script: Mapping[str, Any], files: list[Mapping[str, A
     for item in result:
         source = allowed.get(item["source_path"])
         if source is None:
-            raise ScriptFileError(f"{item['source_path']} is missing or unavailable to this script. Common scripts use Files/Common; company scripts may also use their company's files.")
+            raise ScriptFileError(
+                f"{item['source_path']} is missing or unavailable to this script. Company scripts use Files/Common and "
+                f"their company's files; Common scripts use Files/Common and Files/Companies/{COMPANY_TOKEN}/ for the "
+                "company each run is for."
+            )
         if source.size > MAX_FILE_BYTES:
             raise ScriptFileError(f"{source.path} is larger than 50 MB.")
     return result
@@ -102,7 +150,7 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
     if script.get("company_id") is not None and int(script["company_id"]) != int(agent["company_id"]):
         raise ScriptFileError("The script's files are unavailable to this company.")
     settings = await gitea.load_settings()
-    allowed = await available_files(settings, script)
+    allowed = await available_files(settings, script, {int(agent["company_id"])})
     prepared: list[dict[str, Any]] = []
     metadata_by_sha: dict[str, dict[str, Any]] = {}
     for item in associations:
@@ -112,7 +160,8 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
             raise ScriptFileError(f"{destination} is not an absolute file path for this endpoint's operating system.")
         source = allowed.get(item["source_path"])
         if source is None:
-            raise ScriptFileError(f"{item['source_path']} is missing or unavailable to this script.")
+            company = " for this company" if COMPANY_TOKEN in item["source_path"] else ""
+            raise ScriptFileError(f"{item['source_path']} is missing{company} or unavailable to this script.")
         if source.size > MAX_FILE_BYTES:
             raise ScriptFileError(f"{source.path} is larger than 50 MB.")
         if source.sha not in metadata_by_sha:
@@ -122,7 +171,7 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
                 "sha256": hashlib.sha256(raw).hexdigest(),
             }
         prepared.append({
-            **item, "blob_sha": source.sha, **metadata_by_sha[source.sha],
+            **item, "source_path": source.path, "blob_sha": source.sha, **metadata_by_sha[source.sha],
             "repository": f"{settings.owner}/{settings.repo}", "base_url": settings.base_url,
         })
     return prepared

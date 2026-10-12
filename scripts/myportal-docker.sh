@@ -504,6 +504,11 @@ gitea_api() {
   compose exec -T gitea curl "${args[@]}" "http://127.0.0.1:3000/api/v1${path}" || printf '000'
 }
 
+gitea_get() {
+  # gitea_get PATH: prints the response body; credentials arrive on stdin.
+  compose exec -T gitea curl -sSf -K - "http://127.0.0.1:3000/api/v1$1" 2>/dev/null
+}
+
 gitea_auth() {
   # Curl config lines: a token header, or the administrator's password.
   if [[ -n "${1:-}" ]]; then
@@ -532,6 +537,16 @@ ensure_gitea_admin() {
   chmod 0600 "$GITEA_ADMIN_FILE"
 }
 
+gitea_token_is_read_only() {
+  # True when MyPortal's token is the administrator's and cannot write to the
+  # repository. Early installs were given a read-only token, which cannot
+  # create the script and file folders.
+  local token="$1" scopes
+  scopes=$(gitea_auth | gitea_get "/users/${GITEA_ADMIN_USER}/tokens?limit=50" \
+    | grep -oE "\"token_last_eight\":\"${token: -8}\",\"scopes\":\[[^]]*\]" | head -n1) || return 1
+  [[ -n "$scopes" ]] && ! grep -Eq '"(all|write:repository)"' <<<"$scopes"
+}
+
 ensure_gitea_repository() {
   local token="$1" status
   status=$(gitea_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}")
@@ -547,9 +562,14 @@ ensure_gitea_repository() {
 
 connect_gitea() {
   # Gives MyPortal a token (it reads scripts and creates the script folders)
-  # and the repository, once.
+  # and the repository, once. A read-only token from an early install is
+  # replaced so MyPortal can create the folders.
   local token key value
   token=$(get_setting "$APP_ENV" GITEA_API_TOKEN)
+  if [[ -n "$token" ]] && gitea_token_is_read_only "$token"; then
+    info "Giving MyPortal a Gitea token that can create the script and file folders…"
+    token=""
+  fi
   if [[ -z "$token" ]]; then
     ensure_gitea_admin || return 1
     token=$(gitea_cli admin user generate-access-token --username "$GITEA_ADMIN_USER" \
@@ -990,6 +1010,8 @@ NGINX
     # supply its own.
     location = /_myportal/gitea-identity {
         internal;
+        # Never a body; a size limit here turns large uploads into 500s.
+        client_max_body_size 0;
         proxy_method GET;
         proxy_pass http://myportal_app/api/rmm/gitea/identity;
         proxy_pass_request_body off;
