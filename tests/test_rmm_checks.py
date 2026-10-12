@@ -12,6 +12,7 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_checks as checks_repo
 from app.repositories import rmm_stats as stats_repo
 from app.services import rmm_checks as checks
+from app.services import rmm_event_log_rules as event_log_rules
 from app.services import rmm_scripts
 from app.services import rmm_stats
 from tests.test_rmm_scripts import _enrol, _environment, _sync, anyio_backend, sqlite_db  # noqa: F401 - fixtures
@@ -278,6 +279,60 @@ async def test_failing_check_runs_its_script_again_after_the_cooldown(sqlite_db,
 
 
 @pytest.mark.anyio
+async def test_scheduled_script_runs_later_unless_the_check_passes_first(sqlite_db, stats_db, monkeypatch):
+    await _sync(monkeypatch, {"rmm/Common/Cleanup.ps1": CLEANUP})
+    script = (await rmm_repo.list_scripts())[0]
+    _result, agent = await _enrol(sqlite_db)
+    with pytest.raises(checks.CheckError) as exc:
+        await _save({"name": "Disk", "scope": "asset", "asset_id": "10", "check_type": "disk", "disk_drive": "C:",
+                     "action": "schedule_script", "script_id": str(script["id"]), "schedule_mode": "time",
+                     "run_time": "25:00"})
+    assert "run_time" in exc.value.errors
+    form = {"name": "Disk", "scope": "asset", "asset_id": "10", "check_type": "disk", "disk_drive": "C:",
+            "disk_metric": "free_gb", "disk_operator": "below", "disk_threshold": "10", "action": "schedule_script",
+            "script_id": str(script["id"]), "schedule_mode": "delay", "delay_minutes": "120",
+            "entry:param:Reason": "{{check.result}}"}
+    check_id = await _save(form)
+    await _save(form, check_id=check_id)
+    saved = await checks_repo.get_check(check_id)
+    assert (saved["schedule_mode"], saved["delay_minutes"]) == ("delay", 120)
+    start = datetime(2026, 10, 12, 9, 0)
+    now = _clock(monkeypatch, start)
+    low = {"disks": [{"name": "C:", "total_bytes": 100 * checks.GB, "free_bytes": 2 * checks.GB}]}
+    fine = {"disks": [{"name": "C:", "total_bytes": 100 * checks.GB, "free_bytes": 50 * checks.GB}]}
+
+    await checks.ingest_report(agent, low)
+    state = await checks_repo.get_state(check_id, agent["id"])
+    assert state["status"] == "failing" and state["scheduled_at"] == start + timedelta(hours=2)
+    assert await rmm_repo.list_runs(company_id=1) == []
+    now["value"] = start + timedelta(minutes=5)
+    await checks.ingest_report(agent, low)  # still failing: nothing more is scheduled
+    assert (await checks_repo.get_state(check_id, agent["id"]))["scheduled_at"] == start + timedelta(hours=2)
+    assert await checks.run_due_scheduled_checks(start + timedelta(minutes=119)) == 0
+
+    assert await checks.run_due_scheduled_checks(start + timedelta(hours=2)) == 1
+    runs = await rmm_repo.list_runs(company_id=1)
+    assert len(runs) == 1 and runs[0]["run_source"] == checks.RUN_SOURCE
+    jobs = await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
+    assert jobs[0]["parameters"]["Reason"] == "C: 2 GB free (2%)"
+    assert (await checks_repo.get_state(check_id, agent["id"]))["scheduled_at"] is None
+    assert await checks.run_due_scheduled_checks(start + timedelta(hours=3)) == 0
+
+    # Passing again before the scheduled time drops the run.
+    now["value"] = start + timedelta(hours=4)
+    await checks.ingest_report(agent, fine)
+    now["value"] = start + timedelta(hours=5)
+    await checks.ingest_report(agent, low)
+    assert (await checks_repo.get_state(check_id, agent["id"]))["scheduled_at"] == start + timedelta(hours=7)
+    now["value"] = start + timedelta(hours=6)
+    await checks.ingest_report(agent, fine)
+    assert (await checks_repo.get_state(check_id, agent["id"]))["scheduled_at"] is None
+    assert "Dropped the scheduled script" in (await checks_repo.get_check(check_id))["last_summary"]
+    assert await checks.run_due_scheduled_checks(start + timedelta(hours=8)) == 0
+    assert len(await rmm_repo.list_runs(company_id=1)) == 1
+
+
+@pytest.mark.anyio
 async def test_agent_offline_is_judged_from_the_last_check_in(sqlite_db, tickets):
     _result, agent = await _enrol(sqlite_db)
     check_id = await _save({"name": "Server offline", "scope": "asset", "asset_id": "10", "check_type": "offline",
@@ -389,6 +444,7 @@ def test_checks_page_and_asset_sections_render():
     html = env.get_template("rmm/checks.html").render(
         company={"name": "Contoso"}, checks=[row], can_edit=True, is_super_admin=False, editing=editing,
         errors={"service_name": "Enter the service's name."}, check_types=checks.CHECK_TYPES, actions=checks.ACTIONS,
+        script_actions=checks.SCRIPT_ACTIONS, schedule_modes=event_log_rules.SCHEDULE_MODES,
         disk_metrics=checks.DISK_METRICS, memory_metrics=checks.MEMORY_METRICS, comparisons=checks.COMPARISONS,
         network_directions=checks.NETWORK_DIRECTIONS, service_states=checks.SERVICE_STATES,
         service_fixes=checks.SERVICE_FIXES, script_expectations=checks.SCRIPT_EXPECTATIONS, statuses=checks.STATUSES,
@@ -399,6 +455,7 @@ def test_checks_page_and_asset_sections_render():
     assert "[Add check][Scripts]" in html and "Enter the service&#39;s name." in html
     assert "2 failing" in html and "once per failure" in html and "Some devices have their own" in html
     assert '<option value="service" selected>' in html and 'value="global"' not in html
+    assert 'name="schedule_mode"' in html and '<option value="schedule_script" >Schedule a script</option>' in html
     assert 'action="/rmm/checks/3/enabled"' in html and "/static/js/rmm_checks.js" in html
 
     detail = (ROOT / "app/templates/assets/detail.html").read_text()

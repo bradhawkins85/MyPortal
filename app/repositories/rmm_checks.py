@@ -11,7 +11,8 @@ from app.core.database import db
 _SELECT = (
     "SELECT c.id, c.name, c.company_id, c.asset_id, c.check_type, c.target, c.settings_json, c.duration_minutes, "
     "c.check_script_id, c.check_entries_encrypted, c.check_inputs_json, c.action, c.script_id, c.entries_encrypted, "
-    "c.inputs_json, c.timeout_seconds, c.cooldown_minutes, c.is_enabled, c.last_failed_at, c.last_summary, "
+    "c.inputs_json, c.timeout_seconds, c.cooldown_minutes, c.schedule_mode, c.delay_minutes, c.run_time, "
+    "c.schedule_timezone, c.is_enabled, c.last_failed_at, c.last_summary, "
     "c.created_by_user_id, c.updated_by_user_id, c.created_at, c.updated_at, "
     "s.name AS script_name, cs.name AS check_script_name, a.name AS asset_name, co.name AS company_name "
     "FROM rmm_checks c "
@@ -27,7 +28,7 @@ _STATE_COLUMNS = (
 )
 _STATE_SELECT = (
     "SELECT check_id, agent_id, status, value_text, problem_since, checked_at, changed_at, last_action_at, "
-    "ticket_id, run_id, next_run_at FROM rmm_check_states "
+    "ticket_id, run_id, next_run_at, scheduled_at FROM rmm_check_states "
 )
 
 
@@ -75,7 +76,7 @@ def _state_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if not row:
         return None
     state = dict(row)
-    for key in ("problem_since", "checked_at", "changed_at", "last_action_at", "next_run_at"):
+    for key in ("problem_since", "checked_at", "changed_at", "last_action_at", "next_run_at", "scheduled_at"):
         state[key] = _as_datetime(state.get(key))
     return state
 
@@ -134,7 +135,8 @@ def _values(values: dict[str, Any]) -> tuple:
         json.dumps(values["settings"]), values["duration_minutes"], values["check_script_id"],
         values["check_entries_encrypted"], json.dumps(values["check_inputs"]), values["action"], values["script_id"],
         values["entries_encrypted"], json.dumps(values["inputs"]), values["timeout_seconds"],
-        values["cooldown_minutes"], 1 if values["is_enabled"] else 0, values["user_id"],
+        values["cooldown_minutes"], values.get("schedule_mode"), values.get("delay_minutes"), values.get("run_time"),
+        values.get("schedule_timezone"), 1 if values["is_enabled"] else 0, values["user_id"],
     )
 
 
@@ -143,9 +145,9 @@ async def create_check(values: dict[str, Any]) -> int:
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_checks (name, company_id, asset_id, check_type, target, settings_json, duration_minutes, "
         "check_script_id, check_entries_encrypted, check_inputs_json, action, script_id, entries_encrypted, "
-        "inputs_json, timeout_seconds, cooldown_minutes, is_enabled, created_by_user_id, updated_by_user_id, "
-        "created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-        "%s, %s, %s)",
+        "inputs_json, timeout_seconds, cooldown_minutes, schedule_mode, delay_minutes, run_time, schedule_timezone, "
+        "is_enabled, created_by_user_id, updated_by_user_id, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, "
+        "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (*_values(values), values["user_id"], now, now),
     )
 
@@ -155,14 +157,14 @@ async def update_check(check_id: int, values: dict[str, Any]) -> None:
         "UPDATE rmm_checks SET name = %s, company_id = %s, asset_id = %s, check_type = %s, target = %s, "
         "settings_json = %s, duration_minutes = %s, check_script_id = %s, check_entries_encrypted = %s, "
         "check_inputs_json = %s, action = %s, script_id = %s, entries_encrypted = %s, inputs_json = %s, "
-        "timeout_seconds = %s, cooldown_minutes = %s, is_enabled = %s, updated_by_user_id = %s, updated_at = %s "
-        "WHERE id = %s",
+        "timeout_seconds = %s, cooldown_minutes = %s, schedule_mode = %s, delay_minutes = %s, run_time = %s, "
+        "schedule_timezone = %s, is_enabled = %s, updated_by_user_id = %s, updated_at = %s WHERE id = %s",
         (*_values(values), _utcnow(), check_id),
     )
     # A changed check starts again on every device.
     await db.execute(
         "UPDATE rmm_check_states SET status = 'pending', value_text = NULL, problem_since = NULL, run_id = NULL, "
-        "next_run_at = NULL WHERE check_id = %s",
+        "next_run_at = NULL, scheduled_at = NULL WHERE check_id = %s",
         (check_id,),
     )
 
@@ -247,6 +249,44 @@ async def save_state(check_id: int, agent_id: int, state: dict[str, Any]) -> Non
         "ticket_id, run_id, next_run_at, check_id, agent_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (*values, check_id, agent_id),
     )
+
+
+async def schedule_action(check_id: int, agent_id: int, run_at: datetime) -> bool:
+    """Schedule the check's script on a device unless one is already waiting there."""
+
+    return await db.execute_rowcount(
+        "UPDATE rmm_check_states SET scheduled_at = %s WHERE check_id = %s AND agent_id = %s "
+        "AND scheduled_at IS NULL",
+        (run_at, check_id, agent_id),
+    ) > 0
+
+
+async def clear_scheduled(check_id: int, agent_id: int) -> bool:
+    """Drop a scheduled script that has not run yet. True when one was waiting."""
+
+    return await db.execute_rowcount(
+        "UPDATE rmm_check_states SET scheduled_at = NULL WHERE check_id = %s AND agent_id = %s "
+        "AND scheduled_at IS NOT NULL",
+        (check_id, agent_id),
+    ) > 0
+
+
+async def due_scheduled(now: datetime, limit: int = 100) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        _STATE_SELECT + "WHERE scheduled_at IS NOT NULL AND scheduled_at <= %s ORDER BY scheduled_at LIMIT %s",
+        (now, limit),
+    )
+    return [_state_row(row) for row in rows or []]
+
+
+async def claim_scheduled(check_id: int, agent_id: int, now: datetime) -> bool:
+    """Take a due scheduled script; only the instance that clears it runs it."""
+
+    return await db.execute_rowcount(
+        "UPDATE rmm_check_states SET scheduled_at = NULL WHERE check_id = %s AND agent_id = %s "
+        "AND scheduled_at IS NOT NULL AND scheduled_at <= %s",
+        (check_id, agent_id, now),
+    ) > 0
 
 
 async def list_active_agents() -> list[dict[str, Any]]:

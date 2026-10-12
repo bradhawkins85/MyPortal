@@ -279,7 +279,7 @@
           </select>
         </div>
         <div class="form-field">
-          <label class="form-label" for="rmm-check-action-script">Script <span class="text-muted">for “Run a script”</span></label>
+          <label class="form-label" for="rmm-check-action-script">Script <span class="text-muted">for “Run a script” and “Schedule a script”</span></label>
           <select class="form-input" id="rmm-check-action-script" name="script_id">
             <option value="">Choose a script</option>
             {% for item in scripts %}<option value="{{ item.id }}" {% if e.script_id == item.id %}selected{% endif %}>{{ item.name }} ({{ item.path }})</option>{% endfor %}
@@ -293,11 +293,38 @@
         <div class="form-field">
           <label class="form-label" for="rmm-check-cooldown">Run again every <span class="text-muted">minutes while failing</span></label>
           <input class="form-input" id="rmm-check-cooldown" name="cooldown_minutes" type="number" min="0" max="10080" value="{{ e.cooldown_minutes }}">
-          <p class="form-help">0 runs the script once each time the check fails.</p>
+          <p class="form-help">For “Run a script”: 0 runs the script once each time the check fails.</p>
         </div>
       </div>
 
-      {% if e.action == "run_script" and script %}
+      <fieldset class="rmm-event-log-rule__schedule">
+        <legend class="form-label">When a scheduled script runs <span class="text-muted">for “Schedule a script”</span></legend>
+        <p class="form-help">Scheduled once each time the check starts failing on a device. If the check passes again before then, the scheduled run is dropped.</p>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-schedule-mode">Run it</label>
+            <select class="form-input" id="rmm-check-schedule-mode" name="schedule_mode">
+              {% for key, label in schedule_modes.items() %}<option value="{{ key }}" {% if e.schedule_mode == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-delay">Delay <span class="text-muted">minutes, for “After a delay”</span></label>
+            <input class="form-input" id="rmm-check-delay" name="delay_minutes" type="number" min="1" max="10080" value="{{ e.delay_minutes }}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-run-time">Time of day <span class="text-muted">for “At the next time of day”</span></label>
+            <input class="form-input" id="rmm-check-run-time" name="run_time" type="time" value="{{ e.run_time }}">
+            {% if errors.run_time %}<p class="form-error">{{ errors.run_time }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-timezone">Time zone</label>
+            <input class="form-input" id="rmm-check-timezone" name="schedule_timezone" maxlength="64" value="{{ e.schedule_timezone }}" placeholder="Australia/Sydney">
+            {% if errors.timezone %}<p class="form-error">{{ errors.timezone }}</p>{% endif %}
+          </div>
+        </div>
+      </fieldset>
+
+      {% if e.action in script_actions and script %}
       {% if script_fields %}
       <fieldset class="rmm-event-log-rule__values">
         <legend class="form-label">Script values</legend>
@@ -315,7 +342,7 @@
       {% else %}
       <p class="form-help">{{ script.name }} has no parameters or environment variables.</p>
       {% endif %}
-      {% elif e.action == "run_script" %}
+      {% elif e.action in script_actions %}
       <p class="form-help">After choosing a script and saving, its parameters appear here.</p>
       {% endif %}
 

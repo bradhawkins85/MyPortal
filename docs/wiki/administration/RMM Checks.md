@@ -52,6 +52,10 @@ Checks use the same actions as event log rules:
   `{{check.name}}`, `{{check.type}}`, `{{check.target}}`, `{{check.result}}` and
   `{{check.device}}` as well as the usual variables. While the check keeps failing the script runs
   again every **cooldown** minutes; a cooldown of 0 runs it once each time the check fails.
+* **Schedule a script**: run the script on the device later, either after a delay or at the next
+  time of day in a time zone, such as a clean-up at 02:00 out of hours. One run is scheduled each
+  time the check starts failing; if the check passes again before then, the run is dropped. The
+  asset page shows when a scheduled run is waiting.
 * **Create a ticket**: raise a ticket for the device's company with the device linked. While that
   ticket is not closed, a later failure on the same device adds an internal update to it instead of
   raising another, and the ticket gets an internal update when the check passes again.

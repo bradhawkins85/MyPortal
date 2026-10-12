@@ -29,7 +29,8 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_checks as checks_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
-from app.services import rmm_checks
+from app.services import rmm_automation, rmm_checks
+from app.services import rmm_event_log_rules as event_log_rules
 from app.services import rmm_scripts
 from app.services import rmm_stats
 
@@ -64,6 +65,9 @@ def check_summary(check: dict[str, Any], *, counts: dict[str, int] | None = None
     action = rmm_checks.ACTIONS.get(check.get("action"), check.get("action"))
     if check.get("action") == "run_script":
         action = f"Run {check.get('script_name') or 'a removed script'}"
+    elif check.get("action") == "schedule_script":
+        action = (f"Run {check.get('script_name') or 'a removed script'} "
+                  f"{event_log_rules.describe_schedule(check)}")
     return {
         **(_serialise(check) or {}),
         "type_label": rmm_checks.CHECK_TYPES.get(check.get("check_type"), check.get("check_type")),
@@ -114,6 +118,10 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
         "script_id": check.get("script_id"), "timeout_seconds": check.get("timeout_seconds") or 600,
         "cooldown_minutes": check.get("cooldown_minutes") if check.get("cooldown_minutes") is not None
         else rmm_checks.DEFAULT_COOLDOWN_MINUTES,
+        "schedule_mode": check.get("schedule_mode") or "delay",
+        "delay_minutes": check.get("delay_minutes") or event_log_rules.DEFAULT_DELAY_MINUTES,
+        "run_time": check.get("run_time") or "02:00",
+        "schedule_timezone": check.get("schedule_timezone") or rmm_automation.default_timezone(),
         "is_enabled": bool(check.get("is_enabled")), **values,
     }
 
@@ -142,6 +150,10 @@ def _posted(form: Any, check_id: int | None) -> dict[str, Any]:
         "action": str(form.get("action") or "none"), "script_id": number("script_id"),
         "timeout_seconds": form.get("timeout_seconds") or 600,
         "cooldown_minutes": form.get("cooldown_minutes") or rmm_checks.DEFAULT_COOLDOWN_MINUTES,
+        "schedule_mode": str(form.get("schedule_mode") or "delay"),
+        "delay_minutes": form.get("delay_minutes") or event_log_rules.DEFAULT_DELAY_MINUTES,
+        "run_time": str(form.get("run_time") or ""),
+        "schedule_timezone": str(form.get("schedule_timezone") or ""),
         "is_enabled": bool(form.get("is_enabled")),
     }
 
@@ -192,6 +204,8 @@ async def _render(
             "errors": errors or {},
             "check_types": rmm_checks.CHECK_TYPES,
             "actions": rmm_checks.ACTIONS,
+            "script_actions": rmm_checks.SCRIPT_ACTIONS,
+            "schedule_modes": event_log_rules.SCHEDULE_MODES,
             "disk_metrics": rmm_checks.DISK_METRICS,
             "memory_metrics": rmm_checks.MEMORY_METRICS,
             "comparisons": rmm_checks.COMPARISONS,
@@ -297,7 +311,7 @@ async def _save(request: Request, check_id: int | None):
         },
     )
     message = f"Saved {saved['name']}."
-    new_script = (saved["action"] == "run_script" and saved.get("script_id")) or saved.get("check_script_id")
+    new_script = (saved["action"] in rmm_checks.SCRIPT_ACTIONS and saved.get("script_id")) or saved.get("check_script_id")
     if new_script and check_id is None:
         message += " Fill in the script's values below if it needs any."
     return flash_redirect(f"{PAGE_PATH}?check={saved_id}#rmm-check-form", message, "success")

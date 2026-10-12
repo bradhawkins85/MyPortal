@@ -25,8 +25,10 @@ A problem must last ``duration_minutes`` before the check fails (status
 ``warning`` until then). When a check starts failing it takes the same actions
 as an event log rule (:mod:`app.services.rmm_actions`): run a script on the
 device (again each ``cooldown_minutes`` while it keeps failing, or once when
-the cooldown is 0) or raise a ticket for the device. While that ticket is open
-later failures and the recovery are added to it as internal updates.
+the cooldown is 0), schedule a script for later (dropped if the check passes
+before it runs; :func:`run_due_scheduled_checks`) or raise a ticket for the
+device. While that ticket is open later failures and the recovery are added to
+it as internal updates.
 
 While a device has disk, ping, CPU, memory or network checks, the values it
 reports are kept in the separate stats database (:mod:`app.core.stats_database`)
@@ -52,7 +54,7 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_checks as repo
 from app.repositories import rmm_stats as stats_repo
 from app.security.encryption import encrypt_secret
-from app.services import rmm_actions, rmm_automation, rmm_scripts
+from app.services import rmm_actions, rmm_automation, rmm_event_log_rules, rmm_scripts
 from app.services.rmm_scripts import RunRequestError
 
 RUN_SOURCE = "check"
@@ -68,7 +70,13 @@ CHECK_TYPES = {
 }
 AGENT_TYPES = ("disk", "ping", "cpu", "memory", "service", "network")
 STATS_TYPES = ("disk", "ping", "cpu", "memory", "network")
-ACTIONS = {"none": "Show the result only", "run_script": "Run a script", "create_ticket": "Create a ticket"}
+ACTIONS = {
+    "none": "Show the result only",
+    "run_script": "Run a script",
+    "schedule_script": "Schedule a script",
+    "create_ticket": "Create a ticket",
+}
+SCRIPT_ACTIONS = ("run_script", "schedule_script")
 STATUSES = {"pending": "Waiting", "passing": "Passing", "warning": "Problem", "failing": "Failing"}
 REPORT_INTERVAL_SECONDS = 60
 CONFIG_REFRESH_SECONDS = 300
@@ -442,9 +450,10 @@ async def save_check(
             check_entries = await _script_entries(
                 form, "check_entry:", check_script, (existing or {}).get("check_entries_encrypted"), same)
 
+    schedule = rmm_event_log_rules.parse_schedule(form if action == "schedule_script" else None, errors)
     script: dict[str, Any] | None = None
     entries: dict[str, str] = {}
-    if action == "run_script":
+    if action in SCRIPT_ACTIONS:
         try:
             script = await rmm_automation._scoped_script(form.get("script_id"), check_company_id)
         except RunRequestError as exc:
@@ -475,6 +484,7 @@ async def save_check(
             int(((check_script if check_type == "script" else script) or {}).get("default_timeout_seconds") or 600),
         ),
         "cooldown_minutes": _int(form.get("cooldown_minutes"), DEFAULT_COOLDOWN_MINUTES, 0, MAX_COOLDOWN_MINUTES),
+        **schedule,
         "is_enabled": str(form.get("is_enabled") or "").lower() in {"1", "on", "true", "yes"},
         "user_id": user_id,
     }
@@ -517,7 +527,10 @@ def check_context(check: Mapping[str, Any], agent: Mapping[str, Any], result: st
 
 
 async def _act_on_failure(check: Mapping[str, Any], agent: Mapping[str, Any], state: dict[str, Any],
-                          result: str, now: datetime, *, repeat: bool = False) -> None:
+                          result: str, now: datetime, *, repeat: bool = False) -> datetime | None:
+    """Take the check's action. Returns when a scheduled script should run, which
+    the caller stores once the device's state row exists."""
+
     check_id = int(check["id"])
     agent_id = int(agent["id"])
     device = rmm_actions.device_label(agent)
@@ -536,6 +549,13 @@ async def _act_on_failure(check: Mapping[str, Any], agent: Mapping[str, Any], st
         state["last_action_at"] = now
         summary += f". {ran}{'.' if run_id is not None else ''}"
         log_info("RMM check ran a script", check_id=check_id, agent_id=agent_id, run_id=run_id, attempted=attempted)
+    elif action == "schedule_script" and not repeat:
+        run_at = rmm_event_log_rules.scheduled_time(check, now)
+        name = check.get("script_name") or "the script"
+        summary += f". Scheduled {name} for {run_at.isoformat(timespec='minutes')} UTC."
+        await repo.record_failure(check_id, summary)
+        log_info("RMM check scheduled a script", check_id=check_id, agent_id=agent_id, run_at=run_at.isoformat())
+        return run_at
     elif action == "create_ticket" and not repeat:
         reference = f"rmm-check:{check_id}:{agent_id}"
         body = (f"<p>Check <strong>{rmm_actions.escape(check['name'])}</strong> is failing on "
@@ -552,11 +572,14 @@ async def _act_on_failure(check: Mapping[str, Any], agent: Mapping[str, Any], st
             summary += f". Raised ticket {rmm_actions.ticket_label(created)}."
         state["last_action_at"] = now
     await repo.record_failure(check_id, summary)
+    return None
 
 
 async def _on_recovery(check: Mapping[str, Any], agent: Mapping[str, Any], state: dict[str, Any], result: str) -> None:
     device = rmm_actions.device_label(agent)
     summary = f"Passing again on {device}."
+    if check.get("action") == "schedule_script" and await repo.clear_scheduled(int(check["id"]), int(agent["id"])):
+        summary += " Dropped the scheduled script."
     ticket = await rmm_actions.open_ticket(state.get("ticket_id")) if check.get("action") == "create_ticket" else None
     if ticket:
         await rmm_actions.add_ticket_update(
@@ -571,7 +594,7 @@ async def _on_recovery(check: Mapping[str, Any], agent: Mapping[str, Any], state
 
 def _blank_state() -> dict[str, Any]:
     return {"status": "pending", "value_text": None, "problem_since": None, "checked_at": None, "changed_at": None,
-            "last_action_at": None, "ticket_id": None, "run_id": None, "next_run_at": None}
+            "last_action_at": None, "ticket_id": None, "run_id": None, "next_run_at": None, "scheduled_at": None}
 
 
 async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], problem: bool, result: str, *,
@@ -588,6 +611,7 @@ async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], prob
     previous = state["status"]
     state["checked_at"] = now
     state["value_text"] = result[:512]
+    run_at: datetime | None = None
     duration = timedelta(minutes=int(check.get("duration_minutes") or 0) if duration_minutes is None else duration_minutes)
     try:
         if problem:
@@ -596,7 +620,7 @@ async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], prob
             if now - state["problem_since"] >= duration:
                 if previous != "failing":
                     state["status"], state["changed_at"] = "failing", now
-                    await _act_on_failure(check, agent, state, result, now)
+                    run_at = await _act_on_failure(check, agent, state, result, now)
                 elif check.get("action") == "run_script" and int(check.get("cooldown_minutes") or 0) > 0:
                     last = state.get("last_action_at")
                     if last is None or now - last >= timedelta(minutes=int(check["cooldown_minutes"])):
@@ -619,6 +643,12 @@ async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], prob
         state["checked_at"] = last_written
         return state
     await repo.save_state(check_id, agent_id, state)
+    if run_at is not None:
+        try:
+            if await repo.schedule_action(check_id, agent_id, run_at):
+                state["scheduled_at"] = run_at
+        except Exception as exc:  # noqa: BLE001 - the result is already stored
+            log_error("RMM check could not schedule its script", check_id=check_id, agent_id=agent_id, error=str(exc))
     return state
 
 
@@ -973,11 +1003,47 @@ async def run_finished(run_id: int) -> int:
     return answered
 
 
+async def run_due_scheduled_checks(now: datetime | None = None) -> int:
+    """Run the scripts check actions scheduled for now or earlier. Returns how many were queued."""
+
+    now = now or _utcnow()
+    queued = 0
+    for pending in await repo.due_scheduled(now):
+        check_id, agent_id = int(pending["check_id"]), int(pending["agent_id"])
+        if not await repo.claim_scheduled(check_id, agent_id, now):
+            continue  # another instance took it
+        try:
+            check = await repo.get_check(check_id, with_secrets=True)
+            agent = await rmm_repo.get_agent(agent_id)
+            if (not check or not check.get("is_enabled") or check.get("action") != "schedule_script" or not agent
+                    or pending.get("status") != "failing"):
+                continue  # turned off, changed, passing again or removed since it was scheduled
+            run_id, summary, attempted = await rmm_actions.run_script(
+                script_id=check.get("script_id"),
+                entries_encrypted=check.get("entries_encrypted"),
+                inputs=check.get("inputs"),
+                timeout_seconds=check.get("timeout_seconds"),
+                agent=agent,
+                run_source=RUN_SOURCE,
+                extra_context=check_context(check, agent, str(pending.get("value_text") or "")),
+            )
+            if run_id is not None:
+                queued += 1
+                summary += " as scheduled."
+            await repo.set_summary(check_id, summary)
+            log_info("RMM check ran its scheduled script", check_id=check_id, agent_id=agent_id, run_id=run_id,
+                     attempted=attempted)
+        except Exception as exc:  # noqa: BLE001 - one failure must not stop the others
+            log_error("RMM check scheduled run failed", check_id=check_id, agent_id=agent_id, error=str(exc))
+    return queued
+
+
 async def tick() -> None:
     """Server-side checks; called by the RMM automation loop on one instance at a time."""
 
     await evaluate_offline()
     await run_due_script_checks()
+    await run_due_scheduled_checks()
 
 
 async def prune_stats() -> int:

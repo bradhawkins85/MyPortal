@@ -16,11 +16,14 @@
 -- service state, what a script must return). duration_minutes is how long the
 -- problem must last before the check fails. When it fails the check takes the
 -- same actions as an event log rule: run a script (at most once per
--- cooldown_minutes on a device) or raise a ticket for the device (one open
--- ticket per check and device). A script check's own script and values are in
+-- cooldown_minutes on a device), schedule a script for later (schedule_mode
+-- 'delay' waits delay_minutes, 'time' waits for the next run_time in
+-- schedule_timezone) or raise a ticket for the device (one open ticket per
+-- check and device). A script check's own script and values are in
 -- check_script_id, check_entries_encrypted and check_inputs_json.
 --
--- rmm_check_states keeps each check's result per device (agent).
+-- rmm_check_states keeps each check's result per device (agent);
+-- scheduled_at is when a scheduled script waits to run there.
 
 CREATE TABLE IF NOT EXISTS rmm_checks (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -40,6 +43,10 @@ CREATE TABLE IF NOT EXISTS rmm_checks (
   inputs_json LONGTEXT NULL,
   timeout_seconds INT NOT NULL DEFAULT 600,
   cooldown_minutes INT NOT NULL DEFAULT 60,
+  schedule_mode VARCHAR(8) NULL,
+  delay_minutes INT NULL,
+  run_time VARCHAR(5) NULL,
+  schedule_timezone VARCHAR(64) NULL,
   is_enabled TINYINT(1) NOT NULL DEFAULT 1,
   last_failed_at DATETIME NULL,
   last_summary VARCHAR(512) NULL,
@@ -69,9 +76,11 @@ CREATE TABLE IF NOT EXISTS rmm_check_states (
   ticket_id INT NULL,
   run_id INT NULL,
   next_run_at DATETIME NULL,
+  scheduled_at DATETIME NULL,
   PRIMARY KEY (check_id, agent_id),
   CONSTRAINT fk_rmm_check_states_check FOREIGN KEY (check_id) REFERENCES rmm_checks(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE INDEX IF NOT EXISTS idx_rmm_check_states_run ON rmm_check_states (run_id);
 CREATE INDEX IF NOT EXISTS idx_rmm_check_states_agent ON rmm_check_states (agent_id);
+CREATE INDEX IF NOT EXISTS idx_rmm_check_states_scheduled ON rmm_check_states (scheduled_at);

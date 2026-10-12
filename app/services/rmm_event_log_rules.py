@@ -233,6 +233,33 @@ def _int(value: Any, default: int, low: int, high: int) -> int:
     return max(low, min(high, number))
 
 
+def parse_schedule(form: Mapping[str, Any] | None, errors: dict[str, str]) -> dict[str, Any]:
+    """When a "Schedule a script" action runs, from a rule or check form.
+
+    No ``form`` gives the empty schedule of other actions; problems go in ``errors``."""
+
+    schedule: dict[str, Any] = {"schedule_mode": None, "delay_minutes": None, "run_time": None,
+                                "schedule_timezone": None}
+    if form is None:
+        return schedule
+    mode = str(form.get("schedule_mode") or "delay")
+    if mode not in SCHEDULE_MODES:
+        errors["schedule_mode"] = "Choose when the script runs."
+    schedule["schedule_mode"] = mode
+    if mode == "delay":
+        schedule["delay_minutes"] = _int(form.get("delay_minutes"), DEFAULT_DELAY_MINUTES, 1, MAX_DELAY_MINUTES)
+    else:
+        run_time = str(form.get("run_time") or "").strip()[:5]
+        if not _RUN_TIME.match(run_time):
+            errors["run_time"] = "Enter the time as HH:MM, such as 02:00."
+        schedule["run_time"] = run_time
+        try:
+            schedule["schedule_timezone"] = rmm_automation.validate_timezone(form.get("schedule_timezone"))
+        except RunRequestError as exc:
+            errors.update(exc.errors)
+    return schedule
+
+
 async def save_rule(
     *,
     rule_id: int | None,
@@ -273,24 +300,7 @@ async def save_rule(
 
     script: dict[str, Any] | None = None
     entries: dict[str, str] = {}
-    schedule: dict[str, Any] = {"schedule_mode": None, "delay_minutes": None, "run_time": None,
-                                 "schedule_timezone": None}
-    if action == "schedule_script":
-        mode = str(form.get("schedule_mode") or "delay")
-        if mode not in SCHEDULE_MODES:
-            errors["schedule_mode"] = "Choose when the script runs."
-        schedule["schedule_mode"] = mode
-        if mode == "delay":
-            schedule["delay_minutes"] = _int(form.get("delay_minutes"), DEFAULT_DELAY_MINUTES, 1, MAX_DELAY_MINUTES)
-        else:
-            run_time = str(form.get("run_time") or "").strip()[:5]
-            if not _RUN_TIME.match(run_time):
-                errors["run_time"] = "Enter the time as HH:MM, such as 02:00."
-            schedule["run_time"] = run_time
-            try:
-                schedule["schedule_timezone"] = rmm_automation.validate_timezone(form.get("schedule_timezone"))
-            except RunRequestError as exc:
-                errors.update(exc.errors)
+    schedule = parse_schedule(form, errors) if action == "schedule_script" else parse_schedule(None, errors)
     if action in SCRIPT_ACTIONS:
         try:
             script = await rmm_automation._scoped_script(form.get("script_id"), rule_company_id)
