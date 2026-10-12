@@ -43,6 +43,56 @@ asset page, **Change for this device** on a company or every-company check copie
 device's own, ready to change or turn off. Several checks at the same level all run, for example a
 ticket at 15% free space and a clean-up script at 5%.
 
+### Advanced device rules
+
+The company/device selection sets the scope boundary. **Devices matching advanced
+rules** narrows that scope using company and inventory conditions. Each group can
+match **all (AND)** or **any (OR)** of its conditions and child groups; use **Add
+group** to combine several groups or nest them. Groups support up to eight levels
+and 250 total conditions/groups. Existing checks retain their unrestricted scope
+until you choose advanced rules.
+
+Examples:
+
+* **VIP company servers**: an AND group with asset catalogue type equal to `server`
+  and company VIP equal to `true`.
+* **WireGuard with a custom field**: an AND group with installed software containing
+  `WireGuard` and the asset custom field `VPNEnabled` equal to `true`.
+* **Either device population**: put those two AND groups inside an OR group.
+* **Large customer Windows fleet**: company active agent count at least `25`, a
+  company variable `ServiceTier` equal to `Premium`, RAM at least `16` GB, and
+  recorded asset IP in `10.50.0.0/16`, all joined with AND.
+
+Fields cover company identity, VIP status, tags and variables; asset identity,
+catalogue type, tags and custom fields; hardware manufacturer/model, CPU and core
+counts, RAM and storage; OS name/version/build; agent architecture/version and
+check-in IP; recorded device IPs; and installed software names, versions and
+publishers. Software version/publisher conditions specify the software name so
+they compare the same installed package. Custom fields and company variables
+accept definition names or IDs (numeric keys refer to definition IDs).
+
+Text comparisons ignore case. Numeric conditions support comparisons and
+inclusive ranges, versions compare numeric components, and subnet matching
+accepts IPv4 or IPv6 CIDRs. Negative collection conditions require no known item
+to match. Unknown inventory fails comparisons, including negative comparisons;
+**Is not set** explicitly selects missing values. A confirmed empty collection
+can match a negative condition. Invalid or empty rule groups cannot be saved, and
+malformed stored rules select no devices.
+
+**Preview matching devices** shows current matching device/company names without
+running checks or exposing inventory or variable values. Only super admins can
+preview or save rules across every company. MyPortal evaluates the rules when it
+builds agent configuration, handles reports, evaluates offline/script checks, and
+runs delayed actions. Inventory changes can add or remove devices automatically;
+the agent receives refreshed configuration within its normal five-minute refresh
+interval. Software/hardware matching uses the latest successfully reported
+[device inventory](RMM%20Inventory.md), so an inventory refresh may be needed after
+installing software or changing hardware.
+
+Rules are evaluated **before** scope overrides: a company or device check only
+replaces a broader check on devices its rules match. This includes disabled
+overrides. A pending script action is dropped if the check no longer applies.
+
 ## What happens when a check fails
 
 Checks use the same actions as event log rules:

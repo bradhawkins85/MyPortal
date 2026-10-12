@@ -2,6 +2,11 @@
 
 package inventory
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
-func collectPlatform(ctx context.Context, s *Snapshot) {}
+func collectPlatform(_ context.Context, s *Snapshot) {
+	s.fail("software", errors.New("installed software inventory is unsupported on this platform"))
+}

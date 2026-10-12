@@ -185,13 +185,14 @@
             <td data-label="Fails when">{{ check.description }}{% if check.action != "none" %}<br><span class="text-muted">Then: {{ check.action_label }}</span>{% endif %}</td>
             <td data-label="Result">
               {% if not check.is_enabled %}<span class="status status--neutral">Off</span>
+              {% elif not check.applies and check.target_rules %}<span class="status status--neutral">Not applied</span> <span class="text-muted">excluded by current rules or a scope override</span>
               {% elif not check.applies %}<span class="status status--neutral">Replaced</span> <span class="text-muted">by this device's own check</span>
               {% elif check.state %}{% set st = check.state.status %}<span class="status status--{{ CHECK_STATUS.get(st, 'neutral') }}">{{ check.status_label }}</span>{% if check.state.value_text %} {{ check.state.value_text }}{% endif %}
                 <br><span class="text-muted">{% if st in ("failing", "warning") and check.state.problem_since %}Since <span data-utc="{{ check.state.problem_since }}">{{ check.state.problem_since }}</span>{% elif check.state.changed_at %}Since <span data-utc="{{ check.state.changed_at }}">{{ check.state.changed_at }}</span>{% endif %}{% if check.state.checked_at %} · checked <span data-utc="{{ check.state.checked_at }}">{{ check.state.checked_at }}</span>{% endif %}</span>
                 {% if check.state.scheduled_at %}<br><span class="text-muted">Script scheduled for <span data-utc="{{ check.state.scheduled_at }}">{{ check.state.scheduled_at }}</span></span>{% endif %}
               {% else %}<span class="status status--neutral">Waiting</span> <span class="text-muted">for the first result</span>{% endif %}
             </td>
-            <td data-label="Applies to">{{ "This device" if check.asset_id else check.scope_label }}</td>
+            <td data-label="Applies to">{{ "This device" if check.asset_id else check.scope_label }}{% if check.target_rules %}<br><span class="rmm-chip">Advanced rules</span>{% endif %}</td>
             <td class="table__actions">{% if chk.can_edit %}{{ rmm_ui.check_menu(check, csrf_token, asset.id) }}{% endif %}</td>
           </tr>
           {% endfor %}
