@@ -123,6 +123,8 @@ def rule_summary(rule: dict[str, Any]) -> dict[str, Any]:
     action = event_log_rules.ACTIONS.get(rule.get("action"), rule.get("action"))
     if rule.get("action") == "run_script":
         action = f"Run {rule.get('script_name') or 'a removed script'}"
+    elif rule.get("action") == "schedule_script":
+        action = f"Run {rule.get('script_name') or 'a removed script'} {event_log_rules.describe_schedule(rule)}"
     return {
         **(_serialise(rule) or {}),
         "scope_label": scope,

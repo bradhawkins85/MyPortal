@@ -662,9 +662,12 @@ async def reconcile_onboarding() -> None:
 
 @singleton_run("rmm_automation", ttl_seconds=TICK_SECONDS * 3)
 async def tick() -> None:
+    from app.services import rmm_event_log_rules  # imports this module
+
     await rmm_repo.expire_stale_runs()
     await reconcile_onboarding()
     await run_due_schedules()
+    await rmm_event_log_rules.run_due_scheduled()
 
 
 async def automation_loop() -> None:
