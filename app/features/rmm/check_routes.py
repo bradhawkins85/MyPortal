@@ -445,21 +445,25 @@ async def asset_checks_context(company_id: int, asset_id: int, *, can_edit: bool
     agent = await rmm_repo.get_asset_agent(asset_id)
     if agent and agent.get("company_id") is not None and int(agent["company_id"]) != int(company_id):
         agent = None
+    # Only checks meant for this device are listed: those whose target rules
+    # (such as a Server tag) do not match it are left out. Without an agent
+    # there is no inventory to match rules against, so only checks without
+    # rules are listed.
     if agent:
-        matching = (await rmm_checks.targeted_checks_for_agents(checks, [agent]))[int(agent["id"])]
+        relevant = (await rmm_checks.matching_checks_for_agents(checks, [agent]))[int(agent["id"])]
     else:
-        matching = rmm_checks.effective_checks([check for check in checks if check.get("target_rules") is None], company_id, asset_id)
-    applied = {int(check["id"]) for check in matching}
+        relevant = [check for check in checks
+                    if check.get("target_rules") is None and rmm_checks._in_scope(check, company_id, asset_id)]
+    applied = {int(check["id"]) for check in rmm_checks.effective_checks(relevant, company_id, asset_id)}
     states = await checks_repo.list_states_for_agent(int(agent["id"])) if agent else {}
     rows = []
-    for check in checks:
+    for check in relevant:
         state = states.get(int(check["id"])) if int(check["id"]) in applied else None
         summary = check_summary(check)
         summary.update(
             can_edit=can_edit and rmm_checks.can_edit(check, company_id=company_id, is_super_admin=is_super_admin),
             applies=int(check["id"]) in applied,
-            replaced=bool(check["is_enabled"]) and int(check["id"]) not in applied and check.get("target_rules") is None,
-            filtered=check.get("target_rules") is not None and int(check["id"]) not in applied,
+            replaced=bool(check["is_enabled"]) and int(check["id"]) not in applied,
             state=_serialise(state) if state else None,
             status_label=rmm_checks.STATUSES.get((state or {}).get("status") or "pending"),
         )
