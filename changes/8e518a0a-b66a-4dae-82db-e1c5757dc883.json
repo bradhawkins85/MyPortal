@@ -1,0 +1,7 @@
+{
+  "guid": "8e518a0a-b66a-4dae-82db-e1c5757dc883",
+  "occurred_at": "2026-10-12T11:20Z",
+  "change_type": "Fix",
+  "summary": "Gitea: uploads over 15 MB no longer fail with an nginx 500 error",
+  "content_hash": "6bbc203c0a3825854eaec621507b233687d248e946bc6419aab7289ff4290c12"
+}
