@@ -1010,6 +1010,8 @@ NGINX
     # supply its own.
     location = /_myportal/gitea-identity {
         internal;
+        # Never a body; a size limit here turns large uploads into 500s.
+        client_max_body_size 0;
         proxy_method GET;
         proxy_pass http://myportal_app/api/rmm/gitea/identity;
         proxy_pass_request_body off;

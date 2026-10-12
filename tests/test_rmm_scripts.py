@@ -1128,6 +1128,9 @@ def test_proxies_always_set_gitea_sign_in_headers_themselves(config):
     identity = identity[: identity.index("}")]
     # Gitea form posts must not reach MyPortal as POSTs (CSRF would refuse them).
     assert "internal;" in identity and "proxy_method GET;" in identity and "proxy_pass_request_body off;" in identity
+    # The lookup sees the upload's Content-Length; a body limit there makes
+    # auth_request answer 500 to large Gitea uploads.
+    assert "client_max_body_size 0;" in identity
 
 
 # ---------------------------------------------------------------------------
