@@ -1,0 +1,7 @@
+{
+  "guid": "8a55cafe-c8a4-4e7f-ae6a-0a8c4822c413",
+  "occurred_at": "2026-10-12T00:00Z",
+  "change_type": "Fix",
+  "summary": "Tray build server: name the Windows setup bundle MyPortal-Tray-Setup.exe so WiX v7 no longer fails with WIX0388 (insecure setup.exe bundle name)",
+  "content_hash": "576477102e3a0d403de0500a58a491fc626faaf3a0b1857d66e8c6ad1211c3f7"
+}

@@ -1,7 +1,7 @@
 # Tray Build Server
 
 Deployment URLs (**Admin → Tray → Deployment URLs**) give each company a
-Windows `setup.exe` and `.msi` with the portal address and the company's
+Windows setup `.exe` and `.msi` with the portal address and the company's
 install token already built in. WiX can only build those on Windows, so
 MyPortal queues the builds and a Windows machine running the **MyPortal build
 agent** produces them.
@@ -9,7 +9,7 @@ agent** produces them.
 ```
 MyPortal ──(queued build: release tag, portal URL, token)──▶ build agent
    ▲                                                             │
-   └──────────(signed setup.exe + .msi, uploaded over HTTPS)─────┘
+   └──────────(signed setup .exe + .msi, uploaded over HTTPS)────┘
 ```
 
 The agent:
@@ -18,7 +18,7 @@ The agent:
 2. checks out that tray release tag from GitHub and builds the tray binaries
    from source the same way the *Build MSI* workflow does (cached per release);
 3. builds `myportal-tray.msi` with the company's settings as property
-   defaults, then wraps it in a `setup.exe` Burn bundle;
+   defaults, then wraps it in a Burn setup bundle;
 4. signs the binaries, the MSI, the bundle engine and the bundle with your
    code-signing certificate;
 5. uploads both files and marks the build complete, or reports the error so
@@ -140,6 +140,7 @@ change settings or update WiX.
 | Symptom | Fix |
 | --- | --- |
 | `agent.log` repeats *Installing WixToolset.BootstrapperApplications.wixext* | Update the agent: older copies did not accept the WiX v7 EULA, so the extension install failed without logging why. Run `Install-MyPortalBuildAgent.ps1` again from the latest `tray/build-agent` folder. Any other *WiX setup failed* line in the log names the cause. |
+| *wix build failed with exit code 388* (*WIX0388 … 'setup.exe' creates an insecure bundle*) | The agent is an older copy that named the bundle `setup.exe`, which WiX v7 refuses. Run `Install-MyPortalBuildAgent.ps1` again from the latest `tray/build-agent` folder, then press **Rebuild**. The bundle is now built as `MyPortal-Tray-Setup.exe`; downloads keep their `MyPortal-Tray-<Company>-Setup.exe` name. |
 | *WiX setup failed: wix extension failed* with a NuGet error | The agent downloads the WiX Burn extension from `api.nuget.org` using its own NuGet.Config, so check the server can reach `api.nuget.org` over HTTPS (through any proxy the SYSTEM account uses). |
 | Builds stay *Queued* | Check the scheduled task's last result and `agent.log`. A 401 or 403 means the API key, its IP allow list or its path permissions are wrong. |
 | *Failed: Release … predates deployment URL support* | The cached tray release was tagged before this feature. Publish a new tray release, then press **Rebuild**. |

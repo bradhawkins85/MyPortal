@@ -284,7 +284,7 @@ be typed or pasted. The company-specific packages are only ever served by
 MyPortal through that link; nothing is published to GitHub, and the public
 release installers (MSI, pkg, DMG) are built exactly as before.
 
-* **Windows** downloads a signed `setup.exe`, with the matching `.msi` linked
+* **Windows** downloads a signed setup `.exe` (`MyPortal-Tray-<Company>-Setup.exe`), with the matching `.msi` linked
   for IT teams. Both are built for that company by the Windows build agent,
   with `MYPORTAL_URL` and `ENROL_TOKEN` baked in as MSI property defaults (a
   command-line value still overrides them). Until a build server is set up, or
