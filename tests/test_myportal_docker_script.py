@@ -764,6 +764,23 @@ def test_connect_gitea_reuses_an_existing_repository_and_account(tmp_path):
     assert "GITEA_API_TOKEN=" + "b" * 40 in app_env.read_text()
 
 
+@pytest.mark.parametrize(("scopes", "replaced"), [('"read:repository"', True), ('"write:repository"', False), ('"all"', False)])
+def test_connect_gitea_replaces_a_read_only_token(tmp_path, scopes, replaced):
+    old = "c" * 32 + "12345678"
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text(f"GITEA_API_TOKEN={old}\nDB_NAME=myportal\n")
+    tokens = f'[{{"id":1,"name":"myportal-1","sha1":"","token_last_eight":"12345678","scopes":[{scopes}]}}]'
+    result = _run(
+        f'APP_ENV="{app_env}"; GITEA_ADMIN_FILE="{tmp_path}/gitea-admin.txt"\n'
+        + _gitea_stubs(tmp_path, user_exists=True, repo_status="200")
+        + f"gitea_get() {{ cat >/dev/null; printf '%s' '{tokens}'; }}\nconnect_gitea"
+    )
+    assert result.returncode == 0, result.stderr
+    settings = app_env.read_text().splitlines()
+    assert ("GITEA_API_TOKEN=" + ("b" * 40 if replaced else old)) in settings
+    assert "DB_NAME=myportal" in settings
+
+
 def test_external_gitea_is_never_started(tmp_path):
     app_env = tmp_path / "myportal.env"
     app_env.write_text("GITEA_BASE_URL=https://git.example.com\n")

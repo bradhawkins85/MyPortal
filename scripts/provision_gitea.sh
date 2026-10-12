@@ -63,13 +63,13 @@ PY
 }
 
 env_default() {
-  # env_default KEY VALUE: set KEY only when it is missing or empty, keeping
-  # the file's other lines and permissions.
-  python3 - "$ENV_FILE" "$1" "$2" <<'PY'
+  # env_default KEY VALUE [REPLACE]: set KEY only when it is missing, empty or
+  # exactly REPLACE, keeping the file's other lines and permissions.
+  python3 - "$ENV_FILE" "$1" "$2" "${3:-}" <<'PY'
 import sys
 from pathlib import Path
 
-path, key, value = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+path, key, value, replace = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
 lines = path.read_text(encoding="utf-8").splitlines()
 indices = []
 for index, raw in enumerate(lines):
@@ -84,7 +84,7 @@ for index, raw in enumerate(lines):
         current = current[1:].split(current[0], 1)[0]
     else:
         current = current.split(" #", 1)[0].strip()
-    if current:
+    if current and current != replace:
         raise SystemExit(0)
     indices.append(index)
 for index in indices:
@@ -364,6 +364,11 @@ gitea_api() {
   curl "${args[@]}" "${GITEA_LOCAL_URL}/api/v1${path}" || printf '000'
 }
 
+gitea_get() {
+  # gitea_get PATH: prints the response body; credentials arrive on stdin.
+  curl -sSf -K - "${GITEA_LOCAL_URL}/api/v1$1" 2>/dev/null
+}
+
 curl_auth() {
   # Curl config lines: a token header, or basic auth from the credentials file.
   if [[ -n "${1:-}" ]]; then
@@ -399,6 +404,16 @@ create_token() {
     | grep -oE '[0-9a-f]{40}' | tail -n1
 }
 
+token_is_read_only() {
+  # True when MyPortal's token is the administrator's and cannot write to the
+  # repository. Early installs were given a read-only token, which cannot
+  # create the script and file folders.
+  local token="$1" scopes
+  scopes=$(curl_auth | gitea_get "/users/${GITEA_ADMIN_USER}/tokens?limit=50" \
+    | grep -oE "\"token_last_eight\":\"${token: -8}\",\"scopes\":\[[^]]*\]" | head -n1) || return 1
+  [[ -n "$scopes" ]] && ! grep -Eq '"(all|write:repository)"' <<<"$scopes"
+}
+
 ensure_repository() {
   local token="$1" status
   status=$(curl_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}")
@@ -413,15 +428,21 @@ ensure_repository() {
 }
 
 connect_myportal() {
-  # Gives MyPortal its token and repository once; later runs keep them.
-  local token
+  # Gives MyPortal its token and repository once; later runs keep them,
+  # except a read-only token, which is replaced so MyPortal can make folders.
+  local token old
   token=$(env_value GITEA_API_TOKEN)
+  if [[ -n "$token" ]] && token_is_read_only "$token"; then
+    info "Giving MyPortal a Gitea token that can create the script and file folders…"
+    old="$token"
+    token=""
+  fi
   if [[ -z "$token" ]]; then
     ensure_admin || return 1
     token=$(create_token)
     [[ -n "$token" ]] || { warn "could not create a Gitea token for MyPortal."; return 1; }
     ensure_repository "$token" || true
-    env_default GITEA_API_TOKEN "$token"
+    env_default GITEA_API_TOKEN "$token" "${old:-}"
   fi
   env_default GITEA_BASE_URL "$GITEA_LOCAL_URL"
   env_default GITEA_PUBLIC_URL "$GITEA_PUBLIC_PATH"

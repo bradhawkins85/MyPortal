@@ -294,6 +294,8 @@
     const trigger = editor.querySelector('summary');
     const errorNode = editor.querySelector('[data-rmm-file-error]');
     const loading = editor.querySelector('[data-rmm-file-loading]');
+    const list = editor.querySelector('[data-rmm-file-list]');
+    const empty = editor.querySelector('[data-rmm-file-empty]');
     const source = form.elements.source_path;
     const destination = form.elements.destination;
     const index = form.elements.index;
@@ -325,6 +327,7 @@
       source.value = button.dataset.source || '';
       destination.value = button.dataset.destination || '';
       snapshot = state();
+      list.value = source.value;
       errorNode.hidden = true;
       editor.open = true;
       modal.hidden = false;
@@ -335,14 +338,25 @@
         const response = await fetch('/api/rmm/scripts/' + editor.dataset.rmmFileEditor + '/files', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || 'Could not load Gitea files.');
-        const options = editor.querySelector('datalist');
-        options.replaceChildren(...data.available.map((path) => { const option = document.createElement('option'); option.value = path; return option; }));
-        loaded = true;
+        list.replaceChildren(...data.available.map((path) => {
+          const option = document.createElement('option');
+          option.value = path;
+          option.textContent = path;
+          return option;
+        }));
+        list.value = source.value;
+        list.hidden = data.available.length === 0;
+        empty.hidden = data.available.length > 0;
+        // Retry next time while Gitea could not create the Files folders.
+        loaded = !data.warning;
+        if (data.warning) throw new Error(data.warning);
       } catch (error) {
         errorNode.textContent = error.message;
         errorNode.hidden = false;
       } finally { loading.hidden = true; }
     }
+    list.addEventListener('change', () => { source.value = list.value; });
+    source.addEventListener('input', () => { list.value = source.value; });
     trigger.addEventListener('click', (event) => { event.preventDefault(); open(trigger); });
     detail.querySelectorAll('[data-rmm-file-edit]').forEach((button) => {
       button.hidden = false;
@@ -353,7 +367,7 @@
     modal.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { event.preventDefault(); close(); }
       if (event.key !== 'Tab') return;
-      const focusable = Array.from(modal.querySelectorAll('button:not([disabled]), input:not([type="hidden"]):not([disabled])'));
+      const focusable = Array.from(modal.querySelectorAll('button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([hidden])'));
       const first = focusable[0], last = focusable[focusable.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }

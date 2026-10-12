@@ -67,6 +67,57 @@ async def test_file_catalog_respects_common_and_company_script_scope(monkeypatch
 
 
 @pytest.mark.anyio
+async def test_file_choices_create_missing_files_folders_first(monkeypatch):
+    settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
+    created = []
+
+    async def load_settings():
+        return settings
+
+    async def list_files(_settings):
+        return [gitea.GiteaFile("Common/README.md", "a" * 40, 1), gitea.GiteaFile("Companies/Contoso/.myportal-company", "b" * 40, 1)]
+
+    async def companies(**kwargs):
+        return [{"id": 1, "name": "Contoso"}]
+
+    async def create_files(_settings, files, _message):
+        created.append(sorted(files))
+
+    monkeypatch.setattr(gitea, "load_settings", load_settings)
+    monkeypatch.setattr(gitea, "list_files", list_files)
+    monkeypatch.setattr(gitea, "create_files", create_files)
+    monkeypatch.setattr(rmm_script_files.companies_repo, "list_companies", companies)
+    choices, warning = await rmm_script_files.file_choices({"company_id": 1})
+    assert choices == [] and warning is None
+    assert created == [["Files/Common/README.md", "Files/Companies/Contoso/.myportal-company", "Files/Companies/README.md"]]
+
+    async def refuse(_settings, _files, _message):
+        raise gitea.GiteaError("Gitea refused to create folders. GITEA_API_TOKEN needs write access to the repository.")
+
+    monkeypatch.setattr(gitea, "create_files", refuse)
+    choices, warning = await rmm_script_files.file_choices({"company_id": 1})
+    assert choices == [] and "GITEA_API_TOKEN needs write access" in warning
+
+
+@pytest.mark.anyio
+async def test_existing_files_are_never_recreated(monkeypatch):
+    from app.services import rmm_scripts
+
+    settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
+    # A marker naming a deleted company, in the folder a current company would use.
+    files = [gitea.GiteaFile("Files/Companies/Contoso/.myportal-company", "a" * 40, 1)]
+
+    async def fetch_file(_settings, _path):
+        return b'{"company_id": 99}'
+
+    monkeypatch.setattr(gitea, "fetch_file", fetch_file)
+    layout = await rmm_scripts._read_layout(settings, files, [{"id": 1, "name": "Contoso"}], files_folder=True)
+    assert layout.company_folders == {"Contoso": 1}
+    assert "Companies/Contoso/.myportal-company" not in layout.missing
+    assert set(layout.missing) == {"Common/README.md"}
+
+
+@pytest.mark.anyio
 async def test_queue_rejects_missing_company_files_and_wrong_endpoint_paths(monkeypatch):
     settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
 

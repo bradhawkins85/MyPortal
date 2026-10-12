@@ -179,6 +179,29 @@ def test_connected_installation_keeps_its_token(tmp_path):
     assert path.read_text(encoding="utf-8") == contents
 
 
+@pytest.mark.parametrize(("scopes", "replaced"), [('"read:repository"', True), ('"write:repository"', False)])
+def test_read_only_token_is_replaced_once(tmp_path, scopes, replaced):
+    old = "c" * 32 + "12345678"
+    path = env_file(tmp_path, f"GITEA_API_TOKEN={old}\nGITEA_BASE_URL=http://127.0.0.1:3000\n")
+    token = "a" * 40
+    tokens = f'[{{"id":1,"name":"myportal-1","sha1":"","token_last_eight":"12345678","scopes":[{scopes}]}}]'
+    result = run(
+        f'GITEA_ADMIN_FILE="{tmp_path}/admin-credentials"\n'
+        "gitea_cli() { case \"$*\" in\n"
+        '    *"user list"*) printf "ID Username Email IsActive IsAdmin\\n1 myportal a@b true true\\n" ;;\n'
+        f'    *generate-access-token*) echo "Access token was successfully created: {token}" ;;\n'
+        "  esac; }\n"
+        "gitea_api() { cat >/dev/null; echo 200; }\n"
+        f"gitea_get() {{ cat >/dev/null; printf '%s' '{tokens}'; }}\n"
+        "connect_myportal",
+        path,
+    )
+    assert result.returncode == 0, result.stderr
+    settings = path.read_text(encoding="utf-8").splitlines()
+    assert f"GITEA_API_TOKEN={token if replaced else old}" in settings
+    assert sum(line.startswith("GITEA_API_TOKEN=") for line in settings) == 1
+
+
 def test_baremetal_upgrade_provisions_gitea_without_blocking_and_nginx_serves_it():
     upgrade = (ROOT / "scripts/upgrade.sh").read_text()
     call = upgrade.index('bash "${SCRIPT_DIR}/provision_gitea.sh" "$ENV_FILE" \\\n  || echo')

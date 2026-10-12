@@ -267,6 +267,10 @@ async def _read_layout(
         layout.missing[f"{COMMON_FOLDER}/README.md"] = _COMMON_FILES_README if files_folder else _COMMON_README
     if not any(rel.startswith(COMPANIES_FOLDER + "/") for rel in relative_paths):
         layout.missing[f"{COMPANIES_FOLDER}/README.md"] = _COMPANY_FILES_README if files_folder else _COMPANIES_README
+    # Gitea rejects the whole commit when one file already exists, such as an
+    # unreadable marker or one naming a deleted company, so never recreate one.
+    existing = set(relative_paths)
+    layout.missing = {path: content for path, content in layout.missing.items() if path not in existing}
     return layout
 
 

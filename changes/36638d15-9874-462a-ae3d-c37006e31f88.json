@@ -1,0 +1,7 @@
+{
+  "guid": "36638d15-9874-462a-ae3d-c37006e31f88",
+  "occurred_at": "2026-10-12T10:40Z",
+  "change_type": "Fix",
+  "summary": "RMM scripts: Associate a file lists Gitea files to pick, creates missing Files folders, and upgrades replace a read-only Gitea token",
+  "content_hash": "5e8cd1cabc8b9ea684d30c4ab18bdb156ef00a8b9070c327de24c1f65973315d"
+}
