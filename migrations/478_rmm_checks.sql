@@ -2,7 +2,7 @@
 -- compatible-from: *
 -- compatible-to: *
 -- maintenance: false
--- Migration 477: RMM checks.
+-- Migration 478: RMM checks.
 --
 -- A check watches one thing on a device: disk space, a ping target, CPU load,
 -- free memory, a Windows service, network throughput, a script's result or

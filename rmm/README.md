@@ -49,6 +49,11 @@ the device has such checks, posts the measurements to
 restart or stop the service. See `internal/checks` and
 `docs/wiki/administration/RMM Checks.md`.
 
+Every platform also sends a hardware and software inventory: once shortly after
+the service starts, then whenever `GET /api/rmm/agent/inventory/config` says one
+is due (daily, or when a technician presses **Refresh now** on the asset page).
+See `internal/inventory` and `docs/wiki/administration/RMM Inventory.md`.
+
 ## Develop
 
 ```sh

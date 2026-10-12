@@ -1946,6 +1946,11 @@ async def asset_detail_page(
             company_id, asset_id, can_edit=can_run_scripts, is_super_admin=bool(is_super_admin),
             stats_range=request.query_params.get("stats"),
         )
+        from app.features.rmm import inventory_routes as rmm_inventory_routes
+
+        rmm_context["inventory"] = await rmm_inventory_routes.asset_inventory_context(
+            company_id, asset_id, can_refresh=can_run_scripts,
+        )
     # Tags belong to the tags pack; the card disappears with it.
     tags_context = None
     if not customer_safe and main_module._feature_pack_available("tags"):

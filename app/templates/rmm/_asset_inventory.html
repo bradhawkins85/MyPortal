@@ -1,0 +1,110 @@
+{# The asset page's Hardware & software section (rmm.inventory from app.features.rmm.inventory_routes). #}
+{% set hw = rmm.inventory %}{% set inv = hw.inventory %}{% set size = hw.format_bytes %}
+<section class="card card--panel ce-section" id="hardware" data-asset-edit-section="hardware" aria-labelledby="asset-hardware-heading">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="asset-hardware-heading">Hardware &amp; software</h2>
+      <p class="card__subtitle">{% if inv %}Reported by the RMM agent <span data-utc="{{ inv.received_at }}">{{ inv.received_at }}</span>. The agent sends a new snapshot daily and when its service starts.{% else %}The RMM agent has not sent a snapshot yet. It sends one shortly after its service starts.{% endif %}{% if hw.refresh_pending %} <strong>A refresh is waiting for the device.</strong>{% endif %}</p>
+    </div>
+    {% if hw.can_refresh %}<form method="post" action="/rmm/inventory/assets/{{ asset.id }}/refresh">{% include "partials/csrf.html" %}
+      <button type="submit" class="button button--ghost button--small">Refresh now</button>
+    </form>{% endif %}
+  </header>
+  {% if inv %}
+  <div class="ce-section__body rmm-inventory">
+    <dl class="definition-list">
+      <dt>Manufacturer</dt><dd>{{ inv.manufacturer or '—' }}</dd>
+      <dt>Model</dt><dd>{{ inv.model or '—' }}</dd>
+      <dt>Serial number</dt><dd>{{ inv.serial_number or '—' }}</dd>
+      <dt>Operating system</dt><dd>{{ inv.os_name or '—' }}{% if inv.os_version %} {{ inv.os_version }}{% endif %}{% if inv.os_build %} <span class="text-muted">(build {{ inv.os_build }})</span>{% endif %}{% if inv.arch %} <span class="text-muted">{{ inv.arch }}</span>{% endif %}</dd>
+      <dt>Processor</dt><dd>{{ inv.cpu_model or '—' }}{% if inv.cpu_cores %} <span class="text-muted">({{ inv.cpu_cores }} core{{ 's' if inv.cpu_cores != 1 }}{% if inv.cpu_logical_processors and inv.cpu_logical_processors != inv.cpu_cores %}, {{ inv.cpu_logical_processors }} threads{% endif %})</span>{% endif %}</dd>
+      <dt>Memory</dt><dd>{{ size(inv.ram_bytes) or '—' }}{% if inv.details.memory_modules %} <span class="text-muted">in {{ inv.details.memory_modules | length }} module{{ 's' if inv.details.memory_modules | length != 1 }}</span>{% endif %}</dd>
+      <dt>Storage</dt><dd>{{ size(inv.disk_total_bytes) or '—' }}{% if inv.system_disk_free_bytes is not none %} <span class="text-muted">({{ size(inv.system_disk_free_bytes) or '0 B' }} free on the system disk)</span>{% endif %}</dd>
+      {% if inv.details.gpus %}<dt>Graphics</dt><dd>{{ inv.details.gpus | join(', ') }}</dd>{% endif %}
+      <dt>Domain</dt><dd>{{ inv.domain or '—' }}</dd>
+      <dt>BIOS / firmware</dt><dd>{{ inv.bios_version or '—' }}</dd>
+      <dt>Last boot</dt><dd>{% if inv.last_boot_at %}<span data-utc="{{ inv.last_boot_at }}">{{ inv.last_boot_at }}</span>{% else %}—{% endif %}</dd>
+    </dl>
+
+    {% if inv.details.disks %}
+    <h3 class="rmm-inventory__heading">Volumes</h3>
+    <div class="table-wrapper"><table class="table">
+      <caption class="visually-hidden">Volumes on this device</caption>
+      <thead><tr><th scope="col">Volume</th><th scope="col">File system</th><th scope="col">Size</th><th scope="col">Free</th></tr></thead>
+      <tbody>{% for disk in inv.details.disks %}<tr>
+        <td data-label="Volume">{{ disk.name }}{% if disk.label and disk.label != disk.name %} <span class="text-muted">{{ disk.label }}</span>{% endif %}{% if disk.system %} <span class="status status--info">System</span>{% endif %}</td>
+        <td data-label="File system">{{ disk.file_system or '—' }}</td>
+        <td data-label="Size">{{ size(disk.size_bytes) or '—' }}</td>
+        <td data-label="Free">{{ size(disk.free_bytes) or '0 B' }}{% if disk.size_bytes %} <span class="text-muted">({{ ((disk.free_bytes / disk.size_bytes) * 100) | round | int }}%)</span>{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+
+    {% if inv.details.physical_disks %}
+    <h3 class="rmm-inventory__heading">Drives</h3>
+    <div class="table-wrapper"><table class="table">
+      <caption class="visually-hidden">Physical drives in this device</caption>
+      <thead><tr><th scope="col">Model</th><th scope="col">Size</th><th scope="col">Type</th><th scope="col">Serial</th></tr></thead>
+      <tbody>{% for drive in inv.details.physical_disks %}<tr>
+        <td data-label="Model">{{ drive.model or '—' }}</td>
+        <td data-label="Size">{{ size(drive.size_bytes) or '—' }}</td>
+        <td data-label="Type">{{ [drive.media_type, drive.bus_type] | select | join(' · ') or '—' }}</td>
+        <td data-label="Serial">{{ drive.serial or '—' }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+
+    {% if inv.details.memory_modules %}
+    <h3 class="rmm-inventory__heading">Memory modules</h3>
+    <div class="table-wrapper"><table class="table">
+      <caption class="visually-hidden">Memory modules in this device</caption>
+      <thead><tr><th scope="col">Slot</th><th scope="col">Size</th><th scope="col">Speed</th><th scope="col">Part</th></tr></thead>
+      <tbody>{% for module in inv.details.memory_modules %}<tr>
+        <td data-label="Slot">{{ module.slot or '—' }}</td>
+        <td data-label="Size">{{ size(module.size_bytes) or '—' }}</td>
+        <td data-label="Speed">{% if module.speed_mhz %}{{ module.speed_mhz }} MHz{% else %}—{% endif %}</td>
+        <td data-label="Part">{{ [module.manufacturer, module.part_number] | select | join(' ') or '—' }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+
+    {% if inv.details.network_adapters %}
+    <h3 class="rmm-inventory__heading">Network adapters</h3>
+    <div class="table-wrapper"><table class="table">
+      <caption class="visually-hidden">Network adapters with an address</caption>
+      <thead><tr><th scope="col">Adapter</th><th scope="col">MAC address</th><th scope="col">Addresses</th></tr></thead>
+      <tbody>{% for adapter in inv.details.network_adapters %}<tr>
+        <td data-label="Adapter">{{ adapter.name }}</td>
+        <td data-label="MAC address"><code>{{ adapter.mac or '—' }}</code></td>
+        <td data-label="Addresses">{% for address in adapter.addresses %}<code>{{ address }}</code>{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+
+    <h3 class="rmm-inventory__heading">Installed software <span class="text-muted">({{ hw.software | length }})</span></h3>
+    {% if hw.software %}
+    <label class="visually-hidden" for="rmm-software-filter">Find installed software</label>
+    <input type="search" id="rmm-software-filter" class="form-input rmm-inventory__filter" placeholder="Find a program…" autocomplete="off" data-rmm-software-filter="rmm-software-table">
+    <div class="table-wrapper rmm-inventory__software"><table class="table" id="rmm-software-table">
+      <caption class="visually-hidden">Software installed on this device</caption>
+      <thead><tr><th scope="col">Name</th><th scope="col">Version</th><th scope="col">Publisher</th><th scope="col">Installed</th></tr></thead>
+      <tbody>{% for program in hw.software %}<tr data-rmm-software-row>
+        <td data-label="Name">{{ program.name }}{% if program.source == 'user' %} <span class="text-muted">(user)</span>{% endif %}</td>
+        <td data-label="Version">{{ program.version or '—' }}</td>
+        <td data-label="Publisher">{{ program.publisher or '—' }}</td>
+        <td data-label="Installed">{{ program.install_date or '—' }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="text-muted" data-rmm-software-empty hidden>No installed software matches.</p>
+    {% else %}
+    <p class="text-muted">The device did not report any installed software.</p>
+    {% endif %}
+
+    {% if inv.details.errors %}
+    <details class="rmm-inventory__errors"><summary>Some details could not be read ({{ inv.details.errors | length }})</summary>
+      <ul>{% for error in inv.details.errors %}<li><code>{{ error }}</code></li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
