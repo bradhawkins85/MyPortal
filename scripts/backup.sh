@@ -391,12 +391,12 @@ if [[ "$DRY_RUN" == true ]]; then
   info "[dry-run] mode: no changes will be made."
   info "[dry-run] Database:  ${DB_NAME}@${DB_HOST}:${DB_PORT}  (back up: ${DO_DB})"
   if event_log_backup_enabled; then
-    info "[dry-run] Event logs: ${EVENT_LOG_DB_NAME}@${EVENT_LOG_DB_HOST}:${EVENT_LOG_DB_PORT}  (back up: ${DO_DB})"
+    info "[dry-run] Event logs: ${EVENT_LOG_DB_NAME}@${EVENT_LOG_DB_HOST}:${EVENT_LOG_DB_PORT}  (back up: ${EVENT_LOG_DB_BACKUP})"
   else
     info "[dry-run] Event logs: not backed up (EVENT_LOG_DB_BACKUP is off or EVENT_LOG_DB_* is not set)"
   fi
   if stats_backup_enabled; then
-    info "[dry-run] Stats:     ${STATS_DB_NAME}@${STATS_DB_HOST}:${STATS_DB_PORT}  (back up: ${DO_DB})"
+    info "[dry-run] Stats:     ${STATS_DB_NAME}@${STATS_DB_HOST}:${STATS_DB_PORT}  (back up: ${STATS_DB_BACKUP})"
   else
     info "[dry-run] Stats:     not backed up (STATS_DB_BACKUP is off or STATS_DB_* is not set)"
   fi

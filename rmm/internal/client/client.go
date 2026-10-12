@@ -273,8 +273,8 @@ type CheckReport struct {
 	Services   []ServiceStatus `json:"services"`
 }
 
-// CheckConfig asks what to measure for checks.
-func (c *Client) CheckConfig(ctx context.Context) (CheckConfig, error) {
+// GetCheckConfig asks what to measure for checks.
+func (c *Client) GetCheckConfig(ctx context.Context) (CheckConfig, error) {
 	var out CheckConfig
 	err := c.do(ctx, http.MethodGet, "/api/rmm/agent/checks/config", nil, &out)
 	return out, err
