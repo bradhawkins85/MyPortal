@@ -19,6 +19,7 @@ from app.repositories import rmm_event_logs as event_log_repo
 from app.repositories import rmm_remote_control as remote_repo
 from app.repositories import rmm_agent_deploy as deploy_repo
 from app.repositories import tags as tags_repo
+from app.repositories import tray as tray_repo
 from app.security.encryption import decrypt_secret
 from app.security.menu_permissions import normalize_menu_permissions
 from app.services import gitea
@@ -267,7 +268,10 @@ async def sqlite_db(monkeypatch):
         -- Mirrors migration 235 (tray app), which also alters tables SQLite lacks here.
         CREATE TABLE tray_devices (
           id INTEGER PRIMARY KEY, company_id INT, asset_id INT, device_uid TEXT, os TEXT,
-          status TEXT DEFAULT 'active', last_seen_utc TEXT);
+          status TEXT DEFAULT 'active', last_seen_utc TEXT, agent_version TEXT);
+        CREATE TABLE tray_versions (
+          id INTEGER PRIMARY KEY, version TEXT, platform TEXT DEFAULT 'all', download_url TEXT,
+          enabled INT DEFAULT 1, rollout_percent INT DEFAULT 100, published_at TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE tray_command_log (
           id INTEGER PRIMARY KEY, device_id INT, command TEXT, payload_json TEXT, initiated_by_user_id INT,
           status TEXT DEFAULT 'queued', error TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, delivered_at TEXT);
@@ -289,7 +293,7 @@ async def sqlite_db(monkeypatch):
     """)
     fake = _SqliteDb(conn)
     for module in (rmm_repo, automation_repo, remote_repo, event_log_repo, tags_repo, asset_fields_repo,
-                   company_variables_repo, assets_repo, deploy_repo):
+                   company_variables_repo, assets_repo, deploy_repo, tray_repo):
         monkeypatch.setattr(module, "db", fake)
 
     async def get_company(company_id):

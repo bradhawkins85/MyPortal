@@ -761,6 +761,14 @@ async def deliver_queued_commands(device: dict[str, Any]) -> dict[str, int]:
             )
             continue
 
+        if command.get("command") == "install_rmm_agent":
+            # Older tray apps ignore the RMM agent install, so it waits until
+            # the device reports a tray version that handles it.
+            from app.services import rmm_agent_deploy
+
+            if not await rmm_agent_deploy.ready_for_install(int(device["id"])):
+                continue
+
         if await send_to_device(device_uid, payload):
             await tray_repo.mark_command_delivered(int(command["id"]))
             delivered += 1

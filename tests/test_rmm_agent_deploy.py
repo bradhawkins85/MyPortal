@@ -39,10 +39,11 @@ def sent(monkeypatch):
     return messages, live
 
 
-async def _device(db, *, device_id=5, company_id=1, asset_id=11, os_name="windows", status="active"):
+async def _device(db, *, device_id=5, company_id=1, asset_id=11, os_name="windows", status="active", version=None):
     await db.execute(
-        "INSERT INTO tray_devices (id, company_id, asset_id, device_uid, os, status) VALUES (%s, %s, %s, %s, %s, %s)",
-        (device_id, company_id, asset_id, f"uid-{device_id}", os_name, status),
+        "INSERT INTO tray_devices (id, company_id, asset_id, device_uid, os, status, agent_version) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (device_id, company_id, asset_id, f"uid-{device_id}", os_name, status, version),
     )
     return await db.fetch_one("SELECT * FROM tray_devices WHERE id = %s", (device_id,))
 
@@ -218,3 +219,75 @@ def test_asset_page_shows_why_the_agent_is_missing():
     assert "queued" in str(macros.agent_deploy_status({"status": "queued", "supported": True}))
     failed = str(macros.agent_deploy_status({"status": "error", "error": "<b>denied</b>", "supported": True}))
     assert "&lt;b&gt;denied" in failed
+
+
+def test_tray_versions_that_handle_the_install():
+    assert deploy.parse_version("v0.8.4") == (0, 8, 4) and deploy.parse_version("0.9-2-gabc") == (0, 9, 0)
+    assert deploy.parse_version("nightly") is None
+    assert deploy.tray_can_install({"agent_version": "v0.8.4"}) and deploy.tray_can_install({"agent_version": "1.0.0"})
+    assert not deploy.tray_can_install({"agent_version": "v0.8.3"})
+    assert not deploy.tray_can_install({"agent_version": "0.0.0-dev"})
+    assert deploy.tray_can_install({"agent_version": None})  # not reported yet
+
+
+@pytest.mark.anyio
+async def test_old_tray_without_a_newer_published_release_is_refused(sqlite_db, storage, sent):
+    _cache(storage)
+    await _device(sqlite_db, version="v0.8.3")
+    with pytest.raises(deploy.AgentDeployError, match="too old"):
+        await deploy.push_to_asset(11, company_id=1, user_id=9)
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('0.8.3', 'https://x/a.msi')")
+    with pytest.raises(deploy.AgentDeployError, match="Admin > Tray > Versions"):
+        await deploy.push_to_asset(11, company_id=1, user_id=9)
+    assert await _commands(sqlite_db) == []
+    state = await deploy.asset_deploy_state(11, 1)
+    assert state["tray_outdated"] and state["tray_version"] == "v0.8.3"
+
+
+@pytest.mark.anyio
+async def test_old_tray_updates_first_and_gets_the_install_once_it_reports_the_new_version(sqlite_db, storage, sent):
+    from app.services import tray as tray_service
+
+    messages, live = sent
+    live["on"] = True
+    _cache(storage)
+    device = await _device(sqlite_db, version="v0.8.3")
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('0.8.4', 'https://x/a.msi')")
+
+    result = await deploy.push_to_asset(11, company_id=1, user_id=9)
+    assert result["status"] == "updating_tray"
+    assert [payload["type"] for _uid, payload in messages] == ["update"]
+    rows = {row["command"]: row for row in await _commands(sqlite_db)}
+    assert rows["install_rmm_agent"]["status"] == "queued" and rows["update"]["status"] == "delivered"
+    # Pushing again nudges the tray app again but keeps the one install.
+    await deploy.push_to_asset(11, company_id=1, user_id=9)
+    assert [row["command"] for row in await _commands(sqlite_db)].count("install_rmm_agent") == 1
+
+    # Reconnecting on the old version: the install is held back.
+    messages.clear()
+    await tray_service.deliver_queued_commands(device)
+    assert messages == []
+    # The updated tray app reports its version: the install goes out.
+    await sqlite_db.execute("UPDATE tray_devices SET agent_version = 'v0.8.4' WHERE id = 5")
+    await tray_service.deliver_queued_commands(device)
+    assert messages == [("uid-5", {"type": "install_rmm_agent", "command_id": result["command_id"]})]
+
+
+@pytest.mark.anyio
+async def test_auto_deploy_queues_the_update_for_an_old_tray(sqlite_db, storage, sent):
+    _cache(storage)
+    device = await _device(sqlite_db, version="v0.8.3")
+    await sqlite_db.execute("UPDATE companies SET rmm_agent_auto_deploy = 1 WHERE id = 1")
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('v0.9.0', 'https://x/a.msi')")
+    assert await deploy.auto_deploy_device(device) is True
+    assert sorted(row["command"] for row in await _commands(sqlite_db)) == ["install_rmm_agent", "update"]
+    assert all(row["status"] == "queued" for row in await _commands(sqlite_db))
+
+
+def test_asset_page_says_the_tray_app_must_update():
+    env = _environment()
+    macros = env.get_template("rmm/_macros.html").module
+    text = str(macros.agent_deploy_status(
+        {"supported": True, "tray_outdated": True, "tray_version": "v0.8.3", "min_tray_version": "0.8.4", "status": "queued"}
+    ))
+    assert "v0.8.3" in text and "0.8.4" in text and "queued" in text
