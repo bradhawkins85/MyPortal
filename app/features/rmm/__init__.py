@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from app.core.features import FeaturePack
 
-from app.services import rmm_automation, rmm_scripts
+from app.services import rmm_automation, rmm_event_log_rules, rmm_scripts
 
 from .agent_deploy_routes import router as agent_deploy_router
 from .automation_routes import router as automation_router
@@ -40,6 +40,9 @@ from .event_log_routes import router as event_log_router
 from .event_log_rule_routes import router as event_log_rule_router
 from .remote_control_routes import router as remote_control_router
 from .routes import router
+
+# Event log rules that schedule a script are queued on the automation tick.
+rmm_automation.register_tick_job(rmm_event_log_rules.run_due_scheduled)
 
 PACK = FeaturePack(
     slug="rmm",

@@ -22,6 +22,7 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_event_log_rules as rules_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
+from app.services import rmm_automation
 from app.services import rmm_event_log_rules as event_log_rules
 from app.services import rmm_event_logs as event_logs
 from app.services import rmm_scripts
@@ -40,6 +41,8 @@ def _blank_rule(asset_id: int | None) -> dict[str, Any]:
         "id": None, "name": "", "scope": "asset" if asset_id else "company", "asset_id": asset_id,
         "action": "drop", "conditions": [], "script_id": None, "timeout_seconds": 600,
         "cooldown_minutes": event_log_rules.DEFAULT_COOLDOWN_MINUTES, "is_enabled": True,
+        "schedule_mode": "delay", "delay_minutes": event_log_rules.DEFAULT_DELAY_MINUTES, "run_time": "02:00",
+        "schedule_timezone": rmm_automation.default_timezone(),
     }
 
 
@@ -50,7 +53,13 @@ def _form_rule(rule: dict[str, Any]) -> dict[str, Any]:
         scope = "global"
     else:
         scope = rule.get("scope") or "company"
-    return {**rule, "scope": scope}
+    return {
+        **rule, "scope": scope,
+        "schedule_mode": rule.get("schedule_mode") or "delay",
+        "delay_minutes": rule.get("delay_minutes") or event_log_rules.DEFAULT_DELAY_MINUTES,
+        "run_time": rule.get("run_time") or "02:00",
+        "schedule_timezone": rule.get("schedule_timezone") or rmm_automation.default_timezone(),
+    }
 
 
 async def _render(
@@ -66,10 +75,15 @@ async def _render(
     run_now: dict[str, Any] | None = None,
 ):
     is_super_admin = bool(user.get("is_super_admin"))
+    listed = await rules_repo.list_rules_for_company(company_id)
+    pending = await rules_repo.list_pending_for_rules(
+        [int(rule["id"]) for rule in listed if rule["action"] == "schedule_script"])
     rules = [
         {**rule_summary(rule), "can_edit": can_edit and event_log_rules.can_edit(
-            rule, company_id=company_id, is_super_admin=is_super_admin)}
-        for rule in await rules_repo.list_rules_for_company(company_id)
+            rule, company_id=company_id, is_super_admin=is_super_admin),
+         "pending": [{"run_at": item["run_at"].isoformat() if hasattr(item["run_at"], "isoformat") else item["run_at"]}
+                     for item in pending.get(int(rule["id"]), [])]}
+        for rule in listed
     ]
     script = None
     fields: list[dict[str, Any]] = []
@@ -97,6 +111,8 @@ async def _render(
             "operators": event_log_rules.OPERATORS,
             "field_operators": event_log_rules.FIELD_OPERATORS,
             "actions": event_log_rules.ACTIONS,
+            "script_actions": event_log_rules.SCRIPT_ACTIONS,
+            "schedule_modes": event_log_rules.SCHEDULE_MODES,
             "devices": [agent for agent in await rmm_repo.list_company_agents(company_id) if agent.get("asset_id")],
             "scripts": await rmm_repo.list_scripts(company_id=company_id),
             "script": script,
@@ -204,6 +220,10 @@ async def _save(request: Request, rule_id: int | None):
             "script_id": script_id, "timeout_seconds": form.get("timeout_seconds") or 600,
             "cooldown_minutes": form.get("cooldown_minutes") or event_log_rules.DEFAULT_COOLDOWN_MINUTES,
             "is_enabled": bool(form.get("is_enabled")),
+            "schedule_mode": str(form.get("schedule_mode") or "delay"),
+            "delay_minutes": form.get("delay_minutes") or event_log_rules.DEFAULT_DELAY_MINUTES,
+            "run_time": str(form.get("run_time") or ""),
+            "schedule_timezone": str(form.get("schedule_timezone") or ""),
         }
         return await _render(request, user=user, company=company, company_id=company_id, can_edit=can_edit,
                              editing=editing, errors=errors, status_code=400)
@@ -220,7 +240,7 @@ async def _save(request: Request, rule_id: int | None):
         },
     )
     message = f"Saved {saved['name']}."
-    if saved["action"] == "run_script" and saved.get("script_id") and rule_id is None:
+    if saved["action"] in event_log_rules.SCRIPT_ACTIONS and saved.get("script_id") and rule_id is None:
         message += " Fill in the script's values below if it needs any."
     return flash_redirect(f"{RULES_PATH}?rule={saved_id}", message, "success")
 
