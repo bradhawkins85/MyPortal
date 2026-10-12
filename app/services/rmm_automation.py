@@ -680,7 +680,8 @@ async def tick() -> None:
 
 
 async def automation_loop() -> None:
-    """Run due schedules and move onboarding sequences on, on one instance at a time."""
+    """Run due schedules, move onboarding sequences on and run server-side
+    checks, on one instance at a time."""
 
     await asyncio.sleep(10 + random.uniform(0, 10))  # nosec B311 - start-up jitter, not security
     while True:

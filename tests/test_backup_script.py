@@ -17,7 +17,9 @@ def _run_backup(args: list[str], env_overrides: dict | None = None) -> subproces
     for key in ("DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME"):
         env.pop(key, None)
         env.pop("EVENT_LOG_" + key, None)
+        env.pop("STATS_" + key, None)
     env.pop("EVENT_LOG_DB_BACKUP", None)
+    env.pop("STATS_DB_BACKUP", None)
     if env_overrides:
         env.update(env_overrides)
     return subprocess.run(
@@ -202,6 +204,40 @@ def test_event_log_backups_are_rotated(tmp_path):
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("Would delete") == 2
     assert "eventlog-old-20260100" in result.stdout and "eventlog-old-20260101" in result.stdout
+
+
+def _stats_dry_run(tmp_path, **settings):
+    env_file = _make_env_file(
+        tmp_path / "myportal.env",
+        STATS_DB_HOST="stats.example.com",
+        STATS_DB_USER="stats",
+        STATS_DB_PASSWORD="secret",
+        STATS_DB_NAME="myportal_stats",
+        **settings,
+    )
+    result = _run_backup(
+        ["--dry-run", "--label", "test"],
+        env_overrides={
+            "MYPORTAL_ENV_FILE": str(env_file),
+            "BACKUP_DIR": str(tmp_path / "backups"),
+            "MYPORTAL_SHARED_ROOT": str(tmp_path / "shared"),
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout + result.stderr
+
+
+def test_stats_database_is_left_out_by_default(tmp_path):
+    output = _stats_dry_run(tmp_path)
+    assert "Stats:     not backed up" in output
+    assert "myportal_stats" not in output and "stats-test-" not in output
+
+
+def test_stats_database_backed_up_when_enabled(tmp_path):
+    output = _stats_dry_run(tmp_path, STATS_DB_BACKUP="true")
+    assert "myportal_stats@stats.example.com:3306" in output
+    assert "stats-test-" in output
+    assert "secret" not in output
 
 
 # ---------------------------------------------------------------------------

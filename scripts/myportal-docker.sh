@@ -1281,29 +1281,40 @@ backup_database() {
   printf '%s' "$file"
 }
 
-backup_event_logs() {
-  # backup_event_logs LABEL -> prints the backup path, or nothing when the RMM
-  # event log database is not configured or EVENT_LOG_DB_BACKUP is not true.
-  local label="$1" file host port user password name enabled
-  enabled=$(get_setting "$APP_ENV" EVENT_LOG_DB_BACKUP)
+backup_secondary_database() {
+  # backup_secondary_database PREFIX KIND DESCRIPTION LABEL -> prints the backup
+  # path, or nothing when the database (PREFIX_DB_*) is not configured or
+  # PREFIX_DB_BACKUP is not true.
+  local prefix="$1" kind="$2" description="$3" label="$4" file host port user password name enabled
+  enabled=$(get_setting "$APP_ENV" "${prefix}_DB_BACKUP")
   case "${enabled,,}" in 1|true|yes|on) ;; *) return 0 ;; esac
-  host=$(get_setting "$APP_ENV" EVENT_LOG_DB_HOST)
-  port=$(get_setting "$APP_ENV" EVENT_LOG_DB_PORT)
-  user=$(get_setting "$APP_ENV" EVENT_LOG_DB_USER)
-  password=$(get_setting "$APP_ENV" EVENT_LOG_DB_PASSWORD)
-  name=$(get_setting "$APP_ENV" EVENT_LOG_DB_NAME)
+  host=$(get_setting "$APP_ENV" "${prefix}_DB_HOST")
+  port=$(get_setting "$APP_ENV" "${prefix}_DB_PORT")
+  user=$(get_setting "$APP_ENV" "${prefix}_DB_USER")
+  password=$(get_setting "$APP_ENV" "${prefix}_DB_PASSWORD")
+  name=$(get_setting "$APP_ENV" "${prefix}_DB_NAME")
   [[ -n "$host" && -n "$user" && -n "$name" ]] || return 0
   install -d -m 0700 "$BACKUP_DIR"
-  file="${BACKUP_DIR}/eventlog-${label}-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
-  info "Backing up the event log database to ${file}…"
+  file="${BACKUP_DIR}/${kind}-${label}-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+  info "Backing up the ${description} database to ${file}…"
   # The credentials go in on stdin, so they never appear in process listings.
   printf '[client]\nhost=%s\nport=%s\nuser=%s\npassword=%s\n' "$host" "${port:-3306}" "$user" "$password" \
     | compose exec -T db sh -c \
       'umask 077; f=$(mktemp); cat >"$f"; mariadb-dump --defaults-extra-file="$f" --single-transaction --quick --add-drop-database --databases "$1"; rc=$?; rm -f "$f"; exit $rc' \
       sh "$name" | gzip >"$file"
-  [[ -s "$file" ]] || die "the event log database backup is empty; aborting."
+  [[ -s "$file" ]] || die "the ${description} database backup is empty; aborting."
   chmod 0600 "$file"
   printf '%s' "$file"
+}
+
+backup_event_logs() {
+  # backup_event_logs LABEL -> the RMM event log database (EVENT_LOG_DB_*).
+  backup_secondary_database EVENT_LOG eventlog "event log" "$1"
+}
+
+backup_stats() {
+  # backup_stats LABEL -> the RMM stats database (STATS_DB_*).
+  backup_secondary_database STATS stats "stats" "$1"
 }
 
 prune_backups() {
@@ -1311,7 +1322,7 @@ prune_backups() {
   [[ -d "$BACKUP_DIR" ]] || return 0
   # Newest first; remove everything after the first $keep of each kind.
   local kind
-  for kind in db eventlog files gitea; do
+  for kind in db eventlog stats files gitea; do
     find "$BACKUP_DIR" -maxdepth 1 -name "${kind}-*" -printf '%T@ %p\n' | sort -rn \
       | awk -v k="$keep" 'NR > k {print $2}' | xargs -r rm -f
   done
@@ -1622,10 +1633,11 @@ cmd_status() {
 cmd_backup() {
   require_root
   require_installed
-  local db eventlog files version
+  local db eventlog stats files version
   version=$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)
   db=$(backup_database "$version")
   eventlog=$(backup_event_logs "$version")
+  stats=$(backup_stats "$version")
   files="${BACKUP_DIR}/files-${version}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
   info "Backing up uploaded files to ${files}…"
   app_exec tar -czf - -C /app private_uploads app/static/uploads var >"$files"
@@ -1641,7 +1653,8 @@ cmd_backup() {
   cat <<EOF
 Backups written:
   ${db}${eventlog:+
-  ${eventlog}}
+  ${eventlog}}${stats:+
+  ${stats}}
   ${files}${gitea:+
   ${gitea}}
 Also keep a copy of ${APP_ENV} (it holds the encryption keys).

@@ -204,3 +204,89 @@ func (c *Client) SendEventLogs(ctx context.Context, entries []EventLogEntry) err
 	}{entries}
 	return c.do(ctx, http.MethodPost, "/api/rmm/agent/event-logs", payload, nil)
 }
+
+// CheckService is a service a check watches, and what the agent does when it
+// is not in the expected state: "none", "start", "restart" or "stop".
+type CheckService struct {
+	Name     string `json:"name"`
+	Expected string `json:"expected"`
+	Fix      string `json:"fix"`
+}
+
+// CheckConfig says what to measure for MyPortal's checks.
+type CheckConfig struct {
+	Enabled         bool           `json:"enabled"`
+	IntervalSeconds int            `json:"interval_seconds"`
+	ConfigSeconds   int            `json:"config_seconds"`
+	CPU             bool           `json:"cpu"`
+	Memory          bool           `json:"memory"`
+	Disks           bool           `json:"disks"`
+	Network         bool           `json:"network"`
+	Pings           []string       `json:"pings"`
+	Services        []CheckService `json:"services"`
+}
+
+// DiskUsage is one fixed drive or mounted filesystem.
+type DiskUsage struct {
+	Name       string `json:"name"`
+	TotalBytes uint64 `json:"total_bytes"`
+	FreeBytes  uint64 `json:"free_bytes"`
+}
+
+// MemoryUsage is physical memory.
+type MemoryUsage struct {
+	TotalBytes     uint64 `json:"total_bytes"`
+	AvailableBytes uint64 `json:"available_bytes"`
+}
+
+// InterfaceRate is a network interface's throughput in bytes a second.
+type InterfaceRate struct {
+	Name  string  `json:"name"`
+	RxBps float64 `json:"rx_bps"`
+	TxBps float64 `json:"tx_bps"`
+}
+
+// PingResult is the outcome of pinging one target.
+type PingResult struct {
+	Target   string   `json:"target"`
+	Sent     int      `json:"sent"`
+	Received int      `json:"received"`
+	AvgMs    *float64 `json:"avg_ms,omitempty"`
+	Error    string   `json:"error,omitempty"`
+}
+
+// ServiceStatus is a watched service's state after any fix the agent made.
+type ServiceStatus struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Action string `json:"action,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+// CheckReport is one round of measurements. A nil field was not measured.
+type CheckReport struct {
+	CPUPercent *float64        `json:"cpu_percent"`
+	Memory     *MemoryUsage    `json:"memory"`
+	Disks      []DiskUsage     `json:"disks"`
+	Network    []InterfaceRate `json:"network"`
+	Pings      []PingResult    `json:"pings"`
+	Services   []ServiceStatus `json:"services"`
+}
+
+// CheckConfig asks what to measure for checks.
+func (c *Client) CheckConfig(ctx context.Context) (CheckConfig, error) {
+	var out CheckConfig
+	err := c.do(ctx, http.MethodGet, "/api/rmm/agent/checks/config", nil, &out)
+	return out, err
+}
+
+// SendCheckReport sends one round of measurements.
+func (c *Client) SendCheckReport(ctx context.Context, report CheckReport) error {
+	if report.Pings == nil {
+		report.Pings = []PingResult{}
+	}
+	if report.Services == nil {
+		report.Services = []ServiceStatus{}
+	}
+	return c.do(ctx, http.MethodPost, "/api/rmm/agent/checks/report", report, nil)
+}
