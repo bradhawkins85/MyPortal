@@ -142,7 +142,7 @@ async def test_ingest_drops_entries_and_runs_scripts_with_a_cooldown(sqlite_db, 
 
     batch = [_entry(1), _entry(2), _entry(3, level=2, event_id=7, message="Bad block"),
              _entry(4, level=1, event_id=41, message="Rebooted")]
-    assert await event_logs.ingest(agent, batch) == {"received": 4, "stored": 2, "skipped": 0, "dropped": 2, "runs": 1}
+    assert await event_logs.ingest(agent, batch) == {"received": 4, "stored": 2, "skipped": 0, "dropped": 2, "runs": 1, "tickets": 0}
     assert sorted(e["record_id"] for e in await event_log_repo.list_entries(company_id=1)) == [3, 4]
 
     runs = await rmm_repo.list_runs(company_id=1)
@@ -304,3 +304,69 @@ def test_asset_page_template_uses_the_rule_menu():
     source = env.loader.get_source(env, "assets/detail.html")[0]
     env.parse(source)  # compiles
     assert "rmm_ui.event_log_rule_menu(rule, csrf_token, asset.id)" in source
+
+
+@pytest.mark.anyio
+async def test_create_ticket_rule_raises_one_ticket_per_device_until_closed(sqlite_db, event_db, monkeypatch):
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    tickets: dict[int, dict] = {}
+    replies: list[dict] = []
+    links: dict[int, list[int]] = {}
+
+    async def create_ticket(**kwargs):
+        ticket_id = len(tickets) + 100
+        tickets[ticket_id] = {"id": ticket_id, "ticket_number": str(ticket_id), "status": "open", **kwargs}
+        return tickets[ticket_id]
+
+    async def get_ticket(ticket_id):
+        return tickets.get(ticket_id)
+
+    async def create_reply(**kwargs):
+        replies.append(kwargs)
+        return kwargs
+
+    async def replace_ticket_assets(ticket_id, asset_ids):
+        links[ticket_id] = list(asset_ids)
+        return []
+
+    monkeypatch.setattr(tickets_service, "create_ticket", create_ticket)
+    monkeypatch.setattr(tickets_repo, "get_ticket", get_ticket)
+    monkeypatch.setattr(tickets_repo, "create_reply", create_reply)
+    monkeypatch.setattr(tickets_repo, "replace_ticket_assets", replace_ticket_assets)
+
+    _result, agent = await _enrol(sqlite_db)
+    _result, other = await _enrol(sqlite_db, tray_id=6, asset_id=11, uid="agent-uid-0002")
+    rule_id = await rules.save_rule(
+        form={"name": "Disk errors", "scope": "company", "action": "create_ticket", "is_enabled": "1"},
+        rule_id=None, company_id=1, user_id=9, is_super_admin=False,
+        conditions=[{"field": "event_id", "operator": "is", "value": "7"}])
+    assert (await rules_repo.get_rule(rule_id))["script_id"] is None
+
+    bad = "<script>alert(1)</script>"
+    stats = await event_logs.ingest(agent, [_entry(1, event_id=7, message=bad), _entry(2, event_id=7), _entry(3)])
+    assert (stats["tickets"], stats["stored"]) == (1, 3)
+    ticket = tickets[100]
+    assert ticket["company_id"] == 1 and ticket["subject"] == "Disk errors: PC" and ticket["requester_id"] is None
+    assert "2 events" in ticket["description"] and bad not in ticket["description"]
+    assert "&lt;script&gt;" in ticket["description"]
+    assert links[100] == [10]
+
+    # Same device while the ticket is open: an internal update, not a new ticket.
+    stats = await event_logs.ingest(agent, [_entry(4, event_id=7)])
+    assert stats["tickets"] == 0 and len(tickets) == 1
+    assert replies[-1]["ticket_id"] == 100 and replies[-1]["is_internal"] and "1 more event" in replies[-1]["body"]
+
+    # Another device gets its own ticket.
+    await event_logs.ingest(other, [_entry(5, event_id=7)])
+    assert len(tickets) == 2 and links[101] == [11]
+
+    # Once closed, the next match raises a new ticket.
+    tickets[100]["status"] = "closed"
+    assert (await event_logs.ingest(agent, [_entry(6, event_id=7)]))["tickets"] == 1
+    assert len(tickets) == 3 and await rules_repo.get_rule_ticket(rule_id, agent["id"]) == 102
+    assert "Raised ticket #102" in (await rules_repo.get_rule(rule_id))["last_run_summary"]
+
+    await rules_repo.delete_rule(rule_id)
+    assert await rules_repo.get_rule_ticket(rule_id, agent["id"]) is None

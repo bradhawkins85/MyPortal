@@ -122,6 +122,7 @@ async def set_rule_enabled(rule_id: int, enabled: bool, user_id: int | None) -> 
 
 async def delete_rule(rule_id: int) -> None:
     await db.execute("DELETE FROM rmm_event_log_rule_triggers WHERE rule_id = %s", (rule_id,))
+    await db.execute("DELETE FROM rmm_event_log_rule_tickets WHERE rule_id = %s", (rule_id,))
     await db.execute("DELETE FROM rmm_event_log_rules WHERE id = %s", (rule_id,))
 
 
@@ -170,4 +171,29 @@ async def record_trigger(rule_id: int, agent_id: int, run_id: int | None) -> Non
         "INSERT INTO rmm_event_log_rule_triggers (rule_id, agent_id, last_run_id, last_triggered_at) "
         "VALUES (%s, %s, %s, %s)",
         (rule_id, agent_id, run_id, now),
+    )
+
+
+async def get_rule_ticket(rule_id: int, agent_id: int) -> int | None:
+    """The ticket a create-ticket rule last raised for a device."""
+
+    row = await db.fetch_one(
+        "SELECT ticket_id FROM rmm_event_log_rule_tickets WHERE rule_id = %s AND agent_id = %s", (rule_id, agent_id)
+    )
+    return int(row["ticket_id"]) if row and row.get("ticket_id") is not None else None
+
+
+async def set_rule_ticket(rule_id: int, agent_id: int, ticket_id: int) -> None:
+    now = _utcnow()
+    existing = await get_rule_ticket(rule_id, agent_id)
+    if existing is not None:
+        await db.execute(
+            "UPDATE rmm_event_log_rule_tickets SET ticket_id = %s, updated_at = %s WHERE rule_id = %s AND agent_id = %s",
+            (ticket_id, now, rule_id, agent_id),
+        )
+        return
+    await db.execute(
+        "INSERT INTO rmm_event_log_rule_tickets (rule_id, agent_id, ticket_id, created_at, updated_at) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (rule_id, agent_id, ticket_id, now, now),
     )

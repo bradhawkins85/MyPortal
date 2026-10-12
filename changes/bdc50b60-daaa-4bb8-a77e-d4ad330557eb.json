@@ -2,6 +2,6 @@
   "guid": "bdc50b60-daaa-4bb8-a77e-d4ad330557eb",
   "occurred_at": "2026-10-12T02:30Z",
   "change_type": "Feature",
-  "summary": "RMM: event log drop rules can Run now to delete matching events already stored (after a confirmation showing how many match), and each rule has an Action menu instead of separate buttons",
-  "content_hash": "cba6f352d3de12a2a0ce60737258ebe225e66d2cd43975686a46fd68247f0d14"
+  "summary": "RMM: event log rules can create a ticket for the device's company with the asset linked, updating the open ticket instead of raising duplicates; drop rules can Run now to delete matching stored events after a confirmation, and each rule has an Action menu",
+  "content_hash": "3e052bec4d0ebb6ab518851185ad5ca0c16f4d0da03671814cf2c4089a927136"
 }

@@ -84,6 +84,10 @@ Open **Event log rules** from the Event logs page (`/rmm/event-logs/rules`). A r
     the event's own, such as `{{event.message}}`, `{{event.event_id}}`, `{{event.level}}`,
     `{{event.provider}}`, `{{event.log_name}}`, `{{event.computer}}`, `{{event.record_id}}` and
     `{{event.time_created}}`. Rules for every company can only use scripts in the `Common` folder.
+  - **Create a ticket**: raises a ticket for the company the device belongs to, with the
+    device's asset linked and the matching events in its description. While that ticket is not
+    closed, later matches from the same rule on the same device are added to it as internal
+    updates instead of raising another ticket; once it is closed, the next match raises a new one.
 
 Each rule has an **Action** menu (on the rules page and in the asset page's Event log
 automations) to edit it, turn it on or off, or delete it. Drop rules also have **Run now**, which
@@ -114,4 +118,4 @@ macOS and Linux agents do not send event logs.
 - Agents use `GET /api/rmm/agent/event-logs/config` and `POST /api/rmm/agent/event-logs`. An
   entry is stored once: resending a batch is harmless. Entries from logs the device is not set to
   collect are skipped. The answer counts entries `received`, `stored`, `skipped`, `dropped` by
-  rules, and script `runs` the rules started.
+  rules, script `runs` the rules started and new `tickets` they raised.

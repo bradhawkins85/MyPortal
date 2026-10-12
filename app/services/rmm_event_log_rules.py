@@ -11,7 +11,11 @@ condition must match. When an agent sends a batch (:func:`apply`):
   RMM run (``run_source = 'event_log'``). Its values are saved encrypted like a
   schedule's and may use ``{{event.*}}`` variables (:data:`EVENT_VARIABLES`)
   from the first matching entry. A rule runs at most once per device per
-  ``cooldown_minutes``, so a burst of events queues one run.
+  ``cooldown_minutes``, so a burst of events queues one run;
+* for each enabled **create ticket** rule that some stored entry matches, a
+  ticket is raised for the device's company with the device's asset linked.
+  While that ticket is not closed, later matches on the same device add an
+  internal update to it instead (:func:`_ticket_rule`).
 
 A drop rule can also be run now (:func:`drop_stored`), deleting the entries
 already stored that it matches.
@@ -19,6 +23,7 @@ already stored that it matches.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -34,7 +39,8 @@ from app.services import rmm_automation, rmm_scripts
 from app.services.rmm_scripts import RunRequestError
 
 RUN_SOURCE = "event_log"
-ACTIONS = {"drop": "Drop the event", "run_script": "Run a script"}
+ACTIONS = {"drop": "Drop the event", "run_script": "Run a script", "create_ticket": "Create a ticket"}
+TICKET_EVENTS_LISTED = 10
 FIELDS = {
     "log_name": "Log",
     "event_id": "Event ID",
@@ -368,10 +374,80 @@ async def _run_rule(rule: Mapping[str, Any], agent: Mapping[str, Any], entry: Ma
     return run_id
 
 
+def _entry_html(entry: Mapping[str, Any]) -> str:
+    event = event_context(entry)["event"]
+    details = "<br>".join(
+        f"<strong>{html.escape(label)}:</strong> {html.escape(str(event.get(key) or '–'))}"
+        for label, key in (("Log", "log_name"), ("Event ID", "event_id"), ("Level", "level"), ("Source", "provider"),
+                           ("Computer", "computer"), ("Time (UTC)", "time_created"))
+    )
+    message = str(entry.get("message") or "").strip()
+    body = f"<p>{details}</p>"
+    if message:
+        body += f"<pre>{html.escape(message[:4000])}</pre>"
+    return body
+
+
+async def _ticket_rule(rule: Mapping[str, Any], agent: Mapping[str, Any], matched: list[dict[str, Any]]) -> tuple[int | None, bool]:
+    """Raise a ticket for the device, or update the one still open.
+
+    Returns the ticket ID and whether it is new."""
+
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    rule_id = int(rule["id"])
+    agent_id = int(agent["id"])
+    company_id = int(agent["company_id"]) if agent.get("company_id") is not None else None
+    asset_id = int(agent["asset_id"]) if agent.get("asset_id") is not None else None
+    device = agent.get("hostname") or f"device {asset_id or agent_id}"
+    count = len(matched)
+    listed = "".join(_entry_html(entry) for entry in matched[:TICKET_EVENTS_LISTED])
+    if count > TICKET_EVENTS_LISTED:
+        listed += f"<p>…and {count - TICKET_EVENTS_LISTED} more.</p>"
+
+    ticket_id = await rules_repo.get_rule_ticket(rule_id, agent_id)
+    ticket = await tickets_repo.get_ticket(ticket_id) if ticket_id is not None else None
+    if ticket and str(ticket.get("status") or "").casefold() != "closed":
+        await tickets_repo.create_reply(
+            ticket_id=int(ticket["id"]),
+            author_id=None,
+            body=(f"<p>Event log rule <strong>{html.escape(str(rule['name']))}</strong> matched "
+                  f"{count} more event{'s' if count != 1 else ''} on {html.escape(str(device))}.</p>{listed}"),
+            is_internal=True,
+            external_reference=f"rmm-event-log-rule:{rule_id}:{agent_id}",
+        )
+        summary = f"Updated ticket #{ticket.get('ticket_number') or ticket['id']} for {device}."
+        await rules_repo.record_matches(rule_id, count, summary=summary)
+        return int(ticket["id"]), False
+
+    created = await tickets_service.create_ticket(
+        subject=f"{rule['name']}: {device}"[:255],
+        description=(f"<p>Event log rule <strong>{html.escape(str(rule['name']))}</strong> matched "
+                     f"{count} event{'s' if count != 1 else ''} on {html.escape(str(device))}.</p>{listed}"),
+        requester_id=None,
+        company_id=company_id,
+        assigned_user_id=None,
+        priority="normal",
+        status="open",
+        category=None,
+        module_slug="rmm",
+        external_reference=f"rmm-event-log-rule:{rule_id}:{agent_id}",
+    )
+    new_id = int(created["id"])
+    if asset_id is not None:
+        await tickets_repo.replace_ticket_assets(new_id, [asset_id])
+    await rules_repo.set_rule_ticket(rule_id, agent_id, new_id)
+    summary = f"Raised ticket #{created.get('ticket_number') or new_id} for {device}."
+    await rules_repo.record_matches(rule_id, count, summary=summary)
+    log_info("RMM event log rule raised a ticket", rule_id=rule_id, agent_id=agent_id, ticket_id=new_id)
+    return new_id, True
+
+
 async def apply(agent: Mapping[str, Any], entries: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Return the entries to store and counts of what the rules did."""
 
-    stats = {"dropped": 0, "runs": 0}
+    stats = {"dropped": 0, "runs": 0, "tickets": 0}
     if not entries:
         return entries, stats
     company_id = agent.get("company_id")
@@ -385,9 +461,9 @@ async def apply(agent: Mapping[str, Any], entries: list[dict[str, Any]]) -> tupl
     if not rules:
         return entries, stats
     drop_rules = [rule for rule in rules if rule["action"] == "drop"]
-    run_rules = [rule for rule in rules if rule["action"] == "run_script"]
+    act_rules = [rule for rule in rules if rule["action"] in ("run_script", "create_ticket")]
     drop_counts: dict[int, int] = {}
-    run_matches: dict[int, list[dict[str, Any]]] = {}
+    act_matches: dict[int, list[dict[str, Any]]] = {}
     kept: list[dict[str, Any]] = []
     for entry in entries:
         dropped_by = next((rule for rule in drop_rules if rule_matches(rule, entry)), None)
@@ -395,18 +471,21 @@ async def apply(agent: Mapping[str, Any], entries: list[dict[str, Any]]) -> tupl
             drop_counts[int(dropped_by["id"])] = drop_counts.get(int(dropped_by["id"]), 0) + 1
             continue
         kept.append(entry)
-        for rule in run_rules:
+        for rule in act_rules:
             if rule_matches(rule, entry):
-                run_matches.setdefault(int(rule["id"]), []).append(entry)
+                act_matches.setdefault(int(rule["id"]), []).append(entry)
     for rule_id, count in drop_counts.items():
         await rules_repo.record_matches(rule_id, count)
     stats["dropped"] = sum(drop_counts.values())
-    for rule in run_rules:
-        matched = run_matches.get(int(rule["id"]))
+    for rule in act_rules:
+        matched = act_matches.get(int(rule["id"]))
         if not matched:
             continue
         try:
-            if await _run_rule(rule, agent, matched[0], len(matched)):
+            if rule["action"] == "create_ticket":
+                _ticket_id, is_new = await _ticket_rule(rule, agent, matched)
+                stats["tickets"] += 1 if is_new else 0
+            elif await _run_rule(rule, agent, matched[0], len(matched)):
                 stats["runs"] += 1
         except Exception as exc:  # noqa: BLE001 - a rule must never lose the batch
             log_error("RMM event log rule failed", rule_id=rule["id"], error=str(exc))

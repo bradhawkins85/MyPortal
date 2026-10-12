@@ -40,7 +40,7 @@
   <section class="card card--panel" aria-labelledby="rmm-event-log-rules-heading">
     <header class="card__header card__header--stacked"><div>
       <h2 class="card__title" id="rmm-event-log-rules-heading">Rules</h2>
-      <p class="card__subtitle">Rules check each event as a device sends it. Drop rules stop matching events being stored; use a drop rule's <strong>Run now</strong> to delete the matching events already stored. Script rules run an RMM script on the device that sent the event, at most once per cooldown on each device. Every condition of a rule must match.</p>
+      <p class="card__subtitle">Rules check each event as a device sends it. Drop rules stop matching events being stored; use a drop rule's <strong>Run now</strong> to delete the matching events already stored. Script rules run an RMM script on the device that sent the event, at most once per cooldown on each device. Ticket rules raise a ticket for the device's company with the device linked; while that ticket is not closed, new matches on the device are added to it as internal updates. Every condition of a rule must match.</p>
     </div></header>
     <div class="card__body">
       {% if rules %}
@@ -62,7 +62,7 @@
               <td data-label="Rule" data-column-key="name"><strong>{{ rule.name }}</strong></td>
               <td data-label="Applies to" data-column-key="scope">{{ rule.scope_label }}</td>
               <td data-label="When" data-column-key="conditions">{% for text in rule.conditions_text %}{{ text }}{% if not loop.last %}<br>and {% endif %}{% endfor %}</td>
-              <td data-label="Then" data-column-key="action">{{ rule.action_label }}{% if rule.action == "run_script" %} <span class="text-muted">(cooldown {{ rule.cooldown_minutes }} min)</span>{% endif %}</td>
+              <td data-label="Then" data-column-key="action">{{ rule.action_label }}{% if rule.action == "run_script" %} <span class="text-muted">(cooldown {{ rule.cooldown_minutes }} min)</span>{% endif %}{% if rule.action == "create_ticket" %} <span class="text-muted">(one open ticket per device)</span>{% endif %}</td>
               <td data-label="Matches" data-column-key="matches" data-mobile-hidden="true">{{ rule.match_count or 0 }}{% if rule.last_matched_at %} <span class="text-muted">last <span data-utc="{{ rule.last_matched_at }}">{{ rule.last_matched_at }}</span></span>{% endif %}{% if rule.last_run_summary %}<br><span class="text-muted">{{ rule.last_run_summary }}</span>{% endif %}</td>
               <td data-label="Status" data-column-key="status"><span class="status status--{{ 'success' if rule.is_enabled else 'neutral' }}">{{ "On" if rule.is_enabled else "Off" }}</span></td>
               <td class="table__actions" data-column-key="actions">
