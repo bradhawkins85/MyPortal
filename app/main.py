@@ -12302,6 +12302,25 @@ async def admin_modules_page(
     )
 
 
+@app.get("/admin/env-checker", response_class=HTMLResponse)
+async def admin_env_checker_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services.env_catalog import build_environment_catalog
+
+    catalog = build_environment_catalog(
+        await modules_service.list_modules(), feature_registry.list()
+    )
+    response = await _render_template(
+        "admin/env_checker.html", request, current_user,
+        extra={"title": ".env checker / formatter", "env_catalog": catalog},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
 @app.get("/admin/feature-packs", response_class=HTMLResponse)
 async def admin_feature_packs_page(
     request: Request,

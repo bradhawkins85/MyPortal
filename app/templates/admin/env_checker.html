@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block header_title %}.env checker / formatter{% endblock %}
+{% block header_meta %}<span class="muted">Check server configuration and organize it for review.</span>{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/env_checker.css') }}">
+{% endblock %}
+{% block content %}
+<div class="management management--single env-checker">
+  <section class="management__content">
+    <section class="card card--panel">
+      <h2>Server .env contents</h2>
+      <p>Pasted content stays in browser memory. It is never sent to the server or saved by this tool. Clear it when finished.</p>
+      <p>Settings are grouped using this server's current module and feature pack state. Active settings come first, followed by disabled modules and packs, then stale content. Disabled settings stay uncommented and unchanged.</p>
+      <form id="env-checker" autocomplete="off">
+        <label class="form-label" for="env-input">Paste the entire .env file</label>
+        <textarea class="form-input" id="env-input" rows="18" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="env-help" required></textarea>
+        <p class="muted" id="env-help">Values, comments, duplicate assignments and unrecognized content are preserved. Missing variables are reported without inserting values. This tool does not change the server's .env file.</p>
+        <div class="form-actions">
+          <button class="button" type="submit">Check and format</button>
+          <button class="button button--ghost" id="env-clear" type="button">Clear contents</button>
+        </div>
+      </form>
+      <p id="env-status" role="status" aria-live="polite"></p>
+    </section>
+    <section class="card card--panel" id="env-results" hidden>
+      <h2>Configuration review</h2>
+      <p>Missing means absent from the available configuration schema. Many settings are optional or have defaults, and module credentials may be configured in Administration. Review these lists before adding anything.</p>
+      <details><summary>Missing variables</summary><ul id="env-missing"></ul></details>
+      <details><summary>Extra / stale variables</summary><ul id="env-extra"></ul></details>
+      <details open><summary>Warnings</summary><ul id="env-issues"></ul></details>
+      <h2>Formatted .env</h2>
+      <p>Review the output before replacing the server file. Stale entries remain intact at the end; remove them only after confirming they are no longer needed.</p>
+      <label class="form-label" for="env-output">Formatted file contents</label>
+      <textarea class="form-input" id="env-output" rows="22" readonly spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+      <div class="form-actions">
+        <button class="button" id="env-copy" type="button" disabled>Copy formatted .env</button>
+        <button class="button button--ghost" id="env-download" type="button" disabled>Download .env</button>
+      </div>
+    </section>
+  </section>
+</div>
+<script type="application/json" id="env-catalog">{{ env_catalog | tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='js/env-formatter.js') }}" defer></script>
+{% endblock %}
