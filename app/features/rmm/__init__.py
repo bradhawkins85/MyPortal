@@ -25,6 +25,10 @@
 * ``POST /api/rmm/assets/{id}/agent-install`` push the RMM agent to a device
   through its tray app, and the tray app's download and result APIs
   (:mod:`app.services.rmm_agent_deploy`)
+* ``GET /rmm/findings`` (super admins) a platform-wide, best-guess look at
+  every company's RMM data for abnormalities: event spikes, lockouts, new
+  accounts and services, software changes and slow devices, from fixed rules
+  and the configured language model (:mod:`app.services.rmm_findings`)
 
 A background job keeps the Gitea repository's ``Common/`` and
 ``Companies/<company>/`` folders in place, adding a folder for each new
@@ -41,13 +45,14 @@ from __future__ import annotations
 
 from app.core.features import FeaturePack
 
-from app.services import rmm_automation, rmm_checks, rmm_event_log_rules, rmm_scripts
+from app.services import rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_scripts
 
 from .agent_deploy_routes import router as agent_deploy_router
 from .automation_routes import router as automation_router
 from .check_routes import router as check_router
 from .event_log_routes import router as event_log_router
 from .event_log_rule_routes import router as event_log_rule_router
+from .finding_routes import router as finding_router
 from .inventory_routes import router as inventory_router
 from .remote_control_routes import router as remote_control_router
 from .routes import router
@@ -57,12 +62,14 @@ from .routes import router
 # check actions scheduled for later.
 rmm_automation.register_tick_job(rmm_event_log_rules.run_due_scheduled)
 rmm_automation.register_tick_job(rmm_checks.tick)
+# Findings analyses start on the tick when one is due and run in the background.
+rmm_automation.register_tick_job(rmm_findings.tick)
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.12.0",
+    version="1.13.0",
     routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router,
-             event_log_rule_router, inventory_router, check_router),
+             event_log_rule_router, inventory_router, check_router, finding_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),
 )
 

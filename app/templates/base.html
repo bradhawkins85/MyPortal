@@ -576,7 +576,7 @@
               </a>
             </li>{% endif %}
           {% if can_access_rmm_scripts %}<li class="menu__item">
-              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') and not current_path.startswith('/rmm/event-logs') and not current_path.startswith('/rmm/checks') %}aria-current="page"{% endif %}>
+              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') and not current_path.startswith('/rmm/event-logs') and not current_path.startswith('/rmm/checks') and not current_path.startswith('/rmm/findings') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 4h18v16H3zm2 4v10h14V8zm1.5 2.5 1-1L11 13l-3.5 3.5-1-1L9 13zM12 15h5v1.5h-5z"/></svg></span>
                 <span class="menu__label">Scripts</span>
               </a>
@@ -591,6 +591,12 @@
               <a href="/rmm/checks" {% if current_path.startswith('/rmm/checks') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6v2h-4.6L13 22.4 9 12.4 8.4 14H3z"/></svg></span>
                 <span class="menu__label">Checks</span>
+              </a>
+            </li>{% endif %}
+          {% if can_access_rmm_scripts and is_super_admin %}<li class="menu__item">
+              <a href="/rmm/findings" {% if current_path.startswith('/rmm/findings') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 0 1 6 12l4.7 4.7-1.4 1.4-4.7-4.7A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zm-.9 2h1.8v4.2H9.6zm0 5.3h1.8v1.8H9.6z"/></svg></span>
+                <span class="menu__label">Findings</span>
               </a>
             </li>{% endif %}
           {% if can_access_backups %}<li class="menu__item">

@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% import "rmm/_finding_macros.html" as fx %}
+{% block title %}Findings{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm_findings.css') }}">{% endblock %}
+{% set run = latest_run %}
+{% set running = run and run.status == 'running' %}
+{% block header_title %}
+<div class="page-header-bar">
+  <span class="header__title-text">Findings</span>
+  <form class="page-header-toolbar" method="get" action="/rmm/findings" data-findings-toolbar>
+    <div class="page-header-toolbar__group" data-findings-filters hidden>
+      <label class="visually-hidden" for="findings-search">Search findings</label>
+      <input id="findings-search" type="search" class="form-input page-header-toolbar__search" placeholder="Search findings" title="Search titles, summaries, devices and companies" autocomplete="off" data-findings-search />
+      <label class="visually-hidden" for="findings-severity">Severity</label>
+      <select id="findings-severity" class="form-input page-header-toolbar__select" data-findings-filter="severity">
+        <option value="">Any severity</option>
+        {% for key, label in severities.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select>
+      <label class="visually-hidden" for="findings-category">Category</label>
+      <select id="findings-category" class="form-input page-header-toolbar__select" data-findings-filter="category">
+        <option value="">Any category</option>
+        {% for key, label in categories %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select>
+      <label class="visually-hidden" for="findings-status">Review status</label>
+      <select id="findings-status" class="form-input page-header-toolbar__select" data-findings-filter="status" title="Dismissed findings are hidden unless you choose them here">
+        <option value="review">Not dismissed</option>
+        {% for key, label in statuses.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        <option value="">Any status</option>
+      </select>
+    </div>
+    <label class="visually-hidden" for="findings-view">Which findings</label>
+    <select id="findings-view" name="view" class="form-input page-header-toolbar__select" data-findings-view title="Findings the latest analysis no longer detected are kept for 90 days">
+      <option value="active"{% if view == 'active' %} selected{% endif %}>Currently detected</option>
+      <option value="all"{% if view == 'all' %} selected{% endif %}>Include no longer detected</option>
+    </select>
+    <noscript><button type="submit" class="button button--ghost button--compact">Apply</button></noscript>
+    <span class="page-header-toolbar__info" data-findings-info aria-live="polite">{{ findings | length }} finding{{ '' if findings | length == 1 else 's' }}</span>
+  </form>
+</div>
+{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Analysing…" if running else "Run analysis", "type": "form", "variant": "primary", "action": "/rmm/findings/run",
+     "attrs": {"data-findings-run-button": true, "disabled": true if running else none, "title": "Look across every company's RMM data now"}},
+    {"label": "How findings work", "type": "link", "href": "#findings-about"},
+    {"label": "Event logs", "type": "link", "href": "/rmm/event-logs"},
+    {"label": "Checks", "type": "link", "href": "/rmm/checks"},
+  ], menu_id="findings-actions") }}
+{% endblock %}
+{% block content %}
+<section class="findings-workspace" data-findings-workspace aria-describedby="findings-intro">
+  <p class="visually-hidden" id="findings-intro">Findings are a best-guess look across every company's RMM data for things worth a technician's time. Choose a finding to see its evidence, the devices it affects and suggested next steps, then acknowledge or dismiss it.</p>
+
+  {{ counter_strip([
+    {"label": "Critical", "value": counts.critical, "variant": "danger"},
+    {"label": "High", "value": counts.high, "variant": "partial_outage"},
+    {"label": "Medium", "value": counts.medium, "variant": "warning"},
+    {"label": "Low", "value": counts.low, "variant": "info"},
+    {"label": "Info", "value": counts.info, "variant": "neutral"},
+  ], total=open_total, total_label="Needs review", total_attrs={"title": "Findings currently detected that are not dismissed"}) }}
+
+  <section class="card card--panel findings-run{% if running %} is-running{% endif %}" aria-labelledby="findings-run-title"
+    data-findings-run data-run-status="{{ run.status if run else '' }}" data-run-id="{{ run.id if run else '' }}">
+    <header class="findings-run__header">
+      <div class="findings-run__headline">
+        <p class="findings-eyebrow">Latest analysis</p>
+        <h2 class="card__title" id="findings-run-title">
+          {%- if not run -%}No analysis yet
+          {%- elif running -%}Analysing RMM data…
+          {%- elif run.status == 'failed' -%}The last analysis failed
+          {%- else -%}{{ run.finding_count }} finding{{ '' if run.finding_count == 1 else 's' }} from the last analysis
+          {%- endif -%}
+        </h2>
+        <p class="findings-run__meta" role="status" aria-live="polite" data-findings-run-status>
+          {%- if not run -%}
+            {% if settings_summary.enabled %}The first analysis starts shortly, then every {{ settings_summary.interval_hours }} hours.{% else %}Scheduled analyses are off (FINDINGS_ENABLED). Use Run analysis to start one.{% endif %}
+          {%- elif running -%}
+            Started <span data-utc="{{ run.started_at }}">{{ run.started_at }}</span>. This page updates when it finishes.
+          {%- else -%}
+            Finished <span data-utc="{{ run.finished_at }}">{{ run.finished_at }}</span>{% if run.duration_seconds is not none %} in {{ run.duration_seconds }}s{% endif %} · {{ 'run by a technician' if run.trigger == 'manual' else 'scheduled' }}{% if settings_summary.enabled %} · runs every {{ settings_summary.interval_hours }} hours{% endif %}
+          {%- endif -%}
+        </p>
+      </div>
+      {% if run %}<span class="status status--{{ {'running': 'processing', 'failed': 'error'}.get(run.status, 'success') }}">{{ {'running': 'Running', 'failed': 'Failed'}.get(run.status, 'Finished') }}</span>{% endif %}
+    </header>
+    {% if run and run.status == 'failed' and run.error %}<p class="findings-run__alert">{{ run.error }}</p>{% endif %}
+    {% set stats = run.stats if run else {} %}
+    <dl class="findings-sources" aria-label="What the analysis looked at">
+      <div><dt>Devices</dt><dd>{{ stats.get('devices', '—') }}</dd></div>
+      <div><dt>Companies</dt><dd>{{ stats.get('companies', '—') }}</dd></div>
+      <div class="{{ 'is-off' if run and stats and not stats.get('event_logs') }}"><dt>Event logs</dt><dd>{% if not stats %}—{% elif stats.get('event_logs') %}{{ stats.get('event_spikes', 0) }} spike{{ '' if stats.get('event_spikes', 0) == 1 else 's' }}{% else %}Not connected{% endif %}</dd></div>
+      <div><dt>Software changes</dt><dd>{{ stats.get('software_change_groups', '—') }}</dd></div>
+      <div class="{{ 'is-off' if run and stats and not stats.get('device_stats') }}"><dt>Device stats</dt><dd>{% if not stats %}—{% elif stats.get('device_stats') %}{{ stats.get('performance_outliers', 0) }} outlier group{{ '' if stats.get('performance_outliers', 0) == 1 else 's' }}{% else %}Not connected{% endif %}</dd></div>
+      <div class="findings-sources__ai{% if run and run.ai_status == 'failed' %} is-warning{% elif not settings_summary.ai_enabled %} is-off{% endif %}">
+        <dt>AI insight</dt>
+        <dd>
+          {%- if not settings_summary.ai_enabled -%}Off
+          {%- elif not run or running -%}{{ settings_summary.model or 'Configured' }}
+          {%- elif run.ai_status == 'used' -%}{{ stats.get('ai_findings', 0) }} from {{ run.ai_model or settings_summary.model }}
+          {%- elif run.ai_status == 'skipped' -%}Nothing to assess
+          {%- elif run.ai_status == 'failed' -%}Unavailable
+          {%- else -%}Off{%- endif -%}
+        </dd>
+      </div>
+    </dl>
+    {% if run and run.ai_status == 'failed' %}<p class="findings-run__note">The AI assessment failed ({{ run.ai_error }}). Rule findings are up to date, and AI findings from earlier analyses are kept until the model answers again.</p>{% endif %}
+    {% for problem in stats.get('problems', []) %}<p class="findings-run__note">{{ problem }}</p>{% endfor %}
+  </section>
+
+  <section class="findings-list" aria-labelledby="findings-list-title">
+    <h2 class="visually-hidden" id="findings-list-title">Findings by category</h2>
+    {% if findings %}
+      {% for key, label in categories %}
+      {% set group = findings | selectattr('category', 'equalto', key) | list %}
+      <section class="findings-group" data-findings-group="{{ key }}" aria-labelledby="findings-group-{{ key }}">
+        <h3 class="findings-group__title" id="findings-group-{{ key }}">{{ fx.icon(key) }}<span>{{ label }}</span><span class="findings-group__count" data-findings-group-count>{{ group | length }}</span></h3>
+        <ul class="findings-cards" role="list">
+          {% for finding in group %}<li>{{ fx.finding_card(finding, csrf_token, view) }}</li>{% endfor %}
+        </ul>
+      </section>
+      {% endfor %}
+      <div class="empty-state findings-empty" data-findings-no-results hidden>
+        <h3 class="empty-state__title">No findings match</h3>
+        <p class="empty-state__subtitle">Try another search, or choose Any severity, Any category or Any status.</p>
+      </div>
+    {% elif run and run.status == 'succeeded' %}
+      <div class="empty-state card card--panel findings-empty findings-empty--clear">
+        <h3 class="empty-state__title">Nothing stands out</h3>
+        <p class="empty-state__subtitle">The last analysis found nothing unusual across {{ stats.get('devices', 0) }} devices. Findings appear here when event logs spike, accounts lock out, software or services change, or a device runs slower than similar ones.</p>
+      </div>
+    {% else %}
+      <div class="empty-state card card--panel findings-empty">
+        <h3 class="empty-state__title">No findings yet</h3>
+        <p class="empty-state__subtitle">Findings look across every company's RMM data for problems and patterns worth a technician's time. {% if running %}The first analysis is running now.{% else %}Use Run analysis at the top of the page to start the first one.{% endif %}</p>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="card card--panel findings-about" id="findings-about" aria-labelledby="findings-about-title">
+    <header class="card__header card__header--stacked"><div>
+      <h2 class="card__title" id="findings-about-title">How findings work</h2>
+      <p class="card__subtitle">Every {{ settings_summary.interval_hours }} hours{% if not settings_summary.enabled %} (scheduled analyses are off){% endif %}, MyPortal compares the last 24 hours of every company's RMM data with the {{ settings_summary.baseline_days }} days before. Fixed rules raise the clearest problems{% if settings_summary.ai_enabled %}, then the signals go to {{ settings_summary.model or 'the configured AI model' }} for a best-guess assessment of anything else, such as links between them{% endif %}. Treat AI insights as leads to check, not conclusions.</p>
+    </div></header>
+    <dl class="findings-about__list">
+      <div><dt>{{ fx.icon('events') }}Event logs</dt><dd>Event types far more frequent than usual, and new ones appearing on several devices.</dd></div>
+      <div><dt>{{ fx.icon('security') }}Security</dt><dd>Account lockouts and the computers causing them, similar new accounts across devices or companies, new services, admin group changes and cleared logs.</dd></div>
+      <div><dt>{{ fx.icon('software') }}Software changes</dt><dd>Programs installed, removed or updated since the previous analysis, and event spikes that began where a program changed.</dd></div>
+      <div><dt>{{ fx.icon('performance') }}Performance</dt><dd>Devices using far more CPU or memory than devices with the same processor and memory.</dd></div>
+      <div><dt>{{ fx.icon('health') }}Device health</dt><dd>Nearly full system drives, long uptimes, silent agents and checks failing on many devices.</dd></div>
+    </dl>
+    <p class="findings-about__foot">Acknowledge a finding when someone is on it, or dismiss it when it is expected; the same finding found again keeps your choice. Findings no longer detected stay for 90 days under <em>Include no longer detected</em>.</p>
+  </section>
+
+  <div class="modal finding-modal" id="finding-modal" role="dialog" aria-modal="true" aria-labelledby="finding-modal-title" hidden data-finding-modal>
+    <form class="modal__panel modal__panel--wide finding-editor" method="post" action="/rmm/findings" data-finding-form novalidate>
+      {% include "partials/csrf.html" %}
+      <input type="hidden" name="view" value="{{ view }}" />
+      <header class="modal__header finding-editor__header">
+        <div>
+          <p class="findings-eyebrow" data-finding-field="eyebrow">Finding</p>
+          <h2 class="modal__title" id="finding-modal-title" data-finding-field="title">Finding</h2>
+          <p class="finding-editor__subtitle"><span class="status" data-finding-field="severity"></span><span data-finding-field="seen"></span></p>
+        </div>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close finding"></button>
+      </header>
+      <div class="modal__body finding-editor__body">
+        <div class="finding-editor__main">
+          <section class="finding-editor__section" aria-labelledby="finding-modal-what">
+            <h3 class="finding-editor__heading" id="finding-modal-what">What was found</h3>
+            <p data-finding-field="summary"></p>
+          </section>
+          <section class="finding-editor__section" aria-labelledby="finding-modal-evidence" data-finding-section="evidence">
+            <h3 class="finding-editor__heading" id="finding-modal-evidence">Evidence</h3>
+            <ul class="finding-evidence" data-finding-field="evidence"></ul>
+          </section>
+          <section class="finding-editor__section" aria-labelledby="finding-modal-next" data-finding-section="recommendation">
+            <h3 class="finding-editor__heading" id="finding-modal-next">Suggested next steps</h3>
+            <p data-finding-field="recommendation"></p>
+          </section>
+          <div class="form-field finding-editor__note">
+            <label class="form-label" for="finding-note">Note <span class="finding-optional">optional</span></label>
+            <textarea class="form-input" id="finding-note" name="note" rows="2" maxlength="500" data-finding-note placeholder="e.g. Ticket raised, vendor contacted, expected behaviour"></textarea>
+            <p class="form-help">Saved with your review so other technicians can see what was done.</p>
+          </div>
+        </div>
+        <aside class="finding-editor__aside" aria-label="Finding at a glance">
+          <div class="finding-confidence" data-finding-confidence>
+            <span class="finding-editor__label">AI confidence</span>
+            <div class="finding-confidence__bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="finding-modal-title" data-finding-confidence-bar><span></span></div>
+            <p class="finding-confidence__text" data-finding-confidence-text></p>
+          </div>
+          <div class="finding-editor__block">
+            <span class="finding-editor__label">Affected devices</span>
+            <ul class="finding-affected" data-finding-field="devices"></ul>
+          </div>
+          <div class="finding-editor__block">
+            <span class="finding-editor__label">Companies</span>
+            <ul class="finding-affected" data-finding-field="companies"></ul>
+          </div>
+          <div class="finding-editor__block">
+            <span class="finding-editor__label">Review</span>
+            <p class="finding-editor__review" data-finding-field="review"></p>
+          </div>
+        </aside>
+      </div>
+      <footer class="modal__footer finding-editor__footer">
+        <button type="submit" name="status" value="dismissed" class="button button--danger" data-finding-action="dismissed" title="Hide this finding; it stays hidden if found again">Dismiss</button>
+        <span class="finding-editor__spacer"></span>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" name="status" value="open" class="button button--ghost" data-finding-action="open">Reopen</button>
+        <button type="submit" name="status" value="acknowledged" class="button button--primary" data-finding-action="acknowledged">Acknowledge</button>
+      </footer>
+    </form>
+  </div>
+</section>
+<script type="application/json" id="findings-data">{{ findings | tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="{{ static_url('/static/js/rmm_findings.js') }}" defer></script>
+{% endblock %}
