@@ -103,7 +103,7 @@ async def test_ingest_stores_once_and_skips_logs_nobody_chose(sqlite_db, event_d
         _entry(9, log="Microsoft-Windows-Sysmon/Operational"),
         _entry(3, log="Application", level=1, message="x" * 40_000, minutes_ago=60 * 24 * 40),
     ]
-    assert await event_logs.ingest(agent, batch) == {"received": 6, "stored": 4, "skipped": 1}
+    assert await event_logs.ingest(agent, batch) == {"received": 6, "stored": 4, "skipped": 1, "dropped": 0, "runs": 0}
     assert (await event_logs.ingest(agent, batch[:2]))["stored"] == 0
 
     entries = await event_log_repo.list_entries(company_id=1)
@@ -139,7 +139,7 @@ async def test_agent_routes_validate_and_report_collection_off(sqlite_db, event_
 
     _result, agent = await _enrol(sqlite_db)
     batch = routes.AgentEventLogBatch(entries=[{**_entry(1), "time_created": "2026-10-11T10:00:00.1234567Z"}])
-    assert await routes.agent_event_logs(batch, agent) == {"received": 1, "stored": 1, "skipped": 0}
+    assert await routes.agent_event_logs(batch, agent) == {"received": 1, "stored": 1, "skipped": 0, "dropped": 0, "runs": 0}
     with pytest.raises(ValidationError):
         routes.AgentEventLogBatch(entries=[_entry(i) for i in range(event_logs.MAX_BATCH + 1)])
 

@@ -576,9 +576,15 @@
               </a>
             </li>{% endif %}
           {% if can_access_rmm_scripts %}<li class="menu__item">
-              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') %}aria-current="page"{% endif %}>
+              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') and not current_path.startswith('/rmm/event-logs') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 4h18v16H3zm2 4v10h14V8zm1.5 2.5 1-1L11 13l-3.5 3.5-1-1L9 13zM12 15h5v1.5h-5z"/></svg></span>
                 <span class="menu__label">Scripts</span>
+              </a>
+            </li>{% endif %}
+          {% if can_access_rmm_scripts %}<li class="menu__item">
+              <a href="/rmm/event-logs" {% if current_path.startswith('/rmm/event-logs') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5zm2 2v14h10V7h-2V5zm2 4h6v1.5H9zm0 3h6v1.5H9zm0 3h4v1.5H9z"/></svg></span>
+                <span class="menu__label">Event logs</span>
               </a>
             </li>{% endif %}
           {% if can_access_backups %}<li class="menu__item">

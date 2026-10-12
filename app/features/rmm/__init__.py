@@ -11,6 +11,9 @@
 * ``GET /rmm/event-logs`` Windows event logs agents send to the separate event
   log database, and the extra logs collected per company and device
   (:mod:`app.services.rmm_event_logs`)
+* ``GET /rmm/event-logs/rules`` rules that drop incoming event log entries or
+  run an RMM script on the device that sent them
+  (:mod:`app.services.rmm_event_log_rules`)
 * ``POST /api/rmm/assets/{id}/agent-install`` push the RMM agent to a device
   through its tray app, and the tray app's download and result APIs
   (:mod:`app.services.rmm_agent_deploy`)
@@ -34,13 +37,15 @@ from app.services import rmm_automation, rmm_scripts
 from .agent_deploy_routes import router as agent_deploy_router
 from .automation_routes import router as automation_router
 from .event_log_routes import router as event_log_router
+from .event_log_rule_routes import router as event_log_rule_router
 from .remote_control_routes import router as remote_control_router
 from .routes import router
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.7.0",
-    routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router),
+    version="1.8.0",
+    routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router,
+             event_log_rule_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),
 )
 

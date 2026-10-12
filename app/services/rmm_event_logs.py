@@ -8,7 +8,9 @@ agents are told collection is off and nothing is stored.
 
 The agent keeps its own place in each log (the last record ID sent) and sends
 batches of at most :data:`MAX_BATCH` entries. A record already stored is
-skipped, so resending a batch is harmless.
+skipped, so resending a batch is harmless. Event log rules
+(:mod:`app.services.rmm_event_log_rules`) can drop entries before they are
+stored or run a script when one arrives.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from loguru import logger
 from app.core.config import get_settings
 from app.core.event_log_database import event_log_db
 from app.repositories import rmm_event_logs as repo
+from app.services import rmm_event_log_rules
 
 DEFAULT_LOGS = ("Application", "System")
 MAX_EXTRA_LOGS = 25
@@ -151,8 +154,10 @@ async def ingest(agent: dict[str, Any], entries: list[dict[str, Any]]) -> dict[s
             "time_created": _naive_utc(entry["time_created"]),
             "received_at": received_at,
         })
+    # Event log rules drop entries before they are stored, and queue scripts.
+    rows, rule_stats = await rmm_event_log_rules.apply(agent, rows)
     stored = await repo.insert_entries(rows) if rows else 0
-    return {"received": len(entries), "stored": stored, "skipped": skipped}
+    return {"received": len(entries), "stored": stored, "skipped": skipped, **rule_stats}
 
 
 async def save_extra_logs(

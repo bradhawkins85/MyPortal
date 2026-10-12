@@ -15,6 +15,7 @@ from app.repositories import assets as assets_repo
 from app.repositories import company_variables as company_variables_repo
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_automation as automation_repo
+from app.repositories import rmm_event_log_rules as event_log_rules_repo
 from app.repositories import rmm_event_logs as event_log_repo
 from app.repositories import rmm_remote_control as remote_repo
 from app.repositories import rmm_agent_deploy as deploy_repo
@@ -283,7 +284,8 @@ async def sqlite_db(monkeypatch):
     for name in ("332_company_variables.sql", "465_rmm_scripting.sql", "466_rmm_script_company.sql",
                  "467_rmm_gitea_accounts.sql", "466_asset_company_tags.sql", "468_rmm_automation.sql",
                  "469_asset_tag_blocks.sql", "470_rmm_script_ai_summary.sql", "471_rmm_remote_control.sql",
-                 "472_rmm_event_log_settings.sql", "473_rmm_agent_auto_deploy.sql"):
+                 "472_rmm_event_log_settings.sql", "473_rmm_agent_auto_deploy.sql",
+                 "474_rmm_event_log_rules.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -292,8 +294,8 @@ async def sqlite_db(monkeypatch):
         INSERT INTO company_variable_values (company_id, variable_id, value) VALUES (1, 1, 'contoso');
     """)
     fake = _SqliteDb(conn)
-    for module in (rmm_repo, automation_repo, remote_repo, event_log_repo, tags_repo, asset_fields_repo,
-                   company_variables_repo, assets_repo, deploy_repo, tray_repo):
+    for module in (rmm_repo, automation_repo, remote_repo, event_log_repo, event_log_rules_repo, tags_repo,
+                   asset_fields_repo, company_variables_repo, assets_repo, deploy_repo, tray_repo):
         monkeypatch.setattr(module, "db", fake)
 
     async def get_company(company_id):

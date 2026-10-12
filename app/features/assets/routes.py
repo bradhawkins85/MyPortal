@@ -1919,10 +1919,13 @@ async def asset_detail_page(
             and (is_super_admin or main_module._membership_menu_can(user, membership, "menu.rmm_scripts"))):
         from app.features.rmm import routes as rmm_routes
 
-        rmm_context = await rmm_routes.asset_rmm_context(
-            company_id, asset_id,
-            can_run=is_super_admin or main_module._membership_menu_can(
-                user, membership, "menu.rmm_scripts", write=True),
+        from app.features.rmm import event_log_routes as rmm_event_log_routes
+
+        can_run_scripts = bool(is_super_admin or main_module._membership_menu_can(
+            user, membership, "menu.rmm_scripts", write=True))
+        rmm_context = await rmm_routes.asset_rmm_context(company_id, asset_id, can_run=can_run_scripts)
+        rmm_context["event_logs"] = await rmm_event_log_routes.asset_event_log_context(
+            company_id, asset_id, can_edit=can_run_scripts, is_super_admin=bool(is_super_admin),
         )
     # Tags belong to the tags pack; the card disappears with it.
     tags_context = None
