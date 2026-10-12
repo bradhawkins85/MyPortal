@@ -91,6 +91,10 @@ async def insert_entries(entries: list[dict[str, Any]]) -> int:
     )
 
 
+def _like_escape(value: str) -> str:
+    return value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+
+
 async def list_entries(
     *,
     company_id: int,
@@ -99,9 +103,15 @@ async def list_entries(
     max_level: int | None = None,
     event_id: int | None = None,
     search: str | None = None,
+    source: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
     """Newest entries first for a company, with optional filters.
+
+    ``source`` matches part of the source (provider); ``since`` and ``until``
+    bound ``time_created`` (``until`` is exclusive).
 
     ``max_level`` keeps entries at that severity or worse (1 critical, 2 error,
     3 warning, 4 information); 0 is stored for "log always" entries and counts
@@ -123,9 +133,18 @@ async def list_entries(
         clauses.append("event_id = %s")
         params.append(event_id)
     if search:
-        escaped = search.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        escaped = _like_escape(search)
         clauses.append("(message LIKE %s ESCAPE '!' OR provider LIKE %s ESCAPE '!')")
         params.extend([f"%{escaped}%", f"%{escaped}%"])
+    if source:
+        clauses.append("provider LIKE %s ESCAPE '!'")
+        params.append(f"%{_like_escape(source)}%")
+    if since is not None:
+        clauses.append("time_created >= %s")
+        params.append(since)
+    if until is not None:
+        clauses.append("time_created < %s")
+        params.append(until)
     params.append(int(limit))
     # The clauses are fixed strings chosen above; every value is a bound parameter.
     return await event_log_db.fetch_all(  # nosec B608
@@ -151,3 +170,45 @@ async def prune_entries(before: datetime, *, batch_size: int = 10000) -> int:
         removed += count
         if count < batch_size:
             return removed
+
+
+async def scan_entries(
+    *,
+    company_id: int | None,
+    asset_id: int | None,
+    event_ids: list[int] | None,
+    after_id: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Stored entries in id order after ``after_id``, for checking a rule
+    against what is already stored. ``company_id`` None means every company."""
+
+    clauses = ["id > %s"]
+    params: list[Any] = [int(after_id)]
+    if company_id is not None:
+        clauses.append("company_id = %s")
+        params.append(int(company_id))
+    if asset_id is not None:
+        clauses.append("asset_id = %s")
+        params.append(int(asset_id))
+    if event_ids:
+        clauses.append("event_id IN (" + ", ".join(["%s"] * len(event_ids)) + ")")
+        params.extend(int(event_id) for event_id in event_ids)
+    params.append(int(limit))
+    # The clauses are fixed strings chosen above; every value is a bound parameter.
+    return await event_log_db.fetch_all(  # nosec B608
+        f"SELECT id, log_name, event_id, level, provider, computer, message FROM {ENTRIES_TABLE} "
+        f"WHERE {' AND '.join(clauses)} ORDER BY id LIMIT %s",  # nosec B608
+        tuple(params),
+    )
+
+
+async def delete_entries(ids: list[int]) -> int:
+    if not ids:
+        return 0
+    placeholders = ", ".join(["%s"] * len(ids))
+    # Only "%s" placeholders are interpolated; the ids are bound parameters.
+    return await event_log_db.execute_rowcount(
+        f"DELETE FROM {ENTRIES_TABLE} WHERE id IN ({placeholders})",  # nosec B608
+        tuple(int(entry_id) for entry_id in ids),
+    )

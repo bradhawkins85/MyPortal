@@ -142,7 +142,7 @@ async def test_ingest_drops_entries_and_runs_scripts_with_a_cooldown(sqlite_db, 
 
     batch = [_entry(1), _entry(2), _entry(3, level=2, event_id=7, message="Bad block"),
              _entry(4, level=1, event_id=41, message="Rebooted")]
-    assert await event_logs.ingest(agent, batch) == {"received": 4, "stored": 2, "skipped": 0, "dropped": 2, "runs": 1}
+    assert await event_logs.ingest(agent, batch) == {"received": 4, "stored": 2, "skipped": 0, "dropped": 2, "runs": 1, "tickets": 0}
     assert sorted(e["record_id"] for e in await event_log_repo.list_entries(company_id=1)) == [3, 4]
 
     runs = await rmm_repo.list_runs(company_id=1)
@@ -226,3 +226,182 @@ async def test_asset_page_lists_the_device_logs_and_rules(sqlite_db, event_db):
     detail = (Path(__file__).parents[1] / "app/templates/assets/detail.html").read_text()
     assert 'id="event-logs"' in detail and 'id="event-log-rules"' in detail
     assert "/rmm/event-logs/rules?new=1&amp;asset_id={{ asset.id }}" in detail
+
+
+@pytest.mark.anyio
+async def test_drop_rule_run_now_deletes_matching_stored_events(sqlite_db, event_db):
+    _result, agent = await _enrol(sqlite_db)
+    _result, other = await _enrol(sqlite_db, tray_id=6, asset_id=11, uid="agent-uid-0002")
+    await event_logs.ingest(agent, [_entry(1), _entry(2, event_id=7), _entry(3, message="Service stopped")])
+    await event_logs.ingest(other, [_entry(4)])
+    common = {"user_id": 9, "company_id": 1, "rule_id": None, "is_super_admin": False}
+    conditions = [{"field": "event_id", "operator": "one_of", "value": "7036, 41"},
+                  {"field": "message", "operator": "contains", "value": "started"}]
+    device_id = await rules.save_rule(form={"name": "Device", "scope": "asset", "asset_id": "10", "action": "drop"},
+                                      conditions=conditions, **common)
+    company_id = await rules.save_rule(form={"name": "Company", "scope": "company", "action": "drop"},
+                                       conditions=conditions, **common)
+    device = await rules_repo.get_rule(device_id)
+    company = await rules_repo.get_rule(company_id)
+
+    assert rules._event_id_prefilter(device) == [41, 7036]
+    assert await rules.drop_stored(device, delete=False) == 1  # PC-01's started event only
+    assert await rules.drop_stored(company, delete=False) == 2
+    assert len(await event_log_repo.list_entries(company_id=1)) == 4  # counting deletes nothing
+
+    assert await rules.drop_stored(company, delete=True) == 2
+    assert sorted(e["record_id"] for e in await event_log_repo.list_entries(company_id=1)) == [2, 3]
+    assert "deleted 2 stored events" in (await rules_repo.get_rule(company_id))["last_run_summary"]
+    assert await rules.drop_stored(device, delete=True) == 0
+
+    script_rule = {**device, "action": "run_script"}
+    with pytest.raises(rules.RuleError):
+        await rules.drop_stored(script_rule, delete=False)
+
+
+@pytest.mark.anyio
+async def test_run_now_scans_in_batches(sqlite_db, event_db, monkeypatch):
+    _result, agent = await _enrol(sqlite_db)
+    await event_logs.ingest(agent, [_entry(index, message="Noise" if index % 2 else "Keep") for index in range(1, 12)])
+    rule_id = await rules.save_rule(
+        form={"name": "Noise", "scope": "company", "action": "drop"}, rule_id=None, company_id=1, user_id=9,
+        is_super_admin=False, conditions=[{"field": "message", "operator": "is", "value": "noise"}])
+    monkeypatch.setattr(rules, "RUN_NOW_BATCH", 3)
+    assert await rules.drop_stored(await rules_repo.get_rule(rule_id), delete=True) == 6
+    assert sorted(e["record_id"] for e in await event_log_repo.list_entries(company_id=1)) == [2, 4, 6, 8, 10]
+
+
+def test_rules_page_run_now_confirm_and_action_menu():
+    env = _environment()
+    env.globals["static_url"] = lambda path: path
+    drop = {"id": 3, "name": "Noise", "action": "drop", "scope_label": "Company: Contoso", "action_label": "Drop the event",
+            "conditions_text": ["Event ID is “7036”"], "is_enabled": True, "match_count": 0, "cooldown_minutes": 60,
+            "asset_id": None, "can_edit": True}
+    script = {**drop, "id": 4, "name": "Alert", "action": "run_script", "action_label": "Run Alert", "is_enabled": False}
+    base = dict(company={"name": "Contoso"}, rules=[drop, script], can_edit=True, is_super_admin=False, errors={},
+                editing=None, conditions=[], fields=rules.FIELDS, operators=rules.OPERATORS,
+                field_operators=rules.FIELD_OPERATORS, actions=rules.ACTIONS, devices=[], scripts=[], script=None,
+                script_fields=[], variables=[], csrf_token="tok")
+    html = env.get_template("rmm/event_log_rules.html").render(
+        **base, run_now={"rule": drop, "available": True, "count": 12, "asset_id": 10})
+    assert 'action="/rmm/event-logs/rules/3/run"' in html and "12 stored events" in html
+    assert 'name="asset_id" value="10"' in html and 'href="/assets/10#event-log-rules"' in html
+    # One Action menu per rule; only drop rules can run now.
+    assert html.count("data-rmm-menu") == 2
+    assert "/rmm/event-logs/rules?run=3" in html and "/rmm/event-logs/rules?run=4" not in html
+    assert "Turn off" in html and "Turn on" in html and 'name="_csrf" value="tok"' in html
+
+    empty = env.get_template("rmm/event_log_rules.html").render(
+        **base, run_now={"rule": drop, "available": True, "count": 0, "asset_id": None})
+    assert "nothing to delete" in empty and "/rules/3/run" not in empty
+    offline = env.get_template("rmm/event_log_rules.html").render(
+        **base, run_now={"rule": drop, "available": False, "count": 0, "asset_id": None})
+    assert "not available" in offline and "/rules/3/run" not in offline
+
+
+def test_asset_page_template_uses_the_rule_menu():
+    env = _environment()
+    source = env.loader.get_source(env, "assets/detail.html")[0]
+    env.parse(source)  # compiles
+    assert "rmm_ui.event_log_rule_menu(rule, csrf_token, asset.id)" in source
+
+
+@pytest.mark.anyio
+async def test_create_ticket_rule_raises_one_ticket_per_device_until_closed(sqlite_db, event_db, monkeypatch):
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    tickets: dict[int, dict] = {}
+    replies: list[dict] = []
+    links: dict[int, list[int]] = {}
+
+    async def create_ticket(**kwargs):
+        ticket_id = len(tickets) + 100
+        tickets[ticket_id] = {"id": ticket_id, "ticket_number": str(ticket_id), "status": "open", **kwargs}
+        return tickets[ticket_id]
+
+    async def get_ticket(ticket_id):
+        return tickets.get(ticket_id)
+
+    async def create_reply(**kwargs):
+        replies.append(kwargs)
+        return kwargs
+
+    async def replace_ticket_assets(ticket_id, asset_ids):
+        links[ticket_id] = list(asset_ids)
+        return []
+
+    monkeypatch.setattr(tickets_service, "create_ticket", create_ticket)
+    monkeypatch.setattr(tickets_repo, "get_ticket", get_ticket)
+    monkeypatch.setattr(tickets_repo, "create_reply", create_reply)
+    monkeypatch.setattr(tickets_repo, "replace_ticket_assets", replace_ticket_assets)
+
+    _result, agent = await _enrol(sqlite_db)
+    _result, other = await _enrol(sqlite_db, tray_id=6, asset_id=11, uid="agent-uid-0002")
+    rule_id = await rules.save_rule(
+        form={"name": "Disk errors", "scope": "company", "action": "create_ticket", "is_enabled": "1"},
+        rule_id=None, company_id=1, user_id=9, is_super_admin=False,
+        conditions=[{"field": "event_id", "operator": "is", "value": "7"}])
+    assert (await rules_repo.get_rule(rule_id))["script_id"] is None
+
+    bad = "<script>alert(1)</script>"
+    stats = await event_logs.ingest(agent, [_entry(1, event_id=7, message=bad), _entry(2, event_id=7), _entry(3)])
+    assert (stats["tickets"], stats["stored"]) == (1, 3)
+    ticket = tickets[100]
+    assert ticket["company_id"] == 1 and ticket["subject"] == "Disk errors: PC" and ticket["requester_id"] is None
+    assert "2 events" in ticket["description"] and bad not in ticket["description"]
+    assert "&lt;script&gt;" in ticket["description"]
+    assert links[100] == [10]
+
+    # Same device while the ticket is open: an internal update, not a new ticket.
+    stats = await event_logs.ingest(agent, [_entry(4, event_id=7)])
+    assert stats["tickets"] == 0 and len(tickets) == 1
+    assert replies[-1]["ticket_id"] == 100 and replies[-1]["is_internal"] and "1 more event" in replies[-1]["body"]
+
+    # Another device gets its own ticket.
+    await event_logs.ingest(other, [_entry(5, event_id=7)])
+    assert len(tickets) == 2 and links[101] == [11]
+
+    # Once closed, the next match raises a new ticket.
+    tickets[100]["status"] = "closed"
+    assert (await event_logs.ingest(agent, [_entry(6, event_id=7)]))["tickets"] == 1
+    assert len(tickets) == 3 and await rules_repo.get_rule_ticket(rule_id, agent["id"]) == 102
+    assert "Raised ticket #102" in (await rules_repo.get_rule(rule_id))["last_run_summary"]
+
+    await rules_repo.delete_rule(rule_id)
+    assert await rules_repo.get_rule_ticket(rule_id, agent["id"]) is None
+
+
+@pytest.mark.anyio
+async def test_event_log_filters_for_source_dates_and_the_asset_page(sqlite_db, event_db):
+    from datetime import date
+
+    from app.features.rmm import event_log_routes as routes
+
+    _result, agent = await _enrol(sqlite_db)
+    old = {**_entry(1, provider="Disk"), "time_created": datetime(2026, 10, 1, 23, 30, tzinfo=timezone.utc)}
+    mid = {**_entry(2, provider="Service Control Manager"), "time_created": datetime(2026, 10, 5, 12, tzinfo=timezone.utc)}
+    new = {**_entry(3, provider="Disk", level=2, event_id=7), "time_created": datetime(2026, 10, 9, tzinfo=timezone.utc)}
+    await event_logs.ingest(agent, [old, mid, new])
+
+    async def ids(**filters):
+        rows = await routes._filtered_entries(1, asset_id=10, log=None, level=None, event_id=None, q=None, limit=50,
+                                              **filters)
+        return sorted(row["record_id"] for row in rows)
+
+    assert await ids(source="disk") == [1, 3]
+    assert await ids(source="100%") == []
+    assert await ids(date_from=date(2026, 10, 2)) == [2, 3]
+    assert await ids(date_to=date(2026, 10, 1)) == [1]  # the whole "to" day is included
+    assert await ids(date_from=date(2026, 10, 2), date_to=date(2026, 10, 5)) == [2]
+
+    filters = routes.asset_filters({"el_source": " Disk ", "el_level": "2", "el_event_id": "x", "el_from": "2026-10-02",
+                                    "el_to": "not a date", "el_log": "System"})
+    assert filters == {"log": "System", "level": 2, "event_id": None, "source": "Disk", "q": "",
+                       "date_from": date(2026, 10, 2), "date_to": None}
+    context = await routes.asset_event_log_context(1, 10, can_edit=False, is_super_admin=False, filters=filters)
+    assert [entry["record_id"] for entry in context["entries"]] == [3] and context["filtered"]
+    assert context["filters"]["date_from"] == "2026-10-02" and context["filters"]["level"] == "2"
+    assert "System" in context["log_choices"]
+    unfiltered = await routes.asset_event_log_context(1, 10, can_edit=False, is_super_admin=False)
+    assert len(unfiltered["entries"]) == 3 and not unfiltered["filtered"]

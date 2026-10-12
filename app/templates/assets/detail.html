@@ -162,9 +162,50 @@
   {% if rmm and rmm.event_logs %}{% set elog = rmm.event_logs %}{% set LEVEL_STATUS = {"Critical": "error", "Error": "error", "Warning": "warning", "Information": "info", "Verbose": "neutral"} %}<section class="card card--panel ce-section" id="event-logs" data-asset-edit-section="event-logs" aria-labelledby="asset-event-logs-heading">
     <header class="ce-section__header"><div class="ce-section__heading">
       <h2 class="card__title" id="asset-event-logs-heading">Event logs</h2>
-      <p class="card__subtitle">The latest entries this device sent. <a href="/rmm/event-logs?asset_id={{ asset.id }}">Open in Event logs</a> to filter and search them.</p>
+      <p class="card__subtitle">{{ "Up to 100 entries matching the filters" if rmm.event_logs.filtered else "The latest 25 entries this device sent" }}, newest first. <a href="/rmm/event-logs?asset_id={{ asset.id }}">Open in Event logs</a> for more.</p>
     </div></header>
     <div class="ce-section__body">
+      {% set ef = elog.filters %}
+      {% if elog.database.configured and elog.database.connected %}
+      <form method="get" action="/assets/{{ asset.id }}#event-logs" class="form" role="search" aria-label="Filter this device's event log entries">
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="asset-el-log">Log</label>
+            <select class="form-input" id="asset-el-log" name="el_log">
+              <option value="">Every log</option>
+              {% for name in elog.log_choices %}<option value="{{ name }}" {% if ef.log == name %}selected{% endif %}>{{ name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="asset-el-level">Level</label>
+            <select class="form-input" id="asset-el-level" name="el_level">
+              {% for value, label in elog.level_filters %}<option value="{{ value }}" {% if ef.level == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="asset-el-event-id">Event ID</label>
+            <input class="form-input" id="asset-el-event-id" name="el_event_id" type="number" min="0" value="{{ ef.event_id }}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="asset-el-source">Source contains</label>
+            <input class="form-input" id="asset-el-source" name="el_source" maxlength="255" value="{{ ef.source }}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="asset-el-q">Message or source contains</label>
+            <input class="form-input" id="asset-el-q" name="el_q" maxlength="200" value="{{ ef.q }}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="asset-el-from">From <span class="text-muted">UTC</span></label>
+            <input class="form-input" id="asset-el-from" name="el_from" type="date" value="{{ ef.date_from }}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="asset-el-to">To <span class="text-muted">UTC, inclusive</span></label>
+            <input class="form-input" id="asset-el-to" name="el_to" type="date" value="{{ ef.date_to }}">
+          </div>
+        </div>
+        <div class="form-actions"><button class="button button--primary button--small" type="submit">Filter</button>{% if elog.filtered %} <a class="button button--ghost button--small" href="/assets/{{ asset.id }}#event-logs">Clear</a>{% endif %}</div>
+      </form>
+      {% endif %}
       {% if not elog.database.configured %}
       <p class="text-muted">Event log collection is off. Set the <code>EVENT_LOG_DB_*</code> settings in the .env file to turn it on.</p>
       {% elif not elog.database.connected %}
@@ -187,7 +228,7 @@
         </tbody>
       </table></div>
       {% else %}
-      <p class="text-muted">This device has not sent any event log entries yet.</p>
+      <p class="text-muted">{{ "No entries match these filters." if elog.filtered else "This device has not sent any event log entries yet." }}</p>
       {% endif %}
       <form method="post" action="/rmm/event-logs/assets/{{ asset.id }}" class="form">
         {% include "partials/csrf.html" %}
@@ -212,7 +253,7 @@
     </header>
     <div class="ce-section__body">
       {% if elog.rules %}
-      <div class="table-wrapper"><table class="table">
+      <div class="table-wrapper rmm-rule-table"><table class="table">
         <caption class="visually-hidden">Event log rules for this device</caption>
         <thead><tr><th scope="col">Rule</th><th scope="col">Applies to</th><th scope="col">When</th><th scope="col">Then</th><th scope="col">Status</th><th scope="col" class="table__actions">Actions</th></tr></thead>
         <tbody>
@@ -223,15 +264,7 @@
             <td data-label="When">{% for text in rule.conditions_text %}{{ text }}{% if not loop.last %}<br>and {% endif %}{% endfor %}</td>
             <td data-label="Then">{{ rule.action_label }}</td>
             <td data-label="Status"><span class="status status--{{ 'success' if rule.is_enabled else 'neutral' }}">{{ "On" if rule.is_enabled else "Off" }}</span></td>
-            <td class="table__actions">{% if rule.can_edit %}
-              <a class="button button--ghost button--small" href="/rmm/event-logs/rules?rule={{ rule.id }}#rmm-event-log-rule-form">Edit<span class="visually-hidden"> {{ rule.name }}</span></a>
-              <form method="post" action="/rmm/event-logs/rules/{{ rule.id }}/enabled" class="inline-form">
-                {% include "partials/csrf.html" %}
-                <input type="hidden" name="enabled" value="{{ '0' if rule.is_enabled else '1' }}">
-                <input type="hidden" name="asset_id" value="{{ asset.id }}">
-                <button class="button button--ghost button--small" type="submit">{{ "Turn off" if rule.is_enabled else "Turn on" }}<span class="visually-hidden"> {{ rule.name }}</span></button>
-              </form>
-            {% endif %}</td>
+            <td class="table__actions">{% if rule.can_edit %}{{ rmm_ui.event_log_rule_menu(rule, csrf_token, asset.id) }}{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>

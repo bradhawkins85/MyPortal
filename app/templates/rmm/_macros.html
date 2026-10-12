@@ -124,3 +124,28 @@
   </li>
   {%- endfor %}
 {%- endmacro %}
+
+{# One event log rule's Action menu (rules page and the asset page's Event log
+   automations). asset_id sends the technician back to that asset page. #}
+{% macro event_log_rule_menu(rule, csrf_token=none, asset_id=none) -%}
+<details class="rmm-menu rmm-menu--end" data-rmm-menu>
+  <summary class="button button--ghost button--small rmm-menu__toggle" aria-label="Actions for {{ rule.name }}">Action <span aria-hidden="true">▾</span></summary>
+  <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="Actions for {{ rule.name }}">
+    <a class="dropdown__item" role="menuitem" href="/rmm/event-logs/rules?rule={{ rule.id }}#rmm-event-log-rule-form">Edit</a>
+    {%- if rule.action == "drop" %}
+    <a class="dropdown__item" role="menuitem" href="/rmm/event-logs/rules?run={{ rule.id }}{% if asset_id %}&amp;asset_id={{ asset_id }}{% endif %}#rmm-event-log-run-now">Run now</a>
+    {%- endif %}
+    <form method="post" action="/rmm/event-logs/rules/{{ rule.id }}/enabled" class="rmm-menu__form">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+      <input type="hidden" name="enabled" value="{{ '0' if rule.is_enabled else '1' }}">
+      {% if asset_id %}<input type="hidden" name="asset_id" value="{{ asset_id }}">{% endif %}
+      <button class="dropdown__item" role="menuitem" type="submit">{{ "Turn off" if rule.is_enabled else "Turn on" }}</button>
+    </form>
+    <form method="post" action="/rmm/event-logs/rules/{{ rule.id }}/delete" class="rmm-menu__form" data-confirm="Delete {{ rule.name }}?">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+      {% if asset_id %}<input type="hidden" name="asset_id" value="{{ asset_id }}">{% endif %}
+      <button class="dropdown__item dropdown__item--danger" role="menuitem" type="submit">Delete</button>
+    </form>
+  </div>
+</details>
+{%- endmacro %}

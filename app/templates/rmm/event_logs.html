@@ -21,7 +21,7 @@
       <h2 class="card__title" id="rmm-event-log-entries-heading">Entries</h2>
       <p class="card__subtitle">Newest first.{% if retention_days %} Entries are kept for {{ retention_days }} day{{ "s" if retention_days != 1 }}.{% endif %}</p>
     </div></header>
-    <form method="get" action="/rmm/event-logs" class="card__body form">
+    <form method="get" action="/rmm/event-logs" class="card__body form" role="search" aria-label="Filter event log entries">
       <div class="form-grid">
         <div class="form-field">
           <label class="form-label" for="rmm-event-log-device">Device</label>
@@ -48,8 +48,20 @@
           <input class="form-input" id="rmm-event-log-event-id" name="event_id" type="number" min="0" value="{{ filters.event_id }}">
         </div>
         <div class="form-field">
+          <label class="form-label" for="rmm-event-log-source">Source contains</label>
+          <input class="form-input" id="rmm-event-log-source" name="source" maxlength="255" value="{{ filters.source }}">
+        </div>
+        <div class="form-field">
           <label class="form-label" for="rmm-event-log-search">Message or source contains</label>
           <input class="form-input" id="rmm-event-log-search" name="q" maxlength="200" value="{{ filters.q }}">
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-event-log-from">From <span class="text-muted">UTC</span></label>
+          <input class="form-input" id="rmm-event-log-from" name="from" type="date" value="{{ filters.from }}">
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-event-log-to">To <span class="text-muted">UTC, inclusive</span></label>
+          <input class="form-input" id="rmm-event-log-to" name="to" type="date" value="{{ filters.to }}">
         </div>
       </div>
       <div class="form-actions"><button class="button button--primary" type="submit">Filter</button> <a class="button button--ghost" href="/rmm/event-logs">Clear</a></div>
