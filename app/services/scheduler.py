@@ -466,6 +466,17 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Daily asset warranty lookup (05:15 store-local). Only assets not
+        # checked within WARRANTY_LOOKUP_REFRESH_DAYS are sent to vendors.
+        if not self._scheduler.get_job("asset-warranty-lookup"):
+            self._scheduler.add_job(
+                self._run_asset_warranty_lookup,
+                CronTrigger(hour=5, minute=15, timezone=self._scheduler.timezone),
+                id="asset-warranty-lookup",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         # Seed an "unknown" event for every active backup job each morning so
         # missing reports remain visible. Runs at 00:05 store-local time.
         if not self._scheduler.get_job("backup-history-seed"):
@@ -832,6 +843,19 @@ class SchedulerService:
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Huntress daily sync failed", error=str(exc))
+
+    async def _run_asset_warranty_lookup(self) -> None:
+        """Look up vendor warranty dates for assets that are due a check."""
+        async with db.acquire_lock("asset_warranty_lookup", timeout=5) as lock_acquired:
+            if not lock_acquired:
+                log_info("Asset warranty lookup already running on another worker, skipping")
+                return
+            from app.services import warranty_lookup
+
+            try:
+                await warranty_lookup.refresh_due_assets()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Asset warranty lookup failed", error=str(exc))
 
     async def _run_backup_history_seed(self) -> None:
         """Seed daily 'unknown' backup events with distributed lock."""
@@ -1287,6 +1311,16 @@ class SchedulerService:
                             await company_id_lookup.refresh_all_missing_company_ids()
                         )
                         details = json.dumps(result, default=str) if result else None
+                elif command == "lookup_asset_warranties":
+                    from app.services import warranty_lookup
+
+                    company_id = task.get("company_id")
+                    result = await warranty_lookup.refresh_due_assets(
+                        int(company_id) if company_id else None
+                    )
+                    details = json.dumps(result, default=str)
+                    if result.get("status") == "skipped":
+                        status = "skipped"
                 elif command == "sync_huntress":
                     from app.services import huntress as huntress_service
                     from app.repositories import companies as company_repo

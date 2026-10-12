@@ -1220,6 +1220,18 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "settings": {},
     },
     {
+        "slug": "warranty-lookup",
+        "name": "Warranty lookup",
+        "description": (
+            "Record asset warranty start and expiry dates from each manufacturer's own "
+            "free warranty service (Dell, HP and Lenovo). Sends asset serial numbers to "
+            "the matching vendor. Dell and HP credentials are read from "
+            "WARRANTY_LOOKUP_* environment variables; Lenovo needs none."
+        ),
+        "icon": "🧾",
+        "settings": {},
+    },
+    {
         "slug": "trello",
         "name": "Trello",
         "description": "Link companies to Trello boards. Cards created in Trello become tickets; ticket replies sync back as card comments.",
@@ -2569,6 +2581,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "hudu",  # Hudu - documentation/password management, not a trigger action module
     "gitea",  # Gitea - RMM script source, not a trigger action module
     "huntress",  # Huntress - report data ingester, not a trigger action module
+    "warranty-lookup",  # Warranty lookup - asset data ingester, not a trigger action module
     "solidtime",  # Solidtime - dedicated ticket/reply sync, not a generic trigger action module
 }
 

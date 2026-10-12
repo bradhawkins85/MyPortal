@@ -125,6 +125,8 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
             performance_score,
             warranty_status,
             warranty_end_date,
+            warranty_start_date,
+            warranty_source,
             syncro_asset_id,
             tactical_asset_id,
             mac_address,
@@ -587,6 +589,10 @@ def _is_placeholder_serial(serial: str | None) -> bool:
     return value in _PLACEHOLDER_SERIALS or set(value) <= {"0", " ", "-"}
 
 
+def is_placeholder_serial(serial: str | None) -> bool:
+    return _is_placeholder_serial(serial)
+
+
 def _identity_conflicts(
     candidate: Mapping[str, Any] | None,
     sync_id: str | None,
@@ -773,8 +779,8 @@ async def upsert_asset(
                 last_user = %s,
                 approx_age = %s,
                 performance_score = %s,
-                warranty_status = %s,
-                warranty_end_date = %s,
+                warranty_status = CASE WHEN warranty_source IS NULL THEN %s ELSE warranty_status END,
+                warranty_end_date = CASE WHEN warranty_source IS NULL THEN %s ELSE warranty_end_date END,
                 syncro_asset_id = COALESCE(%s, syncro_asset_id),
                 tactical_asset_id = COALESCE(%s, tactical_asset_id),
                 serial_number = %s,
@@ -846,6 +852,98 @@ async def upsert_asset(
         )
     await _refresh_auto_tags(asset_id)
     return asset_id
+
+
+async def list_assets_due_for_warranty_lookup(
+    *, stale_before: datetime, limit: int, company_id: int | None = None
+) -> list[dict[str, Any]]:
+    """Return active assets with a serial whose warranty has not been checked recently.
+
+    Assets whose dates were entered by hand are left alone.
+    """
+    query = (
+        "SELECT id, company_id, name, serial_number, motherboard_manufacturer, machine_type "
+        "FROM assets WHERE archived_at IS NULL AND serial_number IS NOT NULL AND serial_number <> '' "
+        "AND (warranty_source IS NULL OR warranty_source <> 'manual') "
+        "AND (warranty_checked_at IS NULL OR warranty_checked_at < %s)"
+    )
+    params: list[Any] = [_to_mysql_datetime(stale_before)]
+    if company_id is not None:
+        query += " AND company_id = %s"
+        params.append(company_id)
+    query += " ORDER BY warranty_checked_at IS NULL DESC, warranty_checked_at ASC, id ASC LIMIT %s"
+    params.append(int(limit))
+    rows = await db.fetch_all(query, tuple(params))
+    return [dict(row) for row in rows or [] if not _is_placeholder_serial(row.get("serial_number"))]
+
+
+async def get_rmm_hardware_for_assets(asset_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """Return the manufacturer, model and serial the RMM agent reported for each asset."""
+    ids = sorted({int(asset_id) for asset_id in asset_ids})
+    if not ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(ids))
+    # Only "%s" placeholders are concatenated; the ids are bound parameters.
+    rows = await db.fetch_all(
+        "SELECT g.asset_id, i.manufacturer, i.model, i.serial_number "
+        "FROM rmm_agents g JOIN rmm_device_inventory i ON i.agent_id = g.id "
+        "WHERE g.asset_id IN (" + placeholders + ")",  # nosec B608
+        tuple(ids),
+    )
+    hardware: dict[int, dict[str, Any]] = {}
+    for row in rows or []:
+        hardware.setdefault(int(row["asset_id"]), dict(row))
+    return hardware
+
+
+async def record_warranty_lookup(
+    asset_id: int,
+    *,
+    lookup_status: str,
+    message: str | None,
+    checked_at: datetime,
+    source: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    warranty_status: str | None = None,
+) -> None:
+    """Store a warranty lookup outcome; dates are only replaced when the vendor found them."""
+    checked_db = _to_mysql_datetime(checked_at)
+    note = (message or "")[:255] or None
+    if lookup_status == "found":
+        await db.execute(
+            "UPDATE assets SET warranty_start_date = %s, warranty_end_date = %s, warranty_status = %s, "
+            "warranty_source = %s, warranty_checked_at = %s, warranty_lookup_status = %s, "
+            "warranty_lookup_message = %s WHERE id = %s",
+            (_to_mysql_date(start_date), _to_mysql_date(end_date), warranty_status, source,
+             checked_db, lookup_status, note, asset_id),
+        )
+        return
+    await db.execute(
+        "UPDATE assets SET warranty_checked_at = %s, warranty_lookup_status = %s, "
+        "warranty_lookup_message = %s WHERE id = %s",
+        (checked_db, lookup_status, note, asset_id),
+    )
+
+
+async def set_manual_warranty(
+    asset_id: int, *, start_date: date | None, end_date: date | None, warranty_status: str | None
+) -> None:
+    """Record technician-entered warranty dates, or clear them to allow vendor lookups again."""
+    if start_date is None and end_date is None:
+        await db.execute(
+            "UPDATE assets SET warranty_start_date = NULL, warranty_end_date = NULL, warranty_status = NULL, "
+            "warranty_source = NULL, warranty_checked_at = NULL, warranty_lookup_status = NULL, "
+            "warranty_lookup_message = NULL WHERE id = %s",
+            (asset_id,),
+        )
+        return
+    await db.execute(
+        "UPDATE assets SET warranty_start_date = %s, warranty_end_date = %s, warranty_status = %s, "
+        "warranty_source = 'manual', warranty_lookup_status = NULL, warranty_lookup_message = NULL "
+        "WHERE id = %s",
+        (_to_mysql_date(start_date), _to_mysql_date(end_date), warranty_status, asset_id),
+    )
 
 
 async def _record_asset_source(

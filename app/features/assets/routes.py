@@ -1983,6 +1983,7 @@ async def asset_detail_page(
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
             "asset_sources": [] if customer_safe else await asset_repo.list_asset_sources(company_id, asset_id),
             "customer_safe": customer_safe,
+            "warranty": None if customer_safe else await _warranty_context(record),
             "customer_roles": await role_repo.list_roles() if can_write else [],
             "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if can_write else [],
             "bcp_context": bcp_context,
@@ -2549,6 +2550,107 @@ async def update_asset_type(request: Request, asset_id: int):
         after={"asset_type": submitted, "source": "manual" if submitted else "auto"},
     )
     return _main().flash_redirect(f"/assets/{asset_id}", "Asset type saved.", "success")
+
+
+async def _warranty_context(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Describe where an asset's warranty dates came from and how to refresh them."""
+    from app.services import warranty_lookup
+
+    hardware = (await asset_repo.get_rmm_hardware_for_assets([int(record["id"])])).get(int(record["id"]))
+    vendor = warranty_lookup.vendor_for_asset(dict(record), hardware)
+    source = record.get("warranty_source")
+    return {
+        "lookup_enabled": await warranty_lookup.is_module_enabled(),
+        "vendor_label": warranty_lookup.VENDOR_LABELS.get(vendor or "", None),
+        "vendor_supported": vendor in warranty_lookup.SUPPORTED_VENDORS,
+        "vendor_check_url": warranty_lookup.VENDOR_CHECK_URLS.get(vendor or ""),
+        "source_label": warranty_lookup.VENDOR_LABELS.get(source or "", "Integration sync" if record.get("warranty_end_date") else None),
+        "is_manual": source == "manual",
+        "checked_at_utc": _utc_iso(record.get("warranty_checked_at")),
+    }
+
+
+def _utc_iso(value: Any) -> str | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _form_date(value: Any) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Enter dates as YYYY-MM-DD") from exc
+
+
+@router.post("/assets/{asset_id}/warranty/lookup", summary="Look up an asset's warranty with its manufacturer")
+async def lookup_asset_warranty(request: Request, asset_id: int):
+    from app.services import warranty_lookup
+
+    user, _company, company_id, redirect = await _asset_write_context(request)
+    if redirect:
+        return redirect
+    record = await asset_repo.get_asset_by_id(asset_id)
+    if not record or int(record.get("company_id") or 0) != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    try:
+        result = await warranty_lookup.lookup_asset(asset_id)
+    except warranty_lookup.WarrantyLookupDisabledError as exc:
+        return _main().flash_redirect(f"/assets/{asset_id}", str(exc), "error")
+    await audit_service.record(
+        action="asset.warranty.lookup", request=request, user_id=int(user["id"]),
+        entity_type="asset", entity_id=asset_id,
+        before={"warranty_end_date": str(record.get("warranty_end_date") or "") or None},
+        after={"status": result.status, "vendor": result.vendor,
+               "warranty_end_date": result.end_date.isoformat() if result.end_date else None},
+    )
+    level = "success" if result.status == "found" else "error" if result.status == "error" else "info"
+    return _main().flash_redirect(f"/assets/{asset_id}", result.message, level)
+
+
+@router.post("/assets/{asset_id}/warranty", summary="Record or clear an asset's warranty dates manually")
+async def save_manual_asset_warranty(request: Request, asset_id: int):
+    user, _company, company_id, redirect = await _asset_write_context(request)
+    if redirect:
+        return redirect
+    record = await asset_repo.get_asset_by_id(asset_id)
+    if not record or int(record.get("company_id") or 0) != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    form = await request.form()
+    start = _form_date(form.get("warranty_start_date"))
+    end = _form_date(form.get("warranty_end_date"))
+    if start and end and end < start:
+        raise HTTPException(status_code=422, detail="The warranty must end after it starts")
+    if start and not end:
+        raise HTTPException(status_code=422, detail="Enter the date the warranty ends")
+    status_text = None
+    if end:
+        status_text = "Active" if end >= date.today() else "Expired"
+    await asset_repo.set_manual_warranty(
+        asset_id, start_date=start, end_date=end, warranty_status=status_text,
+    )
+    await audit_service.record(
+        action="asset.warranty.update", request=request, user_id=int(user["id"]),
+        entity_type="asset", entity_id=asset_id,
+        before={"warranty_start_date": str(record.get("warranty_start_date") or "") or None,
+                "warranty_end_date": str(record.get("warranty_end_date") or "") or None,
+                "warranty_source": record.get("warranty_source")},
+        after={"warranty_start_date": start.isoformat() if start else None,
+               "warranty_end_date": end.isoformat() if end else None,
+               "warranty_source": "manual" if end else None},
+    )
+    message = "Warranty dates saved." if end else "Warranty dates cleared; the next lookup will check with the manufacturer."
+    return _main().flash_redirect(f"/assets/{asset_id}", message, "success")
 
 
 @router.post("/assets/{asset_id}/reconciliation/{source_record_id}/approve")

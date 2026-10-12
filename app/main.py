@@ -569,6 +569,7 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "queue_transcriptions": "Queue transcriptions",
     "process_transcription": "Process transcription",
     "sync_huntress": "Sync Huntress data",
+    "lookup_asset_warranties": "Look up asset warranties",
     "update_tray_icon_installer": "Update Tray Icon Installer",
     "rag_index_start": "RAG start indexing",
     "rag_index_stop": "RAG stop indexing",
@@ -596,7 +597,10 @@ def _scheduled_task_command_label(command: str) -> str:
 
 _TASK_COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Microsoft 365", ("sync_m365_", "refresh_m365_", "m365_mail_sync:")),
-    ("Staff and assets", ("sync_staff", "sync_assets", "sync_tactical_assets", "update_mac_vendors")),
+    ("Staff and assets", (
+        "sync_staff", "sync_assets", "sync_tactical_assets", "update_mac_vendors",
+        "lookup_asset_warranties",
+    )),
     ("Billing and Xero", (
         "sync_to_xero", "generate_invoice", "unbill_time_entries",
         "send_price_change_notifications", "process_subscription_renewals",
@@ -8004,8 +8008,8 @@ async def admin_scheduled_tasks(
     available_commands = (
         "update_mac_vendors", "sync_staff", "sync_m365_data", "sync_m365_licenses",
         "sync_m365_contacts", "sync_m365_mailboxes", "refresh_m365_consent_status",
-        "sync_huntress", "sync_to_xero", "sync_to_xero_auto_send", "generate_invoice",
-        "process_subscription_renewals",
+        "sync_huntress", "lookup_asset_warranties", "sync_to_xero", "sync_to_xero_auto_send",
+        "generate_invoice", "process_subscription_renewals",
         "unbill_time_entries", "send_price_change_notifications", "create_scheduled_ticket",
         "sync_recordings", "sync_unifi_talk_recordings", "queue_transcriptions",
         "process_transcription", "update_tray_icon_installer", "rag_index_start",
