@@ -1,0 +1,7 @@
+{
+  "guid": "ee3fee24-e457-4faa-abcf-26f8efc64d4d",
+  "occurred_at": "2026-10-12T01:40Z",
+  "change_type": "Feature",
+  "summary": "RMM: Event logs has its own menu entry, each asset shows its event logs and event log automations, and event log rules can drop incoming events or run an RMM script on the device that sent them",
+  "content_hash": "25270172dbeaa9101d57cdf96f7c51baf6bb50bc3902ad802a6f877e411c8f28"
+}

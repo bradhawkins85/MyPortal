@@ -82,6 +82,8 @@
           ("custom-fields", "asset-custom-fields", "Custom fields", custom_fields | length, not customer_safe),
           ("tags", "tags", "Tags", "", asset_tags is not none),
           ("scripts", "scripts", "Scripts", "", rmm),
+          ("event-logs", "event-logs", "Event logs", "", rmm and rmm.event_logs),
+          ("event-log-rules", "event-log-rules", "Event log automations", rmm.event_logs.rules | length if rmm and rmm.event_logs else "", rmm and rmm.event_logs),
           ("photos", "asset-photos", "Photos", asset_photos | length, can_view_asset_photos),
         ]),
         ("Connections", [
@@ -153,6 +155,89 @@
       </table></div>
       {% else %}
       <p class="text-muted">No scripts have run on this device yet.</p>
+      {% endif %}
+    </div>
+  </section>{% endif %}
+
+  {% if rmm and rmm.event_logs %}{% set elog = rmm.event_logs %}{% set LEVEL_STATUS = {"Critical": "error", "Error": "error", "Warning": "warning", "Information": "info", "Verbose": "neutral"} %}<section class="card card--panel ce-section" id="event-logs" data-asset-edit-section="event-logs" aria-labelledby="asset-event-logs-heading">
+    <header class="ce-section__header"><div class="ce-section__heading">
+      <h2 class="card__title" id="asset-event-logs-heading">Event logs</h2>
+      <p class="card__subtitle">The latest entries this device sent. <a href="/rmm/event-logs?asset_id={{ asset.id }}">Open in Event logs</a> to filter and search them.</p>
+    </div></header>
+    <div class="ce-section__body">
+      {% if not elog.database.configured %}
+      <p class="text-muted">Event log collection is off. Set the <code>EVENT_LOG_DB_*</code> settings in the .env file to turn it on.</p>
+      {% elif not elog.database.connected %}
+      <p class="text-muted">MyPortal cannot reach the event log database, so no entries are shown.</p>
+      {% elif elog.entries %}
+      <div class="table-wrapper"><table class="table">
+        <caption class="visually-hidden">Latest event log entries from this device</caption>
+        <thead><tr><th scope="col">Time</th><th scope="col">Log</th><th scope="col">Level</th><th scope="col">Source</th><th scope="col">Event ID</th><th scope="col">Message</th></tr></thead>
+        <tbody>
+          {% for entry in elog.entries %}
+          <tr>
+            <td data-label="Time"><span data-utc="{{ entry.time_created }}">{{ entry.time_created }}</span></td>
+            <td data-label="Log">{{ entry.log_name }}</td>
+            <td data-label="Level"><span class="status status--{{ LEVEL_STATUS.get(entry.level_label, 'neutral') }}">{{ entry.level_label }}</span></td>
+            <td data-label="Source">{{ entry.provider or "–" }}</td>
+            <td data-label="Event ID"><code>{{ entry.event_id }}</code></td>
+            <td data-label="Message">{% set message = entry.message or "" %}{% set first_line = message.strip().split("\n")[0] %}{% if message.strip() != first_line %}<details><summary>{{ first_line | truncate(160) }}</summary><pre class="rmm-event-log__message">{{ message }}</pre></details>{% else %}{{ first_line or "–" }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table></div>
+      {% else %}
+      <p class="text-muted">This device has not sent any event log entries yet.</p>
+      {% endif %}
+      <form method="post" action="/rmm/event-logs/assets/{{ asset.id }}" class="form">
+        {% include "partials/csrf.html" %}
+        <input type="hidden" name="return_to" value="asset">
+        <div class="form-field">
+          <label class="form-label" for="asset-event-log-extra">Extra logs for this device <span class="text-muted">one per line</span></label>
+          <textarea class="form-input" id="asset-event-log-extra" name="extra_logs" rows="3" {% if not elog.can_edit %}readonly{% endif %}>{{ elog.extra_logs | join("\n") }}</textarea>
+          <p class="form-help">Always collected: {{ (elog.default_logs + elog.company_logs) | join(", ") }}. Use the log's full name from Event Viewer, such as <code>Microsoft-Windows-PowerShell/Operational</code>.</p>
+        </div>
+        {% if elog.can_edit %}<div class="form-actions"><button class="button button--primary button--small" type="submit">Save logs</button></div>{% endif %}
+      </form>
+    </div>
+  </section>
+
+  <section class="card card--panel ce-section" id="event-log-rules" data-asset-edit-section="event-log-rules" aria-labelledby="asset-event-log-rules-heading">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="asset-event-log-rules-heading">Event log automations</h2>
+        <p class="card__subtitle">Event log rules that apply to this device: its own, its company's and those for every company. <a href="/rmm/event-logs/rules">All rules</a></p>
+      </div>
+      {% if elog.can_edit %}<a class="button button--primary button--small" href="/rmm/event-logs/rules?new=1&amp;asset_id={{ asset.id }}#rmm-event-log-rule-form">Add a rule for this device</a>{% endif %}
+    </header>
+    <div class="ce-section__body">
+      {% if elog.rules %}
+      <div class="table-wrapper"><table class="table">
+        <caption class="visually-hidden">Event log rules for this device</caption>
+        <thead><tr><th scope="col">Rule</th><th scope="col">Applies to</th><th scope="col">When</th><th scope="col">Then</th><th scope="col">Status</th><th scope="col" class="table__actions">Actions</th></tr></thead>
+        <tbody>
+          {% for rule in elog.rules %}
+          <tr>
+            <td data-label="Rule"><strong>{{ rule.name }}</strong>{% if rule.last_run_summary %}<br><span class="text-muted">{{ rule.last_run_summary }}</span>{% endif %}</td>
+            <td data-label="Applies to">{{ "This device" if rule.asset_id else rule.scope_label }}</td>
+            <td data-label="When">{% for text in rule.conditions_text %}{{ text }}{% if not loop.last %}<br>and {% endif %}{% endfor %}</td>
+            <td data-label="Then">{{ rule.action_label }}</td>
+            <td data-label="Status"><span class="status status--{{ 'success' if rule.is_enabled else 'neutral' }}">{{ "On" if rule.is_enabled else "Off" }}</span></td>
+            <td class="table__actions">{% if rule.can_edit %}
+              <a class="button button--ghost button--small" href="/rmm/event-logs/rules?rule={{ rule.id }}#rmm-event-log-rule-form">Edit<span class="visually-hidden"> {{ rule.name }}</span></a>
+              <form method="post" action="/rmm/event-logs/rules/{{ rule.id }}/enabled" class="inline-form">
+                {% include "partials/csrf.html" %}
+                <input type="hidden" name="enabled" value="{{ '0' if rule.is_enabled else '1' }}">
+                <input type="hidden" name="asset_id" value="{{ asset.id }}">
+                <button class="button button--ghost button--small" type="submit">{{ "Turn off" if rule.is_enabled else "Turn on" }}<span class="visually-hidden"> {{ rule.name }}</span></button>
+              </form>
+            {% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table></div>
+      {% else %}
+      <p class="text-muted">No event log rules apply to this device.</p>
       {% endif %}
     </div>
   </section>{% endif %}

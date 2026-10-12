@@ -665,9 +665,13 @@ async def queue_for_agent(
     onboarding_run_id: int | None = None,
     expires_at: datetime | None = None,
     notify: bool = True,
+    extra_context: Mapping[str, Any] | None = None,
 ) -> int:
     """Resolve the values for one device and queue the run. Raises
-    :class:`RunRequestError` with a ``device`` message when it cannot run there."""
+    :class:`RunRequestError` with a ``device`` message when it cannot run there.
+
+    ``extra_context`` adds variables for this run only, such as ``event`` for a
+    run started by an event log rule (``{{event.message}}``)."""
 
     problem = device_problem(script, agent)
     if problem:
@@ -675,6 +679,8 @@ async def queue_for_agent(
     company_id = int(agent["company_id"])
     asset_id = int(agent["asset_id"]) if agent.get("asset_id") is not None else None
     context = await build_template_context(company_id, asset_id)
+    if extra_context:
+        context.update(extra_context)
     payload = await resolve_entries(script, entries, context)
     run_id = await rmm_repo.create_run(
         script=dict(script),

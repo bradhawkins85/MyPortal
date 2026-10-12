@@ -5,7 +5,8 @@
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
 {% block header_title %}<span class="header__title-text">Event logs</span>{% endblock %}
 {% block header_actions %}
-  {{ page_header_actions([{"label": "Scripts", "type": "link", "href": "/rmm/scripts"}], menu_id="rmm-event-log-actions") }}
+  {% set actions = [{"label": "Event log rules", "type": "link", "variant": "primary", "href": "/rmm/event-logs/rules"}] if can_manage_rules else [{"label": "Event log rules", "type": "link", "href": "/rmm/event-logs/rules"}] %}
+  {{ page_header_actions(actions + [{"label": "Scripts", "type": "link", "href": "/rmm/scripts"}], menu_id="rmm-event-log-actions") }}
 {% endblock %}
 {% block content %}
 <section class="rmm-page" data-rmm-event-logs>

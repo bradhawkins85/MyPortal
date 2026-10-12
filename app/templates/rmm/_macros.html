@@ -31,6 +31,8 @@
     Schedule: {{ run.schedule_name or 'deleted' }}{% if run.requested_by_email %} <span class="text-muted">(run now by {{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'remote_control' -%}
     Remote control{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
+  {%- elif run.run_source == 'event_log' -%}
+    Event log rule
   {%- elif run.run_source == 'onboarding' -%}
     Onboarding{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- else -%}
