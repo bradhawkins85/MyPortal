@@ -22,12 +22,13 @@ var ErrUnavailable = errors.New("MyPortal reported the service unavailable")
 
 // Details describes the device; sent on enrolment and check-in.
 type Details struct {
-	Hostname     string   `json:"hostname,omitempty"`
-	OS           string   `json:"os,omitempty"`
-	OSVersion    string   `json:"os_version,omitempty"`
-	Arch         string   `json:"arch,omitempty"`
-	AgentVersion string   `json:"agent_version,omitempty"`
-	Shells       []string `json:"shells,omitempty"`
+	Hostname             string   `json:"hostname,omitempty"`
+	OS                   string   `json:"os,omitempty"`
+	OSVersion            string   `json:"os_version,omitempty"`
+	Arch                 string   `json:"arch,omitempty"`
+	AgentVersion         string   `json:"agent_version,omitempty"`
+	Shells               []string `json:"shells,omitempty"`
+	ScriptFilesSupported bool     `json:"script_files_supported"`
 }
 
 // Enrolment is MyPortal's answer to a successful enrolment.
@@ -49,6 +50,43 @@ type Job struct {
 	Parameters     map[string]interface{} `json:"parameters"`
 	ParameterOrder []string               `json:"parameter_order"`
 	Env            map[string]string      `json:"env"`
+	Files          []ScriptFile           `json:"files"`
+}
+
+// ScriptFile identifies a file version and its absolute endpoint destination.
+type ScriptFile struct {
+	SourcePath  string `json:"source_path"`
+	Destination string `json:"destination"`
+	MD5         string `json:"md5"`
+	SHA256      string `json:"sha256"`
+	Size        int64  `json:"size"`
+}
+
+// DownloadRunFile streams an assigned file through the authenticated portal.
+func (c *Client) DownloadRunFile(ctx context.Context, runID int64, index int, out io.Writer) error {
+	path := fmt.Sprintf("/api/rmm/agent/runs/%d/files/%d", runID, index)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("User-Agent", "MyPortal-RMM-Agent")
+	// File downloads must never redirect the device token to another service.
+	httpClient := *c.HTTP
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return ErrUnauthorized
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("file download: HTTP %d", resp.StatusCode)
+	}
+	_, err = io.Copy(out, io.LimitReader(resp.Body, (50<<20)+1))
+	return err
 }
 
 // CustomValue is a value the script asked MyPortal to store.

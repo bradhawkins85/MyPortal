@@ -294,7 +294,7 @@ async def sqlite_db(monkeypatch):
                  "472_rmm_event_log_settings.sql", "473_rmm_agent_auto_deploy.sql",
                  "474_rmm_event_log_rules.sql", "475_rmm_event_log_rule_tickets.sql",
                  "476_rmm_event_log_rule_schedules.sql", "477_rmm_device_inventory.sql", "478_rmm_checks.sql",
-                 "479_rmm_check_target_rules.sql"):
+                 "479_rmm_check_target_rules.sql", "480_rmm_script_files.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -734,7 +734,9 @@ async def test_layout_links_markers_and_names_and_lists_missing_folders(monkeypa
     companies = _companies((1, "Contoso", 0), (2, "Fabrikam", 0), (3, "Northwind", 0), (4, "Gone", 1))
     layout = await rmm_scripts.read_layout(settings, files, companies)
     assert layout.company_folders == {"Renamed": 1, "fabrikam": 2, "Northwind": 3}
-    assert set(layout.missing) == {"Companies/fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"}
+    file_folders = {"Files/Common/README.md", "Files/Companies/README.md", "Files/Companies/Contoso/.myportal-company",
+                    "Files/Companies/Fabrikam/.myportal-company", "Files/Companies/Northwind/.myportal-company"}
+    assert set(layout.missing) == {"Companies/fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"} | file_folders
     assert json.loads(layout.missing["Companies/Northwind/.myportal-company"])["company_id"] == 3
 
     assert rmm_scripts.script_scope("Common/disk/a.ps1", layout) == (True, None, "")
@@ -745,7 +747,35 @@ async def test_layout_links_markers_and_names_and_lists_missing_folders(monkeypa
 
     empty = await rmm_scripts.read_layout(settings, [], companies)
     assert set(empty.missing) == {"Common/README.md", "Companies/README.md", "Companies/Contoso/.myportal-company",
-                                  "Companies/Fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"}
+                                  "Companies/Fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"} | file_folders
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("root", ["", "rmm"])
+async def test_file_folders_preserve_markers_and_are_maintained_idempotently(monkeypatch, root):
+    settings = gitea.GiteaSettings("https://g", "https://g", "t", "msp", "scripts", "main", root, True)
+    prefix = root + "/" if root else ""
+    contents = {
+        prefix + "Files/Common/tool.exe": "binary",
+        prefix + "Files/Companies/Renamed/.myportal-company": '{"company_id": 1}',
+        prefix + "Files/Companies/fabrikam/setup.vbs": "script",
+        prefix + "Files/Companies/Broken/.myportal-company": "not json",
+        prefix + "Files/Companies/Archived/.myportal-company": '{"company_id": 4}',
+    }
+
+    async def fetch_file(_settings, path):
+        return contents[path].encode()
+
+    monkeypatch.setattr(gitea, "fetch_file", fetch_file)
+    companies = _companies((1, "Contoso", 0), (2, "Fabrikam", 0), (3, "Northwind", 0), (4, "Archived", 1), (5, "Gone", 1))
+    layout = await rmm_scripts.read_layout(settings, _files(*contents), companies)
+    missing = {path for path in layout.missing if path.startswith("Files/")}
+    assert missing == {"Files/Companies/fabrikam/.myportal-company", "Files/Companies/Northwind/.myportal-company"}
+    for path in missing:
+        contents[prefix + path] = layout.missing[path]
+    again = await rmm_scripts.read_layout(settings, _files(*contents), companies)
+    assert not any(path.startswith("Files/") for path in again.missing)
+    assert rmm_scripts.script_scope("Files/Common/tool.ps1", again)[0] is False
 
 
 @pytest.mark.anyio
@@ -755,7 +785,9 @@ async def test_company_scripts_run_only_at_their_company(sqlite_db, monkeypatch)
              "rmm/stray.ps1": "Write-Output 3\n"}
     summary, _fetched = await _sync(monkeypatch, files, created=created)
     assert summary.added == 2 and summary.folders_created == len(created)
-    assert set(created) == {"rmm/Companies/Contoso/.myportal-company", "rmm/Companies/Other/.myportal-company"}
+    assert set(created) == {"rmm/Companies/Contoso/.myportal-company", "rmm/Companies/Other/.myportal-company",
+                            "rmm/Files/Common/README.md", "rmm/Files/Companies/README.md",
+                            "rmm/Files/Companies/Contoso/.myportal-company", "rmm/Files/Companies/Other/.myportal-company"}
     assert [item["path"] for item in summary.skipped] == ["rmm/stray.ps1"]
 
     assert {s["name"] for s in await rmm_repo.list_scripts(company_id=1)} == {"a", "only"}
@@ -771,6 +803,109 @@ async def test_company_scripts_run_only_at_their_company(sqlite_db, monkeypatch)
     moved = {"rmm/Common/a.ps1": files["rmm/Common/a.ps1"], "rmm/Companies/Contoso/only.ps1": files["rmm/Companies/Contoso/only.ps1"]}
     summary, _fetched = await _sync(monkeypatch, moved, refuse=True)
     assert summary.unchanged == 2 and "refused" in summary.message()
+
+
+@pytest.mark.anyio
+async def test_stored_files_are_not_fetched_or_imported_as_runnable_scripts(sqlite_db, monkeypatch):
+    files = {"rmm/Common/run.ps1": "Write-Output 1\n", "rmm/Files/Common/tool.exe": "binary",
+             "rmm/Files/Common/helper.ps1": "Write-Output 2\n",
+             "rmm/Files/Companies/Contoso/setup.vbs": "script",
+             "rmm/Files/Companies/Contoso/setup.sh": "echo setup\n"}
+    summary, fetched = await _sync(monkeypatch, files)
+    assert summary.added == 1
+    assert fetched == ["rmm/Common/run.ps1"]
+    assert {script["name"] for script in await rmm_repo.list_scripts()} == {"run"}
+
+
+@pytest.mark.anyio
+async def test_associated_files_survive_sync_and_are_pinned_to_the_assigned_run(sqlite_db, monkeypatch):
+    import hashlib
+    from app.services import rmm_script_files
+
+    source = "rmm/Files/Common/tool.exe"
+    files = {"rmm/Common/run.ps1": "Write-Output 1\n", source: "binary"}
+    await _sync(monkeypatch, files)
+    script = (await rmm_repo.list_scripts())[0]
+    association = {"source_path": source, "destination": "C:\\Tools\\tool.exe"}
+    await rmm_repo.set_script_files(script["id"], [association])
+    await _sync(monkeypatch, {**files, "rmm/Common/run.ps1": "Write-Output 2\n"}, {"rmm/Common/run.ps1": "changed"})
+    assert (await rmm_repo.get_script(script["id"], with_content=True))["files"] == [association]
+    enrolment, agent = await _enrol(sqlite_db)
+
+    # An older agent must not silently ignore the new file manifest.
+    result = await rmm_scripts.queue_runs(script_id=script["id"], company_id=1, asset_ids=[10], submitted={}, timeout_seconds=60, requested_by_user_id=9)
+    assert not result["queued"] and "Update the RMM agent" in result["problems"][0]["message"]
+    await rmm_repo.record_agent_checkin(agent["id"], {"script_files_supported": True})
+    agent = await rmm_scripts.authenticate_agent(enrolment["auth_token"])
+    binary = b"MZ\x00\xffinstaller"
+    downloaded_versions = []
+
+    async def fetch_blob(_settings, sha, **kwargs):
+        downloaded_versions.append(sha)
+        return binary
+
+    monkeypatch.setattr(gitea, "fetch_blob", fetch_blob)
+    result = await rmm_scripts.queue_runs(script_id=script["id"], company_id=1, asset_ids=[10], submitted={}, timeout_seconds=60, requested_by_user_id=9)
+    run_id = result["queued"][0]["run_id"]
+    jobs = await rmm_scripts.claim_jobs(agent)
+    descriptor = jobs[0]["files"][0]
+    assert descriptor["md5"] == hashlib.md5(binary, usedforsecurity=False).hexdigest()
+    assert descriptor["size"] == len(binary)
+    assert descriptor["destination"] == association["destination"]
+    assert "blob_sha" not in descriptor and "base_url" not in descriptor
+    assert await rmm_script_files.download_file({"id": agent["id"] + 1}, run_id, 0) is None
+    assert await rmm_script_files.download_file(agent, run_id, 1) is None
+    assert await rmm_script_files.download_file(agent, run_id, -1) is None
+    assert await rmm_script_files.download_file(agent, run_id, 0) == (binary, "tool.exe")
+    assert downloaded_versions == ["sha-" + source, "sha-" + source]
+    from fastapi import FastAPI
+    from app.features.rmm import routes
+    import httpx
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://portal") as api:
+        url = f"/api/rmm/agent/runs/{run_id}/files/0"
+        assert (await api.get(url)).status_code == 401
+        response = await api.get(url, headers={"Authorization": "Bearer " + enrolment["auth_token"]})
+        assert response.status_code == 200 and response.content == binary
+        assert response.headers["cache-control"] == "no-store"
+    binary = b"changed contents"
+    with pytest.raises(rmm_script_files.ScriptFileError, match="verification"):
+        await rmm_script_files.download_file(agent, run_id, 0)
+    await rmm_repo.finish_run(run_id, status="failed", exit_code=None, stdout="", stderr="", custom_values=[], error_message="test")
+    assert await rmm_script_files.download_file(agent, run_id, 0) is None
+
+
+@pytest.mark.anyio
+async def test_file_association_edits_require_script_editing_write_access(monkeypatch):
+    from fastapi import HTTPException
+    from app.features.rmm import routes
+
+    async def context(request, **kwargs):
+        return {"id": 9}, None, 1, True
+
+    async def level(user):
+        return "read"
+
+    monkeypatch.setattr(routes, "_context", context)
+    monkeypatch.setattr(routes.gitea_sign_in, "access_level", level)
+    with pytest.raises(HTTPException) as exc:
+        await routes._editable_script_files(None, 7)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_agent_downgrade_clears_file_support_but_job_polls_preserve_it(sqlite_db):
+    from app.features.rmm.routes import AgentDetails
+
+    enrolment, agent = await _enrol(sqlite_db)
+    await rmm_scripts.checkin(agent, AgentDetails(agent_version="new", script_files_supported=True).model_dump(), None)
+    assert (await rmm_scripts.authenticate_agent(enrolment["auth_token"]))["script_files_supported"]
+    await rmm_repo.record_agent_checkin(agent["id"], {})
+    assert (await rmm_scripts.authenticate_agent(enrolment["auth_token"]))["script_files_supported"]
+    await rmm_scripts.checkin(agent, AgentDetails(agent_version="old").model_dump(), None)
+    assert not (await rmm_scripts.authenticate_agent(enrolment["auth_token"]))["script_files_supported"]
 
 
 @pytest.mark.anyio
@@ -1049,6 +1184,18 @@ def test_library_uses_company_edit_navigation_and_overview_by_default():
     assert 'aria-current="true"' in overview
     assert "Recent runs" in html and "Devices with the RMM agent" in html
     assert "/static/js/rmm_library.js" in html
+
+
+def test_script_file_list_and_editor_follow_permissions_and_escape_paths():
+    files = [{"source_path": "rmm/Files/Common/tool<test>.exe", "destination": "C:\\Tools\\tool.exe"}]
+    editable = _render_library(selected_script=_detail(files=files), can_edit_files=True, csrf_token="csrf-test")
+    assert "tool&lt;test&gt;.exe" in editable and "tool<test>.exe" not in editable
+    assert 'data-rmm-file-edit="0"' in editable and 'data-rmm-file-editor="7"' in editable
+    assert 'name="_csrf" value="csrf-test"' in editable
+    assert 'action="/rmm/scripts/7/files/0/remove"' in editable
+    read_only = _render_library(selected_script=_detail(files=files), can_edit_files=False)
+    assert "tool&lt;test&gt;.exe" in read_only
+    assert 'data-rmm-file-editor' not in read_only and 'data-rmm-file-edit=' not in read_only
 
 
 def test_library_detail_shows_description_summary_inputs_and_escaped_source():

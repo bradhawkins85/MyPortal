@@ -36,6 +36,16 @@ time and reports each result to `/api/rmm/agent/runs/{id}/result`. See
 are passed, and `docs/wiki/administration/RMM Scripts.md` for the script
 conventions.
 
+Scripts may also have associated Gitea files and absolute endpoint destinations.
+The agent advertises `script_files_supported: true` on enrolment and check-in.
+Before running a job it reuses destination files whose size, MD5 and SHA-256
+match the manifest, or downloads the pinned version from
+`GET /api/rmm/agent/runs/{id}/files/{index}` using its bearer token. Downloads
+are verified in a temporary file and at the final destination. Any failure
+stops the run before the script starts; existing files survive failed downloads.
+File-bearing runs are serialized and file preparation shares the run timeout.
+Gitea credentials stay on MyPortal.
+
 On Windows it also sends event logs: it asks `GET /api/rmm/agent/event-logs/config`
 which logs to collect (Application and System, plus extras chosen per company
 or device), reads new entries with `wevtutil` and posts them to

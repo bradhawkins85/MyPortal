@@ -636,6 +636,8 @@ services:
       GITEA__security__REVERSE_PROXY_TRUSTED_PROXIES: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
       GITEA__repository__DEFAULT_BRANCH: main
       GITEA__repository__DEFAULT_PRIVATE: private
+      GITEA__repository_0X2E_upload__ENABLED: "true"
+      GITEA__repository_0X2E_upload__ALLOWED_TYPES: "*/*"
       GITEA__openid__ENABLE_OPENID_SIGNIN: "false"
       GITEA__openid__ENABLE_OPENID_SIGNUP: "false"
       GITEA__mailer__ENABLED: "false"

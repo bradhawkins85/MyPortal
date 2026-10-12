@@ -286,7 +286,105 @@
     }
   }
 
+  function initFileEditor() {
+    const editor = detail.querySelector('[data-rmm-file-editor]');
+    if (!editor) return;
+    const modal = editor.querySelector('[data-rmm-file-modal]');
+    const form = editor.querySelector('form');
+    const trigger = editor.querySelector('summary');
+    const errorNode = editor.querySelector('[data-rmm-file-error]');
+    const loading = editor.querySelector('[data-rmm-file-loading]');
+    const source = form.elements.source_path;
+    const destination = form.elements.destination;
+    const index = form.elements.index;
+    let lastTrigger = trigger;
+    let snapshot = '';
+    let loaded = false;
+    let saving = false;
+    modal.classList.add('modal');
+    modal.hidden = true;
+    form.classList.add('modal__panel', 'modal__panel--wide');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'rmm-file-editor-title');
+    trigger.setAttribute('aria-haspopup', 'dialog');
+    modal.id = 'rmm-file-modal';
+    trigger.setAttribute('aria-controls', modal.id);
+    editor.querySelectorAll('[data-rmm-file-close]').forEach((button) => { button.hidden = false; });
+    const state = () => JSON.stringify([source.value, destination.value]);
+    function close() {
+      if (saving) return;
+      if (state() !== snapshot && !window.confirm('Discard unsaved changes to this file?')) return;
+      editor.open = false;
+      modal.hidden = true;
+      lastTrigger.focus();
+    }
+    async function open(button, rowIndex) {
+      lastTrigger = button;
+      index.value = rowIndex === undefined ? '' : String(rowIndex);
+      source.value = button.dataset.source || '';
+      destination.value = button.dataset.destination || '';
+      snapshot = state();
+      errorNode.hidden = true;
+      editor.open = true;
+      modal.hidden = false;
+      source.focus();
+      if (loaded) return;
+      loading.hidden = false;
+      try {
+        const response = await fetch('/api/rmm/scripts/' + editor.dataset.rmmFileEditor + '/files', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Could not load Gitea files.');
+        const options = editor.querySelector('datalist');
+        options.replaceChildren(...data.available.map((path) => { const option = document.createElement('option'); option.value = path; return option; }));
+        loaded = true;
+      } catch (error) {
+        errorNode.textContent = error.message;
+        errorNode.hidden = false;
+      } finally { loading.hidden = true; }
+    }
+    trigger.addEventListener('click', (event) => { event.preventDefault(); open(trigger); });
+    detail.querySelectorAll('[data-rmm-file-edit]').forEach((button) => {
+      button.hidden = false;
+      button.addEventListener('click', () => open(button, button.dataset.rmmFileEdit));
+    });
+    editor.querySelectorAll('[data-rmm-file-close]').forEach((button) => button.addEventListener('click', close));
+    modal.addEventListener('click', (event) => { if (event.target === modal) close(); });
+    modal.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); close(); }
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(modal.querySelectorAll('button:not([disabled]), input:not([type="hidden"]):not([disabled])'));
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (saving || !form.reportValidity()) return;
+      saving = true;
+      const save = form.querySelector('[type="submit"]');
+      save.disabled = true;
+      save.textContent = 'Saving…';
+      errorNode.hidden = true;
+      try {
+        const response = await fetch(form.action, { method: 'POST', body: new FormData(form), credentials: 'same-origin', headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() } });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Could not save the file.');
+        window.location.assign('/rmm/scripts?script=' + editor.dataset.rmmFileEditor);
+      } catch (error) {
+        errorNode.textContent = error.message;
+        errorNode.hidden = false;
+        saving = false;
+        save.disabled = false;
+        save.textContent = 'Save file';
+        errorNode.setAttribute('tabindex', '-1');
+        errorNode.focus();
+      }
+    });
+  }
+
   function initPanel() {
+    initFileEditor();
     detail.querySelectorAll('[data-utc]').forEach((node) => {
       node.textContent = formatDate(node.getAttribute('data-utc'));
     });

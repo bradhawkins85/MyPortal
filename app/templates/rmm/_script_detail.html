@@ -38,6 +38,8 @@
     </div>
   </section>
 
+  {% include "rmm/_script_files.html" %}
+
   <section class="card card--panel ce-section rmm-ai" aria-labelledby="rmm-ai-title" data-rmm-ai="{{ script.id }}"{% if can_run and (not ai.summary or ai.stale) %} data-rmm-ai-auto{% endif %}>
     <header class="ce-section__header">
       <div class="ce-section__heading">

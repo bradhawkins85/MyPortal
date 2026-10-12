@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,7 +54,8 @@ var markerPattern = regexp.MustCompile(`^\s*##myportal\[(asset|company|session)\
 type Runner struct {
 	WorkDir string
 	// Lookup finds interpreters; replaced in tests.
-	Lookup func(string) (string, error)
+	Lookup       func(string) (string, error)
+	DownloadFile func(context.Context, int64, int, io.Writer) error
 }
 
 // New returns a runner that keeps temporary files under workDir.
@@ -109,6 +111,30 @@ func (r *Runner) Run(ctx context.Context, job client.Job) client.Result {
 		result.Error = "The script content did not match its checksum, so it was not run."
 		return result
 	}
+	timeout := time.Duration(job.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Minute
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if len(job.Files) > 0 {
+		// Keep one file-bearing run from replacing another run's dependencies.
+		select {
+		case fileRunSlot <- struct{}{}:
+			defer func() { <-fileRunSlot }()
+		case <-runCtx.Done():
+			result.Error = "File preparation was cancelled: " + runCtx.Err().Error()
+			result.TimedOut = errors.Is(runCtx.Err(), context.DeadlineExceeded)
+			return result
+		}
+		var err error
+		result.Stdout, err = r.prepareFiles(runCtx, job)
+		if err != nil {
+			result.Error = "Could not prepare script files: " + err.Error()
+			result.TimedOut = errors.Is(runCtx.Err(), context.DeadlineExceeded)
+			return result
+		}
+	}
 	dir, err := os.MkdirTemp(r.WorkDir, fmt.Sprintf("run-%d-", job.ID))
 	if err != nil {
 		result.Error = "Could not create a working folder: " + err.Error()
@@ -123,13 +149,6 @@ func (r *Runner) Run(ctx context.Context, job client.Job) client.Result {
 		return result
 	}
 
-	timeout := time.Duration(job.TimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 10 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	cmd := exec.CommandContext(runCtx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = buildEnv(os.Environ(), job, resultFile)
@@ -141,7 +160,7 @@ func (r *Runner) Run(ctx context.Context, job client.Job) client.Result {
 	cmd.WaitDelay = 10 * time.Second
 
 	runErr := cmd.Run()
-	result.Stdout = stdout.String()
+	result.Stdout += stdout.String()
 	result.Stderr = stderr.String()
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		result.TimedOut = true

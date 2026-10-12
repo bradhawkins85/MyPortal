@@ -39,6 +39,7 @@ def _script_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     script = dict(row)
     script["parameters"] = _decode_json(script.pop("parameters_json", None), [])
     script["env_vars"] = _decode_json(script.pop("env_vars_json", None), [])
+    script["files"] = _decode_json(script.pop("files_json", None), [])
     script["is_active"] = bool(script.get("is_active"))
     if "ai_summary_json" in script:
         script["ai_summary"] = _decode_json(script.pop("ai_summary_json"), None)
@@ -69,13 +70,13 @@ async def list_scripts(*, company_id: int | None = None) -> list[dict[str, Any]]
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
             "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
-            "created_at, updated_at FROM rmm_scripts WHERE is_active = 1 ORDER BY folder, name"
+            "created_at, updated_at, files_json FROM rmm_scripts WHERE is_active = 1 ORDER BY folder, name"
         )
     else:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
             "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
-            "created_at, updated_at FROM rmm_scripts WHERE is_active = 1 "
+            "created_at, updated_at, files_json FROM rmm_scripts WHERE is_active = 1 "
             "AND (company_id IS NULL OR company_id = %s) ORDER BY folder, name",
             (company_id,),
         )
@@ -96,7 +97,7 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
             "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
-            "created_at, updated_at, content, ai_summary_json, ai_summary_sha256, ai_summary_model, "
+            "created_at, updated_at, files_json, content, ai_summary_json, ai_summary_sha256, ai_summary_model, "
             "ai_summary_updated_at FROM rmm_scripts WHERE id = %s",
             (script_id,),
         )
@@ -104,7 +105,7 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
             "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
-            "created_at, updated_at FROM rmm_scripts WHERE id = %s",
+            "created_at, updated_at, files_json FROM rmm_scripts WHERE id = %s",
             (script_id,),
         )
     return _script_row(row)
@@ -180,6 +181,13 @@ async def set_script_timeout(script_id: int, timeout_seconds: int) -> None:
     )
 
 
+async def set_script_files(script_id: int, files: list[dict[str, str]]) -> None:
+    await db.execute(
+        "UPDATE rmm_scripts SET files_json = %s, updated_at = %s WHERE id = %s",
+        (json.dumps(files), _utcnow(), script_id),
+    )
+
+
 async def save_script_summary(
     script_id: int, summary: dict[str, Any], *, content_sha256: str, model: str | None
 ) -> None:
@@ -225,12 +233,13 @@ async def create_agent(
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_agents (agent_uid, tray_device_id, company_id, asset_id, auth_token_hash, "
         "auth_token_prefix, hostname, os, os_version, arch, agent_version, shells, last_ip, last_seen_utc, "
-        "status, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-        "'active', %s, %s)",
+        "status, created_at, updated_at, script_files_supported) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+        "'active', %s, %s, %s)",
         (
             agent_uid, tray_device_id, company_id, asset_id, auth_token_hash, auth_token_prefix,
             details.get("hostname"), details.get("os"), details.get("os_version"), details.get("arch"),
             details.get("agent_version"), details.get("shells"), details.get("last_ip"), now, now, now,
+            bool(details.get("script_files_supported")),
         ),
     )
 
@@ -249,11 +258,13 @@ async def reenrol_agent(
     await db.execute(
         "UPDATE rmm_agents SET tray_device_id = %s, company_id = %s, asset_id = %s, auth_token_hash = %s, "
         "auth_token_prefix = %s, hostname = %s, os = %s, os_version = %s, arch = %s, agent_version = %s, "
-        "shells = %s, last_ip = %s, last_seen_utc = %s, status = 'active', updated_at = %s WHERE id = %s",
+        "shells = %s, last_ip = %s, last_seen_utc = %s, status = 'active', updated_at = %s, "
+        "script_files_supported = %s WHERE id = %s",
         (
             tray_device_id, company_id, asset_id, auth_token_hash, auth_token_prefix,
             details.get("hostname"), details.get("os"), details.get("os_version"), details.get("arch"),
-            details.get("agent_version"), details.get("shells"), details.get("last_ip"), now, now, agent_id,
+            details.get("agent_version"), details.get("shells"), details.get("last_ip"), now, now,
+            bool(details.get("script_files_supported")), agent_id,
         ),
     )
 
@@ -263,11 +274,12 @@ async def record_agent_checkin(agent_id: int, details: dict[str, Any]) -> None:
     await db.execute(
         "UPDATE rmm_agents SET last_seen_utc = %s, last_ip = COALESCE(%s, last_ip), "
         "agent_version = COALESCE(%s, agent_version), shells = COALESCE(%s, shells), "
-        "hostname = COALESCE(%s, hostname), os_version = COALESCE(%s, os_version), updated_at = %s "
+        "hostname = COALESCE(%s, hostname), os_version = COALESCE(%s, os_version), updated_at = %s, "
+        "script_files_supported = COALESCE(%s, script_files_supported) "
         "WHERE id = %s",
         (
             now, details.get("last_ip"), details.get("agent_version"), details.get("shells"),
-            details.get("hostname"), details.get("os_version"), now, agent_id,
+            details.get("hostname"), details.get("os_version"), now, details.get("script_files_supported"), agent_id,
         ),
     )
 
@@ -357,6 +369,14 @@ async def get_run(run_id: int) -> dict[str, Any] | None:
         (run_id,),
     )
     return _run_row(row)
+
+
+async def get_run_file_payload(run_id: int, agent_id: int) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT payload_encrypted, expires_at FROM rmm_script_runs WHERE id = %s AND agent_id = %s "
+        "AND status IN ('dispatched', 'running') AND expires_at > %s",
+        (run_id, agent_id, _utcnow()),
+    )
 
 
 async def list_runs(

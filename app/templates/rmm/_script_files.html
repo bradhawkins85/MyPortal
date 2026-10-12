@@ -1,0 +1,69 @@
+<section class="card card--panel ce-section" aria-labelledby="rmm-files-title">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="rmm-files-title">Files</h2>
+      <p class="card__subtitle">Files this script needs on the endpoint. Matching files are reused; downloads are verified before the script starts.</p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    {% if script.files %}
+    <ul class="rmm-files" aria-label="Associated files">
+      {% for file in script.files %}
+      <li class="rmm-files__item">
+        <div class="rmm-files__paths"><strong>{{ file.source_path }}</strong><span class="text-muted">Endpoint path</span><code>{{ file.destination }}</code></div>
+        {% if can_edit_files %}
+        <div class="rmm-files__actions">
+          <button class="button button--ghost button--small" type="button" data-rmm-file-edit="{{ loop.index0 }}" data-source="{{ file.source_path }}" data-destination="{{ file.destination }}" hidden>Edit<span class="visually-hidden"> {{ file.source_path }}</span></button>
+          <form method="post" action="/rmm/scripts/{{ script.id }}/files/{{ loop.index0 }}/remove">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <button class="button button--ghost button--small" type="submit">Remove<span class="visually-hidden"> {{ file.source_path }}</span></button>
+          </form>
+        </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="text-muted">No associated files. Add installers, tools or other files the script needs.</p>{% endif %}
+    {% if can_edit_files %}
+    <details data-rmm-file-editor="{{ script.id }}">
+      <summary class="button button--ghost">Add file</summary>
+      <div data-rmm-file-modal>
+        <form method="post" action="/rmm/scripts/{{ script.id }}/files" data-rmm-file-form>
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="index" value="">
+          <header class="modal__header">
+            <div><h2 class="modal__title" id="rmm-file-editor-title">Associate a file</h2><p class="card__subtitle">Choose a file in Gitea and where this script needs it.</p></div>
+            <button type="button" class="modal__close" data-rmm-file-close aria-label="Close file editor" hidden></button>
+          </header>
+          <div class="modal__body rmm-editor__body">
+            <div class="rmm-editor__main">
+              <p class="alert alert--error" data-rmm-file-error role="alert" hidden></p>
+              <div class="form-field">
+                <label class="form-label" for="rmm-file-source">Gitea file</label>
+                <input class="form-input" id="rmm-file-source" name="source_path" list="rmm-file-options" maxlength="1024" required autocomplete="off" aria-describedby="rmm-file-source-help">
+                <datalist id="rmm-file-options"></datalist>
+                <p class="form-help" id="rmm-file-source-help">Use the repository path under Files/Common{% if script.scope == 'company' %} or this company's folder under Files/Companies{% endif %}.</p>
+                <p class="form-help" data-rmm-file-loading role="status" hidden>Loading files from Gitea…</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="rmm-file-destination">Endpoint file path</label>
+                <input class="form-input" id="rmm-file-destination" name="destination" maxlength="1024" required autocomplete="off" aria-describedby="rmm-file-destination-help">
+                <p class="form-help" id="rmm-file-destination-help">Include the filename, for example C:\Tools\setup.exe or /opt/tools/setup.sh. Parent folders are created automatically.</p>
+              </div>
+            </div>
+            <aside class="rmm-editor__aside" aria-label="How files are prepared">
+              <h3 class="rmm-detail__label">Before the script starts</h3>
+              <p>The endpoint checks the existing file. It downloads a replacement only when the file is missing or differs from Gitea.</p>
+              <p>Every download is verified. If a required file cannot be prepared, the run fails and the script does not start.</p>
+            </aside>
+          </div>
+          <footer class="modal__footer">
+            <button type="button" class="button button--ghost" data-rmm-file-close hidden>Cancel</button>
+            <button type="submit" class="button button--primary">Save file</button>
+          </footer>
+        </form>
+      </div>
+    </details>
+    {% endif %}
+  </div>
+</section>

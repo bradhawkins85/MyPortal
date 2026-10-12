@@ -1,0 +1,7 @@
+{
+  "guid": "c12a5e15-a4f7-4cf6-b4ed-bf3278c36dba",
+  "occurred_at": "2026-10-12T09:44Z",
+  "change_type": "Feature",
+  "summary": "Gitea: allow all repository upload types and maintain shared and per-company folders under Files",
+  "content_hash": "d53d73f79ee662b928a1e5fd05bab4eef8e225f8a2bd086491362787693a6902"
+}

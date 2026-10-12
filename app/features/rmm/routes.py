@@ -6,6 +6,7 @@ Technician side (company scoped, ``menu.rmm_scripts``; write access runs scripts
   opens one script: its description, AI summary, inputs, runs and source
 * ``GET /api/rmm/scripts`` and ``/api/rmm/scripts/{id}`` scripts and their fields
 * ``POST /api/rmm/scripts/{id}/summary`` (re)generate a script's AI summary
+* ``GET/PUT /api/rmm/scripts/{id}/files`` list/set associated Gitea files
 * ``POST /api/rmm/scripts/{id}/runs`` push a script to devices
 * ``GET /api/rmm/runs`` / ``/api/rmm/runs/{id}``, ``POST /api/rmm/runs/{id}/cancel``
 * ``POST /rmm/scripts/sync`` load scripts from Gitea (super admin)
@@ -19,6 +20,7 @@ Agent side (``Authorization: Bearer`` token):
 * ``POST /api/rmm/agent/enrol`` with the tray device's token
 * ``POST /api/rmm/agent/checkin``, ``GET /api/rmm/agent/jobs`` (long poll)
 * ``POST /api/rmm/agent/runs/{id}/started`` and ``/result``
+* ``GET /api/rmm/agent/runs/{id}/files/{index}`` assigned immutable file downloads
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from app.services import rmm_checks
 from app.services import rmm_remote_control
 from app.services import rmm_script_parser as parser
 from app.services import rmm_script_summary
+from app.services import rmm_script_files
 from app.services import rmm_scripts
 
 router = APIRouter(tags=["RMM scripts"])
@@ -101,6 +104,7 @@ def _script_summary(script: dict[str, Any]) -> dict[str, Any]:
         "env_count": len(script.get("env_vars") or []),
         "default_timeout_seconds": script.get("default_timeout_seconds") or 600,
         "synced_at": _iso(script.get("synced_at")),
+        "files": script.get("files") or [],
     }
 
 
@@ -230,6 +234,7 @@ async def scripts_page(request: Request, script: int | None = Query(default=None
             "script_not_found": bool(script) and selected is None,
             "can_run": can_run,
             "can_sync": bool(user.get("is_super_admin")),
+            "can_edit_files": await gitea_sign_in.access_level(user) == "write",
             "is_super_admin": bool(user.get("is_super_admin")),
             "gitea_ready": gitea_ready,
             "gitea_message": gitea_message,
@@ -321,6 +326,101 @@ async def summarise_script_api(script_id: int, request: Request):
         metadata={"script": script["name"], "model": state["model"]},
     )
     return state
+
+
+async def _editable_script_files(request: Request, script_id: int) -> tuple[dict, dict]:
+    user, _company, company_id, _can_run = await _context(request, api=True)
+    if await gitea_sign_in.access_level(user) != "write":
+        raise HTTPException(status_code=403, detail="Script editing write access is required")
+    script = await rmm_repo.get_script(script_id, with_content=True)
+    if not rmm_repo.script_available_to(script, company_id):
+        raise HTTPException(status_code=404, detail="Script not found")
+    return user, script
+
+
+class ScriptFileAssociation(BaseModel):
+    source_path: str = Field(min_length=1, max_length=1024)
+    destination: str = Field(min_length=1, max_length=1024)
+
+
+class ScriptFilesRequest(BaseModel):
+    files: list[ScriptFileAssociation] = Field(default_factory=list, max_length=rmm_script_files.MAX_FILES)
+
+
+@router.get("/api/rmm/scripts/{script_id:int}/files", summary="List associated and available Gitea files")
+async def script_files_api(script_id: int, request: Request):
+    _user, script = await _editable_script_files(request, script_id)
+    try:
+        settings = await gitea.load_settings()
+        available = await rmm_script_files.available_files(settings, script)
+    except gitea.GiteaError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"files": script.get("files") or [], "available": sorted(available, key=str.casefold)}
+
+
+async def _save_script_files(request: Request, user: dict, script: dict, files: list[dict]) -> list[dict]:
+    validated = await rmm_script_files.validate_sources(script, files)
+    await rmm_repo.set_script_files(int(script["id"]), validated)
+    await audit_service.record(
+        action="rmm.script.files.update", request=request, user_id=user.get("id"),
+        entity_type="rmm_script", entity_id=script["id"], metadata={"files": validated},
+    )
+    return validated
+
+
+@router.put("/api/rmm/scripts/{script_id:int}/files", summary="Set a script's Gitea files and endpoint paths")
+async def update_script_files_api(script_id: int, payload: ScriptFilesRequest, request: Request):
+    user, script = await _editable_script_files(request, script_id)
+    try:
+        files = await _save_script_files(request, user, script, [item.model_dump() for item in payload.files])
+    except rmm_script_files.ScriptFileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except gitea.GiteaError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"files": files}
+
+
+@router.post("/rmm/scripts/{script_id:int}/files", response_class=HTMLResponse, summary="Associate a Gitea file with a script")
+async def add_script_file(script_id: int, request: Request):
+    user, script = await _editable_script_files(request, script_id)
+    form = await request.form()
+    files = list(script.get("files") or [])
+    association = {"source_path": str(form.get("source_path") or ""), "destination": str(form.get("destination") or "")}
+    if form.get("index") not in (None, ""):
+        try:
+            index = int(str(form["index"]))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid file association") from exc
+        if index < 0 or index >= len(files):
+            raise HTTPException(status_code=404, detail="File association not found")
+        files[index] = association
+    else:
+        files.append(association)
+    try:
+        await _save_script_files(request, user, script, files)
+    except (rmm_script_files.ScriptFileError, gitea.GiteaError) as exc:
+        if request.headers.get("Accept") == "application/json":
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        return flash_redirect(f"/rmm/scripts?script={script_id}", str(exc), "error")
+    if request.headers.get("Accept") == "application/json":
+        return JSONResponse({"ok": True})
+    return flash_redirect(f"/rmm/scripts?script={script_id}", "File associated with the script.", "success")
+
+
+@router.post("/rmm/scripts/{script_id:int}/files/{index:int}/remove", response_class=HTMLResponse, summary="Remove a script file association")
+async def remove_script_file(script_id: int, index: int, request: Request):
+    user, script = await _editable_script_files(request, script_id)
+    files = list(script.get("files") or [])
+    if index < 0 or index >= len(files):
+        raise HTTPException(status_code=404, detail="File association not found")
+    files.pop(index)
+    # Removing a file must still work when Gitea or another associated file is unavailable.
+    await rmm_repo.set_script_files(script_id, files)
+    await audit_service.record(
+        action="rmm.script.files.update", request=request, user_id=user.get("id"),
+        entity_type="rmm_script", entity_id=script_id, metadata={"files": files},
+    )
+    return flash_redirect(f"/rmm/scripts?script={script_id}", "File association removed.", "success")
 
 
 class RunRequest(BaseModel):
@@ -420,6 +520,7 @@ class AgentDetails(BaseModel):
     arch: str | None = Field(default=None, max_length=32)
     agent_version: str | None = Field(default=None, max_length=32)
     shells: list[str] = Field(default_factory=list, max_length=16)
+    script_files_supported: bool | None = None
 
 
 class AgentEnrolRequest(AgentDetails):
@@ -471,6 +572,18 @@ async def agent_run_started(run_id: int, agent: dict = Depends(get_current_rmm_a
     if not await rmm_scripts.mark_started(agent, run_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return {"ok": True}
+
+
+@router.get("/api/rmm/agent/runs/{run_id:int}/files/{index:int}", summary="Download a file assigned to this agent's active run")
+async def agent_script_file(run_id: int, index: int, agent: dict = Depends(get_current_rmm_agent)):
+    try:
+        downloaded = await rmm_script_files.download_file(agent, run_id, index)
+    except (rmm_script_files.ScriptFileError, gitea.GiteaError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if downloaded is None:
+        raise HTTPException(status_code=404, detail="Run file not found")
+    raw, _filename = downloaded
+    return Response(raw, media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
 
 
 class AgentCustomValue(BaseModel):

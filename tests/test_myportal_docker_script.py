@@ -355,6 +355,8 @@ def test_compose_file_publishes_the_port_only_on_the_proxy(tmp_path):
     assert gitea["environment"]["GITEA__server__ROOT_URL"] == "${GITEA_ROOT_URL}"
     assert gitea["environment"]["GITEA__service__DISABLE_REGISTRATION"] == "true"
     assert gitea["environment"]["GITEA__service__REQUIRE_SIGNIN_VIEW"] == "true"
+    assert gitea["environment"]["GITEA__repository_0X2E_upload__ENABLED"] == "true"
+    assert gitea["environment"]["GITEA__repository_0X2E_upload__ALLOWED_TYPES"] == "*/*"
 
 
 @pytest.mark.parametrize("contents", ["", "REDIS_URL=\n", 'export REDIS_URL = ""\n', "# REDIS_URL=old\n"])

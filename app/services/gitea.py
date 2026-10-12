@@ -1,7 +1,8 @@
 """Gitea client used to load RMM scripts from a repository.
 
 Gitea is where scripts are written and reviewed. MyPortal reads them, and only
-writes the folder skeleton (``Common/``, ``Companies/<company>/``) with
+writes the script and file folder skeleton (``Common/``, ``Companies/<company>/``,
+``Files/Common/``, ``Files/Companies/<company>/``) with
 :func:`create_files`. The repository, branch and optional folder come from the
 ``gitea`` integration module (``GITEA_*`` settings in ``.env``).
 
@@ -17,6 +18,9 @@ from typing import Any
 from urllib.parse import quote
 
 import base64
+import hashlib
+import json
+import re
 
 import httpx
 
@@ -147,6 +151,37 @@ async def fetch_file(settings: GiteaSettings, path: str) -> bytes:
         raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
     _raise_for(response, "downloading " + path)
     return response.content
+
+
+async def fetch_blob(settings: GiteaSettings, sha: str, *, max_bytes: int) -> bytes:
+    """Fetch an immutable Git blob, preserving the file version queued for a run."""
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise GiteaError("Gitea returned an invalid file version.")
+    url = _repo_url(settings) + "/git/blobs/" + sha
+    try:
+        async with _client(settings) as client:
+            async with client.stream("GET", url) as response:
+                _raise_for(response, "downloading a script file")
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > max_bytes * 2 + 65536:
+                        raise GiteaError("The script file exceeds the download size limit.")
+    except httpx.HTTPError as exc:
+        raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
+    try:
+        payload = json.loads(data)
+        if payload.get("encoding") != "base64":
+            raise ValueError("Unexpected blob encoding")
+        raw = base64.b64decode("".join(payload["content"].split()), validate=True)
+    except (ValueError, KeyError, TypeError) as exc:
+        raise GiteaError("Gitea returned an unreadable script file.") from exc
+    if len(raw) > max_bytes:
+        raise GiteaError("The script file exceeds the download size limit.")
+    digest = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw, usedforsecurity=False).hexdigest()
+    if digest != sha:
+        raise GiteaError("The script file did not match its Gitea version.")
+    return raw
 
 
 async def create_files(settings: GiteaSettings, files: dict[str, str], message: str) -> None:
