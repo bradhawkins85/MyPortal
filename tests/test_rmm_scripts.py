@@ -27,7 +27,7 @@ from app.security.encryption import decrypt_secret
 from app.security.menu_permissions import normalize_menu_permissions
 from app.services import gitea
 from app.services import rmm_script_parser as parser
-from app.services import rmm_scripts
+from app.services import rmm_script_layout, rmm_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -715,7 +715,7 @@ def _files(*paths):
 
 
 def test_company_folder_names_are_safe_and_unique():
-    names = rmm_scripts.company_folder_names(_companies(
+    names = rmm_script_layout.company_folder_names(_companies(
         (3, "Contoso", 0), (1, "A/B: Ltd.", 0), (2, "contoso", 0), (4, "", 0), (5, "...", 0)))
     assert names == {1: "A-B- Ltd", 2: "contoso", 3: "Contoso (3)", 4: "Company 4", 5: "Company 5"}
 
