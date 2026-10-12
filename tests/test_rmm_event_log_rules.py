@@ -370,3 +370,38 @@ async def test_create_ticket_rule_raises_one_ticket_per_device_until_closed(sqli
 
     await rules_repo.delete_rule(rule_id)
     assert await rules_repo.get_rule_ticket(rule_id, agent["id"]) is None
+
+
+@pytest.mark.anyio
+async def test_event_log_filters_for_source_dates_and_the_asset_page(sqlite_db, event_db):
+    from datetime import date
+
+    from app.features.rmm import event_log_routes as routes
+
+    _result, agent = await _enrol(sqlite_db)
+    old = {**_entry(1, provider="Disk"), "time_created": datetime(2026, 10, 1, 23, 30, tzinfo=timezone.utc)}
+    mid = {**_entry(2, provider="Service Control Manager"), "time_created": datetime(2026, 10, 5, 12, tzinfo=timezone.utc)}
+    new = {**_entry(3, provider="Disk", level=2, event_id=7), "time_created": datetime(2026, 10, 9, tzinfo=timezone.utc)}
+    await event_logs.ingest(agent, [old, mid, new])
+
+    async def ids(**filters):
+        rows = await routes._filtered_entries(1, asset_id=10, log=None, level=None, event_id=None, q=None, limit=50,
+                                              **filters)
+        return sorted(row["record_id"] for row in rows)
+
+    assert await ids(source="disk") == [1, 3]
+    assert await ids(source="100%") == []
+    assert await ids(date_from=date(2026, 10, 2)) == [2, 3]
+    assert await ids(date_to=date(2026, 10, 1)) == [1]  # the whole "to" day is included
+    assert await ids(date_from=date(2026, 10, 2), date_to=date(2026, 10, 5)) == [2]
+
+    filters = routes.asset_filters({"el_source": " Disk ", "el_level": "2", "el_event_id": "x", "el_from": "2026-10-02",
+                                    "el_to": "not a date", "el_log": "System"})
+    assert filters == {"log": "System", "level": 2, "event_id": None, "source": "Disk", "q": "",
+                       "date_from": date(2026, 10, 2), "date_to": None}
+    context = await routes.asset_event_log_context(1, 10, can_edit=False, is_super_admin=False, filters=filters)
+    assert [entry["record_id"] for entry in context["entries"]] == [3] and context["filtered"]
+    assert context["filters"]["date_from"] == "2026-10-02" and context["filters"]["level"] == "2"
+    assert "System" in context["log_choices"]
+    unfiltered = await routes.asset_event_log_context(1, 10, can_edit=False, is_super_admin=False)
+    assert len(unfiltered["entries"]) == 3 and not unfiltered["filtered"]

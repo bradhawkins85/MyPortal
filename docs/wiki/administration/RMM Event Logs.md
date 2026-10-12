@@ -3,7 +3,8 @@
 Windows devices with the [RMM agent](RMM%20Scripts.md) send their Windows event logs to MyPortal.
 Every device sends its **Application** and **System** logs; technicians can add more logs for a
 whole company or for one device. Browse them from **Event logs** in the main menu
-(`/rmm/event-logs`), or on an asset's page under **Event logs**. [Event log rules](#event-log-rules)
+(`/rmm/event-logs`), filtered by device, log, level, event ID, source, message text and
+date range (UTC days), or on an asset's page under **Event logs**. [Event log rules](#event-log-rules)
 drop events you do not want to keep, or run a script when an event arrives.
 
 Event logs are high volume, so they are stored in a **separate database**, not MyPortal's main
@@ -58,7 +59,8 @@ needs write access to Scripts (`menu.rmm_scripts`).
 
 Each device's page (`/assets/{id}`) has two sections for technicians with Scripts access:
 
-- **Event logs**: the latest 25 entries from the device, a link to see them all on the Event logs
+- **Event logs**: the latest 25 entries from the device, filters for log, level, event ID,
+  source, message text and a date range (up to 100 matching entries), a link to the Event logs
   page, and the device's extra logs.
 - **Event log automations**: every rule that applies to the device (its own, its company's and
   those for every company), with **Add a rule for this device**.
@@ -114,7 +116,8 @@ macOS and Linux agents do not send event logs.
 
 - `GET /api/rmm/event-logs` the current company's entries, newest first. Filters: `asset_id`,
   `log`, `level` (`1` critical, `2` error or worse, `3` warning or worse), `event_id`, `q` (text
-  in the message or source) and `limit` (up to 1000). Answers 503 while collection is off.
+  in the message or source), `source` (text in the source), `from` and `to` (UTC dates,
+  inclusive) and `limit` (up to 1000). Answers 503 while collection is off.
 - Agents use `GET /api/rmm/agent/event-logs/config` and `POST /api/rmm/agent/event-logs`. An
   entry is stored once: resending a batch is harmless. Entries from logs the device is not set to
   collect are skipped. The answer counts entries `received`, `stored`, `skipped`, `dropped` by

@@ -175,6 +175,7 @@ def test_event_logs_page_renders_and_escapes():
     assert 'action="/rmm/event-logs/assets/10"' in html and "Save company logs" in html
     assert "Microsoft-Windows-PowerShell/Operational</textarea>" in html
     assert "kept for 30 days" in html
+    assert 'name="source"' in html and 'name="from" type="date"' in html and 'name="to" type="date"' in html
 
     off = env.get_template("rmm/event_logs.html").render(
         company=None, database={"configured": False, "connected": False, "error": None}, default_logs=["Application", "System"],

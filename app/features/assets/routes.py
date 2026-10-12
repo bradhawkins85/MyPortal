@@ -1926,6 +1926,7 @@ async def asset_detail_page(
         rmm_context = await rmm_routes.asset_rmm_context(company_id, asset_id, can_run=can_run_scripts)
         rmm_context["event_logs"] = await rmm_event_log_routes.asset_event_log_context(
             company_id, asset_id, can_edit=can_run_scripts, is_super_admin=bool(is_super_admin),
+            filters=rmm_event_log_routes.asset_filters(request.query_params),
         )
     # Tags belong to the tags pack; the card disappears with it.
     tags_context = None

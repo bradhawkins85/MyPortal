@@ -22,7 +22,7 @@ Agent side (``Authorization: Bearer`` token):
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -54,7 +54,8 @@ def _entry(row: dict[str, Any]) -> dict[str, Any]:
     return entry
 
 
-async def _filtered_entries(company_id: int, *, asset_id, log, level, event_id, q, limit) -> list[dict[str, Any]]:
+async def _filtered_entries(company_id: int, *, asset_id, log, level, event_id, q, limit, source=None,
+                            date_from: date | None = None, date_to: date | None = None) -> list[dict[str, Any]]:
     if not await event_logs.enabled():
         return []
     rows = await event_log_repo.list_entries(
@@ -64,9 +65,42 @@ async def _filtered_entries(company_id: int, *, asset_id, log, level, event_id, 
         max_level=level,
         event_id=event_id,
         search=(q or "").strip()[:200] or None,
+        source=(source or "").strip()[:255] or None,
+        # Dates are UTC days; "to" includes the whole day.
+        since=datetime.combine(date_from, datetime.min.time()) if date_from else None,
+        until=datetime.combine(date_to + timedelta(days=1), datetime.min.time()) if date_to else None,
         limit=limit,
     )
     return [_entry(row) for row in rows]
+
+
+def _int_param(value: Any, low: int, high: int) -> int | None:
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return number if low <= number <= high else None
+
+
+def _date_param(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value or "").strip())
+    except ValueError:
+        return None
+
+
+def asset_filters(params: Any) -> dict[str, Any]:
+    """The asset page's event log filters, read from its query string (``el_*``)."""
+
+    return {
+        "log": str(params.get("el_log") or "").strip()[:255],
+        "level": _int_param(params.get("el_level"), 1, 4),
+        "event_id": _int_param(params.get("el_event_id"), 0, 2_147_483_647),
+        "source": str(params.get("el_source") or "").strip()[:255],
+        "q": str(params.get("el_q") or "").strip()[:200],
+        "date_from": _date_param(params.get("el_from")),
+        "date_to": _date_param(params.get("el_to")),
+    }
 
 
 def _back_path(form: Any, asset_id: int | None) -> str:
@@ -97,13 +131,15 @@ def rule_summary(rule: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def asset_event_log_context(company_id: int, asset_id: int, *, can_edit: bool, is_super_admin: bool) -> dict[str, Any]:
+async def asset_event_log_context(company_id: int, asset_id: int, *, can_edit: bool, is_super_admin: bool,
+                                  filters: dict[str, Any] | None = None) -> dict[str, Any]:
     """The asset page's Event logs and Event log automations sections."""
 
     database = event_log_db.status()
+    filters = filters or asset_filters({})
+    filtered = any(value not in (None, "") for value in filters.values())
     try:
-        entries = await _filtered_entries(
-            company_id, asset_id=asset_id, log=None, level=None, event_id=None, q=None, limit=25)
+        entries = await _filtered_entries(company_id, asset_id=asset_id, limit=100 if filtered else 25, **filters)
     except Exception:  # the asset page must not fail with the event log database
         log_warning("Could not read event log entries for the asset page", asset_id=asset_id)
         entries = []
@@ -112,14 +148,23 @@ async def asset_event_log_context(company_id: int, asset_id: int, *, can_edit: b
             rule, company_id=company_id, is_super_admin=is_super_admin)}
         for rule in await rules_repo.list_rules_for_device(company_id, asset_id)
     ]
+    company_logs = await event_log_repo.get_extra_logs(company_id=company_id)
+    extra_logs = await event_log_repo.get_extra_logs(asset_id=asset_id)
     return {
         "database": {**database, "error": None},
         "entries": entries,
         "default_logs": list(event_logs.DEFAULT_LOGS),
-        "company_logs": await event_log_repo.get_extra_logs(company_id=company_id),
-        "extra_logs": await event_log_repo.get_extra_logs(asset_id=asset_id),
+        "company_logs": company_logs,
+        "extra_logs": extra_logs,
         "rules": rules,
         "can_edit": can_edit,
+        "filters": {**filters, "date_from": filters["date_from"].isoformat() if filters["date_from"] else "",
+                    "date_to": filters["date_to"].isoformat() if filters["date_to"] else "",
+                    "level": str(filters["level"] or ""),
+                    "event_id": filters["event_id"] if filters["event_id"] is not None else ""},
+        "filtered": filtered,
+        "level_filters": LEVEL_FILTERS,
+        "log_choices": event_logs.merge_logs(event_logs.DEFAULT_LOGS, company_logs, extra_logs),
     }
 
 
@@ -131,6 +176,9 @@ async def event_logs_page(
     level: int | None = Query(default=None, ge=1, le=4),
     event_id: int | None = Query(default=None, ge=0),
     q: str | None = Query(default=None, max_length=200),
+    source: str | None = Query(default=None, max_length=255),
+    date_from: date | None = Query(default=None, alias="from"),
+    date_to: date | None = Query(default=None, alias="to"),
     limit: int = Query(default=200, ge=1, le=1000),
 ):
     context = await _context(request)
@@ -143,7 +191,8 @@ async def event_logs_page(
     asset_logs = await event_log_repo.list_asset_extra_logs(asset_ids)
     company_logs = await event_log_repo.get_extra_logs(company_id=company_id)
     entries = await _filtered_entries(
-        company_id, asset_id=asset_id, log=log, level=level, event_id=event_id, q=q, limit=limit
+        company_id, asset_id=asset_id, log=log, level=level, event_id=event_id, q=q, limit=limit,
+        source=source, date_from=date_from, date_to=date_to,
     )
     devices = [
         {
@@ -173,6 +222,8 @@ async def event_logs_page(
             "filters": {
                 "asset_id": asset_id, "log": log or "", "level": str(level or ""),
                 "event_id": event_id if event_id is not None else "", "q": q or "", "limit": limit,
+                "source": source or "", "from": date_from.isoformat() if date_from else "",
+                "to": date_to.isoformat() if date_to else "",
             },
             "can_edit": can_edit,
             "can_manage_rules": can_edit,
@@ -233,6 +284,9 @@ async def list_event_logs_api(
     level: int | None = Query(default=None, ge=1, le=4),
     event_id: int | None = Query(default=None, ge=0),
     q: str | None = Query(default=None, max_length=200),
+    source: str | None = Query(default=None, max_length=255),
+    date_from: date | None = Query(default=None, alias="from"),
+    date_to: date | None = Query(default=None, alias="to"),
     limit: int = Query(default=200, ge=1, le=1000),
 ):
     _user, _company, company_id, _can_edit = await _context(request, api=True)
@@ -242,7 +296,8 @@ async def list_event_logs_api(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
     entries = await _filtered_entries(
-        company_id, asset_id=asset_id, log=log, level=level, event_id=event_id, q=q, limit=limit
+        company_id, asset_id=asset_id, log=log, level=level, event_id=event_id, q=q, limit=limit,
+        source=source, date_from=date_from, date_to=date_to,
     )
     return {"entries": entries}
 
