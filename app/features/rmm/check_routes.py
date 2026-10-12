@@ -137,8 +137,10 @@ def _blank_check(asset_id: int | None, check_type: str | None) -> dict[str, Any]
     return {
         **form_values({"check_type": kind, "is_enabled": True, "asset_id": asset_id,
                        "scope": "asset" if asset_id else "company"}),
+        # A new check has no settings yet, so start from the defaults rather than zeros.
+        **FORM_DEFAULTS,
         "duration_minutes": DEFAULT_DURATIONS.get(kind, 0),
-        "target_mode": "rules", "target_rules": {"operator": "and", "children": []},
+        "target_mode": "all", "target_rules": {"operator": "and", "children": []},
     }
 
 
