@@ -81,6 +81,7 @@
           ("inventory", "asset-inventory", "Inventory", "", true),
           ("custom-fields", "asset-custom-fields", "Custom fields", custom_fields | length, not customer_safe),
           ("tags", "tags", "Tags", "", asset_tags is not none),
+          ("hardware", "hardware", "Hardware & software", rmm.inventory.software | length if rmm and rmm.inventory and rmm.inventory.software else "", rmm and rmm.inventory),
           ("scripts", "scripts", "Scripts", "", rmm),
           ("event-logs", "event-logs", "Event logs", "", rmm and rmm.event_logs),
           ("event-log-rules", "event-log-rules", "Event log automations", rmm.event_logs.rules | length if rmm and rmm.event_logs else "", rmm and rmm.event_logs),
@@ -158,6 +159,8 @@
       {% endif %}
     </div>
   </section>{% endif %}
+
+  {% if rmm and rmm.inventory %}{% include "rmm/_asset_inventory.html" %}{% endif %}
 
   {% if rmm and rmm.event_logs %}{% set elog = rmm.event_logs %}{% set LEVEL_STATUS = {"Critical": "error", "Error": "error", "Warning": "warning", "Information": "info", "Verbose": "neutral"} %}<section class="card card--panel ce-section" id="event-logs" data-asset-edit-section="event-logs" aria-labelledby="asset-event-logs-heading">
     <header class="ce-section__header"><div class="ce-section__heading">
@@ -564,4 +567,4 @@
 {% include "partials/csrf.html" %}
 {% if rmm %}{% include "rmm/_run_modal.html" %}{% endif %}
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script><script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if asset_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}{% if rmm %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script>{% if rmm.can_push_agent %}<script src="{{ static_url('/static/js/rmm_agent_deploy.js') }}" defer></script>{% endif %}{% endif %}{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script><script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if asset_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}{% if rmm %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script>{% if rmm.inventory %}<script src="{{ static_url('/static/js/rmm_inventory.js') }}" defer></script>{% endif %}{% if rmm.can_push_agent %}<script src="{{ static_url('/static/js/rmm_agent_deploy.js') }}" defer></script>{% endif %}{% endif %}{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
