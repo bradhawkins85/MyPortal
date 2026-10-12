@@ -1,0 +1,7 @@
+{
+  "guid": "a556ba3e-0475-4cb0-9352-367bc09dad10",
+  "occurred_at": "2026-10-12T12:55Z",
+  "change_type": "Feature",
+  "summary": "RMM: new Findings page for super admins - a scheduled, platform-wide look at every company's event logs, software, hardware, stats and checks for abnormalities (event spikes after updates, lockouts and their callers, similar new accounts, new services, slow devices), from fixed rules plus a best-guess AI assessment (FINDINGS_LLM_*)",
+  "content_hash": "45535782f1610867e57dc6c36d6eff654c430f8f470250e8f44e8ec151f512b7"
+}
