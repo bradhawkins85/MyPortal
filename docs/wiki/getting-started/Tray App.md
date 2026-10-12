@@ -571,7 +571,17 @@ in stages, each posted to the ticket as an internal note:
    They are added to the built-in list, sent to the device with the request
    and re-checked there; a folder must name at least two real folders, so a
    drive or `C:\Users\*` on its own is ignored.
-3. **Log collection** - when logs are needed, the server sends a
+3. **Log collection** - when logs are needed, Windows event logs that
+   MyPortal already stores for the asset (see
+   [RMM Event Logs](../administration/RMM%20Event%20Logs.md)) are read from
+   the event log database instead of the endpoint, to save bandwidth. A log
+   is read from MyPortal when the asset's RMM agent collects it, has checked
+   in within the last 10 minutes and `EVENT_LOG_RETENTION_DAYS` keeps the
+   whole window; the stored entries are scrubbed with the tray agent's
+   redaction rules. Log files, macOS sources and event logs MyPortal does
+   not store are still collected from the endpoint; when nothing is left to
+   collect, no command is sent and the analysis starts straight away.
+   For the rest, the server sends a
    `collect_logs` troubleshoot command to the asset's tray device. The
    device re-checks every source against its own allowlist, collects and
    scrubs the logs, and uploads them to `troubleshoot-complete`. The bundle

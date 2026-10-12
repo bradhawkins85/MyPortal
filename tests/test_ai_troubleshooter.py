@@ -5,6 +5,7 @@ import asyncio
 import gzip
 import json
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -467,7 +468,8 @@ def test_collect_mode_completion_queues_analysis(rec, completion):
 
 def test_collect_mode_completion_with_only_error(rec, completion):
     _complete(log_bundle=None, error="log collection: unsupported")
-    assert completion["scheduled"] == []
+    # Asked (stored event logs may still need analysing) but nothing to analyse.
+    assert [s["log_bytes"] for s in completion["scheduled"]] == [b""]
     assert "nothing to analyse" in rec.notes[0]
     assert completion["completed"] == [(11, "log collection: unsupported")]
 
@@ -887,3 +889,202 @@ def test_owner_can_allow_extra_log_folders(rec, monkeypatch):
 def test_extra_log_folders_off_by_default():
     assert ts.extra_log_folders("windows") == []
     assert ts.extra_log_folders("macos") == []
+
+
+# ---------------------------------------------------------------------------
+# Stored event logs are used instead of collecting them from the endpoint
+# ---------------------------------------------------------------------------
+
+
+def _stored_entry(message, *, level=2, event_id=8002, minutes_ago=30):
+    return {
+        "event_id": event_id,
+        "level": level,
+        "provider": "Microsoft-Windows-WLAN-AutoConfig",
+        "message": message,
+        "time_created": datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=minutes_ago),
+    }
+
+
+@pytest.fixture
+def stored(monkeypatch):
+    state = {
+        "enabled": True,
+        "agent": {"id": 9, "company_id": 3, "asset_id": 1, "last_seen_utc": datetime.now(timezone.utc).replace(tzinfo=None)},
+        "logs": ["Application", "System", "Microsoft-Windows-WLAN-AutoConfig/Operational"],
+        "entries": [_stored_entry("Wireless connection failed for user@example.com password=hunter2")],
+        "queries": [],
+    }
+
+    async def enabled():
+        return state["enabled"]
+
+    async def get_asset_agent(asset_id):
+        return state["agent"]
+
+    async def logs_for(company_id, asset_id):
+        assert (company_id, asset_id) == (3, 1)
+        return list(state["logs"])
+
+    async def list_entries(**kwargs):
+        state["queries"].append(kwargs)
+        return list(state["entries"])
+
+    monkeypatch.setattr(ts.rmm_event_logs, "enabled", enabled)
+    monkeypatch.setattr(ts.rmm_event_logs, "logs_for", logs_for)
+    monkeypatch.setattr(ts.rmm_repo, "get_asset_agent", get_asset_agent)
+    monkeypatch.setattr(ts.rmm_event_logs_repo, "list_entries", list_entries)
+    return state
+
+
+_ANALYSIS_RESPONSE = json.dumps({"summary": "Driver drops the connection.", "solutions": ["Update the driver"]})
+
+
+def test_stored_event_logs_replace_endpoint_collection(rec, stored):
+    rec.chat_responses = [
+        _research_response(),
+        _plan_response(
+            [{"source": "Microsoft-Windows-WLAN-AutoConfig/Operational", "reason": "Disconnect reasons", "hours": 6}]
+        ),
+        _ANALYSIS_RESPONSE,
+    ]
+    _run()
+
+    # Nothing is requested from the endpoint; the stored copy is analysed now.
+    assert rec.dispatched == []
+    (query,) = stored["queries"]
+    assert query["company_id"] == 3 and query["asset_id"] == 1
+    assert query["log_name"] == "Microsoft-Windows-WLAN-AutoConfig/Operational"
+    assert "stored in MyPortal" in rec.notes[1]
+    assert "Stage 3 of 4" in rec.notes[2] and "stored copies" in rec.notes[2]
+    assert "Stage 4 of 4" in rec.notes[3] and "Update the driver" in rec.notes[3]
+    prompt = rec.chats[2][1]["content"]
+    assert "Wireless connection failed" in prompt and "Disconnect reasons" in prompt
+    assert "stored by MyPortal" in prompt
+    # Stored logs are scrubbed like the tray agent's.
+    assert "user@example.com" not in prompt and "hunter2" not in prompt
+    assert "[REDACTED_EMAIL]" in prompt
+
+
+def test_only_unstored_logs_are_requested_from_the_endpoint(rec, stored):
+    rec.chat_responses = [
+        _research_response(),
+        _plan_response(
+            [
+                {"source": "System", "reason": "Kernel-Power events", "hours": 12},
+                {"source": "Microsoft-Windows-DNS-Client/Operational", "reason": "DNS failures", "hours": 12},
+                {"source": "file:C:\\Windows\\Logs\\CBS\\CBS.log", "reason": "Servicing", "hours": 12},
+            ]
+        ),
+    ]
+    _run()
+
+    (dispatch,) = rec.dispatched
+    payload = dispatch["payload"]
+    assert [r["source"] for r in payload["log_requests"]] == [
+        "Microsoft-Windows-DNS-Client/Operational",
+        "file:C:\\Windows\\Logs\\CBS\\CBS.log",
+    ]
+    context = payload[tray_service.SERVER_CONTEXT_KEY]
+    assert context[ts.STORED_LOGS_KEY]["requests"][0]["source"] == "System"
+    assert "requested 2 log source(s)" in rec.notes[2]
+
+    # Stage 4 combines the device's bundle with the stored copy.
+    rec.chat_responses = [_ANALYSIS_RESPONSE]
+    command = {"payload_json": payload}
+    asyncio.run(
+        ts.analyse_collected_logs(
+            ticket_id=77,
+            command=command,
+            log_text="### Microsoft-Windows-DNS-Client/Operational Log\n2024-05-01 [Error] id=1014 timeout\n",
+            endpoint_label="laptop-01",
+            llm=LLM,
+        )
+    )
+    prompt = rec.chats[-1][1]["content"]
+    assert "Kernel-Power events" in prompt and "Wireless connection failed" in prompt
+    assert "DNS failures" in prompt and "id=1014 timeout" in prompt
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"enabled": False},
+        {"agent": None},
+        {"agent": {"company_id": 4, "last_seen_utc": datetime.now(timezone.utc).replace(tzinfo=None)}},
+        {"agent": {"company_id": 3, "last_seen_utc": datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)}},
+        {"logs": ["Application"]},
+    ],
+)
+def test_endpoint_is_used_when_stored_logs_cannot_stand_in(stored, change):
+    stored.update(change)
+    requests = [{"source": "System", "reason": "r", "hours": 6}]
+    assert asyncio.run(ts.split_stored_log_requests(requests, company_id=3, asset_id=1)) == ([], requests)
+
+
+def test_retention_shorter_than_the_window_uses_the_endpoint(stored, monkeypatch):
+    monkeypatch.setattr(ts.get_settings(), "event_log_retention_days", 1)
+    requests = [{"source": "System", "reason": "r", "hours": 48}, {"source": "Application", "reason": "r", "hours": 6}]
+    stored_requests, remote = asyncio.run(ts.split_stored_log_requests(requests, company_id=3, asset_id=1))
+    assert [r["source"] for r in stored_requests] == ["Application"]
+    assert [r["source"] for r in remote] == ["System"]
+
+
+def test_stored_only_command_is_analysed_without_a_bundle(stored, monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(ts, "_schedule", lambda coro, **kw: (scheduled.append(kw), coro.close()))
+    command = {
+        "payload_json": {
+            "log_requests": [],
+            tray_service.SERVER_CONTEXT_KEY: {
+                ts.STORED_LOGS_KEY: {"company_id": 3, "asset_id": 1, "requests": [{"source": "System", "hours": 6}]}
+            },
+        }
+    }
+    assert ts.schedule_log_analysis(ticket_id=77, command=command, log_bytes=b"", endpoint_label="x")
+    assert not ts.schedule_log_analysis(
+        ticket_id=77, command={"payload_json": {"log_requests": []}}, log_bytes=b"", endpoint_label="x"
+    )
+    assert len(scheduled) == 1
+
+
+def test_scrub_log_text_matches_tray_rules():
+    text = ts.scrub_log_text("Authorization: Bearer abc\ntoken from 10.0.0.1, api_key=xyz AKIAABCDEFGHIJKLMNOP")
+    assert "abc" not in text and "10.0.0.1" not in text and "xyz" not in text
+    assert "Authorization: [REDACTED]" in text
+    assert "[REDACTED_IP]" in text and "[REDACTED_AWS_KEY]" in text
+
+
+def test_read_stored_logs_from_the_event_log_database(monkeypatch):
+    from app.core.event_log_database import EventLogDatabase
+
+    async def scenario():
+        database = EventLogDatabase(sqlite_path=":memory:")
+        monkeypatch.setattr(ts.rmm_event_logs_repo, "event_log_db", database)
+        await database.ensure_connected()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        await ts.rmm_event_logs_repo.insert_entries([
+            {
+                "company_id": 3, "asset_id": 1, "agent_id": 9, "log_name": "System", "record_id": record_id,
+                "event_id": 41, "level": 1, "provider": "Kernel-Power", "computer": "PC-01",
+                "message": f"Rebooted   without a clean shutdown ({record_id})",
+                "time_created": now - timedelta(hours=hours), "received_at": now,
+            }
+            for record_id, hours in ((1, 1), (2, 30))
+        ])
+        try:
+            return await ts.read_stored_logs(
+                {"company_id": 3, "asset_id": 1, "requests": [{"source": "System", "hours": 24}]}
+            )
+        finally:
+            await database.disconnect()
+
+    text = asyncio.run(scenario())
+    sections = ts.split_log_sections(text)
+    assert list(sections) == ["System"]
+    # Only the window is read, one line per event like the tray agent's.
+    assert re.fullmatch(
+        r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC \[Critical\] id=41 Kernel-Power: "
+        r"Rebooted without a clean shutdown \(1\)",
+        sections["System"],
+    )
