@@ -226,3 +226,81 @@ async def test_asset_page_lists_the_device_logs_and_rules(sqlite_db, event_db):
     detail = (Path(__file__).parents[1] / "app/templates/assets/detail.html").read_text()
     assert 'id="event-logs"' in detail and 'id="event-log-rules"' in detail
     assert "/rmm/event-logs/rules?new=1&amp;asset_id={{ asset.id }}" in detail
+
+
+@pytest.mark.anyio
+async def test_drop_rule_run_now_deletes_matching_stored_events(sqlite_db, event_db):
+    _result, agent = await _enrol(sqlite_db)
+    _result, other = await _enrol(sqlite_db, tray_id=6, asset_id=11, uid="agent-uid-0002")
+    await event_logs.ingest(agent, [_entry(1), _entry(2, event_id=7), _entry(3, message="Service stopped")])
+    await event_logs.ingest(other, [_entry(4)])
+    common = {"user_id": 9, "company_id": 1, "rule_id": None, "is_super_admin": False}
+    conditions = [{"field": "event_id", "operator": "one_of", "value": "7036, 41"},
+                  {"field": "message", "operator": "contains", "value": "started"}]
+    device_id = await rules.save_rule(form={"name": "Device", "scope": "asset", "asset_id": "10", "action": "drop"},
+                                      conditions=conditions, **common)
+    company_id = await rules.save_rule(form={"name": "Company", "scope": "company", "action": "drop"},
+                                       conditions=conditions, **common)
+    device = await rules_repo.get_rule(device_id)
+    company = await rules_repo.get_rule(company_id)
+
+    assert rules._event_id_prefilter(device) == [41, 7036]
+    assert await rules.drop_stored(device, delete=False) == 1  # PC-01's started event only
+    assert await rules.drop_stored(company, delete=False) == 2
+    assert len(await event_log_repo.list_entries(company_id=1)) == 4  # counting deletes nothing
+
+    assert await rules.drop_stored(company, delete=True) == 2
+    assert sorted(e["record_id"] for e in await event_log_repo.list_entries(company_id=1)) == [2, 3]
+    assert "deleted 2 stored events" in (await rules_repo.get_rule(company_id))["last_run_summary"]
+    assert await rules.drop_stored(device, delete=True) == 0
+
+    script_rule = {**device, "action": "run_script"}
+    with pytest.raises(rules.RuleError):
+        await rules.drop_stored(script_rule, delete=False)
+
+
+@pytest.mark.anyio
+async def test_run_now_scans_in_batches(sqlite_db, event_db, monkeypatch):
+    _result, agent = await _enrol(sqlite_db)
+    await event_logs.ingest(agent, [_entry(index, message="Noise" if index % 2 else "Keep") for index in range(1, 12)])
+    rule_id = await rules.save_rule(
+        form={"name": "Noise", "scope": "company", "action": "drop"}, rule_id=None, company_id=1, user_id=9,
+        is_super_admin=False, conditions=[{"field": "message", "operator": "is", "value": "noise"}])
+    monkeypatch.setattr(rules, "RUN_NOW_BATCH", 3)
+    assert await rules.drop_stored(await rules_repo.get_rule(rule_id), delete=True) == 6
+    assert sorted(e["record_id"] for e in await event_log_repo.list_entries(company_id=1)) == [2, 4, 6, 8, 10]
+
+
+def test_rules_page_run_now_confirm_and_action_menu():
+    env = _environment()
+    env.globals["static_url"] = lambda path: path
+    drop = {"id": 3, "name": "Noise", "action": "drop", "scope_label": "Company: Contoso", "action_label": "Drop the event",
+            "conditions_text": ["Event ID is “7036”"], "is_enabled": True, "match_count": 0, "cooldown_minutes": 60,
+            "asset_id": None, "can_edit": True}
+    script = {**drop, "id": 4, "name": "Alert", "action": "run_script", "action_label": "Run Alert", "is_enabled": False}
+    base = dict(company={"name": "Contoso"}, rules=[drop, script], can_edit=True, is_super_admin=False, errors={},
+                editing=None, conditions=[], fields=rules.FIELDS, operators=rules.OPERATORS,
+                field_operators=rules.FIELD_OPERATORS, actions=rules.ACTIONS, devices=[], scripts=[], script=None,
+                script_fields=[], variables=[], csrf_token="tok")
+    html = env.get_template("rmm/event_log_rules.html").render(
+        **base, run_now={"rule": drop, "available": True, "count": 12, "asset_id": 10})
+    assert 'action="/rmm/event-logs/rules/3/run"' in html and "12 stored events" in html
+    assert 'name="asset_id" value="10"' in html and 'href="/assets/10#event-log-rules"' in html
+    # One Action menu per rule; only drop rules can run now.
+    assert html.count("data-rmm-menu") == 2
+    assert "/rmm/event-logs/rules?run=3" in html and "/rmm/event-logs/rules?run=4" not in html
+    assert "Turn off" in html and "Turn on" in html and 'name="_csrf" value="tok"' in html
+
+    empty = env.get_template("rmm/event_log_rules.html").render(
+        **base, run_now={"rule": drop, "available": True, "count": 0, "asset_id": None})
+    assert "nothing to delete" in empty and "/rules/3/run" not in empty
+    offline = env.get_template("rmm/event_log_rules.html").render(
+        **base, run_now={"rule": drop, "available": False, "count": 0, "asset_id": None})
+    assert "not available" in offline and "/rules/3/run" not in offline
+
+
+def test_asset_page_template_uses_the_rule_menu():
+    env = _environment()
+    source = env.loader.get_source(env, "assets/detail.html")[0]
+    env.parse(source)  # compiles
+    assert "rmm_ui.event_log_rule_menu(rule, csrf_token, asset.id)" in source

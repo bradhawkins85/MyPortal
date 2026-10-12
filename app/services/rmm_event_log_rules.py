@@ -12,6 +12,9 @@ condition must match. When an agent sends a batch (:func:`apply`):
   schedule's and may use ``{{event.*}}`` variables (:data:`EVENT_VARIABLES`)
   from the first matching entry. A rule runs at most once per device per
   ``cooldown_minutes``, so a burst of events queues one run.
+
+A drop rule can also be run now (:func:`drop_stored`), deleting the entries
+already stored that it matches.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import assets as assets_repo
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_event_log_rules as rules_repo
+from app.repositories import rmm_event_logs as event_log_repo
 from app.security.encryption import encrypt_secret
 from app.services import rmm_automation, rmm_scripts
 from app.services.rmm_scripts import RunRequestError
@@ -407,3 +411,56 @@ async def apply(agent: Mapping[str, Any], entries: list[dict[str, Any]]) -> tupl
         except Exception as exc:  # noqa: BLE001 - a rule must never lose the batch
             log_error("RMM event log rule failed", rule_id=rule["id"], error=str(exc))
     return kept, stats
+
+
+# --------------------------------------------------------------------------- #
+# Running a drop rule against stored entries
+# --------------------------------------------------------------------------- #
+
+RUN_NOW_BATCH = 2000
+
+
+def _event_id_prefilter(rule: Mapping[str, Any]) -> list[int] | None:
+    """Event IDs every match must have, so the database can narrow the scan."""
+
+    for condition in rule.get("conditions") or []:
+        if condition.get("field") != "event_id" or condition.get("operator") not in ("is", "one_of"):
+            continue
+        value = str(condition.get("value") or "")
+        values = _split(value) if condition.get("operator") == "one_of" else [value.strip()]
+        if values and all(item.isdigit() for item in values):
+            return sorted({int(item) for item in values})
+    return None
+
+
+async def drop_stored(rule: Mapping[str, Any], *, delete: bool) -> int:
+    """Count, or delete, the stored entries a drop rule matches in its scope."""
+
+    if rule.get("action") != "drop":
+        raise RuleError({"action": "Only drop rules can run now."})
+    if not rule.get("conditions"):
+        return 0
+    company_id = int(rule["company_id"]) if rule.get("company_id") is not None else None
+    asset_id = int(rule["asset_id"]) if rule.get("asset_id") is not None else None
+    event_ids = _event_id_prefilter(rule)
+    matched = 0
+    after_id = 0
+    while True:
+        rows = await event_log_repo.scan_entries(
+            company_id=company_id, asset_id=asset_id, event_ids=event_ids, after_id=after_id, limit=RUN_NOW_BATCH,
+        )
+        if not rows:
+            break
+        after_id = int(rows[-1]["id"])
+        ids = [int(row["id"]) for row in rows if rule_matches(rule, row)]
+        matched += len(ids)
+        if delete and ids:
+            await event_log_repo.delete_entries(ids)
+        if len(rows) < RUN_NOW_BATCH:
+            break
+    if delete:
+        await rules_repo.record_matches(
+            int(rule["id"]), matched, summary=f"Run now deleted {matched} stored event{'s' if matched != 1 else ''}."
+        )
+        log_info("RMM event log drop rule run now", rule_id=rule["id"], deleted=matched)
+    return matched

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% import "rmm/_macros.html" as rmm_ui %}
 {% block title %}Event log rules{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
 {% block header_title %}<span class="header__title-text">Event log rules</span>{% endblock %}
@@ -8,14 +9,42 @@
 {% endblock %}
 {% block content %}
 <section class="rmm-page" data-rmm-event-log-rules>
+  {% if run_now %}{% set target = run_now.rule %}
+  <section class="card card--panel" id="rmm-event-log-run-now" aria-labelledby="rmm-event-log-run-now-heading">
+    <header class="card__header card__header--stacked"><div>
+      <h2 class="card__title" id="rmm-event-log-run-now-heading">Run {{ target.name }} now</h2>
+      <p class="card__subtitle">{{ target.scope_label }}: {% for text in target.conditions_text %}{{ text }}{% if not loop.last %} and {% endif %}{% endfor %}.</p>
+    </div></header>
+    <div class="card__body">
+      {% if not run_now.available %}
+      <p>The event log database is not available, so the rule cannot run now.</p>
+      <div class="form-actions"><a class="button button--ghost" href="{{ '/assets/' ~ run_now.asset_id ~ '#event-log-rules' if run_now.asset_id else '/rmm/event-logs/rules' }}">Back</a></div>
+      {% elif run_now.count %}
+      <p><strong>{{ run_now.count }} stored event{{ "s" if run_now.count != 1 }}</strong> match{{ "es" if run_now.count == 1 }} this rule. Running it now deletes {{ "them" if run_now.count != 1 else "it" }} from the event log database. This cannot be undone.</p>
+      <form method="post" action="/rmm/event-logs/rules/{{ target.id }}/run" class="form" data-confirm="Delete {{ run_now.count }} stored event{{ 's' if run_now.count != 1 }}? This cannot be undone.">
+        {% include "partials/csrf.html" %}
+        {% if run_now.asset_id %}<input type="hidden" name="asset_id" value="{{ run_now.asset_id }}">{% endif %}
+        <div class="form-actions">
+          <button class="button button--danger" type="submit">Delete {{ run_now.count }} event{{ "s" if run_now.count != 1 }}</button>
+          <a class="button button--ghost" href="{{ '/assets/' ~ run_now.asset_id ~ '#event-log-rules' if run_now.asset_id else '/rmm/event-logs/rules' }}">Cancel</a>
+        </div>
+      </form>
+      {% else %}
+      <p>No stored events match this rule, so there is nothing to delete.</p>
+      <div class="form-actions"><a class="button button--ghost" href="{{ '/assets/' ~ run_now.asset_id ~ '#event-log-rules' if run_now.asset_id else '/rmm/event-logs/rules' }}">Back</a></div>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
   <section class="card card--panel" aria-labelledby="rmm-event-log-rules-heading">
     <header class="card__header card__header--stacked"><div>
       <h2 class="card__title" id="rmm-event-log-rules-heading">Rules</h2>
-      <p class="card__subtitle">Rules check each event as a device sends it. Drop rules stop matching events being stored. Script rules run an RMM script on the device that sent the event, at most once per cooldown on each device. Every condition of a rule must match.</p>
+      <p class="card__subtitle">Rules check each event as a device sends it. Drop rules stop matching events being stored; use a drop rule's <strong>Run now</strong> to delete the matching events already stored. Script rules run an RMM script on the device that sent the event, at most once per cooldown on each device. Every condition of a rule must match.</p>
     </div></header>
     <div class="card__body">
       {% if rules %}
-      <div class="table-wrapper">
+      <div class="table-wrapper rmm-rule-table">
         <table class="table" data-table data-table-id="rmm-event-log-rules">
           <caption class="visually-hidden">Event log rules</caption>
           <thead><tr>
@@ -37,18 +66,7 @@
               <td data-label="Matches" data-column-key="matches" data-mobile-hidden="true">{{ rule.match_count or 0 }}{% if rule.last_matched_at %} <span class="text-muted">last <span data-utc="{{ rule.last_matched_at }}">{{ rule.last_matched_at }}</span></span>{% endif %}{% if rule.last_run_summary %}<br><span class="text-muted">{{ rule.last_run_summary }}</span>{% endif %}</td>
               <td data-label="Status" data-column-key="status"><span class="status status--{{ 'success' if rule.is_enabled else 'neutral' }}">{{ "On" if rule.is_enabled else "Off" }}</span></td>
               <td class="table__actions" data-column-key="actions">
-                {% if rule.can_edit %}
-                <a class="button button--ghost button--small" href="/rmm/event-logs/rules?rule={{ rule.id }}#rmm-event-log-rule-form">Edit<span class="visually-hidden"> {{ rule.name }}</span></a>
-                <form method="post" action="/rmm/event-logs/rules/{{ rule.id }}/enabled" class="inline-form">
-                  {% include "partials/csrf.html" %}
-                  <input type="hidden" name="enabled" value="{{ '0' if rule.is_enabled else '1' }}">
-                  <button class="button button--ghost button--small" type="submit">{{ "Turn off" if rule.is_enabled else "Turn on" }}<span class="visually-hidden"> {{ rule.name }}</span></button>
-                </form>
-                <form method="post" action="/rmm/event-logs/rules/{{ rule.id }}/delete" class="inline-form" data-confirm="Delete {{ rule.name }}?">
-                  {% include "partials/csrf.html" %}
-                  <button class="button button--danger button--small" type="submit">Delete<span class="visually-hidden"> {{ rule.name }}</span></button>
-                </form>
-                {% endif %}
+                {% if rule.can_edit %}{{ rmm_ui.event_log_rule_menu(rule, csrf_token) }}{% endif %}
               </td>
             </tr>
             {% endfor %}

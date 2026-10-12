@@ -7,6 +7,8 @@ rules for every company need a super admin.
   ``?rule={id}`` edits one, ``?new=1`` (optionally ``&asset_id={id}``) adds one
 * ``POST /rmm/event-logs/rules`` and ``/rmm/event-logs/rules/{id}`` save a rule
 * ``POST /rmm/event-logs/rules/{id}/enabled`` and ``/delete``
+* ``GET /rmm/event-logs/rules?run={id}`` asks to confirm running a drop rule
+  now, with how many stored entries it matches; ``POST .../{id}/run`` deletes them
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from app.repositories import rmm_event_log_rules as rules_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import rmm_event_log_rules as event_log_rules
+from app.services import rmm_event_logs as event_logs
 from app.services import rmm_scripts
 
 from .event_log_routes import PAGE_PATH, rule_summary
@@ -60,6 +63,7 @@ async def _render(
     editing: dict[str, Any] | None,
     errors: dict[str, str] | None = None,
     status_code: int = 200,
+    run_now: dict[str, Any] | None = None,
 ):
     is_super_admin = bool(user.get("is_super_admin"))
     rules = [
@@ -100,6 +104,7 @@ async def _render(
             "variables": variables,
             "can_edit": can_edit,
             "is_super_admin": is_super_admin,
+            "run_now": run_now,
         },
     )
     response.status_code = status_code
@@ -131,6 +136,7 @@ async def rules_page(
     rule: int | None = Query(default=None, ge=1),
     new: bool = Query(default=False),
     asset_id: int | None = Query(default=None, ge=1),
+    run: int | None = Query(default=None, ge=1),
 ):
     context = await _load(request)
     if isinstance(context, RedirectResponse):
@@ -141,7 +147,20 @@ async def rules_page(
         editing = _form_rule(await _editable_rule(rule, user, company_id))
     elif can_edit and new:
         editing = _blank_rule(asset_id)
-    return await _render(request, user=user, company=company, company_id=company_id, can_edit=can_edit, editing=editing)
+    run_now = None
+    if can_edit and run is not None and rule is None and not new:
+        to_run = await _editable_rule(run, user, company_id)
+        if to_run["action"] != "drop":
+            return flash_redirect(RULES_PATH, "Only drop rules can run now.", "error")
+        available = await event_logs.enabled()
+        run_now = {
+            "rule": rule_summary(to_run),
+            "available": available,
+            "count": await event_log_rules.drop_stored(to_run, delete=False) if available else 0,
+            "asset_id": asset_id,
+        }
+    return await _render(request, user=user, company=company, company_id=company_id, can_edit=can_edit,
+                         editing=editing, run_now=run_now)
 
 
 async def _save(request: Request, rule_id: int | None):
@@ -230,8 +249,34 @@ async def set_rule_enabled(rule_id: int, request: Request):
         action="rmm.event_log_rule.enabled", request=request, user_id=user.get("id"),
         entity_type="rmm_event_log_rule", entity_id=rule_id, metadata={"enabled": enabled},
     )
-    back = f"/assets/{int(form.get('asset_id'))}#event-log-rules" if str(form.get("asset_id") or "").isdigit() else RULES_PATH
+    back = _asset_back(form, "event-log-rules") or RULES_PATH
     return flash_redirect(back, f"{rule['name']} turned {'on' if enabled else 'off'}.", "success")
+
+
+def _asset_back(form: Any, anchor: str) -> str | None:
+    value = str(form.get("asset_id") or "")
+    return f"/assets/{int(value)}#{anchor}" if value.isdigit() else None
+
+
+@router.post(RULES_PATH + "/{rule_id:int}/run", response_class=HTMLResponse, summary="Run a drop rule on stored events")
+async def run_rule_now(rule_id: int, request: Request):
+    context = await _load(request, write=True)
+    if isinstance(context, RedirectResponse):
+        return context
+    user, _company, company_id, _can_edit = context
+    rule = await _editable_rule(rule_id, user, company_id)
+    form = await request.form()
+    back = _asset_back(form, "event-log-rules") or RULES_PATH
+    if rule["action"] != "drop":
+        return flash_redirect(back, "Only drop rules can run now.", "error")
+    if not await event_logs.enabled():
+        return flash_redirect(back, "The event log database is not available, so nothing was deleted.", "error")
+    deleted = await event_log_rules.drop_stored(rule, delete=True)
+    await audit_service.record(
+        action="rmm.event_log_rule.run", request=request, user_id=user.get("id"),
+        entity_type="rmm_event_log_rule", entity_id=rule_id, metadata={"name": rule["name"], "deleted": deleted},
+    )
+    return flash_redirect(back, f"{rule['name']} deleted {deleted} stored event{'s' if deleted != 1 else ''}.", "success")
 
 
 @router.post(RULES_PATH + "/{rule_id:int}/delete", response_class=HTMLResponse, summary="Delete an event log rule")
@@ -241,9 +286,10 @@ async def delete_rule(rule_id: int, request: Request):
         return context
     user, _company, company_id, _can_edit = context
     rule = await _editable_rule(rule_id, user, company_id)
+    form = await request.form()
     await rules_repo.delete_rule(rule_id)
     await audit_service.record(
         action="rmm.event_log_rule.delete", request=request, user_id=user.get("id"),
         entity_type="rmm_event_log_rule", entity_id=rule_id, metadata={"name": rule["name"]},
     )
-    return flash_redirect(RULES_PATH, f"Deleted {rule['name']}.", "success")
+    return flash_redirect(_asset_back(form, "event-log-rules") or RULES_PATH, f"Deleted {rule['name']}.", "success")

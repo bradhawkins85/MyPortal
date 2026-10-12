@@ -85,6 +85,11 @@ Open **Event log rules** from the Event logs page (`/rmm/event-logs/rules`). A r
     `{{event.provider}}`, `{{event.log_name}}`, `{{event.computer}}`, `{{event.record_id}}` and
     `{{event.time_created}}`. Rules for every company can only use scripts in the `Common` folder.
 
+Each rule has an **Action** menu (on the rules page and in the asset page's Event log
+automations) to edit it, turn it on or off, or delete it. Drop rules also have **Run now**, which
+applies the rule to events already stored: MyPortal shows how many stored events in the rule's
+scope match, and deletes them once you confirm. Run now only deletes; it never runs scripts.
+
 Runs a rule starts show **Event log rule** as who started them in run history. The rules list
 shows how many events each rule matched and what it last did. Changing rules needs write access
 to Scripts (`menu.rmm_scripts`).

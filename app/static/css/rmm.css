@@ -788,3 +788,8 @@ body.navigation--top .rmm-library {
 }
 
 .rmm-event-log__device-form textarea { flex: 1 1 auto; min-width: 0; }
+
+/* Event log rule Action menus: the open menu must not be clipped by the table. */
+.rmm-rule-table { overflow: visible; }
+.rmm-menu__form { margin: 0; }
+.rmm-menu .dropdown__item--danger { color: var(--color-danger, #f87171); }

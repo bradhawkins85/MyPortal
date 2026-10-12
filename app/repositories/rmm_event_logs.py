@@ -151,3 +151,45 @@ async def prune_entries(before: datetime, *, batch_size: int = 10000) -> int:
         removed += count
         if count < batch_size:
             return removed
+
+
+async def scan_entries(
+    *,
+    company_id: int | None,
+    asset_id: int | None,
+    event_ids: list[int] | None,
+    after_id: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Stored entries in id order after ``after_id``, for checking a rule
+    against what is already stored. ``company_id`` None means every company."""
+
+    clauses = ["id > %s"]
+    params: list[Any] = [int(after_id)]
+    if company_id is not None:
+        clauses.append("company_id = %s")
+        params.append(int(company_id))
+    if asset_id is not None:
+        clauses.append("asset_id = %s")
+        params.append(int(asset_id))
+    if event_ids:
+        clauses.append("event_id IN (" + ", ".join(["%s"] * len(event_ids)) + ")")
+        params.extend(int(event_id) for event_id in event_ids)
+    params.append(int(limit))
+    # The clauses are fixed strings chosen above; every value is a bound parameter.
+    return await event_log_db.fetch_all(  # nosec B608
+        f"SELECT id, log_name, event_id, level, provider, computer, message FROM {ENTRIES_TABLE} "
+        f"WHERE {' AND '.join(clauses)} ORDER BY id LIMIT %s",  # nosec B608
+        tuple(params),
+    )
+
+
+async def delete_entries(ids: list[int]) -> int:
+    if not ids:
+        return 0
+    placeholders = ", ".join(["%s"] * len(ids))
+    # Only "%s" placeholders are interpolated; the ids are bound parameters.
+    return await event_log_db.execute_rowcount(
+        f"DELETE FROM {ENTRIES_TABLE} WHERE id IN ({placeholders})",  # nosec B608
+        tuple(int(entry_id) for entry_id in ids),
+    )

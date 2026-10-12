@@ -212,7 +212,7 @@
     </header>
     <div class="ce-section__body">
       {% if elog.rules %}
-      <div class="table-wrapper"><table class="table">
+      <div class="table-wrapper rmm-rule-table"><table class="table">
         <caption class="visually-hidden">Event log rules for this device</caption>
         <thead><tr><th scope="col">Rule</th><th scope="col">Applies to</th><th scope="col">When</th><th scope="col">Then</th><th scope="col">Status</th><th scope="col" class="table__actions">Actions</th></tr></thead>
         <tbody>
@@ -223,15 +223,7 @@
             <td data-label="When">{% for text in rule.conditions_text %}{{ text }}{% if not loop.last %}<br>and {% endif %}{% endfor %}</td>
             <td data-label="Then">{{ rule.action_label }}</td>
             <td data-label="Status"><span class="status status--{{ 'success' if rule.is_enabled else 'neutral' }}">{{ "On" if rule.is_enabled else "Off" }}</span></td>
-            <td class="table__actions">{% if rule.can_edit %}
-              <a class="button button--ghost button--small" href="/rmm/event-logs/rules?rule={{ rule.id }}#rmm-event-log-rule-form">Edit<span class="visually-hidden"> {{ rule.name }}</span></a>
-              <form method="post" action="/rmm/event-logs/rules/{{ rule.id }}/enabled" class="inline-form">
-                {% include "partials/csrf.html" %}
-                <input type="hidden" name="enabled" value="{{ '0' if rule.is_enabled else '1' }}">
-                <input type="hidden" name="asset_id" value="{{ asset.id }}">
-                <button class="button button--ghost button--small" type="submit">{{ "Turn off" if rule.is_enabled else "Turn on" }}<span class="visually-hidden"> {{ rule.name }}</span></button>
-              </form>
-            {% endif %}</td>
+            <td class="table__actions">{% if rule.can_edit %}{{ rmm_ui.event_log_rule_menu(rule, csrf_token, asset.id) }}{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
