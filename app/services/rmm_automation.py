@@ -24,7 +24,7 @@ import asyncio
 import json
 import random
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Mapping
+from typing import Any, Awaitable, Callable, Iterable, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import CroniterBadDateError, croniter
@@ -660,14 +660,23 @@ async def reconcile_onboarding() -> None:
 # --------------------------------------------------------------------------- #
 
 
+# Other RMM jobs run on the same tick, registered by the feature pack so this
+# module need not import them (they import it).
+_TICK_JOBS: list[Callable[[], Awaitable[Any]]] = []
+
+
+def register_tick_job(job: Callable[[], Awaitable[Any]]) -> None:
+    if job not in _TICK_JOBS:
+        _TICK_JOBS.append(job)
+
+
 @singleton_run("rmm_automation", ttl_seconds=TICK_SECONDS * 3)
 async def tick() -> None:
-    from app.services import rmm_event_log_rules  # imports this module
-
     await rmm_repo.expire_stale_runs()
     await reconcile_onboarding()
     await run_due_schedules()
-    await rmm_event_log_rules.run_due_scheduled()
+    for job in list(_TICK_JOBS):
+        await job()
 
 
 async def automation_loop() -> None:

@@ -469,3 +469,10 @@ async def test_schedule_script_rule_waits_runs_once_and_does_not_stack(sqlite_db
     await rules_repo.set_rule_enabled(rule_id, False, 9)
     assert await rules.run_due_scheduled(later + timedelta(hours=1)) == 0
     assert await rules_repo.get_pending(rule_id, agent["id"]) is None
+
+
+def test_scheduled_runs_are_queued_on_the_automation_tick():
+    import app.features.rmm  # noqa: F401 - registers the tick job
+    from app.services import rmm_automation
+
+    assert rules.run_due_scheduled in rmm_automation._TICK_JOBS
