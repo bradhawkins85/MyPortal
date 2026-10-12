@@ -168,6 +168,14 @@ class Settings(BaseSettings):
             "and can be collected again."
         ),
     )
+    event_log_default_logs: str = Field(
+        default="Application;System",
+        validation_alias="EVENT_LOG_DEFAULT_LOGS",
+        description=(
+            "Windows event logs every RMM agent sends, separated by ';' or ','. "
+            "Companies and devices can add more. Empty uses Application and System."
+        ),
+    )
     event_log_retention_days: int = Field(
         default=30,
         ge=0,

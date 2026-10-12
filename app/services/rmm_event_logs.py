@@ -1,8 +1,8 @@
 """Windows event logs collected by the RMM agent.
 
-Every agent sends its Application and System logs (:data:`DEFAULT_LOGS`).
-Technicians add more logs for a whole company or one device; an agent collects
-the defaults plus both lists. Entries are stored in the separate event log
+Every agent sends the logs in ``EVENT_LOG_DEFAULT_LOGS`` (:func:`default_logs`;
+Application and System when it is empty). Technicians add more logs for a whole
+company or one device; an agent collects the defaults plus both lists. Entries are stored in the separate event log
 database (``EVENT_LOG_DB_*``, :mod:`app.core.event_log_database`); without it
 agents are told collection is off and nothing is stored.
 
@@ -26,6 +26,7 @@ from app.core.event_log_database import event_log_db
 from app.repositories import rmm_event_logs as repo
 from app.services import rmm_event_log_rules
 
+# Collected when EVENT_LOG_DEFAULT_LOGS is empty or holds no valid name.
 DEFAULT_LOGS = ("Application", "System")
 MAX_EXTRA_LOGS = 25
 MAX_BATCH = 500
@@ -55,16 +56,38 @@ def valid_log_name(name: str) -> bool:
     return bool(_LOG_NAME.match(name)) and "//" not in name and ".." not in name
 
 
+def default_logs() -> list[str]:
+    """The logs every agent sends, from ``EVENT_LOG_DEFAULT_LOGS``.
+
+    Names are separated by ``;`` or ``,`` (neither can be in a log name).
+    Invalid names are skipped with a warning so one typo never stops
+    collection; with no valid name the built-in :data:`DEFAULT_LOGS` apply.
+    """
+
+    raw = str(get_settings().event_log_default_logs or "")
+    logs: list[str] = []
+    for item in re.split(r"[;,\r\n]", raw):
+        name = item.strip()
+        if not name:
+            continue
+        if not valid_log_name(name):
+            logger.warning("Ignoring invalid EVENT_LOG_DEFAULT_LOGS entry {name!r}", name=name[:80])
+            continue
+        logs.append(name)
+    logs = merge_logs(logs)[:MAX_EXTRA_LOGS]
+    return logs or list(DEFAULT_LOGS)
+
+
 def parse_log_names(value: str | list[str] | None) -> list[str]:
     """Clean a list of extra logs (one per line when given as text).
 
-    Blank lines, duplicates and the default logs are dropped; an invalid name
+    Blank lines, duplicates and the default logs (:func:`default_logs`) are dropped; an invalid name
     raises :class:`EventLogSettingsError`.
     """
 
     items = value.splitlines() if isinstance(value, str) else list(value or [])
     logs: list[str] = []
-    seen = {name.casefold() for name in DEFAULT_LOGS}
+    seen = {name.casefold() for name in default_logs()}
     for item in items:
         name = str(item).strip()
         if not name:
@@ -96,7 +119,7 @@ async def logs_for(company_id: int | None, asset_id: int | None) -> list[str]:
 
     company_logs = await repo.get_extra_logs(company_id=company_id) if company_id is not None else []
     asset_logs = await repo.get_extra_logs(asset_id=asset_id) if asset_id is not None else []
-    return merge_logs(DEFAULT_LOGS, company_logs, asset_logs)
+    return merge_logs(default_logs(), company_logs, asset_logs)
 
 
 async def enabled() -> bool:

@@ -1,0 +1,7 @@
+{
+  "guid": "d18c7dca-ea76-4b87-9a84-9e0b8a253bcc",
+  "occurred_at": "2026-10-12T13:00Z",
+  "change_type": "Feature",
+  "summary": "RMM event logs: the logs every agent sends are now set by EVENT_LOG_DEFAULT_LOGS (default Application;System), for example to collect Security from every device",
+  "content_hash": "4af73acf9c0c2ca41135e8ca99b7a03ed2a5aa8891287fcc05835486ea3fd3ac"
+}

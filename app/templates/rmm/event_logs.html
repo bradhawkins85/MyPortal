@@ -114,7 +114,7 @@
   <section class="card card--panel" aria-labelledby="rmm-event-log-company-heading">
     <header class="card__header card__header--stacked"><div>
       <h2 class="card__title" id="rmm-event-log-company-heading">Logs collected</h2>
-      <p class="card__subtitle">Every Windows device with the RMM agent sends its {{ default_logs | join(" and ") }} logs. Add more for the whole company here, or for one device below. Use the log's full name, as shown in Event Viewer's Properties, such as <code>Security</code> or <code>Microsoft-Windows-PowerShell/Operational</code>.</p>
+      <p class="card__subtitle">Every Windows device with the RMM agent sends its {% if default_logs | length > 1 %}{{ default_logs[:-1] | join(", ") }} and {{ default_logs[-1] }}{% else %}{{ default_logs | join("") }}{% endif %} logs. Add more for the whole company here, or for one device below. Use the log's full name, as shown in Event Viewer's Properties, such as <code>Security</code> or <code>Microsoft-Windows-PowerShell/Operational</code>.</p>
     </div></header>
     <form method="post" action="/rmm/event-logs/company" class="card__body form">
       {% include "partials/csrf.html" %}

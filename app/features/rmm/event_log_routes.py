@@ -155,7 +155,7 @@ async def asset_event_log_context(company_id: int, asset_id: int, *, can_edit: b
     return {
         "database": {**database, "error": None},
         "entries": entries,
-        "default_logs": list(event_logs.DEFAULT_LOGS),
+        "default_logs": event_logs.default_logs(),
         "company_logs": company_logs,
         "extra_logs": extra_logs,
         "rules": rules,
@@ -166,7 +166,7 @@ async def asset_event_log_context(company_id: int, asset_id: int, *, can_edit: b
                     "event_id": filters["event_id"] if filters["event_id"] is not None else ""},
         "filtered": filtered,
         "level_filters": LEVEL_FILTERS,
-        "log_choices": event_logs.merge_logs(event_logs.DEFAULT_LOGS, company_logs, extra_logs),
+        "log_choices": event_logs.merge_logs(event_logs.default_logs(), company_logs, extra_logs),
     }
 
 
@@ -204,7 +204,7 @@ async def event_logs_page(
         for agent in agents
     ]
     log_choices = event_logs.merge_logs(
-        event_logs.DEFAULT_LOGS, company_logs, *(device["extra_logs"] for device in devices)
+        event_logs.default_logs(), company_logs, *(device["extra_logs"] for device in devices)
     )
     return await _assets_routes()._main()._render_template(
         "rmm/event_logs.html",
@@ -215,7 +215,7 @@ async def event_logs_page(
             "company": company,
             # Connection errors can name hosts, so only super admins see them.
             "database": {**database, "error": database["error"] if user.get("is_super_admin") else None},
-            "default_logs": list(event_logs.DEFAULT_LOGS),
+            "default_logs": event_logs.default_logs(),
             "company_logs": company_logs,
             "devices": devices,
             "log_choices": log_choices,

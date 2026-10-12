@@ -183,3 +183,26 @@ def test_event_logs_page_renders_and_escapes():
         filters={"asset_id": None, "log": "", "level": "", "event_id": "", "q": "", "limit": 200},
     )
     assert "Event log collection is off" in off and "Save company logs" not in off
+
+
+def test_default_logs_come_from_the_environment(monkeypatch):
+    settings = event_logs.get_settings()
+    monkeypatch.setattr(settings, "event_log_default_logs", " Application ; System,Security;security;;Bad\"quote;-Leading;../x ")
+    assert event_logs.default_logs() == ["Application", "System", "Security"]
+    # Extra logs never repeat a default.
+    assert event_logs.parse_log_names("Security\nSetup") == ["Setup"]
+
+    for empty in ("", "   ", ";;", "../bad"):
+        monkeypatch.setattr(settings, "event_log_default_logs", empty)
+        assert event_logs.default_logs() == ["Application", "System"]
+
+    monkeypatch.setattr(settings, "event_log_default_logs", ";".join(f"Log{i}" for i in range(40)))
+    assert len(event_logs.default_logs()) == event_logs.MAX_EXTRA_LOGS
+
+
+@pytest.mark.anyio
+async def test_agents_collect_the_configured_default_logs(sqlite_db, event_db, monkeypatch):
+    monkeypatch.setattr(event_logs.get_settings(), "event_log_default_logs", "System;Security")
+    _result, agent = await _enrol(sqlite_db)
+    await event_logs.save_extra_logs("Application\nsecurity", company_id=1)
+    assert (await event_logs.agent_config(agent))["logs"] == ["System", "Security", "Application"]
