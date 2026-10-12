@@ -52,6 +52,9 @@ MAX_OUTPUT_CHARS = 1_000_000
 MAX_CUSTOM_VALUES = 200
 MAX_TARGETS_PER_RUN = 500
 POLL_WAIT_SECONDS = 25
+# Agents long-poll for jobs every POLL_WAIT_SECONDS, so one that has missed a
+# few polls has lost its connection.
+AGENT_CONNECTED_WINDOW = timedelta(seconds=POLL_WAIT_SECONDS * 4)
 SENSITIVE_MASK = "••••••"
 CUSTOM_VALUE_SCOPES = ("asset", "company", "session")
 
@@ -858,6 +861,25 @@ def _job_payload(row: Mapping[str, Any]) -> dict[str, Any] | None:
         "parameter_order": values.get("parameter_order") or [],
         "env": values.get("env") or {},
     }
+
+
+def agent_state(agent: Mapping[str, Any] | None, *, now: datetime | None = None) -> str:
+    """``connected``, ``offline`` (installed, not polling) or ``missing`` (no RMM agent)."""
+
+    if not agent:
+        return "missing"
+    last_seen = agent.get("last_seen_utc")
+    if isinstance(last_seen, str):
+        try:
+            last_seen = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+        except ValueError:
+            last_seen = None
+    if not isinstance(last_seen, datetime):
+        return "offline"
+    if last_seen.tzinfo is not None:
+        last_seen = last_seen.astimezone(timezone.utc).replace(tzinfo=None)
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    return "connected" if now - last_seen <= AGENT_CONNECTED_WINDOW else "offline"
 
 
 async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:

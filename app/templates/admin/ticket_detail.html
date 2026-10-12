@@ -1026,6 +1026,7 @@
                   data-ticket-subject="{{ ticket.subject | e }}"
                   data-ai-opted-out="{{ 'true' if ticket_ai_opted_out else 'false' }}"
                   data-remote-control="{{ (remote_control_providers or []) | tojson | forceescape }}"
+                  data-rmm-agents="{{ (ticket_rmm_agent_states or {}) | tojson | forceescape }}"
                 >
                   {% if remote_control_providers %}<div class="ticket-assets-linked__remote" data-rmm-remote-status role="status" aria-live="polite" hidden>
                     <span data-rmm-remote-message></span>
@@ -1088,12 +1089,14 @@
                             {{ display_name }}
                           </span>
                         {% endif %}
+                        {% set agent_state = (ticket_rmm_agent_states or {}).get(asset.asset_id | string) %}
+                        {% if remote_control_providers %}{{ rmm_ui.agent_indicator(agent_state or 'missing') }}{% endif %}
                         {% if meta_parts %}
                           <p class="ticket-assets-linked__meta">{{ meta_parts | join(' · ') }}</p>
                         {% endif %}
                         <div class="ticket-assets-linked__actions">
                           <a href="/assets/{{ asset.asset_id }}" class="button button--ghost button--small">Documentation</a>
-                          {% if remote_control_providers %}{{ rmm_ui.asset_menu(asset.asset_id, display_name, remote_control_providers) }}{% endif %}
+                          {% if remote_control_providers and agent_state %}{{ rmm_ui.asset_menu(asset.asset_id, display_name, remote_control_providers) }}{% endif %}
                           {% if tactical_link %}
                             <a
                               href="{{ tactical_link }}"

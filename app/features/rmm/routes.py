@@ -151,9 +151,19 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
         "can_push_agent": bool(can_run and deploy and deploy.get("supported")),
         "runs": [_serialise(run) for run in await rmm_repo.list_runs(company_id=company_id, asset_id=asset_id, limit=10)],
         "can_run": can_run and agent is not None,
-        # Remote control works without the agent when the device's ID is in a custom field.
-        "remote_control": await rmm_remote_control.enabled_providers() if can_run else [],
+        "agent_state": rmm_scripts.agent_state(agent),
+        # RustDesk and MeshCentral are switched on through the agent, so they need one.
+        "remote_control": await rmm_remote_control.enabled_providers() if can_run and agent else [],
     }
+
+
+async def company_agent_states(company_id: int) -> dict[int, str]:
+    """``connected`` or ``offline`` for each of a company's assets with an RMM agent.
+
+    Assets missing from the result have no agent installed."""
+
+    agents = await rmm_repo.list_company_asset_agents(company_id)
+    return {asset_id: rmm_scripts.agent_state(agent) for asset_id, agent in agents.items()}
 
 
 async def _script_detail(script_id: int, company_id: int, runs: list[dict[str, Any]]) -> dict[str, Any] | None:
