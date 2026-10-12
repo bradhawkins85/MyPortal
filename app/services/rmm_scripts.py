@@ -119,6 +119,7 @@ class SyncSummary:
 
 COMMON_FOLDER = "Common"
 COMPANIES_FOLDER = "Companies"
+FILES_FOLDER = "Files"
 # Links a folder in Companies/ to a MyPortal company, so the folder can be
 # renamed in Gitea without losing which company its scripts belong to.
 COMPANY_MARKER = ".myportal-company"
@@ -138,6 +139,21 @@ MyPortal creates a folder here for every company. Scripts in a company's folder
 
 Each folder holds a `.myportal-company` file linking it to the company. Keep that
 file; the folder itself can be renamed.
+"""
+
+_COMMON_FILES_README = """# Common files
+
+Store files shared across companies here, including executables, installers and
+scripts of any type. Manage uploads and downloads in Gitea. Files in this folder
+are not imported into MyPortal's runnable script library.
+"""
+
+_COMPANY_FILES_README = """# Company files
+
+MyPortal creates a folder here for every company to store its files of any type.
+Each folder holds a `.myportal-company` file linking it to the company. Keep that
+file; the folder itself can be renamed. Manage uploads and downloads in Gitea.
+Repository permissions cover every company folder.
 """
 
 
@@ -184,7 +200,7 @@ def _marker(company_id: int, name: str) -> str:
         {
             "company_id": company_id,
             "company": name,
-            "note": "Links this folder to a MyPortal company: its scripts run only on that company's devices.",
+            "note": "Links this folder to a MyPortal company.",
         },
         indent=2,
     ) + "\n"
@@ -202,15 +218,26 @@ class RepositoryLayout:
 async def read_layout(
     settings: gitea.GiteaSettings, files: list[gitea.GiteaFile], companies: list[Mapping[str, Any]]
 ) -> RepositoryLayout:
+    layout = await _read_layout(settings, files, companies)
+    file_layout = await _read_layout(settings, files, companies, files_folder=True)
+    layout.missing.update({f"{FILES_FOLDER}/{path}": content for path, content in file_layout.missing.items()})
+    return layout
+
+
+async def _read_layout(
+    settings: gitea.GiteaSettings, files: list[gitea.GiteaFile], companies: list[Mapping[str, Any]],
+    *, files_folder: bool = False,
+) -> RepositoryLayout:
     layout = RepositoryLayout()
+    root = _repo_path(FILES_FOLDER, settings.path) if files_folder else settings.path
     known = {int(company["id"]): company for company in companies}
-    relative_paths = [rel for rel in (_relative(item.path, settings.path) for item in files) if rel is not None]
+    relative_paths = [rel for rel in (_relative(item.path, root) for item in files) if rel is not None]
     company_dirs = {
         rel.split("/")[1] for rel in relative_paths if rel.startswith(COMPANIES_FOLDER + "/") and rel.count("/") >= 2
     }
 
     for item in files:
-        rel = _relative(item.path, settings.path)
+        rel = _relative(item.path, root)
         parts = rel.split("/") if rel else []
         if len(parts) != 3 or parts[0] != COMPANIES_FOLDER or parts[2] != COMPANY_MARKER:
             continue
@@ -237,9 +264,9 @@ async def read_layout(
         layout.missing[f"{COMPANIES_FOLDER}/{folder}/{COMPANY_MARKER}"] = _marker(company_id, str(known[company_id].get("name") or name))
 
     if not any(rel.startswith(COMMON_FOLDER + "/") for rel in relative_paths):
-        layout.missing[f"{COMMON_FOLDER}/README.md"] = _COMMON_README
+        layout.missing[f"{COMMON_FOLDER}/README.md"] = _COMMON_FILES_README if files_folder else _COMMON_README
     if not any(rel.startswith(COMPANIES_FOLDER + "/") for rel in relative_paths):
-        layout.missing[f"{COMPANIES_FOLDER}/README.md"] = _COMPANIES_README
+        layout.missing[f"{COMPANIES_FOLDER}/README.md"] = _COMPANY_FILES_README if files_folder else _COMPANIES_README
     return layout
 
 
@@ -263,15 +290,15 @@ async def _create_missing(settings: gitea.GiteaSettings, layout: RepositoryLayou
     await gitea.create_files(
         settings,
         {_repo_path(path, settings.path): content for path, content in sorted(layout.missing.items())},
-        "Add MyPortal script folders",
+        "Add MyPortal script and file folders",
     )
-    log_info("Created RMM script folders in Gitea", files=sorted(layout.missing))
+    log_info("Created script and file folders in Gitea", files=sorted(layout.missing))
     return len(layout.missing)
 
 
 async def ensure_folders() -> int:
-    """Create ``Common/``, ``Companies/`` and a folder for every company that
-    lacks one. Returns the number of files created."""
+    """Create shared and company folders for scripts and ``Files/`` storage.
+    Returns the number of files created."""
 
     settings = await gitea.load_settings()
     files = await gitea.list_files(settings)
@@ -687,6 +714,12 @@ async def queue_for_agent(
     if extra_context:
         context.update(extra_context)
     payload = await resolve_entries(script, entries, context)
+    from app.services import rmm_script_files
+
+    try:
+        payload["files"] = await rmm_script_files.prepare_files(script, agent)
+    except (rmm_script_files.ScriptFileError, gitea.GiteaError) as exc:
+        raise RunRequestError({"files": str(exc)}) from exc
     run_id = await rmm_repo.create_run(
         script=dict(script),
         content=str(script.get("content") or ""),
@@ -829,6 +862,7 @@ def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[st
         "os_version": text("os_version", 128),
         "arch": text("arch", 32),
         "agent_version": text("agent_version", 32),
+        "script_files_supported": bool(payload.get("script_files_supported")) if payload.get("agent_version") is not None else payload.get("script_files_supported"),
         "shells": (str(shells).strip()[:255] or None) if shells else None,
         "last_ip": (client_ip or "")[:64] or None,
     }
@@ -905,6 +939,10 @@ def _job_payload(row: Mapping[str, Any]) -> dict[str, Any] | None:
         "parameters": values.get("parameters") or {},
         "parameter_order": values.get("parameter_order") or [],
         "env": values.get("env") or {},
+        "files": [
+            {key: item[key] for key in ("source_path", "destination", "md5", "sha256", "size")}
+            for item in values.get("files") or []
+        ],
     }
 
 
@@ -943,6 +981,12 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
             await rmm_repo.finish_run(
                 int(row["id"]), status="failed", exit_code=None, stdout="", stderr="",
                 custom_values=[], error_message="The run's values could not be decrypted.",
+            )
+            continue
+        if job["files"] and not agent.get("script_files_supported"):
+            await rmm_repo.finish_run(
+                int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],
+                error_message="Update the RMM agent before running a script with associated files.",
             )
             continue
         jobs.append(job)

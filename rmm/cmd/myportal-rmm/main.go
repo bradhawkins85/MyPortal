@@ -91,12 +91,13 @@ func usage() {
 func details(r *runner.Runner) client.Details {
 	hostname, _ := os.Hostname()
 	return client.Details{
-		Hostname:     hostname,
-		OS:           runtime.GOOS,
-		OSVersion:    osVersion(),
-		Arch:         runtime.GOARCH,
-		AgentVersion: Version,
-		Shells:       r.AvailableShells(),
+		Hostname:             hostname,
+		OS:                   runtime.GOOS,
+		OSVersion:            osVersion(),
+		Arch:                 runtime.GOARCH,
+		AgentVersion:         Version,
+		Shells:               r.AvailableShells(),
+		ScriptFilesSupported: true,
 	}
 }
 
@@ -250,6 +251,7 @@ func loop(ctx context.Context) {
 	_ = os.MkdirAll(workDir, 0o700)
 	r := runner.New(workDir)
 	api := client.New(st.PortalURL, st.AuthToken)
+	r.DownloadFile = api.DownloadRunFile
 	slots := make(chan struct{}, maxConcurrent)
 	var wg sync.WaitGroup
 	defer wg.Wait()

@@ -100,12 +100,17 @@ Gitea disappears from the library while its past runs keep the exact version tha
 
 ### Repository layout
 
-MyPortal keeps two folders at the top of the repository (or of `GITEA_SCRIPTS_PATH`):
+MyPortal keeps these folders at the top of the repository (or of `GITEA_SCRIPTS_PATH`):
 
 - **`Common/`**: scripts any company can run. Organise them in subfolders as you like.
 - **`Companies/`**: one folder per MyPortal company, for example `Companies/Contoso Ltd/`.
   Scripts in a company's folder, and its subfolders, are offered and run only on that company's
   devices.
+- **`Files/Common/`**: files shared across companies, such as installers, executables,
+  documents and supporting scripts.
+- **`Files/Companies/`**: one folder per MyPortal company for its stored files, for example
+  `Files/Companies/Contoso Ltd/`. These folders have their own `.myportal-company` markers,
+  so they can be renamed independently of the script folders.
 
 MyPortal creates these folders itself, along with a folder for every company, on each sync and
 every ten minutes, so a new company gets its folder without anyone touching Gitea. Archived
@@ -113,6 +118,20 @@ companies do not get a new folder. Git cannot store an empty folder, so each com
 holds a small `.myportal-company` file that records which company it belongs to; leave it in
 place. Because of that file you can rename a company folder in Gitea and it stays linked. A
 folder you make yourself under `Companies/` is linked to the company with the same name.
+The same folder maintenance applies under `Files/Companies/`.
+
+Upload and download stored files directly in Gitea. The bundled Gitea allows all repository
+upload types, including `.exe` and `.vbs`, on both bare-metal and Docker installations.
+This uses `[repository.upload]` settings `ENABLED = true` and `ALLOWED_TYPES = */*`, applied
+on install and upgrade. Gitea applies these settings to the whole instance; file size and
+upload count limits still apply (by default 50 MB per file and five files per upload).
+For an externally managed Gitea server, configure these settings in its `app.ini` and restart
+Gitea yourself.
+
+Files under `Files/` are stored in Gitea and are not imported into MyPortal's runnable script
+library, even when they have a supported script extension. The existing **Script editing**
+permission controls access to the whole repository, including all stored company files;
+company folders organise files and do not restrict who can view them in Gitea.
 
 Scripts anywhere else in the repository, and scripts in a `Companies/` folder that matches no
 company, are not loaded; sync lists them as skipped.
@@ -123,6 +142,54 @@ says the token needs write access: create a new token for the `myportal` user wi
 move existing scripts into `Common/` or a company folder.
 
 ## Writing scripts
+
+### Associated files
+
+Open a script in **Scripts**, then use its **Files** section to add a Gitea file and an
+absolute endpoint file path, including the filename. **Script editing → Write** permission
+is required to add, edit or remove these associations. They are stored in MyPortal and kept
+when the script is synced again.
+
+For example, associate `Files/Common/setup.exe` with `C:\Tools\setup.exe`, then have the
+PowerShell script use `C:\Tools\setup.exe`. A shell script might associate
+`Files/Common/helper.sh` with `/opt/myportal/helper.sh`. When `GITEA_SCRIPTS_PATH` is set,
+include it in the repository path (for example `rmm/Files/Common/setup.exe`).
+
+- Common scripts can use files under `Files/Common/`. Company scripts can also use files
+  under their own company's folder in `Files/Companies/`, including folders linked by a
+  `.myportal-company` marker. Files from another company cannot be associated or delivered.
+- Each script may associate up to 20 files, up to 50 MB each. Every destination must be a
+  different absolute local path for the endpoint's operating system. Windows paths must
+  include the drive letter. UNC paths, relative paths and `..` are rejected.
+- When a run is queued, MyPortal reads each Gitea file and calculates its MD5, SHA-256 and
+  size. The run keeps that exact Git file version, so a later Gitea update does not change an
+  already queued run's files.
+- Before starting the script, the RMM agent compares the file already at each destination
+  with the queued checksums and size. Matching files are reused without a download.
+  Missing or different files are downloaded through MyPortal with the agent's token;
+  endpoints never receive Gitea credentials.
+- Downloads go to a temporary file beside the destination. The agent checks the downloaded
+  size, MD5 and SHA-256 on disk before replacing the destination, and checks the final file
+  again. An interrupted or corrupt download leaves the previous file intact and prevents
+  the script from starting. Parent folders are created automatically. Existing file
+  permissions are preserved; new files use owner-only read, write and execute permissions
+  on Unix. Prepared files remain at their destinations after the script ends.
+- All required files must be ready before the script runs. Preparation is included in the
+  run timeout. File-bearing runs execute one at a time on an endpoint to prevent concurrent
+  runs from replacing one another's dependencies. Run output records whether each file was
+  reused or downloaded and verified.
+
+Install the updated RMM agent on endpoints before using associated files. Agents advertise
+support at enrolment and check-in; MyPortal refuses file-bearing runs for older agents.
+Manual, scheduled, onboarding, tray, event log and check-triggered runs all use this flow.
+
+The file APIs are:
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/rmm/scripts/{id}/files` | List saved associations and available Gitea paths; requires Script editing write access |
+| `PUT /api/rmm/scripts/{id}/files` | Replace the list with `{"files": [{"source_path": "Files/Common/setup.exe", "destination": "C:\\Tools\\setup.exe"}]}`; an empty list removes all associations |
+| `GET /api/rmm/agent/runs/{id}/files/{index}` | Download the pinned file at the zero-based index; requires the assigned agent's bearer token and a non-expired dispatched or running job |
 
 ### Parameters
 

@@ -1,0 +1,147 @@
+"""Associate Gitea files with scripts and serve the immutable versions queued for runs."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import ntpath
+import posixpath
+import re
+from pathlib import PurePosixPath, PureWindowsPath
+from typing import Any, Mapping
+
+from app.repositories import companies as companies_repo
+from app.repositories import rmm as rmm_repo
+from app.security.encryption import decrypt_secret
+from app.services import gitea
+
+MAX_FILES = 20
+MAX_FILE_BYTES = 50 * 1024 * 1024
+
+
+class ScriptFileError(ValueError):
+    pass
+
+
+def validate_associations(files: list[Mapping[str, Any]]) -> list[dict[str, str]]:
+    if len(files) > MAX_FILES:
+        raise ScriptFileError(f"Associate at most {MAX_FILES} files with a script.")
+    result: list[dict[str, str]] = []
+    destinations: set[str] = set()
+    for item in files:
+        source = str(item.get("source_path") or "").strip()
+        destination = str(item.get("destination") or "").strip()
+        if not source or len(source) > 1024 or source.startswith("/") or "\\" in source:
+            raise ScriptFileError("Enter a repository file path under Files/Common or Files/Companies.")
+        if any(part in ("", ".", "..") for part in source.split("/")) or any(ord(c) < 32 for c in source):
+            raise ScriptFileError("The repository path contains invalid characters or path traversal.")
+        if not destination or len(destination) > 1024 or any(ord(c) < 32 for c in destination):
+            raise ScriptFileError("Enter the full destination file path on the endpoint.")
+        windows = bool(re.match(r"^[A-Za-z]:", destination)) or destination.startswith("\\")
+        path = PureWindowsPath(destination) if windows else PurePosixPath(destination)
+        if not path.is_absolute() or ".." in path.parts or not path.name or str(path) == path.anchor:
+            raise ScriptFileError("Use an absolute destination file path without '..', such as C:\\Tools\\setup.exe or /opt/tools/setup.sh.")
+        if windows:
+            if not re.match(r"^[A-Za-z]:[\\/]", destination):
+                raise ScriptFileError("Use a local Windows drive path for the destination.")
+            if any(re.search(r'[:*?"<>|]', part) or part.endswith((" ", ".")) or PureWindowsPath(part).is_reserved()
+                   for part in path.parts[1:]):
+                raise ScriptFileError("The destination contains an invalid Windows filename.")
+            canonical = ntpath.normcase(ntpath.normpath(destination))
+        else:
+            if destination.startswith("//") or destination.endswith("/"):
+                raise ScriptFileError("Enter an absolute local file path, including its filename.")
+            canonical = posixpath.normpath(destination)
+        if canonical in destinations:
+            raise ScriptFileError("Each file needs a different destination path.")
+        destinations.add(canonical)
+        result.append({"source_path": source, "destination": destination})
+    return result
+
+
+async def available_files(settings: gitea.GiteaSettings, script: Mapping[str, Any]) -> dict[str, gitea.GiteaFile]:
+    # Reuse the established company markers, including renamed file folders.
+    from app.services import rmm_scripts
+
+    files = await gitea.list_files(settings)
+    companies = await companies_repo.list_companies(include_archived=True)
+    layout = await rmm_scripts._read_layout(settings, files, companies, files_folder=True)
+    root = rmm_scripts._repo_path(rmm_scripts.FILES_FOLDER, settings.path)
+    allowed: dict[str, gitea.GiteaFile] = {}
+    for item in files:
+        relative = rmm_scripts._relative(item.path, root)
+        if relative is None or relative.rsplit("/", 1)[-1] == rmm_scripts.COMPANY_MARKER:
+            continue
+        usable, company_id, _reason = rmm_scripts.script_scope(relative, layout)
+        if usable and (company_id is None or company_id == script.get("company_id")):
+            allowed[item.path] = item
+    return allowed
+
+
+async def validate_sources(script: Mapping[str, Any], files: list[Mapping[str, Any]]) -> list[dict[str, str]]:
+    result = validate_associations(files)
+    if not result:
+        return result
+    settings = await gitea.load_settings()
+    allowed = await available_files(settings, script)
+    for item in result:
+        source = allowed.get(item["source_path"])
+        if source is None:
+            raise ScriptFileError(f"{item['source_path']} is missing or unavailable to this script. Common scripts use Files/Common; company scripts may also use their company's files.")
+        if source.size > MAX_FILE_BYTES:
+            raise ScriptFileError(f"{source.path} is larger than 50 MB.")
+    return result
+
+
+async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> list[dict[str, Any]]:
+    associations = validate_associations(script.get("files") or [])
+    if not associations:
+        return []
+    if not agent.get("script_files_supported"):
+        raise ScriptFileError("Update the RMM agent before running a script with associated files.")
+    if script.get("company_id") is not None and int(script["company_id"]) != int(agent["company_id"]):
+        raise ScriptFileError("The script's files are unavailable to this company.")
+    settings = await gitea.load_settings()
+    allowed = await available_files(settings, script)
+    prepared: list[dict[str, Any]] = []
+    metadata_by_sha: dict[str, dict[str, Any]] = {}
+    for item in associations:
+        destination = item["destination"]
+        windows = str(agent.get("os") or "").lower() == "windows"
+        if bool(re.match(r"^[A-Za-z]:[\\/]", destination)) != windows:
+            raise ScriptFileError(f"{destination} is not an absolute file path for this endpoint's operating system.")
+        source = allowed.get(item["source_path"])
+        if source is None:
+            raise ScriptFileError(f"{item['source_path']} is missing or unavailable to this script.")
+        if source.size > MAX_FILE_BYTES:
+            raise ScriptFileError(f"{source.path} is larger than 50 MB.")
+        if source.sha not in metadata_by_sha:
+            raw = await gitea.fetch_blob(settings, source.sha, max_bytes=MAX_FILE_BYTES)
+            metadata_by_sha[source.sha] = {
+                "size": len(raw), "md5": hashlib.md5(raw, usedforsecurity=False).hexdigest(),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        prepared.append({
+            **item, "blob_sha": source.sha, **metadata_by_sha[source.sha],
+            "repository": f"{settings.owner}/{settings.repo}", "base_url": settings.base_url,
+        })
+    return prepared
+
+
+async def download_file(agent: Mapping[str, Any], run_id: int, index: int) -> tuple[bytes, str] | None:
+    row = await rmm_repo.get_run_file_payload(run_id, int(agent["id"]))
+    if row is None or index < 0:
+        return None
+    try:
+        payload = json.loads(decrypt_secret(row["payload_encrypted"], allow_plaintext=False))
+        files = payload.get("files") or []
+        item = files[index]
+    except (IndexError, KeyError, TypeError, ValueError):
+        return None
+    settings = await gitea.load_settings()
+    if settings.base_url != item["base_url"] or f"{settings.owner}/{settings.repo}" != item["repository"]:
+        raise ScriptFileError("The Gitea repository configuration has changed. Queue a new run.")
+    raw = await gitea.fetch_blob(settings, item["blob_sha"], max_bytes=MAX_FILE_BYTES)
+    if len(raw) != item["size"] or hashlib.md5(raw, usedforsecurity=False).hexdigest() != item["md5"] or hashlib.sha256(raw).hexdigest() != item["sha256"]:
+        raise ScriptFileError("The Gitea file failed download verification.")
+    return raw, item["source_path"].rsplit("/", 1)[-1]

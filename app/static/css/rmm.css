@@ -844,3 +844,8 @@ body.navigation--top .rmm-library {
   margin: var(--space-gap-tight, 0.5rem) 0 0;
   padding-left: 1.25rem;
 }
+.rmm-files { list-style: none; margin: 0; padding: 0; }
+.rmm-files__item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-gap-roomy); padding-block: var(--space-gap-roomy); border-bottom: 1px solid var(--color-border); }
+.rmm-files__paths { display: grid; gap: var(--space-gap-tight); min-width: 0; overflow-wrap: anywhere; }
+.rmm-files__actions { display: flex; flex-wrap: wrap; gap: var(--space-gap-tight); flex-shrink: 0; }
+@media (max-width: 640px) { .rmm-files__item { align-items: flex-start; flex-direction: column; } }

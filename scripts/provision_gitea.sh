@@ -203,7 +203,7 @@ PY
 
 write_config() {
   # Written once; later runs keep ROOT_URL in step with PORTAL_URL and apply
-  # the sign-in settings (configure_sign_in).
+  # the sign-in and repository upload settings.
   [[ -f "$GITEA_CONFIG" ]] && return 0
   local secret_key internal_token jwt_secret tmp
   secret_key=$("$GITEA_BIN" generate secret SECRET_KEY)
@@ -213,7 +213,7 @@ write_config() {
   cat >"$tmp" <<INI
 ; Gitea for the MyPortal RMM script library. Written by
 ; scripts/provision_gitea.sh, which afterwards only changes [server] ROOT_URL
-; and the MyPortal sign-in settings.
+; and the MyPortal sign-in and repository upload settings.
 APP_NAME = MyPortal scripts
 RUN_USER = ${GITEA_ACCOUNT}
 RUN_MODE = prod
@@ -239,6 +239,10 @@ PATH = ${GITEA_HOME}/data/gitea.db
 ROOT = ${GITEA_HOME}/data/repositories
 DEFAULT_BRANCH = main
 DEFAULT_PRIVATE = private
+
+[repository.upload]
+ENABLED = true
+ALLOWED_TYPES = */*
 
 [security]
 INSTALL_LOCK = true
@@ -271,6 +275,12 @@ INI
   chmod 0640 "$tmp"
   mv -f "$tmp" "$GITEA_CONFIG"
   printf 'changed'
+}
+
+configure_uploads() {
+  # Repository files include executables and scripts; allow all upload types.
+  ini_set repository.upload ENABLED true
+  ini_set repository.upload ALLOWED_TYPES '*/*'
 }
 
 configure_sign_in() {
@@ -444,6 +454,7 @@ main() {
   changed+=$(write_config)
   changed+=$(ini_set server ROOT_URL "$(root_url)")
   changed+=$(configure_sign_in)
+  changed+=$(configure_uploads)
   changed+=$(write_unit)
 
   systemctl daemon-reload

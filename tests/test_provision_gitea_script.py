@@ -219,3 +219,22 @@ def test_sign_in_settings_are_applied_to_existing_and_new_configs(tmp_path):
     # Already applied: nothing changes, so Gitea is not restarted.
     again = run(f'GITEA_CONFIG="{config}"\nconfigure_sign_in', env_file(tmp_path, ""))
     assert again.stdout == "" and config.read_text() == text
+
+
+@pytest.mark.parametrize("existing", ["", "[repository.upload]\nENABLED = false\nALLOWED_TYPES = image/*\nFILE_MAX_SIZE = 100\n"])
+def test_repository_uploads_allow_all_types_on_install_and_upgrade(tmp_path, existing):
+    config = tmp_path / "app.ini"
+    config.write_text("[security]\nINSTALL_LOCK = true\n" + existing)
+    snippet = f'GITEA_CONFIG="{config}"\nconfigure_uploads'
+    first = run(snippet, env_file(tmp_path, ""))
+    assert first.returncode == 0 and "changed" in first.stdout, first.stderr
+    text = config.read_text()
+    assert "ENABLED = true" in text.splitlines()
+    assert "ALLOWED_TYPES = */*" in text.splitlines()
+    assert "INSTALL_LOCK = true" in text.splitlines()
+    if existing:
+        assert "FILE_MAX_SIZE = 100" in text.splitlines()
+    again = run(snippet, env_file(tmp_path, ""))
+    assert again.returncode == 0 and again.stdout == "", again.stderr
+    assert config.read_text() == text
+    assert 'changed+=$(configure_uploads)' in SCRIPT.read_text()

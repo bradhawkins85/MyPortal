@@ -1,0 +1,7 @@
+{
+  "guid": "d3ceed19-1d3f-41cf-bcf2-88cae381974b",
+  "occurred_at": "2026-10-12T10:04Z",
+  "change_type": "Feature",
+  "summary": "RMM scripts: associate Gitea files with endpoint paths, reuse matching files and verify downloads before running",
+  "content_hash": "d21d9eac33d4728348ddccd27687d21a9edf45141a9b08c6cc378f21b2217e93"
+}
