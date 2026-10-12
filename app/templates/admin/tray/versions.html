@@ -55,6 +55,46 @@
     </div>
   </section>
 
+  {% if server_installers %}
+  <section class="card card--panel">
+    <header class="card__header">
+      <h2>Installers on this server</h2>
+      <p class="card__lede">These installers were downloaded from GitHub Releases and are served by MyPortal. Publish one so tray apps download it from this server and update themselves; the installer's SHA-256 is published with it and checked on each device before it runs.</p>
+    </header>
+    <div class="card__body card__body--table">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Installer</th>
+            <th>Version</th>
+            <th>Platform</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for inst in server_installers %}
+            <tr>
+              <td><code>{{ inst.name }}</code></td>
+              <td><strong>{{ inst.version }}</strong></td>
+              <td>{{ inst.platform }}</td>
+              <td>
+                <form method="post" action="/admin/tray/versions" class="form-inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input type="hidden" name="version" value="{{ inst.version }}" />
+                  <input type="hidden" name="platform" value="{{ inst.platform }}" />
+                  <input type="hidden" name="download_url" value="{{ inst.download_url }}" />
+                  <input type="hidden" name="rollout_percent" value="100" />
+                  <button type="submit" class="button button--ghost button--sm">Publish</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="card card--panel">
     <header class="card__header"><h2>Published versions</h2></header>
     <div class="card__body card__body--table">

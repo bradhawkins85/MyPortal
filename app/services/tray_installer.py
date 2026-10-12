@@ -26,6 +26,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -62,14 +63,62 @@ def cached_installer_sha256(download_url: str) -> str | None:
     url = str(download_url or "").strip()
     if not url:
         return None
+    path = urlsplit(url).path
     for asset_name in _ASSET_NAMES:
         try:
             metadata = json.loads(_metadata_path(asset_name).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if metadata.get("download_url") == url and metadata.get("sha256"):
+        if not metadata.get("sha256"):
+            continue
+        # Match the GitHub asset URL, or this server's own copy of it.
+        if metadata.get("download_url") == url or path == server_installer_path(asset_name):
             return str(metadata["sha256"]).lower()
     return None
+
+
+def server_installer_path(asset_name: str) -> str:
+    """Return the path this server serves a cached installer from."""
+
+    return "/static/tray/" + asset_name
+
+
+_ASSET_PLATFORMS = {"myportal-tray.msi": "windows", "myportal-tray.pkg": "darwin"}
+
+
+def cached_server_installers(portal_url: str) -> list[dict[str, Any]]:
+    """Return the cached installers devices can update from, served by this server.
+
+    Each entry carries the release version, the tray platform it installs on,
+    and its absolute URL on ``portal_url``. The DMG is left out because the
+    tray's self-update installs a pkg.
+    """
+
+    info = get_cached_latest_release_info()
+    base = str(portal_url or "").rstrip("/")
+    installers: list[dict[str, Any]] = []
+    for asset in info.get("loaded_assets") or []:
+        name = asset.get("name")
+        platform = _ASSET_PLATFORMS.get(name)
+        if not platform:
+            continue
+        try:
+            metadata = json.loads(_metadata_path(name).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        version = _parse_release_version(metadata.get("release_tag"))
+        if not version:
+            continue
+        installers.append(
+            {
+                "name": name,
+                "platform": platform,
+                "version": version,
+                "download_url": base + server_installer_path(name),
+                "sha256": metadata.get("sha256"),
+            }
+        )
+    return installers
 
 
 def _build_headers(github_token: str | None) -> dict[str, str]:
