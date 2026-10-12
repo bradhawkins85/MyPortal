@@ -59,9 +59,9 @@
     <Property Id="MYPORTAL_URL" Secure="yes" />
     <?endif?>
     <?ifdef DefaultEnrolToken?>
-    <Property Id="ENROL_TOKEN" Value="$(var.DefaultEnrolToken)" Secure="yes" />
+    <Property Id="ENROL_TOKEN" Value="$(var.DefaultEnrolToken)" Secure="yes" Hidden="yes" />
     <?else?>
-    <Property Id="ENROL_TOKEN" Secure="yes" />
+    <Property Id="ENROL_TOKEN" Secure="yes" Hidden="yes" />
     <?endif?>
     <Property Id="AUTO_UPDATE" Secure="yes" />
 
@@ -76,14 +76,13 @@
     <Property Id="SAVED_MYPORTAL_URL" Secure="yes">
       <RegistrySearch Id="SavedPortalUrlSearch" Root="HKLM" Key="Software\MyPortal\Tray" Name="PortalURL" Type="raw" Bitness="always64" />
     </Property>
-    <Property Id="SAVED_ENROL_TOKEN" Secure="yes">
+    <Property Id="SAVED_ENROL_TOKEN" Secure="yes" Hidden="yes">
       <RegistrySearch Id="SavedEnrolTokenSearch" Root="HKLM" Key="Software\MyPortal\Tray" Name="EnrolToken" Type="raw" Bitness="always64" />
     </Property>
     <Property Id="SAVED_AUTO_UPDATE" Secure="yes">
       <RegistrySearch Id="SavedAutoUpdateSearch" Root="HKLM" Key="Software\MyPortal\Tray" Name="AutoUpdate" Type="raw" Bitness="always64" />
     </Property>
-    <!-- Keep the enrolment token out of the installer log. -->
-    <Property Id="MsiHiddenProperties" Value="ENROL_TOKEN;SAVED_ENROL_TOKEN" />
+    <!-- Keep enrolment-token properties out of the installer log. -->
 
     <SetProperty Id="MYPORTAL_URL" Action="RestorePortalUrl" Value="[SAVED_MYPORTAL_URL]"
                  After="AppSearch" Sequence="first" Condition="SAVED_MYPORTAL_URL AND NOT MYPORTAL_URL" />
