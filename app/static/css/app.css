@@ -18084,8 +18084,31 @@ body.scf-modal-open {
 }
 
 .auth-card__wide {
+  display: flex;
+  align-items: center;
   width: 100%;
   justify-content: center;
+  text-align: center;
+  text-decoration: none;
+}
+
+.tray-deploy__options {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-gap-roomy) * 1.25);
+}
+
+.tray-deploy__option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.tray-deploy__help {
+  margin: 0;
+  color: var(--hf-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .auth-card__footer {
