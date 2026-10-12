@@ -48,8 +48,8 @@ _AUDIT_RECORD_TYPE = "MailSubmission"
 _AUDIT_RESULT_SIZE = 1000
 _AUDIT_LOOKUP_MINUTES = 10
 _AUDIT_CATEGORIES = {
-    "phish": ("phish", "Phish"),
-    "phishing": ("phish", "Phish"),
+    "phish": ("phish", "Phishing"),
+    "phishing": ("phish", "Phishing"),
     "malware": ("phish", "Malware"),
     "junk": ("junk", "Junk"),
     "spam": ("junk", "Junk"),
@@ -58,7 +58,7 @@ _AUDIT_CATEGORIES = {
 }
 _EMAIL_IN_ANGLES = re.compile(r"<([^<>@\s]+@[^<>\s]+)>")
 _SUBMISSION_LABELS = {
-    "phishing": ("phish", "Phish"),
+    "phishing": ("phish", "Phishing"),
     "malware": ("phish", "Malware"),
     "spam": ("junk", "Junk"),
     "notjunk": ("other", "Not junk"),
@@ -174,6 +174,8 @@ def report_label(title: str) -> str:
     cleaned = title.strip()
     if cleaned.lower().startswith(REPORTED_TITLE_PREFIX):
         cleaned = cleaned[len(REPORTED_TITLE_PREFIX):].strip()
+    if cleaned.lower() in ("phish", "phishing"):
+        return "Phishing"
     return (cleaned[:1].upper() + cleaned[1:]) if cleaned else title
 
 
@@ -322,7 +324,7 @@ def _audit_category(data: dict[str, Any]) -> tuple[str, str]:
         mapped = _AUDIT_CATEGORIES.get(value.strip().lower().replace(" ", ""))
         if mapped:
             return mapped
-    return "other", "Reported"
+    return "other", "Unknown"
 
 
 def _epoch(value: datetime) -> int:

@@ -340,7 +340,7 @@ def test_summarise_submission_maps_category_sender_and_window():
     assert summary["id"] == "submission:49c5ef5b-1f65-444a-e6b9-08d772ea2059"
     assert summary["source"] == "submission"
     assert summary["kind"] == "phish"
-    assert summary["report_label"] == "Phish"
+    assert summary["report_label"] == "Phishing"
     assert summary["p1_sender"] == "service.kJz@breaking87ddb171.tulsipurkhabar.com"
     assert summary["window_start"] == datetime(2026, 10, 1, 22, 4)
     assert summary["window_end"] == datetime(2026, 10, 2, 0, 4)
@@ -515,7 +515,7 @@ def test_summarise_audit_record_reads_user_submission():
     assert summary["id"] == "audit:4278982f-c627-443e-63f7-08df201071be:" + str(
         int(datetime(2026, 10, 1, 23, 5, 10, tzinfo=timezone.utc).timestamp())
     )
-    assert summary["kind"] == "phish" and summary["report_label"] == "Phish"
+    assert summary["kind"] == "phish" and summary["report_label"] == "Phishing"
     assert summary["p1_sender"] == "service.kJz@breaking87ddb171.tulsipurkhabar.com"
     assert summary["p2_sender"] == "email.DZ3lH@breaking87ddb171.tulsipurkhabar.com"
     assert summary["p2_sender_name"] == "-Storage Service Notice-"
@@ -664,6 +664,33 @@ def _render_reported(**context):
     values = {"load_error": None, "kind": "all", "days": 30, "csrf_token": "tok"}
     values.update(context)
     return env.get_template("m365/reported_emails.html").render(**values)
+
+
+@pytest.mark.parametrize(
+    ("row", "label", "variant"),
+    [
+        (service.summarise_alert(_alert(title="Email reported by user as phish")), "Phishing", "danger"),
+        (service.summarise_submission(_submission(category="spam")), "Junk", "warning"),
+        (service.summarise_audit_record(_audit_record(SubmissionContent=[
+            {"Name": "SubmissionType", "Value": "Malware"},
+        ])), "Malware", "danger"),
+        (service.summarise_audit_record(_audit_record(SubmissionContent=[
+            {"Name": "SubmissionType", "Value": "NotJunk"},
+        ])), "Not junk", "neutral"),
+        (service.summarise_audit_record(_audit_record(SubmissionContent=[
+            {"Name": "OriginalVerdict", "Value": "Phish"},
+        ])), "Unknown", "neutral"),
+    ],
+)
+def test_reported_emails_template_shows_user_report_type(row, label, variant):
+    row = {**row, "search": None, "ignored": True}
+    body = _render_reported(alerts=[row], ignored="show", ignored_count=1)
+    assert "Reported as" in body
+    header = body.split("<thead>", 1)[1].split('data-column-key="report"', 1)[1].split(">", 1)[0]
+    assert 'data-mobile-priority="essential"' in header
+    assert f'<td data-column-key="report" data-sort-value="{label}">' in body
+    assert f'<span class="status status--{variant}">{label}</span>' in body
+    assert '<span class="status status--neutral">Ignored</span>' in body
 
 
 def test_reported_emails_template_offers_ignore_and_restore():
