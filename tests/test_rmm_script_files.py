@@ -58,8 +58,18 @@ async def test_file_catalog_respects_common_and_company_script_scope(monkeypatch
     monkeypatch.setattr(gitea, "list_files", list_files)
     monkeypatch.setattr(gitea, "fetch_file", fetch_file)
     monkeypatch.setattr(rmm_script_files.companies_repo, "list_companies", companies)
-    common = await rmm_script_files.available_files(settings, {"company_id": None})
+    common = await rmm_script_files.available_files(settings, {"company_id": None}, set())
     assert set(common) == {"rmm/Files/Common/tool.exe"}
+    # A Common script reaches the run's company files through the {company} folder.
+    for company_id, sha in ((1, "rmm/Files/Companies/Renamed/setup.vbs"), (2, "rmm/Files/Companies/Other/setup.exe")):
+        for_company = await rmm_script_files.available_files(settings, {"company_id": None}, {company_id})
+        assert {path: item.path for path, item in for_company.items()} == {
+            "rmm/Files/Common/tool.exe": "rmm/Files/Common/tool.exe",
+            "rmm/Files/Companies/{company}/" + sha.rsplit("/", 1)[-1]: sha,
+        }
+    any_company = await rmm_script_files.available_files(settings, {"company_id": None})
+    assert set(any_company) == {"rmm/Files/Common/tool.exe", "rmm/Files/Companies/{company}/setup.vbs",
+                                "rmm/Files/Companies/{company}/setup.exe"}
     company = await rmm_script_files.available_files(settings, {"company_id": 1})
     assert set(company) == {"rmm/Files/Common/tool.exe", "rmm/Files/Companies/Renamed/setup.vbs"}
     other = await rmm_script_files.available_files(settings, {"company_id": 2})
@@ -87,7 +97,7 @@ async def test_file_choices_create_missing_files_folders_first(monkeypatch):
     monkeypatch.setattr(gitea, "list_files", list_files)
     monkeypatch.setattr(gitea, "create_files", create_files)
     monkeypatch.setattr(rmm_script_files.companies_repo, "list_companies", companies)
-    choices, warning = await rmm_script_files.file_choices({"company_id": 1})
+    choices, warning = await rmm_script_files.file_choices({"company_id": 1}, 1)
     assert choices == [] and warning is None
     assert created == [["Files/Common/README.md", "Files/Companies/Contoso/.myportal-company", "Files/Companies/README.md"]]
 
@@ -95,7 +105,7 @@ async def test_file_choices_create_missing_files_folders_first(monkeypatch):
         raise gitea.GiteaError("Gitea refused to create folders. GITEA_API_TOKEN needs write access to the repository.")
 
     monkeypatch.setattr(gitea, "create_files", refuse)
-    choices, warning = await rmm_script_files.file_choices({"company_id": 1})
+    choices, warning = await rmm_script_files.file_choices({"company_id": 1}, 1)
     assert choices == [] and "GITEA_API_TOKEN needs write access" in warning
 
 
@@ -124,7 +134,7 @@ async def test_queue_rejects_missing_company_files_and_wrong_endpoint_paths(monk
     async def load_settings():
         return settings
 
-    async def catalog(_settings, _script):
+    async def catalog(_settings, _script, _company_ids=None):
         return {}
 
     monkeypatch.setattr(gitea, "load_settings", load_settings)
@@ -161,3 +171,30 @@ async def test_gitea_blob_preserves_binary_content_and_checks_git_hash(monkeypat
     body["content"] = base64.b64encode(raw).decode()
     with pytest.raises(gitea.GiteaError, match="size limit"):
         await gitea.fetch_blob(settings, sha, max_bytes=1)
+
+
+@pytest.mark.anyio
+async def test_common_script_uses_the_run_company_file(monkeypatch):
+    settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
+    raw = b"installer"
+    blob = gitea.GiteaFile("Files/Companies/Contoso/setup.exe", "c" * 40, len(raw))
+
+    async def load_settings():
+        return settings
+
+    async def catalog(_settings, _script, company_ids=None):
+        return {"Files/Companies/{company}/setup.exe": blob} if company_ids == {1} else {}
+
+    async def fetch_blob(_settings, _sha, *, max_bytes):
+        return raw
+
+    monkeypatch.setattr(gitea, "load_settings", load_settings)
+    monkeypatch.setattr(gitea, "fetch_blob", fetch_blob)
+    monkeypatch.setattr(rmm_script_files, "available_files", catalog)
+    script = {"company_id": None, "files": [{"source_path": "Files/Companies/{company}/setup.exe", "destination": "C:\\Tools\\setup.exe"}]}
+    agent = {"company_id": 1, "os": "windows", "script_files_supported": True}
+    prepared = await rmm_script_files.prepare_files(script, agent)
+    assert prepared[0]["source_path"] == "Files/Companies/Contoso/setup.exe"
+    assert prepared[0]["sha256"] == hashlib.sha256(raw).hexdigest()
+    with pytest.raises(rmm_script_files.ScriptFileError, match="missing for this company"):
+        await rmm_script_files.prepare_files(script, {**agent, "company_id": 2})
