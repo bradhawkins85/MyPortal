@@ -390,6 +390,17 @@ async def list_runs(
     return [_run_row(row) for row in rows or []]
 
 
+async def has_active_run(agent_id: int, script_id: int, *, run_source: str) -> bool:
+    """True while ``agent_id`` has an unfinished run of ``script_id`` from ``run_source``."""
+
+    row = await db.fetch_one(
+        "SELECT id FROM rmm_script_runs WHERE agent_id = %s AND script_id = %s AND run_source = %s "
+        "AND status IN ('queued', 'dispatched', 'running') LIMIT 1",
+        (agent_id, script_id, run_source),
+    )
+    return bool(row)
+
+
 async def next_jobs_for_agent(agent_id: int, *, limit: int = 5) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         "SELECT id, script_name, script_path, language, script_content, content_sha256, payload_encrypted, "

@@ -83,10 +83,15 @@
           {% else %}
             <p class="form-help">No Tactical RMM scripts were returned by the configured TRMM API.</p>
           {% endif %}
+          {% if rmm_scripts %}
+            <p class="form-help">Use the <code>rmm_script</code> node type to let the person at the computer run a MyPortal RMM script from Gitea on that computer. Set the script's values here; they can use MyPortal variables such as <code>{% raw %}{{asset.name}}{% endraw %}</code> or <code>{% raw %}{{company.variables.Name}}{% endraw %}</code>, stay on the server and are never sent to the tray. Runs show in RMM run history as started from the tray menu. A company's own scripts only run on that company's computers, so pair them with <strong>Show only for companies</strong>.</p>
+          {% else %}
+            <p class="form-help">No MyPortal RMM scripts are available yet. Sync scripts from Gitea under RMM to add <code>rmm_script</code> menu items.</p>
+          {% endif %}
           <p class="form-help">
             Configure each row with the fields you need. <code>Service Status</code> opens the published status page for the tray device's company using the existing link action, so no tray agent upgrade is required. Types: <code>label</code>, <code>app_version</code>, <code>link</code>, <code>Service Status</code>, <code>submenu</code>,
             <code>display_text</code>, <code>env_var</code>, <code>open_chat</code>, <code>submit_ticket</code>, <code>submit_syncro_ticket</code>,
-            <code>TRMM_Script</code>, <code>scan_network</code>, <code>refresh_config</code>, <code>separator</code>, <code>quit</code>.
+            <code>TRMM_Script</code>, <code>rmm_script</code>, <code>scan_network</code>, <code>refresh_config</code>, <code>separator</code>, <code>quit</code>.
             Use <code>Level</code> to place nodes under the nearest preceding submenu. Add company visibility conditions to show a node only for selected company IDs or hide it from selected company IDs.
           </p>
           <p class="form-help">
@@ -127,6 +132,7 @@
       const DEFAULT_MENU_LABEL = 'Menu';
       const SERVICE_STATUS_URL_VARIABLE = '{% raw %}{{service_status_url}}{% endraw %}';
       const TRMM_SCRIPTS = {{ (trmm_scripts or [])|tojson }};
+      const RMM_SCRIPTS = {{ (rmm_scripts or [])|tojson }};
       const TRAY_COMPANIES = {{ (companies or [])|tojson }};
 
       const NODE_TYPES = [
@@ -141,6 +147,7 @@
         'submit_ticket',
         'submit_syncro_ticket',
         'TRMM_Script',
+        'rmm_script',
         'scan_network',
         'refresh_config',
         'separator',
@@ -160,6 +167,93 @@
       function getSelectedScript(row) {
         const scriptID = Number(row.querySelector('[data-node-script-id]').value) || 0;
         return TRMM_SCRIPTS.find((script) => Number(script.id) === scriptID) || null;
+      }
+
+      function getSelectedRmmScript(row) {
+        const scriptID = Number(row.querySelector('[data-node-rmm-script-id]').value) || 0;
+        return RMM_SCRIPTS.find((script) => Number(script.id) === scriptID) || null;
+      }
+
+      function rmmScriptOptionLabel(script) {
+        const name = String(script.name || ('Script #' + script.id));
+        return script.folder ? `${script.folder} / ${name}` : name;
+      }
+
+      function newNodeID() {
+        const bytes = new Uint8Array(8);
+        window.crypto.getRandomValues(bytes);
+        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      }
+
+      // Inputs for the selected RMM script's parameters and environment
+      // variables, keyed like the RMM run form (param:Name / env:NAME).
+      function renderRmmFields(row, entries) {
+        const container = row.querySelector('[data-node-rmm-fields]');
+        const script = getSelectedRmmScript(row);
+        container.innerHTML = '';
+        if (!script || !Array.isArray(script.fields) || !script.fields.length) {
+          container.hidden = !script;
+          if (script) container.innerHTML = '<p class="form-help">This script has no parameters to set.</p>';
+          return;
+        }
+        container.hidden = false;
+        script.fields.forEach((field, index) => {
+          const inputId = `${row.dataset.rowId}-rmm-field-${index}`;
+          const wrap = document.createElement('div');
+          wrap.className = 'form-field';
+          const label = document.createElement('label');
+          label.className = 'form-label';
+          label.htmlFor = inputId;
+          label.textContent = `${field.kind === 'env' ? 'Env' : 'Parameter'}: ${field.name}${field.mandatory ? ' *' : ''}`;
+          let input;
+          const fieldType = String(field.type || 'string');
+          const choices = fieldType === 'choice' ? (field.choices || []) : (fieldType === 'boolean' || fieldType === 'switch') ? ['true', 'false'] : null;
+          if (choices) {
+            input = document.createElement('select');
+            [''].concat(choices.map(String)).forEach((choice) => {
+              const option = document.createElement('option');
+              option.value = choice;
+              option.textContent = choice || (field.default !== null && field.default !== undefined ? `Default (${field.default})` : 'Not set');
+              input.appendChild(option);
+            });
+          } else {
+            input = document.createElement('input');
+            input.type = field.sensitive ? 'password' : 'text';
+            input.autocomplete = 'off';
+            if (field.default !== null && field.default !== undefined && field.default !== '') {
+              input.placeholder = `Default: ${field.default}`;
+            }
+          }
+          input.className = 'form-input';
+          input.id = inputId;
+          input.dataset.rmmFieldKey = field.key;
+          const value = entries && Object.prototype.hasOwnProperty.call(entries, field.key) ? String(entries[field.key]) : '';
+          if (choices && value && !choices.map(String).includes(value)) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            input.appendChild(option);
+          }
+          input.value = value;
+          wrap.appendChild(label);
+          wrap.appendChild(input);
+          const helpText = [field.help, field.sensitive ? 'Saved with this configuration; a company variable keeps the secret out of it.' : ''].filter(Boolean).join(' ');
+          if (helpText) {
+            const help = document.createElement('p');
+            help.className = 'form-help';
+            help.textContent = helpText;
+            wrap.appendChild(help);
+          }
+          container.appendChild(wrap);
+        });
+      }
+
+      function readRmmEntries(row) {
+        const entries = {};
+        row.querySelectorAll('[data-rmm-field-key]').forEach((input) => {
+          if (input.value !== '') entries[input.dataset.rmmFieldKey] = input.value;
+        });
+        return entries;
       }
 
       function parseCompanyIDs(value) {
@@ -243,6 +337,7 @@
         row.querySelector('[data-wrap-name]').hidden = type !== 'env_var';
         row.querySelector('[data-wrap-text]').hidden = type !== 'display_text';
         row.querySelector('[data-wrap-script]').hidden = type !== 'TRMM_Script';
+        row.querySelector('[data-wrap-rmm-script]').hidden = type !== 'rmm_script';
         row.querySelector('[data-wrap-color]').hidden = type === 'separator';
       }
 
@@ -260,6 +355,11 @@
         if (type === 'TRMM_Script') {
           const script = getSelectedScript(row);
           return script ? script.name : '(no TRMM script selected)';
+        }
+        if (type === 'rmm_script') {
+          const label = row.querySelector('[data-node-label]').value.trim();
+          const script = getSelectedRmmScript(row);
+          return label || (script ? script.name : '(no RMM script selected)');
         }
         const label = row.querySelector('[data-node-label]').value.trim();
         return label || '(no label)';
@@ -294,6 +394,8 @@
         const rowId = `menu-node-${rowCounter++}`;
         const row = document.createElement('div');
         row.className = 'card card--panel';
+        row.dataset.rowId = rowId;
+        row.dataset.nodeId = node.node_id || newNodeID();
         row.style.padding = '0.75rem';
         row.style.transition = 'margin-inline-start 0.16s ease, width 0.16s ease';
         row.innerHTML = `
@@ -312,7 +414,7 @@
               <div class="form-field">
                 <label class="form-label" for="${rowId}-type">Type</label>
                 <select class="form-input" id="${rowId}-type" data-node-type>
-                  ${NODE_TYPES.map((type) => `<option value="${type}">${type === 'service_status' ? 'Service Status' : type}</option>`).join('')}
+                  ${NODE_TYPES.map((type) => `<option value="${type}">${type === 'service_status' ? 'Service Status' : type === 'rmm_script' ? 'rmm_script (MyPortal RMM)' : type}</option>`).join('')}
                 </select>
               </div>
               <div class="form-field">
@@ -340,6 +442,24 @@
                   ${TRMM_SCRIPTS.map((script) => `<option value="${script.id}">${escapeHtml(script.name || ('Script #' + script.id))}</option>`).join('')}
                 </select>
               </div>
+            </div>
+            <div class="form-stack" data-wrap-rmm-script>
+              <div class="form-row">
+                <div class="form-field">
+                  <label class="form-label" for="${rowId}-rmm-script">MyPortal RMM script</label>
+                  <select class="form-input" id="${rowId}-rmm-script" data-node-rmm-script-id>
+                    <option value="">Select an RMM script…</option>
+                    ${RMM_SCRIPTS.map((script) => `<option value="${script.id}">${escapeHtml(rmmScriptOptionLabel(script))}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-field form-field--checkbox">
+                  <label>
+                    <input type="checkbox" data-node-confirm />
+                    Ask the user before running
+                  </label>
+                </div>
+              </div>
+              <div class="form-row" data-node-rmm-fields hidden></div>
             </div>
             <div class="form-row">
               <div class="form-field">
@@ -378,7 +498,24 @@
         row.querySelector('[data-node-url]').value = node.url || '';
         row.querySelector('[data-node-name]').value = node.name || '';
         row.querySelector('[data-node-text]').value = node.text || '';
-        row.querySelector('[data-node-script-id]').value = node.script_id || '';
+        if (node.type === 'TRMM_Script') row.querySelector('[data-node-script-id]').value = node.script_id || '';
+        if (node.type === 'rmm_script') {
+          const rmmSelect = row.querySelector('[data-node-rmm-script-id]');
+          rmmSelect.value = node.script_id || '';
+          if (node.script_id && rmmSelect.value !== String(node.script_id)) {
+            // Keep a script that is no longer synced so saving does not drop it.
+            const option = document.createElement('option');
+            option.value = String(node.script_id);
+            option.textContent = `${node.script_name || ('Script #' + node.script_id)} (no longer available)`;
+            rmmSelect.appendChild(option);
+            rmmSelect.value = String(node.script_id);
+          }
+          row.querySelector('[data-node-confirm]').checked = Boolean(node.confirm);
+        }
+        renderRmmFields(row, node.entries || {});
+        row.querySelector('[data-node-rmm-script-id]').addEventListener('change', () => {
+          renderRmmFields(row, readRmmEntries(row));
+        });
         setSelectedCompanyIDs(row.querySelector('[data-node-visible-company-ids]'), node.visible_company_ids);
         setSelectedCompanyIDs(row.querySelector('[data-node-hidden-company-ids]'), node.hidden_company_ids);
 
@@ -471,6 +608,7 @@
         row.querySelector('[data-action-clone]').addEventListener('click', (e) => {
           e.stopPropagation();
           const cloneData = readRow(row);
+          cloneData.node_id = '';
           const clone = createRow(cloneData, cloneData.level, true);
           row.insertAdjacentElement('afterend', clone);
           updateMoveButtons();
@@ -495,6 +633,9 @@
             color: typeof candidate.color === 'string' ? candidate.color : '',
             script_id: Number(candidate.script_id) || 0,
             script_name: typeof candidate.script_name === 'string' ? candidate.script_name : '',
+            node_id: typeof candidate.node_id === 'string' ? candidate.node_id : '',
+            confirm: candidate.confirm === true,
+            entries: (candidate.entries && typeof candidate.entries === 'object' && !Array.isArray(candidate.entries)) ? candidate.entries : {},
             visible_company_ids: parseCompanyIDs(candidate.visible_company_ids),
             hidden_company_ids: parseCompanyIDs(candidate.hidden_company_ids)
           };
@@ -525,15 +666,23 @@
 
       function readRow(row) {
         const colorEl = row.querySelector('[data-node-color]');
+        const type = row.querySelector('[data-node-type]').value;
+        const rmmScript = getSelectedRmmScript(row);
+        const rmmScriptID = Number(row.querySelector('[data-node-rmm-script-id]').value) || 0;
+        const rmmScriptOption = row.querySelector('[data-node-rmm-script-id]').selectedOptions[0];
         return {
           level: getRowLevel(row),
-          type: row.querySelector('[data-node-type]').value,
+          type,
           label: row.querySelector('[data-node-label]').value.trim(),
           url: row.querySelector('[data-node-url]').value.trim(),
           name: row.querySelector('[data-node-name]').value.trim(),
           text: row.querySelector('[data-node-text]').value.trim(),
           color: (colorEl && colorEl.dataset.active === '1') ? colorEl.value.trim() : '',
-          script_id: Number(row.querySelector('[data-node-script-id]').value) || 0,
+          script_id: type === 'rmm_script' ? rmmScriptID : (Number(row.querySelector('[data-node-script-id]').value) || 0),
+          script_name: type === 'rmm_script' ? (rmmScript ? String(rmmScript.name || '') : (rmmScriptOption && rmmScriptID ? rmmScriptOption.textContent.replace(/ \(no longer available\)$/, '') : '')) : '',
+          node_id: row.dataset.nodeId,
+          confirm: row.querySelector('[data-node-confirm]').checked,
+          entries: readRmmEntries(row),
           visible_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-visible-company-ids]')),
           hidden_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-hidden-company-ids]'))
         };
@@ -561,6 +710,13 @@
             if (row.script_id) node.script_id = row.script_id;
             const script = TRMM_SCRIPTS.find((candidate) => Number(candidate.id) === Number(row.script_id));
             if (script && script.name) node.script_name = String(script.name).slice(0, LABEL_MAX);
+          }
+          if (row.type === 'rmm_script') {
+            if (row.script_id) node.script_id = row.script_id;
+            if (row.script_name) node.script_name = row.script_name.slice(0, LABEL_MAX);
+            node.node_id = row.node_id;
+            if (row.confirm) node.confirm = true;
+            if (Object.keys(row.entries).length) node.entries = row.entries;
           }
           let parent = null;
           for (let level = row.level - 1; level >= 0; level -= 1) {
