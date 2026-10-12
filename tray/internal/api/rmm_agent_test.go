@@ -41,3 +41,17 @@ func TestRMMAgentDownloadSendsTheTokenOnlyToMyPortalPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestRMMAgentPackageRequestsMatchingRelease(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("version") != "v1.2.3" {
+			t.Errorf("version query = %q", r.URL.Query().Get("version"))
+		}
+		_, _ = io.WriteString(w, `{"version":"1.2.3"}`)
+	}))
+	defer srv.Close()
+	pkg, err := New(srv.URL).GetRMMAgentPackage(context.Background(), "windows", "amd64", "v1.2.3")
+	if err != nil || pkg.Version != "1.2.3" {
+		t.Fatalf("package = %+v, %v", pkg, err)
+	}
+}

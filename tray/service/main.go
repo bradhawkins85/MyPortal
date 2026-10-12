@@ -137,7 +137,7 @@ type daemon struct {
 	pendingUIMessage *ipc.Message
 
 	networkScanMu sync.Mutex
-	// rmmInstallMu keeps two install_rmm_agent commands from racing.
+	// rmmInstallMu serialises deployments and automatic RMM upgrades.
 	rmmInstallMu sync.Mutex
 	// defenderScanMu serialises Defender scans, which run in the background
 	// because Start-MpScan blocks until a (possibly hours-long) scan finishes.
@@ -226,6 +226,7 @@ func (d *daemon) run() {
 	defer cancelUpdate()
 	d.updater = updater.New(d.client, d.cfg.AutoUpdate)
 	go d.updater.Run(updateCtx)
+	go d.rmmVersionLoop(updateCtx)
 
 	// Main WS + heartbeat loop.
 	go d.wsLoop()
@@ -627,6 +628,33 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 	}
 }
 
+// rmmVersionLoop runs after every tray restart (including installer updates).
+// Retry while offline or while release assets are still being published.
+func (d *daemon) rmmVersionLoop(ctx context.Context) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
+		return
+	}
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+	for {
+		d.rmmInstallMu.Lock()
+		checkCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+		changed, err := rmminstall.New(d.client).EnsureVersion(checkCtx, updater.AgentVersion)
+		cancel()
+		d.rmmInstallMu.Unlock()
+		if err != nil && ctx.Err() == nil {
+			logger.Warn("RMM version sync: %v; will retry", err)
+		} else if changed {
+			logger.Info("RMM agent updated to match tray version %s", updater.AgentVersion)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 // handleInstallRMMAgent installs the MyPortal RMM agent for an
 // "install_rmm_agent" command and reports the outcome to the server.
 func (d *daemon) handleInstallRMMAgent(msg map[string]json.RawMessage) {
@@ -643,7 +671,7 @@ func (d *daemon) handleInstallRMMAgent(msg map[string]json.RawMessage) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	version, err := rmminstall.New(d.client).Install(ctx)
+	version, err := rmminstall.New(d.client).InstallVersion(ctx, updater.AgentVersion)
 	message := fmt.Sprintf("Installed the MyPortal RMM agent %s.", version)
 	if err != nil {
 		logger.Error("install_rmm_agent: %v", err)

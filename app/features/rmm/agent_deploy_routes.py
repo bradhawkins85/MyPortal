@@ -18,6 +18,8 @@ Companies switch on automatic pushes on their tray settings page
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -72,8 +74,13 @@ def _platform(os_name: str, arch: str) -> tuple[str, str]:
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported platform")
 
 
-async def _package(os_name: str, arch: str) -> dict:
-    package = await deploy.ensure_package(*_platform(os_name, arch))
+async def _package(os_name: str, arch: str, version: str | None = None) -> dict:
+    if version is not None:
+        try:
+            version = deploy.release_version(version)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    package = await deploy.ensure_package(*_platform(os_name, arch), version=version)
     if not package:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No RMM agent build for this platform yet")
     return package
@@ -84,15 +91,19 @@ async def agent_package(
     os: str = Query(max_length=16),
     arch: str = Query(max_length=16),
     tray_device: dict = Depends(get_current_tray_device),
+    version: str | None = Query(default=None, max_length=128),
 ):
     os_name, arch_name = _platform(os, arch)
-    package = await _package(os_name, arch_name)
+    package = await _package(os_name, arch_name, version)
+    query = {"os": os_name, "arch": arch_name}
+    if version is not None:
+        query["version"] = deploy.release_version(version)
     return {
         "file_name": package["file_name"],
         "version": package["version"],
         "sha256": package["sha256"],
         "size": package["size"],
-        "download_path": f"/api/rmm/agent/package/download?os={os_name}&arch={arch_name}",
+        "download_path": "/api/rmm/agent/package/download?" + urlencode(query),
     }
 
 
@@ -101,8 +112,9 @@ async def agent_package_download(
     os: str = Query(max_length=16),
     arch: str = Query(max_length=16),
     tray_device: dict = Depends(get_current_tray_device),
+    version: str | None = Query(default=None, max_length=128),
 ):
-    package = await _package(os, arch)
+    package = await _package(os, arch, version)
     return FileResponse(package["path"], media_type="application/octet-stream", filename=package["file_name"])
 
 

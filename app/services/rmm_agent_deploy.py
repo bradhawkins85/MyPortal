@@ -85,8 +85,20 @@ def _valid_platform(os_name: str, arch: str) -> bool:
     return (os_name, arch) in _FILE_NAMES
 
 
-def _metadata_path(name: str) -> Path:
-    return _STORAGE_DIR / f"{name}.json"
+def release_version(value: str) -> str:
+    """Validate a release selector before using it in paths or GitHub URLs."""
+    value = value.strip().removeprefix("v")
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", value):
+        raise ValueError("Invalid RMM release version")
+    return value
+
+
+def _package_dir(version: str | None = None) -> Path:
+    return _STORAGE_DIR / release_version(version) if version else _STORAGE_DIR
+
+
+def _metadata_path(name: str, version: str | None = None) -> Path:
+    return _package_dir(version) / f"{name}.json"
 
 
 def _sha256_file(path: Path) -> str:
@@ -97,18 +109,20 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def cached_package(os_name: str, arch: str) -> dict[str, Any] | None:
+def cached_package(os_name: str, arch: str, version: str | None = None) -> dict[str, Any] | None:
     """The cached agent build for a platform: ``path``, ``sha256``, ``version`` and ``size``."""
 
     name = _FILE_NAMES.get((os_name, arch))
     if name is None:
         return None
-    path = _STORAGE_DIR / name
+    path = _package_dir(version) / name
     try:
-        metadata = json.loads(_metadata_path(name).read_text(encoding="utf-8"))
+        metadata = json.loads(_metadata_path(name, version).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     if not path.is_file() or not metadata.get("sha256"):
+        return None
+    if version and str(metadata.get("version") or "").removeprefix("v") != release_version(version):
         return None
     return {
         "file_name": name,
@@ -179,33 +193,52 @@ async def _published_sha256(client: httpx.AsyncClient, asset: dict[str, Any] | N
     return text.split()[0].lower() if text else None
 
 
-async def fetch_latest_agent(*, repo: str | None = None, github_token: str | None = None, force: bool = False) -> dict[str, bool]:
-    """Cache the newest agent builds; returns which files were updated."""
+async def fetch_latest_agent(*, repo: str | None = None, github_token: str | None = None, force: bool = False, version: str | None = None) -> dict[str, bool]:
+    """Cache the selected release (or newest agent builds); return updated files."""
 
+    if version:
+        version = release_version(version)
     settings = get_settings()
     repo = repo or settings.github_tray_msi_repo
     github_token = github_token if github_token is not None else settings.github_token
     results = {file_name(os_name, arch): False for os_name, arch in PLATFORMS}
     async with _FETCH_LOCK:
-        _STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+        _package_dir(version).mkdir(parents=True, exist_ok=True)
         headers = tray_installer._build_headers(github_token)
         async with monitored_client(httpx.AsyncClient, follow_redirects=True) as client:
-            release = await _find_agent_release(client, repo, headers)
+            if version:
+                release = None
+                # Tagged tray releases commonly use a leading v, but older
+                # releases can use the bare numeric version.
+                for tag in (f"v{version}", version):
+                    response = await client.get(
+                        f"https://api.github.com/repos/{repo}/releases/tags/{tag}", headers=headers, timeout=15.0
+                    )
+                    if response.status_code == 404:
+                        continue
+                    response.raise_for_status()
+                    candidate = response.json()
+                    if not candidate.get("draft") and not candidate.get("prerelease"):
+                        if tray_installer._parse_release_version(candidate.get("tag_name")) == version:
+                            release = candidate
+                            break
+            else:
+                release = await _find_agent_release(client, repo, headers)
             if release is None:
                 log_warning("No release carries the RMM agent yet", repo=repo)
                 return results
             assets = _release_assets(release)
-            version = tray_installer._parse_release_version(release.get("tag_name"))
+            build_version = tray_installer._parse_release_version(release.get("tag_name"))
             for name in results:
                 asset = assets.get(name)
                 if not asset or not asset.get("browser_download_url"):
                     continue
                 marker = {"release_id": release.get("id"), "asset_id": asset.get("id"), "asset_updated_at": asset.get("updated_at")}
                 try:
-                    cached = json.loads(_metadata_path(name).read_text(encoding="utf-8"))
+                    cached = json.loads(_metadata_path(name, version).read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     cached = {}
-                dest = _STORAGE_DIR / name
+                dest = _package_dir(version) / name
                 if not force and dest.is_file() and all(cached.get(key) == value for key, value in marker.items()):
                     continue
                 try:
@@ -218,8 +251,8 @@ async def fetch_latest_agent(*, repo: str | None = None, github_token: str | Non
                     dest.with_name(dest.name + ".tmp").unlink(missing_ok=True)
                     log_error("Failed to download the RMM agent", repo=repo, asset=name, error=str(exc))
                     continue
-                _metadata_path(name).write_text(
-                    json.dumps({**marker, "version": version, "sha256": actual}, sort_keys=True), encoding="utf-8"
+                _metadata_path(name, version).write_text(
+                    json.dumps({**marker, "version": build_version, "sha256": actual}, sort_keys=True), encoding="utf-8"
                 )
                 results[name] = True
     if any(results.values()):
@@ -227,14 +260,14 @@ async def fetch_latest_agent(*, repo: str | None = None, github_token: str | Non
     return results
 
 
-async def ensure_package(os_name: str, arch: str) -> dict[str, Any] | None:
-    package = cached_package(os_name, arch)
+async def ensure_package(os_name: str, arch: str, version: str | None = None) -> dict[str, Any] | None:
+    package = cached_package(os_name, arch, version)
     if package is None and _valid_platform(os_name, arch):
         try:
-            await fetch_latest_agent()
+            await fetch_latest_agent(version=version)
         except Exception as exc:  # noqa: BLE001 - reported as "not available" to the caller
             log_error("Failed to fetch the RMM agent", error=str(exc))
-        package = cached_package(os_name, arch)
+        package = cached_package(os_name, arch, version)
     return package
 
 

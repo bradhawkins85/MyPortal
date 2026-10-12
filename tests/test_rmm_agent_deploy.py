@@ -291,3 +291,58 @@ def test_asset_page_says_the_tray_app_must_update():
         {"supported": True, "tray_outdated": True, "tray_version": "v0.8.3", "min_tray_version": "0.8.4", "status": "queued"}
     ))
     assert "v0.8.3" in text and "0.8.4" in text and "queued" in text
+
+
+@pytest.mark.anyio
+async def test_versioned_package_uses_requested_release_and_separate_cache(storage, monkeypatch):
+    name = deploy.file_name("windows", "amd64")
+    requests = []
+    assets = [_asset(name, 1), _asset(name + ".sha256", 2)]
+
+    def handler(request):
+        requests.append(request.url.path)
+        if request.url.path.endswith("/releases/tags/v1.2.3"):
+            return httpx.Response(200, json={"id": 1, "tag_name": "v1.2.3", "assets": assets})
+        if request.url.path.endswith("/releases/tags/v1.2.4") or request.url.path.endswith("/releases/tags/1.2.4"):
+            return httpx.Response(404)
+        if request.url.path.endswith(".sha256"):
+            return httpx.Response(200, text=hashlib.sha256(BINARY).hexdigest())
+        if request.url.path.endswith(name):
+            return httpx.Response(200, content=BINARY)
+        raise AssertionError(f"Unexpected request: {request.url}")
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(deploy, "monitored_client", lambda cls, **kw: cls(transport=transport, **kw))
+    # A different latest package must not be returned for the selected release.
+    _cache(storage, body=b"latest")
+    package = await deploy.ensure_package("windows", "amd64", version="v1.2.3")
+    assert package["version"] == "1.2.3" and package["path"].read_bytes() == BINARY
+    assert package["path"].parent == storage / "1.2.3"
+    assert deploy.cached_package("windows", "amd64")["path"].read_bytes() == b"latest"
+    before = len(requests)
+    assert await deploy.ensure_package("windows", "amd64", version="1.2.3") == package
+    assert len(requests) == before
+    assert await deploy.ensure_package("windows", "amd64", version="1.2.4") is None
+
+
+@pytest.mark.parametrize("version", ["../secret", "", "1.2.3/../../secret", "dev", "1.2"])
+def test_release_selector_rejects_invalid_paths(version):
+    with pytest.raises(ValueError):
+        deploy.release_version(version)
+
+
+@pytest.mark.anyio
+async def test_package_routes_keep_version_on_download_url(storage):
+    from app.features.rmm.agent_deploy_routes import agent_package, agent_package_download, _package
+    from fastapi import HTTPException
+
+    folder = storage / "1.2.3"
+    folder.mkdir()
+    _cache(folder)
+    package = await agent_package(os="windows", arch="amd64", tray_device={}, version="v1.2.3")
+    assert package["download_path"] == "/api/rmm/agent/package/download?os=windows&arch=amd64&version=1.2.3"
+    response = await agent_package_download(os="windows", arch="amd64", tray_device={}, version="1.2.3")
+    assert response.path == folder / deploy.file_name("windows", "amd64")
+    with pytest.raises(HTTPException) as error:
+        await _package("windows", "amd64", "../secret")
+    assert error.value.status_code == 400

@@ -411,3 +411,20 @@ reported). Ctrl-C cancels an in-flight LLM call.
 | 5 — Hardening | ✅ Shipped | Auto-update, diagnostics upload, version endpoint |
 | 6 — Dedicated chat shell | ✅ Shipped | Electron chat shell; 3-tier launch strategy; `chat_client_mode` server flag |
 | 7 — Polish | 🔄 Partial | Notification push, versions admin page; localization deferred |
+
+### RMM agent version alignment
+
+On Windows and macOS, the privileged tray service checks an existing MyPortal
+RMM agent at startup and every 30 minutes. After a tray upgrade it downloads the
+RMM build from the same release, verifies its SHA-256, and replaces the older
+agent while preserving its enrolment and state. Deployment commands also install
+the tray's matching version. Missing agents still follow the company's RMM
+deployment policy.
+
+Publish the RMM binaries alongside the tray installers under the same release
+tag and deploy the portal's version-aware package API before the new tray release.
+The portal caches requested releases separately so gradual tray rollouts continue
+to receive matching RMM builds. If a build is unavailable or a download fails, the
+tray leaves the current agent in place and retries. If replacement startup fails,
+it attempts to restore and restart the previous binary. Synchronisation does not
+require old RMM agents to support self-updates.
