@@ -358,6 +358,9 @@ async def test_remote_control_needs_the_devices_rmm_agent(sqlite_db, monkeypatch
     assert with_agent["agent_state"] == "connected"
     assert with_agent["remote_control"] == [{"provider": "rustdesk", "label": "RustDesk"}]
     assert await routes.company_agent_states(1) == {10: "connected"}
+    details = await routes.company_agent_details(1)
+    assert details[10]["state"] == "connected"
+    assert details[10]["version"] == (await sqlite_db.fetch_one("SELECT agent_version FROM rmm_agents"))["agent_version"]
     # Installed but no longer polling.
     await sqlite_db.execute("UPDATE rmm_agents SET last_seen_utc = '2000-01-01 00:00:00'")
     assert (await routes.asset_rmm_context(1, 10, can_run=True))["agent_state"] == "offline"

@@ -369,12 +369,12 @@ async def assets_page(request: Request):
         bool(user.get("is_super_admin"))
         or main_module._membership_menu_can(user, membership, "menu.rmm_scripts")
     )
-    rmm_agent_states: dict[int, str] = {}
+    rmm_agents: dict[int, dict[str, Any]] = {}
     if show_rmm_agent or can_push_rmm_agent:
         from app.features.rmm import routes as rmm_routes
 
-        rmm_agent_states = await rmm_routes.company_agent_states(company_id)
-    rmm_agent_asset_ids = set(rmm_agent_states)
+        rmm_agents = await rmm_routes.company_agent_details(company_id)
+    rmm_agent_asset_ids = set(rmm_agents)
     if can_push_rmm_agent:
         from app.services.rmm_agent_deploy import TRAY_PLATFORMS
 
@@ -389,6 +389,10 @@ async def assets_page(request: Request):
             tray_device.get("hostname") if tray_device else None
         )
         record["tray_agent_synced"] = bool(record["tray_device_uid"])
+        if can_write_assets:
+            record["tray_agent_version"] = _clean_text(
+                tray_device.get("agent_version") if tray_device else None
+            )
         record["can_open_chat"] = bool(
             record["tray_device_uid"] and main_module.settings.matrix_enabled
         )
@@ -399,7 +403,9 @@ async def assets_page(request: Request):
             and int(record["id"]) not in rmm_agent_asset_ids
         )
         if show_rmm_agent and record.get("id"):
-            record["rmm_agent"] = rmm_agent_states.get(int(record["id"]), "missing")
+            rmm_agent = rmm_agents.get(int(record["id"])) or {}
+            record["rmm_agent"] = rmm_agent.get("state", "missing")
+            record["rmm_agent_version"] = _clean_text(rmm_agent.get("version"))
         asset_id = record.get("id")
         asset_cf = cf_values_by_asset.get(asset_id, {})
         for field_def in field_definitions:
@@ -420,9 +426,13 @@ async def assets_page(request: Request):
         for field_def in field_definitions
     ]
     all_columns = list(_ASSET_TABLE_COLUMNS) + custom_columns
+    if can_write_assets:
+        synced_index = next(i for i, column in enumerate(all_columns) if column["key"] == "tray_agent_synced")
+        all_columns.insert(synced_index + 1, {"key": "tray_agent_version", "label": "Tray agent version", "sort": "string"})
     if show_rmm_agent:
         status_index = next((i for i, column in enumerate(all_columns) if column["key"] == "status"), 0)
         all_columns.insert(status_index + 1, {"key": "rmm_agent", "label": "RMM agent", "sort": "number"})
+        all_columns.insert(status_index + 2, {"key": "rmm_agent_version", "label": "RMM agent version", "sort": "string"})
     # Tags belong to the tags pack and are internal, so customers never see them.
     show_tags = False
     if can_write_assets and main_module._feature_pack_available("tags"):
