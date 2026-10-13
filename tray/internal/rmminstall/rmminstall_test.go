@@ -16,11 +16,15 @@ import (
 )
 
 type fakeAPI struct {
-	body   []byte
-	sha    string
-	token  string
-	goos   string
-	goarch string
+	body             []byte
+	sha              string
+	token            string
+	goos             string
+	goarch           string
+	packageErr       error
+	downloadErr      error
+	packageCalls     int
+	requestedVersion string
 }
 
 func (f *fakeAPI) BaseURL() string   { return "https://portal.example.com" }
@@ -28,11 +32,21 @@ func (f *fakeAPI) AuthToken() string { return f.token }
 
 func (f *fakeAPI) GetRMMAgentPackage(_ context.Context, goos, goarch string, version ...string) (*api.RMMAgentPackage, error) {
 	f.goos, f.goarch = goos, goarch
+	f.packageCalls++
+	if len(version) > 0 {
+		f.requestedVersion = version[0]
+	}
+	if f.packageErr != nil {
+		return nil, f.packageErr
+	}
 	return &api.RMMAgentPackage{Version: "1.2.3", Sha256: f.sha, DownloadPath: "/api/rmm/agent/package/download?os=x"}, nil
 }
 
 func (f *fakeAPI) DownloadRMMAgent(_ context.Context, _ string, w io.Writer) error {
 	_, err := w.Write(f.body)
+	if f.downloadErr != nil {
+		return f.downloadErr
+	}
 	return err
 }
 
@@ -216,5 +230,117 @@ func TestUpgradeRestoresOldAgentWhenNewServiceFails(t *testing.T) {
 	got, _ := os.ReadFile(final)
 	if !restartedOld || string(got) != "old" {
 		t.Fatalf("restarted=%v binary=%q", restartedOld, got)
+	}
+}
+
+func TestGitHubFirstSucceedsWhenPortalWouldReturnHTTP400(t *testing.T) {
+	body := []byte("github agent")
+	portal := &fakeAPI{token: "tray-token", packageErr: errors.New("rmm agent package: HTTP 400")}
+	in, calls := newInstaller(t, portal, "")
+	github := &fakeAPI{body: body, sha: digest(body)}
+	in.GitHub = github
+	version, err := in.InstallVersion(context.Background(), "v1.2.3")
+	if err != nil || version != "1.2.3" {
+		t.Fatalf("version=%q err=%v", version, err)
+	}
+	if portal.packageCalls != 0 || github.packageCalls != 1 || github.requestedVersion != "v1.2.3" {
+		t.Fatalf("portal calls=%d GitHub=%+v", portal.packageCalls, github)
+	}
+	if len(*calls) != 2 || (*calls)[0].env[0] != "MYPORTAL_TRAY_TOKEN=tray-token" {
+		t.Fatalf("calls=%+v", *calls)
+	}
+}
+
+func TestGitHubFailuresFallBackToVerifiedPortalPackage(t *testing.T) {
+	for _, failure := range []string{"lookup", "partial download", "checksum mismatch", "invalid checksum"} {
+		t.Run(failure, func(t *testing.T) {
+			body := []byte("portal agent")
+			portal := &fakeAPI{body: body, sha: digest(body), token: "t"}
+			github := &fakeAPI{body: []byte("partial github"), sha: digest([]byte("github agent"))}
+			switch failure {
+			case "lookup":
+				github.packageErr = errors.New("GitHub unavailable")
+			case "partial download":
+				github.downloadErr = errors.New("connection reset")
+			case "invalid checksum":
+				github.sha = strings.Repeat("z", 64)
+			}
+			in, _ := newInstaller(t, portal, "")
+			in.GitHub = github
+			if _, err := in.InstallVersion(context.Background(), "1.2.3"); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.Join(in.Dir, binaryName()))
+			if err != nil || string(got) != string(body) || portal.requestedVersion != "1.2.3" {
+				t.Fatalf("binary=%q err=%v portal=%+v", got, err, portal)
+			}
+			entries, _ := os.ReadDir(in.Dir)
+			if len(entries) != 1 {
+				t.Fatalf("left temporary downloads: %v", entries)
+			}
+		})
+	}
+}
+
+func TestBothSourcesFailWithoutStoppingExistingAgent(t *testing.T) {
+	portal := &fakeAPI{body: []byte("tampered"), sha: digest([]byte("agent")), token: "t"}
+	in, calls := newInstaller(t, portal, "")
+	in.GitHub = &fakeAPI{packageErr: errors.New("GitHub unavailable")}
+	final := filepath.Join(in.Dir, binaryName())
+	if err := os.WriteFile(final, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := in.InstallVersion(context.Background(), "1.2.3")
+	if err == nil || !strings.Contains(err.Error(), "GitHub unavailable") || !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("err=%v", err)
+	}
+	got, _ := os.ReadFile(final)
+	if string(got) != "old" || len(*calls) != 0 {
+		t.Fatalf("binary=%q calls=%v", got, *calls)
+	}
+}
+
+func TestCancelledGitHubAttemptDoesNotTryPortal(t *testing.T) {
+	portal := &fakeAPI{token: "t"}
+	in, calls := newInstaller(t, portal, "")
+	in.GitHub = &fakeAPI{packageErr: context.Canceled}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := in.InstallVersion(ctx, "1.2.3"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	if portal.packageCalls != 0 || len(*calls) != 0 {
+		t.Fatalf("portal calls=%d service calls=%v", portal.packageCalls, *calls)
+	}
+}
+
+func TestEnsureVersionUsesGitHubWhilePortalPackageFails(t *testing.T) {
+	body := []byte("new GitHub agent")
+	portal := &fakeAPI{token: "t", packageErr: errors.New("rmm agent package: HTTP 400")}
+	in, calls := newInstaller(t, portal, "")
+	github := &fakeAPI{body: body, sha: digest(body)}
+	in.GitHub = github
+	final := filepath.Join(in.Dir, binaryName())
+	if err := os.WriteFile(final, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := in.EnsureVersion(context.Background(), "v1.2.3")
+	if err != nil || !changed || portal.packageCalls != 0 {
+		t.Fatalf("changed=%v err=%v portal calls=%d", changed, err, portal.packageCalls)
+	}
+	if len(*calls) != 3 || (*calls)[0].args[0] != "version" || (*calls)[1].args[0] != "uninstall" || (*calls)[2].args[0] != "install" {
+		t.Fatalf("calls=%+v", *calls)
+	}
+	got, _ := os.ReadFile(final)
+	if string(got) != string(body) {
+		t.Fatalf("binary=%q", got)
+	}
+}
+
+func TestNewEnablesPublicGitHubSource(t *testing.T) {
+	in := New(&fakeAPI{})
+	source, ok := in.GitHub.(*githubSource)
+	if !ok || source.baseURL != githubReleaseURL || source.client == nil {
+		t.Fatalf("source=%+v", in.GitHub)
 	}
 }

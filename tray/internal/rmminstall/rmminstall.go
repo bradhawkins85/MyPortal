@@ -2,7 +2,7 @@
 // MyPortal sends the tray service an install_rmm_agent command.
 //
 // The tray service runs as LocalSystem/root, so it downloads the agent build
-// MyPortal holds for this platform, checks its SHA-256, puts it in a folder
+// from GitHub (falling back to MyPortal), checks its SHA-256, puts it in a folder
 // only administrators can write to, enrols it with the tray device's own token
 // (passed in the environment, never on the command line) and installs its
 // service:
@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
+	"github.com/bradhawkins85/myportal-tray/internal/logger"
 )
 
 // API is the part of the MyPortal client the installer uses.
@@ -38,20 +39,27 @@ type API interface {
 	DownloadRMMAgent(ctx context.Context, downloadPath string, w io.Writer) error
 }
 
+// PackageSource is the lookup and download interface shared by both sources.
+type PackageSource interface {
+	GetRMMAgentPackage(ctx context.Context, goos, goarch string, version ...string) (*api.RMMAgentPackage, error)
+	DownloadRMMAgent(ctx context.Context, downloadPath string, w io.Writer) error
+}
+
 // Runner runs the agent binary with args and extra environment and returns
 // its combined output.
 type Runner func(ctx context.Context, path string, args []string, env []string) ([]byte, error)
 
 // Installer installs the agent into Dir.
 type Installer struct {
-	API API
-	Dir string
-	Run Runner
+	API    API
+	GitHub PackageSource
+	Dir    string
+	Run    Runner
 }
 
 // New returns an installer for this platform's install folder.
 func New(client API) *Installer {
-	return &Installer{API: client, Dir: DefaultDir(), Run: runCommand}
+	return &Installer{API: client, GitHub: newGitHubSource(), Dir: DefaultDir(), Run: runCommand}
 }
 
 // DefaultDir is where the agent binary lives on this platform.
@@ -118,39 +126,34 @@ func (in *Installer) InstallVersion(ctx context.Context, version string) (instal
 	if token == "" {
 		return "", errors.New("the tray app is not enrolled")
 	}
-	pkg, err := in.API.GetRMMAgentPackage(ctx, runtime.GOOS, runtime.GOARCH, version)
-	if err != nil {
-		return "", fmt.Errorf("find the agent build: %w", err)
-	}
-	if version != "" && !sameVersion(pkg.Version, version) {
-		return "", fmt.Errorf("RMM package version %q does not match tray version %q", pkg.Version, version)
-	}
-	expected := strings.ToLower(strings.TrimSpace(pkg.Sha256))
-	if len(expected) != sha256.Size*2 {
-		return "", errors.New("MyPortal did not give the agent build's SHA-256")
-	}
 	if err := os.MkdirAll(in.Dir, 0o755); err != nil {
 		return "", err
 	}
-	// Download next to the final path so the rename stays on one volume.
-	tmp, err := os.CreateTemp(in.Dir, "myportal-rmm-*.download")
-	if err != nil {
-		return "", err
+	var pkg *api.RMMAgentPackage
+	var tmpPath string
+	var err, githubErr error
+	if in.GitHub != nil {
+		// Reserve time for the portal fallback within the service's 15 minute limit.
+		githubCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		pkg, tmpPath, githubErr = in.downloadPackage(githubCtx, in.GitHub, version)
+		cancel()
+		if githubErr != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			logger.Warn("RMM GitHub download failed: %v; trying MyPortal", githubErr)
+		}
 	}
-	tmpPath := tmp.Name()
+	if tmpPath == "" {
+		pkg, tmpPath, err = in.downloadPackage(ctx, in.API, version)
+		if err != nil {
+			if githubErr != nil {
+				return "", errors.Join(fmt.Errorf("GitHub: %w", githubErr), fmt.Errorf("MyPortal: %w", err))
+			}
+			return "", err
+		}
+	}
 	defer os.Remove(tmpPath)
-	digest := sha256.New()
-	err = in.API.DownloadRMMAgent(ctx, pkg.DownloadPath, io.MultiWriter(tmp, digest))
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return "", fmt.Errorf("download the agent: %w", err)
-	}
-	actual := hex.EncodeToString(digest.Sum(nil))
-	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
-		return "", fmt.Errorf("agent download SHA-256 mismatch: got %s want %s", actual, expected)
-	}
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
 		return "", err
 	}
@@ -232,4 +235,49 @@ func trim(out []byte) string {
 		out = out[len(out)-1500:]
 	}
 	return string(out)
+}
+
+// downloadPackage verifies the complete download before any service is stopped.
+func (in *Installer) downloadPackage(ctx context.Context, source PackageSource, version string) (*api.RMMAgentPackage, string, error) {
+	pkg, err := source.GetRMMAgentPackage(ctx, runtime.GOOS, runtime.GOARCH, version)
+	if err != nil {
+		return nil, "", fmt.Errorf("find the agent build: %w", err)
+	}
+	if pkg == nil {
+		return nil, "", errors.New("missing agent package")
+	}
+	if version != "" && !sameVersion(pkg.Version, version) {
+		return nil, "", fmt.Errorf("RMM package version %q does not match tray version %q", pkg.Version, version)
+	}
+	expected := strings.ToLower(strings.TrimSpace(pkg.Sha256))
+	decoded, err := hex.DecodeString(expected)
+	if err != nil || len(decoded) != sha256.Size {
+		return nil, "", errors.New("missing or invalid agent build SHA-256")
+	}
+	// Download next to the final path so the rename stays on one volume.
+	tmp, err := os.CreateTemp(in.Dir, "myportal-rmm-*.download")
+	if err != nil {
+		return nil, "", err
+	}
+	tmpPath := tmp.Name()
+	success := false
+	defer func() {
+		if !success {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	digest := sha256.New()
+	err = source.DownloadRMMAgent(ctx, pkg.DownloadPath, io.MultiWriter(tmp, digest))
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("download the agent: %w", err)
+	}
+	actual := hex.EncodeToString(digest.Sum(nil))
+	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
+		return nil, "", fmt.Errorf("agent download SHA-256 mismatch: got %s want %s", actual, expected)
+	}
+	success = true
+	return pkg, tmpPath, nil
 }

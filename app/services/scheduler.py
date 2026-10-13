@@ -1378,12 +1378,16 @@ class SchedulerService:
                         status = "skipped"
                 elif command == "update_tray_icon_installer":
                     settings = get_settings()
-                    updated_assets = (
-                        await tray_installer_service.fetch_latest_tray_installers(
+                    refresh_errors = {}
+                    try:
+                        updated_assets = await tray_installer_service.fetch_latest_tray_installers(
                             repo=settings.github_tray_msi_repo,
                             github_token=settings.github_token,
                         )
-                    )
+                    except Exception as exc:  # noqa: BLE001 - still refresh RMM builds
+                        log_error("Failed to refresh the tray installers", error=str(exc))
+                        updated_assets = {}
+                        refresh_errors["assets"] = str(exc)
                     # The RMM agent the tray app installs ships in the same releases.
                     from app.services import rmm_agent_deploy
 
@@ -1392,15 +1396,19 @@ class SchedulerService:
                             repo=settings.github_tray_msi_repo,
                             github_token=settings.github_token,
                         )
-                    except Exception as exc:  # noqa: BLE001 - tray installers still count
+                    except Exception as exc:  # noqa: BLE001 - preserve tray download results
                         log_error("Failed to refresh the RMM agent builds", error=str(exc))
                         updated_agent = {}
+                        refresh_errors["rmm_agent"] = str(exc)
+                    if refresh_errors:
+                        status = "failed"
                     details = json.dumps(
                         {
                             "repo": settings.github_tray_msi_repo,
                             "assets": updated_assets,
                             "rmm_agent": updated_agent,
                             "updated": any(updated_assets.values()) or any(updated_agent.values()),
+                            **({"errors": refresh_errors} if refresh_errors else {}),
                         },
                         default=str,
                     )

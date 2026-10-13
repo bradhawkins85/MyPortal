@@ -417,14 +417,22 @@ reported). Ctrl-C cancels an in-flight LLM call.
 On Windows and macOS, the privileged tray service checks an existing MyPortal
 RMM agent at startup and every 30 minutes. After a tray upgrade it downloads the
 RMM build from the same release, verifies its SHA-256, and replaces the older
-agent while preserving its enrolment and state. Deployment commands also install
-the tray's matching version. Missing agents still follow the company's RMM
+agent while preserving its enrolment and state. It first downloads the matching
+platform binary and `.sha256` file directly from the public
+`bradhawkins85/MyPortal` GitHub release, without sending the device token.
+If GitHub lookup, download, or checksum verification fails, it uses MyPortal's
+version-aware package API and verifies that download too. Deployment commands
+also install the tray's matching version. Missing agents still follow the company's RMM
 deployment policy.
 
 Publish the RMM binaries alongside the tray installers under the same release
-tag and deploy the portal's version-aware package API before the new tray release.
+tag. Keep the portal's version-aware package API available for fallback downloads.
 The portal caches requested releases separately so gradual tray rollouts continue
-to receive matching RMM builds. If a build is unavailable or a download fails, the
+to receive matching RMM builds. The **Update Tray Icon Installer** scheduled task
+downloads both tray installers and RMM builds. It retains each downloaded RMM
+release in a versioned cache as well as the latest cache, so matching fallback
+downloads work while GitHub is unavailable. Older cached releases are preserved.
+If a build is unavailable or a download fails, the
 tray leaves the current agent in place and retries. If replacement startup fails,
 it attempts to restore and restart the previous binary. Synchronisation does not
 require old RMM agents to support self-updates.
