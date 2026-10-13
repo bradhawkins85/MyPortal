@@ -1,0 +1,12 @@
+
+/internal/thermal/bundle/*.dll
+/internal/thermal/bundle/*.xml
+/internal/thermal/bundle/LICENSE.txt
+/internal/thermal/bundle/third-party-notices.txt
+/thermal-bundle/bin/
+/thermal-bundle/obj/
+
+/internal/thermal/bundle/upstream-notices.txt
+/internal/thermal/bundle/*.exe
+/internal/thermal/bundle/*-source.tar.gz
+/internal/thermal/bundle/PawnIO-COPYING.txt

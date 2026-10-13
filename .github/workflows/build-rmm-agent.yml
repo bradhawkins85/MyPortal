@@ -49,9 +49,33 @@ jobs:
       - name: Test
         run: go test ./...
 
+  windows-thermal:
+    name: Verify Windows sensor bundle
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: rmm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: rmm/go.mod
+          cache-dependency-path: rmm/go.sum
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+      - name: Prepare bundled libraries
+        run: python thermal-bundle/build.py
+      - name: Verify silent PawnIO installation on disposable Windows runner
+        env:
+          MYPORTAL_TEST_PAWNIO_INSTALL: '1'
+        run: go test -timeout 4m ./internal/thermal -run '^TestWindowsPawnIOInstallation$' -count=1
+      - name: Verify extraction and Windows PowerShell loading
+        run: go test ./internal/thermal
+
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: test
+    needs: [test, windows-thermal]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -71,6 +95,15 @@ jobs:
         with:
           go-version-file: rmm/go.mod
           cache-dependency-path: rmm/go.sum
+      - uses: actions/setup-dotnet@v5
+        if: matrix.goos == 'windows'
+        with:
+          dotnet-version: '8.0.x'
+      - name: Bundle temperature library and licenses
+        if: matrix.goos == 'windows'
+        env:
+          THERMAL_ARCH: ${{ matrix.goarch }}
+        run: python3 thermal-bundle/build.py
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}

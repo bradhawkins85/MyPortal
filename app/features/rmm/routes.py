@@ -25,7 +25,8 @@ Agent side (``Authorization: Bearer`` token):
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -50,7 +51,7 @@ from app.services import rmm_scripts
 router = APIRouter(tags=["RMM scripts"])
 
 PERMISSION = "menu.rmm_scripts"
-_AGENT_PUBLIC_FIELDS = ("id", "hostname", "os", "os_version", "arch", "agent_version", "shells", "last_seen_utc", "status")
+_AGENT_PUBLIC_FIELDS = ("id", "hostname", "os", "os_version", "arch", "agent_version", "shells", "last_seen_utc", "status", "thermal")
 
 
 def _assets_routes():
@@ -541,6 +542,19 @@ async def get_current_rmm_agent(request: Request) -> dict[str, Any]:
     return agent
 
 
+class TemperatureSensor(BaseModel):
+    id: str = Field(min_length=1, max_length=255)
+    name: str = Field(max_length=255)
+    hardware: str = Field(max_length=255)
+    celsius: float = Field(ge=-100, le=250, allow_inf_nan=False)
+
+
+class ThermalSnapshot(BaseModel):
+    collected_at: datetime
+    status: Literal["available", "unavailable", "unsupported", "error"]
+    sensors: list[TemperatureSensor] = Field(default_factory=list, max_length=256)
+
+
 class AgentDetails(BaseModel):
     hostname: str | None = Field(default=None, max_length=255)
     os: str | None = Field(default=None, max_length=32)
@@ -549,6 +563,7 @@ class AgentDetails(BaseModel):
     agent_version: str | None = Field(default=None, max_length=32)
     shells: list[str] = Field(default_factory=list, max_length=16)
     script_files_supported: bool | None = None
+    thermal: ThermalSnapshot | None = None
 
 
 class AgentEnrolRequest(AgentDetails):
