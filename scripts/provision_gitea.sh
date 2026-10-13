@@ -4,7 +4,7 @@
 #
 # Gitea runs from the official binary as the "gitea" service account on
 # 127.0.0.1:3000, and nginx serves it at /gitea on the portal's address. The
-# first run creates an administrator, a private "rmm-scripts" repository and a
+# first run creates an administrator, a private "rmm-scripts" repository, a public "Public" repository and a
 # token MyPortal uses to read scripts and create the script folders, and
 # writes the GITEA_* settings MyPortal needs. Later runs move the binary to
 # GITEA_VERSION and keep data, accounts and settings.
@@ -254,7 +254,7 @@ JWT_SECRET = ${jwt_secret}
 
 [service]
 DISABLE_REGISTRATION = true
-REQUIRE_SIGNIN_VIEW = true
+REQUIRE_SIGNIN_VIEW = false
 DEFAULT_KEEP_EMAIL_PRIVATE = true
 
 [openid]
@@ -415,14 +415,16 @@ token_is_read_only() {
 }
 
 ensure_repository() {
-  local token="$1" status
-  status=$(curl_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}")
+  local token="$1" repository="${2:-$GITEA_REPOSITORY}" private="${3:-true}" status
+  local description="Scripts MyPortal runs on devices"
+  [[ "$private" == true ]] || description="Public downloads for MyPortal staff and users"
+  status=$(curl_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/${repository}")
   [[ "$status" != 200 ]] || return 0
-  info "Creating the Gitea repository ${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}…"
-  status=$(curl_auth | gitea_api POST /user/repos \
-    "{\"name\":\"${GITEA_REPOSITORY}\",\"description\":\"Scripts MyPortal runs on devices\",\"private\":true,\"auto_init\":true,\"default_branch\":\"main\",\"readme\":\"Default\"}")
+  info "Creating the Gitea repository ${GITEA_ADMIN_USER}/${repository}…"
+  status=$(curl_auth "$token" | gitea_api POST /user/repos \
+    "{\"name\":\"${repository}\",\"description\":\"${description}\",\"private\":${private},\"auto_init\":true,\"default_branch\":\"main\",\"readme\":\"Default\"}")
   [[ "$status" == 201 || "$status" == 409 ]] || {
-    warn "could not create ${GITEA_ADMIN_USER}/${GITEA_REPOSITORY} in Gitea (HTTP ${status}); create it, then sync scripts."
+    warn "could not create ${GITEA_ADMIN_USER}/${repository} in Gitea (HTTP ${status}); create it, then sync scripts."
     return 1
   }
 }
@@ -444,6 +446,7 @@ connect_myportal() {
     ensure_repository "$token" || true
     env_default GITEA_API_TOKEN "$token" "${old:-}"
   fi
+  ensure_repository "$token" Public false || return 1
   env_default GITEA_BASE_URL "$GITEA_LOCAL_URL"
   env_default GITEA_PUBLIC_URL "$GITEA_PUBLIC_PATH"
   env_default GITEA_SCRIPTS_REPOSITORY "${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}"
@@ -476,6 +479,7 @@ main() {
   changed+=$(ini_set server ROOT_URL "$(root_url)")
   changed+=$(configure_sign_in)
   changed+=$(configure_uploads)
+  changed+=$(ini_set service REQUIRE_SIGNIN_VIEW false)
   changed+=$(write_unit)
 
   systemctl daemon-reload

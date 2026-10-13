@@ -13,7 +13,7 @@ repository (see ``app.services.gitea_sign_in``).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import quote
 
@@ -281,3 +281,10 @@ def web_url(settings: GiteaSettings, path: str) -> str:
     return (
         repository_url(settings) + "/src/branch/" + quote(settings.branch, safe="") + "/" + encoded
     )
+
+
+def public_settings(settings: GiteaSettings) -> GiteaSettings:
+    """The separate public download repository owned by the scripts owner."""
+    if settings.repo.casefold() == "public":
+        raise GiteaError("The private scripts repository must be separate from Public.")
+    return replace(settings, repo="Public", branch="main", path="")

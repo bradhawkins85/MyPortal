@@ -353,6 +353,16 @@
             </a>
           </li>
           {% endif %}
+          {% if feature_pack_available('rmm') %}
+          <li class="menu__item">
+            <a href="/downloads">
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M11 3h2v10l3-3 1.4 1.4L12 17l-5.4-5.6L8 10l3 3V3ZM4 17h2v3h12v-3h2v5H4z"/></svg>
+              </span>
+              <span class="menu__label">Downloads</span>
+            </a>
+          </li>
+          {% endif %}
           {% if can_access_documentation_search %}
           <li class="menu__item">
             <a href="/documentation-search" {% if current_path.startswith('/documentation-search') %}aria-current="page"{% endif %}>
