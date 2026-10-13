@@ -832,7 +832,6 @@ async def get_ticket_questions(
 async def tray_submit_ticket(
     payload: TrayTicketSubmitRequest,
     request: Request,
-    external_reference: str | None = None,
 ) -> TrayTicketSubmitResponse:
     """Create a support ticket submitted via the tray icon.
 
@@ -848,6 +847,16 @@ async def tray_submit_ticket(
     value; select questions must use a declared option.
     """
     device = await _resolve_tray_device(payload, request)
+    return await _create_tray_ticket(payload, device)
+
+
+async def _create_tray_ticket(
+    payload: TrayTicketSubmitRequest,
+    device: dict[str, Any],
+    *,
+    external_reference: str | None = None,
+) -> TrayTicketSubmitResponse:
+    """Create a MyPortal ticket for an already-authenticated tray device."""
 
     company_id: int | None = device.get("company_id")
     asset_id: int | None = device.get("asset_id")
@@ -1003,6 +1012,14 @@ async def tray_submit_syncro_ticket(
     """
 
     device = await _resolve_tray_device(payload, request)
+    return await _create_syncro_tray_ticket(payload, device)
+
+
+async def _create_syncro_tray_ticket(
+    payload: TrayTicketSubmitRequest, device: dict[str, Any]
+) -> TrayTicketSubmitResponse:
+    """Create a Syncro ticket for an already-authenticated tray device."""
+
     company_id: int | None = device.get("company_id")
     normalised_email = payload.email.strip().lower()
 
@@ -1586,16 +1603,13 @@ async def tray_ticket_form_submit(request: Request) -> HTMLResponse:
         answers=answers,
     )
 
-    class _NoAuthRequest:
-        headers: dict[str, str] = {}
-
     submission_ref = _ticket_form_submission_reference(session, token)
     lock = _TICKET_FORM_SUBMISSION_LOCKS.setdefault(submission_ref, asyncio.Lock())
 
     try:
         async with lock:
             if str(session.get("mode")) == "syncro":
-                result = await tray_submit_syncro_ticket(payload, _NoAuthRequest())
+                result = await _create_syncro_tray_ticket(payload, device)
             else:
                 existing_ticket = await tickets_repo.get_ticket_by_external_reference(
                     submission_ref
@@ -1606,9 +1620,12 @@ async def tray_ticket_form_submit(request: Request) -> HTMLResponse:
                         ticket_number=existing_ticket.get("ticket_number"),
                     )
                 else:
-                    result = await tray_submit_ticket(
+                    # The signed form token already identified the device,
+                    # so create the ticket directly rather than going through
+                    # the bearer-authenticated JSON endpoint.
+                    result = await _create_tray_ticket(
                         payload,
-                        _NoAuthRequest(),
+                        device,
                         external_reference=submission_ref,
                     )
     except HTTPException as exc:
