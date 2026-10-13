@@ -752,6 +752,13 @@
     return row;
   }
 
+  function updateOutput(node, text) {
+    if (node.textContent === text) return;
+    const follow = node.scrollHeight - node.scrollTop - node.clientHeight < 40;
+    node.textContent = text;
+    if (follow) node.scrollTop = node.scrollHeight;
+  }
+
   function renderRun(run) {
     currentRun = run;
     resultModal.querySelector('[data-rmm-result-title]').textContent = run.script_name;
@@ -801,9 +808,10 @@
     resultModal.querySelector('[data-rmm-result-values-section]').hidden = values.length === 0;
 
     const active = ACTIVE.has(run.status);
-    resultModal.querySelector('[data-rmm-result-stdout]').textContent =
-      run.stdout || (active ? 'Waiting for the device to report back…' : 'The script printed nothing.');
-    resultModal.querySelector('[data-rmm-result-stderr]').textContent = run.stderr || '';
+    updateOutput(resultModal.querySelector('[data-rmm-result-stdout]'),
+      run.stdout || (active ? 'Waiting for script output…' : 'The script printed nothing.'));
+    updateOutput(resultModal.querySelector('[data-rmm-result-stderr]'), run.stderr || '');
+    resultModal.querySelector('[data-rmm-output-state]').textContent = active ? 'Live · updates every second' : '';
     resultModal.querySelector('[data-rmm-result-stderr-section]').hidden = !run.stderr;
 
     const inputs = run.inputs || [];
@@ -818,7 +826,10 @@
     resultModal.querySelector('[data-rmm-cancel-run]').hidden = !(config.can_run && run.status === 'queued');
   }
 
+  let pollGeneration = 0;
+
   function stopPolling() {
+    pollGeneration += 1;
     if (pollTimer) {
       window.clearTimeout(pollTimer);
       pollTimer = null;
@@ -826,16 +837,20 @@
   }
 
   async function refreshRun(runId) {
+    const generation = pollGeneration;
     try {
       const data = await api('/api/rmm/runs/' + encodeURIComponent(runId));
+      if (generation !== pollGeneration || resultModal.hidden) return;
       renderRun(data.run);
       if (ACTIVE.has(data.run.status) && !resultModal.hidden) {
-        pollTimer = window.setTimeout(() => refreshRun(runId), 3000);
+        pollTimer = window.setTimeout(() => refreshRun(runId), 1000);
       }
     } catch (error) {
+      if (generation !== pollGeneration || resultModal.hidden) return;
       const message = resultModal.querySelector('[data-rmm-result-error]');
       message.textContent = error.message;
       message.hidden = false;
+      pollTimer = window.setTimeout(() => refreshRun(runId), 3000);
     }
   }
 

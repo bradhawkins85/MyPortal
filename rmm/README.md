@@ -31,7 +31,19 @@ the service.
 ## How it works
 
 The agent long-polls `GET /api/rmm/agent/jobs`, runs up to four scripts at a
-time and reports each result to `/api/rmm/agent/runs/{id}/result`. See
+time and reports each result to `/api/rmm/agent/runs/{id}/result`.
+While executing, it sends cumulative stdout/stderr snapshots once a second to
+`/api/rmm/agent/runs/{id}/output`. The technician's result view refreshes every
+second, follows new lines when scrolled to the bottom, and preserves the scroll
+position when reading earlier output. Failed snapshots retry on the next tick;
+the final result always includes captured output. Output remains capped at 1 MiB
+per stream on the agent and 1,000,000 characters in MyPortal, with a visible
+truncation notice. Session credential markers are masked before live storage.
+
+Deploy MyPortal before updating RMM agents to enable live reporting. Older agents
+continue to report final results; MyPortal also decodes their PowerShell CLIXML
+errors, including previously stored runs. New agents use a PowerShell file wrapper
+and text output to avoid serialized error records. See
 `internal/runner` for how parameters, environment variables and custom values
 are passed, and `docs/wiki/administration/RMM Scripts.md` for the script
 conventions.

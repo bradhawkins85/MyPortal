@@ -38,6 +38,7 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import gitea
 from app.services import gitea_sign_in
 from app.services import rmm_script_parser as parser
+from app.services.rmm_output import readable_output
 from app.services import tray as tray_service
 from app.services import value_templates
 from app.services.singleton_jobs import singleton_run
@@ -872,6 +873,22 @@ def _parse_bool(value: str) -> bool | None:
     return None
 
 
+def _take_session_markers(text: str) -> tuple[str, dict[str, str]]:
+    markers: dict[str, str] = {}
+    cleaned_lines: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if line.startswith("::session:") and "=" in line:
+            body = line[len("::session:"):]
+            key, value = body.split("=", 1)
+            key = key.strip()
+            if key:
+                markers[key] = value.strip()
+            continue
+        cleaned_lines.append(raw_line)
+    return ("\n".join(cleaned_lines), markers)
+
+
 async def _apply_asset_value(asset_id: int | None, name: str, value: str, definitions: list[dict[str, Any]]) -> str | None:
     if asset_id is None:
         return "The run is not linked to an asset."
@@ -958,6 +975,15 @@ async def apply_custom_values(run: Mapping[str, Any], values: list[dict[str, str
     return results
 
 
+async def record_output(agent: Mapping[str, Any], run_id: int, payload: Mapping[str, Any]) -> bool:
+    """Store live output without applying custom values or finishing the run."""
+    stdout, _ = _take_session_markers(readable_output(payload.get("stdout")))
+    stderr, _ = _take_session_markers(readable_output(payload.get("stderr")))
+    return await rmm_repo.update_run_output(
+        run_id, int(agent["id"]), stdout=_truncate(stdout), stderr=_truncate(stderr),
+    )
+
+
 async def record_result(agent: Mapping[str, Any], run_id: int, payload: Mapping[str, Any]) -> dict[str, Any] | None:
     run = await rmm_repo.get_agent_run(run_id, int(agent["id"]))
     if not run:
@@ -981,7 +1007,7 @@ async def record_result(agent: Mapping[str, Any], run_id: int, payload: Mapping[
 
     values = normalise_custom_values(payload.get("custom_values"))
     # Session values (a remote access ID and password) never stay in the output.
-    stdout, session_values = rmm_remote_control.take_session_markers(str(payload.get("stdout") or ""))
+    stdout, session_values = rmm_remote_control.take_session_markers(readable_output(payload.get("stdout")))
     session_values.update({item["name"].lower(): item["value"] for item in values if item["scope"] == "session"})
     custom_values = await apply_custom_values(run, [item for item in values if item["scope"] != "session"])
     if session_values:
@@ -991,7 +1017,7 @@ async def record_result(agent: Mapping[str, Any], run_id: int, payload: Mapping[
         status=status,
         exit_code=exit_code,
         stdout=_truncate(stdout),
-        stderr=_truncate(payload.get("stderr")),
+        stderr=_truncate(rmm_remote_control.take_session_markers(readable_output(payload.get("stderr")))[0]),
         custom_values=custom_values,
         error_message=error,
     )

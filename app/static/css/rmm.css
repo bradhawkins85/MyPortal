@@ -299,7 +299,7 @@
 }
 
 .rmm-source__code { max-height: 18rem; white-space: pre; }
-.rmm-output { max-height: 24rem; }
+.rmm-output { max-height: 24rem; font-size: 0.875rem; line-height: 1.5; tab-size: 4; }
 .rmm-output--error { border-color: color-mix(in srgb, var(--hf-danger) 45%, transparent); }
 
 .rmm-preview__env,
