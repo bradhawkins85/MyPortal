@@ -21,6 +21,28 @@
   {%- endif -%}
 {%- endmacro %}
 
+{# Every attempt to install the RMM agent on a device, newest first
+   (rmm_agent_deploy.asset_install_history). #}
+{% macro install_history(attempts, open=false) -%}
+<details class="rmm-install-history" data-rmm-install-history{% if open %} open{% endif %}>
+  <summary>RMM agent install history <span class="text-muted">· {{ attempts | length }} latest attempt{{ "s" if attempts | length != 1 }}</span></summary>
+  <div class="table-wrapper"><table class="table">
+    <caption class="visually-hidden">RMM agent install attempts on this device</caption>
+    <thead><tr><th scope="col">When</th><th scope="col">Started by</th><th scope="col">Result</th><th scope="col">Details</th></tr></thead>
+    <tbody>
+      {%- for attempt in attempts %}
+      <tr data-rmm-install-attempt="{{ attempt.id }}">
+        <td data-label="When"><span data-utc="{{ attempt.created_at }}">{{ attempt.created_at }}</span></td>
+        <td data-label="Started by">{{ attempt.source_label }}{% if attempt.requested_by_email %} <span class="text-muted">({{ attempt.requested_by_email }})</span>{% endif %}</td>
+        <td data-label="Result"><span class="status status--{{ attempt.variant }}">{{ attempt.label }}</span></td>
+        <td data-label="Details">{{ attempt.reason or '–' }}</td>
+      </tr>
+      {%- endfor %}
+    </tbody>
+  </table></div>
+</details>
+{%- endmacro %}
+
 {# The device's RMM agent: "connected", "offline" (installed, not polling) or
    "missing" (not installed). rmm_remote_control.js draws the same markup
    (window.MyPortalRmm.agentIndicator). #}

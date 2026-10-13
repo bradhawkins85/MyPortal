@@ -98,3 +98,65 @@ async def set_command_status(command_id: int, status: str, *, error: str | None 
         "WHERE id = %s",
         (status, error, _utcnow(), command_id),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Install attempts (migration 484)
+# --------------------------------------------------------------------------- #
+
+_ATTEMPT_COLUMNS = (
+    "a.*, c.status AS command_status, c.error AS command_error, c.delivered_at AS command_delivered_at, "
+    "u.email AS requested_by_email"
+)
+_ATTEMPT_JOINS = (
+    "FROM rmm_agent_install_attempts a "
+    "LEFT JOIN tray_command_log c ON c.id = a.command_id "
+    "LEFT JOIN users u ON u.id = a.requested_by_user_id"
+)
+
+
+async def record_attempt(
+    *,
+    company_id: int | None,
+    asset_id: int | None,
+    tray_device_id: int | None,
+    command_id: int | None,
+    source: str,
+    user_id: int | None,
+    outcome: str,
+    message: str | None,
+) -> int:
+    last_id = await db.execute_returning_lastrowid(
+        "INSERT INTO rmm_agent_install_attempts (company_id, asset_id, tray_device_id, command_id, source, "
+        "requested_by_user_id, outcome, message, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (company_id, asset_id, tray_device_id, command_id, source, user_id, outcome, message, _utcnow()),
+    )
+    return int(last_id or 0)
+
+
+async def latest_device_attempt(device_id: int) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT * FROM rmm_agent_install_attempts WHERE tray_device_id = %s ORDER BY id DESC LIMIT 1",
+        (device_id,),
+    )
+
+
+async def list_asset_attempts(asset_id: int, *, limit: int = 20) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        f"SELECT {_ATTEMPT_COLUMNS} {_ATTEMPT_JOINS} "  # nosec B608 - fixed columns and joins
+        "WHERE a.asset_id = %s ORDER BY a.id DESC LIMIT %s",
+        (asset_id, int(limit)),
+    )
+    return [dict(row) for row in rows or []]
+
+
+async def latest_company_attempts(company_id: int) -> dict[int, dict[str, Any]]:
+    """The newest install attempt of each of a company's assets, by asset ID."""
+
+    rows = await db.fetch_all(
+        f"SELECT {_ATTEMPT_COLUMNS} {_ATTEMPT_JOINS} WHERE a.id IN ("  # nosec B608 - fixed columns and joins
+        "SELECT MAX(id) FROM rmm_agent_install_attempts WHERE company_id = %s AND asset_id IS NOT NULL "
+        "GROUP BY asset_id)",
+        (company_id,),
+    )
+    return {int(row["asset_id"]): dict(row) for row in rows or []}

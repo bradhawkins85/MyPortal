@@ -294,7 +294,8 @@ async def sqlite_db(monkeypatch):
                  "472_rmm_event_log_settings.sql", "473_rmm_agent_auto_deploy.sql",
                  "474_rmm_event_log_rules.sql", "475_rmm_event_log_rule_tickets.sql",
                  "476_rmm_event_log_rule_schedules.sql", "477_rmm_device_inventory.sql", "478_rmm_checks.sql",
-                 "479_rmm_check_target_rules.sql", "480_rmm_script_files.sql"):
+                 "479_rmm_check_target_rules.sql", "480_rmm_script_files.sql",
+                 "484_rmm_agent_install_attempts.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES

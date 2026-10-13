@@ -358,7 +358,38 @@ async def _send(device: dict[str, Any], command_id: int) -> bool:
     return delivered
 
 
-async def push_to_device(device: dict[str, Any], *, user_id: int | None, send: bool = True) -> dict[str, Any]:
+async def _record_attempt(
+    device: dict[str, Any] | None,
+    *,
+    source: str,
+    user_id: int | None,
+    outcome: str,
+    command_id: int | None = None,
+    message: str | None = None,
+    asset_id: int | None = None,
+    company_id: int | None = None,
+) -> None:
+    """Add a row to the asset's install history; never fails the push itself."""
+
+    device = device or {}
+    try:
+        await deploy_repo.record_attempt(
+            company_id=device.get("company_id") if device.get("company_id") is not None else company_id,
+            asset_id=device.get("asset_id") if device.get("asset_id") is not None else asset_id,
+            tray_device_id=device.get("id"),
+            command_id=command_id,
+            source=source,
+            user_id=user_id,
+            outcome=outcome,
+            message=(message or None) and str(message)[:MAX_ERROR_LENGTH],
+        )
+    except Exception as exc:  # noqa: BLE001 - the history must not stop an install
+        log_error("Failed to record an RMM agent install attempt", device_id=device.get("id"), error=str(exc))
+
+
+async def push_to_device(
+    device: dict[str, Any], *, user_id: int | None, send: bool = True, source: str = "manual"
+) -> dict[str, Any]:
     """Queue (and try to deliver) an agent install on one tray device.
 
     Returns ``{"status": ..., "command_id": ...}`` where status is
@@ -366,8 +397,34 @@ async def push_to_device(device: dict[str, Any], *, user_id: int | None, send: b
     ``queued`` (the device collects it when it next connects) or
     ``updating_tray`` (the tray app is too old: it was asked to update itself
     and gets the install once it reports the new version).
+
+    Every call is kept in the asset's install history (``source`` says who
+    started it); one MyPortal refuses is kept with the reason.
     """
 
+    try:
+        result = await _push_to_device(device, user_id=user_id, send=send)
+    except AgentDeployError as exc:
+        await _record_attempt(device, source=source, user_id=user_id, outcome="rejected", message=str(exc))
+        raise
+    await _record_attempt(
+        device,
+        source=source,
+        user_id=user_id,
+        outcome=result["status"],
+        command_id=result["command_id"],
+        message=_ATTEMPT_MESSAGES.get(result["status"]),
+    )
+    return result
+
+
+_ATTEMPT_MESSAGES = {
+    "installed": "The RMM agent was already installed.",
+    "updating_tray": "The tray app was asked to update itself first; the install follows once it has.",
+}
+
+
+async def _push_to_device(device: dict[str, Any], *, user_id: int | None, send: bool) -> dict[str, Any]:
     if str(device.get("status") or "") != "active":
         raise AgentDeployError("The tray app on this device is not active.")
     os_name = str(device.get("os") or "").lower()
@@ -422,9 +479,12 @@ async def push_to_device(device: dict[str, Any], *, user_id: int | None, send: b
 async def push_to_asset(asset_id: int, *, company_id: int, user_id: int | None) -> dict[str, Any]:
     device = await deploy_repo.get_asset_tray_device(asset_id)
     if not device or device.get("company_id") is None or int(device["company_id"]) != int(company_id):
-        raise AgentDeployError(
-            "This device has no MyPortal tray app, which installs the RMM agent. Install the tray app first."
+        message = "This device has no MyPortal tray app, which installs the RMM agent. Install the tray app first."
+        await _record_attempt(
+            None, source="manual", user_id=user_id, outcome="rejected", message=message,
+            asset_id=asset_id, company_id=company_id,
         )
+        raise AgentDeployError(message)
     return await push_to_device(device, user_id=user_id)
 
 
@@ -458,13 +518,30 @@ async def auto_deploy_device(device: dict[str, Any], *, now: datetime | None = N
         return False
     if await deploy_repo.device_has_agent(device):
         return False
-    if await _recently_tried(int(device["id"]), now or datetime.now(timezone.utc)):
+    now = now or datetime.now(timezone.utc)
+    if await _recently_tried(int(device["id"]), now):
         return False
     try:
-        await push_to_device(device, user_id=None, send=False)
+        result = await _push_to_device(device, user_id=None, send=False)
     except AgentDeployError as exc:
         log_warning("Automatic RMM agent install skipped", device_id=device.get("id"), reason=str(exc))
+        # The device connects often: keep one row for a reason that repeats.
+        latest = await deploy_repo.latest_device_attempt(int(device["id"]))
+        created = _as_utc(latest.get("created_at")) if latest else None
+        repeated = (
+            latest is not None
+            and latest.get("outcome") == "rejected"
+            and latest.get("message") == str(exc)
+            and created is not None
+            and now - created < timedelta(hours=AUTO_RETRY_HOURS)
+        )
+        if not repeated:
+            await _record_attempt(device, source="auto", user_id=None, outcome="rejected", message=str(exc))
         return False
+    await _record_attempt(
+        device, source="auto", user_id=None, outcome=result["status"], command_id=result["command_id"],
+        message=_ATTEMPT_MESSAGES.get(result["status"]),
+    )
     return True
 
 
@@ -482,7 +559,7 @@ async def auto_deploy_company(company_id: int, *, user_id: int | None = None) ->
             counts["skipped"] += 1
             continue
         try:
-            result = await push_to_device(device, user_id=user_id)
+            result = await push_to_device(device, user_id=user_id, source="company")
         except AgentDeployError as exc:
             log_warning("RMM agent push skipped", device_id=device.get("id"), reason=str(exc))
             counts["skipped"] += 1
@@ -542,6 +619,74 @@ async def record_result(device: dict[str, Any], command_id: int, *, ok: bool, me
     await deploy_repo.set_command_status(command_id, "completed" if ok else "error", error=error)
     log_info("RMM agent install reported", device_id=device.get("id"), command_id=command_id, ok=ok)
     return True
+
+
+# A tray app that was sent the install but has not reported back by then
+# probably lost it (restarted, or an older build that ignores the command).
+NO_REPORT_HOURS = 2
+SOURCE_LABELS = {"manual": "Technician", "company": "Company-wide push", "auto": "Automatic install"}
+
+
+def describe_attempt(attempt: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+    """How an install attempt went: ``state``, a status ``variant`` and ``label``,
+    and the ``reason`` behind it, from the attempt and its tray command."""
+
+    outcome = str(attempt.get("outcome") or "")
+    command_status = attempt.get("command_status")
+    message = attempt.get("message")
+    if outcome == "rejected":
+        state, variant, label, reason = "rejected", "error", "Not sent", message or "MyPortal could not send the install."
+    elif outcome == "installed":
+        state, variant, label, reason = "installed", "success", "Already installed", message
+    elif command_status == "completed":
+        state, variant, label, reason = "completed", "success", "Installed", "The tray app installed the RMM agent."
+    elif command_status == "error":
+        state, variant, label = "failed", "error", "Failed"
+        reason = attempt.get("command_error") or "The tray app reported a failure without a reason."
+    elif command_status == "delivered":
+        delivered = _as_utc(attempt.get("command_delivered_at")) or _as_utc(attempt.get("created_at"))
+        if delivered and (now or datetime.now(timezone.utc)) - delivered > timedelta(hours=NO_REPORT_HOURS):
+            state, variant, label = "no_report", "warning", "No report"
+            reason = (
+                f"The tray app was sent the install but has not reported back within {NO_REPORT_HOURS} hours. "
+                "Check that the device is online and its tray app is up to date, then push again."
+            )
+        else:
+            state, variant, label = "installing", "info", "Installing"
+            reason = "Sent to the tray app, which is installing the RMM agent."
+    elif command_status == "queued":
+        if outcome == "updating_tray":
+            state, variant, label = "updating_tray", "info", "Waiting for tray update"
+            reason = message
+        else:
+            state, variant, label = "queued", "info", "Waiting for device"
+            reason = "Queued until the device's tray app connects."
+    else:
+        state, variant, label, reason = "unknown", "neutral", "Unknown", message or "The tray command is gone."
+    return {
+        "id": attempt.get("id"),
+        "created_at": attempt.get("created_at"),
+        "source": attempt.get("source"),
+        "source_label": SOURCE_LABELS.get(str(attempt.get("source") or ""), "Technician"),
+        "requested_by_email": attempt.get("requested_by_email"),
+        "state": state,
+        "variant": variant,
+        "label": label,
+        "reason": reason,
+    }
+
+
+async def asset_install_history(asset_id: int, *, limit: int = 20) -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    return [describe_attempt(row, now=now) for row in await deploy_repo.list_asset_attempts(asset_id, limit=limit)]
+
+
+async def company_latest_attempts(company_id: int) -> dict[int, dict[str, Any]]:
+    """The latest install attempt of each of a company's assets, described."""
+
+    now = datetime.now(timezone.utc)
+    rows = await deploy_repo.latest_company_attempts(company_id)
+    return {asset_id: describe_attempt(row, now=now) for asset_id, row in rows.items()}
 
 
 async def asset_deploy_state(asset_id: int, company_id: int) -> dict[str, Any] | None:

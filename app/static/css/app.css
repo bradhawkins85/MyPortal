@@ -12650,6 +12650,26 @@ a.service-card__ai-icon:hover {
   font-size: 0.65rem;
 }
 
+/* RMM agent install history (rmm/_macros.html install_history) under the
+   asset page's Scripts card, and the latest attempt under the Assets list's
+   RMM agent indicator. */
+.rmm-install-history {
+  margin-block-start: var(--space-gap, 1rem);
+}
+
+.rmm-install-history > summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-block-end: var(--space-gap-tight, 0.5rem);
+}
+
+.rmm-install-latest {
+  display: block;
+  margin-block-start: 0.2rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 /* RMM actions beside each asset (rmm/_macros.html asset_menu): a RustDesk
    split button and an "RMM" menu, both <details> dropdowns. */
 .rmm-asset-actions {
