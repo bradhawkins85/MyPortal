@@ -500,7 +500,13 @@ async def _company_run(run_id: int, company_id: int) -> dict[str, Any]:
 @router.get("/api/rmm/runs/{run_id:int}", summary="Get a script run with its output")
 async def get_run_api(run_id: int, request: Request):
     _user, _company, company_id, _can_run = await _context(request, api=True)
-    return {"run": _serialise(await _company_run(run_id, company_id))}
+    run = await _company_run(run_id, company_id)
+    # Older agents and historical runs may contain redirected PowerShell XML.
+    from app.services.rmm_output import readable_output
+
+    for stream in ("stdout", "stderr"):
+        run[stream] = readable_output(run.get(stream))
+    return {"run": _serialise(run)}
 
 
 @router.post("/api/rmm/runs/{run_id:int}/cancel", summary="Cancel a run the device has not collected yet")
@@ -612,6 +618,18 @@ class AgentCustomValue(BaseModel):
     scope: str = Field(max_length=16)
     name: str = Field(max_length=255)
     value: Any = None
+
+
+class AgentOutput(BaseModel):
+    stdout: str = Field(default="", max_length=2_000_000)
+    stderr: str = Field(default="", max_length=2_000_000)
+
+
+@router.post("/api/rmm/agent/runs/{run_id:int}/output", summary="Report a live output snapshot for an executing run")
+async def agent_run_output(run_id: int, payload: AgentOutput, agent: dict = Depends(get_current_rmm_agent)):
+    if not await rmm_scripts.record_output(agent, run_id, payload.model_dump()):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active run not found")
+    return {"ok": True}
 
 
 class AgentResult(BaseModel):

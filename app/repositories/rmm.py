@@ -470,6 +470,20 @@ async def mark_started(run_id: int) -> None:
     )
 
 
+async def update_run_output(run_id: int, agent_id: int, *, stdout: str, stderr: str) -> bool:
+    """Replace a live snapshot only for the owning agent's executing run."""
+    updated = await db.execute_rowcount(
+        "UPDATE rmm_script_runs SET stdout = %s, stderr = %s "
+        "WHERE id = %s AND agent_id = %s AND status IN ('dispatched', 'running')",
+        (stdout, stderr, run_id, agent_id),
+    )
+    if updated:
+        return True
+    # MySQL reports zero changed rows for an identical retry.
+    run = await get_agent_run(run_id, agent_id)
+    return bool(run and run["status"] in ("dispatched", "running"))
+
+
 async def finish_run(
     run_id: int,
     *,
