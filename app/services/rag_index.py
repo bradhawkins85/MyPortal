@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import math
 import re
@@ -190,8 +191,16 @@ def source_identity(
 
 
 def normalise_text(value: Any) -> str:
-    sanitized = sanitize_rich_text(str(value or ""))
-    return re.sub(r"\s+", " ", sanitized.text_content).strip()
+    # Keep angle-bracket email addresses from being mistaken for HTML tags on
+    # repeated normalization, including addresses decoded from inbound mail.
+    raw = re.sub(r"<([^<>\s]+@[^<>\s]+)>", r"\1", str(value or ""))
+    sanitized = sanitize_rich_text(raw)
+    text = sanitized.text_content
+    # Mail imports may contain entities escaped more than once.
+    for _ in range(2):
+        text = html.unescape(text)
+    text = re.sub(r"<([^<>\s]+@[^<>\s]+)>", r"\1", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def tokenise(text: str) -> list[str]:
@@ -262,19 +271,57 @@ async def embed_text(text: str) -> list[float]:
             "encoding_format": "float",
         }
     started = time.monotonic()
+    body = None
     try:
-        async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
+        async with monitored_client(
+            httpx.AsyncClient,
+            timeout=getattr(settings, "rag_embedding_timeout_seconds", 120.0),
+        ) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             body = response.json()
-    except Exception:
+        try:
+            vector = (
+                body["embeddings"][0]
+                if provider == "ollama"
+                else body["data"][0]["embedding"]
+            )
+            if not isinstance(vector, list) or not vector:
+                raise ValueError("Expected a non-empty embedding vector")
+            result = [float(value) for value in vector]
+            if not all(math.isfinite(value) for value in result):
+                raise ValueError("Expected finite embedding values")
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise ValueError("Embedding provider returned an invalid response") from exc
+        expected = int(settings.rag_embedding_dimensions)
+        if len(result) < expected:
+            raise ValueError(
+                f"Embedding dimension mismatch: configured {expected}, provider returned {len(result)}"
+            )
+        # Request native vectors for llama.cpp compatibility; reduce locally for
+        # Matryoshka models, then normalize the dimensions that will be stored.
+        result = result[:expected]
+        magnitude = math.hypot(*result)
+        if not magnitude or not math.isfinite(magnitude):
+            raise ValueError("Embedding provider returned an invalid response")
+        result = [value / magnitude for value in result]
+    except Exception as exc:
+        reported = llm_usage.extract_token_usage(body) if isinstance(body, Mapping) else None
         await llm_usage.record_usage(
             feature="rag_embeddings",
             provider=provider,
             model=settings.rag_embedding_model,
             status="failed",
-            usage=(0, 0),
+            usage=(reported[0], 0) if reported else (0, 0),
             duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        # Log only the error class and status, never provider bodies or inputs.
+        log_warning(
+            "RAG embedding request failed",
+            provider=provider,
+            model=settings.rag_embedding_model,
+            error_type=type(exc).__name__,
+            response_status=exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None,
         )
         raise
     reported = llm_usage.extract_token_usage(body)
@@ -283,33 +330,11 @@ async def embed_text(text: str) -> list[float]:
         provider=provider,
         model=settings.rag_embedding_model,
         status="succeeded",
-        # Embeddings consume input tokens only.
         usage=(reported[0], 0) if reported else None,
         prompt=text,
         duration_ms=int((time.monotonic() - started) * 1000),
     )
-    try:
-        vector = (
-            body["embeddings"][0]
-            if provider == "ollama"
-            else body["data"][0]["embedding"]
-        )
-        result = [float(value) for value in vector]
-    except (KeyError, IndexError, TypeError, ValueError) as exc:
-        raise ValueError("Embedding provider returned an invalid response") from exc
-    expected = int(settings.rag_embedding_dimensions)
-    if len(result) < expected:
-        raise ValueError(
-            f"Embedding dimension mismatch: configured {expected}, provider returned {len(result)}"
-        )
-    # ``dimensions`` is not part of the baseline OpenAI-compatible contract and
-    # llama.cpp rejects it with HTTP 501.  Request the model's native vector and
-    # reduce it locally; Matryoshka models retain their intended semantics after
-    # truncation and the normalization below.
-    if len(result) > expected:
-        result = result[:expected]
-    magnitude = math.sqrt(sum(value * value for value in result))
-    return [value / magnitude for value in result] if magnitude else result
+    return result
 
 
 def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
@@ -322,12 +347,22 @@ def chunk_text(text: str) -> list[str]:
         return []
     chunks: list[str] = []
     chunk_words = _chunk_words()
+    # Word limits alone do not bound URLs, encoded mail or unspaced content.
+    max_chars = getattr(get_settings(), "rag_chunk_max_chars", 2000)
     step = max(1, chunk_words - _chunk_overlap_words())
     for start in range(0, len(words), step):
         segment = words[start : start + chunk_words]
         if not segment:
             break
-        chunks.append(" ".join(segment))
+        remaining = " ".join(segment)
+        while len(remaining) > max_chars:
+            boundary = remaining.rfind(" ", 0, max_chars + 1)
+            if boundary <= 0:
+                boundary = max_chars
+            chunks.append(remaining[:boundary])
+            remaining = remaining[boundary:].lstrip()
+        if remaining:
+            chunks.append(remaining)
         if start + chunk_words >= len(words):
             break
     return chunks
@@ -677,6 +712,21 @@ async def index_document(
         metadata=document.metadata,
         supplied_url=document.url,
     )
+    # Leave the previous content hash intact until every embedding succeeds.
+    # Otherwise a retry can mistake stale active chunks for the refreshed index.
+    replacement_chunks = None
+    if content_changed or chunks_missing:
+        replacement_chunks = [
+            {
+                "chunk_index": index,
+                "chunk_text": chunk,
+                "chunk_hash": content_hash(chunk),
+                "embedding_json": json.dumps(await embed_text(chunk)),
+                "embedding_model": embedding_model(),
+                "token_count": len(chunk.split()),
+            }
+            for index, chunk in enumerate(chunks)
+        ]
     doc_id = await rag_repo.upsert_document(
         {
             "source_type": document.source_type,
@@ -695,22 +745,9 @@ async def index_document(
             "source_updated_at": source_updated_at,
         }
     )
-    if not content_changed and not chunks_missing:
+    if replacement_chunks is None:
         return doc_id
-    await rag_repo.replace_chunks(
-        doc_id,
-        [
-            {
-                "chunk_index": index,
-                "chunk_text": chunk,
-                "chunk_hash": content_hash(chunk),
-                "embedding_json": json.dumps(await embed_text(chunk)),
-                "embedding_model": embedding_model(),
-                "token_count": len(chunk.split()),
-            }
-            for index, chunk in enumerate(chunks)
-        ],
-    )
+    await rag_repo.replace_chunks(doc_id, replacement_chunks)
     # A historical document with no active chunks was never retrievable. Treat
     # repairing it like a content change so relationship matching also sees it.
     await rag_relationships.on_document_indexed(
