@@ -889,13 +889,22 @@ def test_stats_backup_dumps_with_credentials_on_stdin(tmp_path):
 def test_connect_gitea_adds_public_on_upgrade_without_replacing_token(tmp_path):
     app_env = tmp_path / "myportal.env"
     app_env.write_text("GITEA_API_TOKEN=existing\n")
+    credentials = tmp_path / "admin-credentials"
+    credentials.write_text("password=installer-password\n")
+    calls = tmp_path / "calls"
     result = _run(
-        f'APP_ENV="{app_env}"; GITEA_ADMIN_FILE="{tmp_path}/unused"\n'
-        + _gitea_stubs(tmp_path)
-        + 'gitea_token_is_read_only() { return 1; }\ngitea_cli() { exit 99; }\nconnect_gitea'
+        f'APP_ENV="{app_env}"; GITEA_ADMIN_FILE="{credentials}"\n'
+        'gitea_token_is_read_only() { return 1; }\n'
+        'gitea_cli() { exit 99; }\n'
+        f'gitea_api() {{ local auth; auth=$(cat); echo "$* stdin=$auth" >> "{calls}"; '
+        'if [[ $1 == GET ]]; then echo 404; '
+        'elif [[ $auth == \'user = "myportal:installer-password"\' ]]; then echo 201; '
+        'else echo 403; fi; }\n'
+        'connect_gitea'
     )
     assert result.returncode == 0, result.stderr
-    log = (tmp_path / "calls").read_text()
-    assert 'GET /repos/myportal/Public' in log
+    log = calls.read_text()
+    assert 'GET /repos/myportal/Public stdin=header = "Authorization: token existing"' in log
     assert '"name":"Public"' in log and '"private":false' in log
+    assert 'stdin=user = "myportal:installer-password"' in log
     assert "GITEA_API_TOKEN=existing" in app_env.read_text()

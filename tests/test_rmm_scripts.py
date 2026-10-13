@@ -1476,3 +1476,59 @@ async def test_public_failure_keeps_private_grants_tracked(sqlite_db, monkeypatc
     await gitea_sign_in.identity({"id": 9, "email": "tech@example.com"})
     assert (await rmm_repo.get_gitea_account(9))["permission"] == "write"
     assert 9 not in gitea_sign_in._granted
+
+
+@pytest.mark.anyio
+async def test_live_output_ownership_retries_and_final_result(sqlite_db, monkeypatch):
+    import httpx
+    from fastapi import FastAPI
+    from app.features.rmm import routes
+
+    await _sync(monkeypatch, {"rmm/Common/live.ps1": "Write-Output 'hello'\n"})
+    script = (await rmm_repo.list_scripts())[0]
+    enrolment, agent = await _enrol(sqlite_db)
+    queued = await rmm_scripts.queue_runs(
+        script_id=script["id"], company_id=1, asset_ids=[10], submitted={},
+        timeout_seconds=60, requested_by_user_id=None,
+    )
+    run_id = queued["queued"][0]["run_id"]
+    snapshot = {"stdout": "working\n##myportal[session.password]=secret", "stderr": "warning\n"}
+    assert not await rmm_scripts.record_output(agent, run_id, snapshot)  # not collected yet
+    await rmm_scripts.claim_jobs(agent)
+    assert not await rmm_scripts.record_output({"id": agent["id"] + 1}, run_id, snapshot)
+    app = FastAPI()
+    app.include_router(routes.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://portal") as api:
+        url = f"/api/rmm/agent/runs/{run_id}/output"
+        assert (await api.post(url, json=snapshot)).status_code == 401
+        headers = {"Authorization": "Bearer " + enrolment["auth_token"]}
+        for _ in range(2):
+            assert (await api.post(url, json=snapshot, headers=headers)).status_code == 200
+        run = await rmm_repo.get_run(run_id)
+        assert run["stdout"].startswith("working\n") and "secret" not in run["stdout"]
+        assert run["stderr"] == "warning\n" and run["status"] == "dispatched"
+        assert not run["custom_values"] and run["completed_at"] is None
+        assert (await api.post(url, json={"stdout": "x" * 2_000_001}, headers=headers)).status_code == 422
+        await rmm_scripts.record_result(agent, run_id, {"exit_code": 1, "stdout": "finished", "stderr": "failed"})
+        assert (await api.post(url, json=snapshot, headers=headers)).status_code == 404
+        run = await rmm_repo.get_run(run_id)
+        assert run["stdout"] == "finished" and run["stderr"] == "failed" and run["status"] == "failed"
+
+
+def test_readable_powershell_clixml_preserves_messages_and_escapes():
+    from app.services.rmm_output import readable_output
+
+    xml = ('before\n#< CLIXML\n<Objs xmlns="http://schemas.microsoft.com/powershell/2004/04">'
+           '<Obj S="progress"><MS><S N="ignored">noise</S></MS><PR>'
+           '<AV>Downloading</AV><SD>50%</SD></PR></Obj>'
+           '<S S="Error">Get-Content : missing file_x000D__x000A_'
+           '  + CategoryInfo : ObjectNotFound_x000D__x000A_</S>'
+           '<S S="warning">Use &amp; retry _x005F_x0041_ _xD83D__xDE00_</S>'
+           '<Obj S="information"><ToString>hello</ToString></Obj></Objs>')
+    assert readable_output(xml) == ('before\nDownloading: 50%\nGet-Content : missing file\r\n'
+                                    '  + CategoryInfo : ObjectNotFound\r\nUse & retry _x0041_ 😀\nhello\n')
+    assert readable_output('literal <xml> _x000A_') == 'literal <xml> _x000A_'
+    malformed = '#< CLIXML\n<Objs><S>unfinished'
+    assert readable_output(malformed) == malformed
+    hostile = '#< CLIXML\n<!DOCTYPE x [<!ENTITY bad "expanded">]><Objs><S>&bad;</S></Objs>'
+    assert readable_output(hostile) == hostile

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -145,5 +147,55 @@ func TestOutputIsCapped(t *testing.T) {
 	_, _ = buf.Write([]byte("abcdef"))
 	if !strings.HasPrefix(buf.String(), "abcd") || !strings.Contains(buf.String(), "truncated") {
 		t.Fatalf("buffer = %q", buf.String())
+	}
+}
+
+// The script waits for a signal created by the live reporter. It cannot finish
+// successfully unless output was delivered while it was still executing.
+func TestRunStreamsBothPipesBeforeCompletionAndRetries(t *testing.T) {
+	requireBash(t)
+	signal := filepath.Join(t.TempDir(), "reported")
+	script := `printf 'first'; printf 'warning' >&2
+ for i in {1..100}; do
+  if [ -f "$SIGNAL" ]; then printf 'last'; exit 0; fi
+  sleep 0.05
+ done
+ exit 1`
+	calls := 0
+	result := New(t.TempDir()).RunStreaming(context.Background(), client.Job{
+		ID: 42, Language: "bash", Script: script, TimeoutSeconds: 10,
+		Env: map[string]string{"SIGNAL": signal},
+	}, func(output client.Output) bool {
+		calls++
+		if output.Stdout != "first" || output.Stderr != "warning" {
+			t.Errorf("unexpected live output: %#v", output)
+		}
+		if calls == 1 {
+			return false
+		} // same snapshot must be retried
+		if err := os.WriteFile(signal, nil, 0600); err != nil {
+			t.Error(err)
+		}
+		return true
+	})
+	if calls < 2 || result.ExitCode == nil || *result.ExitCode != 0 || result.Stdout != "firstlast" || result.Stderr != "warning" {
+		t.Fatalf("calls=%d result=%#v", calls, result)
+	}
+}
+
+func TestPowerShellUsesTextFileWrapper(t *testing.T) {
+	r := New(t.TempDir())
+	r.Lookup = func(name string) (string, error) { return name, nil }
+	_, args, err := r.powershellCommand(client.Job{Language: "powershell", Script: "Write-Output 'hello'"}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "EncodedCommand") || !strings.Contains(joined, "-OutputFormat Text -File") {
+		t.Fatalf("PowerShell args: %v", args)
+	}
+	wrapper, err := os.ReadFile(args[len(args)-1])
+	if err != nil || !strings.Contains(string(wrapper), "catch { Write-Error $_; exit 1 }") {
+		t.Fatalf("wrapper: %s error: %v", wrapper, err)
 	}
 }

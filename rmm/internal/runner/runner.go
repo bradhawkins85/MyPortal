@@ -25,7 +25,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -39,6 +38,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf16"
 
@@ -75,12 +75,15 @@ func (r *Runner) AvailableShells() []string {
 }
 
 type limitedBuffer struct {
+	mu        sync.Mutex
 	buf       bytes.Buffer
 	limit     int
 	truncated bool
 }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	remaining := b.limit - b.buf.Len()
 	if remaining <= 0 {
 		b.truncated = true
@@ -95,6 +98,8 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *limitedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	text := strings.ToValidUTF8(b.buf.String(), "�")
 	if b.truncated {
 		text += "\n… output truncated by the RMM agent …"
@@ -105,6 +110,12 @@ func (b *limitedBuffer) String() string {
 // Run executes one job and returns its result. It never returns an error:
 // problems are reported in Result.Error so MyPortal can show them.
 func (r *Runner) Run(ctx context.Context, job client.Job) client.Result {
+	return r.RunStreaming(ctx, job, nil)
+}
+
+// RunStreaming reports cumulative output while running. Reporting happens on a
+// separate goroutine so a slow server cannot block the script's output pipes.
+func (r *Runner) RunStreaming(ctx context.Context, job client.Job, report func(client.Output) bool) client.Result {
 	result := client.Result{CustomValues: []client.CustomValue{}}
 	sum := sha256.Sum256([]byte(job.Script))
 	if job.SHA256 != "" && !strings.EqualFold(hex.EncodeToString(sum[:]), job.SHA256) {
@@ -159,7 +170,35 @@ func (r *Runner) Run(ctx context.Context, job client.Job) client.Result {
 	prepareCommand(cmd)
 	cmd.WaitDelay = 10 * time.Second
 
+	done := make(chan struct{})
+	drained := make(chan struct{})
+	prefix := result.Stdout
+	if report != nil {
+		go func() {
+			defer close(drained)
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			var previous client.Output
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					output := client.Output{Stdout: prefix + stdout.String(), Stderr: stderr.String()}
+					if output != previous {
+						if report(output) {
+							previous = output
+						}
+					}
+				}
+			}
+		}()
+	} else {
+		close(drained)
+	}
 	runErr := cmd.Run()
+	close(done)
+	<-drained
 	result.Stdout += stdout.String()
 	result.Stderr = stderr.String()
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
@@ -288,16 +327,6 @@ func PowerShellWrapper(scriptPath, paramsPath string) string {
 	}, "\n")
 }
 
-func encodePowerShell(command string) string {
-	units := utf16.Encode([]rune(command))
-	buf := make([]byte, len(units)*2)
-	for i, unit := range units {
-		buf[i*2] = byte(unit)
-		buf[i*2+1] = byte(unit >> 8)
-	}
-	return base64.StdEncoding.EncodeToString(buf)
-}
-
 func (r *Runner) powershellCommand(job client.Job, dir string) (string, []string, error) {
 	interpreter := ""
 	candidates := []string{"pwsh"}
@@ -331,9 +360,14 @@ func (r *Runner) powershellCommand(job client.Job, dir string) (string, []string
 	if err := os.WriteFile(paramsPath, data, 0o600); err != nil {
 		return "", nil, err
 	}
+	wrapperPath := filepath.Join(dir, "wrapper.ps1")
+	wrapper := append([]byte{0xEF, 0xBB, 0xBF}, []byte(PowerShellWrapper(script, paramsPath))...)
+	if err := os.WriteFile(wrapperPath, wrapper, 0o600); err != nil {
+		return "", nil, err
+	}
 	return interpreter, []string{
 		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-		"-EncodedCommand", encodePowerShell(PowerShellWrapper(script, paramsPath)),
+		"-OutputFormat", "Text", "-File", wrapperPath,
 	}, nil
 }
 

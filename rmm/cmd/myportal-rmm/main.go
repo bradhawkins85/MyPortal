@@ -320,7 +320,15 @@ func execute(ctx context.Context, api *client.Client, r *runner.Runner, job clie
 	if err := api.Started(ctx, job.ID); err != nil {
 		log.Printf("run %d: could not mark as started: %v", job.ID, err)
 	}
-	result := r.Run(ctx, job)
+	result := r.RunStreaming(ctx, job, func(output client.Output) bool {
+		outputCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := api.ReportOutput(outputCtx, job.ID, output); err != nil {
+			log.Printf("run %d: live output report failed: %v", job.ID, err)
+			return false
+		}
+		return true
+	})
 	// Report even if the service is stopping, so the run is not left open.
 	reportCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

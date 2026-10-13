@@ -199,6 +199,16 @@ func (c *Client) Started(ctx context.Context, runID int64) error {
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/api/rmm/agent/runs/%d/started", runID), struct{}{}, nil)
 }
 
+// Output is a cumulative snapshot; retries replace rather than duplicate text.
+type Output struct {
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+}
+
+func (c *Client) ReportOutput(ctx context.Context, runID int64, output Output) error {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/api/rmm/agent/runs/%d/output", runID), output, nil)
+}
+
 // Report sends a run's result.
 func (c *Client) Report(ctx context.Context, runID int64, result Result) error {
 	if result.CustomValues == nil {
