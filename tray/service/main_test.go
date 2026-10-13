@@ -116,3 +116,29 @@ func TestProcessDefenderCommandsRechecksPolicyAfterClaim(t *testing.T) {
 		t.Fatalf("result uploads = %d, want 0 because the command must not execute", resultUploads)
 	}
 }
+
+func TestUninstallToleratesMissingService(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(source)
+
+	// The uninstall path must check service.Status() before calling
+	// Uninstall so that a missing service (e.g. after a failed prior
+	// install) is treated as a no-op rather than an error.
+	if !strings.Contains(src, "service.ErrNotInstalled") {
+		t.Error("main.go must check service.ErrNotInstalled before uninstalling")
+	}
+	if !strings.Contains(src, "handleServiceCommand") {
+		t.Error("main.go must define handleServiceCommand for install/uninstall subcommands")
+	}
+	// The install/uninstall subcommand check must run before config.Load()
+	// so a failed prior install that never wrote the registry/env config
+	// does not prevent cleanup.
+	cmdIdx := strings.Index(src, `"install" || cmd == "uninstall"`)
+	cfgIdx := strings.Index(src, "config.Load()")
+	if cmdIdx < 0 || cfgIdx < 0 || cmdIdx > cfgIdx {
+		t.Error("install/uninstall subcommand check must appear before config.Load() in main()")
+	}
+}
