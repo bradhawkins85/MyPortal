@@ -25,6 +25,7 @@
           {% if field.field_type == 'checkbox' %}<label class="checkbox"><input id="custom-{{ field.id }}" name="custom_{{ field.id }}" value="1" type="checkbox"><span>Yes</span></label>
           {% elif field.field_type == 'date' %}<input class="input" id="custom-{{ field.id }}" name="custom_{{ field.id }}" type="date">
           {% elif field.field_type == 'url' %}<input class="input" id="custom-{{ field.id }}" name="custom_{{ field.id }}" type="url">
+          {% elif field.field_type == 'textarea' %}<textarea class="input" id="custom-{{ field.id }}" name="custom_{{ field.id }}" rows="4"></textarea>
           {% else %}<input class="input" id="custom-{{ field.id }}" name="custom_{{ field.id }}" type="text">{% endif %}</div>
         {% endfor %}
       </div>

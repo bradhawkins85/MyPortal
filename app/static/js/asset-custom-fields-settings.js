@@ -57,6 +57,7 @@
   function formatFieldType(type) {
     const types = {
       text: 'Text',
+      textarea: 'Multi-line text',
       image: 'Image (URL)',
       checkbox: 'Checkbox',
       url: 'URL',

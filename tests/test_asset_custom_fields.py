@@ -202,6 +202,7 @@ def test_field_type_enum_values():
     from app.schemas.asset_custom_fields import FieldType
     
     assert FieldType.TEXT.value == "text"
+    assert FieldType.TEXTAREA.value == "textarea"
     assert FieldType.IMAGE.value == "image"
     assert FieldType.CHECKBOX.value == "checkbox"
     assert FieldType.URL.value == "url"
