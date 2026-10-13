@@ -6,7 +6,10 @@ and are drawn as inline SVG on the server, so the page needs no chart library.
 
 from __future__ import annotations
 
-from collections import defaultdict
+import hashlib
+import json
+import math
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
@@ -67,29 +70,39 @@ def _average(points: list[tuple[datetime, float]], since: datetime, span: float)
 
 
 def chart(title: str, unit: str, series: Iterable[tuple[str, list[tuple[datetime, float]]]], *,
-          since: datetime, until: datetime, gap: timedelta, fixed_max: float | None = None) -> dict[str, Any] | None:
+          since: datetime, until: datetime, gap: timedelta, fixed_max: float | None = None,
+          allow_negative: bool = False) -> dict[str, Any] | None:
     """One chart: SVG polyline points for each series in a WIDTH x HEIGHT box.
 
     A line breaks where samples are further apart than ``gap``, so a device
     that was off shows as a gap rather than a straight line."""
 
     span = max((until - since).total_seconds(), 1.0)
-    lines = [(name, _average(sorted(points), since, span)) for name, points in series if points][:MAX_SERIES]
+    lines = [(name, sorted(points)) for name, points in series if points][:MAX_SERIES]
     if not lines:
         return None
     peak = max(value for _name, points in lines for _when, value in points)
     top = fixed_max if fixed_max is not None else _nice_max(peak * 1.1)
+    bottom = min(0.0, min(value for _name, points in lines for _when, value in points)) if allow_negative else 0.0
     drawn = []
     for index, (name, points) in enumerate(lines):
-        segments: list[list[str]] = []
+        # Preserve real outages before averaging; long-range buckets can be
+        # hours apart even when raw samples arrive every 15 minutes.
+        raw_segments: list[list[tuple[datetime, float]]] = []
         previous: datetime | None = None
         for when, value in points:
             if previous is None or when - previous > gap:
-                segments.append([])
-            x = (when - since).total_seconds() / span * WIDTH
-            y = HEIGHT - max(0.0, min(value, top)) / top * HEIGHT
-            segments[-1].append(f"{x:.1f},{y:.1f}")
+                raw_segments.append([])
+            raw_segments[-1].append((when, value))
             previous = when
+        segments = []
+        for raw in raw_segments:
+            segment = []
+            for when, value in _average(raw, since, span):
+                x = (when - since).total_seconds() / span * WIDTH
+                y = HEIGHT - (max(bottom, min(value, top)) - bottom) / (top - bottom) * HEIGHT
+                segment.append(f"{x:.1f},{y:.1f}")
+            segments.append(segment)
         latest = points[-1][1]
         drawn.append({
             "name": name,
@@ -106,7 +119,8 @@ def chart(title: str, unit: str, series: Iterable[tuple[str, list[tuple[datetime
         "width": WIDTH,
         "height": HEIGHT,
         "top": f"{_label(top)} {unit}".strip(),
-        "middle": f"{_label(top / 2)} {unit}".strip(),
+        "middle": f"{_label((top + bottom) / 2)} {unit}".strip(),
+        "bottom": f"{_label(bottom)} {unit}".strip(),
         "since": since.isoformat(),
         "until": until.isoformat(),
         "series": drawn,
@@ -134,6 +148,28 @@ def build_charts(samples: Iterable[dict[str, Any]], *, since: datetime, until: d
     charts.append(chart("Network", "Mbps", [(label, sorted(points.items())) for label, points in totals.items()],
                         **common))
     charts.append(chart("Ping", "ms", sorted(by_metric["ping_ms"].items()), **common))
+    # One chart per sensor: avoid silently dropping sensors at MAX_SERIES.
+    # Temperature readings arrive every 15 minutes, independent of checks.
+    temperature_series = sorted(by_metric["temperature_celsius"].items())
+    labels = Counter()
+    for instance, _points in temperature_series:
+        try:
+            sensor = json.loads(instance)
+            labels[(sensor["hardware"], sensor["name"])] += 1
+        except (ValueError, TypeError, KeyError):
+            pass
+    numbered = Counter()
+    for instance, points in temperature_series:
+        try:
+            sensor = json.loads(instance)
+            label = (sensor["hardware"], sensor["name"])
+            numbered[label] += 1
+            suffix = f" · sensor {numbered[label]}" if labels[label] > 1 else ""
+            title = f"Temperature · {sensor['hardware']} · {sensor['name']}{suffix}"
+        except (ValueError, TypeError, KeyError):
+            title = f"Temperature · {instance}"
+        charts.append(chart(title, "°C", [("Temperature", points)], since=since, until=until,
+                            gap=max(gap, timedelta(minutes=45)), allow_negative=True))
     return [item for item in charts if item]
 
 
@@ -162,3 +198,38 @@ async def asset_stats_context(asset_id: int, range_key: str | None = None) -> di
         return context
     context["charts"] = build_charts(samples, since=since, until=until)
     return context
+
+
+def thermal_samples(agent: dict[str, Any], snapshot: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
+    """Bucket check-in temperatures using server receipt time and stable sensor IDs."""
+    from app.services.rmm_checks import _sample_time
+
+    if not agent.get("asset_id") or not agent.get("company_id"):
+        return []
+    rows = []
+    seen = set()
+    for sensor in snapshot.get("sensors") or []:
+        value = float(sensor["celsius"])
+        identifier = str(sensor["id"])
+        if identifier in seen or not math.isfinite(value) or not -100 <= value <= 250:
+            continue
+        seen.add(identifier)
+        # Keep a stable identity even when two CPU cores have the same label.
+        instance = json.dumps({"id": hashlib.sha256(identifier.encode()).hexdigest()[:16],
+                               "hardware": "".join(c for c in str(sensor["hardware"]) if c.isprintable())[:40], "name": "".join(c for c in str(sensor["name"]) if c.isprintable())[:40]},
+                              ensure_ascii=False, separators=(",", ":"))
+        rows.append({"company_id": agent["company_id"], "asset_id": agent["asset_id"], "agent_id": agent["id"],
+                     "metric": "temperature_celsius", "instance": instance,
+                     "value": round(value, 3), "sampled_at": _sample_time(now)})
+    return rows
+
+
+async def ingest_thermal(agent: dict[str, Any], snapshot: dict[str, Any]) -> int:
+    """History is best effort; a stats outage must never reject agent check-in."""
+    try:
+        samples = thermal_samples(agent, snapshot, _utcnow())
+        if samples and await stats_db.ensure_connected():
+            return await repo.insert_samples(samples)
+    except Exception as exc:
+        log_warning("Could not store RMM temperatures", agent_id=agent.get("id"), error=str(exc))
+    return 0

@@ -39,6 +39,7 @@ import (
 	"github.com/bradhawkins85/myportal-rmm/internal/eventlog"
 	"github.com/bradhawkins85/myportal-rmm/internal/runner"
 	"github.com/bradhawkins85/myportal-rmm/internal/state"
+	"github.com/bradhawkins85/myportal-rmm/internal/thermal"
 )
 
 // Version is set at build time with -ldflags "-X main.Version=...".
@@ -255,6 +256,15 @@ func loop(ctx context.Context) {
 	slots := make(chan struct{}, maxConcurrent)
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	thermalReady := make(chan struct{})
+	wg.Add(1)
+	go func(ready chan struct{}) {
+		defer wg.Done()
+		defer close(ready)
+		if err := thermal.Prepare(ctx); err != nil {
+			log.Printf("thermal setup failed: %v", err)
+		}
+	}(thermalReady)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -276,8 +286,17 @@ func loop(ctx context.Context) {
 	backoff := 5 * time.Second
 	lastCheckin := time.Time{}
 	for ctx.Err() == nil {
+		select {
+		case <-thermalReady:
+			// Report newly available sensors promptly after driver setup.
+			lastCheckin = time.Time{}
+			thermalReady = nil
+		default:
+		}
 		if time.Since(lastCheckin) > checkinEvery {
-			if err := api.Checkin(ctx, details(r)); err != nil {
+			report := details(r)
+			report.Thermal = thermal.Collect(ctx)
+			if err := api.Checkin(ctx, report); err != nil {
 				log.Printf("check-in failed: %v", err)
 			} else {
 				lastCheckin = time.Now()

@@ -690,6 +690,7 @@ def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[st
     if isinstance(shells, (list, tuple)):
         shells = ",".join(str(item).strip() for item in shells if str(item).strip())
     return {
+        "thermal": payload.get("thermal"),
         "hostname": text("hostname", 255),
         "os": (text("os", 32) or "").lower() or None,
         "os_version": text("os_version", 128),
@@ -753,6 +754,9 @@ async def authenticate_agent(token: str) -> dict[str, Any] | None:
 
 async def checkin(agent: Mapping[str, Any], payload: Mapping[str, Any], client_ip: str | None) -> None:
     await rmm_repo.record_agent_checkin(int(agent["id"]), _agent_details(payload, client_ip))
+    if payload.get("thermal") is not None:
+        from app.services.rmm_stats import ingest_thermal
+        await ingest_thermal(agent, payload["thermal"])
 
 
 def _job_payload(row: Mapping[str, Any]) -> dict[str, Any] | None:

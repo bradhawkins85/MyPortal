@@ -153,6 +153,19 @@
         <span data-rmm-remote-message></span>
         <a class="button button--primary button--small" data-rmm-remote-link href="#" target="_blank" rel="noopener noreferrer" hidden>Open</a>
       </div>{% endif %}
+      {% if rmm.agent and rmm.agent.thermal %}{% set thermal = rmm.agent.thermal %}
+      <details>
+        <summary>Temperatures — {{ thermal.sensors | length }} sensor{{ 's' if thermal.sensors | length != 1 }}</summary>
+        <p class="text-muted">Collected <span data-utc="{{ thermal.collected_at }}">{{ thermal.collected_at }}</span>. Readings update with the agent's regular check-in, approximately every 15 minutes.</p>
+        {% if thermal.sensors %}
+        <div class="table-wrapper"><table class="table">
+          <caption class="visually-hidden">Latest endpoint temperatures</caption>
+          <thead><tr><th scope="col">Hardware</th><th scope="col">Sensor</th><th scope="col">Temperature</th></tr></thead>
+          <tbody>{% for sensor in thermal.sensors %}<tr><td>{{ sensor.hardware }}</td><td>{{ sensor.name }}</td><td>{{ '%.1f' | format(sensor.celsius) }} °C</td></tr>{% endfor %}</tbody>
+        </table></div>
+        {% else %}<p class="text-muted">{{ {'unsupported': 'Temperature collection is not supported on this platform.', 'error': 'Temperature collection failed at this check-in.'}.get(thermal.status, 'No temperature sensors are available on this endpoint.') }}</p>{% endif %}
+      </details>
+      {% endif %}
       {% if rmm.runs %}
       <div class="table-wrapper"><table class="table">
         <caption class="visually-hidden">Recent script runs on this device</caption>
@@ -208,7 +221,7 @@
   {% set stats = chk.stats %}<section class="card card--panel ce-section" id="machine-stats" data-asset-edit-section="machine-stats" aria-labelledby="asset-machine-stats-heading">
     <header class="ce-section__header"><div class="ce-section__heading">
       <h2 class="card__title" id="asset-machine-stats-heading">Machine stats</h2>
-      <p class="card__subtitle">CPU, memory, disk, network and ping values the RMM agent reports while those checks are on, one sample every {{ stats.sample_minutes }} minute{{ "s" if stats.sample_minutes != 1 }}{% if stats.retention_days %}, kept for {{ stats.retention_days }} days{% endif %}. Times are UTC.</p>
+      <p class="card__subtitle">CPU, memory, disk, network and ping values the RMM agent reports while their checks are on, one sample every {{ stats.sample_minutes }} minute{{ "s" if stats.sample_minutes != 1 }}{% if stats.retention_days %}, kept for {{ stats.retention_days }} days{% endif %}. Temperatures are collected at regular agent check-in, approximately every 15 minutes, whether checks are enabled or not. Times are UTC.</p>
     </div></header>
     <div class="ce-section__body">
       {% if not stats.database.configured %}
@@ -227,7 +240,7 @@
             <span class="rmm-stats__legend">{% for line in chart.series %}<span class="rmm-stats__key rmm-stats__series--{{ line.colour }}">{{ line.name }}: {{ line.latest }} <span class="text-muted">(peak {{ line.peak }})</span></span>{% endfor %}</span>
           </figcaption>
           <div class="rmm-stats__plot">
-            <div class="rmm-stats__axis" aria-hidden="true"><span>{{ chart.top }}</span><span>{{ chart.middle }}</span><span>0</span></div>
+            <div class="rmm-stats__axis" aria-hidden="true"><span>{{ chart.top }}</span><span>{{ chart.middle }}</span><span>{{ chart.bottom | default("0") }}</span></div>
             <svg class="rmm-stats__svg" viewBox="0 0 {{ chart.width }} {{ chart.height }}" preserveAspectRatio="none" role="img" aria-label="{{ chart.title }} over the selected time range">
               <line x1="0" y1="{{ chart.height / 2 }}" x2="{{ chart.width }}" y2="{{ chart.height / 2 }}"></line>
               {% for line in chart.series %}<g class="rmm-stats__series--{{ line.colour }}">{% for points in line.segments %}<polyline points="{{ points }}"></polyline>{% endfor %}{% for dot in line.dots %}{% set xy = dot.split(",") %}<circle cx="{{ xy[0] }}" cy="{{ xy[1] }}" r="1.5"></circle>{% endfor %}</g>{% endfor %}
@@ -238,7 +251,7 @@
         {% endfor %}
       </div>
       {% else %}
-      <p class="text-muted">No stats for this time range. Stats are kept while the device has disk space, ping, CPU, memory or network checks.</p>
+      <p class="text-muted">No stats for this time range. Temperatures are kept at agent check-in when sensors are available; other stats are kept while their checks are enabled.</p>
       {% endif %}
       {% endif %}
     </div>

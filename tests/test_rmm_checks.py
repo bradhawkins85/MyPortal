@@ -468,3 +468,60 @@ def test_checks_page_and_asset_sections_render():
     env.parse(detail)  # compiles
     assert 'id="checks"' in detail and 'id="machine-stats"' in detail
     assert "rmm_ui.check_menu(check, csrf_token, asset.id)" in detail
+
+
+@pytest.mark.anyio
+async def test_temperature_history_without_checks_and_sensor_graphs(sqlite_db, stats_db):
+    _, agent = await _enrol(sqlite_db)
+    now = datetime(2026, 10, 13, 0, 0)
+    sensors = [{"id": f"cpu/{index}", "hardware": "CPU", "name": "Core", "celsius": 40 + index}
+               for index in range(8)]
+    snapshot = {"sensors": sensors}
+    for offset in (0, 15, 90):
+        samples = rmm_stats.thermal_samples(agent, snapshot, now + timedelta(minutes=offset))
+        await stats_db.ensure_connected()
+        await stats_repo.insert_samples(samples)
+    rows = await stats_repo.list_samples(asset_id=10, since=now)
+    assert len(rows) == 24
+    assert len({row["instance"] for row in rows}) == 8
+    charts = rmm_stats.build_charts(rows, since=now, until=now + timedelta(hours=2))
+    assert len(charts) == 8  # Not limited to the existing six-series cap.
+    assert all(chart["unit"] == "°C" for chart in charts)
+    assert all(len(chart["series"][0]["segments"]) == 2 for chart in charts)
+    assert all(len(chart["series"][0]["segments"][0].split()) == 2 for chart in charts)
+
+
+def test_temperature_chart_supports_subzero_readings():
+    now = datetime(2026, 10, 13)
+    chart = rmm_stats.chart("Temperature", "°C", [("Sensor", [(now, -10), (now + timedelta(minutes=15), 10)])],
+                            since=now, until=now + timedelta(hours=1), gap=timedelta(minutes=45), allow_negative=True)
+    assert chart["bottom"] == "-10 °C"
+    assert chart["series"][0]["latest"] == "10 °C"
+
+
+@pytest.mark.anyio
+async def test_temperature_stats_outage_does_not_reject_checkin(sqlite_db, monkeypatch):
+    _, agent = await _enrol(sqlite_db)
+    async def broken():
+        raise RuntimeError("stats unavailable")
+    monkeypatch.setattr(rmm_stats.stats_db, "ensure_connected", broken)
+    snapshot = {"collected_at": "2026-10-13T00:00:00Z", "status": "available", "sensors": [
+        {"id": "cpu", "name": "CPU", "hardware": "CPU", "celsius": 50}]}
+    await rmm_scripts.checkin(agent, {"thermal": snapshot}, None)
+    assert (await rmm_repo.get_asset_agent(10))["thermal"]["sensors"][0]["celsius"] == 50
+
+
+def test_temperature_long_history_downsampling_preserves_real_gaps():
+    since = datetime(2026, 9, 13)
+    until = since + timedelta(days=30)
+    points = [(since + timedelta(minutes=15 * i), 40 + i % 20) for i in range(30 * 24 * 4)]
+    continuous = rmm_stats.chart("Temperature", "°C", [("CPU", points)], since=since, until=until,
+                                 gap=timedelta(minutes=45), allow_negative=True)
+    assert len(continuous["series"][0]["segments"]) == 1
+    assert continuous["series"][0]["dots"] == []
+    assert len(continuous["series"][0]["segments"][0].split()) <= rmm_stats.MAX_POINTS
+    outage = since + timedelta(days=15)
+    points = [(when, value) for when, value in points if not outage <= when < outage + timedelta(hours=6)]
+    interrupted = rmm_stats.chart("Temperature", "°C", [("CPU", points)], since=since, until=until,
+                                  gap=timedelta(minutes=45), allow_negative=True)
+    assert len(interrupted["series"][0]["segments"]) == 2

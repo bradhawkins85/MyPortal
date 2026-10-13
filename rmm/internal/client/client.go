@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/bradhawkins85/myportal-rmm/internal/thermal"
 )
 
 // ErrUnauthorized means the token was revoked or the device was removed.
@@ -22,13 +24,14 @@ var ErrUnavailable = errors.New("MyPortal reported the service unavailable")
 
 // Details describes the device; sent on enrolment and check-in.
 type Details struct {
-	Hostname             string   `json:"hostname,omitempty"`
-	OS                   string   `json:"os,omitempty"`
-	OSVersion            string   `json:"os_version,omitempty"`
-	Arch                 string   `json:"arch,omitempty"`
-	AgentVersion         string   `json:"agent_version,omitempty"`
-	Shells               []string `json:"shells,omitempty"`
-	ScriptFilesSupported bool     `json:"script_files_supported"`
+	Thermal              *thermal.Snapshot `json:"thermal,omitempty"`
+	Hostname             string            `json:"hostname,omitempty"`
+	OS                   string            `json:"os,omitempty"`
+	OSVersion            string            `json:"os_version,omitempty"`
+	Arch                 string            `json:"arch,omitempty"`
+	AgentVersion         string            `json:"agent_version,omitempty"`
+	Shells               []string          `json:"shells,omitempty"`
+	ScriptFilesSupported bool              `json:"script_files_supported"`
 }
 
 // Enrolment is MyPortal's answer to a successful enrolment.

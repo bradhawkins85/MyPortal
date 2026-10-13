@@ -271,16 +271,21 @@ async def reenrol_agent(
 
 async def record_agent_checkin(agent_id: int, details: dict[str, Any]) -> None:
     now = _utcnow()
+    # Older agents and job polling omit thermal; preserve the last snapshot.
+    # An explicit empty snapshot replaces old readings when sensors disappear.
+    thermal = details.get("thermal")
+    thermal_sql = ", thermal_json = %s" if thermal is not None else ""
+    thermal_params = (json.dumps(thermal, default=lambda value: value.isoformat()),) if thermal is not None else ()
     await db.execute(
         "UPDATE rmm_agents SET last_seen_utc = %s, last_ip = COALESCE(%s, last_ip), "
         "agent_version = COALESCE(%s, agent_version), shells = COALESCE(%s, shells), "
         "hostname = COALESCE(%s, hostname), os_version = COALESCE(%s, os_version), updated_at = %s, "
         "script_files_supported = COALESCE(%s, script_files_supported) "
-        "WHERE id = %s",
+        + thermal_sql + " WHERE id = %s",
         (
             now, details.get("last_ip"), details.get("agent_version"), details.get("shells"),
-            details.get("hostname"), details.get("os_version"), now, details.get("script_files_supported"), agent_id,
-        ),
+            details.get("hostname"), details.get("os_version"), now, details.get("script_files_supported"),
+        ) + thermal_params + (agent_id,),
     )
 
 
@@ -317,11 +322,16 @@ async def list_company_asset_agents(company_id: int) -> dict[int, dict[str, Any]
 
 
 async def get_asset_agent(asset_id: int) -> dict[str, Any] | None:
-    return await db.fetch_one(
+    row = await db.fetch_one(
         "SELECT * FROM rmm_agents WHERE asset_id = %s AND status = 'active' "
         "ORDER BY last_seen_utc DESC LIMIT 1",
         (asset_id,),
     )
+
+    if row:
+        row = dict(row)
+        row["thermal"] = _decode_json(row.pop("thermal_json", None), None)
+    return row
 
 
 # --------------------------------------------------------------------------- #
