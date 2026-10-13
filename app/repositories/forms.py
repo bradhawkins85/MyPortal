@@ -1,77 +1,139 @@
+"""Repository for the Custom Forms feature.
+
+All queries use the portable ``?`` placeholder (native SQLite, adapted to
+``%s`` for MySQL by :mod:`app.core.database`).
+"""
 from __future__ import annotations
 
-from typing import Any, Iterable
-
-import aiomysql
+import json
+from typing import Any
 
 from app.core.database import db
 
 
-def _normalise_form(row: dict[str, Any]) -> dict[str, Any]:
+def _decode_options(value: Any) -> list[str]:
+    """Decode the ``options`` column (stored as a JSON array of strings)."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed]
+    return []
+
+
+def _normalise_form(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
     normalised = dict(row)
-    if "id" in normalised and normalised["id"] is not None:
+    if normalised.get("id") is not None:
         normalised["id"] = int(normalised["id"])
+    normalised["active"] = bool(int(normalised.get("active") or 0))
+    if normalised.get("created_by") is not None:
+        normalised["created_by"] = int(normalised["created_by"])
     return normalised
 
 
+def _normalise_field(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    normalised = dict(row)
+    if normalised.get("id") is not None:
+        normalised["id"] = int(normalised["id"])
+    if normalised.get("form_id") is not None:
+        normalised["form_id"] = int(normalised["form_id"])
+    normalised["required"] = bool(int(normalised.get("required") or 0))
+    normalised["sort_order"] = int(normalised.get("sort_order") or 0)
+    normalised["options"] = _decode_options(normalised.get("options"))
+    return normalised
+
+
+def _normalise_submission(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    normalised = dict(row)
+    if normalised.get("id") is not None:
+        normalised["id"] = int(normalised["id"])
+    if normalised.get("form_id") is not None:
+        normalised["form_id"] = int(normalised["form_id"])
+    if normalised.get("ticket_id") is not None:
+        normalised["ticket_id"] = int(normalised["ticket_id"])
+    if normalised.get("submitted_by") is not None:
+        normalised["submitted_by"] = int(normalised["submitted_by"])
+    return normalised
+
+
+# ---------------------------------------------------------------------------
+# Forms
+# ---------------------------------------------------------------------------
+
+
 async def list_forms() -> list[dict[str, Any]]:
-    rows = await db.fetch_all("SELECT * FROM forms ORDER BY name")
-    return [_normalise_form(row) for row in rows]
-
-
-async def list_forms_for_user(user_id: int) -> list[dict[str, Any]]:
-    rows = await db.fetch_all(
-        """
-        SELECT DISTINCT f.*
-        FROM forms AS f
-        INNER JOIN form_permissions AS fp ON fp.form_id = f.id
-        WHERE fp.user_id = %s
-        ORDER BY f.name
-        """,
-        (user_id,),
-    )
-    return [_normalise_form(row) for row in rows]
-
-
-async def list_forms_for_company(company_id: int) -> list[dict[str, Any]]:
-    rows = await db.fetch_all(
-        """
-        SELECT DISTINCT f.*
-        FROM forms AS f
-        INNER JOIN form_permissions AS fp ON fp.form_id = f.id
-        WHERE fp.company_id = %s
-        ORDER BY f.name
-        """,
-        (company_id,),
-    )
+    rows = await db.fetch_all("SELECT * FROM custom_forms ORDER BY name")
     return [_normalise_form(row) for row in rows]
 
 
 async def get_form(form_id: int) -> dict[str, Any] | None:
-    row = await db.fetch_one("SELECT * FROM forms WHERE id = %s", (form_id,))
-    return _normalise_form(row) if row else None
+    row = await db.fetch_one("SELECT * FROM custom_forms WHERE id = ?", (form_id,))
+    return _normalise_form(row)
+
+
+async def get_form_by_slug(slug: str) -> dict[str, Any] | None:
+    row = await db.fetch_one("SELECT * FROM custom_forms WHERE slug = ?", (slug,))
+    return _normalise_form(row)
+
+
+async def list_forms_for_user(user_id: int, *, is_super_admin: bool = False) -> list[dict[str, Any]]:
+    """Return active forms the user may view and submit.
+
+    A form is available when it is active and either it has no access rows
+    (visible to everyone) or the user is explicitly granted access.
+    """
+    if is_super_admin:
+        rows = await db.fetch_all("SELECT * FROM custom_forms WHERE active = 1 ORDER BY name")
+    else:
+        rows = await db.fetch_all(
+            """
+            SELECT f.*
+            FROM custom_forms AS f
+            WHERE f.active = 1
+              AND (
+                NOT EXISTS (
+                    SELECT 1 FROM custom_form_access WHERE form_id = f.id
+                )
+                OR EXISTS (
+                    SELECT 1 FROM custom_form_access
+                    WHERE form_id = f.id AND user_id = ?
+                )
+              )
+            ORDER BY f.name
+            """,
+            (user_id,),
+        )
+    return [_normalise_form(row) for row in rows]
 
 
 async def create_form(
     *,
+    slug: str,
     name: str,
-    url: str,
-    embed_code: str | None,
     description: str | None,
+    created_by: int | None,
 ) -> dict[str, Any]:
-    async with db.acquire() as conn:
-        async with conn.cursor(aiomysql.DictCursor) as cursor:
-            await cursor.execute(
-                """
-                INSERT INTO forms (name, url, embed_code, description)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (name, url, embed_code, description),
-            )
-            form_id = int(cursor.lastrowid)
-    form = await get_form(form_id)
+    form_id = await db.execute_returning_lastrowid(
+        """
+        INSERT INTO custom_forms (slug, name, description, active, created_by)
+        VALUES (?, ?, ?, 1, ?)
+        """,
+        (slug, name, description, created_by),
+    )
+    form = await get_form(int(form_id))
     if not form:
-        raise RuntimeError("Failed to create form")
+        raise RuntimeError("Failed to create custom form")
     return form
 
 
@@ -79,92 +141,229 @@ async def update_form(
     form_id: int,
     *,
     name: str,
-    url: str,
-    embed_code: str | None,
     description: str | None,
+    active: bool,
 ) -> dict[str, Any]:
     await db.execute(
         """
-        UPDATE forms
-        SET name = %s, url = %s, embed_code = %s, description = %s
-        WHERE id = %s
+        UPDATE custom_forms
+        SET name = ?, description = ?, active = ?
+        WHERE id = ?
         """,
-        (name, url, embed_code, description, form_id),
+        (name, description, 1 if active else 0, form_id),
     )
     form = await get_form(form_id)
     if not form:
-        raise ValueError("Form not found after update")
+        raise ValueError("Custom form not found after update")
     return form
 
 
 async def delete_form(form_id: int) -> None:
-    await db.execute("DELETE FROM forms WHERE id = %s", (form_id,))
+    await db.execute("DELETE FROM custom_forms WHERE id = ?", (form_id,))
 
 
-async def list_form_permissions(form_id: int, company_id: int) -> list[int]:
+# ---------------------------------------------------------------------------
+# Fields
+# ---------------------------------------------------------------------------
+
+
+async def list_fields(form_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
+        "SELECT * FROM custom_form_fields WHERE form_id = ? ORDER BY sort_order, id",
+        (form_id,),
+    )
+    return [_normalise_field(row) for row in rows]
+
+
+async def get_field(field_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one("SELECT * FROM custom_form_fields WHERE id = ?", (field_id,))
+    return _normalise_field(row)
+
+
+async def create_field(
+    *,
+    form_id: int,
+    field_type: str,
+    label: str,
+    placeholder: str | None,
+    help_text: str | None,
+    required: bool,
+    options: list[str] | None,
+    default_value: str | None,
+    sort_order: int,
+) -> dict[str, Any]:
+    options_json = json.dumps(options) if options else None
+    field_id = await db.execute_returning_lastrowid(
         """
-        SELECT user_id
-        FROM form_permissions
-        WHERE form_id = %s AND company_id = %s
-        ORDER BY user_id
+        INSERT INTO custom_form_fields
+        (form_id, field_type, label, placeholder, help_text, required, options, default_value, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (form_id, company_id),
+        (
+            form_id,
+            field_type,
+            label,
+            placeholder,
+            help_text,
+            1 if required else 0,
+            options_json,
+            default_value,
+            sort_order,
+        ),
+    )
+    field = await get_field(int(field_id))
+    if not field:
+        raise RuntimeError("Failed to create custom form field")
+    return field
+
+
+async def update_field(
+    field_id: int,
+    *,
+    field_type: str,
+    label: str,
+    placeholder: str | None,
+    help_text: str | None,
+    required: bool,
+    options: list[str] | None,
+    default_value: str | None,
+) -> dict[str, Any]:
+    options_json = json.dumps(options) if options else None
+    await db.execute(
+        """
+        UPDATE custom_form_fields
+        SET field_type = ?, label = ?, placeholder = ?, help_text = ?,
+            required = ?, options = ?, default_value = ?
+        WHERE id = ?
+        """,
+        (
+            field_type,
+            label,
+            placeholder,
+            help_text,
+            1 if required else 0,
+            options_json,
+            default_value,
+            field_id,
+        ),
+    )
+    field = await get_field(field_id)
+    if not field:
+        raise ValueError("Custom form field not found after update")
+    return field
+
+
+async def delete_field(field_id: int) -> None:
+    await db.execute("DELETE FROM custom_form_fields WHERE id = ?", (field_id,))
+
+
+async def reorder_fields(form_id: int, ordered_field_ids: list[int]) -> None:
+    """Re-sequence ``sort_order`` for the given field ordering."""
+    for index, field_id in enumerate(ordered_field_ids):
+        await db.execute(
+            """
+            UPDATE custom_form_fields
+            SET sort_order = ?
+            WHERE id = ? AND form_id = ?
+            """,
+            (index, int(field_id), form_id),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Submissions
+# ---------------------------------------------------------------------------
+
+
+async def create_submission(
+    *,
+    form_id: int,
+    ticket_id: int | None,
+    data_json: str,
+    ip_address: str | None,
+    user_agent: str | None,
+    submitted_by: int | None,
+) -> dict[str, Any]:
+    submission_id = await db.execute_returning_lastrowid(
+        """
+        INSERT INTO custom_form_submissions
+        (form_id, ticket_id, data, ip_address, user_agent, submitted_by)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (form_id, ticket_id, data_json, ip_address, user_agent, submitted_by),
+    )
+    row = await db.fetch_one(
+        "SELECT * FROM custom_form_submissions WHERE id = ?", (int(submission_id),)
+    )
+    return _normalise_submission(row) or {"id": int(submission_id)}
+
+
+async def list_submissions(form_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        "SELECT * FROM custom_form_submissions WHERE form_id = ? ORDER BY created_at DESC, id DESC",
+        (form_id,),
+    )
+    return [_normalise_submission(row) for row in rows]
+
+
+async def get_submission(submission_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM custom_form_submissions WHERE id = ?", (submission_id,)
+    )
+    return _normalise_submission(row)
+
+
+# ---------------------------------------------------------------------------
+# Access
+# ---------------------------------------------------------------------------
+
+
+async def list_access_user_ids(form_id: int) -> list[int]:
+    rows = await db.fetch_all(
+        "SELECT user_id FROM custom_form_access WHERE form_id = ? ORDER BY user_id",
+        (form_id,),
     )
     return [int(row["user_id"]) for row in rows]
 
 
-async def update_form_permissions(
-    form_id: int,
-    company_id: int,
-    user_ids: Iterable[int],
-) -> None:
-    ids = [int(user_id) for user_id in user_ids]
-    async with db.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(
-                "DELETE FROM form_permissions WHERE form_id = %s AND company_id = %s",
-                (form_id, company_id),
-            )
-            if not ids:
-                return
-            values = [(form_id, user_id, company_id) for user_id in ids]
-            await cursor.executemany(
-                """
-                INSERT INTO form_permissions (form_id, user_id, company_id)
-                VALUES (%s, %s, %s)
-                """,
-                values,
-            )
+async def has_access_rows(form_id: int) -> bool:
+    row = await db.fetch_one(
+        "SELECT 1 AS present FROM custom_form_access WHERE form_id = ? LIMIT 1",
+        (form_id,),
+    )
+    return row is not None
 
 
-async def delete_form_permission(form_id: int, user_id: int, company_id: int) -> None:
+async def can_access_form(form_id: int, user_id: int, *, is_super_admin: bool = False) -> bool:
+    """Return whether the user may view/submit the form.
+
+    Super admins may access any form. Otherwise a form with no access rows is
+    open to every authenticated user, and a form with access rows is limited to
+    the explicitly granted users.
+    """
+    if is_super_admin:
+        return True
+    if not await has_access_rows(form_id):
+        return True
+    row = await db.fetch_one(
+        "SELECT 1 AS present FROM custom_form_access WHERE form_id = ? AND user_id = ?",
+        (form_id, user_id),
+    )
+    return row is not None
+
+
+async def grant_access(form_id: int, user_id: int) -> None:
     await db.execute(
         """
-        DELETE FROM form_permissions
-        WHERE form_id = %s AND user_id = %s AND company_id = %s
+        INSERT INTO custom_form_access (form_id, user_id) VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE form_id = form_id
         """,
-        (form_id, user_id, company_id),
+        (form_id, user_id),
     )
 
 
-async def list_permission_entries() -> list[dict[str, Any]]:
-    rows = await db.fetch_all(
-        """
-        SELECT fp.form_id, f.name AS form_name, fp.user_id, u.email,
-               fp.company_id, c.name AS company_name
-        FROM form_permissions AS fp
-        INNER JOIN forms AS f ON f.id = fp.form_id
-        INNER JOIN users AS u ON u.id = fp.user_id
-        INNER JOIN companies AS c ON c.id = fp.company_id
-        ORDER BY u.email, c.name, f.name
-        """,
+async def revoke_access(form_id: int, user_id: int) -> None:
+    await db.execute(
+        "DELETE FROM custom_form_access WHERE form_id = ? AND user_id = ?",
+        (form_id, user_id),
     )
-    entries: list[dict[str, Any]] = []
-    for row in rows:
-        normalised = dict(row)
-        normalised["form_id"] = int(row.get("form_id", 0))
-        normalised["user_id"] = int(row.get("user_id", 0))
-        normalised["company_id"] = int(row.get("company_id", 0))
-        entries.append(normalised)
-    return entries

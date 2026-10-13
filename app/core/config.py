@@ -744,10 +744,6 @@ class Settings(BaseSettings):
     recaptcha_secret_key: str = Field(
         default="", validation_alias="RECAPTCHA_SECRET_KEY", repr=False
     )
-    opnform_base_url: AnyHttpUrl | None = Field(
-        default=None,
-        validation_alias=AliasChoices("OPNFORM_BASE_URL", "OPNFORM_URL"),
-    )
     verbose_logging: bool = Field(
         default=False,
         validation_alias="VERBOSE_LOGGING",
@@ -1315,7 +1311,6 @@ class Settings(BaseSettings):
         "licenses_webhook_url",
         "shop_webhook_url",
         "sms_endpoint",
-        "opnform_base_url",
         "stock_feed_url",
         "wan_ip_source_url",
         mode="before",

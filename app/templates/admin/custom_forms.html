@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block styles %}
+  <link rel="stylesheet" href="{{ static_url('/static/css/custom_forms_admin.css') }}" />
+{% endblock %}
+
+{% block header_title %}
+  <span class="header__title-text">Custom forms</span>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "New form", "type": "button", "variant": "primary", "id": "cf-new-form"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid cf-admin">
+  {% if errors %}
+  <div class="alert alert--error" role="alert" data-cf-errors>
+    <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <section class="card card--panel" aria-labelledby="cf-create-heading" data-cf-create-panel>
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="cf-create-heading">Create a form</h2>
+        <p class="card__subtitle">Give the form a name and an optional description, then add its fields.</p>
+      </div>
+    </div>
+    <div class="card__body">
+      <form class="form" data-cf-create-form>
+        <div class="form-field">
+          <label class="form-label required" for="cf-create-name">Form name</label>
+          <input class="form-input" id="cf-create-name" name="name" required maxlength="255" placeholder="e.g. Support request" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="cf-create-description">Description <span class="scf-optional">optional</span></label>
+          <textarea class="form-input" id="cf-create-description" name="description" rows="2" maxlength="1024" placeholder="What is this form for?"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Create form</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="cf-list-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="cf-list-heading">Forms</h2>
+        <p class="card__subtitle">Select a form to build its fields and control who can submit it.</p>
+      </div>
+    </div>
+    <div class="card__body">
+      {% if forms %}
+      <ul class="cf-form-list">
+        {% for form in forms %}
+        <li class="cf-form-row{% if selected_form and selected_form.id == form.id %} cf-form-row--active{% endif %}" data-cf-form-card>
+          <div class="cf-form-row__main">
+            <a class="cf-form-row__name" href="/admin/custom-forms?form_id={{ form.id }}">{{ form.name }}</a>
+            {% if form.description %}<p class="cf-form-row__desc">{{ form.description }}</p>{% endif %}
+          </div>
+          <span class="scf-chip{% if not form.active %} scf-chip--logic{% endif %}">{{ 'Active' if form.active else 'Inactive' }}</span>
+          <span class="cf-form-row__actions">
+            <a class="button button--ghost" href="/admin/custom-forms?form_id={{ form.id }}">Configure</a>
+            <button type="button" class="button button--danger" data-cf-delete-form="{{ form.id }}" data-cf-confirm="Delete this form and its fields?">Delete</button>
+          </span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-muted">No forms yet. Create one above.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if selected_form %}
+  <section class="card card--panel" aria-labelledby="cf-builder-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="cf-builder-heading">Build: {{ selected_form.name }}</h2>
+        <p class="card__subtitle">Edit the form details, manage its fields, and control who can submit it.</p>
+      </div>
+    </div>
+    <div class="card__body">
+      <form class="form cf-update-form" data-cf-update-form data-form-id="{{ selected_form.id }}">
+        <div class="form-field">
+          <label class="form-label required" for="cf-update-name">Form name</label>
+          <input class="form-input" id="cf-update-name" name="name" required maxlength="255" value="{{ selected_form.name }}" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="cf-update-description">Description <span class="scf-optional">optional</span></label>
+          <textarea class="form-input" id="cf-update-description" name="description" rows="2" maxlength="1024">{{ selected_form.description or '' }}</textarea>
+        </div>
+        <div class="form-field">
+          <label class="scf-switch">
+            <input type="checkbox" name="active" value="1"{% if selected_form.active %} checked{% endif %} />
+            <span class="scf-switch__track" aria-hidden="true"></span>
+            <span>Active (visible to users who have access)</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Save form</button>
+        </div>
+      </form>
+
+      <h3 class="cf-subheading">Fields</h3>
+      <ul class="cf-fields" data-cf-fields>
+        {% for field in selected_fields %}
+        <li class="cf-field-row" data-cf-field data-field-id="{{ field.id }}">
+          <div class="cf-field-row__main">
+            <span class="cf-field-row__label">{{ field.label }}</span>
+            <span class="scf-chips">
+              <span class="scf-chip">{{ field_type_labels.get(field.field_type, field.field_type) }}</span>
+              <span class="scf-chip{% if field.required %} scf-chip--logic{% endif %}">{{ 'Required' if field.required else 'Optional' }}</span>
+              {% if field.options %}<span class="scf-chip">{{ field.options | length }} options</span>{% endif %}
+            </span>
+          </div>
+          <span class="cf-field-row__actions">
+            <button type="button" class="button button--ghost" data-cf-field-up="{{ field.id }}" aria-label="Move up">&uarr;</button>
+            <button type="button" class="button button--ghost" data-cf-field-down="{{ field.id }}" aria-label="Move down">&darr;</button>
+            <button type="button" class="button button--ghost" data-cf-field-edit="{{ field.id }}">Edit</button>
+            <button type="button" class="button button--danger" data-cf-field-delete="{{ field.id }}" data-cf-confirm="Remove this field?">Remove</button>
+          </span>
+          <script type="application/json" data-cf-field-data="{{ field.id }}">{{ field | tojson }}</script>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if not selected_fields %}
+      <p class="text-muted">No fields yet. Add the first one below.</p>
+      {% endif %}
+
+      <form class="form cf-field-editor" data-cf-field-editor data-form-id="{{ selected_form.id }}">
+        <input type="hidden" name="field_id" value="" data-cf-field-id />
+        <div class="form-field">
+          <label class="form-label required" for="cf-fe-label">Label</label>
+          <input class="form-input" id="cf-fe-label" name="label" required maxlength="255" />
+        </div>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label required" for="cf-fe-type">Field type</label>
+            <select class="form-input" id="cf-fe-type" name="field_type" data-cf-field-type>
+              {% for ft in field_types %}<option value="{{ ft.value }}">{{ ft.label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-field" data-cf-options-wrap>
+            <label class="form-label" for="cf-fe-options">Options (one per line)</label>
+            <textarea class="form-input" id="cf-fe-options" name="options" rows="4" data-cf-options-input></textarea>
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="cf-fe-placeholder">Placeholder <span class="scf-optional">optional</span></label>
+          <input class="form-input" id="cf-fe-placeholder" name="placeholder" maxlength="255" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="cf-fe-help">Help text <span class="scf-optional">optional</span></label>
+          <textarea class="form-input" id="cf-fe-help" name="help_text" rows="2" maxlength="2000"></textarea>
+        </div>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="cf-fe-default">Default value <span class="scf-optional">optional</span></label>
+            <input class="form-input" id="cf-fe-default" name="default_value" maxlength="255" />
+          </div>
+          <div class="form-field">
+            <label class="scf-switch">
+              <input type="checkbox" name="required" value="1" data-cf-required />
+              <span class="scf-switch__track" aria-hidden="true"></span>
+              <span>Required</span>
+            </label>
+          </div>
+        </div>
+        <div class="form-actions form-actions--inline">
+          <button type="submit" class="button button--primary" data-cf-field-submit>Add field</button>
+          <button type="button" class="button" data-cf-field-cancel>Cancel</button>
+        </div>
+      </form>
+
+      <h3 class="cf-subheading">Access</h3>
+      <p class="form-help">Leave empty to allow every signed-in user. Add user IDs to restrict who can view and submit this form.</p>
+      <ul class="cf-access" data-cf-access>
+        {% for uid in access_user_ids %}
+        <li class="cf-access__item" data-user-id="{{ uid }}">
+          <span class="scf-chip">{{ uid }}</span>
+          <button type="button" class="button button--ghost" data-cf-access-remove="{{ uid }}" aria-label="Remove user {{ uid }}">&times;</button>
+        </li>
+        {% endfor %}
+      </ul>
+      <form class="form cf-access-add" data-cf-access-add data-form-id="{{ selected_form.id }}">
+        <div class="form-actions form-actions--inline">
+          <input class="form-input" type="number" name="user_id" min="1" required placeholder="User ID" />
+          <button type="submit" class="button">Add user</button>
+        </div>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ static_url('/static/js/custom_forms_admin.js') }}" defer></script>
+{% endblock %}

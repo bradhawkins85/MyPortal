@@ -310,6 +310,6 @@ def test_essential8_report_queries_hidden(monkeypatch):
 
 def test_forms_paths_blocked():
     policy = ComponentAvailability(disabled_feature_packs=frozenset({"forms"}))
-    for path in ("/myforms", "/myforms/admin/edit", "/forms", "/admin/forms", "/api/forms/1"):
+    for path in ("/forms", "/forms/some-slug", "/admin/custom-forms", "/api/forms/1"):
         assert not policy.path_available(path), path
     assert policy.path_available("/formsets")

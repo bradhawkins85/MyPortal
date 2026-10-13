@@ -1,211 +1,339 @@
+"""JSON API for the Custom Forms feature.
+
+Admin CRUD lives under ``/api/forms``; the public submission endpoint is at
+``/forms/{slug}/submit``. All admin endpoints require a super admin.
+"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import json
+from typing import Any
 
-from app.api.dependencies.auth import get_current_user, require_super_admin
-from app.api.dependencies.database import require_database
+from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.responses import JSONResponse
+
+from app.api.dependencies.auth import get_current_user
 from app.repositories import forms as forms_repo
-from app.repositories import user_companies as user_company_repo
 from app.schemas.forms import (
+    FieldReorder,
+    FormAccessUpdate,
     FormCreate,
-    FormPermissionUpdate,
-    FormResponse,
+    FormFieldCreate,
+    FormFieldUpdate,
     FormUpdate,
 )
-from app.services.opnform import (
-    OpnformValidationError,
-    extract_allowed_host,
-    normalize_opnform_embed_code,
-    normalize_opnform_form_url,
-)
-from app.core.config import get_settings
+from app.services import custom_forms
+from app.services.custom_forms import FILE_TYPES, FormValidationError, OPTION_TYPES
+
+router = APIRouter(tags=["forms"])
 
 
-router = APIRouter(prefix="/api/forms", tags=["Forms"])
-
-settings = get_settings()
-OPNFORM_ALLOWED_HOST = extract_allowed_host(str(settings.opnform_base_url) if settings.opnform_base_url else None)
-
-
-async def _ensure_admin_for_company(current_user: dict, company_id: int) -> None:
-    if current_user.get("is_super_admin"):
-        return
-    membership = await user_company_repo.get_user_company(current_user["id"], company_id)
-    if not membership or not membership.get("is_admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Company admin privileges required",
-        )
+def _require_admin(user: dict[str, Any]) -> dict[str, Any]:
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin access is required.")
+    return user
 
 
-def _normalise_form_payload(payload: FormCreate | FormUpdate) -> tuple[str, str | None, str | None]:
-    allowed_host = OPNFORM_ALLOWED_HOST
-    embed_code = payload.embed_code.strip() if payload.embed_code else None
-    url = payload.url.strip() if payload.url else None
-    description = payload.description.strip() if payload.description else None
-    if url is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form URL is required")
-    try:
-        normalised_url = normalize_opnform_form_url(url, allowed_host=allowed_host)
-        sanitized_embed = None
-        if embed_code:
-            normalized = normalize_opnform_embed_code(embed_code, allowed_host=allowed_host)
-            sanitized_embed = normalized.sanitized_embed_code
-            normalised_url = normalized.form_url
-        return normalised_url, sanitized_embed, description
-    except OpnformValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+async def _get_admin_form(form_id: int, user: dict[str, Any]) -> dict[str, Any]:
+    _require_admin(user)
+    form = await forms_repo.get_form(form_id)
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found.")
+    return form
 
 
-@router.get("", response_model=list[FormResponse])
-async def list_forms_for_current_user(
-    _: None = Depends(require_database),
-    current_user: dict = Depends(get_current_user),
-):
-    forms = await forms_repo.list_forms_for_user(current_user["id"])
-    return forms
+async def _get_admin_field(
+    form_id: int, field_id: int, user: dict[str, Any]
+) -> dict[str, Any]:
+    await _get_admin_form(form_id, user)
+    field = await forms_repo.get_field(field_id)
+    if not field or field["form_id"] != form_id:
+        raise HTTPException(status_code=404, detail="Field not found.")
+    return field
 
 
-@router.get("/companies/{company_id}", response_model=list[FormResponse])
-async def list_forms_for_company(
-    company_id: int,
-    _: None = Depends(require_database),
-    current_user: dict = Depends(get_current_user),
-):
-    await _ensure_admin_for_company(current_user, company_id)
-    forms = await forms_repo.list_forms_for_company(company_id)
-    return forms
+# ---------------------------------------------------------------------------
+# Admin: forms
+# ---------------------------------------------------------------------------
 
 
-@router.get("/all", response_model=list[FormResponse])
-async def list_all_forms(
-    _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
-):
+@router.get("/api/forms")
+async def api_list_forms(user: dict[str, Any] = Depends(get_current_user)):
+    _require_admin(user)
     return await forms_repo.list_forms()
 
 
-@router.post("", response_model=FormResponse, status_code=status.HTTP_201_CREATED)
-async def create_form(
-    payload: FormCreate,
-    _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+@router.post("/api/forms")
+async def api_create_form(
+    payload: FormCreate, user: dict[str, Any] = Depends(get_current_user)
 ):
-    sanitized_name = payload.name.strip()
-    if not sanitized_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form name cannot be empty")
-    normalised_url, sanitized_embed, description = _normalise_form_payload(payload)
-    created = await forms_repo.create_form(
-        name=sanitized_name,
-        url=normalised_url,
-        embed_code=sanitized_embed,
-        description=description,
+    _require_admin(user)
+    existing = [form["slug"] for form in await forms_repo.list_forms()]
+    slug = custom_forms.unique_slug(payload.name, existing)
+    form = await forms_repo.create_form(
+        slug=slug,
+        name=payload.name.strip(),
+        description=payload.description,
+        created_by=user.get("id"),
     )
-    return created
+    return form
 
 
-@router.patch("/{form_id}", response_model=FormResponse)
-async def update_form(
+@router.get("/api/forms/{form_id}")
+async def api_get_form(
+    form_id: int, user: dict[str, Any] = Depends(get_current_user)
+):
+    form = await _get_admin_form(form_id, user)
+    fields = await forms_repo.list_fields(form_id)
+    return custom_forms.serialize_form(form, fields)
+
+
+@router.patch("/api/forms/{form_id}")
+async def api_update_form(
     form_id: int,
     payload: FormUpdate,
-    _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    user: dict[str, Any] = Depends(get_current_user),
 ):
-    existing = await forms_repo.get_form(form_id)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
-
-    if payload.name is not None:
-        name = payload.name.strip()
-        if not name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form name cannot be empty")
-    else:
-        name = existing["name"]
+    form = await _get_admin_form(form_id, user)
+    name = (payload.name if payload.name is not None else form["name"]).strip()
     description = (
-        payload.description.strip() if payload.description is not None else existing.get("description")
+        payload.description
+        if payload.description is not None
+        else form.get("description")
     )
-    description = description or None
-
-    url = payload.url.strip() if payload.url is not None else existing["url"]
-    embed_code = payload.embed_code.strip() if payload.embed_code is not None else existing.get("embed_code")
-    try:
-        normalised_url = normalize_opnform_form_url(url, allowed_host=OPNFORM_ALLOWED_HOST)
-        sanitized_embed = None
-        if embed_code:
-            normalized = normalize_opnform_embed_code(embed_code, allowed_host=OPNFORM_ALLOWED_HOST)
-            sanitized_embed = normalized.sanitized_embed_code
-            normalised_url = normalized.form_url
-    except OpnformValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    updated = await forms_repo.update_form(
-        form_id,
-        name=name,
-        url=normalised_url,
-        embed_code=sanitized_embed,
-        description=description,
+    active = payload.active if payload.active is not None else form.get("active", True)
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required.")
+    return await forms_repo.update_form(
+        form_id, name=name, description=description, active=active
     )
-    return updated
 
 
-@router.delete("/{form_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_form(
-    form_id: int,
-    _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+@router.delete("/api/forms/{form_id}")
+async def api_delete_form(
+    form_id: int, user: dict[str, Any] = Depends(get_current_user)
 ):
-    existing = await forms_repo.get_form(form_id)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    await _get_admin_form(form_id, user)
     await forms_repo.delete_form(form_id)
-    return None
+    return {"ok": True}
 
 
-@router.get("/{form_id}/companies/{company_id}/permissions", response_model=list[int])
-async def get_company_form_permissions(
+# ---------------------------------------------------------------------------
+# Admin: fields
+# ---------------------------------------------------------------------------
+
+
+@router.post("/api/forms/{form_id}/fields")
+async def api_create_field(
     form_id: int,
-    company_id: int,
-    _: None = Depends(require_database),
-    current_user: dict = Depends(get_current_user),
+    payload: FormFieldCreate,
+    user: dict[str, Any] = Depends(get_current_user),
 ):
-    await _ensure_admin_for_company(current_user, company_id)
-    form = await forms_repo.get_form(form_id)
-    if not form:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
-    permissions = await forms_repo.list_form_permissions(form_id, company_id)
-    return permissions
+    await _get_admin_form(form_id, user)
+    errors = custom_forms.validate_field_definition(
+        payload.field_type, payload.label, payload.options
+    )
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+    options = payload.options if payload.field_type in OPTION_TYPES else None
+    sort_order = len(await forms_repo.list_fields(form_id))
+    return await forms_repo.create_field(
+        form_id=form_id,
+        field_type=payload.field_type,
+        label=payload.label.strip(),
+        placeholder=payload.placeholder,
+        help_text=payload.help_text,
+        required=payload.required,
+        options=options,
+        default_value=payload.default_value,
+        sort_order=sort_order,
+    )
 
 
-@router.put("/{form_id}/companies/{company_id}/permissions", response_model=list[int])
-async def update_company_form_permissions(
+@router.patch("/api/forms/{form_id}/fields/{field_id}")
+async def api_update_field(
     form_id: int,
-    company_id: int,
-    payload: FormPermissionUpdate,
-    _: None = Depends(require_database),
-    current_user: dict = Depends(get_current_user),
+    field_id: int,
+    payload: FormFieldUpdate,
+    user: dict[str, Any] = Depends(get_current_user),
 ):
-    await _ensure_admin_for_company(current_user, company_id)
-    form = await forms_repo.get_form(form_id)
-    if not form:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
-    await forms_repo.update_form_permissions(form_id, company_id, payload.user_ids)
-    return await forms_repo.list_form_permissions(form_id, company_id)
+    existing = await _get_admin_field(form_id, field_id, user)
+    new_type = payload.field_type or existing["field_type"]
+    new_label = (
+        payload.label if payload.label is not None else existing["label"]
+    ).strip()
+    new_placeholder = (
+        payload.placeholder
+        if payload.placeholder is not None
+        else existing["placeholder"]
+    )
+    new_help = (
+        payload.help_text if payload.help_text is not None else existing["help_text"]
+    )
+    new_required = (
+        payload.required
+        if payload.required is not None
+        else existing["required"]
+    )
+    new_default = (
+        payload.default_value
+        if payload.default_value is not None
+        else existing["default_value"]
+    )
+    new_options = (
+        payload.options if payload.options is not None else existing["options"]
+    )
+    if new_type not in OPTION_TYPES:
+        new_options = None
+    errors = custom_forms.validate_field_definition(new_type, new_label, new_options)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+    return await forms_repo.update_field(
+        field_id,
+        field_type=new_type,
+        label=new_label,
+        placeholder=new_placeholder,
+        help_text=new_help,
+        required=new_required,
+        options=new_options,
+        default_value=new_default,
+    )
 
 
-@router.delete(
-    "/{form_id}/companies/{company_id}/permissions/{user_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def delete_company_form_permission(
+@router.delete("/api/forms/{form_id}/fields/{field_id}")
+async def api_delete_field(
     form_id: int,
-    company_id: int,
-    user_id: int,
-    _: None = Depends(require_database),
-    current_user: dict = Depends(get_current_user),
+    field_id: int,
+    user: dict[str, Any] = Depends(get_current_user),
 ):
-    await _ensure_admin_for_company(current_user, company_id)
-    form = await forms_repo.get_form(form_id)
-    if not form:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
-    await forms_repo.delete_form_permission(form_id, user_id, company_id)
-    return None
+    await _get_admin_field(form_id, field_id, user)
+    await forms_repo.delete_field(field_id)
+    return {"ok": True}
+
+
+@router.put("/api/forms/{form_id}/fields/reorder")
+async def api_reorder_fields(
+    form_id: int,
+    payload: FieldReorder,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    await _get_admin_form(form_id, user)
+    existing_ids = {f["id"] for f in await forms_repo.list_fields(form_id)}
+    if set(payload.field_ids) != existing_ids:
+        raise HTTPException(status_code=400, detail="Reorder must include every field.")
+    await forms_repo.reorder_fields(form_id, [int(fid) for fid in payload.field_ids])
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Admin: access
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/forms/{form_id}/access")
+async def api_get_access(
+    form_id: int, user: dict[str, Any] = Depends(get_current_user)
+):
+    await _get_admin_form(form_id, user)
+    return {"user_ids": await forms_repo.list_access_user_ids(form_id)}
+
+
+@router.put("/api/forms/{form_id}/access")
+async def api_set_access(
+    form_id: int,
+    payload: FormAccessUpdate,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    await _get_admin_form(form_id, user)
+    current = set(await forms_repo.list_access_user_ids(form_id))
+    desired = {int(uid) for uid in payload.user_ids}
+    for uid in current - desired:
+        await forms_repo.revoke_access(form_id, uid)
+    for uid in desired - current:
+        await forms_repo.grant_access(form_id, uid)
+    return {"user_ids": sorted(desired)}
+
+
+# ---------------------------------------------------------------------------
+# Admin: submissions
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/forms/{form_id}/submissions")
+async def api_list_submissions(
+    form_id: int, user: dict[str, Any] = Depends(get_current_user)
+):
+    await _get_admin_form(form_id, user)
+    submissions = await forms_repo.list_submissions(form_id)
+    for submission in submissions:
+        if isinstance(submission.get("data"), str):
+            try:
+                submission["data"] = json.loads(submission["data"])
+            except (TypeError, ValueError):
+                submission["data"] = None
+    return submissions
+
+
+# ---------------------------------------------------------------------------
+# Public: submit
+# ---------------------------------------------------------------------------
+
+
+@router.post("/forms/{slug}/submit")
+async def api_submit_form(
+    slug: str, request: Request, user: dict[str, Any] = Depends(get_current_user)
+):
+    form = await forms_repo.get_form_by_slug(slug)
+    if not form or not form.get("active"):
+        raise HTTPException(status_code=404, detail="Form not found.")
+    user_id = int(user["id"])
+    if not await forms_repo.can_access_form(
+        form["id"], user_id, is_super_admin=bool(user.get("is_super_admin"))
+    ):
+        raise HTTPException(
+            status_code=403, detail="You do not have access to this form."
+        )
+    fields = await forms_repo.list_fields(form["id"])
+
+    parsed = await request.form()
+    values: dict[str, Any] = {}
+    raw_data = parsed.get("form_data")
+    if isinstance(raw_data, str) and raw_data:
+        try:
+            parsed_json = json.loads(raw_data)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="form_data must be valid JSON.")
+        if isinstance(parsed_json, dict):
+            for key, value in parsed_json.items():
+                try:
+                    values[int(key)] = value
+                except (TypeError, ValueError):
+                    values[key] = value
+
+    files_by_field: dict[int, list[Any]] = {}
+    for field in fields:
+        if field["field_type"] in FILE_TYPES:
+            files_by_field[field["id"]] = parsed.getlist(f"file_{field['id']}")
+
+    try:
+        result = await custom_forms.submit_form(
+            form=form,
+            fields=fields,
+            values=values,
+            files=files_by_field,
+            requester=user,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except FormValidationError as exc:
+        raise HTTPException(status_code=400, detail={"errors": exc.errors})
+
+    return JSONResponse(
+        status_code=201,
+        content={
+            "status": "ok",
+            "message": "Your submission was received.",
+            "ticket_id": result["ticket_id"],
+            "submission_id": result["submission_id"],
+            "attachments": result["attachments"],
+        },
+    )

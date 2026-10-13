@@ -215,12 +215,7 @@ from app.services import role_switching
 from app.services.realtime import refresh_notifier
 from app.services.redis import close_redis_client, get_redis_client
 from app.services.sanitization import sanitize_rich_text
-from app.services.opnform import (
-    OpnformValidationError,
-    extract_allowed_host,
-    normalize_opnform_embed_code,
-    normalize_opnform_form_url,
-)
+from app.services import custom_forms
 
 configure_logging()
 settings = get_settings()
@@ -395,9 +390,6 @@ _PWA_ICON_SOURCES = [
         "purpose": "any maskable",
     },
 ]
-OPNFORM_ALLOWED_HOST = extract_allowed_host(
-    str(settings.opnform_base_url) if settings.opnform_base_url else None
-)
 
 
 def _random_daily_cron() -> str:
@@ -405,13 +397,6 @@ def _random_daily_cron() -> str:
     minute = random.randint(0, 59)
     hour = random.randint(0, 23)
     return f"{minute} {hour} * * *"
-
-
-def _opnform_base_url() -> str | None:
-    if settings.opnform_base_url:
-        base = str(settings.opnform_base_url)
-        return base if base.endswith("/") else f"{base}/"
-    return "/myforms/"
 
 
 def _build_xero_redirect_uri() -> str:
@@ -494,7 +479,7 @@ tags_metadata = [
     {"name": "Companies", "description": "Company catalogue and membership management."},
     {
         "name": "Forms",
-        "description": "OpnForm publishing, company assignments, and secure embedding endpoints.",
+        "description": "Custom form builder, field/access management, and ticket-generating submissions.",
     },
     {
         "name": "Integration Modules",
@@ -6791,101 +6776,76 @@ async def search_by_phone_number(request: Request):
     )
 
 
-@app.get("/myforms", response_class=HTMLResponse)
-async def forms_page(request: Request):
-    (
-        user,
-        _membership,
-        company,
-        company_id,
-        redirect,
-    ) = await _load_company_section_context(
-        request,
-        permission_field="can_access_forms",
-        allow_super_admin_without_company=True,
-    )
+@app.get("/admin/custom-forms", response_class=HTMLResponse)
+async def custom_forms_admin_page(request: Request, form_id: int | None = None):
+    current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-
-    active_company_id = company_id
-    active_company = company
-    if active_company is None:
-        fallback_company_id = getattr(request.state, "active_company_id", None)
-        if fallback_company_id is not None:
-            try:
-                active_company = await company_repo.get_company_by_id(int(fallback_company_id))
-                active_company_id = int(fallback_company_id)
-            except (TypeError, ValueError):
-                active_company = None
-
-    portal_base = str(settings.portal_url) if settings.portal_url else str(request.base_url).rstrip("/")
-    login_url = str(request.url_for("login_page"))
-
-    replacements = template_variables.build_template_replacement_map(
-        template_variables.TemplateContext(
-            user=template_variables.TemplateContextUser(
-                id=user.get("id"),
-                email=user.get("email"),
-                first_name=user.get("first_name"),
-                last_name=user.get("last_name"),
-            ),
-            company=template_variables.TemplateContextCompany(
-                id=int(active_company_id) if active_company_id is not None else None,
-                name=(active_company or {}).get("name"),
-                syncro_customer_id=(active_company or {}).get("syncro_company_id"),
-            ),
-            portal=template_variables.TemplateContextPortal(
-                base_url=portal_base,
-                login_url=login_url,
-            ),
-        )
+    all_forms = await forms_repo.list_forms()
+    selected_form = None
+    selected_fields: list[dict[str, Any]] = []
+    access_user_ids: list[int] = []
+    if form_id is not None:
+        selected_form = await forms_repo.get_form(form_id)
+        if selected_form:
+            selected_fields = await forms_repo.list_fields(form_id)
+            access_user_ids = await forms_repo.list_access_user_ids(form_id)
+    return await _render_template(
+        "admin/custom_forms.html",
+        request,
+        current_user,
+        extra={
+            "title": "Custom forms",
+            "errors": [],
+            "forms": all_forms,
+            "selected_form": selected_form,
+            "selected_fields": selected_fields,
+            "access_user_ids": access_user_ids,
+            "field_types": custom_forms.field_type_choices(),
+            "field_type_labels": dict(custom_forms.FIELD_TYPES),
+        },
     )
 
-    raw_forms = await forms_repo.list_forms_for_user(user["id"])
-    hydrated_forms: list[dict[str, Any]] = []
-    for form in raw_forms:
-        iframe_url = template_variables.apply_template_variables(form.get("url", ""), replacements)
-        embed_html: str | None = None
-        embed_code = form.get("embed_code")
-        if embed_code:
-            try:
-                normalized = normalize_opnform_embed_code(embed_code, allowed_host=OPNFORM_ALLOWED_HOST)
-                embed_html = template_variables.apply_template_variables(
-                    normalized.sanitized_embed_code,
-                    replacements,
-                )
-                iframe_url = template_variables.apply_template_variables(
-                    normalized.form_url,
-                    replacements,
-                )
-            except OpnformValidationError as exc:
-                log_error(
-                    "Failed to normalise OpnForm embed for rendering",
-                    form_id=form.get("id"),
-                    error=str(exc),
-                )
-        hydrated_forms.append(
-            {
-                "id": form.get("id"),
-                "name": form.get("name"),
-                "description": form.get("description"),
-                "iframe_url": iframe_url,
-                "embed_html": embed_html,
-            }
-        )
 
-    extra = {
-        "title": "Forms",
-        "forms": hydrated_forms,
-        "opnform_base_url": _opnform_base_url(),
-    }
-    return await _render_template("forms/index.html", request, user, extra=extra)
+@app.get("/forms", response_class=HTMLResponse)
+async def forms_index_page(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    try:
+        user_id = int(user["id"])
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=403, detail="Access denied") from None
+    is_super_admin = bool(user.get("is_super_admin"))
+    visible_forms = await forms_repo.list_forms_for_user(user_id, is_super_admin=is_super_admin)
+    return await _render_template(
+        "forms/index.html", request, user, extra={"title": "Forms", "forms": visible_forms}
+    )
 
 
-@app.get("/forms", include_in_schema=False)
-async def legacy_forms_redirect() -> RedirectResponse:
-    """Maintain compatibility for legacy bookmarks under /forms."""
-    return RedirectResponse(url="/myforms", status_code=status.HTTP_308_PERMANENT_REDIRECT)
+@app.get("/forms/{slug}", response_class=HTMLResponse)
+async def forms_view_page(request: Request, slug: str):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    try:
+        user_id = int(user["id"])
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=403, detail="Access denied") from None
+    form = await forms_repo.get_form_by_slug(slug)
+    if not form or not form.get("active"):
+        raise HTTPException(status_code=404, detail="Form not found")
+    if not await forms_repo.can_access_form(
+        form["id"], user_id, is_super_admin=bool(user.get("is_super_admin"))
+    ):
+        raise HTTPException(status_code=403, detail="You do not have access to this form")
+    fields = await forms_repo.list_fields(form["id"])
+    return await _render_template(
+        "forms/submit.html",
+        request,
+        user,
+        extra={"title": form.get("name") or "Form", "form": form, "fields": fields},
+    )
 
 
 @app.head("/admin/service-status", response_class=HTMLResponse)
@@ -10055,123 +10015,6 @@ async def admin_change_log(
     return await _render_template("admin/change_log.html", request, current_user, extra=extra)
 
 
-@app.get("/admin/forms", response_class=HTMLResponse)
-async def admin_forms_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    forms_task = asyncio.create_task(forms_repo.list_forms())
-    companies_task = asyncio.create_task(company_repo.list_companies())
-    assignments_task = asyncio.create_task(user_company_repo.list_assignments())
-    permissions_task = asyncio.create_task(forms_repo.list_permission_entries())
-
-    forms, companies, assignments, permission_entries = await asyncio.gather(
-        forms_task,
-        companies_task,
-        assignments_task,
-        permissions_task,
-    )
-
-    company_lookup: dict[int, dict[str, Any]] = {}
-    for company in companies:
-        company_id = int(company.get("id")) if company.get("id") is not None else None
-        if company_id is None:
-            continue
-        company_lookup[company_id] = {
-            "id": company_id,
-            "name": company.get("name", "Unnamed company"),
-            "users": [],
-        }
-
-    seen_assignments: set[tuple[int, int]] = set()
-    for record in assignments:
-        company_id = record.get("company_id")
-        user_id = record.get("user_id")
-        if company_id is None or user_id is None:
-            continue
-        company_entry = company_lookup.get(int(company_id))
-        if not company_entry:
-            continue
-        key = (int(company_id), int(user_id))
-        if key in seen_assignments:
-            continue
-        seen_assignments.add(key)
-
-        first_name = (record.get("first_name") or "").strip()
-        last_name = (record.get("last_name") or "").strip()
-        full_name_parts = [part for part in (first_name, last_name) if part]
-        full_name = " ".join(full_name_parts)
-        email = (record.get("email") or "").strip()
-        label: str
-        if full_name and email:
-            label = f"{full_name} ({email})"
-        elif full_name:
-            label = full_name
-        elif email:
-            label = email
-        else:
-            label = f"User {user_id}"
-
-        company_entry["users"].append(
-            {
-                "id": int(user_id),
-                "label": label,
-                "email": email,
-                "name": full_name,
-            }
-        )
-
-    for company in company_lookup.values():
-        company["users"].sort(key=lambda item: item.get("label", "").lower())
-
-    company_user_options = sorted(company_lookup.values(), key=lambda item: item.get("name", ""))
-
-    permissions_map: dict[int, dict[int, set[int]]] = {}
-    for entry in permission_entries:
-        form_id = entry.get("form_id")
-        company_id = entry.get("company_id")
-        user_id = entry.get("user_id")
-        if form_id is None or company_id is None or user_id is None:
-            continue
-        form_map = permissions_map.setdefault(int(form_id), {})
-        user_set = form_map.setdefault(int(company_id), set())
-        user_set.add(int(user_id))
-
-    permissions_json: dict[str, dict[str, list[int]]] = {}
-    for form_id, company_map in permissions_map.items():
-        json_companies: dict[str, list[int]] = {}
-        for company_id, user_ids in company_map.items():
-            json_companies[str(company_id)] = sorted(user_ids)
-        permissions_json[str(form_id)] = json_companies
-
-    form_assignment_summary: dict[int, dict[str, int]] = {}
-    for form in forms:
-        form_id = form.get("id")
-        if form_id is None:
-            continue
-        company_map = permissions_map.get(int(form_id), {})
-        company_count = 0
-        user_count = 0
-        for company_users in company_map.values():
-            if company_users:
-                company_count += 1
-                user_count += len(company_users)
-        form_assignment_summary[int(form_id)] = {
-            "companies": company_count,
-            "users": user_count,
-        }
-
-    extra = {
-        "title": "Forms admin",
-        "forms": forms,
-        "opnform_base_url": _opnform_base_url(),
-        "company_user_options": company_user_options,
-        "form_permissions_map": permissions_json,
-        "form_assignment_summary": form_assignment_summary,
-    }
-    return await _render_template("admin/forms.html", request, current_user, extra=extra)
-
-
 @app.get("/admin/tag-exclusions", response_class=HTMLResponse)
 async def admin_tag_exclusions_page(
     request: Request,
@@ -10257,88 +10100,6 @@ async def _prepare_kb_editor_options() -> tuple[list[dict[str, Any]], list[dict[
 
     company_options.sort(key=lambda item: item.get("name", "").lower())
     return user_options, company_options
-
-
-@app.post("/myforms/admin")
-async def admin_create_form(
-    request: Request,
-    name: str = Form(...),
-    url: str = Form(...),
-    description: str = Form(""),
-):
-    _, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    cleaned_name = name.strip()
-    if not cleaned_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form name cannot be empty")
-    try:
-        normalized_url = normalize_opnform_form_url(url, allowed_host=OPNFORM_ALLOWED_HOST)
-    except OpnformValidationError as exc:
-        log_error("Invalid OpnForm URL supplied", error=str(exc))
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    await forms_repo.create_form(
-        name=cleaned_name,
-        url=normalized_url,
-        embed_code=None,
-        description=description.strip() or None,
-    )
-    return RedirectResponse(url="/admin/forms", status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.post("/myforms/admin/edit")
-async def admin_edit_form(
-    request: Request,
-    id: str = Form(...),
-    name: str = Form(...),
-    url: str = Form(...),
-    description: str = Form(""),
-):
-    _, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    try:
-        form_id = int(id)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid form identifier")
-    existing = await forms_repo.get_form(form_id)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
-    cleaned_name = name.strip()
-    if not cleaned_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form name cannot be empty")
-    try:
-        normalized_url = normalize_opnform_form_url(url, allowed_host=OPNFORM_ALLOWED_HOST)
-    except OpnformValidationError as exc:
-        log_error("Invalid OpnForm URL during update", form_id=form_id, error=str(exc))
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    await forms_repo.update_form(
-        form_id,
-        name=cleaned_name,
-        url=normalized_url,
-        embed_code=existing.get("embed_code"),
-        description=description.strip() or None,
-    )
-    return RedirectResponse(url="/admin/forms", status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.post("/myforms/admin/delete")
-async def admin_delete_form(
-    request: Request,
-    id: str = Form(...),
-):
-    _, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    try:
-        form_id = int(id)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid form identifier")
-    existing = await forms_repo.get_form(form_id)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
-    await forms_repo.delete_form(form_id)
-    return RedirectResponse(url="/admin/forms", status_code=status.HTTP_303_SEE_OTHER)
 
 
 async def _render_portal_tickets_page(
