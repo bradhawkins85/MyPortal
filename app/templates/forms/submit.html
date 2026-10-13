@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% macro render_field(field) %}
+{% set fid = field.id %}
+<div class="form-field cf-pub-field" data-cf-pub-field data-field-id="{{ fid }}" data-field-type="{{ field.field_type }}">
+  <label class="form-label{% if field.required %} required{% endif %}" for="cf-f-{{ fid }}">{{ field.label }}{% if field.required %} <span aria-hidden="true">*</span>{% endif %}</label>
+  {% if field.field_type == 'text' %}
+    <input class="form-input" id="cf-f-{{ fid }}" type="text" placeholder="{{ field.placeholder or '' }}" value="{{ field.default_value or '' }}" data-cf-value />
+  {% elif field.field_type == 'textarea' %}
+    <textarea class="form-input" id="cf-f-{{ fid }}" rows="4" placeholder="{{ field.placeholder or '' }}" data-cf-value>{{ field.default_value or '' }}</textarea>
+  {% elif field.field_type == 'email' %}
+    <input class="form-input" id="cf-f-{{ fid }}" type="email" placeholder="{{ field.placeholder or '' }}" data-cf-value />
+  {% elif field.field_type == 'number' %}
+    <input class="form-input" id="cf-f-{{ fid }}" type="number" placeholder="{{ field.placeholder or '' }}" value="{{ field.default_value or '' }}" data-cf-value />
+  {% elif field.field_type == 'date' %}
+    <input class="form-input" id="cf-f-{{ fid }}" type="date" value="{{ field.default_value or '' }}" data-cf-value />
+  {% elif field.field_type == 'select' %}
+    <select class="form-input" id="cf-f-{{ fid }}" data-cf-value>
+      <option value="">Select an option…</option>
+      {% for opt in field.options %}<option value="{{ opt }}"{% if opt == field.default_value %} selected{% endif %}>{{ opt }}</option>{% endfor %}
+    </select>
+  {% elif field.field_type == 'multiselect' %}
+    <select class="form-input" id="cf-f-{{ fid }}" multiple data-cf-value>
+      {% for opt in field.options %}<option value="{{ opt }}"{% if opt == field.default_value %} selected{% endif %}>{{ opt }}</option>{% endfor %}
+    </select>
+    <p class="form-help">Hold Ctrl (Windows) or ⌘ (Mac) and click to select multiple options.</p>
+  {% elif field.field_type == 'radio' %}
+    <div class="cf-radio-group">
+      {% for opt in field.options %}
+      <label class="scf-radio"><input type="radio" name="cf-radio-{{ fid }}" value="{{ opt }}"{% if opt == field.default_value %} checked{% endif %} data-cf-value /> {{ opt }}</label>
+      {% endfor %}
+    </div>
+  {% elif field.field_type == 'checkbox' %}
+    <label class="scf-check"><input type="checkbox" name="cf-check-{{ fid }}"{% if field.default_value %} checked{% endif %} data-cf-value /> <span>{{ field.help_text or 'Yes' }}</span></label>
+  {% elif field.field_type == 'file' %}
+    <input class="form-input" id="cf-f-{{ fid }}" type="file" data-cf-file />
+  {% endif %}
+  {% if field.help_text and field.field_type != 'checkbox' %}<p class="form-help">{{ field.help_text }}</p>{% endif %}
+</div>
+{% endmacro %}
+
+{% block header_title %}
+  <span class="header__title-text">{{ form.name }}</span>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel" aria-labelledby="cf-submit-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="cf-submit-heading">{{ form.name }}</h2>
+        {% if form.description %}<p class="card__subtitle">{{ form.description }}</p>{% endif %}
+      </div>
+    </div>
+    <div class="card__body">
+      <form id="cf-submit-form" data-cf-submit data-slug="{{ form.slug }}">
+        {% for field in fields %}
+        {{ render_field(field) }}
+        {% endfor %}
+        {% if not fields %}
+        <p class="text-muted">This form has no fields yet. Please contact support.</p>
+        {% endif %}
+        <div class="form-actions">
+          <button type="submit" class="button button--primary" {% if not fields %}disabled{% endif %}>Submit</button>
+        </div>
+        <p class="cf-submit-status" data-cf-status hidden></p>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ static_url('/static/js/forms.js') }}" defer></script>
+{% endblock %}

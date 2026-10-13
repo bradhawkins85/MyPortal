@@ -151,8 +151,8 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
     CoreComponent(
         "forms",
         "Forms",
-        "Forms (OpnForm) portal pages, forms administration and forms API.",
-        ("/myforms", "/forms", "/admin/forms", "/api/forms"),
+        "Custom forms portal pages, forms administration and forms API.",
+        ("/forms", "/admin/custom-forms", "/api/forms"),
     ),
     CoreComponent(
         "smb1001",
