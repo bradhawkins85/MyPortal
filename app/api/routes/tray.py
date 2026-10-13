@@ -254,13 +254,6 @@ async def enrol_device(
     auth_hash = tray_service.hash_token(auth_token)
     auth_prefix = tray_service.token_prefix(auth_token)
 
-    # Try to match to an existing asset by serial / hostname.
-    asset_id = await tray_service.find_matching_asset(
-        company_id=company_id,
-        serial_number=payload.serial_number,
-        hostname=payload.hostname,
-    )
-
     existing = await tray_repo.get_device_by_uid(device_uid)
     if existing:
         # An install token only authorises (re-)enrolment within its own
@@ -289,13 +282,11 @@ async def enrol_device(
             auth_token_hash=auth_hash,
             auth_token_prefix=auth_prefix,
         )
-        if asset_id and not existing.get("asset_id"):
-            await tray_repo.link_device_to_asset(int(existing["id"]), asset_id)
         device = await tray_repo.get_device_by_uid(device_uid) or existing
     else:
         device = await tray_repo.create_device(
             company_id=company_id,
-            asset_id=asset_id,
+            asset_id=None,
             device_uid=device_uid,
             enrolment_token_id=int(token_record["id"]),
             auth_token_hash=auth_hash,
@@ -309,6 +300,12 @@ async def enrol_device(
             status="active",
         )
 
+    # Do this only after ownership/revocation checks and device persistence.
+    # Facts supplied on re-enrolment can fill gaps in older device records.
+    for key in ("hostname", "serial_number", "os", "os_version", "console_user"):
+        if not device.get(key) and getattr(payload, key):
+            device[key] = getattr(payload, key)
+    asset_id = await tray_service.ensure_device_asset(device)
     await tray_repo.mark_install_token_used(int(token_record["id"]))
     log_info(
         "Tray device enrolled",

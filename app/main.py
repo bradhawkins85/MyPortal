@@ -1293,6 +1293,8 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
         await websocket.close(code=4401)
         return
 
+    if not device.get("asset_id"):
+        await tray_service.ensure_device_asset(device)
     await websocket.accept()
     tray_service.register_connection(device_uid, websocket)
     await tray_service.mark_websocket_alive(device)
@@ -3335,7 +3337,10 @@ async def on_startup() -> None:
         else:
             log_info("Demo data seeded on startup", **{k: v for k, v in result.items() if k != "skipped"})
 
+    from app.services import tray as tray_service
+
     startup_tasks = [
+        ("reconcile_tray_device_assets", tray_service.reconcile_device_assets()),
         ("sync_change_log_sources", change_log_service.sync_change_log_sources()),
         ("ensure_default_modules", modules_service.ensure_default_modules()),
         ("refresh_all_schedules", automations_service.refresh_all_schedules()),

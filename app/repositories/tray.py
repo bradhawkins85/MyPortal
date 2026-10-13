@@ -520,6 +520,26 @@ async def link_device_to_asset(device_id: int, asset_id: int | None) -> None:
     )
 
 
+async def get_device_rmm_asset(device_id: int, company_id: int) -> int | None:
+    row = await db.fetch_one(
+        "SELECT a.id FROM rmm_agents g JOIN assets a ON a.id = g.asset_id "
+        "WHERE g.tray_device_id = %s AND g.company_id = %s AND a.company_id = %s "
+        "AND g.status = 'active' AND a.archived_at IS NULL ORDER BY g.id DESC LIMIT 1",
+        (device_id, company_id, company_id),
+    )
+    return int(row["id"]) if row else None
+
+
+async def link_device_rmm_assets(device_id: int, company_id: int, asset_id: int) -> None:
+    """Use the tray device's canonical asset for its same-company RMM agents."""
+    await db.execute(
+        "UPDATE rmm_agents SET asset_id = %s WHERE tray_device_id = %s "
+        "AND company_id = %s AND status = 'active' "
+        "AND (asset_id IS NULL OR asset_id <> %s)",
+        (asset_id, device_id, company_id, asset_id),
+    )
+
+
 async def revoke_device(device_id: int) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     # Backend placeholder token is selected from the active DB adapter; values remain bound.

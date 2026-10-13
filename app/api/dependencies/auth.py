@@ -192,4 +192,6 @@ async def get_current_tray_device(request: Request) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Tray device authentication failed",
         )
+    if not device.get("asset_id"):
+        await tray_service.ensure_device_asset(device)
     return device

@@ -95,13 +95,11 @@ async def find_matching_asset(
 
     if not (serial_number or hostname) or company_id is None:
         return None
-    try:
-        company_assets = await assets_repo.list_company_assets(int(company_id))
-    except Exception:  # pragma: no cover - defensive
-        return None
+    company_assets = await assets_repo.list_company_assets(int(company_id))
 
     candidates: list[dict[str, Any]] = []
-    if serial_number:
+    company_assets = [a for a in company_assets if not a.get("archived_at")]
+    if serial_number and not assets_repo.is_placeholder_serial(serial_number):
         target = serial_number.strip().lower()
         candidates = [
             a
@@ -121,6 +119,37 @@ async def find_matching_asset(
         except (TypeError, ValueError):
             return None
     return None
+
+
+async def ensure_device_asset(device: dict[str, Any]) -> int | None:
+    """Give a company-owned active device a canonical asset and repair RMM links."""
+    if device.get("company_id") is None or device.get("status") != "active":
+        return device.get("asset_id")
+    company_id = int(device["company_id"])
+    asset_id = device.get("asset_id")
+    asset = await assets_repo.get_asset_by_id(int(asset_id)) if asset_id else None
+    if not asset or int(asset["company_id"]) != company_id:
+        asset_id = await tray_repo.get_device_rmm_asset(int(device["id"]), company_id)
+        if not asset_id:
+            asset_id = await find_matching_asset(
+                company_id=company_id, serial_number=device.get("serial_number"),
+                hostname=device.get("hostname"),
+            )
+        if not asset_id:
+            asset_id = await assets_repo.create_tray_asset(device)
+        await tray_repo.link_device_to_asset(int(device["id"]), int(asset_id))
+        device["asset_id"] = int(asset_id)
+    await tray_repo.link_device_rmm_assets(int(device["id"]), company_id, int(asset_id))
+    return int(asset_id)
+
+
+async def reconcile_device_assets() -> None:
+    """Backfill existing devices at startup, retrying failures on the next run."""
+    for device in await tray_repo.list_devices(status="active"):
+        try:
+            await ensure_device_asset(device)
+        except Exception as exc:
+            log_error("Could not reconcile tray device asset", device_uid=device.get("device_uid"), error=str(exc))
 
 
 # ---------------------------------------------------------------------------
