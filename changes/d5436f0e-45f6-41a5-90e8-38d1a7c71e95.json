@@ -1,0 +1,7 @@
+{
+  "guid": "d5436f0e-45f6-41a5-90e8-38d1a7c71e95",
+  "occurred_at": "2026-10-13T00:38Z",
+  "change_type": "Feature",
+  "summary": "Assets: show the Tray agent and RMM agent versions as columns on the assets list",
+  "content_hash": "b07db2d63db01919db06e152e234f0877acbd955a6211527eafa486aa27b1707"
+}
