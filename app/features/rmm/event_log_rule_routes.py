@@ -13,6 +13,7 @@ rules for every company need a super admin.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -55,6 +56,7 @@ def _form_rule(rule: dict[str, Any]) -> dict[str, Any]:
         scope = rule.get("scope") or "company"
     return {
         **rule, "scope": scope,
+        "target_mode": "rules" if rule.get("target_rules") is not None else "all",
         "schedule_mode": rule.get("schedule_mode") or "delay",
         "delay_minutes": rule.get("delay_minutes") or event_log_rules.DEFAULT_DELAY_MINUTES,
         "run_time": rule.get("run_time") or "02:00",
@@ -214,7 +216,12 @@ async def _save(request: Request, rule_id: int | None):
             posted_asset = int(str(form.get("asset_id") or ""))
         except ValueError:
             posted_asset = None
+        try:
+            target_rules = json.loads(str(form.get("target_rules") or "null"))
+        except (ValueError, TypeError, RecursionError):
+            target_rules = None
         editing = {
+            "target_rules": target_rules, "target_mode": str(form.get("target_mode") or "all"),
             "id": rule_id, "name": str(form.get("name") or ""), "scope": str(form.get("scope") or "company"),
             "asset_id": posted_asset, "action": str(form.get("action") or ""), "conditions": posted,
             "script_id": script_id, "timeout_seconds": form.get("timeout_seconds") or 600,

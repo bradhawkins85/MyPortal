@@ -200,7 +200,7 @@ async def scan_entries(
     params.append(int(limit))
     # The clauses are fixed strings chosen above; every value is a bound parameter.
     return await event_log_db.fetch_all(  # nosec B608
-        f"SELECT id, log_name, event_id, level, provider, computer, message FROM {ENTRIES_TABLE} "
+        f"SELECT id, agent_id, log_name, event_id, level, provider, computer, message FROM {ENTRIES_TABLE} "
         f"WHERE {' AND '.join(clauses)} ORDER BY id LIMIT %s",  # nosec B608
         tuple(params),
     )

@@ -9,8 +9,8 @@ and are resolved per device each time a run is queued.
   :data:`TICK_SECONDS` on one instance at a time. A device that still has an
   unfinished run from the same schedule is skipped rather than given a second.
 * **Onboarding** runs a company's ordered list of scripts the first time one of
-  its devices' RMM agent enrols. Each step has a tag filter (for example Server
-  or Workstation) and is skipped on devices without any of its tags. Steps run
+  its devices' RMM agent enrols. Each step selects all devices, matching tags
+  or advanced device rules. Devices outside the selection skip the step. Steps run
   one at a time; the next is queued only once the previous one has finished. A
   failed step stops the sequence unless that step is set to continue on
   failure. :func:`advance_onboarding` moves a sequence on when a result arrives,
@@ -36,13 +36,13 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_automation as automation_repo
 from app.repositories import tags as tags_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
-from app.services import cron_expression
-from app.services import rmm_scripts
+from app.services import cron_expression, rmm_device_targeting, rmm_scripts
 from app.services.rmm_scripts import RunRequestError
 from app.services.singleton_jobs import singleton_run
 
 TICK_SECONDS = 30
-TARGET_MODES = ("all", "tags", "assets")
+
+TARGET_MODES = ("all", "tags", "assets", "rules")
 MAX_SCHEDULE_ASSETS = rmm_scripts.MAX_TARGETS_PER_RUN
 MAX_SCHEDULE_TAGS = 50
 # A scheduled run waits for an offline device until the schedule's next run,
@@ -199,6 +199,7 @@ async def save_schedule(
     target_mode = str(payload.get("target_mode") or "all")
     if target_mode not in TARGET_MODES or (target_mode == "assets" and company_id is None):
         errors["target_mode"] = "Choose which devices to run on."
+    target_rules = rmm_device_targeting.parse_rules(payload, errors)
     asset_ids = _int_list(payload.get("asset_ids"), MAX_SCHEDULE_ASSETS, "assets", "devices")
     tag_ids = _int_list(payload.get("tag_ids"), MAX_SCHEDULE_TAGS, "tags", "tags")
     if target_mode == "assets":
@@ -239,6 +240,7 @@ async def save_schedule(
         "cron": cron,
         "timezone": tz_name,
         "target_mode": target_mode,
+        "target_rules": target_rules,
         "asset_ids": asset_ids,
         "tag_ids": tag_ids,
         "entries_encrypted": encrypt_secret(json.dumps(entries)),
@@ -262,12 +264,16 @@ async def set_schedule_enabled(schedule: Mapping[str, Any], enabled: bool) -> No
 
 
 async def schedule_targets(schedule: Mapping[str, Any], script: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Agents the schedule runs on: in scope, allowed the script, and matching its devices or tags."""
+    """Agents the schedule runs on: in scope, allowed the script, and matching its device selection."""
 
     company_id = schedule.get("company_id")
     agents = await automation_repo.list_active_agents(company_id=int(company_id) if company_id is not None else None)
     agents = [agent for agent in agents if rmm_repo.script_available_to(dict(script), int(agent["company_id"]))]
     mode = schedule.get("target_mode") or "all"
+    if mode == "rules" or schedule.get("target_rules") is not None:
+        return await rmm_device_targeting.filter_agents(agents, schedule.get("target_rules"))
+    if mode not in TARGET_MODES:
+        return []
     if mode == "assets":
         wanted = {int(item) for item in schedule.get("asset_ids") or []}
         return [agent for agent in agents if agent.get("asset_id") is not None and int(agent["asset_id"]) in wanted]
@@ -380,16 +386,21 @@ async def save_step(
     payload: Mapping[str, Any],
     user_id: int | None,
 ) -> int:
-    """Create or update one of a company's onboarding steps. A step needs at
-    least one tag: it runs only on devices with any of them."""
+    """Create or update an onboarding step with all, tag or rule targeting."""
 
     errors: dict[str, str] = {}
     script = await _scoped_script(payload.get("script_id"), int(company_id))
     tag_ids = await tags_repo.existing_tag_ids(
         _int_list(payload.get("tag_ids"), MAX_SCHEDULE_TAGS, "tags", "tags")
     )
-    if not tag_ids:
+    target_mode = str(payload.get("target_mode") or "tags")
+    target_rules = rmm_device_targeting.parse_rules(payload, errors)
+    if target_mode not in {"all", "tags", "rules"}:
+        errors["target_mode"] = "Choose all devices, tags or device rules."
+    if target_mode == "tags" and not tag_ids:
         errors["tags"] = "Choose at least one tag, such as Server or Workstation."
+    if target_mode != "tags":
+        tag_ids = []
     previous: dict[str, str] = {}
     if step_id is not None:
         existing = await automation_repo.get_step(step_id, with_secrets=True)
@@ -404,6 +415,8 @@ async def save_step(
         raise RunRequestError(errors)
     values = {
         "company_id": int(company_id),
+        "target_mode": target_mode,
+        "target_rules": target_rules,
         "script_id": int(script["id"]),
         "tag_ids": tag_ids,
         "entries_encrypted": encrypt_secret(json.dumps(entries)),
@@ -521,8 +534,15 @@ async def _queue_step(onboarding: Mapping[str, Any], entry: Mapping[str, Any]) -
     step = await automation_repo.get_step(int(entry["step_id"]), with_secrets=True)
     if not step:
         raise _StepSkipped("Removed from the onboarding list.")
-    if not await device_matches_tags(agent, step.get("tag_ids") or []):
-        raise _StepSkipped("The device has none of this step's tags.")
+    mode = step.get("target_mode") or "tags"
+    if mode == "rules" or step.get("target_rules") is not None:
+        if not await rmm_device_targeting.device_matches(agent, step.get("target_rules")):
+            raise _StepSkipped("The device does not match this step's device rules.")
+    elif mode == "tags":
+        if not await device_matches_tags(agent, step.get("tag_ids") or []):
+            raise _StepSkipped("The device has none of this step's tags.")
+    elif mode != "all":
+        raise _StepSkipped("The step's device selection is invalid.")
     script = await rmm_repo.get_script(int(step["script_id"]), with_content=True)
     if not rmm_repo.script_available_to(script, int(onboarding["company_id"])):
         raise RunRequestError({"script": "The script is no longer available to this company."})
