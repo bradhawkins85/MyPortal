@@ -84,7 +84,8 @@
           ("custom-fields", "asset-custom-fields", "Custom fields", custom_fields | length, not customer_safe),
           ("warranty", "asset-warranty", "Warranty", "", warranty is not none),
           ("tags", "tags", "Tags", "", asset_tags is not none),
-          ("hardware", "hardware", "Hardware & software", rmm.inventory.software | length if rmm and rmm.inventory and rmm.inventory.software else "", rmm and rmm.inventory),
+          ("hardware", "hardware", "Hardware", "", rmm and rmm.inventory),
+          ("software", "software", "Software", rmm.inventory.software | length if rmm and rmm.inventory and rmm.inventory.software else "", rmm and rmm.inventory),
           ("scripts", "scripts", "Scripts", "", rmm),
           ("checks", "checks", "Checks", rmm.checks.failing or "" if rmm and rmm.checks else "", rmm and rmm.checks),
           ("machine-stats", "machine-stats", "Machine stats", "", rmm and rmm.checks),
@@ -256,7 +257,7 @@
       {% endif %}
     </div>
   </section>{% endif %}
-  {% if rmm and rmm.inventory %}{% include "rmm/_asset_inventory.html" %}{% endif %}
+  {% if rmm and rmm.inventory %}{% include "rmm/_asset_inventory.html" %}{% include "rmm/_asset_software.html" %}{% endif %}
 
   {% if rmm and rmm.event_logs %}{% set elog = rmm.event_logs %}{% set LEVEL_STATUS = {"Critical": "error", "Error": "error", "Warning": "warning", "Information": "info", "Verbose": "neutral"} %}<section class="card card--panel ce-section" id="event-logs" data-asset-edit-section="event-logs" aria-labelledby="asset-event-logs-heading">
     <header class="ce-section__header"><div class="ce-section__heading">

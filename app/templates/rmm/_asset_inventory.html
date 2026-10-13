@@ -1,9 +1,9 @@
-{# The asset page's Hardware & software section (rmm.inventory from app.features.rmm.inventory_routes). #}
+{# The asset page's Hardware page (rmm.inventory from app.features.rmm.inventory_routes). #}
 {% set hw = rmm.inventory %}{% set inv = hw.inventory %}{% set size = hw.format_bytes %}
 <section class="card card--panel ce-section" id="hardware" data-asset-edit-section="hardware" aria-labelledby="asset-hardware-heading">
   <header class="ce-section__header">
     <div class="ce-section__heading">
-      <h2 class="card__title" id="asset-hardware-heading">Hardware &amp; software</h2>
+      <h2 class="card__title" id="asset-hardware-heading">Hardware</h2>
       <p class="card__subtitle">{% if inv %}Reported by the RMM agent <span data-utc="{{ inv.received_at }}">{{ inv.received_at }}</span>. The agent sends a new snapshot daily and when its service starts.{% else %}The RMM agent has not sent a snapshot yet. It sends one shortly after its service starts.{% endif %}{% if hw.refresh_pending %} <strong>A refresh is waiting for the device.</strong>{% endif %}</p>
     </div>
     {% if hw.can_refresh %}<form method="post" action="/rmm/inventory/assets/{{ asset.id }}/refresh">{% include "partials/csrf.html" %}
@@ -79,25 +79,6 @@
         <td data-label="Addresses">{% for address in adapter.addresses %}<code>{{ address }}</code>{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
       </tr>{% endfor %}</tbody>
     </table></div>
-    {% endif %}
-
-    <h3 class="rmm-inventory__heading">Installed software <span class="text-muted">({{ hw.software | length }})</span></h3>
-    {% if hw.software %}
-    <label class="visually-hidden" for="rmm-software-filter">Find installed software</label>
-    <input type="search" id="rmm-software-filter" class="form-input rmm-inventory__filter" placeholder="Find a program…" autocomplete="off" data-rmm-software-filter="rmm-software-table">
-    <div class="table-wrapper rmm-inventory__software"><table class="table" id="rmm-software-table">
-      <caption class="visually-hidden">Software installed on this device</caption>
-      <thead><tr><th scope="col">Name</th><th scope="col">Version</th><th scope="col">Publisher</th><th scope="col">Installed</th></tr></thead>
-      <tbody>{% for program in hw.software %}<tr data-rmm-software-row>
-        <td data-label="Name">{{ program.name }}{% if program.source == 'user' %} <span class="text-muted">(user)</span>{% endif %}</td>
-        <td data-label="Version">{{ program.version or '—' }}</td>
-        <td data-label="Publisher">{{ program.publisher or '—' }}</td>
-        <td data-label="Installed">{{ program.install_date or '—' }}</td>
-      </tr>{% endfor %}</tbody>
-    </table></div>
-    <p class="text-muted" data-rmm-software-empty hidden>No installed software matches.</p>
-    {% else %}
-    <p class="text-muted">The device did not report any installed software.</p>
     {% endif %}
 
     {% if inv.details.errors %}

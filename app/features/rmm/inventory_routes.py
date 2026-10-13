@@ -3,7 +3,7 @@
 Technician side (company scoped, ``menu.rmm_scripts``; write access asks for
 a refresh):
 
-* each asset page's Hardware & software section (:func:`asset_inventory_context`)
+* each asset page's Hardware and Software pages (:func:`asset_inventory_context`)
 * ``POST /rmm/inventory/assets/{id}/refresh`` ask the device for a new snapshot
 * ``GET /api/rmm/assets/{id}/inventory`` the latest snapshot and software as JSON
 
@@ -39,7 +39,7 @@ async def _company_agent(company_id: int, asset_id: int) -> dict[str, Any]:
 
 
 async def asset_inventory_context(company_id: int, asset_id: int, *, can_refresh: bool) -> dict[str, Any] | None:
-    """The asset page's Hardware & software section, or None without an agent."""
+    """The asset page's Hardware and Software pages, or None without an agent."""
 
     agent = await rmm_repo.get_asset_agent(asset_id)
     if agent and agent.get("company_id") is not None and int(agent["company_id"]) != int(company_id):
@@ -61,8 +61,10 @@ async def refresh_asset_inventory(asset_id: int, request: Request):
         action="rmm.inventory.refresh", request=request, user_id=user.get("id"), entity_type="asset",
         entity_id=asset_id,
     )
+    form = await request.form()
+    section = "software" if form.get("section") == "software" else "hardware"
     return flash_redirect(
-        f"/assets/{asset_id}#hardware",
+        f"/assets/{asset_id}#{section}",
         "Refresh requested. The device sends a new snapshot the next time it checks in, usually within a few minutes.",
         "success",
     )
