@@ -155,6 +155,27 @@ async def test_switching_auto_deploy_on_pushes_to_every_device_without_the_agent
 
 
 @pytest.mark.anyio
+async def test_company_push_runs_in_the_background_once_at_a_time(sqlite_db, storage, sent, monkeypatch):
+    import asyncio
+
+    from app.services import background
+
+    _cache(storage)
+    messages, live = sent
+    live["on"] = True
+    monkeypatch.setattr(deploy, "COMPANY_PUSH_STAGGER_SECONDS", 0.01)
+    await _device(sqlite_db, device_id=5, asset_id=10)
+    await _device(sqlite_db, device_id=6, asset_id=11)
+
+    assert deploy.start_company_deploy(1, user_id=9) is True
+    assert deploy.start_company_deploy(1, user_id=9) is False  # already running
+    assert messages == []  # nothing is pushed before the request returns
+    await asyncio.gather(*list(background._BACKGROUND_TASKS.values()))
+    assert sorted(uid for uid, _ in messages) == ["uid-5", "uid-6"]
+    assert 1 not in deploy._COMPANY_PUSHES
+
+
+@pytest.mark.anyio
 async def test_results_only_land_on_the_reporting_devices_command(sqlite_db, storage, sent):
     _cache(storage)
     device = await _device(sqlite_db)

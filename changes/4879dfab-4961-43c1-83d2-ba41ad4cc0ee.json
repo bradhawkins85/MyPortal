@@ -1,0 +1,7 @@
+{
+  "guid": "4879dfab-4961-43c1-83d2-ba41ad4cc0ee",
+  "occurred_at": "2026-10-13T00:00Z",
+  "change_type": "Fix",
+  "summary": "RMM: enabling automatic agent push for a company now rolls the agent out in the background instead of blocking the page",
+  "content_hash": "5518b73ab515469e6e82e88d737b4e0f39fb24aecec1abc6d45b484d561286af"
+}

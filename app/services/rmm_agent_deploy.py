@@ -44,6 +44,7 @@ from app.repositories import companies as companies_repo
 from app.repositories import rmm_agent_deploy as deploy_repo
 from app.repositories import tray as tray_repo
 from app.services import tray as tray_service
+from app.services import background as background_tasks
 from app.services import tray_installer
 from app.services.monitored_http import monitored_client
 
@@ -59,6 +60,9 @@ PLATFORMS = (
     ("linux", "arm64"),
 )
 AUTO_RETRY_HOURS = 24
+# Pause between devices reached during a company-wide push, so they do not all
+# download the agent build from MyPortal at the same moment.
+COMPANY_PUSH_STAGGER_SECONDS = 2.0
 # The first tray release whose service handles install_rmm_agent.
 MIN_TRAY_VERSION = (0, 8, 4)
 UPDATE_COMMAND = "update"
@@ -465,7 +469,12 @@ async def auto_deploy_device(device: dict[str, Any], *, now: datetime | None = N
 
 
 async def auto_deploy_company(company_id: int, *, user_id: int | None = None) -> dict[str, int]:
-    """Push the agent to every device of a company that does not have it."""
+    """Push the agent to every device of a company that does not have it.
+
+    Devices that were reached are spaced :data:`COMPANY_PUSH_STAGGER_SECONDS`
+    apart, so this can take a while: request handlers run it through
+    :func:`start_company_deploy` instead of awaiting it.
+    """
 
     counts = {"sent": 0, "queued": 0, "skipped": 0}
     for device in await deploy_repo.list_company_devices_without_agent(company_id):
@@ -478,9 +487,49 @@ async def auto_deploy_company(company_id: int, *, user_id: int | None = None) ->
             log_warning("RMM agent push skipped", device_id=device.get("id"), reason=str(exc))
             counts["skipped"] += 1
             continue
+        except Exception as exc:  # noqa: BLE001 - one device failing must not stop the rest
+            log_error("RMM agent push failed", device_id=device.get("id"), error=str(exc))
+            counts["skipped"] += 1
+            continue
         counts[result["status"]] = counts.get(result["status"], 0) + 1
+        if result["status"] in ("sent", "updating_tray") and COMPANY_PUSH_STAGGER_SECONDS > 0:
+            await asyncio.sleep(COMPANY_PUSH_STAGGER_SECONDS)
     log_info("Pushed the RMM agent to a company", company_id=company_id, **counts)
     return counts
+
+
+_COMPANY_PUSHES: set[int] = set()
+
+
+def start_company_deploy(company_id: int, *, user_id: int | None = None) -> bool:
+    """Run :func:`auto_deploy_company` in the background.
+
+    Returns False when a push to this company is already running.
+    """
+
+    company_id = int(company_id)
+    if company_id in _COMPANY_PUSHES:
+        return False
+    _COMPANY_PUSHES.add(company_id)
+
+    async def _run() -> dict[str, int]:
+        try:
+            return await auto_deploy_company(company_id, user_id=user_id)
+        finally:
+            _COMPANY_PUSHES.discard(company_id)
+
+    def _on_error(exc: Exception) -> None:
+        log_error("RMM agent company push failed", company_id=company_id, error=str(exc))
+
+    try:
+        background_tasks.queue_background_task(
+            _run, description=f"rmm-agent-company-push-{company_id}", on_error=_on_error
+        )
+    except Exception:
+        _COMPANY_PUSHES.discard(company_id)
+        raise
+    log_info("Queued RMM agent push to a company", company_id=company_id, user_id=user_id)
+    return True
 
 
 async def record_result(device: dict[str, Any], command_id: int, *, ok: bool, message: str | None) -> bool:
