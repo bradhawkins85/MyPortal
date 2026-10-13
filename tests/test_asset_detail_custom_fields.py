@@ -53,6 +53,14 @@ def test_detail_page_custom_fields_are_editable_for_every_provenance():
     assert 'form="asset-settings-form"' in section
 
 
+def test_detail_page_renders_multiline_custom_fields_as_textarea():
+    section = _custom_fields_section(DETAIL_TEMPLATE.read_text())
+    assert "field.field_type == 'textarea'" in section
+    assert '<textarea id="asset-custom-{{ field.id }}" form="asset-settings-form"' in section
+    # Read-only views keep the line breaks.
+    assert "white-space: pre-wrap" in section
+
+
 def test_detail_page_offers_a_tray_notification_toggle():
     template = DETAIL_TEMPLATE.read_text()
     assert 'name="send_tray_notification"' in template
@@ -131,6 +139,22 @@ async def test_detail_form_saves_custom_fields_for_synced_asset(monkeypatch):
     # Custom fields persist even though the asset is not manually created.
     set_value.assert_awaited_once_with(1, 11, value_text="Floor2")
     routes.asset_repo.update_manual_inventory.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_detail_form_keeps_line_breaks_in_multiline_custom_fields(monkeypatch):
+    set_value, _notify = _patch_documentation(monkeypatch, provenance="syncro")
+    monkeypatch.setattr(
+        routes.asset_custom_fields_repo,
+        "list_field_definitions",
+        AsyncMock(return_value=[{"id": 11, "name": "Notes", "field_type": "textarea"}]),
+    )
+
+    await routes.update_asset_documentation(
+        _form_request(b"custom_11=Line+one%0D%0ALine+two%0D%0A"), asset_id=1
+    )
+
+    set_value.assert_awaited_once_with(1, 11, value_text="Line one\r\nLine two")
 
 
 @pytest.mark.anyio

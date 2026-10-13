@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 class FieldType(str, Enum):
     """Custom field types."""
     TEXT = "text"
+    TEXTAREA = "textarea"
     IMAGE = "image"
     CHECKBOX = "checkbox"
     URL = "url"
@@ -77,7 +78,7 @@ class AssetFieldValue(BaseModel):
             value = row.get("value_boolean")
         elif field_type == FieldType.DATE:
             value = row.get("value_date")
-        else:  # text, image, url
+        else:  # text, textarea, image, url
             value = row.get("value_text")
         
         return cls(
