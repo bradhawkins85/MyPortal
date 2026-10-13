@@ -19,13 +19,15 @@ server config to MyPortal's `.env` file:
 ```bash
 # RustDesk > Settings > Network > Export server config
 RUSTDESK_CFG=0nI9...
-# Optional: installer used on Windows devices without RustDesk
+# Optional override: leave blank to use the latest stable GitHub release
 RUSTDESK_INSTALLER_URL=https://downloads.example.com/rustdesk-x86_64.exe
 ```
 
 When a technician starts a RustDesk session, the RMM agent:
 
-1. installs RustDesk from `RUSTDESK_INSTALLER_URL` if it is missing (Windows only);
+1. checks for an existing RustDesk installation; if missing on Windows, downloads the
+   latest stable release from `rustdesk/rustdesk` on GitHub for the device architecture
+   and installs it silently (`RUSTDESK_INSTALLER_URL` can override the download URL);
 2. applies `RUSTDESK_CFG` (`rustdesk --config`), so the device uses your RustDesk server;
 3. starts the RustDesk service;
 4. sets a new one-time password that MyPortal generated for this session;
@@ -34,7 +36,9 @@ When a technician starts a RustDesk session, the RMM agent:
 MyPortal then opens the session in the technician's RustDesk app. Every session sets a new
 password, so an earlier session's password stops working. The built-in script runs on Windows
 (PowerShell) and on macOS and Linux (Bash). Without `RUSTDESK_CFG` the device keeps its current
-RustDesk server settings.
+RustDesk server settings. Windows downloads and client commands have time limits, so a
+failed installation or configuration returns an error instead of waiting indefinitely.
+macOS and Linux still require RustDesk to be installed beforehand.
 
 To do something different, choose your own activation script instead (see
 [Your own activation script](#your-own-activation-script)).
