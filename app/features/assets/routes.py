@@ -375,8 +375,21 @@ async def assets_page(request: Request):
 
         rmm_agents = await rmm_routes.company_agent_details(company_id)
     rmm_agent_asset_ids = set(rmm_agents)
+    # The latest RMM agent install attempt of each asset, shown under its indicator.
+    rmm_install_attempts: dict[int, dict[str, Any]] = {}
+    # Technicians who run scripts get the RMM actions (run a script, remote
+    # sessions) in the Actions menu of each device with an RMM agent.
+    rmm_remote_providers: list[dict[str, str]] = []
+    if show_rmm_agent or can_push_rmm_agent:
+        from app.services import rmm_agent_deploy
+
+        rmm_install_attempts = await rmm_agent_deploy.company_latest_attempts(company_id)
     if can_push_rmm_agent:
+        from app.services import rmm_remote_control
         from app.services.rmm_agent_deploy import TRAY_PLATFORMS
+
+        if rmm_agent_asset_ids:
+            rmm_remote_providers = await rmm_remote_control.enabled_providers()
 
     for record in prepared:
         tray_device = (
@@ -402,10 +415,15 @@ async def assets_page(request: Request):
             and str(tray_device.get("os") or "").lower() in TRAY_PLATFORMS
             and int(record["id"]) not in rmm_agent_asset_ids
         )
+        record["rmm_actions"] = bool(
+            can_push_rmm_agent and record.get("id") and int(record["id"]) in rmm_agent_asset_ids
+        )
         if show_rmm_agent and record.get("id"):
             rmm_agent = rmm_agents.get(int(record["id"])) or {}
             record["rmm_agent"] = rmm_agent.get("state", "missing")
             record["rmm_agent_version"] = _clean_text(rmm_agent.get("version"))
+            if not rmm_agent:
+                record["rmm_install"] = rmm_install_attempts.get(int(record["id"]))
         asset_id = record.get("id")
         asset_cf = cf_values_by_asset.get(asset_id, {})
         for field_def in field_definitions:
@@ -455,9 +473,10 @@ async def assets_page(request: Request):
         "active_warranty": active_warranty,
     }
     has_asset_actions = bool(user.get("is_super_admin")) or any(
-        bool(asset.get("can_open_chat")) or bool(asset.get("can_push_rmm_agent"))
+        bool(asset.get("can_open_chat")) or bool(asset.get("can_push_rmm_agent")) or bool(asset.get("rmm_actions"))
         for asset in prepared
     )
+    rmm_actions = any(bool(asset.get("rmm_actions")) for asset in prepared)
 
     extra = {
         "title": "Assets",
@@ -471,6 +490,8 @@ async def assets_page(request: Request):
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_asset_actions": has_asset_actions,
         "can_push_rmm_agent": any(bool(asset.get("can_push_rmm_agent")) for asset in prepared),
+        "rmm_actions": rmm_actions,
+        "rmm_remote_providers": [item["provider"] for item in rmm_remote_providers] if rmm_actions else [],
         "matrix_enabled": main_module.settings.matrix_enabled,
         "show_tags": show_tags,
     }

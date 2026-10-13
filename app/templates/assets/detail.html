@@ -162,6 +162,7 @@
       {% else %}
       <p class="text-muted">No scripts have run on this device yet.</p>
       {% endif %}
+      {% if rmm.install_history %}{{ rmm_ui.install_history(rmm.install_history, open=not rmm.agent) }}{% endif %}
     </div>
   </section>{% endif %}
 

@@ -192,6 +192,83 @@ async def test_results_only_land_on_the_reporting_devices_command(sqlite_db, sto
     assert (await _commands(sqlite_db))[0]["status"] == "completed"
 
 
+
+@pytest.fixture
+def no_release(monkeypatch):
+    async def fetch_latest_agent(**kwargs):
+        return {}
+
+    monkeypatch.setattr(deploy, "fetch_latest_agent", fetch_latest_agent)
+
+
+async def _attempts(db):
+    return [dict(row) for row in await db.fetch_all("SELECT * FROM rmm_agent_install_attempts ORDER BY id")]
+
+
+@pytest.mark.anyio
+async def test_every_push_is_kept_in_the_asset_history_with_its_outcome(sqlite_db, storage, sent, no_release):
+    from datetime import datetime, timedelta, timezone
+
+    # No tray app: refused, and the reason is kept for the asset.
+    with pytest.raises(deploy.AgentDeployError):
+        await deploy.push_to_asset(11, company_id=1, user_id=9)
+    history = await deploy.asset_install_history(11)
+    assert [(item["state"], item["label"]) for item in history] == [("rejected", "Not sent")]
+    assert "no MyPortal tray app" in history[0]["reason"] and history[0]["requested_by_email"] == "tech@example.com"
+
+    # No agent build yet: refused too.
+    device = await _device(sqlite_db)
+    with pytest.raises(deploy.AgentDeployError):
+        await deploy.push_to_asset(11, company_id=1, user_id=9)
+
+    _cache(storage)
+    command_id = (await deploy.push_to_asset(11, company_id=1, user_id=9))["command_id"]
+    history = await deploy.asset_install_history(11)
+    assert [item["state"] for item in history] == ["queued", "rejected", "rejected"]
+    assert "agent builds" in history[1]["reason"]
+
+    await sqlite_db.execute("UPDATE tray_command_log SET status = 'delivered', delivered_at = %s", (
+        (datetime.now(timezone.utc) - timedelta(hours=1)).replace(tzinfo=None),))
+    assert (await deploy.asset_install_history(11))[0]["state"] == "installing"
+    later = datetime.now(timezone.utc) + timedelta(hours=deploy.NO_REPORT_HOURS)
+    stale = deploy.describe_attempt((await sqlite_db.fetch_all(
+        "SELECT a.*, c.status AS command_status, c.error AS command_error, c.delivered_at AS command_delivered_at "
+        "FROM rmm_agent_install_attempts a JOIN tray_command_log c ON c.id = a.command_id"))[0], now=later)
+    assert stale["state"] == "no_report"
+
+    await deploy.record_result(device, command_id, ok=False, message="Access is denied")
+    latest = (await deploy.asset_install_history(11))[0]
+    assert (latest["state"], latest["reason"]) == ("failed", "Access is denied")
+    assert (await deploy.company_latest_attempts(1))[11]["state"] == "failed"
+    await deploy.record_result(device, command_id, ok=True, message=None)
+    assert (await deploy.asset_install_history(11))[0]["label"] == "Installed"
+
+
+@pytest.mark.anyio
+async def test_automatic_installs_keep_one_row_for_a_reason_that_repeats(sqlite_db, storage, sent, no_release):
+    device = await _device(sqlite_db)
+    await sqlite_db.execute("UPDATE companies SET rmm_agent_auto_deploy = 1 WHERE id = 1")
+    # No agent build: every connection is refused, but the history keeps one row.
+    assert await deploy.auto_deploy_device(device) is False
+    assert await deploy.auto_deploy_device(device) is False
+    rows = await _attempts(sqlite_db)
+    assert [(row["source"], row["outcome"]) for row in rows] == [("auto", "rejected")]
+
+    _cache(storage)
+    assert await deploy.auto_deploy_device(device) is True
+    rows = await _attempts(sqlite_db)
+    assert [(row["source"], row["outcome"]) for row in rows] == [("auto", "rejected"), ("auto", "queued")]
+    assert rows[-1]["command_id"] == (await _commands(sqlite_db))[0]["id"]
+
+
+@pytest.mark.anyio
+async def test_company_pushes_are_recorded_as_such(sqlite_db, storage, sent):
+    _cache(storage)
+    await _device(sqlite_db, device_id=6, asset_id=11)
+    await deploy.auto_deploy_company(1, user_id=9)
+    history = await deploy.asset_install_history(11)
+    assert [(item["source_label"], item["state"]) for item in history] == [("Company-wide push", "queued")]
+
 def _github(release_assets, files):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/releases"):

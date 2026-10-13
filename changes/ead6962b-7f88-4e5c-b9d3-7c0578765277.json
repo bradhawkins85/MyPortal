@@ -1,0 +1,7 @@
+{
+  "guid": "ead6962b-7f88-4e5c-b9d3-7c0578765277",
+  "occurred_at": "2026-10-13T00:00Z",
+  "change_type": "Feature",
+  "summary": "RMM agent installs now leave a history on each asset: every push (by a technician, a company-wide push or an automatic install when a tray device connects) is recorded with its outcome, including pushes MyPortal could not send (no tray app, tray app too old, no agent build) with the reason, failures the tray app reports, and installs the tray app never reported back on. The asset page's Scripts card shows the history, the Assets list shows the latest attempt under the RMM agent indicator, and GET /api/rmm/assets/{id}/agent-installs returns it. Devices with the RMM agent also get RMM actions in the Assets list's Actions menu: Run script (with the device chosen), RustDesk and MeshCentral remote desktop, file transfer and terminal sessions, and a link to the device's RMM agent and install history.",
+  "content_hash": "9b579fed302dcfb7c5ddb20258285d4f0fefb1e1af332fd47c5bd81f3baaeac2"
+}

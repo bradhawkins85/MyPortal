@@ -3,7 +3,7 @@
 {% import "rmm/_macros.html" as rmm_ui %}
 
 {% block title %}Assets{% endblock %}
-{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if show_tags %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if show_tags %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% if rmm_actions %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endif %}{% endblock %}
 
 {% block header_title %}
   <div class="page-header-bar">
@@ -133,6 +133,7 @@
                 {% elif key == 'rmm_agent' %}
                   <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ {'connected': 2, 'offline': 1}.get(value, 0) }}">
                     {{ rmm_ui.agent_indicator(value) }}
+                    {% if asset.rmm_install %}<a class="rmm-install-latest status status--{{ asset.rmm_install.variant }}" href="/assets/{{ asset.id }}#scripts" title="{{ asset.rmm_install.reason or asset.rmm_install.label }}">Install: {{ asset.rmm_install.label | lower }}</a>{% endif %}
                   </td>
                 {% elif key in ['ram_gb', 'approx_age', 'performance_score'] %}
                   <td
@@ -261,6 +262,24 @@
                           >Open Chat</button>
                         </li>
                       {% endif %}
+                      {% if asset.rmm_actions %}
+                        {% set rmm_name = asset.name or asset.hostname or ('Asset ' ~ asset.id) %}
+                        <li class="header-title-menu__item" role="none">
+                          <button type="button" class="header-title-menu__link" role="menuitem" data-rmm-run-open data-rmm-run-asset="{{ asset.id }}" aria-haspopup="dialog" aria-controls="rmm-run-modal">Run script</button>
+                        </li>
+                        {% for provider, provider_label in [("rustdesk", "RustDesk"), ("meshcentral", "MeshCentral")] if provider in rmm_remote_providers %}
+                          {% for mode, mode_label in rmm_ui.REMOTE_MODES %}
+                            <li class="header-title-menu__item" role="none">
+                              <button type="button" class="header-title-menu__link" role="menuitem" data-rmm-remote="{{ provider }}" data-rmm-remote-mode="{{ mode }}" data-rmm-remote-asset="{{ asset.id }}" data-rmm-remote-name="{{ rmm_name }}">{{ provider_label }}: {{ mode_label | lower }}</button>
+                            </li>
+                          {% endfor %}
+                        {% endfor %}
+                      {% endif %}
+                      {% if asset.rmm_install or asset.rmm_actions %}
+                        <li class="header-title-menu__item" role="none">
+                          <a class="header-title-menu__link" role="menuitem" href="/assets/{{ asset.id }}#scripts">RMM agent and install history</a>
+                        </li>
+                      {% endif %}
                       {% if asset.can_push_rmm_agent %}
                         <li class="header-title-menu__item" role="none">
                           <button
@@ -322,6 +341,16 @@
   </section>
 </div>
 
+{% if rmm_actions %}
+<div class="rmm-remote__status rmm-remote__status--floating" data-rmm-remote-status role="status" aria-live="polite" hidden>
+  <span data-rmm-remote-message></span>
+  <a class="button button--primary button--small" data-rmm-remote-link href="#" target="_blank" rel="noopener noreferrer" hidden>Open</a>
+</div>
+<div data-rmm-page hidden>
+  <script type="application/json" id="rmm-config">{{ {"can_run": true, "asset_id": None} | tojson }}</script>
+</div>
+{% include "rmm/_run_modal.html" %}
+{% endif %}
 {% include "partials/csrf.html" %}
 {% endblock %}
 
@@ -330,6 +359,7 @@
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/assets.js') }}" defer></script>
   {% if can_push_rmm_agent %}<script src="{{ static_url('/static/js/rmm_agent_deploy.js') }}" defer></script>{% endif %}
+  {% if rmm_actions %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script>{% endif %}
   <script>
     // Allow row-level action dropdowns to overflow the table wrapper.
     document.addEventListener('DOMContentLoaded', function () {

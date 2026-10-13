@@ -410,6 +410,39 @@ enrols it and installs its service. MyPortal fetches the builds from the newest 
 that has them (`GITHUB_TRAY_MSI_REPO`) with the **Update tray icon installer** scheduled task,
 or on the first push. Each push is a tray command, recorded in the audit trail.
 
+### Install history
+
+Every attempt to install the agent is kept for the device, whoever started it (a technician, a
+company-wide push or an automatic install when the tray app connects), including pushes
+MyPortal could not send (no tray app, a tray app too old with no newer version published, or
+no agent build yet) with the reason. Each attempt shows one of:
+
+| Result | Meaning |
+| --- | --- |
+| Not sent | MyPortal refused the push; the details say why. |
+| Waiting for device | Queued until the device's tray app connects. |
+| Waiting for tray update | The tray app was told to update itself first. |
+| Installing | The tray app has the install and has not reported back yet. |
+| No report | The tray app was sent the install over 2 hours ago and never reported back. |
+| Failed | The tray app reported a failure; the details hold its error. |
+| Installed | The tray app installed the agent. |
+
+The asset page's **Scripts** card lists the latest ten attempts under **RMM agent install
+history** (open while the device has no agent). On **Assets**, a device without the agent shows
+its latest attempt under the **RMM agent** indicator; hover it for the reason. The history is
+also at `GET /api/rmm/assets/{id}/agent-installs`.
+
+### RMM actions on the Assets list
+
+Once a device has the agent, technicians with write access to RMM scripts get its RMM actions in
+the device's **Actions** menu on **Assets**:
+
+- **Run script**: opens the run editor with the device already chosen.
+- **RustDesk** and **MeshCentral** remote desktop, file transfer and terminal sessions, when
+  those providers are switched on under [Remote Control](Remote%20Control.md). A status box in
+  the corner of the page follows the session until it opens.
+- **RMM agent and install history**: the device's Scripts card.
+
 To install it by hand, as an administrator:
 
 ```text

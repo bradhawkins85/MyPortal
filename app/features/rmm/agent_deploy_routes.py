@@ -4,6 +4,8 @@ Technician side (``menu.rmm_scripts`` with write access, current company):
 
 * ``POST /api/rmm/assets/{id}/agent-install`` push the agent to a device
   through its tray app (Assets list and asset page)
+* ``GET /api/rmm/assets/{id}/agent-installs`` every attempt to install the
+  agent on a device and how it went (any ``menu.rmm_scripts`` access)
 
 Tray side (the tray device's ``Authorization: Bearer`` token):
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -64,6 +67,16 @@ async def push_agent(asset_id: int, request: Request):
             metadata={"company_id": company_id, "command_id": result["command_id"], "status": result["status"]},
         )
     return {**result, "message": _PUSH_MESSAGES[result["status"]]}
+
+
+@router.get("/api/rmm/assets/{asset_id:int}/agent-installs", summary="List a device's RMM agent install attempts")
+async def list_agent_installs(asset_id: int, request: Request, limit: int = Query(default=20, ge=1, le=100)):
+    _user, _company, company_id, _can_run = await _context(request, api=True)
+    asset = await assets_repo.get_asset_by_id(asset_id)
+    if not asset or asset.get("company_id") is None or int(asset["company_id"]) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    attempts = await deploy.asset_install_history(asset_id, limit=limit)
+    return {"attempts": jsonable_encoder(attempts)}
 
 
 def _platform(os_name: str, arch: str) -> tuple[str, str]:

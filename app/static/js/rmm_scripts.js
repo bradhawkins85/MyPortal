@@ -566,7 +566,7 @@
     }
   }
 
-  window.MyPortalRmm = { openEditor: openRunEditor, api: api, formatDate: formatDate, openResult: (runId) => openResult(runId) };
+  window.MyPortalRmm = Object.assign(window.MyPortalRmm || {}, { openEditor: openRunEditor, api: api, formatDate: formatDate, openResult: (runId) => openResult(runId) });
 
   function closeRunEditor() {
     if (state.dirty && !state.done && !window.confirm('Discard the values you entered?')) {
@@ -582,6 +582,10 @@
     const opener = event.target.closest('[data-rmm-run-open]');
     if (opener && config.can_run) {
       event.preventDefault();
+      // The Assets list opens the editor from each row, with that device chosen.
+      if (opener.hasAttribute('data-rmm-run-asset')) {
+        config.asset_id = Number(opener.getAttribute('data-rmm-run-asset')) || null;
+      }
       openRunEditor(opener.getAttribute('data-rmm-run-open') || '');
       return;
     }

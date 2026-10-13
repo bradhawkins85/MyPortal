@@ -154,6 +154,9 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
         "agent": _serialise({key: agent.get(key) for key in _AGENT_PUBLIC_FIELDS}) if agent else None,
         "deploy": deploy,
         "can_push_agent": bool(can_run and deploy and deploy.get("supported")),
+        "install_history": [
+            _serialise(attempt) for attempt in await rmm_agent_deploy.asset_install_history(asset_id, limit=10)
+        ],
         "runs": [_serialise(run) for run in await rmm_repo.list_runs(company_id=company_id, asset_id=asset_id, limit=10)],
         "can_run": can_run and agent is not None,
         "agent_state": rmm_scripts.agent_state(agent),
