@@ -1179,7 +1179,7 @@ class Settings(BaseSettings):
     # to a device each time a technician starts a RustDesk session.
     rustdesk_cfg: str = Field(default="", validation_alias="RUSTDESK_CFG")
     # Optional RustDesk installer (.exe for Windows) used when a device does not
-    # have RustDesk yet.
+    # have RustDesk yet. When blank, use the latest stable GitHub release.
     rustdesk_installer_url: str = Field(default="", validation_alias="RUSTDESK_INSTALLER_URL")
 
     @model_validator(mode="after")
