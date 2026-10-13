@@ -74,6 +74,9 @@ Open **Event log rules** from the Event logs page (`/rmm/event-logs/rules`). A r
 
 - **Applies to**: one device, every device in the company you are working in, or every company
   (super admins only).
+- **Which of those devices**: all devices in the scope, or devices that match the same
+  nested AND/OR rules, fields and operators as Checks. **Preview matching devices** shows
+  current matches. Device conditions narrow the scope; event conditions still apply.
 - **Conditions**, all of which must match. Each compares one field of the event: Log, Event ID,
   Level, Source, Computer or Message. Text comparisons ignore case and can be *is*, *is not*,
   *is one of* / *is not one of* (comma separated), *contains*, *does not contain* or *starts
@@ -140,3 +143,11 @@ has checked in within the last 10 minutes and retention keeps the whole window i
   entry is stored once: resending a batch is harmless. Entries from logs the device is not set to
   collect are skipped. The answer counts entries `received`, `stored`, `skipped`, `dropped` by
   rules, script `runs` the rules started, runs `scheduled` for later and new `tickets` they raised.
+
+### Device rules
+
+Event rules support the same asset, agent, company, software, hardware, network, tag and
+custom-field filters as Checks. Device rules are evaluated using current details when
+events arrive. Delayed scripts recheck both scope and device rules before running.
+Running a drop rule against stored entries also restricts deletion to matching devices.
+Existing rules without device conditions keep their original scope.

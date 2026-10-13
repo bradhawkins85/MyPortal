@@ -147,6 +147,13 @@
   // with its values for later (on /rmm/automation). item is the record being edited.
   const state = { detail: null, dirty: false, done: false, scriptsLoaded: false, mode: 'run', item: null, onSaved: null };
 
+  const rulesField = runModal.querySelector('[data-rmm-rules-field]');
+  const targeting = window.MyPortalRmmTargeting ? window.MyPortalRmmTargeting.create({
+    host: rulesField, api: api,
+    getContext: () => ({ scope: state.mode === 'schedule' && scopeSelect.value === 'all' ? 'global' : 'company',
+      script_id: state.detail && state.detail.script.id }),
+  }) : null;
+
   function fieldInputId(field) {
     return 'rmm-field-' + field.key.replace(/[^A-Za-z0-9_-]/g, '-');
   }
@@ -302,6 +309,16 @@
     const count = selectedAssets().length;
     const envText = env.length ? ' with ' + env.length + ' environment variable' + (env.length === 1 ? '' : 's') : '';
     const summary = runModal.querySelector('[data-rmm-preview-summary]');
+    if (state.mode !== 'run' && targetMode.value === 'rules') {
+      summary.textContent = 'Runs only on devices matching the device rules' + envText + '.';
+      submitButton.disabled = false;
+      return;
+    }
+    if (state.mode === 'onboarding' && targetMode.value === 'all') {
+      summary.textContent = 'Runs on each new device' + envText + ', after the steps before it.';
+      submitButton.disabled = false;
+      return;
+    }
     if (state.mode === 'onboarding') {
       const tagCount = selectedTags().length;
       summary.textContent = tagCount
@@ -354,7 +371,7 @@
       return ['Schedule a script', state.item ? 'Edit schedule' : 'New schedule', 'Pick a script, when it runs and the values it needs.', 'Save schedule'];
     }
     if (state.mode === 'onboarding') {
-      return ['Onboarding step', state.item ? 'Edit onboarding step' : 'Add an onboarding step', 'Runs once on each new device with any of the chosen tags, after the steps before it.', state.item ? 'Save step' : 'Add step'];
+      return ['Onboarding step', state.item ? 'Edit onboarding step' : 'Add an onboarding step', 'Runs once on each matching new device, after the steps before it.', state.item ? 'Save step' : 'Add step'];
     }
     return ['Run a script', 'Choose a script', 'Pick a script, the devices to run it on and the values it needs.', 'Run script'];
   }
@@ -368,11 +385,13 @@
     scopeField.hidden = state.mode !== 'schedule' || !config.is_super_admin || Boolean(state.item);
     const everyCompany = scopeSelect.value === 'all';
     const assetsOption = targetMode.querySelector('[data-rmm-company-only]');
-    assetsOption.disabled = everyCompany;
-    if (everyCompany && targetMode.value === 'assets') {
+    assetsOption.disabled = everyCompany || state.mode === 'onboarding';
+    if ((everyCompany || state.mode === 'onboarding') && targetMode.value === 'assets') {
       targetMode.value = 'all';
     }
-    tagsField.hidden = !(state.mode === 'onboarding' || (state.mode === 'schedule' && targetMode.value === 'tags'));
+    tagsField.hidden = !automated || targetMode.value !== 'tags';
+    rulesField.hidden = !automated || targetMode.value !== 'rules';
+    if (targeting) targeting.invalidate();
     if (state.detail) {
       devicesSection.hidden = automated && !(state.mode === 'schedule' && targetMode.value === 'assets');
     }
@@ -407,7 +426,8 @@
     const item = state.item || {};
     scheduleName.value = item.name || '';
     scopeSelect.value = item.scope || 'company';
-    targetMode.value = item.target_mode || 'all';
+    targetMode.value = item.target_mode || (state.mode === 'onboarding' ? 'tags' : 'all');
+    if (targeting) targeting.setRules(item.target_rules || { operator: 'and', children: [] });
     renderTags((item.tag_ids || []).map(Number));
     const cron = item.cron || '0 2 * * *';
     cronInput.value = cron;
@@ -420,6 +440,8 @@
   }
 
   scopeSelect.addEventListener('change', applyMode);
+  scriptSelect.addEventListener('change', () => { if (targeting) targeting.invalidate(); });
+  rulesField.addEventListener('rmm:rules-change', () => { state.dirty = true; });
   targetMode.addEventListener('change', () => { applyMode(); updatePreview(); });
   tagsList.addEventListener('change', updatePreview);
   cronPreset.addEventListener('change', () => {
@@ -691,11 +713,19 @@
   });
 
   async function saveAutomation(timeoutSeconds) {
+    if (targetMode.value === 'rules' && (!targeting || !targeting.validate(true))) {
+      submitButton.disabled = false;
+      const invalid = rulesField.querySelector('[aria-invalid="true"]');
+      if (invalid) invalid.focus();
+      return;
+    }
     const base = state.mode === 'schedule' ? '/api/rmm/schedules' : '/api/rmm/onboarding/steps';
     const body = {
       script_id: state.detail.script.id,
       values: collectValues(),
       timeout_seconds: timeoutSeconds,
+      target_mode: targetMode.value,
+      target_rules: targetMode.value === 'rules' ? targeting.getRules() : null,
     };
     if (state.mode === 'schedule') {
       Object.assign(body, {
@@ -709,7 +739,7 @@
         enabled: enabledBox.checked,
       });
     } else {
-      body.tag_ids = selectedTags();
+      body.tag_ids = targetMode.value === 'tags' ? selectedTags() : [];
       body.continue_on_failure = continueBox.checked;
     }
     try {

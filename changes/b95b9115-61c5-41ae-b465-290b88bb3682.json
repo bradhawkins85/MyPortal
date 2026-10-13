@@ -1,0 +1,7 @@
+{
+  "guid": "b95b9115-61c5-41ae-b465-290b88bb3682",
+  "occurred_at": "2026-10-13T10:38+00:00",
+  "change_type": "Feature",
+  "summary": "Give event log rules, scheduled scripts and onboarding steps the same advanced device filtering as Checks, including nested AND/OR groups, inventory and custom fields, and matching-device previews",
+  "content_hash": "9d70df97e6164e4325c696b80952feb8eb5d1008f39461b5e86c18667bb45579"
+}

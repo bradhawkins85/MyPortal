@@ -362,29 +362,7 @@
       <input type="hidden" name="target_rules" data-rmm-check-target-rules value="{{ e.target_rules | default(none) | tojson | forceescape }}">
       <script type="application/json" id="rmm-check-targeting-config">{{ {"fields": targeting_fields | default([])} | tojson }}</script>
       <noscript><p class="alert alert--warning">JavaScript is required to build and preview device rules.</p></noscript>
-      <section class="rmm-targeting" data-rmm-rules-field hidden aria-labelledby="rmm-targeting-title">
-        <h4 class="rmm-subheading" id="rmm-targeting-title" tabindex="-1">Device rules</h4>
-        <p class="form-help">AND needs every condition to match; OR needs any one. Groups can hold more groups.</p>
-        <div class="rmm-targeting__examples" aria-label="Start from an example">
-          <span class="form-help">Start from:</span>
-          <button type="button" class="button button--ghost button--small" data-rmm-rule-example="vip">VIP company servers</button>
-          <button type="button" class="button button--ghost button--small" data-rmm-rule-example="wireguard">WireGuard + asset custom field</button>
-        </div>
-        <div data-rmm-rule-builder></div>
-        <p class="form-help form-help--error" data-rmm-error="target_rules" role="alert" {% if not errors.get("target_rules") %}hidden{% endif %}>{{ errors.get("target_rules") or "" }}</p>
-        <div class="rmm-targeting__preview-tools">
-          <button type="button" class="button button--secondary button--small" data-rmm-rules-preview>Preview matching devices</button>
-          <p class="form-help">Matches update as inventory and company details change.</p>
-        </div>
-        <p class="form-help" data-rmm-rules-preview-status role="status" aria-live="polite"></p>
-        <div class="rmm-targeting__results table-wrapper" data-rmm-rules-preview-results hidden>
-          <table class="table">
-            <caption class="visually-hidden">Devices currently matching the rules</caption>
-            <thead><tr><th scope="col">Device</th><th scope="col">Company</th></tr></thead>
-            <tbody data-rmm-rules-preview-agents></tbody>
-          </table>
-        </div>
-      </section>
+{% set targeting_id = "rmm-targeting-title" %}{% include "rmm/_device_rules.html" %}
     </section>
 
     {# 4. What happens next #}

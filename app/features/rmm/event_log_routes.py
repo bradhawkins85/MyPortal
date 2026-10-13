@@ -120,6 +120,8 @@ def rule_summary(rule: dict[str, Any]) -> dict[str, Any]:
         scope = f"Company: {rule.get('company_name') or rule['company_id']}"
     else:
         scope = "Every company"
+    if rule.get("target_rules") is not None:
+        scope += " (matching device rules)"
     action = event_log_rules.ACTIONS.get(rule.get("action"), rule.get("action"))
     if rule.get("action") == "run_script":
         action = f"Run {rule.get('script_name') or 'a removed script'}"
