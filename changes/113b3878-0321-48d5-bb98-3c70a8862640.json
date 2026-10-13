@@ -1,0 +1,7 @@
+{
+  "guid": "113b3878-0321-48d5-bb98-3c70a8862640",
+  "occurred_at": "2026-10-13T11:40Z",
+  "change_type": "Feature",
+  "summary": "Machine stats: filter by stat type and temperature device, retaining selections across time ranges.",
+  "content_hash": "25294709c903847779936a540f192c6fbf2281d1f5b47e950e8c46eb9d589eb9"
+}

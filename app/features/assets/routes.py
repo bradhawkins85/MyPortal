@@ -1976,6 +1976,8 @@ async def asset_detail_page(
         rmm_context["checks"] = await rmm_check_routes.asset_checks_context(
             company_id, asset_id, can_edit=can_run_scripts, is_super_admin=bool(is_super_admin),
             stats_range=request.query_params.get("stats"),
+            stats_type=request.query_params.get("stats_type"),
+            stats_hardware=request.query_params.get("stats_hardware"),
         )
         from app.features.rmm import inventory_routes as rmm_inventory_routes
 

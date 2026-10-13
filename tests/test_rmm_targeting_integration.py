@@ -353,7 +353,7 @@ async def test_asset_check_context_hides_checks_whose_rules_do_not_match(target_
     check_id = await save(group("and", condition("software.name", "contains", "WireGuard")))
     await checks_repo.save_state(check_id, first["id"], {**checks._blank_state(), "status": "failing"})
 
-    async def stats(_asset_id, _range=None):
+    async def stats(_asset_id, _range=None, _type=None, _hardware=None):
         return {}
 
     monkeypatch.setattr(routes.rmm_stats, "asset_stats_context", stats)
@@ -374,7 +374,7 @@ async def test_asset_page_lists_server_checks_only_on_servers(target_db, monkeyp
     await save(name="Workstation disk", scope="asset", asset_id="11", check_type="disk", disk_drive="C:",
                disk_metric="free_percent", disk_operator="below", disk_threshold="10")
 
-    async def stats(_asset_id, _range=None):
+    async def stats(_asset_id, _range=None, _type=None, _hardware=None):
         return {}
 
     monkeypatch.setattr(routes.rmm_stats, "asset_stats_context", stats)

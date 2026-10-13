@@ -421,6 +421,10 @@ async def test_asset_context_and_charts(sqlite_db, stats_db, monkeypatch):
     assert charts["Network"]["series"][0]["latest"] == "1 Mbps"
     assert charts["Memory used"]["series"][0]["peak"] == "50 %"
     assert len(charts["CPU"]["series"][0]["segments"]) == 1
+    filtered = await check_routes.asset_checks_context(
+        1, 10, can_edit=True, is_super_admin=False, stats_range="7d", stats_type="memory")
+    assert filtered["stats"]["range"] == "7d"
+    assert [item["title"] for item in filtered["stats"]["charts"]] == ["Memory used"]
 
     # A gap longer than three sample periods breaks the line.
     since = base
