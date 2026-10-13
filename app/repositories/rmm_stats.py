@@ -18,7 +18,10 @@ async def insert_samples(samples: list[dict[str, Any]]) -> int:
         return 0
     placeholders = ", ".join(["%s"] * len(_COLUMNS))
     return await stats_db.execute_many(
-        f"INSERT IGNORE INTO {SAMPLES_TABLE} ({', '.join(_COLUMNS)}) VALUES ({placeholders})",
+        # A duplicate-key no-op is idempotent without making MySQL emit
+        # warning 1062 through aiomysql on every ignored row.
+        f"INSERT INTO {SAMPLES_TABLE} ({', '.join(_COLUMNS)}) VALUES ({placeholders}) "  # nosec B608 - fixed table name
+        "ON DUPLICATE KEY UPDATE id = id",
         [tuple(sample.get(column) for column in _COLUMNS) for sample in samples],
     )
 
