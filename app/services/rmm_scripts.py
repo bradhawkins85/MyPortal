@@ -873,6 +873,22 @@ def _parse_bool(value: str) -> bool | None:
     return None
 
 
+def _take_session_markers(text: str) -> tuple[str, dict[str, str]]:
+    markers: dict[str, str] = {}
+    cleaned_lines: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if line.startswith("::session:") and "=" in line:
+            body = line[len("::session:"):]
+            key, value = body.split("=", 1)
+            key = key.strip()
+            if key:
+                markers[key] = value.strip()
+            continue
+        cleaned_lines.append(raw_line)
+    return ("\n".join(cleaned_lines), markers)
+
+
 async def _apply_asset_value(asset_id: int | None, name: str, value: str, definitions: list[dict[str, Any]]) -> str | None:
     if asset_id is None:
         return "The run is not linked to an asset."
@@ -961,10 +977,8 @@ async def apply_custom_values(run: Mapping[str, Any], values: list[dict[str, str
 
 async def record_output(agent: Mapping[str, Any], run_id: int, payload: Mapping[str, Any]) -> bool:
     """Store live output without applying custom values or finishing the run."""
-    from app.services import rmm_remote_control
-
-    stdout, _ = rmm_remote_control.take_session_markers(readable_output(payload.get("stdout")))
-    stderr, _ = rmm_remote_control.take_session_markers(readable_output(payload.get("stderr")))
+    stdout, _ = _take_session_markers(readable_output(payload.get("stdout")))
+    stderr, _ = _take_session_markers(readable_output(payload.get("stderr")))
     return await rmm_repo.update_run_output(
         run_id, int(agent["id"]), stdout=_truncate(stdout), stderr=_truncate(stderr),
     )
