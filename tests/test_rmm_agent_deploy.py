@@ -304,10 +304,62 @@ async def test_fetch_caches_builds_from_the_newest_release_with_the_agent(storag
     assert results["myportal-rmm-darwin-arm64"] is False  # digest mismatch: not kept
     package = deploy.cached_package("windows", "amd64")
     assert package["version"] == "1.9.0" and package["path"].read_bytes() == good
+    versioned = deploy.cached_package("windows", "amd64", "1.9.0")
+    assert versioned["path"].read_bytes() == good
     assert deploy.cached_package("darwin", "arm64") is None
+    assert deploy.cached_package("darwin", "arm64", "1.9.0") is None
     assert not list(storage.glob("*.tmp"))
     # Unchanged release assets are not downloaded again.
     assert not any((await deploy.fetch_latest_agent(repo="o/r", github_token="")).values())
+
+
+@pytest.mark.anyio
+async def test_latest_refresh_retains_all_platforms_by_version_for_offline_fallback(storage, monkeypatch):
+    version = "1.2.3"
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        if request.url.path.endswith("/releases"):
+            assets = []
+            for index, (os_name, arch) in enumerate(deploy.PLATFORMS):
+                name = deploy.file_name(os_name, arch)
+                assets.extend([_asset(name, index * 2), _asset(name + ".sha256", index * 2 + 1)])
+            return httpx.Response(200, json=[{"id": version, "tag_name": "v" + version, "assets": assets}])
+        name = request.url.path.rsplit("/", 1)[-1]
+        binary_name = name.removesuffix(".sha256")
+        body = f"{version}:{binary_name}".encode()
+        if name.endswith(".sha256"):
+            return httpx.Response(200, text=hashlib.sha256(body).hexdigest())
+        return httpx.Response(200, content=body)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(deploy, "monitored_client", lambda cls, **kw: cls(transport=transport, **kw))
+    assert all((await deploy.fetch_latest_agent(repo="o/r", github_token="")).values())
+
+    # An unchanged latest cache from older servers also warms the version cache
+    # without downloading the binaries again.
+    for path in (storage / version).iterdir():
+        path.unlink()
+    requests.clear()
+    assert not any((await deploy.fetch_latest_agent(repo="o/r", github_token="")).values())
+    assert requests == ["/repos/o/r/releases"]
+
+    version = "1.2.4"
+    assert all((await deploy.fetch_latest_agent(repo="o/r", github_token="")).values())
+
+    async def github_unavailable(**kwargs):
+        pytest.fail("Fallback attempted to fetch from GitHub instead of using the scheduled cache")
+
+    monkeypatch.setattr(deploy, "fetch_latest_agent", github_unavailable)
+    for os_name, arch in deploy.PLATFORMS:
+        name = deploy.file_name(os_name, arch)
+        for release in ("1.2.3", "1.2.4"):
+            package = await deploy.ensure_package(os_name, arch, version="v" + release)
+            assert package["path"].read_bytes() == f"{release}:{name}".encode()
+            assert package["version"] == release
+        assert deploy.cached_package(os_name, arch)["version"] == "1.2.4"
+    assert not list(storage.rglob("*.tmp"))
 
 
 def test_asset_page_shows_why_the_agent_is_missing():

@@ -5,8 +5,9 @@ managed Windows and macOS device and holds the device token the agent enrols
 with. A push queues an ``install_rmm_agent`` tray command (see
 :mod:`app.repositories.rmm_agent_deploy`); the tray app then
 
-1. asks ``GET /api/rmm/agent/package`` for the agent build for its platform,
-2. downloads it from ``/api/rmm/agent/package/download`` and checks its SHA-256,
+1. tries the matching GitHub release's platform binary and published SHA-256,
+2. falls back to ``GET /api/rmm/agent/package`` and
+   ``/api/rmm/agent/package/download`` if GitHub fails, checking SHA-256 either way,
 3. runs ``myportal-rmm enrol`` with its own token and ``myportal-rmm install``,
 4. reports the outcome to ``POST /api/rmm/agent/install-result``.
 
@@ -24,6 +25,8 @@ device connects, at most once every :data:`AUTO_RETRY_HOURS`.
 Agent builds come from the GitHub release the ``Build RMM agent`` workflow
 uploads them to (``GITHUB_TRAY_MSI_REPO``) and are kept in
 ``private_uploads/rmm-agent``, served only to enrolled tray devices.
+The ``Update Tray Icon Installer`` scheduled task refreshes these builds and
+retains a copy under each downloaded release version for offline fallback.
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ import asyncio
 import hashlib
 import json
 import re
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -197,8 +201,30 @@ async def _published_sha256(client: httpx.AsyncClient, asset: dict[str, Any] | N
     return text.split()[0].lower() if text else None
 
 
+def _cache_versioned_package(name: str, source: Path, metadata: dict[str, Any]) -> None:
+    """Keep scheduled downloads available to trays requesting an exact release."""
+    version = release_version(str(metadata["version"]))
+    directory = _package_dir(version)
+    directory.mkdir(parents=True, exist_ok=True)
+    dest = directory / name
+    metadata_path = _metadata_path(name, version)
+    try:
+        current = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        current = {}
+    if dest.is_file() and current == metadata:
+        return
+    tmp = dest.with_name(dest.name + ".tmp")
+    try:
+        shutil.copyfile(source, tmp)
+        tmp.replace(dest)
+        metadata_path.write_text(json.dumps(metadata, sort_keys=True), encoding="utf-8")
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 async def fetch_latest_agent(*, repo: str | None = None, github_token: str | None = None, force: bool = False, version: str | None = None) -> dict[str, bool]:
-    """Cache the selected release (or newest agent builds); return updated files."""
+    """Cache agent builds, retaining newest builds by version too for offline fallback."""
 
     if version:
         version = release_version(version)
@@ -244,6 +270,8 @@ async def fetch_latest_agent(*, repo: str | None = None, github_token: str | Non
                     cached = {}
                 dest = _package_dir(version) / name
                 if not force and dest.is_file() and all(cached.get(key) == value for key, value in marker.items()):
+                    if version is None:
+                        _cache_versioned_package(name, dest, cached)
                     continue
                 try:
                     actual = await _download(client, asset["browser_download_url"], headers, dest)
@@ -255,9 +283,10 @@ async def fetch_latest_agent(*, repo: str | None = None, github_token: str | Non
                     dest.with_name(dest.name + ".tmp").unlink(missing_ok=True)
                     log_error("Failed to download the RMM agent", repo=repo, asset=name, error=str(exc))
                     continue
-                _metadata_path(name, version).write_text(
-                    json.dumps({**marker, "version": build_version, "sha256": actual}, sort_keys=True), encoding="utf-8"
-                )
+                metadata = {**marker, "version": build_version, "sha256": actual}
+                _metadata_path(name, version).write_text(json.dumps(metadata, sort_keys=True), encoding="utf-8")
+                if version is None:
+                    _cache_versioned_package(name, dest, metadata)
                 results[name] = True
     if any(results.values()):
         log_info("RMM agent builds updated", repo=repo, updated=[name for name, done in results.items() if done])
