@@ -547,11 +547,25 @@ class Settings(BaseSettings):
     rag_embedding_api_key: str | None = Field(
         default=None, validation_alias="RAG_EMBEDDING_API_KEY"
     )
+    rag_embedding_timeout_seconds: float = Field(
+        default=120.0,
+        validation_alias="RAG_EMBEDDING_TIMEOUT_SECONDS",
+        gt=0,
+        le=600,
+        description="HTTP timeout for embedding requests, including model loading and queue time.",
+    )
     rag_embedding_dimensions: int = Field(
         default=256, validation_alias="RAG_EMBEDDING_DIMENSIONS", ge=16, le=4096
     )
     rag_chunk_words: int = Field(
         default=180, validation_alias="RAG_CHUNK_WORDS", ge=50, le=2000
+    )
+    rag_chunk_max_chars: int = Field(
+        default=2000,
+        validation_alias="RAG_CHUNK_MAX_CHARS",
+        ge=100,
+        le=10000,
+        description="Additional size limit for each RAG text chunk before its section label.",
     )
     rag_chunk_overlap_words: int = Field(
         default=35, validation_alias="RAG_CHUNK_OVERLAP_WORDS", ge=0, le=500
