@@ -447,7 +447,8 @@ async def delete_check(check_id: int, request: Request):
 
 
 async def asset_checks_context(company_id: int, asset_id: int, *, can_edit: bool, is_super_admin: bool,
-                               stats_range: str | None = None) -> dict[str, Any]:
+                               stats_range: str | None = None, stats_type: str | None = None,
+                               stats_hardware: str | None = None) -> dict[str, Any]:
     """The asset page's Checks and Machine stats sections."""
 
     checks = await checks_repo.list_checks_for_device(company_id, asset_id)
@@ -486,7 +487,7 @@ async def asset_checks_context(company_id: int, asset_id: int, *, can_edit: bool
         "has_agent": agent is not None,
         "can_edit": can_edit,
         "check_types": rmm_checks.CHECK_TYPES,
-        "stats": await rmm_stats.asset_stats_context(asset_id, stats_range),
+        "stats": await rmm_stats.asset_stats_context(asset_id, stats_range, stats_type, stats_hardware),
     }
 
 

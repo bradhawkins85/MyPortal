@@ -231,8 +231,31 @@
       <p class="text-muted">The stats database is not available right now.</p>
       {% else %}
       <nav class="rmm-stats__ranges" aria-label="Time range">
-        {% for item in stats.ranges %}<a class="button button--small {{ 'button--primary' if item.key == stats.range else 'button--ghost' }}" href="/assets/{{ asset.id }}?stats={{ item.key }}#machine-stats" {% if item.key == stats.range %}aria-current="true"{% endif %}>{{ item.label }}</a>{% endfor %}
+        {% for item in stats.ranges %}<a class="button button--small {{ 'button--primary' if item.key == stats.range else 'button--ghost' }}" href="{{ request.url.include_query_params(stats=item.key).replace(fragment='machine-stats') }}" {% if item.key == stats.range %}aria-current="true"{% endif %}>{{ item.label }}</a>{% endfor %}
       </nav>
+      <form method="get" action="/assets/{{ asset.id }}#machine-stats" class="form" role="search" aria-label="Filter machine stats">
+        {% for name, value in request.query_params.multi_items() %}{% if name not in ('stats', 'stats_type', 'stats_hardware') %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
+        <input type="hidden" name="stats" value="{{ stats.range }}">
+        <div class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="asset-stats-type">Stat type</label>
+          <select class="form-input" id="asset-stats-type" name="stats_type">
+            {% for item in stats.types %}<option value="{{ item.key }}" {% if item.key == stats.type %}selected{% endif %}>{{ item.label }}</option>{% endfor %}
+          </select>
+        </div>
+        {% if stats.hardware_choices %}
+        <div class="form-field">
+          <label class="form-label" for="asset-stats-hardware">Temperature device</label>
+          <select class="form-input" id="asset-stats-hardware" name="stats_hardware" aria-describedby="asset-stats-hardware-help">
+            <option value="">All temperature devices</option>
+            {% for name in stats.hardware_choices %}<option value="{{ name }}" {% if name == stats.hardware %}selected{% endif %}>{{ name }}</option>{% endfor %}
+          </select>
+          <p class="form-help" id="asset-stats-hardware-help">Limits temperature charts to this device. Choose Temperature as the stat type to show only temperatures.</p>
+        </div>
+        {% endif %}
+        </div>
+        <div class="form-actions"><button class="button button--primary button--small" type="submit">Filter</button>{% if stats.filtered %} <a class="button button--ghost button--small" href="{{ request.url.include_query_params(stats_type='all', stats_hardware='').replace(fragment='machine-stats') }}">Clear</a>{% endif %}</div>
+      </form>
       {% if stats.charts %}
       <div class="rmm-stats">
         {% for chart in stats.charts %}
@@ -252,7 +275,7 @@
         {% endfor %}
       </div>
       {% else %}
-      <p class="text-muted">No stats for this time range. Temperatures are kept at agent check-in when sensors are available; other stats are kept while their checks are enabled.</p>
+      <p class="text-muted">{{ 'No stats match these filters in the selected time range.' if stats.filtered else 'No stats for this time range.' }} Temperatures are kept at agent check-in when sensors are available; other stats are kept while their checks are enabled.</p>
       {% endif %}
       {% endif %}
     </div>

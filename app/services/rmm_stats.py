@@ -21,6 +21,11 @@ from app.repositories import rmm_stats as repo
 RANGES = {"24h": ("Last 24 hours", timedelta(days=1)), "7d": ("Last 7 days", timedelta(days=7)),
           "30d": ("Last 30 days", timedelta(days=30))}
 DEFAULT_RANGE = "24h"
+STAT_TYPES = {"all": "All stat types", "cpu": "CPU", "memory": "Memory", "disk": "Disk",
+              "network": "Network", "ping": "Ping", "temperature": "Temperature"}
+TYPE_METRICS = {"cpu": {"cpu_percent"}, "memory": {"memory_used_percent"},
+                "disk": {"disk_free_percent"}, "network": {"net_in_bps", "net_out_bps"},
+                "ping": {"ping_ms"}, "temperature": {"temperature_celsius"}}
 WIDTH = 600
 HEIGHT = 160
 MAX_POINTS = 240
@@ -127,9 +132,26 @@ def chart(title: str, unit: str, series: Iterable[tuple[str, list[tuple[datetime
     }
 
 
-def build_charts(samples: Iterable[dict[str, Any]], *, since: datetime, until: datetime) -> list[dict[str, Any]]:
+def _temperature_hardware(instance: Any) -> str:
+    """Read the reported hardware name without guessing a category from its model."""
+    try:
+        sensor = json.loads(instance)
+        name = sensor.get("hardware", "") if isinstance(sensor, dict) else ""
+        return name if isinstance(name, str) else ""
+    except (ValueError, TypeError):
+        return ""
+
+
+def build_charts(samples: Iterable[dict[str, Any]], *, since: datetime, until: datetime,
+                 stat_type: str = "all", hardware: str = "") -> list[dict[str, Any]]:
     by_metric: dict[str, dict[str, list[tuple[datetime, float]]]] = defaultdict(lambda: defaultdict(list))
+    metrics = TYPE_METRICS.get(stat_type)
     for sample in samples:
+        if metrics is not None and sample["metric"] not in metrics:
+            continue
+        if (hardware and sample["metric"] == "temperature_celsius"
+                and _temperature_hardware(sample.get("instance")) != hardware):
+            continue
         by_metric[str(sample["metric"])][str(sample.get("instance") or "")].append(
             (_as_datetime(sample["sampled_at"]), float(sample["value"])))
     gap = timedelta(minutes=get_settings().stats_sample_minutes * 3)
@@ -173,10 +195,13 @@ def build_charts(samples: Iterable[dict[str, Any]], *, since: datetime, until: d
     return [item for item in charts if item]
 
 
-async def asset_stats_context(asset_id: int, range_key: str | None = None) -> dict[str, Any]:
+async def asset_stats_context(asset_id: int, range_key: str | None = None,
+                              stat_type: str | None = None, hardware: str | None = None) -> dict[str, Any]:
     """The asset page's Machine stats section."""
 
     key = range_key if range_key in RANGES else DEFAULT_RANGE
+    selected_type = stat_type if stat_type in STAT_TYPES else "all"
+    selected_hardware = (hardware or "")[:40]
     until = _utcnow()
     since = until - RANGES[key][1]
     status = stats_db.status()
@@ -184,6 +209,11 @@ async def asset_stats_context(asset_id: int, range_key: str | None = None) -> di
         "database": {"configured": status["configured"], "connected": status["connected"]},
         "range": key,
         "ranges": [{"key": name, "label": label} for name, (label, _span) in RANGES.items()],
+        "type": selected_type,
+        "types": [{"key": name, "label": label} for name, label in STAT_TYPES.items()],
+        "hardware": selected_hardware,
+        "hardware_choices": [selected_hardware] if selected_hardware else [],
+        "filtered": selected_type != "all" or bool(selected_hardware),
         "charts": [],
         "sample_minutes": get_settings().stats_sample_minutes,
         "retention_days": get_settings().stats_retention_days,
@@ -196,7 +226,13 @@ async def asset_stats_context(asset_id: int, range_key: str | None = None) -> di
     except Exception as exc:  # the asset page must not fail with the stats database
         log_warning("Could not read RMM device stats for the asset page", asset_id=asset_id, error=str(exc))
         return context
-    context["charts"] = build_charts(samples, since=since, until=until)
+    hardware_names = {_temperature_hardware(sample.get("instance")) for sample in samples
+                      if sample["metric"] == "temperature_celsius"}
+    if selected_hardware:
+        hardware_names.add(selected_hardware)
+    context["hardware_choices"] = sorted((name for name in hardware_names if name), key=str.casefold)
+    context["charts"] = build_charts(samples, since=since, until=until, stat_type=selected_type,
+                                     hardware=selected_hardware)
     return context
 
 

@@ -124,6 +124,14 @@ readings are never stored as zero-temperature samples; extended interruptions pr
 LibreHardwareMonitor and silently install bundled PawnIO 2.1.0 at service startup
 if 2.1.0 or newer is absent. Setup failures are logged and do not stop check-in.
 Linux uses sysfs sensors; macOS temperature collection is currently unsupported.
+
+Use **Stat type** to focus on CPU, memory, disk, network, ping or temperature charts.
+Use **Temperature device** to limit temperature charts to a reported hardware component,
+such as the CPU or a particular SSD. Other stat types remain visible when **All stat types**
+is selected. Click **Filter** to apply; the selected filters stay active when changing time
+ranges. **Clear** restores all stat types and temperature devices while keeping the time range.
+If no readings match, the page shows an empty result and keeps the filters available.
+
 Stats are kept in their **own database**, separate from the main and event log databases, and are
 left out of backups unless you ask for them.
 
