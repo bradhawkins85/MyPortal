@@ -1511,11 +1511,8 @@ def test_tray_submit_ticket_passes_external_reference(monkeypatch, run):
         tray_routes.tickets_service, "create_ticket", fake_create_ticket
     )
 
-    class RequestWithoutAuth:
-        headers = {"Authorization": "Bearer device-token"}
-
     result = run(
-        tray_routes.tray_submit_ticket(
+        tray_routes._create_tray_ticket(
             TrayTicketSubmitRequest(
                 device_uid="device-1",
                 name="Alice",
@@ -1523,10 +1520,115 @@ def test_tray_submit_ticket_passes_external_reference(monkeypatch, run):
                 subject="Help",
                 description="Please help",
             ),
-            RequestWithoutAuth(),
+            {
+                "id": 1,
+                "device_uid": "device-1",
+                "company_id": None,
+                "asset_id": None,
+                "status": "active",
+            },
             external_reference="tray-form:test-ref",
         )
     )
 
     assert result.ticket_id == 77
     assert captured["external_reference"] == "tray-form:test-ref"
+
+
+def test_tray_ticket_form_submit_uses_form_token_without_bearer(monkeypatch, run):
+    """The browser form has no bearer header; its signed token identifies the device."""
+
+    _stub_magic_module()
+    from app.api.routes import tray as tray_routes
+
+    device = {
+        "id": 5,
+        "device_uid": "device-5",
+        "company_id": 9,
+        "asset_id": None,
+        "status": "active",
+    }
+    token, csrf = tray_routes._issue_ticket_form_token(device, "myportal")
+
+    async def fake_get_device_by_id(device_id):
+        assert device_id == 5
+        return device
+
+    async def fake_get_device_by_auth_hash(token_hash):  # pragma: no cover - must not be used
+        raise AssertionError("form submission must not require a bearer token")
+
+    async def fake_get_questions_for_company(company_id):
+        return []
+
+    async def fake_get_tooltip_name():
+        return "MyPortal"
+
+    async def fake_get_ticket_by_external_reference(reference):
+        return None
+
+    async def fake_get_user_by_email(email):
+        return None
+
+    async def fake_get_staff(company_id, email):
+        return None
+
+    async def fake_resolve_status_or_default(status):
+        return "open"
+
+    captured = {}
+
+    async def fake_create_ticket(**kwargs):
+        captured.update(kwargs)
+        return {"id": 88, "ticket_number": "TKT-88"}
+
+    monkeypatch.setattr(tray_routes.tray_repo, "get_device_by_id", fake_get_device_by_id)
+    monkeypatch.setattr(
+        tray_routes.tray_repo, "get_device_by_auth_hash", fake_get_device_by_auth_hash
+    )
+    monkeypatch.setattr(
+        tray_routes.tq_service, "get_questions_for_company", fake_get_questions_for_company
+    )
+    monkeypatch.setattr(
+        tray_routes.site_settings_repo, "get_tray_icon_tooltip_name", fake_get_tooltip_name
+    )
+    monkeypatch.setattr(
+        tray_routes.tickets_repo,
+        "get_ticket_by_external_reference",
+        fake_get_ticket_by_external_reference,
+    )
+    monkeypatch.setattr(tray_routes.users_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(
+        tray_routes.staff_repo, "get_staff_by_company_and_email", fake_get_staff
+    )
+    monkeypatch.setattr(
+        tray_routes.tickets_service,
+        "resolve_status_or_default",
+        fake_resolve_status_or_default,
+    )
+    monkeypatch.setattr(tray_routes.tickets_service, "create_ticket", fake_create_ticket)
+
+    form = {
+        "token": token,
+        "csrf": csrf,
+        "name": "Alice",
+        "email": "alice@example.com",
+        "subject": "Printer broken",
+        "description": "It jams",
+    }
+
+    class FormData(dict):
+        def multi_items(self):
+            return list(self.items())
+
+    class FormRequest:
+        headers: dict[str, str] = {}
+
+        async def form(self):
+            return FormData(form)
+
+    response = run(tray_routes.tray_ticket_form_submit(FormRequest()))
+
+    assert response.status_code == 200
+    assert b"TKT-88" in response.body
+    assert captured["company_id"] == 9
+    assert captured["subject"] == "Printer broken"
