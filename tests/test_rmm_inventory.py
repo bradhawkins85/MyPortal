@@ -196,9 +196,81 @@ async def test_asset_section_renders_snapshot_and_refresh(inventory_db):
     )
     assert 'action="/rmm/inventory/assets/10/refresh"' in html and "Refresh now" in html
     assert "Latitude 7440" in html and "15.7 GB" in html and "Samsung SSD 980" in html
-    assert "Google Chrome" in html and "&lt;script&gt;" in html and "<script>x" not in html
+    assert 'id="hardware"' in html and 'rmm-software-table' not in html
+    software_html = env.get_template("rmm/_asset_software.html").render(
+        rmm={"inventory": context}, asset={"id": 10}, csrf_token="t",
+    )
+    assert 'id="software"' in software_html and "Show uninstalled apps" in software_html
+    assert "Google Chrome" in software_html and "&lt;script&gt;" in software_html and "<script>x" not in software_html
     assert "Some details could not be read" in html
     read_only = env.get_template("rmm/_asset_inventory.html").render(
         rmm={"inventory": {**empty, "can_refresh": False}}, asset={"id": 10}, csrf_token="t",
     )
     assert "Refresh now" not in read_only and "has not sent a snapshot yet" in read_only
+
+
+@pytest.mark.anyio
+async def test_software_history_tracks_updates_removal_and_reinstall(inventory_db):
+    _result, agent = await _enrol(inventory_db)
+    first = {"name": "Example App", "version": "1.0", "install_date": "2026-10-01"}
+    await inventory.ingest(agent, _snapshot(software=[first], errors=[]))
+    await inventory.ingest(agent, _snapshot(software=[{**first, "name": "example app"}], errors=[]))
+    history = await inventory_repo.list_software_history(agent["id"])
+    assert len(history) == 1 and history[0]["removed_at"] is None
+    assert str(history[0]["install_date"]) == "2026-10-01"
+
+    second = {**first, "version": "2.0", "install_date": "2026-10-02"}
+    await inventory.ingest(agent, _snapshot(software=[second], errors=[]))
+    history = await inventory_repo.list_software_history(agent["id"])
+    assert len(history) == 2 and history[0]["version"] == "2.0"
+    assert history[1]["removed_at"] is not None
+    context = await inventory.asset_inventory_context(agent, can_refresh=True)
+    assert len(context["software_apps"]) == 1 and context["software_apps"][0]["installed"]
+    assert len(context["software_apps"][0]["history"]) == 2
+
+    await inventory.ingest(agent, _snapshot(software=[], errors=[]))
+    assert await inventory_repo.list_software(agent["id"]) == []
+    assert (await inventory_repo.list_software_for_agents([agent["id"]]))[agent["id"]] == []
+    context = await inventory.asset_inventory_context(agent, can_refresh=True)
+    app = context["software_apps"][0]
+    assert not app["installed"] and len(app["history"]) == 2
+    html = _environment().get_template("rmm/_asset_software.html").render(
+        rmm={"inventory": context}, asset={"id": 10}, csrf_token="t",
+    )
+    assert 'data-installed="false" hidden' in html
+    assert 'type="checkbox" id="rmm-show-uninstalled" data-rmm-show-uninstalled>' in html
+    assert "2026-10-01" in html and "2026-10-02" in html and "Uninstalled" in html
+
+    await inventory.ingest(agent, _snapshot(software=[second], errors=[]))
+    history = await inventory_repo.list_software_history(agent["id"])
+    assert len(history) == 3 and sum(row["removed_at"] is None for row in history) == 1
+    await inventory.ingest(agent, _snapshot(software=[{**second, "install_date": "2026-10-03"}], errors=[]))
+    history = await inventory_repo.list_software_history(agent["id"])
+    assert len(history) == 4 and sum(row["removed_at"] is None for row in history) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("error", ["software: Access denied", "powershell: failed", "system_profiler: failed",
+                                      "software: list cut to the first 5000 programs"])
+async def test_failed_software_collection_does_not_record_uninstalls(inventory_db, error):
+    _result, agent = await _enrol(inventory_db)
+    await inventory.ingest(agent, _snapshot(software=[{"name": "Example App", "version": "1"}], errors=[]))
+    await inventory.ingest(agent, _snapshot(software=[], errors=[error]))
+    history = await inventory_repo.list_software_history(agent["id"])
+    assert len(history) == 1 and history[0]["removed_at"] is None
+    assert (await inventory_repo.list_software(agent["id"]))[0]["name"] == "Example App"
+
+
+@pytest.mark.anyio
+async def test_history_migration_seeds_existing_installs_once(inventory_db):
+    _result, agent = await _enrol(inventory_db)
+    await inventory.ingest(agent, _snapshot(errors=[]))
+    await inventory_db.execute("DELETE FROM rmm_device_software_history")
+    migration = Database()._adapt_sql_for_sqlite((ROOT / "migrations" / "488_rmm_software_history.sql").read_text())
+    await inventory_db.conn.executescript(migration)
+    await inventory_db.conn.executescript(migration)
+    history = await inventory_repo.list_software_history(agent["id"])
+    assert len(history) == 3
+    chrome = next(row for row in history if row["name"] == "Google Chrome")
+    assert chrome["version"] == "129.0.6668.90" and str(chrome["install_date"]) == "2024-10-01"
+    assert chrome["first_seen_at"] == chrome["last_seen_at"] and chrome["removed_at"] is None

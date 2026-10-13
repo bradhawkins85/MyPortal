@@ -257,7 +257,7 @@ def format_bytes(value: Any) -> str:
 
 
 async def asset_inventory_context(agent: Mapping[str, Any] | None, *, can_refresh: bool) -> dict[str, Any] | None:
-    """The asset page's Hardware & software section, or None without an agent."""
+    """The asset's Hardware and Software pages, or None without an agent."""
 
     if not agent:
         return None
@@ -270,9 +270,24 @@ async def asset_inventory_context(agent: Mapping[str, Any] | None, *, can_refres
                      for key, value in inventory.items()}
     software = [{key: value.isoformat() if isinstance(value, date) else value for key, value in item.items()}
                 for item in software]
+    history = await repo.list_software_history(int(agent["id"])) if received else []
+    apps: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in software:
+        key = (item["name"].casefold(), item.get("source") or "")
+        if key not in apps:
+            apps[key] = {**item, "installed": True, "history": []}
+        elif item.get("version"):
+            apps[key]["version"] = ", ".join(filter(None, (apps[key].get("version"), item["version"])))
+    for row in history:
+        row = {key: value.isoformat() if isinstance(value, date) else value for key, value in row.items()}
+        key = (row["name"].casefold(), row.get("source") or "")
+        if key not in apps:
+            apps[key] = {**row, "installed": False, "history": []}
+        apps[key]["history"].append(row)
     return {
         "inventory": inventory if received else None,
         "software": software,
+        "software_apps": sorted(apps.values(), key=lambda item: item["name"].casefold()),
         "refresh_pending": requested is not None and (received is None or requested > received),
         "can_refresh": can_refresh,
         "format_bytes": format_bytes,

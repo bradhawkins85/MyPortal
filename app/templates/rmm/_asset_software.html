@@ -1,0 +1,50 @@
+{% set hw = rmm.inventory %}{% set inv = hw.inventory %}
+<section class="card card--panel ce-section" id="software" data-asset-edit-section="software" aria-labelledby="asset-software-heading">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="asset-software-heading">Software</h2>
+      <p class="card__subtitle">{% if inv %}Reported by the RMM agent <span data-utc="{{ inv.received_at }}">{{ inv.received_at }}</span>. Expand an app's history to see its versions and install dates. Removal dates show when the agent first reported it missing.{% else %}The RMM agent has not sent a snapshot yet. It sends one shortly after its service starts.{% endif %}{% if hw.refresh_pending %} <strong>A refresh is waiting for the device.</strong>{% endif %}</p>
+    </div>
+    {% if hw.can_refresh %}<form method="post" action="/rmm/inventory/assets/{{ asset.id }}/refresh">
+      {% include "partials/csrf.html" %}<input type="hidden" name="section" value="software">
+      <button type="submit" class="button button--ghost button--small">Refresh now</button>
+    </form>{% endif %}
+  </header>
+  {% if inv %}
+  <div class="ce-section__body rmm-inventory">
+    <label for="rmm-show-uninstalled"><input type="checkbox" id="rmm-show-uninstalled" data-rmm-show-uninstalled> Show uninstalled apps</label>
+    {% if hw.software_apps %}
+    <label class="visually-hidden" for="rmm-software-filter">Find software</label>
+    <input type="search" id="rmm-software-filter" class="form-input rmm-inventory__filter" placeholder="Find a program…" autocomplete="off" data-rmm-software-filter="rmm-software-table">
+    <div class="table-wrapper rmm-inventory__software"><table class="table" id="rmm-software-table">
+      <caption class="visually-hidden">Software and installation history on this device</caption>
+      <thead><tr><th scope="col">Name</th><th scope="col">Version</th><th scope="col">Publisher</th><th scope="col">Install date</th><th scope="col">Status</th><th scope="col">History</th></tr></thead>
+      <tbody>{% for program in hw.software_apps %}<tr data-rmm-software-row data-installed="{{ 'true' if program.installed else 'false' }}"{% if not program.installed %} hidden{% endif %}>
+        <td data-label="Name">{{ program.name }}{% if program.source == 'user' %} <span class="text-muted">(user)</span>{% endif %}</td>
+        <td data-label="Version">{{ program.version or '—' }}</td>
+        <td data-label="Publisher">{{ program.publisher or '—' }}</td>
+        <td data-label="Install date">{{ program.install_date or 'Unknown' }}</td>
+        <td data-label="Status">{{ 'Installed' if program.installed else 'Uninstalled' }}</td>
+        <td data-label="History"><details><summary>History <span class="visually-hidden">for {{ program.name }}</span> ({{ program.history | length }})</summary>
+          <div class="table-wrapper"><table class="table">
+            <caption class="visually-hidden">Installation history for {{ program.name }}</caption>
+            <thead><tr><th scope="col">Version</th><th scope="col">Install date</th><th scope="col">First seen</th><th scope="col">Last seen</th><th scope="col">Removal detected</th></tr></thead>
+            <tbody>{% for entry in program.history %}<tr>
+              <td data-label="Version">{{ entry.version or '—' }}</td>
+              <td data-label="Install date">{{ entry.install_date or 'Unknown' }}</td>
+              <td data-label="First seen"><span data-utc="{{ entry.first_seen_at }}">{{ entry.first_seen_at }}</span></td>
+              <td data-label="Last seen"><span data-utc="{{ entry.last_seen_at }}">{{ entry.last_seen_at }}</span></td>
+              <td data-label="Removal detected">{% if entry.removed_at %}<span data-utc="{{ entry.removed_at }}">{{ entry.removed_at }}</span>{% else %}—{% endif %}</td>
+            </tr>{% endfor %}</tbody>
+          </table></div>
+        </details></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="text-muted" data-rmm-software-empty role="status"{% if hw.software %} hidden{% endif %}>No software matches the current filters.</p>
+    {% else %}<p class="text-muted">The device did not report any installed software.</p>{% endif %}
+    {% if inv.details.errors %}<details class="rmm-inventory__errors"><summary>Some details could not be read ({{ inv.details.errors | length }})</summary>
+      <ul>{% for error in inv.details.errors %}<li><code>{{ error }}</code></li>{% endfor %}</ul>
+    </details>{% endif %}
+  </div>
+  {% endif %}
+</section>
