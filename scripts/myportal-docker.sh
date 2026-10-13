@@ -438,7 +438,7 @@ ensure_local_redis() {
 #
 # A Gitea container holds the scripts technicians run from MyPortal's Scripts
 # page; the proxy serves it at /gitea. The first deploy creates an
-# administrator, a private "rmm-scripts" repository and a repository token, and
+# administrator, a private "rmm-scripts" repository, a public "Public" repository and a repository token, and
 # writes the GITEA_* settings into myportal.env. Installations with
 # GITEA_PROVISION=false, or whose GITEA_BASE_URL names another server, are
 # left alone.
@@ -548,14 +548,16 @@ gitea_token_is_read_only() {
 }
 
 ensure_gitea_repository() {
-  local token="$1" status
-  status=$(gitea_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}")
+  local token="$1" repository="${2:-$GITEA_REPOSITORY}" private="${3:-true}" status
+  local description="Scripts MyPortal runs on devices"
+  [[ "$private" == true ]] || description="Public downloads for MyPortal staff and users"
+  status=$(gitea_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/${repository}")
   [[ "$status" != 200 ]] || return 0
-  info "Creating the Gitea repository ${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}…"
-  status=$(gitea_auth | gitea_api POST /user/repos \
-    "{\"name\":\"${GITEA_REPOSITORY}\",\"description\":\"Scripts MyPortal runs on devices\",\"private\":true,\"auto_init\":true,\"default_branch\":\"main\",\"readme\":\"Default\"}")
+  info "Creating the Gitea repository ${GITEA_ADMIN_USER}/${repository}…"
+  status=$(gitea_auth "$token" | gitea_api POST /user/repos \
+    "{\"name\":\"${repository}\",\"description\":\"${description}\",\"private\":${private},\"auto_init\":true,\"default_branch\":\"main\",\"readme\":\"Default\"}")
   [[ "$status" == 201 || "$status" == 409 ]] || {
-    warn "could not create ${GITEA_ADMIN_USER}/${GITEA_REPOSITORY} in Gitea (HTTP ${status}); create it, then sync scripts."
+    warn "could not create ${GITEA_ADMIN_USER}/${repository} in Gitea (HTTP ${status}); create it, then sync scripts."
     return 1
   }
 }
@@ -578,6 +580,7 @@ connect_gitea() {
     ensure_gitea_repository "$token" || true
     set_setting "$APP_ENV" GITEA_API_TOKEN "$token" || return 1
   fi
+  ensure_gitea_repository "$token" Public false || return 1
   for key in GITEA_BASE_URL GITEA_PUBLIC_URL GITEA_SCRIPTS_REPOSITORY GITEA_SCRIPTS_BRANCH; do
     case "$key" in
       GITEA_BASE_URL) value="$GITEA_INTERNAL_URL" ;;
@@ -642,7 +645,7 @@ services:
       GITEA__server__OFFLINE_MODE: "true"
       GITEA__security__INSTALL_LOCK: "true"
       GITEA__service__DISABLE_REGISTRATION: "true"
-      GITEA__service__REQUIRE_SIGNIN_VIEW: "true"
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
       GITEA__service__DEFAULT_KEEP_EMAIL_PRIVATE: "true"
       # MyPortal sign-in: the proxy sends who is signed in to MyPortal. Only
       # Compose containers reach Gitea, so the private ranges are trusted.
