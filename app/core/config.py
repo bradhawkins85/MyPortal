@@ -140,6 +140,11 @@ class Settings(BaseSettings):
     database_user: str | None = Field(default=None, validation_alias="DB_USER")
     database_password: str | None = Field(default=None, validation_alias="DB_PASSWORD")
     database_name: str | None = Field(default=None, validation_alias="DB_NAME")
+    db_pool_min_size: int = Field(default=1, ge=0, le=1000, validation_alias="DB_POOL_MIN_SIZE")
+    db_pool_max_size: int = Field(default=50, ge=1, le=1000, validation_alias="DB_POOL_MAX_SIZE")
+    db_lock_pool_max_size: int = Field(
+        default=10, ge=1, le=1000, validation_alias="DB_LOCK_POOL_MAX_SIZE"
+    )
     db_pool_wait_timeout: float = Field(
         default=10.0,
         ge=0.5,
@@ -151,6 +156,13 @@ class Settings(BaseSettings):
             "Default: 10."
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_database_pool_sizes(self) -> "Settings":
+        if self.db_pool_min_size > self.db_pool_max_size:
+            raise ValueError("DB_POOL_MIN_SIZE must not exceed DB_POOL_MAX_SIZE")
+        return self
+
     # Secondary MySQL/MariaDB database for RMM event logs. Event log collection
     # is off until host, user and name are all set; it never falls back to the
     # main database. See app/core/event_log_database.py.
