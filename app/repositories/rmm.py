@@ -305,11 +305,15 @@ async def list_company_asset_agents(company_id: int) -> dict[int, dict[str, Any]
     """Each of a company's assets with an active RMM agent, keyed by asset ID (latest check-in)."""
 
     rows = await db.fetch_all(
-        "SELECT asset_id, MAX(last_seen_utc) AS last_seen_utc FROM rmm_agents "
-        "WHERE company_id = %s AND status = 'active' AND asset_id IS NOT NULL GROUP BY asset_id",
+        "SELECT asset_id, last_seen_utc, agent_version FROM rmm_agents "
+        "WHERE company_id = %s AND status = 'active' AND asset_id IS NOT NULL "
+        "ORDER BY last_seen_utc DESC, id DESC",
         (company_id,),
     )
-    return {int(row["asset_id"]): dict(row) for row in rows or []}
+    agents: dict[int, dict[str, Any]] = {}
+    for row in rows or []:
+        agents.setdefault(int(row["asset_id"]), dict(row))
+    return agents
 
 
 async def get_asset_agent(asset_id: int) -> dict[str, Any] | None:

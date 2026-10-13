@@ -171,6 +171,16 @@ async def company_agent_states(company_id: int) -> dict[int, str]:
     return {asset_id: rmm_scripts.agent_state(agent) for asset_id, agent in agents.items()}
 
 
+async def company_agent_details(company_id: int) -> dict[int, dict[str, Any]]:
+    """State and reported version of each of a company's assets with an RMM agent."""
+
+    agents = await rmm_repo.list_company_asset_agents(company_id)
+    return {
+        asset_id: {"state": rmm_scripts.agent_state(agent), "version": agent.get("agent_version")}
+        for asset_id, agent in agents.items()
+    }
+
+
 async def _script_detail(script_id: int, company_id: int, runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Everything the Scripts page shows for one script, or None when the company cannot use it."""
 

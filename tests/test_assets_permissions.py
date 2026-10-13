@@ -146,6 +146,10 @@ async def test_assets_page_adds_tray_agent_sync_column(monkeypatch):
         assets_by_id = {asset["id"]: asset for asset in extra["assets"]}
         assert assets_by_id[100]["tray_agent_synced"] is True
         assert assets_by_id[200]["tray_agent_synced"] is False
+        # Agent versions are technician detail, so read-only customers never see them.
+        keys = {column["key"] for column in extra["columns"]}
+        assert not keys & {"tray_agent_version", "rmm_agent_version"}
+        assert "tray_agent_version" not in assets_by_id[100]
         return HTMLResponse("assets page")
 
     monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_authenticated_user)
