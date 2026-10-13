@@ -162,6 +162,37 @@ async def get_asset_by_id(asset_id: int) -> dict[str, Any] | None:
     )
 
 
+async def create_tray_asset(device: dict[str, Any]) -> int:
+    """Create once per tray identity, including concurrent enrolment retries."""
+    os_name = " ".join(str(device.get(key) or "").strip() for key in ("os", "os_version")).strip()
+    serial = device.get("serial_number")
+    if is_placeholder_serial(serial):
+        serial = None
+    query = """INSERT INTO assets
+        (company_id, name, type, asset_type, serial_number, status, os_name,
+         last_user, provenance, tray_device_uid)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'integration', %s)"""
+    query += (
+        " ON CONFLICT(tray_device_uid) DO NOTHING"
+        if db.is_sqlite()
+        else " ON DUPLICATE KEY UPDATE tray_device_uid = VALUES(tray_device_uid)"
+    )
+    await db.execute(query, (
+        device["company_id"], device.get("hostname") or f"Tray device {device['device_uid']}",
+        "Workstation", asset_types.derive("Workstation", os_name=os_name), serial,
+        "Active", os_name or None, device.get("console_user"), device["device_uid"],
+    ))
+    row = await db.fetch_one(
+        "SELECT id FROM assets WHERE tray_device_uid = %s AND company_id = %s",
+        (device["device_uid"], device["company_id"]),
+    )
+    if not row:
+        raise ValueError("Tray asset identity belongs to another company")
+    asset_id = int(row["id"])
+    await _refresh_auto_tags(asset_id)
+    return asset_id
+
+
 async def create_manual_asset(
     *, company_id: int, name: str, type: str | None, status: str | None,
     serial_number: str | None, location: str | None, created_by: int,
