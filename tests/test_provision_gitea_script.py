@@ -163,6 +163,7 @@ def test_first_run_creates_admin_repository_and_token(tmp_path):
     assert "--random-password" in log
     # Secrets travel on stdin, escaped for curl's config syntax, never as arguments.
     assert f'stdin=header = "Authorization: token {token}"' in log
+    assert 'stdin=user = "myportal:p\\\"w\\\\d"' in log
     assert "api POST /user/repos" in log and '"private":true' in log
     credentials = tmp_path / "admin-credentials"
     assert credentials.stat().st_mode & 0o777 == 0o600
@@ -265,14 +266,21 @@ def test_repository_uploads_allow_all_types_on_install_and_upgrade(tmp_path, exi
 def test_upgrade_adds_public_repository_with_existing_token(tmp_path):
     path = env_file(tmp_path, "GITEA_API_TOKEN=existing\n")
     calls = tmp_path / "calls"
+    credentials = tmp_path / "admin-credentials"
+    credentials.write_text("password=installer-password\n")
     result = run(
+        f'GITEA_ADMIN_FILE="{credentials}"\n'
         'token_is_read_only() { return 1; }\n'
         'gitea_cli() { exit 99; }\n'
-        f'gitea_api() {{ cat >/dev/null; echo "$*" >> "{calls}"; if [[ $1 == GET ]]; then echo 404; else echo 201; fi; }}\n'
+        f'gitea_api() {{ local auth; auth=$(cat); echo "$* stdin=$auth" >> "{calls}"; '
+        'if [[ $1 == GET ]]; then echo 404; '
+        'elif [[ $auth == \'user = "myportal:installer-password"\' ]]; then echo 201; '
+        'else echo 403; fi; }\n'
         "connect_myportal", path,
     )
     assert result.returncode == 0, result.stderr
     log = calls.read_text()
-    assert 'GET /repos/myportal/Public' in log
-    assert '\"name\":\"Public\"' in log and '\"private\":false' in log
+    assert 'GET /repos/myportal/Public stdin=header = "Authorization: token existing"' in log
+    assert '"name":"Public"' in log and '"private":false' in log
+    assert 'stdin=user = "myportal:installer-password"' in log
     assert "GITEA_API_TOKEN=existing" in path.read_text()

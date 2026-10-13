@@ -421,7 +421,9 @@ ensure_repository() {
   status=$(curl_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/${repository}")
   [[ "$status" != 200 ]] || return 0
   info "Creating the Gitea repository ${GITEA_ADMIN_USER}/${repository}…"
-  status=$(curl_auth "$token" | gitea_api POST /user/repos \
+  # /user/repos also requires write:user for token authentication. Use the
+  # installer administrator credentials; keep MyPortal's token repository-only.
+  status=$(curl_auth | gitea_api POST /user/repos \
     "{\"name\":\"${repository}\",\"description\":\"${description}\",\"private\":${private},\"auto_init\":true,\"default_branch\":\"main\",\"readme\":\"Default\"}")
   [[ "$status" == 201 || "$status" == 409 ]] || {
     warn "could not create ${GITEA_ADMIN_USER}/${repository} in Gitea (HTTP ${status}); create it, then sync scripts."
