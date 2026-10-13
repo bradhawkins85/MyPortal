@@ -278,6 +278,16 @@ async def sync_scripts(request: Request):
     return flash_redirect("/rmm/scripts", summary.message(), "warning" if summary.skipped else "success")
 
 
+@router.get("/downloads", include_in_schema=False)
+async def public_downloads() -> Response:
+    """Public downloads are available without RMM permissions or sign-in."""
+    try:
+        settings = gitea.public_settings(await gitea.load_settings())
+    except gitea.GiteaError as exc:
+        raise HTTPException(status_code=503, detail="Public downloads are unavailable.") from exc
+    return RedirectResponse(gitea.repository_url(settings), status_code=302, headers={"Cache-Control": "no-store"})
+
+
 @router.get("/api/rmm/gitea/identity", include_in_schema=False)
 async def gitea_identity(request: Request) -> Response:
     """Tell nginx who to sign in to Gitea as. Always 204: without the user

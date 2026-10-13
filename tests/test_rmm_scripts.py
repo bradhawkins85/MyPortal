@@ -994,10 +994,10 @@ def _fake_gitea(monkeypatch, *, fail: bool = False):
         calls.append(("sign_in", login, email, full_name))
 
     async def set_collaborator(_settings, login, permission):
-        calls.append(("grant", login, permission))
+        calls.append(("grant", login, permission) if _settings.repo != "Public" else ("public_grant", login, permission))
 
     async def remove_collaborator(_settings, login):
-        calls.append(("remove", login))
+        calls.append(("remove", login) if _settings.repo != "Public" else ("public_remove", login))
 
     monkeypatch.setattr(gitea, "load_settings", load_settings)
     monkeypatch.setattr(gitea, "sign_in_as", sign_in_as)
@@ -1016,15 +1016,15 @@ async def test_identity_creates_the_account_once_and_follows_role_changes(sqlite
 
     account = await gitea_sign_in.identity(user)
     assert (account.login, account.permission, account.full_name) == ("tech-9", "read", "Zoe Tech")
-    assert calls == [("sign_in", "tech-9", "tech@example.com", "Zoe Tech"), ("grant", "tech-9", "read")]
+    assert calls == [("sign_in", "tech-9", "tech@example.com", "Zoe Tech"), ("grant", "tech-9", "read"), ("public_remove", "tech-9")]
     assert (await rmm_repo.get_gitea_account(9))["permission"] == "read"
 
     await gitea_sign_in.identity(user)
-    assert len(calls) == 2  # already granted on this worker
+    assert len(calls) == 3  # already granted on this worker
 
     roles[9] = [{"menu.rmm_script_editing": "write"}]
     assert (await gitea_sign_in.identity(user)).permission == "write"
-    assert calls[-1] == ("grant", "tech-9", "write")
+    assert calls[-2:] == [("grant", "tech-9", "write"), ("public_grant", "tech-9", "write")]
 
     # A changed email keeps the account MyPortal already made.
     assert (await gitea_sign_in.identity({**user, "email": "new@example.com"})).login == "tech-9"
@@ -1074,11 +1074,16 @@ async def test_reconcile_lowers_and_removes_repository_access(sqlite_db, monkeyp
 
     monkeypatch.setattr(gitea_sign_in.user_repo, "get_user_by_id", get_user_by_id)
     assert await gitea_sign_in.reconcile_accounts() == 3
-    assert sorted(calls) == [("grant", "tech-9", "read"), ("remove", "gone-11"), ("remove", "off-12")]
+    assert sorted(calls) == sorted([
+        ("grant", "tech-9", "read"), ("remove", "gone-11"), ("remove", "off-12"),
+        ("public_remove", "tech-9"), ("public_grant", "keep-10", "write"),
+        ("public_remove", "gone-11"), ("public_remove", "off-12"),
+    ])
     stored = {row["user_id"]: row["permission"] for row in await rmm_repo.list_gitea_accounts()}
     assert stored == {9: "read", 10: "write", 11: "none", 12: "none", 13: "none"}
     calls.clear()
-    assert await gitea_sign_in.reconcile_accounts() == 0 and calls == []
+    assert await gitea_sign_in.reconcile_accounts() == 0
+    assert sorted(calls) == [("public_grant", "keep-10", "write"), ("public_remove", "tech-9")]
 
 
 @pytest.mark.anyio
@@ -1406,3 +1411,68 @@ async def test_tray_menu_item_runs_its_script_with_the_admins_values(sqlite_db, 
     with pytest.raises(rmm_scripts.RunRequestError) as unlinked:
         await rmm_scripts.queue_tray_run(device={"id": 8, "company_id": 1, "asset_id": None}, node=node)
     assert "not linked" in unlinked.value.errors["device"]
+
+
+@pytest.mark.anyio
+async def test_public_downloads_need_no_identity_or_rmm_access(monkeypatch):
+    import httpx
+    from fastapi import FastAPI
+    from app.features.rmm import routes
+
+    _fake_gitea(monkeypatch)
+    app = FastAPI()
+    app.include_router(routes.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://portal") as client:
+        response = await client.get("/downloads")
+        assert response.status_code == 302
+        assert response.headers["location"] == "/gitea/myportal/Public"
+        assert response.headers["cache-control"] == "no-store"
+        async def unavailable():
+            raise gitea.GiteaError("secret internal details")
+        monkeypatch.setattr(gitea, "load_settings", unavailable)
+        response = await client.get("/downloads")
+        assert response.status_code == 503
+        assert "secret" not in response.text
+
+
+def test_public_repository_is_separate_from_the_script_tree():
+    scripts = gitea.GiteaSettings("https://git", "/gitea", "token", "myportal", "scripts", "dev", "rmm", True)
+    public = gitea.public_settings(scripts)
+    assert (public.owner, public.repo, public.branch, public.path) == ("myportal", "Public", "main", "")
+    assert (scripts.repo, scripts.branch, scripts.path) == ("scripts", "dev", "rmm")
+    with pytest.raises(gitea.GiteaError, match="separate"):
+        gitea.public_settings(public)
+
+
+@pytest.mark.anyio
+async def test_public_failure_does_not_prevent_private_access_revocation(sqlite_db, monkeypatch):
+    calls = _fake_gitea(monkeypatch)
+    _memberships(monkeypatch, {})
+    await rmm_repo.save_gitea_account(9, "tech-9", "write")
+
+    async def user(user_id):
+        return {"id": user_id}
+
+    async def unavailable(settings, login, level):
+        raise gitea.GiteaError("Public is unavailable")
+
+    monkeypatch.setattr(gitea_sign_in.user_repo, "get_user_by_id", user)
+    monkeypatch.setattr(gitea_sign_in, "_public_access", unavailable)
+    assert await gitea_sign_in.reconcile_accounts() == 0
+    assert calls == [("remove", "tech-9")]
+    # Keep the old permission recorded so Public revocation is retried.
+    assert (await rmm_repo.get_gitea_account(9))["permission"] == "write"
+
+
+@pytest.mark.anyio
+async def test_public_failure_keeps_private_grants_tracked(sqlite_db, monkeypatch):
+    _fake_gitea(monkeypatch)
+    _memberships(monkeypatch, {9: [{"menu.rmm_script_editing": "write"}]})
+
+    async def unavailable(settings, login, level):
+        raise gitea.GiteaError("Public is unavailable")
+
+    monkeypatch.setattr(gitea_sign_in, "_public_access", unavailable)
+    await gitea_sign_in.identity({"id": 9, "email": "tech@example.com"})
+    assert (await rmm_repo.get_gitea_account(9))["permission"] == "write"
+    assert 9 not in gitea_sign_in._granted

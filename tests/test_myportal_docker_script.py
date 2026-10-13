@@ -354,7 +354,7 @@ def test_compose_file_publishes_the_port_only_on_the_proxy(tmp_path):
     assert gitea["volumes"] == ["gitea_data:/data"]
     assert gitea["environment"]["GITEA__server__ROOT_URL"] == "${GITEA_ROOT_URL}"
     assert gitea["environment"]["GITEA__service__DISABLE_REGISTRATION"] == "true"
-    assert gitea["environment"]["GITEA__service__REQUIRE_SIGNIN_VIEW"] == "true"
+    assert gitea["environment"]["GITEA__service__REQUIRE_SIGNIN_VIEW"] == "false"
     assert gitea["environment"]["GITEA__repository_0X2E_upload__ENABLED"] == "true"
     assert gitea["environment"]["GITEA__repository_0X2E_upload__ALLOWED_TYPES"] == "*/*"
 
@@ -747,7 +747,7 @@ def test_connect_gitea_creates_account_repository_and_token(tmp_path):
     assert admin.stat().st_mode & 0o777 == 0o600
     log = (tmp_path / "calls").read_text()
     assert "--scopes write:repository" in log
-    assert 'api POST /user/repos' in log and 'stdin=user = "myportal:secret-pw"' in log
+    assert 'api POST /user/repos' in log and '"name":"Public"' in log and '"private":false' in log
     assert "secret-pw" not in log.split("stdin=")[0]
 
 
@@ -884,3 +884,18 @@ def test_stats_backup_dumps_with_credentials_on_stdin(tmp_path):
     assert path.name.startswith("stats-v1-") and path.stat().st_size > 0
     calls = (tmp_path / "calls").read_text(encoding="utf-8")
     assert "s3cret" not in calls and calls.rstrip().endswith("sh myportal_stats")
+
+
+def test_connect_gitea_adds_public_on_upgrade_without_replacing_token(tmp_path):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text("GITEA_API_TOKEN=existing\n")
+    result = _run(
+        f'APP_ENV="{app_env}"; GITEA_ADMIN_FILE="{tmp_path}/unused"\n'
+        + _gitea_stubs(tmp_path)
+        + 'gitea_token_is_read_only() { return 1; }\ngitea_cli() { exit 99; }\nconnect_gitea'
+    )
+    assert result.returncode == 0, result.stderr
+    log = (tmp_path / "calls").read_text()
+    assert 'GET /repos/myportal/Public' in log
+    assert '"name":"Public"' in log and '"private":false' in log
+    assert "GITEA_API_TOKEN=existing" in app_env.read_text()

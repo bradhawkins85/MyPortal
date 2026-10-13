@@ -31,7 +31,7 @@ straight after installing:
   below. The administrator's password is in `/etc/gitea/admin-credentials` (bare metal) or
   `/opt/myportal-docker/gitea-admin.txt` (Docker). Technicians don't need it: they sign in with
   MyPortal (see [Signing in to Gitea](#signing-in-to-gitea)).
-- Self-registration is off and every page needs a sign-in.
+- Self-registration is off. Public repositories can be read without signing in; the script repository stays private.
 - Every upgrade checks Gitea: it is installed if missing, moved to the Gitea version the release
   ships with, and its address follows `PORTAL_URL`. Its data is kept, and a Gitea problem never
   stops a MyPortal upgrade (the next one retries).
@@ -44,6 +44,21 @@ data in the `myportal_gitea_data` volume.
 To use your own Gitea server instead, set `GITEA_BASE_URL` (and the other settings below) to it;
 the installers then leave Gitea alone. Set `GITEA_PROVISION=false` to stop them running Gitea
 without connecting another one.
+
+### Public downloads
+
+The installers also create **`myportal/Public`**, a separate public repository. All staff
+and users can open **Downloads** in the menu (`/downloads`), and anyone with the repository
+link can browse and download files without signing in. Technicians with **Script editing →
+Write**, including super administrators, can upload files using Gitea's **Add file → Upload
+file** action. Share a file's **Raw** link for a direct download.
+
+Public files are separate from the private RMM script repository and its company folders.
+Changes to technician roles remove upload access during the usual account reconciliation.
+Existing technicians receive Public upload access on their next visit or background check.
+For an external Gitea server, create a public repository named `Public` under the configured
+script repository owner, allow anonymous repository viewing, and grant the appropriate
+technician accounts write access; the installers leave external servers alone.
 
 ### Signing in to Gitea
 

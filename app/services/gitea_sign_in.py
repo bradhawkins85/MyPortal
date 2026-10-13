@@ -11,8 +11,10 @@ their next click after they lose Script editing access or sign out of MyPortal.
 The first time a technician comes through, MyPortal makes Gitea create their
 account and adds it to the script repository as a collaborator, with read or
 write access to match the ``menu.rmm_script_editing`` permission. The
+same write permission also allows uploads to the separate Public repository. The
 background folder check (``rmm_scripts.folder_maintenance_loop``) lowers or
-removes that access when the technician's roles change.
+removes access to both repositories when the technician's roles change. Public
+downloads do not require an account or Script editing access.
 
 The login is always one MyPortal made (``gitea_login``); a stored value that is
 not is dropped, because the sign-in headers create Gitea accounts on first use
@@ -150,7 +152,21 @@ async def _ensure_access(user_id: int, account: GiteaIdentity) -> None:
             log_warning("Could not give a technician access to the script repository", login=account.login, error=str(exc))
             return
         await rmm_repo.save_gitea_account(user_id, account.login, account.permission)
+        try:
+            await _public_access(settings, account.login, account.permission)
+        except gitea.GiteaError as exc:
+            log_warning("Could not update Public repository access", login=account.login, error=str(exc))
+            return
         _granted[user_id] = (account.permission, time.monotonic())
+
+
+async def _public_access(settings: gitea.GiteaSettings, login: str, level: str) -> None:
+    public = gitea.public_settings(settings)
+    if level == "write":
+        await gitea.set_collaborator(public, login, "write")
+    else:
+        # Public reads need no collaborator grant. Remove any previous upload access.
+        await gitea.remove_collaborator(public, login)
 
 
 async def reconcile_accounts() -> int:
@@ -166,16 +182,20 @@ async def reconcile_accounts() -> int:
         user_id = int(account["user_id"])
         user = await user_repo.get_user_by_id(user_id)
         level = await access_level(user) if user and is_user_active(user) else "none"
-        if level == account["permission"]:
-            continue
         login = str(account["gitea_login"])
         try:
-            if level == "none":
-                await gitea.remove_collaborator(settings, login)
-            else:
-                await gitea.set_collaborator(settings, login, level)
+            if level != account["permission"]:
+                if level == "none":
+                    await gitea.remove_collaborator(settings, login)
+                else:
+                    await gitea.set_collaborator(settings, login, level)
+            # Existing technicians need Public access even when their script
+            # permissions have not changed. Revoke private access first.
+            await _public_access(settings, login, level)
         except gitea.GiteaError as exc:
-            log_warning("Could not update a technician's script repository access", login=login, error=str(exc))
+            log_warning("Could not update a technician's repository access", login=login, error=str(exc))
+            continue
+        if level == account["permission"]:
             continue
         await rmm_repo.save_gitea_account(user_id, login, level)
         _granted.pop(user_id, None)
