@@ -121,7 +121,8 @@ def _render_sidebar(monkeypatch, *disabled: str) -> str:
 
 
 SIDEBAR_LINKS = (
-    "/myforms",
+    "/forms",
+    "/admin/custom-forms",
     "/devices",
     "/ipam",
     "/racks",

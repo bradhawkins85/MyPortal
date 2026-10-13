@@ -185,7 +185,15 @@ class SecondaryDatabase:
     def _sql(self, sql: str) -> str:
         if not self.is_sqlite:
             return sql
-        return sql.replace("%s", "?").replace("INSERT IGNORE", "INSERT OR IGNORE")
+        sql = sql.replace("%s", "?")
+        sql = sql.replace("INSERT IGNORE", "INSERT OR IGNORE")
+        # Convert MySQL "ON DUPLICATE KEY UPDATE id = id" to a plain SQLite
+        # INSERT OR IGNORE (the no-op update has no effect; OR IGNORE does
+        # the same skip-on-conflict).
+        if "ON DUPLICATE KEY UPDATE id = id" in sql:
+            sql = sql.replace(" ON DUPLICATE KEY UPDATE id = id", "")
+            sql = re.sub(r"\bINSERT INTO\b", "INSERT OR IGNORE INTO", sql, count=1)
+        return sql
 
     @staticmethod
     def _sqlite_params(params: Iterable[Any]) -> tuple:
