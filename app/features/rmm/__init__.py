@@ -45,7 +45,7 @@ from __future__ import annotations
 
 from app.core.features import FeaturePack
 
-from app.services import rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_scripts
+from app.services import rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_scripts, rmm_patching
 
 from .agent_deploy_routes import router as agent_deploy_router
 from .automation_routes import router as automation_router
@@ -55,6 +55,7 @@ from .event_log_rule_routes import router as event_log_rule_router
 from .finding_routes import router as finding_router
 from .inventory_routes import router as inventory_router
 from .remote_control_routes import router as remote_control_router
+from .patch_routes import router as patch_router
 from .routes import router
 
 # Event log rules that schedule a script are queued on the automation tick,
@@ -62,14 +63,15 @@ from .routes import router
 # check actions scheduled for later.
 rmm_automation.register_tick_job(rmm_event_log_rules.run_due_scheduled)
 rmm_automation.register_tick_job(rmm_checks.tick)
+rmm_automation.register_tick_job(rmm_patching.tick)
 # Findings analyses start on the tick when one is due and run in the background.
 rmm_automation.register_tick_job(rmm_findings.tick)
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.15.0",
+    version="1.16.0",
     routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router,
-             event_log_rule_router, inventory_router, check_router, finding_router),
+             event_log_rule_router, inventory_router, check_router, finding_router, patch_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),
 )
 

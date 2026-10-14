@@ -806,6 +806,13 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
     jobs: list[dict[str, Any]] = []
     agent_id = int(agent["id"])
     for row in await rmm_repo.next_jobs_for_agent(agent_id):
+        if row.get("run_source") == "patch":
+            queue_deadline = row.get("expires_at")
+            if isinstance(queue_deadline, str):
+                queue_deadline = datetime.fromisoformat(queue_deadline)
+            if not queue_deadline or queue_deadline <= datetime.now(timezone.utc).replace(tzinfo=None):
+                await rmm_repo.cancel_run(int(row["id"]))
+                continue
         expires_at = (
             datetime.now(timezone.utc).replace(tzinfo=None)
             + timedelta(seconds=int(row.get("timeout_seconds") or 600))
@@ -820,6 +827,14 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
                 custom_values=[], error_message="The run's values could not be decrypted.",
             )
             continue
+        if row.get("run_source") == "patch":
+            from app.services import rmm_patching
+            if not await rmm_patching.job_is_current(agent, job):
+                await rmm_repo.finish_run(
+                    int(row["id"]), status="cancelled", exit_code=None, stdout="", stderr="", custom_values=[],
+                    error_message="Patch policy or device targeting changed before dispatch.",
+                )
+                continue
         if job["files"] and not agent.get("script_files_supported"):
             await rmm_repo.finish_run(
                 int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],

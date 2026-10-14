@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% block title %}Patch management{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
+{% block header_title %}<span class="header__title-text">Patch management</span>{% endblock %}
+{% block header_actions %}{{ page_header_actions(([{"label": "Add policy", "type": "link", "variant": "primary", "href": "/rmm/patching?new=1#patch-form"}] if can_edit else []) + [{"label": "Run history", "type": "link", "href": "/rmm/scripts"}], menu_id="patch-actions") }}{% endblock %}
+{% block content %}
+<section class="rmm-page">
+{% if editing %}
+{% set e = editing %}
+<section class="card card--panel" id="patch-form" aria-labelledby="patch-form-heading">
+<header class="card__header"><h2 class="card__title" id="patch-form-heading">{{ 'Edit' if e.id else 'Add' }} patch policy</h2></header>
+<form class="card__body form rmm-check-form" method="post" action="/rmm/patching{% if e.id %}/{{ e.id }}{% endif %}" data-rmm-patch-form>
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="target_rules" value="{{ e.target_rules | tojson | forceescape }}">
+{% if errors %}<div role="alert"><p>Check these policy settings:</p><ul>{% for key, error in errors.items() %}<li>{{ error }}</li>{% endfor %}</ul></div>{% endif %}
+<div class="form-field"><label class="form-label" for="patch-name">Policy name</label><input class="form-input" id="patch-name" name="name" value="{{ e.name }}" required maxlength="255"></div>
+<div class="form-field"><label class="form-label" for="patch-scope">Applies to</label><select class="form-input" id="patch-scope" name="scope"><option value="company" {% if e.scope == 'company' %}selected{% endif %}>This company</option>{% if is_super_admin %}<option value="global" {% if e.scope == 'global' %}selected{% endif %}>Every company</option>{% endif %}</select></div>
+<div class="form-field"><label class="form-label" for="patch-kind">Patch type</label><select class="form-input" id="patch-kind" name="kind"><option value="windows" {% if e.kind == 'windows' %}selected{% endif %}>Windows Update</option><option value="chocolatey" {% if e.kind == 'chocolatey' %}selected{% endif %}>Application via Chocolatey</option></select></div>
+<div data-patch-app>
+<div class="form-field"><label class="form-label" for="patch-package">Chocolatey package ID</label><input class="form-input" id="patch-package" name="package_id" value="{{ e.package_id }}" maxlength="128" placeholder="googlechrome"></div>
+<div class="form-field"><label class="form-label" for="patch-display">Installed application name</label><input class="form-input" id="patch-display" name="display_name" value="{{ e.display_name }}" maxlength="255" placeholder="Google Chrome"><p class="form-help">Exact name from the device's installed software. Older Chocolatey installations are upgraded; older installations from another source receive a forced install.</p></div>
+<label><input type="checkbox" name="install_missing" value="1" {% if e.install_missing %}checked{% endif %}> Also install on devices where this app is missing</label>
+<p class="form-help">Chocolatey must already be installed. Uses stable versions from the Chocolatey community repository. Per-user applications are outside the service's inventory.</p>
+</div>
+<div data-patch-windows>
+<fieldset><legend>Windows update categories</legend>{% for category in categories %}<label><input type="checkbox" name="categories" value="{{ category }}" {% if category in e.categories %}checked{% endif %}> {{ category }}</label>{% endfor %}</fieldset>
+<div class="form-field"><label class="form-label" for="patch-deferral">Defer updates (days)</label><input class="form-input" id="patch-deferral" name="deferral_days" type="number" min="0" max="90" value="{{ e.deferral_days }}"></div>
+<fieldset><legend>Reboot management</legend>
+<div class="form-field"><label class="form-label" for="patch-reboot">When a restart is required</label><select class="form-input" id="patch-reboot" name="reboot_mode">{% for value, label in [('never', 'Leave restart to the user'), ('no_users', 'Restart only when no user is signed in'), ('always', 'Restart even when users are signed in')] %}<option value="{{ value }}" {% if e.reboot_mode == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+<div class="form-field"><label class="form-label" for="patch-start">Active hours start (device local hour)</label><input class="form-input" id="patch-start" name="active_start" type="number" min="0" max="23" value="{{ e.active_start }}"></div>
+<div class="form-field"><label class="form-label" for="patch-end">Active hours end (device local hour)</label><input class="form-input" id="patch-end" name="active_end" type="number" min="0" max="23" value="{{ e.active_end }}"></div>
+<div class="form-field"><label class="form-label" for="patch-delay">Restart warning (minutes)</label><input class="form-input" id="patch-delay" name="reboot_delay_minutes" type="number" min="5" max="120" value="{{ e.reboot_delay_minutes }}"></div>
+<p class="form-help">Restarts wait until outside active hours. The effective Windows policy also controls restarts after app patching. Pending restarts are reconsidered at the next run. Windows or installer reboot settings outside MyPortal may still apply.</p>
+</fieldset>
+</div>
+<div class="form-field"><label class="form-label" for="patch-cron">Schedule (cron)</label><input class="form-input" id="patch-cron" name="cron" value="{{ e.cron }}" required maxlength="128"><p class="form-help">For example, 0 2 * * 0 runs every Sunday at 02:00. Devices must collect queued work within 15 minutes.</p></div>
+<div class="form-field"><label class="form-label" for="patch-zone">Schedule time zone</label><input class="form-input" id="patch-zone" name="timezone" value="{{ e.timezone }}" required maxlength="64" placeholder="Australia/Brisbane"></div>
+<div class="form-field"><label class="form-label" for="patch-target">Device targeting</label><select class="form-input" id="patch-target" name="target_mode"><option value="all" {% if e.target_mode == 'all' %}selected{% endif %}>All Windows devices in scope</option><option value="rules" {% if e.target_mode == 'rules' %}selected{% endif %}>Advanced device rules</option></select></div>
+{% set targeting_id = 'patch-device-rules' %}{% include 'rmm/_device_rules.html' %}
+<label><input type="checkbox" name="is_enabled" value="1" {% if e.is_enabled %}checked{% endif %}> Policy enabled</label>
+<div class="form-actions"><button class="button button--primary" type="submit">Save policy</button><a class="button button--ghost" href="/rmm/patching">Cancel</a></div>
+</form></section>
+{% endif %}
+<section class="card card--panel" aria-labelledby="patch-list-heading">
+<header class="card__header card__header--stacked"><h2 class="card__title" id="patch-list-heading">Patch policies</h2><p class="card__subtitle">Manage Windows updates and application patches on Windows devices. A matching company policy replaces the global policy for Windows Update or the same Chocolatey package. At the same scope, the newest policy wins. A disabled matching policy stops patching for that target.</p></header>
+<div class="card__body">
+{% if policies %}<div class="table-wrapper"><table class="table"><caption class="visually-hidden">Patch policies</caption><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Schedule</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>
+{% for p in policies %}<tr><td data-label="Policy"><strong>{{ p.name }}</strong><br>{{ 'Windows Update' if p.kind == 'windows' else p.package_id }}</td><td data-label="Scope">{{ 'Every company' if p.company_id is none else 'This company' }}{% if p.target_rules is not none %}<br>Advanced rules{% endif %}</td><td data-label="Schedule">{{ p.cron }}<br>{{ p.timezone }}</td><td data-label="Status">{{ 'Enabled' if p.is_enabled else 'Disabled' }}</td><td data-label="Actions">{% if p.can_edit %}<a class="button button--ghost button--small" href="/rmm/patching?policy={{ p.id }}#patch-form">Edit</a>{% if p.is_enabled %}<form method="post" action="/rmm/patching/{{ p.id }}/run" data-confirm="Run this patch policy now on matching Windows devices?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button--secondary button--small">Run now</button></form>{% endif %}<form method="post" action="/rmm/patching/{{ p.id }}/delete" data-confirm="Delete this patch policy?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button--ghost button--small">Delete</button></form>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="empty-state"><h3 class="empty-state__title">No patch policies</h3><p class="empty-state__subtitle">Add a Windows Update or application policy to start managing patches.</p></div>{% endif %}
+</div></section></section>
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_patching.js') }}" defer></script>{% endblock %}
