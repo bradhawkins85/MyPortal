@@ -452,9 +452,15 @@ make_dependency_layer_service_readable() {
   # The upgrade runs as root under umask 027, while systemd runs the release as
   # myportal. The release's .venv is a symlink into this shared layer, so
   # hardening only the release tree does not make its interpreter executable.
-  chmod a+rx "${SHARED_ROOT}/dependency-layers" "$layer"
-  find "$layer" -type d -exec chmod a+rx,a-w {} +
-  find "$layer" -type f -exec chmod a+rX,a-w {} +
+  # Preserve owner write access so the root-owned cache can still be refreshed or
+  # replaced while locking the service user to read-only traversal.
+  chmod u+rwx,go+rx "${SHARED_ROOT}/dependency-layers" "$layer"
+  find "$layer" -type d -exec chmod u+rwx,go+rx {} +
+  find "$layer" -type f -exec chmod u+rw,go+rX {} +
+  # The service account only needs traversal and execution; the metastore file
+  # used to recognise a verified layer must remain writable by the owner that
+  # refreshes or removes the cache.
+  chmod u+rw,go+r "${layer}/.verified" 2>/dev/null || true
 }
 
 install_dependencies() {
@@ -981,6 +987,26 @@ print(f"Recorded {key}={checkout} in {path}.")
 PY
 }
 
+repair_control_checkout_permissions() {
+  local owner="$1" repo_root="${PROJECT_ROOT}"
+  local git_dir="${repo_root}/.git"
+  [[ -d "$git_dir" ]] || return 0
+
+  # A checkout is frequently owned by an administrative user, but the Git object
+  # database is created by root while the release workflow runs under root too.
+  # If the checkout owner cannot traverse or read .git/objects, fast-forwarding
+  # the control checkout fails with loose-object permission errors before Git can
+  # report the real history status.
+  owner=$(stat -c %U "$repo_root")
+  [[ "$owner" != root && "$owner" != UNKNOWN ]] || return 0
+
+  chown -R "$owner:$owner" "$repo_root" 2>/dev/null || true
+  find "$git_dir" -type d -exec chmod u+rwx,go+rx {} + 2>/dev/null || true
+  find "$git_dir" -type f -exec chmod u+rw,go+r {} + 2>/dev/null || true
+  find "$repo_root" -type d -exec chmod u+rwx,go+rx {} + 2>/dev/null || true
+  find "$repo_root" -type f -exec chmod u+rw,go+r {} + 2>/dev/null || true
+}
+
 update_control_checkout() {
   # Only the release is built from origin/main; this script, the provisioning
   # helpers it runs and the cron updater all run from the control checkout.
@@ -1003,12 +1029,18 @@ update_control_checkout() {
     echo "Warning: the control checkout at ${PROJECT_ROOT} has local changes; its upgrade scripts were not updated. Commit or discard them so later upgrades can update it." >&2
     return 1
   fi
-  # Keep the checkout's files owned by whoever cloned it.
+  # Keep the checkout's files owned by whoever cloned it, and repair the Git
+  # object database if it was created by another account or left unreadable.
   owner=$(stat -c %U "$PROJECT_ROOT")
+  if command -v repair_control_checkout_permissions >/dev/null 2>&1; then
+    repair_control_checkout_permissions "$owner"
+  fi
   if [[ "$owner" == root || "$owner" == UNKNOWN ]]; then
     git merge --ff-only --quiet "$target"
-  else
+  elif [[ "$(id -u)" -eq 0 ]] && command -v runuser >/dev/null 2>&1; then
     runuser -u "$owner" -- git merge --ff-only --quiet "$target"
+  else
+    git merge --ff-only --quiet "$target"
   fi || {
     echo "Warning: could not update the control checkout at ${PROJECT_ROOT}; update it by hand." >&2
     return 1
