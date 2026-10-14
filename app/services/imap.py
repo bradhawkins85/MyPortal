@@ -1342,7 +1342,7 @@ async def _find_existing_ticket_for_reply(
     Priority order:
     1. Extract ticket number from subject
     2. Match In-Reply-To/References message IDs against ticket and reply external references
-    3. Fuzzy subject match for non-closed tickets where sender is requester or watcher.
+    3. Normalized subject match for non-closed tickets involving the sender.
 
     Args:
         subject: Email subject line
@@ -1429,19 +1429,18 @@ async def _find_existing_ticket_for_reply(
             ticket = None
 
     # If no ticket number found, try to match by normalized subject
-    # Only match non-closed tickets where sender is requester or watcher
+    # Only match non-closed tickets where the sender is a participant.
     normalized_subject = _normalize_subject_for_matching(subject)
     if not normalized_subject or len(normalized_subject) < 5:
         # Subject too short or empty to match reliably
         return None
     
     # Build query to find tickets with matching subject where sender is involved
-    # We'll check if sender is the requester or a watcher
+    # Include structured requester, watcher, and external author identities.
     try:
         # Resolved tickets remain eligible: a customer reply can indicate that
         # the issue was not actually resolved. Only explicitly closed tickets
         # must be excluded.
-        # We'll use LIKE with wildcards to match normalized subjects
         query = """
             SELECT DISTINCT t.*
             FROM tickets t
@@ -1451,51 +1450,41 @@ async def _find_existing_ticket_for_reply(
         """
         params: list[Any] = []
         
-        # If we have a requester_id, include tickets where they are the requester
-        # or a watcher. When the sender's email is also available, extend the
-        # match to tickets originally created from their email address (captured
-        # in the leading "From:" line of the description). This covers the case
-        # where the ticket was created before the sender had a local user account,
-        # so the ticket has no requester_id but the sender's email is in the
-        # description – they should still be able to reply without being a watcher.
+        # Match structured participant identities, including email-only CC
+        # watchers and external authors recorded on inbound conversation entries.
+        # Never use description/body text as evidence of sender participation.
+        participants: list[str] = []
         if requester_id is not None:
-            if from_email:
-                query += """
-                    AND (
-                        t.requester_id = %s
-                        OR tw.user_id = %s
-                        OR LOWER(u.email) = LOWER(%s)
-                        OR LOWER(COALESCE(t.description, '')) LIKE LOWER(%s)
-                    )
-                """
-                params.extend([requester_id, requester_id, from_email, f"%{from_email}%"])
-            else:
-                query += """
-                    AND (t.requester_id = %s OR tw.user_id = %s)
-                """
-                params.extend([requester_id, requester_id])
-        elif from_email:
-            # If no requester_id but we have an email, only match tickets where
-            # that address belongs to the requester or a watcher. Do not search
-            # ticket descriptions here: descriptions include attacker-controlled
-            # email body text, so using them for reply association can attach an
-            # unrelated external sender's message to the wrong ticket.
-            query += """
-                AND (
-                    EXISTS (
-                        SELECT 1 FROM users ru
-                        WHERE ru.id = t.requester_id AND LOWER(ru.email) = LOWER(%s)
-                    )
-                    OR LOWER(u.email) = LOWER(%s)
-                )
-            """
-            params.extend([from_email, from_email])
-        else:
-            # No way to match sender, can't reliably determine if this is a reply
+            participants.extend(["t.requester_id = %s", "tw.user_id = %s"])
+            params.extend([requester_id, requester_id])
+        sender_email = _normalise_email_address(from_email)
+        if sender_email:
+            participants.extend([
+                """EXISTS (
+                    SELECT 1 FROM users ru
+                    WHERE ru.id = t.requester_id AND LOWER(ru.email) = LOWER(%s)
+                )""",
+                """EXISTS (
+                    SELECT 1 FROM staff rs
+                    WHERE rs.id = t.requester_staff_id AND LOWER(rs.email) = LOWER(%s)
+                )""",
+                "LOWER(u.email) = LOWER(%s)",
+                "LOWER(tw.email) = LOWER(%s)",
+                """EXISTS (
+                    SELECT 1 FROM ticket_replies tr
+                    WHERE tr.ticket_id = t.id AND tr.is_internal = 0
+                        AND LOWER(tr.author_email) = LOWER(%s)
+                )""",
+            ])
+            params.extend([sender_email] * 5)
+        if not participants:
             return None
-        
-        query += " ORDER BY t.updated_at DESC LIMIT 20"
-        
+
+        query += " AND (" + " OR ".join(participants) + ")"
+        # Normalize subjects in Python, so every eligible candidate must be
+        # checked; a recent-ticket limit can hide an older matching subject.
+        query += " ORDER BY t.updated_at DESC, t.id DESC"
+
         rows = await db.fetch_all(query, tuple(params))
         
         if not rows:
