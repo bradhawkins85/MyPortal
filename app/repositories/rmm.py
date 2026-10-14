@@ -438,7 +438,7 @@ async def has_active_run(agent_id: int, script_id: int, *, run_source: str) -> b
 async def next_jobs_for_agent(agent_id: int, *, limit: int = 5) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         "SELECT id, script_name, script_path, language, script_content, content_sha256, payload_encrypted, "
-        "timeout_seconds FROM rmm_script_runs WHERE agent_id = %s AND status = 'queued' "
+        "timeout_seconds, run_source, expires_at FROM rmm_script_runs WHERE agent_id = %s AND status = 'queued' "
         "ORDER BY queued_at, id LIMIT %s",
         (agent_id, limit),
     )

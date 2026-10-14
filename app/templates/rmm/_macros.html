@@ -70,6 +70,8 @@
     Event log rule
   {%- elif run.run_source == 'tray' -%}
     Tray menu
+  {%- elif run.run_source == 'patch' -%}
+    Patch policy{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'check' -%}
     Check
   {%- elif run.run_source == 'onboarding' -%}

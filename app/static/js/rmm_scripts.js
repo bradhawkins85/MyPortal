@@ -800,6 +800,8 @@
       source = ' · onboarding';
     } else if (run.run_source === 'remote_control') {
       source = ' · remote control' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
+    } else if (run.run_source === 'patch') {
+      source = ' · patch policy' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     } else if (run.run_source === 'tray') {
       source = ' · tray menu';
     }

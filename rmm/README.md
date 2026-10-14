@@ -76,6 +76,14 @@ the service starts, then whenever `GET /api/rmm/agent/inventory/config` says one
 is due (daily, or when a technician presses **Refresh now** on the asset page).
 See `internal/inventory` and `docs/wiki/administration/RMM Inventory.md`.
 
+## Patch management
+
+Windows Update and Chocolatey policies run as built-in PowerShell jobs through the
+existing runner, with policy targeting rechecked before dispatch. They appear in
+Scripts run history. Chocolatey must already be installed. See
+`docs/wiki/administration/RMM Patch Management.md` for scope, schedule and reboot behavior.
+Deploy MyPortal and migration 490 to enable policies; no agent upgrade is required.
+
 ## Develop
 
 ```sh
