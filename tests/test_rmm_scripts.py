@@ -297,7 +297,7 @@ async def sqlite_db(monkeypatch):
                  "476_rmm_event_log_rule_schedules.sql", "477_rmm_device_inventory.sql", "478_rmm_checks.sql",
                  "479_rmm_check_target_rules.sql", "480_rmm_script_files.sql",
                  "484_rmm_agent_install_attempts.sql", "486_rmm_automation_target_rules.sql",
-                 "487_rmm_thermal_monitoring.sql", "488_rmm_software_history.sql", "490_rmm_patch_policies.sql"):
+                 "487_rmm_thermal_monitoring.sql", "488_rmm_software_history.sql", "491_rmm_patch_policies.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES

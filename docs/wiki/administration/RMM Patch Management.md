@@ -1,7 +1,7 @@
 # RMM Patch Management
 
 Open **Patch management** to configure Windows Update and Chocolatey application policies.
-Apply migration **490** with the portal deployment. These jobs use the existing RMM
+Apply migration **491** with the portal deployment. These jobs use the existing RMM
 agent's PowerShell runner; no new agent version is required. Windows endpoints need
 Windows PowerShell, an active RMM agent running as LocalSystem, and access to their
 configured Windows Update service. Chocolatey must already be installed for app policies.
