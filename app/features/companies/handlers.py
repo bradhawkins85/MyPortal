@@ -2762,6 +2762,7 @@ async def admin_company_tray_settings_save(company_id: int, request: Request):
         "customer_chat_enabled": customer_chat_enabled,
         "tray_chat_enabled": tray_chat_enabled,
         "tray_notifications_enabled": tray_notifications_enabled,
+        "tray_setup_tickets_enabled": 1 if form.get("tray_setup_tickets_enabled") else 0,
     }
     # The RMM pack owns the agent; without it the setting is left as it is.
     rmm_available = _main()._feature_pack_available("rmm")

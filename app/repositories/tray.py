@@ -338,6 +338,13 @@ async def mark_deployment_link_downloaded(link_id: int) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def mark_setup_ticket_processed(device_id: int) -> None:
+    await db.execute(
+        "UPDATE tray_devices SET setup_ticket_processed = 1 WHERE id = ?",
+        (device_id,),
+    )
+
+
 async def create_device(
     *,
     company_id: int | None,

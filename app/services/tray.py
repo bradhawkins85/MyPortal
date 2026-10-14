@@ -14,6 +14,7 @@ Responsibilities
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import html
 import json
@@ -22,6 +23,7 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
+from weakref import WeakValueDictionary
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
@@ -35,6 +37,7 @@ from app.services import service_status as service_status_service
 _settings = get_settings()
 
 SERVICE_STATUS_URL_VARIABLE = "{{service_status_url}}"
+_setup_ticket_locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +153,73 @@ async def reconcile_device_assets() -> None:
             await ensure_device_asset(device)
         except Exception as exc:
             log_error("Could not reconcile tray device asset", device_uid=device.get("device_uid"), error=str(exc))
+
+
+async def ensure_device_setup_ticket(device: dict[str, Any]) -> None:
+    """Create one setup ticket per new enrolment, retrying partial failures.
+
+    The migration marks old devices processed. A disabled company's first
+    enrolment is also marked processed, so enabling later does not backfill it.
+    Ticket failures must never prevent the agent from enrolling or checking in.
+    """
+    if device.get("setup_ticket_processed", 1) or device.get("status") != "active":
+        return
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    device_id = int(device["id"])
+    lock = _setup_ticket_locks.setdefault(device_id, asyncio.Lock())
+    try:
+        # Local locking also serialises SQLite coroutines; the database lock
+        # coordinates MySQL workers. Always re-read after acquiring both.
+        async with lock, tray_repo.db.acquire_lock(f"tray-setup-ticket:{device_id}") as acquired:
+            if not acquired:
+                return
+            current = await tray_repo.get_device_by_id(device_id)
+            if not current or current.get("status") != "active":
+                return
+            if current.get("setup_ticket_processed", 1):
+                device["setup_ticket_processed"] = 1
+                return
+            company_id = current.get("company_id")
+            if company_id is None:
+                return
+            company = await companies_repo.get_company_by_id(int(company_id))
+            if not company:
+                return
+            if company.get("tray_setup_tickets_enabled", True):
+                asset_id = await ensure_device_asset(current)
+                if not asset_id:
+                    return
+                reference = f"tray-setup:{device_id}"
+                # If creation succeeded but linking/marking failed, reuse the
+                # same ticket on the next check-in, including closed tickets.
+                ticket = await tickets_repo.get_ticket_by_external_reference(reference)
+                if ticket and int(ticket["company_id"]) != int(company_id):
+                    raise ValueError("Setup ticket belongs to another company")
+                if not ticket:
+                    label = current.get("hostname") or current["device_uid"]
+                    ticket = await tickets_service.create_ticket(
+                        subject=f"New device setup required: {label}"[:255],
+                        description=(
+                            "A new tray agent has checked in for the first time. "
+                            "Perform the required setup of this device.\n\n"
+                            f"Device: {label}\n"
+                            f"Serial number: {current.get('serial_number') or 'Not reported'}\n"
+                            f"Operating system: {current.get('os') or 'Not reported'} "
+                            f"{current.get('os_version') or ''}\n"
+                            f"Console user: {current.get('console_user') or 'Not reported'}\n"
+                        ),
+                        requester_id=None, company_id=int(company_id),
+                        assigned_user_id=None, priority="normal", status="open",
+                        category=None, module_slug="tray",
+                        external_reference=reference, trigger_automations=True,
+                    )
+                await tickets_repo.replace_ticket_assets(int(ticket["id"]), [int(asset_id)])
+            await tray_repo.mark_setup_ticket_processed(device_id)
+            device["setup_ticket_processed"] = 1
+    except Exception as exc:
+        log_error("Could not create tray device setup ticket", device_id=device_id, error=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +734,7 @@ WEBSOCKET_PRESENCE_WINDOW_SECONDS = 90
 async def mark_websocket_alive(device: dict[str, Any]) -> None:
     """Best-effort record that ``device`` holds a live WebSocket."""
 
+    await ensure_device_setup_ticket(device)
     try:
         await tray_repo.touch_device_websocket(int(device["id"]))
     except Exception as exc:  # noqa: BLE001 - presence is diagnostic only

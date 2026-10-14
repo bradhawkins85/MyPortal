@@ -7,6 +7,7 @@ import pytest
 from pydantic import AnyHttpUrl
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
+from starlette.datastructures import FormData
 
 from app import main
 from app.features.companies import handlers
@@ -148,3 +149,31 @@ async def test_company_tray_settings_attaches_conditions_and_global_parents(monk
     assert extra["company_questions"][0]["conditions"] == [
         {"question_id": 7, "parent_question_id": 3, "operator": "equals", "expected_value": "Sydney"}
     ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_company_tray_settings_saves_setup_ticket_preference(monkeypatch, enabled):
+    from app.repositories import companies
+    monkeypatch.setattr(main, "_require_super_admin_page", AsyncMock(return_value=({"id": 1}, None)))
+    monkeypatch.setattr(main, "_feature_pack_available", lambda name: False)
+    monkeypatch.setattr(companies, "get_company_by_id", AsyncMock(return_value={"id": 1}))
+    update = AsyncMock()
+    monkeypatch.setattr(companies, "update_company", update)
+    request = _make_request()
+    monkeypatch.setattr(request, "form", AsyncMock(return_value=FormData(
+        {"tray_setup_tickets_enabled": "1"} if enabled else {}
+    )))
+    response = await handlers.admin_company_tray_settings_save(1, request)
+    assert response.status_code == 303
+    assert update.call_args.args == (1,)
+    assert update.call_args.kwargs["tray_setup_tickets_enabled"] == int(enabled)
+
+
+def test_company_api_setup_ticket_preference():
+    from app.schemas.companies import CompanyCreate, CompanyUpdate, CompanyResponse
+    assert CompanyCreate(name="ACME").tray_setup_tickets_enabled is True
+    assert CompanyResponse(id=1, name="ACME", tray_setup_tickets_enabled=0).tray_setup_tickets_enabled is False
+    assert CompanyUpdate(tray_setup_tickets_enabled=False).model_dump(exclude_unset=True) == {
+        "tray_setup_tickets_enabled": False
+    }
