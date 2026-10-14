@@ -152,3 +152,23 @@ def test_internal_note_document_is_restricted_to_super_admins():
         "user_ids": [],
         "required_any": [],
     }
+
+
+def test_rag_normalisation_decodes_email_entities_before_chunking():
+    text = 'Budget&amp;nbsp;' + '&nbsp;' * 1000 + 'alert &lt;sender@example.test&gt;'
+    # Repeated normalization occurs during source extraction and chunking.
+    cleaned = rag_index.normalise_text(rag_index.normalise_text(text))
+    assert cleaned == 'Budget alert sender@example.test'
+    assert rag_index.chunk_text(cleaned) == ['Budget alert sender@example.test']
+
+
+def test_rag_chunk_size_bounds_long_words_without_losing_text(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(rag_index, 'get_settings', lambda: SimpleNamespace(
+        rag_chunk_words=180, rag_chunk_overlap_words=0, rag_chunk_max_chars=100,
+    ))
+    text = 'a' * 250 + ' ordinary words ' + 'b' * 220
+    chunks = rag_index.chunk_text(text)
+    assert all(len(chunk) <= 100 for chunk in chunks)
+    assert ''.join(chunks).replace(' ', '') == text.replace(' ', '')
+    assert 'ordinary words' in ' '.join(chunks)

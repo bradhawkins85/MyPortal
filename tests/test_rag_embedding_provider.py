@@ -161,3 +161,59 @@ async def test_reranker_is_bounded_and_applies_returned_order(monkeypatch):
     ranked = await rag_retrieval._rerank("query", candidates)
 
     assert [item["title"] for item in ranked] == ["b", "a", "c"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('provider', ['ollama', 'openai_compatible'])
+@pytest.mark.parametrize('vector', [[], [1.0], [float('nan'), 1.0], [float('inf'), 1.0], [0.0, 0.0], '12'])
+async def test_invalid_embedding_records_failure_once(monkeypatch, provider, vector):
+    settings = SimpleNamespace(
+        rag_embedding_provider=provider, rag_embedding_model='nomic-embed-text',
+        rag_embedding_dimensions=2, rag_embedding_base_url='http://embedding.test',
+        rag_embedding_api_key=None,
+    )
+    body = {'embeddings': [vector]} if provider == 'ollama' else {'data': [{'embedding': vector}]}
+    body['usage'] = {'prompt_tokens': 7, 'total_tokens': 7}
+    response = SimpleNamespace(raise_for_status=lambda: None, json=lambda: body)
+    usage = AsyncMock()
+    monkeypatch.setattr(rag_index, 'get_settings', lambda: settings)
+    monkeypatch.setattr(rag_index.httpx.AsyncClient, 'post', AsyncMock(return_value=response))
+    monkeypatch.setattr(rag_index.llm_usage, 'record_usage', usage)
+
+    with pytest.raises(ValueError):
+        await rag_index.embed_text('test')
+
+    usage.assert_awaited_once()
+    assert usage.await_args.kwargs['status'] == 'failed'
+    assert usage.await_args.kwargs['usage'] == (7, 0)
+
+
+@pytest.mark.anyio
+async def test_embedding_timeout_is_configurable_and_recorded(monkeypatch):
+    import httpx
+    settings = SimpleNamespace(
+        rag_embedding_provider='ollama', rag_embedding_model='nomic-embed-text',
+        rag_embedding_dimensions=2, rag_embedding_base_url='http://embedding.test',
+        rag_embedding_api_key=None, rag_embedding_timeout_seconds=90,
+    )
+    timeouts = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            timeouts.append(kwargs['timeout'])
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def post(self, *args, **kwargs):
+            raise httpx.ReadTimeout('busy server')
+
+    usage = AsyncMock()
+    monkeypatch.setattr(rag_index, 'get_settings', lambda: settings)
+    monkeypatch.setattr(rag_index, 'monitored_client', lambda _cls, **kwargs: Client(**kwargs))
+    monkeypatch.setattr(rag_index.llm_usage, 'record_usage', usage)
+    with pytest.raises(httpx.ReadTimeout):
+        await rag_index.embed_text('test')
+    assert timeouts == [90]
+    usage.assert_awaited_once()
+    assert usage.await_args.kwargs['status'] == 'failed'

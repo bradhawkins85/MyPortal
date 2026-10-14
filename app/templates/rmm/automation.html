@@ -31,7 +31,13 @@
         <span class="rmm-script__name">{{ step.script_name }}</span>
         <span class="rmm-script__path">{{ step.script_path }}</span>
         <ul class="rmm-chips" aria-label="Step details">
+          {% if step.target_mode == 'rules' %}
+          <li class="rmm-chip">Device rules</li>
+          {% elif step.target_mode == 'all' %}
+          <li class="rmm-chip">Every device</li>
+          {% else %}
           {% for name in step.tag_names %}<li class="rmm-chip rmm-chip--env">{{ name }}</li>{% else %}<li class="rmm-chip rmm-chip--warning">No tags: skipped on every device</li>{% endfor %}
+          {% endif %}
           {% if not step.script_active %}<li class="rmm-chip rmm-chip--warning">Script removed from Gitea</li>{% endif %}
           {% if step.inputs %}<li class="rmm-chip">{{ step.inputs | length }} value{{ '' if step.inputs | length == 1 else 's' }} set</li>{% endif %}
           <li class="rmm-chip">{{ 'Carries on if it fails' if step.continue_on_failure else 'Stops the sequence if it fails' }}</li>
@@ -91,7 +97,9 @@
               </td>
               <td data-label="Script" data-column-key="script">{{ schedule.script_name }}</td>
               <td data-label="Devices" data-column-key="devices">
-                {%- if schedule.target_mode == 'tags' -%}
+                {%- if schedule.target_mode == 'rules' or (schedule.target_rules | default(none)) is not none -%}
+                  Device rules
+                {%- elif schedule.target_mode == 'tags' -%}
                   {{ schedule.tag_ids | length }} tag{{ '' if schedule.tag_ids | length == 1 else 's' }}
                 {%- elif schedule.target_mode == 'assets' -%}
                   {{ schedule.asset_ids | length }} chosen device{{ '' if schedule.asset_ids | length == 1 else 's' }}
@@ -213,6 +221,7 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_automation.js') }}" defer></script>
 {% endblock %}

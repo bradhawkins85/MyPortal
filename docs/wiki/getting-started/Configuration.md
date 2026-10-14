@@ -13,6 +13,47 @@ For integration-specific guidance refer to the dedicated documentation under
 `docs/`. For example, [docs/xero.md](xero.md) outlines the callback URL and
 credential requirements for the Xero module.
 
+## MySQL connection pools
+
+Each application worker has a query pool and a separate advisory lock pool.
+Scheduled jobs hold advisory locks while running queries and external API calls;
+separating these connections prevents the jobs from occupying every query slot.
+
+```dotenv
+DB_POOL_MIN_SIZE=1
+DB_POOL_MAX_SIZE=50
+DB_LOCK_POOL_MAX_SIZE=10
+DB_POOL_WAIT_TIMEOUT=10
+```
+
+These are the defaults, including for existing `.env` files without these keys.
+Pool sizes are bounded positive integers (minimum query size can be zero), and
+the query minimum must not exceed its maximum. Restart or roll the application
+workers after changing them. SQLite does not use these pools.
+
+MariaDB's `max_connections` is a server-wide ceiling, independent of these
+per-worker limits. For example, four workers with the defaults can use up to
+240 main-database connections, plus any configured event-log and stats pools.
+Allow additional capacity for other clients and overlapping workers during
+blue/green upgrades. A 16 GB host with `max_connections=2500` does not need
+2,500 connections in each application pool; memory usage also depends on
+MariaDB's buffer pool, per-query buffers, and the other services on that host.
+
+If acquisition timeouts persist, the application warning reports pool size,
+free slots, and maximum size. At the time of the error, inspect MariaDB:
+
+```sql
+SHOW GLOBAL STATUS WHERE Variable_name IN
+  ('Threads_connected', 'Threads_running', 'Max_used_connections');
+SHOW FULL PROCESSLIST;
+SHOW ENGINE INNODB STATUS;
+```
+
+Look for slow queries and blocked transactions before increasing pool sizes.
+`DB_POOL_WAIT_TIMEOUT` bounds the wait for a pool connection; increasing it
+does not fix exhausted connections or query bottlenecks. The named lock's own
+timeout remains separate from its pool acquisition timeout.
+
 ## Outbound email sender
 
 Set `COMPANY_NAME` in `.env` to the name recipients should see on outbound

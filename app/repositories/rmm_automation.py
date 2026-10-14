@@ -22,7 +22,7 @@ def _decode_json(value: Any, default: Any) -> Any:
         return value
     try:
         return json.loads(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return default
 
 
@@ -33,6 +33,8 @@ def _schedule_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     schedule["asset_ids"] = [int(item) for item in _decode_json(schedule.pop("asset_ids_json", None), [])]
     schedule["tag_ids"] = [int(item) for item in _decode_json(schedule.pop("tag_ids_json", None), [])]
     schedule["inputs"] = _decode_json(schedule.pop("inputs_json", None), [])
+    raw_rules = schedule.pop("target_rules_json", None)
+    schedule["target_rules"] = None if raw_rules is None else (_decode_json(raw_rules, {}) or {})
     schedule["is_enabled"] = bool(schedule.get("is_enabled"))
     return schedule
 
@@ -43,6 +45,8 @@ def _step_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     step = dict(row)
     step["inputs"] = _decode_json(step.pop("inputs_json", None), [])
     step["tag_ids"] = [int(item) for item in _decode_json(step.pop("tag_ids_json", None), [])]
+    raw_rules = step.pop("target_rules_json", None)
+    step["target_rules"] = None if raw_rules is None else (_decode_json(raw_rules, {}) or {})
     step["continue_on_failure"] = bool(step.get("continue_on_failure"))
     return step
 
@@ -61,7 +65,7 @@ def _onboarding_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 _SCHEDULE_COLUMNS = (
     "s.id, s.name, s.company_id, s.script_id, s.cron, s.timezone, s.target_mode, s.asset_ids_json, "
-    "s.tag_ids_json, s.inputs_json, s.timeout_seconds, s.is_enabled, s.next_run_at, s.last_run_at, "
+    "s.tag_ids_json, s.target_rules_json, s.inputs_json, s.timeout_seconds, s.is_enabled, s.next_run_at, s.last_run_at, "
     "s.last_run_summary, s.created_by_user_id, s.created_at, s.updated_at, sc.name AS script_name, "
     "sc.path AS script_path, sc.language AS script_language, sc.is_active AS script_active"
 )
@@ -92,12 +96,13 @@ async def create_schedule(values: dict[str, Any]) -> int:
     now = _utcnow()
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_schedules (name, company_id, script_id, cron, timezone, target_mode, asset_ids_json, "
-        "tag_ids_json, entries_encrypted, inputs_json, timeout_seconds, is_enabled, next_run_at, "
+        "tag_ids_json, target_rules_json, entries_encrypted, inputs_json, timeout_seconds, is_enabled, next_run_at, "
         "created_by_user_id, created_at, updated_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             values["name"], values["company_id"], values["script_id"], values["cron"], values["timezone"],
             values["target_mode"], json.dumps(values["asset_ids"]), json.dumps(values["tag_ids"]),
+            json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
             values["entries_encrypted"], json.dumps(values["inputs"]), values["timeout_seconds"],
             1 if values["is_enabled"] else 0, values["next_run_at"], values.get("created_by_user_id"), now, now,
         ),
@@ -107,11 +112,12 @@ async def create_schedule(values: dict[str, Any]) -> int:
 async def update_schedule(schedule_id: int, values: dict[str, Any]) -> None:
     await db.execute(
         "UPDATE rmm_schedules SET name = %s, company_id = %s, script_id = %s, cron = %s, timezone = %s, "
-        "target_mode = %s, asset_ids_json = %s, tag_ids_json = %s, entries_encrypted = %s, inputs_json = %s, "
+        "target_mode = %s, asset_ids_json = %s, tag_ids_json = %s, target_rules_json = %s, entries_encrypted = %s, inputs_json = %s, "
         "timeout_seconds = %s, is_enabled = %s, next_run_at = %s, updated_at = %s WHERE id = %s",
         (
             values["name"], values["company_id"], values["script_id"], values["cron"], values["timezone"],
             values["target_mode"], json.dumps(values["asset_ids"]), json.dumps(values["tag_ids"]),
+            json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
             values["entries_encrypted"], json.dumps(values["inputs"]), values["timeout_seconds"],
             1 if values["is_enabled"] else 0, values["next_run_at"], _utcnow(), schedule_id,
         ),
@@ -187,7 +193,7 @@ async def list_active_agents(*, company_id: int | None) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 
 _STEP_COLUMNS = (
-    "o.id, o.company_id, o.position, o.script_id, o.tag_ids_json, o.inputs_json, o.timeout_seconds, "
+    "o.id, o.company_id, o.position, o.script_id, o.tag_ids_json, o.target_rules_json, o.target_mode, o.inputs_json, o.timeout_seconds, "
     "o.continue_on_failure, "
     "o.created_by_user_id, o.created_at, o.updated_at, sc.name AS script_name, sc.path AS script_path, "
     "sc.language AS script_language, sc.is_active AS script_active"
@@ -223,11 +229,13 @@ async def create_step(values: dict[str, Any]) -> int:
     )
     position = int((row or {}).get("top") or 0) + 1
     return await db.execute_returning_lastrowid(
-        "INSERT INTO rmm_onboarding_steps (company_id, position, script_id, tag_ids_json, entries_encrypted, "
+        "INSERT INTO rmm_onboarding_steps (company_id, position, script_id, tag_ids_json, target_rules_json, target_mode, entries_encrypted, "
         "inputs_json, timeout_seconds, continue_on_failure, created_by_user_id, created_at, updated_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
-            company_id, position, values["script_id"], json.dumps(values["tag_ids"]), values["entries_encrypted"],
+            company_id, position, values["script_id"], json.dumps(values["tag_ids"]),
+            json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
+            values.get("target_mode", "tags"), values["entries_encrypted"],
             json.dumps(values["inputs"]),
             values["timeout_seconds"], 1 if values["continue_on_failure"] else 0,
             values.get("created_by_user_id"), now, now,
@@ -237,10 +245,12 @@ async def create_step(values: dict[str, Any]) -> int:
 
 async def update_step(step_id: int, values: dict[str, Any]) -> None:
     await db.execute(
-        "UPDATE rmm_onboarding_steps SET script_id = %s, tag_ids_json = %s, entries_encrypted = %s, "
+        "UPDATE rmm_onboarding_steps SET script_id = %s, tag_ids_json = %s, target_rules_json = %s, target_mode = %s, entries_encrypted = %s, "
         "inputs_json = %s, timeout_seconds = %s, continue_on_failure = %s, updated_at = %s WHERE id = %s",
         (
-            values["script_id"], json.dumps(values["tag_ids"]), values["entries_encrypted"], json.dumps(values["inputs"]),
+            values["script_id"], json.dumps(values["tag_ids"]),
+            json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
+            values.get("target_mode", "tags"), values["entries_encrypted"], json.dumps(values["inputs"]),
             values["timeout_seconds"], 1 if values["continue_on_failure"] else 0, _utcnow(), step_id,
         ),
     )

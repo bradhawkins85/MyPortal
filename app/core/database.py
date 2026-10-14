@@ -27,6 +27,7 @@ else:
 class Database:
     def __init__(self) -> None:
         self._pool: Any | None = None
+        self._lock_pool: Any | None = None
         self._sqlite_conn: aiosqlite.Connection | None = None
         self._settings = get_settings()
         self._use_sqlite = self._should_use_sqlite()
@@ -148,19 +149,40 @@ class Database:
             await self._sqlite_conn.commit()
         else:
             mysql = self._require_aiomysql()
-            logger.info("Connecting to MySQL at {host}", host=self._settings.database_host)
-            self._pool = await mysql.create_pool(
+            logger.info(
+                "Connecting to MySQL at {host}: query pool {minimum}-{maximum}, lock pool 0-{locks}",
+                host=self._settings.database_host,
+                minimum=self._settings.db_pool_min_size,
+                maximum=self._settings.db_pool_max_size,
+                locks=self._settings.db_lock_pool_max_size,
+            )
+            options = dict(
                 host=self._settings.database_host,
                 port=self._settings.database_port,
                 user=self._settings.database_user,
                 password=self._settings.database_password,
                 db=self._settings.database_name,
                 autocommit=True,
-                minsize=1,
-                maxsize=10,
                 pool_recycle=600,
                 init_command="SET time_zone = '+00:00'",
             )
+            pool = await mysql.create_pool(
+                minsize=self._settings.db_pool_min_size,
+                maxsize=self._settings.db_pool_max_size,
+                **options,
+            )
+            try:
+                # GET_LOCK connections stay occupied while jobs perform queries
+                # and external I/O. Keep them out of the query pool so jobs
+                # cannot consume every slot while waiting for their own queries.
+                self._lock_pool = await mysql.create_pool(
+                    minsize=0, maxsize=self._settings.db_lock_pool_max_size, **options
+                )
+            except BaseException:
+                pool.close()
+                await pool.wait_closed()
+                raise
+            self._pool = pool
 
     async def disconnect(self) -> None:
         if self._sqlite_conn:
@@ -173,6 +195,10 @@ class Database:
             self._pool.close()
             await self._pool.wait_closed()
             self._pool = None
+            if self._lock_pool:
+                self._lock_pool.close()
+                await self._lock_pool.wait_closed()
+                self._lock_pool = None
             logger.info("MySQL database disconnected successfully")
 
     def is_connected(self) -> bool:
@@ -196,6 +222,10 @@ class Database:
             try:
                 conn = await asyncio.wait_for(self._pool.acquire(), timeout=timeout)
             except asyncio.TimeoutError:
+                logger.warning(
+                    "MySQL query pool exhausted: size={size}, free={free}, max={maximum}",
+                    size=self._pool.size, free=self._pool.freesize, maximum=self._pool.maxsize,
+                )
                 raise TimeoutError(
                     f"Timed out waiting {timeout}s for a free MySQL connection from the pool"
                 ) from None
@@ -921,7 +951,19 @@ class Database:
             yield True
             return
 
-        conn = await self._pool.acquire()
+        if self._lock_pool is None:
+            raise RuntimeError("Database lock pool not initialised")
+        pool = self._lock_pool
+        try:
+            conn = await asyncio.wait_for(
+                pool.acquire(), timeout=self._settings.db_pool_wait_timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "MySQL lock pool exhausted: size={size}, free={free}, max={maximum}",
+                size=pool.size, free=pool.freesize, maximum=pool.maxsize,
+            )
+            raise TimeoutError("Timed out waiting for a MySQL advisory lock connection") from None
         lock_acquired = False
         try:
             async with conn.cursor() as cursor:
@@ -930,20 +972,28 @@ class Database:
                 lock_acquired = bool(result and result[0] == 1)
 
             yield lock_acquired
+        except BaseException:
+            # GET_LOCK may have succeeded before cancellation interrupted its
+            # response. Closing also releases locks whose ownership is unknown.
+            conn.close()
+            raise
         finally:
-            if lock_acquired:
+            if lock_acquired and not conn.closed:
                 try:
                     async with conn.cursor() as cursor:
                         await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
-                except Exception as exc:
-                    # Log but don't raise - lock will be auto-released on connection close
-                    # Defensive cleanup that shouldn't fail in normal operation
+                except BaseException as exc:
+                    # Never return a session with a potentially held lock.
+                    conn.close()
+                    if not isinstance(exc, Exception):
+                        pool.release(conn)
+                        raise
                     logger.warning(
                         "Failed to explicitly release lock {lock}: {error}",
                         lock=lock_name,
                         error=str(exc),
                     )
-            self._pool.release(conn)
+            pool.release(conn)
 
 
 db = Database()

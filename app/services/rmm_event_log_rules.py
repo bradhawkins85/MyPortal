@@ -41,7 +41,7 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_event_log_rules as rules_repo
 from app.repositories import rmm_event_logs as event_log_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
-from app.services import rmm_actions, rmm_automation, rmm_scripts
+from app.services import rmm_actions, rmm_automation, rmm_device_targeting, rmm_scripts
 from app.services.rmm_scripts import RunRequestError
 
 RUN_SOURCE = "event_log"
@@ -294,6 +294,10 @@ async def save_rule(
             errors["asset_id"] = "Choose a device in this company."
     elif scope != "company":
         errors["scope"] = "Choose who the rule applies to."
+    target_mode = str(form.get("target_mode") or "all")
+    if target_mode not in {"all", "rules"}:
+        errors["target_mode"] = "Choose all devices in scope or device rules."
+    target_rules = rmm_device_targeting.parse_rules(form, errors)
     action = str(form.get("action") or "")
     if action not in ACTIONS:
         errors["action"] = "Choose what the rule does."
@@ -328,6 +332,7 @@ async def save_rule(
         "asset_id": asset_id,
         "action": action,
         "conditions": conditions,
+        "target_rules": target_rules,
         "script_id": int(script["id"]) if script else None,
         "entries_encrypted": encrypt_secret(json.dumps(entries)) if entries else None,
         "inputs": rmm_scripts.stored_inputs(script, entries) if script else [],
@@ -530,6 +535,12 @@ async def run_due_scheduled(now: datetime | None = None) -> int:
             agent = await rmm_repo.get_agent(agent_id)
             if not rule or not rule.get("is_enabled") or rule.get("action") != "schedule_script" or not agent:
                 continue  # turned off, changed or removed since it was scheduled
+            if rule.get("company_id") is not None and rule["company_id"] != agent.get("company_id"):
+                continue
+            if rule.get("asset_id") is not None and rule["asset_id"] != agent.get("asset_id"):
+                continue
+            if rule.get("target_rules") is not None and not await rmm_device_targeting.device_matches(agent, rule["target_rules"]):
+                continue
             try:
                 event = json.loads(decrypt_secret(str(pending.get("event_encrypted") or ""), allow_plaintext=False))
             except (ValueError, TypeError):
@@ -569,6 +580,19 @@ async def apply(agent: Mapping[str, Any], entries: list[dict[str, Any]]) -> tupl
     )
     if not rules:
         return entries, stats
+    if any(rule.get("target_rules") is not None for rule in rules):
+        from app.repositories import rmm_targeting as targeting_repo
+        from app.services import rmm_targeting
+        contexts = await targeting_repo.contexts_for_agents([dict(agent)])
+        context = contexts.get(int(agent["id"]))
+        eligible = []
+        for rule in rules:
+            try:
+                if rule.get("target_rules") is None or rmm_targeting.compile_rules(rule["target_rules"])(context):
+                    eligible.append(rule)
+            except (ValueError, TypeError, OverflowError, RecursionError):
+                continue
+        rules = eligible
     drop_rules = [rule for rule in rules if rule["action"] == "drop"]
     act_rules = [rule for rule in rules if rule["action"] in (*SCRIPT_ACTIONS, "create_ticket")]
     drop_counts: dict[int, int] = {}
@@ -633,6 +657,15 @@ async def drop_stored(rule: Mapping[str, Any], *, delete: bool) -> int:
         return 0
     company_id = int(rule["company_id"]) if rule.get("company_id") is not None else None
     asset_id = int(rule["asset_id"]) if rule.get("asset_id") is not None else None
+    allowed_agents = None
+    if rule.get("target_rules") is not None:
+        from app.repositories import rmm_automation as automation_repo
+        agents = await automation_repo.list_active_agents(company_id=company_id)
+        if asset_id is not None:
+            agents = [agent for agent in agents if agent.get("asset_id") == asset_id]
+        allowed_agents = {int(agent["id"]) for agent in await rmm_device_targeting.filter_agents(agents, rule["target_rules"])}
+        if not allowed_agents:
+            return 0
     event_ids = _event_id_prefilter(rule)
     matched = 0
     after_id = 0
@@ -643,7 +676,7 @@ async def drop_stored(rule: Mapping[str, Any], *, delete: bool) -> int:
         if not rows:
             break
         after_id = int(rows[-1]["id"])
-        ids = [int(row["id"]) for row in rows if rule_matches(rule, row)]
+        ids = [int(row["id"]) for row in rows if (allowed_agents is None or row.get("agent_id") in allowed_agents) and rule_matches(rule, row)]
         matched += len(ids)
         if delete and ids:
             await event_log_repo.delete_entries(ids)

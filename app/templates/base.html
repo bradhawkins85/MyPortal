@@ -516,7 +516,7 @@
           {% endif %}
           {% if can_access_forms %}
             <li class="menu__item">
-              <a href="/myforms" {% if current_path.startswith('/myforms') or current_path.startswith('/forms') %}aria-current="page"{% endif %}>
+              <a href="/forms" {% if current_path.startswith('/forms') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18H6zm3 4h6a1 1 0 0 0 0-2H9a1 1 0 0 0 0 2zm0 4h6a1 1 0 0 0 0-2H9a1 1 0 0 0 0 2zm0 4h3a1 1 0 0 0 0-2H9a1 1 0 0 0 0 2z"/></svg>
                 </span>
@@ -1149,9 +1149,9 @@
               {% if feature_pack_available('forms') %}<li class="menu__item">
                 <a href="/admin/custom-forms" {% if current_path.startswith('/admin/custom-forms') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6V2zm2 2v2h8V4H8zm0 4v2h8V8H8zm0 4v2h5v-2H8zm0 4v2h8v-2H8z"/></svg>
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18H6zm3 4h6a1 1 0 0 0 0-2H9a1 1 0 0 0 0 2zm0 4h6a1 1 0 0 0 0-2H9a1 1 0 0 0 0 2zm0 4h3a1 1 0 0 0 0-2H9a1 1 0 0 0 0 2z"/></svg>
                   </span>
-                  <span class="menu__label">Custom Forms</span>
+                  <span class="menu__label">Custom forms</span>
                 </a>
               </li>{% endif %}
               {% if feature_pack_available('tray') %}<li class="menu__item">

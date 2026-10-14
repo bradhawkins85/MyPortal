@@ -288,21 +288,24 @@ class TargetingPreviewRequest(BaseModel):
     scope: str = Field(default="company", max_length=16)
     asset_id: int | None = Field(default=None, ge=1)
     rules: dict[str, Any]
+    script_id: int | None = Field(default=None, ge=1)
 
 
+@router.get("/api/rmm/targeting/fields")
 @router.get("/api/rmm/checks/targeting/fields", summary="Check targeting fields and operators")
 async def targeting_fields(request: Request):
     await _context(request, api=True)
     return {"fields": rmm_targeting.field_catalogue()}
 
 
+@router.post("/api/rmm/targeting/preview")
 @router.post("/api/rmm/checks/targeting/preview", summary="Preview devices matching check rules")
 async def targeting_preview(request: Request, payload: TargetingPreviewRequest):
     user, _company, company_id, _can_edit = await _context(request, write=True, api=True)
     if payload.scope not in {"global", "company", "asset"}:
         raise HTTPException(status_code=422, detail="Choose a company or device scope")
     if payload.scope == "global" and not user.get("is_super_admin"):
-        raise HTTPException(status_code=403, detail="Only super admins can preview checks for every company")
+        raise HTTPException(status_code=403, detail="Only super admins can preview device rules for every company")
     if payload.scope == "asset":
         from app.repositories import assets as assets_repo
         asset = await assets_repo.get_asset_by_id(payload.asset_id) if payload.asset_id else None
@@ -315,6 +318,12 @@ async def targeting_preview(request: Request, payload: TargetingPreviewRequest):
     agents = await automation_repo.list_active_agents(company_id=None if payload.scope == "global" else company_id)
     if payload.scope == "asset":
         agents = [agent for agent in agents if agent.get("asset_id") == payload.asset_id]
+    if payload.script_id is not None:
+        script = await rmm_repo.get_script(payload.script_id)
+        if (not script or not rmm_repo.script_available_to(script, company_id)
+                or (payload.scope == "global" and script.get("company_id") is not None)):
+            raise HTTPException(status_code=404, detail="Script not found")
+        agents = [agent for agent in agents if rmm_repo.script_available_to(script, int(agent["company_id"]))]
     contexts = await targeting_repo.contexts_for_agents(agents)
     matched = [agent for agent in agents if int(agent["id"]) in contexts
                and matches(contexts[int(agent["id"])])]
@@ -438,7 +447,8 @@ async def delete_check(check_id: int, request: Request):
 
 
 async def asset_checks_context(company_id: int, asset_id: int, *, can_edit: bool, is_super_admin: bool,
-                               stats_range: str | None = None) -> dict[str, Any]:
+                               stats_range: str | None = None, stats_type: str | None = None,
+                               stats_hardware: str | None = None) -> dict[str, Any]:
     """The asset page's Checks and Machine stats sections."""
 
     checks = await checks_repo.list_checks_for_device(company_id, asset_id)
@@ -477,7 +487,7 @@ async def asset_checks_context(company_id: int, asset_id: int, *, can_edit: bool
         "has_agent": agent is not None,
         "can_edit": can_edit,
         "check_types": rmm_checks.CHECK_TYPES,
-        "stats": await rmm_stats.asset_stats_context(asset_id, stats_range),
+        "stats": await rmm_stats.asset_stats_context(asset_id, stats_range, stats_type, stats_hardware),
     }
 
 

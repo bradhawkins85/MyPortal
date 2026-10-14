@@ -83,3 +83,53 @@ go test ./...
 GOOS=windows go vet ./...
 go build ./cmd/myportal-rmm
 ```
+
+## Temperatures
+
+At service startup and every regular detailed check-in (approximately 15 minutes),
+the agent sends available endpoint temperature sensors in Celsius. Each reading
+has an identifier, sensor name and hardware name. Collection is bounded to 20
+seconds and 256 sensors; missing hardware, inaccessible sensors and failed reads
+never prevent check-in. macOS currently reports collection as unsupported.
+
+Linux reads hwmon sensors from sysfs, falling back to ACPI thermal zones when
+hwmon is absent. Windows release builds embed LibreHardwareMonitorLib 0.9.6
+(.NET Framework 4.7.2) and its dependencies, with locked NuGet package hashes and
+original license notices. The agent expands its embedded bundle into a versioned
+folder under `%ProgramData%\MyPortal RMM\LibreHardwareMonitor` on first check-in.
+The existing agent download checksum covers the complete bundle. Install/update
+and rollback continue to deliver a single executable. No GUI or separate download
+is needed on endpoints; Windows PowerShell and .NET Framework 4.7.2 or later
+(4.8.1 on ARM64) are required. Sensor availability varies with hardware, drivers and Windows security
+settings. Low-level CPU and motherboard sensors use PawnIO. Windows builds also
+embed its upstream 2.1.0 installer, pinned by SHA-256, along with its license and
+corresponding sources. At service startup the agent checks the installed version
+and runs `PawnIO_setup.exe -install -silent` if 2.1.0 or newer is absent. It keeps
+newer installations and verifies the registered version after setup. Setup runs
+in the background with a two-minute limit; failures are logged, leave check-in
+working and retry at the next service start. A fresh temperature check-in follows
+setup completion. PawnIO is shared system software, so agent rollback or removal
+does not downgrade or uninstall it.
+
+MyPortal keeps the latest snapshot for the asset's Scripts section. It also stores
+temperature samples in the existing stats database independently of enabled
+checks, and displays sensor graphs in Machine stats with its 24-hour, 7-day and
+30-day ranges and configured retention. History uses server receipt time and the
+configured stats sample period. If the stats database is unavailable, check-in
+and the latest snapshot still work. Missing readings do not become zero-degree
+samples. Older agents and job polling preserve the last snapshot and its timestamp.
+Deploy MyPortal and migration 487 before updating agents.
+
+For a local Windows build, install .NET SDK 8 and run from `rmm/`:
+
+```sh
+python3 thermal-bundle/build.py
+go build ./cmd/myportal-rmm
+```
+
+The release workflow prepares the bundle automatically for both Windows builds.
+Keep the checked-in NuGet lock file and include all library notices when changing
+versions. Upstream source and license links are preserved in the bundled notices.
+The disposable Windows CI runner also verifies silent PawnIO installation.
+That integration test requires `MYPORTAL_TEST_PAWNIO_INSTALL=1`; ordinary local
+test runs validate the setup policy without installing a driver.

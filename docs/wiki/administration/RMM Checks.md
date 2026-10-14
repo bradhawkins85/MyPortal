@@ -117,6 +117,21 @@ Script runs started by checks show as **Check** in run history.
 While a device has disk space, ping, CPU, memory or network checks, MyPortal keeps the values its
 agent reports so technicians can see them on the asset page (**Machine stats**, last 24 hours, 7
 days or 30 days): CPU and memory use, free space on each drive, network throughput and ping times.
+Temperature sensors also appear as graphs in Machine stats. The RMM agent collects them at
+startup and every detailed check-in (approximately 15 minutes), independently of enabled checks.
+Each sensor has its own graph in Celsius, using the same ranges and retention settings. Missing
+readings are never stored as zero-temperature samples; extended interruptions produce gaps. Windows agents bundle
+LibreHardwareMonitor and silently install bundled PawnIO 2.1.0 at service startup
+if 2.1.0 or newer is absent. Setup failures are logged and do not stop check-in.
+Linux uses sysfs sensors; macOS temperature collection is currently unsupported.
+
+Use **Stat type** to focus on CPU, memory, disk, network, ping or temperature charts.
+Use **Temperature device** to limit temperature charts to a reported hardware component,
+such as the CPU or a particular SSD. Other stat types remain visible when **All stat types**
+is selected. Click **Filter** to apply; the selected filters stay active when changing time
+ranges. **Clear** restores all stat types and temperature devices while keeping the time range.
+If no readings match, the page shows an empty result and keeps the filters available.
+
 Stats are kept in their **own database**, separate from the main and event log databases, and are
 left out of backups unless you ask for them.
 

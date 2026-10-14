@@ -1,8 +1,7 @@
 (function () {
   'use strict';
 
-  // The asset page's Hardware & software section (rmm/_asset_inventory.html):
-  // narrow the installed software table as the technician types.
+  // Filter apps by their current status and the technician's search.
 
   function setUp(input) {
     const table = document.getElementById(input.getAttribute('data-rmm-software-filter'));
@@ -11,19 +10,26 @@
     }
     const rows = Array.from(table.querySelectorAll('[data-rmm-software-row]'));
     const empty = table.closest('.ce-section__body').querySelector('[data-rmm-software-empty]');
-    input.addEventListener('input', () => {
+    const showUninstalled = table.closest('.ce-section__body').querySelector('[data-rmm-show-uninstalled]');
+    function applyFilter() {
       const words = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
       let shown = 0;
       rows.forEach((row) => {
         const text = row.textContent.toLowerCase();
-        const match = words.every((word) => text.includes(word));
+        const match = (row.dataset.installed !== 'false' || (showUninstalled && showUninstalled.checked))
+          && words.every((word) => text.includes(word));
         row.hidden = !match;
         shown += match ? 1 : 0;
       });
       if (empty) {
         empty.hidden = shown > 0;
       }
-    });
+    }
+    input.addEventListener('input', applyFilter);
+    if (showUninstalled) {
+      showUninstalled.addEventListener('change', applyFilter);
+    }
+    applyFilter();
   }
 
   document.querySelectorAll('[data-rmm-software-filter]').forEach(setUp);

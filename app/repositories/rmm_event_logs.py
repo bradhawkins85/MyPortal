@@ -86,7 +86,10 @@ async def insert_entries(entries: list[dict[str, Any]]) -> int:
 
     placeholders = ", ".join(["%s"] * len(_ENTRY_COLUMNS))
     return await event_log_db.execute_many(
-        f"INSERT IGNORE INTO {ENTRIES_TABLE} ({', '.join(_ENTRY_COLUMNS)}) VALUES ({placeholders})",
+        # A duplicate-key no-op is idempotent without making MySQL emit
+        # warning 1062 through aiomysql on every ignored row.
+        f"INSERT INTO {ENTRIES_TABLE} ({', '.join(_ENTRY_COLUMNS)}) VALUES ({placeholders}) "  # nosec B608 - fixed table name
+        "ON DUPLICATE KEY UPDATE id = id",
         [tuple(entry.get(column) for column in _ENTRY_COLUMNS) for entry in entries],
     )
 
@@ -197,7 +200,7 @@ async def scan_entries(
     params.append(int(limit))
     # The clauses are fixed strings chosen above; every value is a bound parameter.
     return await event_log_db.fetch_all(  # nosec B608
-        f"SELECT id, log_name, event_id, level, provider, computer, message FROM {ENTRIES_TABLE} "
+        f"SELECT id, agent_id, log_name, event_id, level, provider, computer, message FROM {ENTRIES_TABLE} "
         f"WHERE {' AND '.join(clauses)} ORDER BY id LIMIT %s",  # nosec B608
         tuple(params),
     )

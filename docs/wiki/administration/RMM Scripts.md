@@ -349,7 +349,8 @@ secret.
 RMM schedules are separate from MyPortal's scheduled tasks. Each schedule has:
 
 - **Devices**: every device with the RMM agent, devices with any of the chosen
-  [tags](Tags.md) (a tag on a company counts for all of its devices), or devices you pick.
+  [tags](Tags.md) (a tag on a company counts for all of its devices), devices you pick,
+  or **Devices that match rules** using the same fields and operators as [Checks](RMM%20Checks.md#advanced-device-rules).
   Devices added later are included automatically, except when you pick devices.
 - **When**: every hour, every day, every Monday, the 1st of the month, or your own cron
   expression (`minute hour day month weekday`), in the time zone you choose (`CRON_TIMEZONE`
@@ -370,10 +371,11 @@ reinstall that keeps the agent's identity does not run them again). Each company
 ordered list of steps, and the steps run one at a time in that order: the next step is sent
 only after the previous one reports back.
 
-Every step has a **tag filter**, for example Server or Workstation, and runs only on devices
-with any of its tags (a tag on the company counts for all of its devices). Other devices skip
-it. Automatic tags are refreshed just before each step is checked, so a new device is matched
-on its current type and operating system.
+Each step can run on **every device**, devices with **any of the chosen tags**, or
+**devices that match rules**. Existing steps keep their tag filters. A tag on the company
+counts for all of its devices. Devices outside the selection skip the step.
+Automatic tags are refreshed before tag matching; device rules use current inventory
+just before each step is queued.
 
 If a step fails, times out, expires or is cancelled, the steps after it are not run and the
 onboarding is marked **Stopped**, unless that step is set to **Carry on with the next step if
@@ -468,3 +470,16 @@ myportal-rmm install
 It runs scripts as the service account (SYSTEM on Windows, root on macOS and Linux). On
 Windows it uses Windows PowerShell; on macOS and Linux it runs PowerShell scripts only when
 `pwsh` is installed. Shell scripts do not run on Windows.
+
+### Device rules for scripts
+
+Schedules and onboarding steps share the Checks rule editor. Combine nested **AND** and
+**OR** groups across asset and agent details, company details, hardware, operating system,
+IP subnets, installed software, tags, asset custom fields and company variables. Numeric
+ranges, version comparisons, list matching and presence checks use the same semantics as
+Checks. Choose **Preview matching devices** to see current matches in the selected scope
+that can use the script. Missing inventory cannot satisfy negative comparisons; use
+**Is not set** explicitly when you want to match missing values.
+
+Schedules evaluate rules each time they run, including **Run now**. Onboarding evaluates
+rules before each step runs. Devices added later are included when they match.

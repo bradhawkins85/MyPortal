@@ -26,6 +26,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -920,6 +921,18 @@ func main() {
 		logger.Error("logger init: %v", err)
 	}
 
+	// Handle install/uninstall subcommands before loading config so
+	// that a re-install after a failed prior install can still
+	// clean up (or skip cleaning up) without requiring the
+	// registry/env config that the daemon needs.
+	if len(os.Args) > 1 {
+		cmd := os.Args[1]
+		if cmd == "install" || cmd == "uninstall" {
+			handleServiceCommand(cmd)
+			return
+		}
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Fatal("Config load: %v", err)
@@ -953,3 +966,50 @@ func main() {
 	<-stop
 	_ = d.Stop(svc)
 }
+
+// handleServiceCommand runs the "install" or "uninstall" subcommand
+// using the OS service manager. For "uninstall" it first checks
+// whether the service is registered; a missing service (e.g. after a
+// previous install that failed before the service was created) is
+// treated as a successful no-op rather than an error.
+func handleServiceCommand(cmd string) {
+	svcCfg := &service.Config{
+		Name:        "MyPortalTrayService",
+		DisplayName: "MyPortal Tray Service",
+		Description: "Maintains the MyPortal helpdesk tray connection.",
+	}
+	// The Start/Stop callbacks are never invoked during install or
+	// uninstall, so a no-op implementation is safe.
+	svc, err := service.New(&noopLifecycle{}, svcCfg)
+	if err != nil {
+		logger.Fatal("Service init: %v", err)
+	}
+
+	if cmd == "uninstall" {
+		_, statusErr := svc.Status()
+		if statusErr != nil && errors.Is(statusErr, service.ErrNotInstalled) {
+			logger.Info("Service is not installed — nothing to remove.")
+			return
+		}
+		// Stop the service if it is running. The call may fail if
+		// the service is already stopped; that is not an error for
+		// uninstall purposes.
+		if stopErr := svc.Stop(); stopErr != nil {
+			logger.Warn("Stop before uninstall: %v", stopErr)
+		}
+	}
+
+	if err := service.Control(svc, cmd); err != nil {
+		logger.Error("%s failed: %v", cmd, err)
+		os.Exit(1)
+	}
+	logger.Info("%s succeeded", cmd)
+}
+
+// noopLifecycle satisfies service.Interface without starting or
+// stopping any daemon work. It is used for install/uninstall
+// commands that only need the service-manager handle.
+type noopLifecycle struct{}
+
+func (noopLifecycle) Start(service.Service) error { return nil }
+func (noopLifecycle) Stop(service.Service) error  { return nil }

@@ -57,6 +57,51 @@ async def list_software(agent_id: int) -> list[dict[str, Any]]:
     return [dict(row) for row in rows or []]
 
 
+async def list_software_history(agent_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        "SELECT * FROM rmm_device_software_history WHERE agent_id = %s "
+        "ORDER BY first_seen_at DESC, id DESC", (agent_id,),
+    )
+    return [dict(row) for row in rows or []]
+
+
+def _software_key(item: dict[str, Any]) -> tuple[str, str, str]:
+    return (item["name"].casefold(), item.get("version") or "", item.get("source") or "")
+
+
+async def _save_software_history(agent_id: int, software: list[dict[str, Any]], now: datetime) -> None:
+    active = await db.fetch_all(
+        "SELECT * FROM rmm_device_software_history WHERE agent_id = %s AND removed_at IS NULL", (agent_id,),
+    )
+    remaining = {_software_key(item): item for item in software}
+    updates = []
+    removals = []
+    for row in active or []:
+        item = remaining.get(_software_key(row))
+        # A changed install date indicates a reinstall even when the version is unchanged.
+        if item and (not item.get("install_date") or not row.get("install_date")
+                     or str(item["install_date"]) == str(row["install_date"])):
+            updates.append((now, item.get("publisher"), item.get("install_date"), row["id"]))
+            remaining.pop(_software_key(row))
+        else:
+            removals.append((now, row["id"]))
+    if updates:
+        await db.execute_many(
+            "UPDATE rmm_device_software_history SET last_seen_at = %s, publisher = %s, "
+            "install_date = COALESCE(%s, install_date) WHERE id = %s", updates,
+        )
+    if removals:
+        await db.execute_many("UPDATE rmm_device_software_history SET removed_at = %s WHERE id = %s", removals)
+    if remaining:
+        await db.execute_many(
+            "INSERT INTO rmm_device_software_history "
+            "(agent_id, name, version, publisher, install_date, source, first_seen_at, last_seen_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            [(agent_id, item["name"], item.get("version"), item.get("publisher"), item.get("install_date"),
+              item.get("source"), now, now) for item in remaining.values()],
+        )
+
+
 async def list_software_for_agents(agent_ids: Iterable[int]) -> dict[int, list[dict[str, Any]]]:
     ids = sorted({int(agent_id) for agent_id in agent_ids})
     if not ids:
@@ -87,10 +132,16 @@ async def _ensure_row(agent: dict[str, Any]) -> int:
 
 async def save_snapshot(agent: dict[str, Any], summary: dict[str, Any], details: dict[str, Any],
                         software: list[dict[str, Any]], *, collected_at: datetime) -> None:
-    """Replace the agent's snapshot and software list."""
+    """Replace the current snapshot, retaining observed software installation intervals."""
 
     row_id = await _ensure_row(agent)
     now = _utcnow()
+    agent_id = int(agent["id"])
+    software_failed = any(str(error).lower().startswith(("software:", "powershell:", "system_profiler:"))
+                          for error in details.get("errors", []))
+    if software_failed:
+        # Failed/truncated collection must not be interpreted as an uninstall.
+        software = await list_software(agent_id)
     assignments = ", ".join(f"{column} = %s" for column in SUMMARY_COLUMNS)
     # The column names come from SUMMARY_COLUMNS, not from the agent.
     await db.execute(
@@ -102,7 +153,9 @@ async def save_snapshot(agent: dict[str, Any], summary: dict[str, Any], details:
             len(software), json.dumps(details), now, row_id,
         ),
     )
-    agent_id = int(agent["id"])
+    if software_failed:
+        return
+    await _save_software_history(agent_id, software, now)
     await db.execute("DELETE FROM rmm_device_software WHERE agent_id = %s", (agent_id,))
     if software:
         await db.execute_many(

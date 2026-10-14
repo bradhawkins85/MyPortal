@@ -295,7 +295,8 @@ async def sqlite_db(monkeypatch):
                  "474_rmm_event_log_rules.sql", "475_rmm_event_log_rule_tickets.sql",
                  "476_rmm_event_log_rule_schedules.sql", "477_rmm_device_inventory.sql", "478_rmm_checks.sql",
                  "479_rmm_check_target_rules.sql", "480_rmm_script_files.sql",
-                 "484_rmm_agent_install_attempts.sql"):
+                 "484_rmm_agent_install_attempts.sql", "486_rmm_automation_target_rules.sql",
+                 "487_rmm_thermal_monitoring.sql", "488_rmm_software_history.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -1532,3 +1533,41 @@ def test_readable_powershell_clixml_preserves_messages_and_escapes():
     assert readable_output(malformed) == malformed
     hostile = '#< CLIXML\n<!DOCTYPE x [<!ENTITY bad "expanded">]><Objs><S>&bad;</S></Objs>'
     assert readable_output(hostile) == hostile
+
+
+@pytest.mark.anyio
+async def test_thermal_checkin_persists_and_empty_snapshot_clears_readings(sqlite_db, monkeypatch):
+    from app.features.rmm.routes import AgentDetails
+    from app.services import rmm_stats
+
+    async def no_history(*args):
+        return 0
+    monkeypatch.setattr(rmm_stats, "ingest_thermal", no_history)
+    _, agent = await _enrol(sqlite_db)
+    thermal = {"collected_at": "2026-10-13T00:00:00Z", "status": "available", "sensors": [
+        {"id": "/cpu/0/temp/0", "name": "CPU Package", "hardware": "CPU", "celsius": 63.5}]}
+    await rmm_scripts.checkin(agent, AgentDetails(thermal=thermal).model_dump(), None)
+    stored = (await rmm_repo.get_asset_agent(10))["thermal"]
+    assert stored["sensors"][0]["celsius"] == 63.5
+    assert stored["collected_at"].startswith("2026-10-13")
+    await rmm_repo.record_agent_checkin(agent["id"], {})
+    await rmm_scripts.checkin(agent, AgentDetails(agent_version="old").model_dump(), None)
+    assert (await rmm_repo.get_asset_agent(10))["thermal"] == stored
+    thermal.update(status="unavailable", sensors=[])
+    await rmm_scripts.checkin(agent, AgentDetails(thermal=thermal).model_dump(), None)
+    assert (await rmm_repo.get_asset_agent(10))["thermal"]["sensors"] == []
+
+
+def test_thermal_payload_bounds_and_legacy_compatibility():
+    from app.features.rmm.routes import AgentDetails
+    from pydantic import ValidationError
+
+    assert AgentDetails(agent_version="old").thermal is None
+    thermal = {"collected_at": "2026-10-13T00:00:00Z", "status": "available", "sensors": [
+        {"id": "cpu", "name": "CPU", "hardware": "CPU", "celsius": float("inf")}]}
+    with pytest.raises(ValidationError):
+        AgentDetails(thermal=thermal)
+    thermal["sensors"][0]["celsius"] = 50
+    thermal["sensors"] *= 257
+    with pytest.raises(ValidationError):
+        AgentDetails(thermal=thermal)

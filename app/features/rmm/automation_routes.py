@@ -118,6 +118,7 @@ class ScheduleRequest(BaseModel):
     cron: str = Field(max_length=128)
     timezone: str = Field(default="", max_length=64)
     target_mode: str = Field(default="all", max_length=16)
+    target_rules: dict[str, Any] | None = None
     asset_ids: list[int] = Field(default_factory=list, max_length=automation.MAX_SCHEDULE_ASSETS)
     tag_ids: list[int] = Field(default_factory=list, max_length=automation.MAX_SCHEDULE_TAGS)
     values: dict[str, str] = Field(default_factory=dict)
@@ -228,6 +229,8 @@ async def delete_schedule_api(schedule_id: int, request: Request):
 
 
 class StepRequest(BaseModel):
+    target_mode: str = Field(default="tags", max_length=16)
+    target_rules: dict[str, Any] | None = None
     script_id: int
     tag_ids: list[int] = Field(default_factory=list, max_length=automation.MAX_SCHEDULE_TAGS)
     values: dict[str, str] = Field(default_factory=dict)

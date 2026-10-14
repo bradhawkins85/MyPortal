@@ -9,7 +9,7 @@ from typing import Any
 from app.core.database import db
 
 _SELECT = (
-    "SELECT r.id, r.name, r.company_id, r.asset_id, r.action, r.conditions_json, r.script_id, "
+    "SELECT r.id, r.name, r.company_id, r.asset_id, r.action, r.target_rules_json, r.conditions_json, r.script_id, "
     "r.entries_encrypted, r.inputs_json, r.timeout_seconds, r.cooldown_minutes, r.is_enabled, r.match_count, "
     "r.last_matched_at, r.last_run_summary, r.created_by_user_id, r.updated_by_user_id, r.created_at, "
     "r.updated_at, r.schedule_mode, r.delay_minutes, r.run_time, r.schedule_timezone, s.name AS script_name, s.path AS script_path, s.is_active AS script_active, "
@@ -32,7 +32,7 @@ def _decode_json(value: Any, default: Any) -> Any:
         return value
     try:
         return json.loads(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return default
 
 
@@ -42,6 +42,8 @@ def _rule_row(row: dict[str, Any] | None, *, with_secrets: bool = False) -> dict
     rule = dict(row)
     rule["conditions"] = _decode_json(rule.pop("conditions_json", None), [])
     rule["inputs"] = _decode_json(rule.pop("inputs_json", None), [])
+    raw_rules = rule.pop("target_rules_json", None)
+    rule["target_rules"] = None if raw_rules is None else (_decode_json(raw_rules, {}) or {})
     rule["is_enabled"] = bool(rule.get("is_enabled"))
     if not with_secrets:
         rule.pop("entries_encrypted", None)
@@ -92,12 +94,13 @@ def _schedule_values(values: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
 async def create_rule(values: dict[str, Any]) -> int:
     now = _utcnow()
     return await db.execute_returning_lastrowid(
-        "INSERT INTO rmm_event_log_rules (name, company_id, asset_id, action, conditions_json, script_id, "
+        "INSERT INTO rmm_event_log_rules (name, company_id, asset_id, action, target_rules_json, conditions_json, script_id, "
         "entries_encrypted, inputs_json, timeout_seconds, cooldown_minutes, is_enabled, schedule_mode, delay_minutes, "
         "run_time, schedule_timezone, created_by_user_id, updated_by_user_id, created_at, updated_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             values["name"], values["company_id"], values["asset_id"], values["action"],
+            json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
             json.dumps(values["conditions"]), values["script_id"], values["entries_encrypted"],
             json.dumps(values["inputs"]), values["timeout_seconds"], values["cooldown_minutes"],
             1 if values["is_enabled"] else 0, *_schedule_values(values), values["user_id"], values["user_id"], now, now,
@@ -108,11 +111,12 @@ async def create_rule(values: dict[str, Any]) -> int:
 async def update_rule(rule_id: int, values: dict[str, Any]) -> None:
     await db.execute(
         "UPDATE rmm_event_log_rules SET name = %s, company_id = %s, asset_id = %s, action = %s, "
-        "conditions_json = %s, script_id = %s, entries_encrypted = %s, inputs_json = %s, timeout_seconds = %s, "
+        "target_rules_json = %s, conditions_json = %s, script_id = %s, entries_encrypted = %s, inputs_json = %s, timeout_seconds = %s, "
         "cooldown_minutes = %s, is_enabled = %s, schedule_mode = %s, delay_minutes = %s, run_time = %s, "
         "schedule_timezone = %s, updated_by_user_id = %s, updated_at = %s WHERE id = %s",
         (
             values["name"], values["company_id"], values["asset_id"], values["action"],
+            json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
             json.dumps(values["conditions"]), values["script_id"], values["entries_encrypted"],
             json.dumps(values["inputs"]), values["timeout_seconds"], values["cooldown_minutes"],
             1 if values["is_enabled"] else 0, *_schedule_values(values), values["user_id"], _utcnow(), rule_id,

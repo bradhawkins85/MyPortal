@@ -88,7 +88,7 @@
       <h2 class="card__title" id="rmm-event-log-rule-form-heading">{{ "Edit " ~ editing.name if editing.id else "Add a rule" }}</h2>
       <p class="card__subtitle">Text comparisons ignore case. For “is one of”, separate values with commas. Levels are Critical, Error, Warning, Information and Verbose; “is at least” matches that level and anything more severe.</p>
     </div></header>
-    <form method="post" action="/rmm/event-logs/rules{% if editing.id %}/{{ editing.id }}{% endif %}" class="card__body form">
+    <form method="post" action="/rmm/event-logs/rules{% if editing.id %}/{{ editing.id }}{% endif %}" class="card__body form" data-rmm-event-rule-form>
       {% include "partials/csrf.html" %}
       {% if errors %}
       <div class="alert alert--error" role="alert"><ul>{% for message in errors.values() %}<li>{{ message }}</li>{% endfor %}</ul></div>
@@ -115,6 +115,16 @@
         </div>
       </div>
 
+      <div class="form-field">
+        <label class="form-label" for="rmm-rule-target-mode">Which of those devices</label>
+        <select class="form-input" id="rmm-rule-target-mode" name="target_mode">
+          <option value="all" {% if editing.target_mode != 'rules' %}selected{% endif %}>All devices in scope</option>
+          <option value="rules" {% if editing.target_mode == 'rules' %}selected{% endif %}>Only devices that match rules</option>
+        </select>
+      </div>
+      <input type="hidden" name="target_rules" value="{{ editing.target_rules | default(none) | tojson | forceescape }}">
+      {% set targeting_id = "rmm-event-targeting-title" %}{% include "rmm/_device_rules.html" %}
+      <noscript><p class="alert alert--warning">JavaScript is required to build and preview device rules.</p></noscript>
       <fieldset class="rmm-event-log-rule__conditions">
         <legend class="form-label">When an event matches all of these</legend>
         <p class="form-help">Blank rows are ignored. Event ID and level take only “is”, “is not”, “is one of”, “is not one of” or “is at least”.</p>
@@ -225,4 +235,9 @@
   </section>
   {% endif %}
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
+<script src="{{ static_url('/static/js/rmm_event_rule_targeting.js') }}" defer></script>
 {% endblock %}
