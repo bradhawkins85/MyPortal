@@ -1,135 +1,57 @@
 {% extends "base.html" %}
-
-{% block styles %}
-  <link rel="stylesheet" href="{{ static_url('/static/css/custom_forms.css') }}" />
-{% endblock %}
-
-{% macro render_field(field) %}
-{% if field.field_type == 'hidden' %}
-  {# Hidden fields are stored from their default; nothing to render. #}
-{% else %}
-{% set cfg = field.config or {} %}
-{% set fid = field.id %}
-<div class="form-field cf-pub-field" data-cf-pub-field data-field-id="{{ fid }}" data-field-type="{{ field.field_type }}">
-  <label class="form-label{% if field.required %} required{% endif %}" for="cf-f-{{ fid }}">{{ field.label }}{% if field.required %} <span aria-hidden="true">*</span>{% endif %}</label>
-  {% if field.field_type == 'text' %}
-    <input class="form-input" id="cf-f-{{ fid }}" type="text" placeholder="{{ field.placeholder or '' }}" value="{{ field.default_value or '' }}" data-cf-value />
-  {% elif field.field_type == 'password' %}
-    <div class="cf-password-field">
-      <input class="form-input" id="cf-f-{{ fid }}" type="password" placeholder="{{ field.placeholder or '••••••••' }}" value="{{ field.default_value or '' }}" data-cf-value />
-      <button type="button" class="cf-password-toggle" data-cf-password-toggle aria-label="Show password">Show</button>
-    </div>
-  {% elif field.field_type == 'textarea' %}
-    <textarea class="form-input" id="cf-f-{{ fid }}" rows="4" placeholder="{{ field.placeholder or '' }}" data-cf-value>{{ field.default_value or '' }}</textarea>
-  {% elif field.field_type == 'email' %}
-    <input class="form-input" id="cf-f-{{ fid }}" type="email" placeholder="{{ field.placeholder or '' }}" data-cf-value />
-  {% elif field.field_type == 'url' %}
-    <input class="form-input" id="cf-f-{{ fid }}" type="url" placeholder="{{ field.placeholder or 'https://example.com' }}" value="{{ field.default_value or '' }}" data-cf-value />
-  {% elif field.field_type == 'number' %}
-    <input class="form-input" id="cf-f-{{ fid }}" type="number" placeholder="{{ field.placeholder or '' }}" value="{{ field.default_value or '' }}" data-cf-value />
-  {% elif field.field_type == 'date' %}
-    <input class="form-input" id="cf-f-{{ fid }}" type="date" value="{{ field.default_value or '' }}" data-cf-value />
-  {% elif field.field_type == 'time' %}
-    <input class="form-input" id="cf-f-{{ fid }}" type="time" value="{{ field.default_value or '' }}" data-cf-value />
-  {% elif field.field_type == 'select' %}
-    <select class="form-input" id="cf-f-{{ fid }}" data-cf-value>
-      <option value="">Select an option…</option>
-      {% for opt in field.options %}<option value="{{ opt }}"{% if opt == field.default_value %} selected{% endif %}>{{ opt }}</option>{% endfor %}
-    </select>
-  {% elif field.field_type == 'multiselect' %}
-    <select class="form-input" id="cf-f-{{ fid }}" multiple data-cf-value>
-      {% for opt in field.options %}<option value="{{ opt }}"{% if opt == field.default_value %} selected{% endif %}>{{ opt }}</option>{% endfor %}
-    </select>
-    <p class="form-help">Hold Ctrl (Windows) or ⌘ (Mac) and click to select multiple options.</p>
-  {% elif field.field_type == 'radio' %}
-    <div class="cf-radio-group">
-      {% for opt in field.options %}
-      <label class="scf-radio"><input type="radio" name="cf-radio-{{ fid }}" value="{{ opt }}"{% if opt == field.default_value %} checked{% endif %} data-cf-value /> {{ opt }}</label>
-      {% endfor %}
-    </div>
-  {% elif field.field_type == 'checkbox' %}
-    <label class="scf-check"><input type="checkbox" name="cf-check-{{ fid }}"{% if field.default_value %} checked{% endif %} data-cf-value /> <span>{{ field.help_text or 'Yes' }}</span></label>
-  {% elif field.field_type == 'rating' %}
-    {% set rmax = cfg.get('max', 5) or 5 %}
-    <div class="cf-rating" data-cf-rating data-max="{{ rmax }}">
-      {% for i in range(1, rmax + 1) %}
-      <label class="cf-rating__star"><input type="radio" name="cf-rating-{{ fid }}" value="{{ i }}"{% if field.default_value and (field.default_value | int) == i %} checked{% endif %} data-cf-value /> <span class="cf-rating__glyph" aria-hidden="true">★</span><span class="cf-rating__label">{{ i }}</span></label>
-      {% endfor %}
-    </div>
-  {% elif field.field_type == 'matrix' %}
-    {% set mrows = cfg.get('rows', []) %}
-    {% set mcols = cfg.get('columns', []) %}
-    <div class="cf-matrix-wrap">
-      <table class="cf-matrix">
-        <thead>
-          <tr><th scope="col"></th>{% for col in mcols %}<th scope="col">{{ col }}</th>{% endfor %}</tr>
-        </thead>
-        <tbody>
-          {% for row in mrows %}
-          <tr>
-            <th scope="row">{{ row }}</th>
-            {% for col in mcols %}
-            <td><label class="cf-matrix__cell"><input type="radio" name="cf-matrix-{{ fid }}-{{ loop.index }}" value="{{ col }}" data-cf-matrix-row="{{ row }}" /></label></td>
-            {% endfor %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% elif field.field_type == 'signature' %}
-    <div class="cf-signature">
-      <canvas class="cf-signature__canvas" data-cf-signature width="560" height="160"></canvas>
-      <div class="cf-signature__actions">
-        <button type="button" class="button button--ghost" data-cf-signature-clear>Clear</button>
-        <span class="cf-signature__hint">Sign with your mouse or finger</span>
-      </div>
-      <input type="hidden" data-cf-value />
-    </div>
-  {% elif field.field_type == 'audio' %}
-    {% set amax = cfg.get('max_clips', 5) or 5 %}
-    <input class="form-input" id="cf-f-{{ fid }}" type="file" name="file_{{ fid }}" accept="audio/*" multiple data-cf-file data-max-clips="{{ amax }}" />
-    <div class="cf-audio">
-      <div class="cf-audio__list" data-cf-audio-list></div>
-    </div>
-  {% elif field.field_type == 'file' %}
-    <input class="form-input" id="cf-f-{{ fid }}" type="file" name="file_{{ fid }}" data-cf-file />
-  {% endif %}
-  {% if field.help_text and field.field_type not in ('checkbox', 'rating', 'signature', 'audio') %}<p class="form-help">{{ field.help_text }}</p>{% endif %}
-</div>
-{% endif %}
-{% endmacro %}
-
-{% block header_title %}
-  <span class="header__title-text">{{ form.name }}</span>
-{% endblock %}
-
+{% from "macros/header.html" import page_header_actions %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/custom_forms_admin.css') }}" />{% endblock %}
+{% block header_title %}<span class="header__title-text">{{ form.name }}</span>{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label": "Back to forms", "type": "link", "href": "/forms"}]) }}{% endblock %}
 {% block content %}
-<div class="admin-grid">
+<div class="cf-public">
   <section class="card card--panel" aria-labelledby="cf-submit-heading">
-    <div class="card__header">
-      <div>
-        <h2 class="card__title" id="cf-submit-heading">{{ form.name }}</h2>
-        {% if form.description %}<p class="card__subtitle">{{ form.description }}</p>{% endif %}
-      </div>
-    </div>
+    <header class="card__header"><div><h2 class="card__title" id="cf-submit-heading">Your request</h2><p class="card__subtitle">{{ form.description or 'Complete the questions below to open a support request.' }}</p><p class="form-help">Each submission creates a support ticket. Fields marked required need an answer.</p></div></header>
     <div class="card__body">
-      <form id="cf-submit-form" data-cf-submit data-slug="{{ form.slug }}">
-        {% for field in fields %}
-        {{ render_field(field) }}
-        {% endfor %}
-        {% if not fields %}
-        <p class="text-muted">This form has no fields yet. Please contact support.</p>
-        {% endif %}
-        <div class="form-actions">
-          <button type="submit" class="button button--primary" {% if not fields %}disabled{% endif %}>Submit</button>
+      <form id="cf-submit-form" class="cf-public__form" method="post" action="/forms/{{ form.slug }}/submit" enctype="multipart/form-data" data-cf-submit data-slug="{{ form.slug }}">
+        {% include "partials/csrf.html" %}
+        <div class="cf-message{% if errors %} cf-message--error{% endif %}" tabindex="-1" role="{{ 'alert' if errors else 'status' }}" aria-live="polite" data-cf-status{% if not errors %} hidden{% endif %}>{% if errors %}<p>Please check your answers:</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}</div>
+        {% for field in fields if field.field_type != 'hidden' %}
+        {% set fid = field.id %}
+        {% set cfg = field.config or {} %}
+        {% set value = (submitted_values | default({})).get(fid, field.default_value or '') %}
+        {% set described = ' aria-describedby="cf-help-' ~ fid ~ '"' if field.help_text else '' %}
+        <div class="form-field cf-pub-field" data-cf-pub-field data-field-id="{{ fid }}" data-field-type="{{ field.field_type }}" data-required="{{ 'true' if field.required else 'false' }}">
+          {% if field.field_type in ['radio', 'multiselect'] %}
+          <fieldset class="cf-public__choices"{% if field.help_text %} aria-describedby="cf-help-{{ fid }}"{% endif %}><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend>
+            {% for opt in field.options %}<label class="cf-public__choice"><input type="{{ 'radio' if field.field_type == 'radio' else 'checkbox' }}" name="field_{{ fid }}" value="{{ opt }}"{% if opt == value or (value is not string and opt in value) %} checked{% endif %}{% if field.required and field.field_type == 'radio' %} required{% endif %} data-cf-value /><span>{{ opt }}</span></label>{% endfor %}
+          </fieldset>
+          {% elif field.field_type == 'rating' %}
+          <fieldset class="cf-public__choices"><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend><div class="cf-rating-choices">{% for score in range(1, (cfg.get('max', 5) | int) + 1) %}<label class="cf-type-choice"><input type="radio" name="field_{{ fid }}" value="{{ score }}"{% if value | int == score %} checked{% endif %}{% if field.required %} required{% endif %} data-cf-value /><span>{{ score }}</span></label>{% endfor %}</div><p class="form-help">Choose a rating from 1 to {{ cfg.get('max', 5) }}.</p></fieldset>
+          {% elif field.field_type == 'matrix' %}
+          <fieldset class="cf-public__choices"><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend>{% for row in cfg.get('rows', []) %}<div class="form-field"><label class="form-label" for="cf-matrix-{{ fid }}-{{ loop.index0 }}">{{ row }}</label><select class="form-input" id="cf-matrix-{{ fid }}-{{ loop.index0 }}" name="matrix_{{ fid }}_{{ loop.index0 }}" data-cf-matrix-row="{{ row }}"{% if field.required %} required{% endif %}><option value="">Choose an answer…</option>{% for column in cfg.get('columns', []) %}<option value="{{ column }}"{% if value is mapping and value.get(row) == column %} selected{% endif %}>{{ column }}</option>{% endfor %}</select></div>{% endfor %}</fieldset>
+          {% elif field.field_type == 'signature' %}
+          <fieldset class="cf-public__choices"><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend><div class="cf-signature" data-cf-signature-wrap hidden><canvas width="560" height="160" data-cf-signature aria-label="Draw your signature"></canvas><input type="hidden" name="field_{{ fid }}" data-cf-value /><button class="button button--ghost" type="button" data-cf-signature-clear>Clear signature</button><p class="form-help">Draw with your mouse or finger, or upload an image below.</p></div><label class="form-label" for="cf-signature-upload-{{ fid }}">Upload a signature image</label><input class="form-input" type="file" id="cf-signature-upload-{{ fid }}" name="signature_{{ fid }}" accept="image/png,image/jpeg" data-cf-signature-upload /><p class="form-help">PNG or JPEG, up to 1 MB.</p></fieldset>
+          {% elif field.field_type == 'checkbox' %}
+          <label class="cf-public__choice" for="cf-f-{{ fid }}"><input id="cf-f-{{ fid }}" type="checkbox" name="field_{{ fid }}" value="1"{% if value in [true, 1, '1', 'true', 'on'] %} checked{% endif %}{% if field.required %} required{% endif %}{{ described | safe }} data-cf-value /><span>{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></span></label>
+          {% else %}
+          <label class="form-label" for="cf-f-{{ fid }}">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></label>
+          {% if field.field_type == 'textarea' %}
+          <textarea class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}" rows="4" placeholder="{{ field.placeholder or '' }}"{% if field.required %} required{% endif %}{{ described | safe }} data-cf-value>{{ value }}</textarea>
+          {% elif field.field_type == 'select' %}
+          <select class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}"{% if field.required %} required{% endif %}{{ described | safe }} data-cf-value><option value="">Select an option…</option>{% for opt in field.options %}<option value="{{ opt }}"{% if opt == value %} selected{% endif %}>{{ opt }}</option>{% endfor %}</select>
+          {% elif field.field_type in ['file', 'audio'] %}
+          <input class="form-input" id="cf-f-{{ fid }}" name="file_{{ fid }}" type="file"{% if field.field_type == 'audio' %} accept="audio/*" multiple data-max-clips="{{ cfg.get('max_clips', 5) }}"{% endif %}{% if field.required %} required{% endif %}{{ described | safe }} data-cf-file />
+          {% if field.field_type == 'audio' %}<div data-cf-audio-list></div>{% endif %}
+          {% else %}
+          <input class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}" type="{{ field.field_type }}"{% if field.field_type == 'number' %} step="any"{% endif %} placeholder="{{ field.placeholder or '' }}" value="{{ value }}"{% if field.required %} required{% endif %}{{ described | safe }} data-cf-value />
+          {% if field.field_type == 'password' %}<button type="button" class="button button--ghost" data-cf-password-toggle aria-label="Show password" aria-pressed="false">Show</button>{% endif %}
+          {% endif %}
+          {% endif %}
+          {% if field.help_text %}<p class="form-help" id="cf-help-{{ fid }}">{{ field.help_text }}</p>{% endif %}
+          <p class="cf-public__field-error" id="cf-error-{{ fid }}" data-cf-field-error hidden></p>
         </div>
-        <p class="cf-submit-status" data-cf-status hidden></p>
+        {% endfor %}
+        {% if not fields %}<div class="cf-empty"><h3>This form is still being prepared</h3><p>No questions have been added yet. Please contact support or choose another form.</p><a href="/forms">Back to available forms</a></div>{% endif %}
+        <div class="form-actions"><button class="button button--primary" type="submit"{% if not fields %} disabled{% endif %}>Submit request</button></div>
       </form>
     </div>
   </section>
 </div>
 {% endblock %}
-
-{% block scripts %}
-  <script src="{{ static_url('/static/js/forms.js') }}" defer></script>
-{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/forms.js') }}" defer></script>{% endblock %}

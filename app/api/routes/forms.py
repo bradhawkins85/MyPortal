@@ -6,9 +6,11 @@ Admin CRUD lives under ``/api/forms``; the public submission endpoint is at
 from __future__ import annotations
 
 import json
+import base64
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
 from app.api.dependencies.auth import get_current_user
@@ -22,12 +24,9 @@ from app.schemas.forms import (
     FormUpdate,
 )
 from app.services import custom_forms
-from app.services.custom_forms import (
-    CONFIG_TYPES,
-    FILE_TYPES,
-    FormValidationError,
-    OPTION_TYPES,
-)
+from app.services.custom_forms import CONFIG_TYPES, FILE_TYPES, FormValidationError, OPTION_TYPES
+from app.security.flash import flash_redirect
+
 
 router = APIRouter(tags=["forms"])
 
@@ -102,7 +101,7 @@ async def api_update_form(
     name = (payload.name if payload.name is not None else form["name"]).strip()
     description = (
         payload.description
-        if payload.description is not None
+        if "description" in payload.model_fields_set
         else form.get("description")
     )
     active = payload.active if payload.active is not None else form.get("active", True)
@@ -170,11 +169,11 @@ async def api_update_field(
     ).strip()
     new_placeholder = (
         payload.placeholder
-        if payload.placeholder is not None
+        if "placeholder" in payload.model_fields_set
         else existing["placeholder"]
     )
     new_help = (
-        payload.help_text if payload.help_text is not None else existing["help_text"]
+        payload.help_text if "help_text" in payload.model_fields_set else existing["help_text"]
     )
     new_required = (
         payload.required
@@ -183,7 +182,7 @@ async def api_update_field(
     )
     new_default = (
         payload.default_value
-        if payload.default_value is not None
+        if "default_value" in payload.model_fields_set
         else existing["default_value"]
     )
     new_options = (
@@ -289,6 +288,100 @@ async def api_list_submissions(
 
 
 # ---------------------------------------------------------------------------
+# HTML admin form submissions
+# ---------------------------------------------------------------------------
+
+
+@router.post("/admin/custom-forms/save", include_in_schema=False)
+async def save_custom_form_page(
+    request: Request, user: dict[str, Any] = Depends(get_current_user)
+):
+    """Progressive enhancement fallback, using the same validation as the API."""
+    _require_admin(user)
+    parsed = await request.form()
+    destination = "/admin/custom-forms"
+    try:
+        action = str(parsed.get("action") or "")
+        if action == "create_form":
+            form = await api_create_form(
+                payload=FormCreate(name=str(parsed.get("name") or "").strip(), description=parsed.get("description") or None),
+                user=user,
+            )
+            return flash_redirect(f"{destination}?form_id={form['id']}", "Form created. Add your first field.", "success")
+        form_id = int(parsed.get("form_id") or 0)
+        await _get_admin_form(form_id, user)
+        destination += f"?form_id={form_id}"
+        if action == "update_form":
+            await api_update_form(form_id, FormUpdate(
+                name=str(parsed.get("name") or "").strip(), description=parsed.get("description") or None,
+                active=parsed.get("active") == "1",
+            ), user)
+        elif action == "delete_form":
+            await api_delete_form(form_id, user)
+            destination = "/admin/custom-forms"
+        elif action == "save_field":
+            field_type = str(parsed.get("field_type") or "")
+            config = None
+            if field_type == "matrix":
+                config = {
+                    "rows": [line.strip() for line in str(parsed.get("matrix_rows") or "").splitlines() if line.strip()],
+                    "columns": [line.strip() for line in str(parsed.get("matrix_columns") or "").splitlines() if line.strip()],
+                }
+            elif field_type == "rating":
+                config = {"max": int(parsed.get("rating_max") or 5)}
+            elif field_type == "audio":
+                config = {"max_clips": int(parsed.get("audio_max") or 5)}
+            payload = {
+                "field_type": field_type,
+                "config": config,
+                "label": str(parsed.get("label") or "").strip(),
+                "placeholder": parsed.get("placeholder") or None,
+                "help_text": parsed.get("help_text") or None,
+                "default_value": parsed.get("default_value") or None,
+                "required": parsed.get("required") == "1",
+                "options": [line.strip() for line in str(parsed.get("options") or "").splitlines() if line.strip()],
+            }
+            if parsed.get("field_id"):
+                await api_update_field(form_id, int(parsed["field_id"]), FormFieldUpdate(**payload), user)
+            else:
+                await api_create_field(form_id, FormFieldCreate(**payload), user)
+        elif action == "move_field":
+            order = [field["id"] for field in await forms_repo.list_fields(form_id)]
+            field_id = int(parsed.get("field_id") or 0)
+            if field_id not in order or parsed.get("direction") not in {"up", "down"}:
+                raise HTTPException(status_code=400, detail="Choose a valid field and direction.")
+            index = order.index(field_id)
+            other = index + (-1 if parsed["direction"] == "up" else 1)
+            if 0 <= other < len(order):
+                order[index], order[other] = order[other], order[index]
+                await api_reorder_fields(form_id, FieldReorder(field_ids=order), user)
+        elif action == "delete_field":
+            await api_delete_field(form_id, int(parsed.get("field_id") or 0), user)
+        elif action in {"add_access", "remove_access"}:
+            user_id = int(parsed.get("user_id") or 0)
+            if user_id < 1:
+                raise HTTPException(status_code=400, detail="Choose a user to update access.")
+            ids = set(await forms_repo.list_access_user_ids(form_id))
+            if action == "add_access":
+                ids.add(user_id)
+            else:
+                ids.discard(user_id)
+            await api_set_access(form_id, FormAccessUpdate(user_ids=sorted(ids)), user)
+        else:
+            raise HTTPException(status_code=400, detail="Unknown form action.")
+    except ValidationError as exc:
+        message = "; ".join(f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}" for error in exc.errors())
+        return flash_redirect(destination, message, "error")
+    except ValueError:
+        return flash_redirect(destination, "Choose a valid form, field or user.", "error")
+    except HTTPException as exc:
+        if exc.status_code in {401, 403, 404}:
+            raise
+        return flash_redirect(destination, str(exc.detail), "error")
+    return flash_redirect(destination, "Changes saved.", "success")
+
+
+# ---------------------------------------------------------------------------
 # Public: submit
 # ---------------------------------------------------------------------------
 
@@ -310,6 +403,7 @@ async def api_submit_form(
     fields = await forms_repo.list_fields(form["id"])
 
     parsed = await request.form()
+    html_submission = "text/html" in request.headers.get("accept", "") and not request.headers.get("x-requested-with")
     values: dict[str, Any] = {}
     raw_data = parsed.get("form_data")
     if isinstance(raw_data, str) and raw_data:
@@ -323,11 +417,34 @@ async def api_submit_form(
                     values[int(key)] = value
                 except (TypeError, ValueError):
                     values[key] = value
+    else:
+        for field in fields:
+            key = f"field_{field['id']}"
+            values[field["id"]] = parsed.getlist(key) if field["field_type"] == "multiselect" else parsed.get(key, "")
+            if field["field_type"] == "matrix":
+                values[field["id"]] = {
+                    row: parsed.get(f"matrix_{field['id']}_{index}")
+                    for index, row in enumerate((field.get("config") or {}).get("rows", []))
+                    if parsed.get(f"matrix_{field['id']}_{index}")
+                }
+    for field in fields:
+        if field["field_type"] == "signature":
+            upload = parsed.get(f"signature_{field['id']}")
+            if getattr(upload, "filename", None):
+                if upload.content_type not in {"image/png", "image/jpeg"}:
+                    raise HTTPException(status_code=400, detail="Upload a PNG or JPEG signature image.")
+                image_data = await upload.read(1024 * 1024 + 1)
+                if len(image_data) > 1024 * 1024:
+                    raise HTTPException(status_code=400, detail="Signature images must be 1 MB or smaller.")
+                values[field["id"]] = f"data:{upload.content_type};base64," + base64.b64encode(image_data).decode("ascii")
 
     files_by_field: dict[int, list[Any]] = {}
     for field in fields:
         if field["field_type"] in FILE_TYPES:
-            files_by_field[field["id"]] = parsed.getlist(f"file_{field['id']}")
+            files_by_field[field["id"]] = [
+                upload for upload in parsed.getlist(f"file_{field['id']}")
+                if getattr(upload, "filename", None)
+            ]
 
     try:
         result = await custom_forms.submit_form(
@@ -340,7 +457,19 @@ async def api_submit_form(
             user_agent=request.headers.get("user-agent"),
         )
     except FormValidationError as exc:
+        if html_submission:
+            from app.main import _render_template
+
+            response = await _render_template(
+                "forms/submit.html", request, user,
+                extra={"title": form["name"], "form": form, "fields": fields, "errors": exc.errors, "submitted_values": values},
+            )
+            response.status_code = 400
+            return response
         raise HTTPException(status_code=400, detail={"errors": exc.errors})
+
+    if html_submission:
+        return flash_redirect(f"/tickets/{result['ticket_id']}", "Your request has been submitted.", "success")
 
     return JSONResponse(
         status_code=201,

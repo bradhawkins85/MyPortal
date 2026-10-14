@@ -1,34 +1,13 @@
 {% extends "base.html" %}
-
-{% block header_title %}
-  <span class="header__title-text">Forms</span>
-{% endblock %}
-
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/custom_forms_admin.css') }}" />{% endblock %}
+{% block header_title %}<span class="header__title-text">Forms</span>{% endblock %}
 {% block content %}
-<div class="admin-grid">
+<div class="cf-public">
   <section class="card card--panel" aria-labelledby="cf-pub-heading">
-    <div class="card__header">
-      <div>
-        <h2 class="card__title" id="cf-pub-heading">Available forms</h2>
-        <p class="card__subtitle">Complete a form to open a support request. Each submission creates a ticket.</p>
-      </div>
-    </div>
+    <header class="card__header"><div><h2 class="card__title" id="cf-pub-heading">Start a request</h2><p class="card__subtitle">Choose a form and tell us what you need. Each submission creates a support ticket.</p></div></header>
     <div class="card__body">
-      {% if forms %}
-      <ul class="cf-pub-list">
-        {% for form in forms %}
-        <li class="cf-pub-row">
-          <div class="cf-pub-row__main">
-            <a class="cf-pub-row__name" href="/forms/{{ form.slug }}">{{ form.name }}</a>
-            {% if form.description %}<p class="cf-pub-row__desc">{{ form.description }}</p>{% endif %}
-          </div>
-          <a class="button button--primary" href="/forms/{{ form.slug }}">Open</a>
-        </li>
-        {% endfor %}
-      </ul>
-      {% else %}
-      <p class="text-muted">No forms are available to you right now.</p>
-      {% endif %}
+      {% if forms %}<ul class="cf-public__list">{% for form in forms %}<li><a class="cf-public__link" href="/forms/{{ form.slug }}"><strong>{{ form.name }}</strong>{% if form.description %}<p>{{ form.description }}</p>{% endif %}<span class="cf-public__open">Open form</span></a></li>{% endfor %}</ul>
+      {% else %}<div class="cf-empty"><h3>No forms are available</h3><p>There are no forms you can submit right now. Contact support if you need help finding the right request form.</p></div>{% endif %}
     </div>
   </section>
 </div>
