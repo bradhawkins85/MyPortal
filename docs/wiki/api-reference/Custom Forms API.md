@@ -82,3 +82,14 @@ Resetting the form or leaving the page releases the microphone and local preview
 Uploads remain available when recording is unsupported or permission is denied,
 and without JavaScript. Microphone permission and blob media playback are enabled
 only on `/forms/{slug}` pages by the portal's security headers.
+
+File fields offer **Take photo** and **Record video** controls using native mobile
+camera capture (`capture="environment"` with image/video file inputs). Devices
+that support capture open their camera; other browsers may show a file picker.
+Captured media uses the same `file_{field_id}` attachment flow and 50 MB limit.
+Users can review or remove the attachment, and choosing another file or capture
+replaces it. Cancelling capture keeps the existing attachment. Normal file uploads
+remain available, including without JavaScript. HEIC/HEIF photos and MP4/QuickTime
+videos are accepted; HEIC/HEIF photos are downloadable even when a browser cannot
+preview them. Native camera capture does not require enabling in-page camera
+streaming in the portal's Permissions-Policy.

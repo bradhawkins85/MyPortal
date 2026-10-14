@@ -226,6 +226,13 @@ def test_validate_file_upload_success():
     assert error is None
 
 
+@pytest.mark.parametrize('mime_type', ['image/heic', 'image/heif', 'video/mp4', 'video/quicktime'])
+def test_mobile_camera_formats_can_be_uploaded(mime_type):
+    upload = MagicMock(filename='camera-attachment', size=1024, content_type=mime_type)
+    assert attachments_service.validate_file_upload(upload) == (True, None)
+    assert not attachments_service.can_preview_inline(mime_type)
+
+
 def test_validate_file_upload_no_filename():
     """Test validation fails with no filename."""
     mock_file = MagicMock()
@@ -333,6 +340,7 @@ async def test_save_uploaded_file_success():
     }
     
     with patch("app.services.ticket_attachments._get_upload_directory") as mock_dir, \
+         patch("app.services.ticket_attachments.blocklist_repo.is_blocked", new=AsyncMock(return_value=False)) as mock_blocked, \
          patch("app.services.ticket_attachments.attachments_repo.create_attachment", return_value=mock_attachment), \
          patch("builtins.open", create=True) as mock_open:
         
@@ -348,6 +356,7 @@ async def test_save_uploaded_file_success():
     assert result["id"] == 1
     assert result["ticket_id"] == 5
     mock_file.read.assert_called_once()
+    mock_blocked.assert_awaited_once()
 
 
 @pytest.mark.asyncio
