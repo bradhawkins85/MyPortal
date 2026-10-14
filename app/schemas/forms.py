@@ -1,9 +1,10 @@
 """Pydantic schemas for the Custom Forms feature."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
 
 class FormCreate(BaseModel):
@@ -89,3 +90,14 @@ class SubmissionResponse(BaseModel):
     user_agent: Optional[str]
     submitted_by: Optional[int]
     created_at: Optional[str]
+
+class FormShareLinkCreate(BaseModel):
+    company_id: int = Field(gt=0)
+    expires_at: AwareDatetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def future_expiry(cls, value):
+        if value is not None and value <= datetime.now(timezone.utc):
+            raise ValueError("Expiry must be in the future.")
+        return value

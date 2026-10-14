@@ -27,6 +27,7 @@ DEFAULT_EXEMPT_PREFIXES = (
     "/auth/password/forgot",
     "/auth/password/reset",
     "/api/knowledge-base/search",
+    "/public/forms/",  # Bearer link only; these endpoints never use a session identity.
 )
 
 

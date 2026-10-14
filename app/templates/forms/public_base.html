@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ static_url('/static/css/app.css') }}" />
+  {% block styles %}{% endblock %}
+</head>
+<body class="theme-default">
+  <main class="cf-public-shell">
+    <h1>{{ title }}</h1>
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

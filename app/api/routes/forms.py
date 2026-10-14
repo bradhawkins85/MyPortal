@@ -7,18 +7,23 @@ from __future__ import annotations
 
 import json
 import base64
+import hashlib
+import secrets
+from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
 from app.api.dependencies.auth import get_current_user
 from app.repositories import forms as forms_repo
+from app.repositories import companies as companies_repo
 from app.schemas.forms import (
     FieldReorder,
     FormAccessUpdate,
     FormCreate,
+    FormShareLinkCreate,
     FormFieldCreate,
     FormFieldUpdate,
     FormUpdate,
@@ -400,8 +405,11 @@ async def api_submit_form(
         raise HTTPException(
             status_code=403, detail="You do not have access to this form."
         )
-    fields = await forms_repo.list_fields(form["id"])
+    return await _submit_form_request(form, request, user)
 
+
+async def _submit_form_request(form, request, user, *, public=False, submit_action=None):
+    fields = await forms_repo.list_fields(form["id"])
     parsed = await request.form()
     html_submission = "text/html" in request.headers.get("accept", "") and not request.headers.get("x-requested-with")
     values: dict[str, Any] = {}
@@ -458,6 +466,9 @@ async def api_submit_form(
         )
     except FormValidationError as exc:
         if html_submission:
+            if public:
+                return _render_public_form(request, form, fields, submit_action,
+                                           errors=exc.errors, submitted_values=values, status_code=400)
             from app.main import _render_template
 
             response = await _render_template(
@@ -467,6 +478,11 @@ async def api_submit_form(
             response.status_code = 400
             return response
         raise HTTPException(status_code=400, detail={"errors": exc.errors})
+
+    if public:
+        if html_submission:
+            return _render_public_form(request, form, [], submit_action, success=True)
+        return JSONResponse(status_code=201, content={"status": "ok", "message": "Your submission was received."}, headers={"Cache-Control": "no-store"})
 
     if html_submission:
         return flash_redirect(f"/tickets/{result['ticket_id']}", "Your request has been submitted.", "success")
@@ -481,3 +497,123 @@ async def api_submit_form(
             "attachments": result["attachments"],
         },
     )
+
+
+# Public sharing is a separate bearer-token capability, never a portal session.
+@router.post("/api/forms/{form_id}/share-links", status_code=201)
+async def api_create_share_link(form_id: int, payload: FormShareLinkCreate,
+                                request: Request, response: Response, user: dict[str, Any] = Depends(get_current_user)):
+    form = await _get_admin_form(form_id, user)
+    response.headers["Cache-Control"] = "no-store"
+    if not await companies_repo.get_company_by_id(payload.company_id):
+        raise HTTPException(status_code=400, detail="Choose an existing company.")
+    token = secrets.token_urlsafe(32)
+    expires_at = payload.expires_at.astimezone(timezone.utc).replace(tzinfo=None) if payload.expires_at else None
+    link = await forms_repo.create_share_link(
+        form_id=form_id, company_id=payload.company_id,
+        token_hash=hashlib.sha256(token.encode()).hexdigest(), expires_at=expires_at,
+        created_by=user.get("id"),
+    )
+    url = str(request.url_for("public_shared_form", slug=form["slug"]).include_query_params(token=token))
+    return {**link, "url": url}
+
+
+@router.get("/api/forms/{form_id}/share-links")
+async def api_list_share_links(form_id: int, user: dict[str, Any] = Depends(get_current_user)):
+    await _get_admin_form(form_id, user)
+    return await forms_repo.list_share_links(form_id)
+
+
+@router.delete("/api/forms/{form_id}/share-links/{link_id}")
+async def api_revoke_share_link(form_id: int, link_id: int, user: dict[str, Any] = Depends(get_current_user)):
+    await _get_admin_form(form_id, user)
+    await forms_repo.revoke_share_link(form_id, link_id)
+    return {"ok": True}
+
+
+@router.get("/admin/custom-forms/{form_id}/sharing", include_in_schema=False)
+async def share_links_page(form_id: int, request: Request, user: dict[str, Any] = Depends(get_current_user)):
+    return await _share_links_page(form_id, request, user)
+
+
+async def _share_links_page(form_id, request, user, *, url=None, error=None):
+    form = await _get_admin_form(form_id, user)
+    from app.main import _render_template
+    response = await _render_template("admin/custom_form_sharing.html", request, user, extra={
+        "title": "Share form", "form": form, "share_url": url, "error": error,
+        "links": await forms_repo.list_share_links(form_id),
+        "companies": await companies_repo.list_companies(),
+    })
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@router.post("/admin/custom-forms/{form_id}/sharing", include_in_schema=False)
+async def save_share_links_page(form_id: int, request: Request, user: dict[str, Any] = Depends(get_current_user)):
+    await _get_admin_form(form_id, user)
+    data = await request.form()
+    try:
+        if data.get("action") == "revoke":
+            await api_revoke_share_link(form_id, int(data.get("link_id") or 0), user)
+            return flash_redirect(f"/admin/custom-forms/{form_id}/sharing", "Link revoked.", "success")
+        expiry = str(data.get("expires_at") or "").strip()
+        if data.get("expiry_mode") != "never" and not expiry:
+            raise ValueError("Choose an expiry date or Never expires.")
+        payload = FormShareLinkCreate(
+            company_id=int(data.get("company_id") or 0),
+            expires_at=None if data.get("expiry_mode") == "never" else expiry + "+00:00",
+        )
+        result = await api_create_share_link(form_id, payload, request, Response(), user)
+    except (ValueError, ValidationError):
+        return await _share_links_page(form_id, request, user, error="Choose a company and a future expiry date (UTC), or Never expires.")
+    except HTTPException as exc:
+        if exc.status_code != 400:
+            raise
+        return await _share_links_page(form_id, request, user, error=str(exc.detail))
+    return await _share_links_page(form_id, request, user, url=result["url"])
+
+
+async def _resolve_shared_form(slug: str, request: Request):
+    token = request.query_params.get("token", "")
+    if len(token) != 43:
+        raise HTTPException(status_code=404, detail="This form link is unavailable or has expired.")
+    link = await forms_repo.get_share_link_by_hash(hashlib.sha256(token.encode()).hexdigest())
+    if not link or link.get("revoked_at"):
+        raise HTTPException(status_code=404, detail="This form link is unavailable or has expired.")
+    expiry = link.get("expires_at")
+    if expiry:
+        if isinstance(expiry, str):
+            expiry = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if expiry <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=404, detail="This form link is unavailable or has expired.")
+    form = await forms_repo.get_form(int(link["form_id"]))
+    if not form or form["slug"] != slug or not form.get("active"):
+        raise HTTPException(status_code=404, detail="This form link is unavailable or has expired.")
+    if not await companies_repo.get_company_by_id(int(link["company_id"])):
+        raise HTTPException(status_code=404, detail="This form link is unavailable or has expired.")
+    return form, link
+
+
+def _render_public_form(request, form, fields, submit_action, *, status_code=200, **extra):
+    from app.main import templates
+    return templates.TemplateResponse(request, "forms/submit.html", {
+        "request": request, "title": form["name"], "form": form, "fields": fields,
+        "public_share": True, "submit_action": submit_action, **extra,
+    }, status_code=status_code, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow"})
+
+
+@router.get("/public/forms/{slug}", name="public_shared_form", include_in_schema=False)
+async def public_shared_form(slug: str, request: Request):
+    form, link = await _resolve_shared_form(slug, request)
+    return _render_public_form(request, form, await forms_repo.list_fields(form["id"]), str(request.url))
+
+
+@router.post("/public/forms/{slug}", include_in_schema=False)
+async def submit_shared_form(slug: str, request: Request):
+    form, link = await _resolve_shared_form(slug, request)
+    # Anonymous submissions must never impersonate the link creator or visitor.
+    return await _submit_form_request(form, request, {"company_id": int(link["company_id"])},
+                                      public=True, submit_action=str(request.url))
