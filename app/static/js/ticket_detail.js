@@ -1852,6 +1852,106 @@
     });
   }
 
+  function initialiseReplyTroubleshooting() {
+    const modal = document.getElementById('reply-troubleshoot-modal');
+    const timeline = document.querySelector('[data-ticket-timeline]');
+    if (!modal || !timeline) return;
+    const form = modal.querySelector('[data-reply-troubleshoot-form]');
+    const assetSelect = document.getElementById('reply-troubleshoot-asset');
+    const feedback = document.getElementById('reply-troubleshoot-feedback');
+    const error = modal.querySelector('[data-reply-troubleshoot-error]');
+    const submit = modal.querySelector('[data-reply-troubleshoot-submit]');
+    let trigger = null;
+    let replyId = null;
+    let pending = false;
+    function setError(message) {
+      error.textContent = message;
+      error.hidden = !message;
+    }
+    function close() {
+      if (pending) return;
+      modal.hidden = true;
+      modal.classList.remove('is-visible');
+      document.removeEventListener('keydown', onKeydown);
+      if (trigger) trigger.focus();
+      trigger = null;
+      replyId = null;
+      form.reset();
+    }
+    function onKeydown(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close();
+      } else if (event.key === 'Tab') {
+        const elements = Array.from(modal.querySelectorAll('button:not([disabled]), select:not([disabled]), textarea:not([disabled])'));
+        const first = elements[0];
+        const last = elements[elements.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    timeline.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-reply-troubleshoot]');
+      if (!button || button.disabled || pending) return;
+      trigger = button;
+      replyId = button.closest('[data-ticket-reply]').getAttribute('data-reply-id');
+      assetSelect.replaceChildren();
+      document.querySelectorAll('[data-linked-asset-troubleshoot]').forEach((asset) => {
+        if (asset.disabled || !asset.dataset.deviceUid) return;
+        const option = document.createElement('option');
+        option.value = asset.dataset.assetId;
+        option.textContent = asset.dataset.assetName || `Asset ${option.value}`;
+        assetSelect.appendChild(option);
+      });
+      submit.disabled = !assetSelect.options.length;
+      setError(assetSelect.options.length ? '' : 'Link an asset with an active tray device to continue troubleshooting.');
+      modal.hidden = false;
+      modal.classList.add('is-visible');
+      document.addEventListener('keydown', onKeydown);
+      (assetSelect.options.length > 1 ? assetSelect : feedback).focus();
+    });
+    modal.querySelectorAll('[data-troubleshoot-close]').forEach((button) => button.addEventListener('click', close));
+    modal.addEventListener('click', (event) => { if (event.target === modal) close(); });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (pending || !replyId || !assetSelect.value) return;
+      pending = true;
+      submit.disabled = true;
+      submit.textContent = 'Starting…';
+      form.setAttribute('aria-busy', 'true');
+      setError('');
+      try {
+        const ticketId = timeline.getAttribute('data-ticket-id');
+        const response = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/replies/${encodeURIComponent(replyId)}/troubleshoot`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken(), Accept: 'application/json' },
+          body: JSON.stringify({ asset_id: Number(assetSelect.value), context: feedback.value.trim() || null }),
+        });
+        if (!response.ok) throw new Error(await getApiErrorMessage(response, 'Unable to continue AI troubleshooting.'));
+        pending = false;
+        close();
+        const message = 'Read-only AI follow-up started. Results will appear as internal ticket notes.';
+        if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+          window.__portalToast.show(message, { variant: 'success' });
+        } else {
+          window.alert(message);
+        }
+      } catch (err) {
+        setError(err.message || 'Unable to continue AI troubleshooting.');
+      } finally {
+        pending = false;
+        submit.disabled = false;
+        submit.textContent = 'Continue troubleshooting';
+        form.removeAttribute('aria-busy');
+      }
+    });
+  }
+
   function initialiseReplyTimeEditing() {
     const modal = document.getElementById('reply-time-modal');
     const timeline = document.querySelector('[data-ticket-timeline]');
@@ -3857,6 +3957,7 @@
     initialiseTicketHistory();
     initialiseReplyVisibility();
     initialiseReplyTimeEditing();
+    initialiseReplyTroubleshooting();
     initialiseCallRecordingTimeEditing();
     initialiseTicketDetailsAutosave();
     initialiseShipmentWatchProviderDetection();

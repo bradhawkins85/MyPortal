@@ -206,12 +206,35 @@ func control(action string) error {
 		}
 		return service.Control(svc, "start")
 	}
-	// Repair also covers a binary whose service has already been removed.
-	if _, err := svc.Status(); errors.Is(err, service.ErrNotInstalled) {
+	return uninstallService(svc.Status, func(action string) error { return service.Control(svc, action) })
+}
+
+// Uninstall is idempotent, including when the service disappears between the
+// status query and deletion. Some service backends return a wrapped native
+// error or a named-service error rather than service.ErrNotInstalled.
+func serviceNotInstalled(err error) bool {
+	return errors.Is(err, service.ErrNotInstalled) || platformServiceNotInstalled(err)
+}
+
+func uninstallService(status func() (service.Status, error), control func(string) error) error {
+	if _, err := status(); serviceNotInstalled(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("query agent service: %w", err)
+	}
+	_ = control("stop")
+	err := control("uninstall")
+	if serviceNotInstalled(err) {
 		return nil
 	}
-	_ = service.Control(svc, "stop")
-	return service.Control(svc, "uninstall")
+	// The Windows backend replaces any OpenService error with this message,
+	// including access denied. Confirm absence before treating it as success.
+	if err != nil && strings.Contains(err.Error(), "service MyPortalRMMAgent is not installed") {
+		if _, statusErr := status(); serviceNotInstalled(statusErr) {
+			return nil
+		}
+	}
+	return err
 }
 
 // verifyConnection checks the installed service and the saved agent credentials.

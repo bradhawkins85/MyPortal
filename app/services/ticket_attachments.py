@@ -43,6 +43,8 @@ ALLOWED_MIME_TYPES = {
     "image/png",
     "image/gif",
     "image/webp",
+    "image/heic",
+    "image/heif",
     # Archives
     "application/zip",
     "application/x-7z-compressed",

@@ -45,11 +45,32 @@ def test_app():
     @app.get("/static/test.css")
     async def static_endpoint(request: Request):
         return JSONResponse({"status": "ok"})
+
+    @app.get("/forms/{slug}")
+    async def form_endpoint(slug: str):
+        return JSONResponse({"slug": slug})
     
     # Add middleware (note: middleware is applied in reverse order)
     app.add_middleware(SecurityHeadersMiddleware, exempt_paths=("/static",))
     
     return app
+
+
+@pytest.mark.parametrize("path, allowed", [
+    ("/forms/support", True),
+    ("/forms/support/", True),
+    ("/test", False),
+    ("/forms", False),
+    ("/forms/support/submit", False),
+    ("/admin/custom-forms", False),
+])
+def test_microphone_and_blob_audio_are_scoped_to_custom_form_pages(test_app, path, allowed):
+    response = TestClient(test_app).get(path)
+    permissions = response.headers["Permissions-Policy"]
+    assert ("microphone=(self)" in permissions) is allowed
+    assert ("microphone=()" in permissions) is not allowed
+    assert ("media-src 'self' blob:" in response.headers["Content-Security-Policy"]) is allowed
+    assert "camera=()" in permissions
 
 
 @pytest.fixture

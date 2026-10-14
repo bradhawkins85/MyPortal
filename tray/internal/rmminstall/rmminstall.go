@@ -27,6 +27,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kardianos/service"
+
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 )
@@ -57,11 +59,16 @@ type Installer struct {
 	// StateFile identifies a previously enrolled agent when its binary is missing.
 	StateFile string
 	Run       Runner
+	// ServiceStatus checks the actual service independently of binary version.
+	ServiceStatus func() (service.Status, error)
+	// WaitServiceRemoved waits for asynchronous Windows service deletion.
+	WaitServiceRemoved func(context.Context) error
 }
 
 // New returns an installer for this platform's install folder.
 func New(client API) *Installer {
-	return &Installer{API: client, GitHub: newGitHubSource(), Dir: DefaultDir(), StateFile: defaultStateFile(), Run: runCommand}
+	return &Installer{API: client, GitHub: newGitHubSource(), Dir: DefaultDir(), StateFile: defaultStateFile(), Run: runCommand,
+		ServiceStatus: rmmServiceStatus, WaitServiceRemoved: waitServiceRemoved}
 }
 
 // DefaultDir is where the agent binary lives on this platform.
@@ -133,7 +140,7 @@ func (in *Installer) EnsureVersion(ctx context.Context, version string) (bool, e
 	out, err := in.Run(probeCtx, final, []string{"version"}, nil)
 	cancel()
 	if err == nil && sameVersion(string(out), version) {
-		return false, nil
+		return in.ensureService(ctx, final)
 	}
 	if strings.TrimSpace(version) == "" || strings.Contains(version, "dev") {
 		return false, errors.New("the tray has no release version to match")
@@ -216,27 +223,25 @@ func (in *Installer) installVersion(ctx context.Context, version string, repair 
 		if err := os.Remove(backup); err != nil {
 			return "", err
 		}
-		out, uninstallErr := in.Run(ctx, final, []string{"uninstall"}, nil)
+		out, uninstallErr := in.uninstall(ctx, final)
 		if uninstallErr != nil {
 			// A damaged old executable cannot remove its service. The verified
 			// replacement uses the same service name and can remove it instead.
-			out, uninstallErr = in.Run(ctx, tmpPath, []string{"uninstall"}, nil)
+			out, uninstallErr = in.uninstall(ctx, tmpPath)
 		}
 		if uninstallErr != nil {
 			// uninstall may have stopped the service before failing.
-			_, _ = in.Run(ctx, final, []string{"install"}, nil)
-			return "", fmt.Errorf("remove the old agent service: %w: %s", uninstallErr, trim(out))
+			return "", errors.Join(fmt.Errorf("remove the old agent service: %w: %s", uninstallErr, trim(out)), in.restartAgent(final))
 		}
 		if err := os.Rename(final, backup); err != nil {
-			_, _ = in.Run(ctx, final, []string{"install"}, nil)
-			return "", fmt.Errorf("back up the agent: %w", err)
+			return "", errors.Join(fmt.Errorf("back up the agent: %w", err), in.restartAgent(final))
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	} else if repair {
 		// A deleted binary can leave its old service registered (or even
 		// running). Remove that registration using the verified replacement.
-		if out, err := in.Run(ctx, tmpPath, []string{"uninstall"}, nil); err != nil {
+		if out, err := in.uninstall(ctx, tmpPath); err != nil {
 			return "", fmt.Errorf("remove the orphaned agent service: %w: %s", err, trim(out))
 		}
 	}
@@ -250,7 +255,7 @@ func (in *Installer) installVersion(ctx context.Context, version string, repair 
 			recoveryCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			if _, err := os.Stat(final); err == nil {
-				_, _ = in.Run(recoveryCtx, final, []string{"uninstall"}, nil)
+				_, _ = in.uninstall(recoveryCtx, final)
 				if err := os.Remove(final); err != nil {
 					installErr = errors.Join(installErr, fmt.Errorf("remove failed repair: %w", err))
 				}
@@ -260,7 +265,7 @@ func (in *Installer) installVersion(ctx context.Context, version string, repair 
 			recoveryCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			if _, err := os.Stat(final); err == nil {
-				_, _ = in.Run(recoveryCtx, final, []string{"uninstall"}, nil)
+				_, _ = in.uninstall(recoveryCtx, final)
 			}
 			if err := os.Remove(final); err != nil && !errors.Is(err, os.ErrNotExist) {
 				installErr = errors.Join(installErr, fmt.Errorf("restore old agent: %w (backup at %s)", err, backup))
@@ -286,6 +291,9 @@ func (in *Installer) installVersion(ctx context.Context, version string, repair 
 	}
 	if out, err := in.Run(ctx, final, []string{"install"}, nil); err != nil {
 		return "", fmt.Errorf("install the agent service: %w: %s", err, trim(out))
+	}
+	if err := in.waitRunning(ctx); err != nil {
+		return "", err
 	}
 	if repair {
 		verifyCtx, cancel := context.WithTimeout(ctx, time.Minute)

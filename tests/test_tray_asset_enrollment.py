@@ -220,3 +220,160 @@ async def test_new_enrollment_returns_provisioned_asset(asset_db, monkeypatch):
     )
     assert again.asset_id == response.asset_id
     assert len(await assets.list_company_assets(1)) == 1
+
+
+@pytest.fixture
+async def setup_ticket_db(asset_db, monkeypatch):
+    from app.repositories import companies, tickets
+    from app.services import tickets as ticket_service
+    from unittest.mock import AsyncMock
+
+    for module in (companies, tickets):
+        monkeypatch.setattr(module, "db", asset_db)
+    await asset_db._sqlite_conn.executescript("""
+        CREATE TABLE companies (id INT PRIMARY KEY, name TEXT);
+        CREATE TABLE company_email_domains (company_id INT, domain TEXT);
+        CREATE TABLE tickets (id INTEGER PRIMARY KEY AUTOINCREMENT,
+          company_id INT, subject TEXT, description TEXT, external_reference TEXT,
+          status TEXT, priority TEXT);
+        CREATE TABLE ticket_assets (ticket_id INT, asset_id INT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(ticket_id, asset_id));
+        ALTER TABLE tray_devices ADD COLUMN updated_at TEXT;
+    """)
+    # Verify the migration excludes devices which checked in before deployment.
+    await add_device(asset_db, uid="existing-device")
+    migration = Path(__file__).resolve().parents[1] / "migrations/490_tray_setup_tickets.sql"
+    await asset_db._sqlite_conn.executescript(asset_db._adapt_sql_for_sqlite(migration.read_text()))
+    await asset_db.execute("INSERT INTO companies (id,name) VALUES (1,'ACME'),(2,'Other')")
+
+    async def create_ticket(**kwargs):
+        ticket_id = await asset_db.execute_returning_lastrowid(
+            "INSERT INTO tickets (company_id,subject,description,external_reference,status,priority) "
+            "VALUES (?,?,?,?,?,?)",
+            tuple(kwargs[key] for key in (
+                "company_id", "subject", "description", "external_reference", "status", "priority"
+            )),
+        )
+        return await tickets.get_ticket(ticket_id)
+
+    # Exercise real ticket persistence/lookups and asset associations without
+    # unrelated notification/automation infrastructure in this focused fixture.
+    create = AsyncMock(side_effect=create_ticket)
+    monkeypatch.setattr(ticket_service, "create_ticket", create)
+    yield asset_db, create
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("hostname", ["PC-1", "x" * 255])
+async def test_setup_ticket_is_company_owned_and_asset_linked_once(setup_ticket_db, hostname):
+    db, create = setup_ticket_db
+    device = await add_device(db, uid="new-device", company=2, hostname=hostname)
+    # Separate request dictionaries simulate concurrent check-ins/re-enrolment.
+    await asyncio.gather(*(service.ensure_device_setup_ticket(dict(device)) for _ in range(5)))
+    await service.ensure_device_setup_ticket(device)
+    create.assert_awaited_once()
+    ticket = await db.fetch_one("SELECT * FROM tickets")
+    linked = await tray.get_device_by_id(device["id"])
+    asset = await assets.get_asset_by_id(linked["asset_id"])
+    assert ticket["company_id"] == asset["company_id"] == 2
+    assert ticket["status"] == "open" and ticket["priority"] == "normal"
+    assert hostname[:40] in ticket["subject"] and len(ticket["subject"]) <= 255
+    assert hostname in ticket["description"] and "SN-1" in ticket["description"]
+    association = await db.fetch_one("SELECT * FROM ticket_assets WHERE ticket_id=?", (ticket["id"],))
+    assert association["asset_id"] == linked["asset_id"]
+    assert linked["setup_ticket_processed"] == 1
+    assert create.call_args.kwargs["trigger_automations"] is True
+
+
+@pytest.mark.anyio
+async def test_enrollment_creates_setup_ticket_but_reenrollment_does_not(setup_ticket_db, monkeypatch):
+    db, create = setup_ticket_db
+    await test_new_enrollment_returns_provisioned_asset(db, monkeypatch)
+    create.assert_awaited_once()
+    assert len(await db.fetch_all("SELECT * FROM ticket_assets")) == 1
+
+
+@pytest.mark.anyio
+async def test_disabled_company_does_not_backfill_after_enabling(setup_ticket_db):
+    db, create = setup_ticket_db
+    await db.execute("UPDATE companies SET tray_setup_tickets_enabled=0 WHERE id=1")
+    device = await add_device(db, uid="opted-out")
+    await service.ensure_device_setup_ticket(device)
+    assert (await tray.get_device_by_id(device["id"]))["setup_ticket_processed"] == 1
+    await db.execute("UPDATE companies SET tray_setup_tickets_enabled=1 WHERE id=1")
+    await service.ensure_device_setup_ticket(await tray.get_device_by_id(device["id"]))
+    create.assert_not_awaited()
+    await service.ensure_device_setup_ticket(await add_device(db, uid="enabled-later"))
+    create.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_preexisting_devices_do_not_create_setup_tickets(setup_ticket_db):
+    db, create = setup_ticket_db
+    await service.ensure_device_setup_ticket(await tray.get_device_by_uid("existing-device"))
+    create.assert_not_awaited()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kwargs", [{"company": None}, {"status": "revoked"}])
+async def test_setup_tickets_skip_unassigned_and_revoked_devices(setup_ticket_db, kwargs):
+    db, create = setup_ticket_db
+    await service.ensure_device_setup_ticket(await add_device(db, uid="skip-ticket", **kwargs))
+    create.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_partial_ticket_failure_reuses_closed_ticket_on_retry(setup_ticket_db, monkeypatch):
+    from app.repositories import tickets
+    db, create = setup_ticket_db
+    device = await add_device(db, uid="retry-link")
+    original = tickets.replace_ticket_assets
+    async def fail_link(*args):
+        raise RuntimeError("connection interrupted")
+    monkeypatch.setattr(tickets, "replace_ticket_assets", fail_link)
+    await service.ensure_device_setup_ticket(device)
+    assert (await tray.get_device_by_id(device["id"]))["setup_ticket_processed"] == 0
+    await db.execute("UPDATE tickets SET status='closed'")
+    monkeypatch.setattr(tickets, "replace_ticket_assets", original)
+    await service.ensure_device_setup_ticket(device)
+    create.assert_awaited_once()
+    assert (await tray.get_device_by_id(device["id"]))["setup_ticket_processed"] == 1
+    assert len(await db.fetch_all("SELECT * FROM ticket_assets")) == 1
+
+
+@pytest.mark.anyio
+async def test_ticket_creation_failure_retries_on_heartbeat(setup_ticket_db):
+    from app.api.routes import tray as routes
+    from app.schemas.tray import TrayHeartbeatRequest
+    from starlette.requests import Request
+    db, create = setup_ticket_db
+    device = await add_device(db, uid="retry-create")
+    normal_create = create.side_effect
+    create.side_effect = RuntimeError("ticket service unavailable")
+    await service.ensure_device_setup_ticket(device)
+    assert (await tray.get_device_by_id(device["id"]))["setup_ticket_processed"] == 0
+    create.side_effect = normal_create
+    # This fixture only includes asset/link columns, so isolate the liveness
+    # write while exercising the actual HTTP heartbeat retry path.
+    from unittest.mock import AsyncMock
+    from pytest import MonkeyPatch
+    with MonkeyPatch.context() as patch:
+        patch.setattr(tray, "update_device_heartbeat", AsyncMock())
+        response = await routes.heartbeat(TrayHeartbeatRequest(), Request({"type": "http"}), device)
+    assert response.status_code == 200
+    assert len(await db.fetch_all("SELECT * FROM tickets")) == 1
+    assert (await tray.get_device_by_id(device["id"]))["setup_ticket_processed"] == 1
+
+
+@pytest.mark.anyio
+async def test_websocket_checkin_retries_pending_setup_ticket(setup_ticket_db, monkeypatch):
+    from unittest.mock import AsyncMock
+    db, create = setup_ticket_db
+    device = await add_device(db, uid="websocket-retry")
+    monkeypatch.setattr(tray, "touch_device_websocket", AsyncMock())
+    await service.mark_websocket_alive(device)
+    # A second WebSocket worker can have an older device dictionary.
+    stale = dict(device, setup_ticket_processed=0)
+    await service.mark_websocket_alive(stale)
+    create.assert_awaited_once()
+    assert stale["setup_ticket_processed"] == 1

@@ -48,6 +48,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         # Skip security headers for exempted paths (e.g., static files)
         path = request.url.path
+        # Only custom form pages need microphone access and local audio previews.
+        is_custom_form = bool(re.fullmatch(r"/forms/[^/]+/?", path))
         if any(path.startswith(prefix) for prefix in self.exempt_paths):
             return response
 
@@ -124,6 +126,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             f"form-action {' '.join(form_action_sources)}",
         ]
         response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
+        if is_custom_form:
+            response.headers["Content-Security-Policy"] += "; media-src 'self' blob:"
 
         # X-Frame-Options: Prevent the page from being embedded in iframes
         response.headers["X-Frame-Options"] = "DENY"
@@ -137,7 +141,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Permissions-Policy: Disable sensitive browser features
         permissions = [
             "geolocation=()",
-            "microphone=()",
+            "microphone=(self)" if is_custom_form else "microphone=()",
             "camera=()",
             "payment=()",
             "usb=()",

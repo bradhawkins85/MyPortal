@@ -70,3 +70,26 @@ the configured row labels. Signatures can be drawn with a pointer or uploaded as
 a PNG/JPEG image (up to 1 MB) under `signature_{field_id}`; uploaded images are
 converted to the existing data URL format before submission validation. Audio
 uploads repeat `file_{field_id}` for each clip.
+
+Audio fields also offer direct microphone recording in supported browsers over
+HTTPS, including mobile browsers. Users grant microphone permission, record and
+stop a clip, then listen back or remove it before submitting. Recordings and
+uploaded files share the configured clip limit and the 50 MB per-file limit.
+Recordings use a browser-supported audio format (for example, MP4/M4A or WebM)
+and are submitted through the same `file_{field_id}` attachment flow. Submission
+waits until recording has stopped; failed JavaScript submissions retain the clips.
+Resetting the form or leaving the page releases the microphone and local previews.
+Uploads remain available when recording is unsupported or permission is denied,
+and without JavaScript. Microphone permission and blob media playback are enabled
+only on `/forms/{slug}` pages by the portal's security headers.
+
+File fields offer **Take photo** and **Record video** controls using native mobile
+camera capture (`capture="environment"` with image/video file inputs). Devices
+that support capture open their camera; other browsers may show a file picker.
+Captured media uses the same `file_{field_id}` attachment flow and 50 MB limit.
+Users can review or remove the attachment, and choosing another file or capture
+replaces it. Cancelling capture keeps the existing attachment. Normal file uploads
+remain available, including without JavaScript. HEIC/HEIF photos and MP4/QuickTime
+videos are accepted; HEIC/HEIF photos are downloadable even when a browser cannot
+preview them. Native camera capture does not require enabling in-page camera
+streaming in the portal's Permissions-Policy.

@@ -339,7 +339,7 @@ class TestFindExistingTicket:
         assert result["id"] == 12
         assert "LOWER(u.email) = LOWER(%s)" in str(captured["query"])
         assert "COALESCE(t.description" not in str(captured["query"])
-        assert captured["params"] == ("support@ideagen.example", "support@ideagen.example")
+        assert captured["params"] == ("support@ideagen.example",) * 5
 
     async def test_subject_match_does_not_use_sender_in_description(self, monkeypatch):
         """Attacker-controlled descriptions must not influence reply matching."""
@@ -625,10 +625,8 @@ class TestFindExistingTicket:
         assert result["id"] == 3
         assert result["status"] == "closed"
 
-    async def test_find_ticket_by_subject_for_known_user_not_watcher(self, monkeypatch):
-        """Known users who are not watchers can still match a ticket if their email
-        appears in the ticket description (e.g. tickets originally created from their
-        email before they had a local user account)."""
+    async def test_find_ticket_by_subject_for_known_user_with_external_author_history(self, monkeypatch):
+        """A sender who later registers can match their earlier external replies."""
         from app.services import imap
         from app.core import database
 
@@ -639,8 +637,7 @@ class TestFindExistingTicket:
             captured["params"] = params
             if "ticket_number" in query:
                 return []
-            # Return a ticket where requester_id=None but description contains the
-            # sender's email (ticket was created from an email before user existed)
+            # Simulate a ticket with an external author recorded before signup.
             return [
                 {
                     "id": 20,
@@ -661,8 +658,8 @@ class TestFindExistingTicket:
 
         monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
 
-        # Sender is a known user (requester_id=99) but is NOT a watcher on the ticket.
-        # Their email appears in the ticket description so it should still match.
+        # Sender is now a known user, but their earlier external author snapshot
+        # must still qualify the ticket even without a requester or watcher link.
         result = await imap._find_existing_ticket_for_reply(
             subject="Re: Printer not working",
             from_email="alice@example.com",
@@ -671,12 +668,12 @@ class TestFindExistingTicket:
 
         assert result is not None, (
             "Ticket should be matched even when the known user is not a watcher, "
-            "provided their email appears in the ticket description"
+            "provided their email is recorded on an external conversation entry"
         )
         assert result["id"] == 20
-        # The query must include the description fallback when requester_id is set
-        assert "COALESCE(t.description" in str(captured["query"])
-        assert "%alice@example.com%" in captured["params"]
+        assert "tr.author_email" in str(captured["query"])
+        assert "COALESCE(t.description" not in str(captured["query"])
+        assert "alice@example.com" in captured["params"]
 
 
 

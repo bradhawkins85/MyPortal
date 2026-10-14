@@ -37,7 +37,27 @@
           <select class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}"{% if field.required %} required{% endif %}{{ described | safe }} data-cf-value><option value="">Select an option…</option>{% for opt in field.options %}<option value="{{ opt }}"{% if opt == value %} selected{% endif %}>{{ opt }}</option>{% endfor %}</select>
           {% elif field.field_type in ['file', 'audio'] %}
           <input class="form-input" id="cf-f-{{ fid }}" name="file_{{ fid }}" type="file"{% if field.field_type == 'audio' %} accept="audio/*" multiple data-max-clips="{{ cfg.get('max_clips', 5) }}"{% endif %}{% if field.required %} required{% endif %}{{ described | safe }} data-cf-file />
-          {% if field.field_type == 'audio' %}<div data-cf-audio-list></div>{% endif %}
+          {% if field.field_type == 'file' %}
+          <div class="cf-capture-controls" data-cf-capture-controls hidden>
+            <button class="button button--ghost" type="button" data-cf-capture-photo>Take photo</button>
+            <button class="button button--ghost" type="button" data-cf-capture-video>Record video</button>
+            <input type="file" accept="image/*" capture="environment" data-cf-photo-input hidden />
+            <input type="file" accept="video/*" capture="environment" data-cf-video-input hidden />
+          </div>
+          <p class="form-help">Upload a file, take a photo, or record a video. Camera options use your device's camera when supported. Choosing another attachment replaces the current one. Maximum 50 MB.</p>
+          <p class="form-help" role="status" aria-live="polite" data-cf-capture-status></p>
+          <div class="cf-capture-preview" data-cf-capture-preview></div>
+          {% endif %}
+          {% if field.field_type == 'audio' %}
+          <div class="cf-audio-controls" data-cf-audio-controls hidden>
+            <button class="button button--ghost" type="button" data-cf-audio-record aria-describedby="cf-audio-status-{{ fid }}">Record audio</button>
+            <button class="button button--ghost" type="button" data-cf-audio-stop hidden>Stop recording</button>
+            <span class="cf-audio-timer" data-cf-audio-timer aria-hidden="true" hidden>0:00</span>
+          </div>
+          <p class="form-help" id="cf-audio-status-{{ fid }}" role="status" aria-live="polite" data-cf-audio-status></p>
+          <p class="form-help">Record or upload up to {{ cfg.get('max_clips', 5) }} audio clips. Listen back and remove clips before submitting. Each clip can be up to 50 MB.</p>
+          <div class="cf-audio-list" data-cf-audio-list></div>
+          {% endif %}
           {% else %}
           <input class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}" type="{{ field.field_type }}"{% if field.field_type == 'number' %} step="any"{% endif %} placeholder="{{ field.placeholder or '' }}" value="{{ value }}"{% if field.required %} required{% endif %}{{ described | safe }} data-cf-value />
           {% if field.field_type == 'password' %}<button type="button" class="button button--ghost" data-cf-password-toggle aria-label="Show password" aria-pressed="false">Show</button>{% endif %}
