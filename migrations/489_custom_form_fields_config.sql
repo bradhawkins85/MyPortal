@@ -1,4 +1,4 @@
--- 486: Add a flexible per-field ``config`` column to custom forms.
+-- 489: Add a flexible per-field ``config`` column to custom forms.
 --
 -- Stores a JSON configuration blob for field types that need one
 -- (e.g. matrix rows/columns, rating max value, audio max clips, signature

@@ -793,9 +793,9 @@ def test_migration_runs_on_sqlite():
     ).fetchone() == (555,)
 
 
-def test_migration_486_adds_config_column():
+def test_migration_489_adds_config_column():
     base = Path("migrations/485_custom_forms.sql").read_text(encoding="utf-8")
-    alter = Path("migrations/486_custom_form_fields_config.sql").read_text(encoding="utf-8")
+    alter = Path("migrations/489_custom_form_fields_config.sql").read_text(encoding="utf-8")
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
     connection.execute("CREATE TABLE tickets (id INTEGER PRIMARY KEY)")
