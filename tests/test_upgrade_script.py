@@ -50,6 +50,19 @@ def _resolve_environment_file(
     return result.stdout.strip()
 
 
+def test_upgrade_repairs_control_checkout_permissions_before_fast_forward(tmp_path):
+    function = SCRIPT[
+        SCRIPT.index("repair_control_checkout_permissions() {") : SCRIPT.index(
+            "\nupdate_control_checkout() {"
+        )
+    ]
+
+    assert 'chown -R "$owner:$owner" "$repo_root"' in function
+    assert 'find "$git_dir" -type d -exec chmod u+rwx,go+rx {} +' in function
+    assert 'find "$repo_root" -type f -exec chmod u+rw,go+r {} +' in function
+    assert 'repair_control_checkout_permissions "$owner"' in SCRIPT
+
+
 def test_upgrade_defaults_to_systemd_environment_file(tmp_path):
     system_env = tmp_path / "myportal.env"
     system_env.write_text("DB_NAME=production\n")
@@ -1227,7 +1240,9 @@ def _control_checkouts(tmp_path: Path) -> tuple[Path, Path, str]:
 
 
 def _update_control_checkout(control: Path, target: str) -> subprocess.CompletedProcess[str]:
-    function = SCRIPT[SCRIPT.index("update_control_checkout() {") : SCRIPT.index("\nverify_release_sources()")]
+    start = SCRIPT.index("repair_control_checkout_permissions() {")
+    end = SCRIPT.index("\nverify_release_sources()")
+    function = SCRIPT[start:end]
     return subprocess.run(
         ["bash", "-c", f"set -Eeuo pipefail\nPROJECT_ROOT=$PWD\n{function}\nupdate_control_checkout \"$1\"", "_", target],
         cwd=control, text=True, capture_output=True, check=False,
