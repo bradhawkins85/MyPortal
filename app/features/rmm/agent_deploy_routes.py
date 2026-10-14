@@ -69,6 +69,29 @@ async def push_agent(asset_id: int, request: Request):
     return {**result, "message": _PUSH_MESSAGES[result["status"]]}
 
 
+@router.post("/api/rmm/assets/{asset_id:int}/agent-repair", summary="Repair the RMM agent on a device")
+async def repair_agent(asset_id: int, request: Request):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    asset = await assets_repo.get_asset_by_id(asset_id)
+    if not asset or asset.get("company_id") is None or int(asset["company_id"]) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    try:
+        result = await deploy.push_to_asset(asset_id, company_id=company_id, user_id=user.get("id"), repair=True)
+    except deploy.AgentDeployError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await audit_service.record(
+        action="rmm.agent.repair", request=request, user_id=user.get("id"),
+        entity_type="asset", entity_id=asset_id,
+        metadata={"company_id": company_id, "command_id": result["command_id"], "status": result["status"]},
+    )
+    messages = {
+        "sent": "Sent to the device. Its tray app is reinstalling and reconnecting the RMM agent.",
+        "queued": "Repair queued until the device's tray app connects.",
+        "updating_tray": "The tray app must update first. The RMM repair follows when it reconnects.",
+    }
+    return {**result, "message": messages[result["status"]]}
+
+
 @router.get("/api/rmm/assets/{asset_id:int}/agent-installs", summary="List a device's RMM agent install attempts")
 async def list_agent_installs(asset_id: int, request: Request, limit: int = Query(default=20, ge=1, le=100)):
     _user, _company, company_id, _can_run = await _context(request, api=True)

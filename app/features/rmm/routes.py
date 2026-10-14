@@ -150,7 +150,7 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
     if agent and agent.get("company_id") is not None and int(agent["company_id"]) != int(company_id):
         agent = None
     # Without an agent, technicians can push one through the device's tray app.
-    deploy = None if agent else _serialise(await rmm_agent_deploy.asset_deploy_state(asset_id, company_id))
+    deploy = _serialise(await rmm_agent_deploy.asset_deploy_state(asset_id, company_id))
     return {
         "agent": _serialise({key: agent.get(key) for key in _AGENT_PUBLIC_FIELDS}) if agent else None,
         "deploy": deploy,

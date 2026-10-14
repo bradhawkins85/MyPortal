@@ -54,12 +54,14 @@ type Installer struct {
 	API    API
 	GitHub PackageSource
 	Dir    string
-	Run    Runner
+	// StateFile identifies a previously enrolled agent when its binary is missing.
+	StateFile string
+	Run       Runner
 }
 
 // New returns an installer for this platform's install folder.
 func New(client API) *Installer {
-	return &Installer{API: client, GitHub: newGitHubSource(), Dir: DefaultDir(), Run: runCommand}
+	return &Installer{API: client, GitHub: newGitHubSource(), Dir: DefaultDir(), StateFile: defaultStateFile(), Run: runCommand}
 }
 
 // DefaultDir is where the agent binary lives on this platform.
@@ -72,6 +74,17 @@ func DefaultDir() string {
 		return filepath.Join(base, "MyPortal RMM")
 	}
 	return "/Library/Application Support/MyPortal RMM"
+}
+
+func defaultStateFile() string {
+	if runtime.GOOS == "windows" {
+		base := os.Getenv("ProgramData")
+		if base == "" {
+			base = `C:\ProgramData`
+		}
+		return filepath.Join(base, "MyPortal RMM", "rmm-state.json")
+	}
+	return filepath.Join(DefaultDir(), "rmm-state.json")
 }
 
 func binaryName() string {
@@ -94,11 +107,25 @@ func (in *Installer) Install(ctx context.Context) (string, error) {
 }
 
 // EnsureVersion upgrades an existing agent to the tray version. Missing agents
-// are left to the portal's deployment policy. It also repairs unreadable versions.
+// without saved enrolment are left to the portal's deployment policy.
 func (in *Installer) EnsureVersion(ctx context.Context, version string) (bool, error) {
 	final := filepath.Join(in.Dir, binaryName())
 	if _, err := os.Stat(final); errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		// Restore previously enrolled agents without enabling deployment on
+		// devices that have never had an RMM agent.
+		if in.StateFile == "" {
+			return false, nil
+		}
+		if _, stateErr := os.Stat(in.StateFile); errors.Is(stateErr, os.ErrNotExist) {
+			return false, nil
+		} else if stateErr != nil {
+			return false, stateErr
+		}
+		if strings.TrimSpace(version) == "" || strings.Contains(version, "dev") {
+			return false, errors.New("the tray has no release version to match")
+		}
+		_, repairErr := in.RepairVersion(ctx, version)
+		return repairErr == nil, repairErr
 	} else if err != nil {
 		return false, err
 	}
@@ -111,7 +138,11 @@ func (in *Installer) EnsureVersion(ctx context.Context, version string) (bool, e
 	if strings.TrimSpace(version) == "" || strings.Contains(version, "dev") {
 		return false, errors.New("the tray has no release version to match")
 	}
-	_, err = in.InstallVersion(ctx, version)
+	if err != nil {
+		_, err = in.RepairVersion(ctx, version)
+	} else {
+		_, err = in.InstallVersion(ctx, version)
+	}
 	return err == nil, err
 }
 
@@ -121,7 +152,17 @@ func sameVersion(a, b string) bool {
 
 // InstallVersion installs the matching release, refusing a different package.
 // An empty version preserves compatibility with older deployment callers.
-func (in *Installer) InstallVersion(ctx context.Context, version string) (installedVersion string, installErr error) {
+func (in *Installer) InstallVersion(ctx context.Context, version string) (string, error) {
+	return in.installVersion(ctx, version, false)
+}
+
+// RepairVersion reinstalls even a matching agent and refreshes its enrolment.
+// Success requires a running service and an authenticated portal check-in.
+func (in *Installer) RepairVersion(ctx context.Context, version string) (string, error) {
+	return in.installVersion(ctx, version, true)
+}
+
+func (in *Installer) installVersion(ctx context.Context, version string, repair bool) (installedVersion string, installErr error) {
 	token := in.API.AuthToken()
 	if token == "" {
 		return "", errors.New("the tray app is not enrolled")
@@ -175,10 +216,16 @@ func (in *Installer) InstallVersion(ctx context.Context, version string) (instal
 		if err := os.Remove(backup); err != nil {
 			return "", err
 		}
-		if out, err := in.Run(ctx, final, []string{"uninstall"}, nil); err != nil {
+		out, uninstallErr := in.Run(ctx, final, []string{"uninstall"}, nil)
+		if uninstallErr != nil {
+			// A damaged old executable cannot remove its service. The verified
+			// replacement uses the same service name and can remove it instead.
+			out, uninstallErr = in.Run(ctx, tmpPath, []string{"uninstall"}, nil)
+		}
+		if uninstallErr != nil {
 			// uninstall may have stopped the service before failing.
 			_, _ = in.Run(ctx, final, []string{"install"}, nil)
-			return "", fmt.Errorf("remove the old agent service: %w: %s", err, trim(out))
+			return "", fmt.Errorf("remove the old agent service: %w: %s", uninstallErr, trim(out))
 		}
 		if err := os.Rename(final, backup); err != nil {
 			_, _ = in.Run(ctx, final, []string{"install"}, nil)
@@ -186,11 +233,29 @@ func (in *Installer) InstallVersion(ctx context.Context, version string) (instal
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
+	} else if repair {
+		// A deleted binary can leave its old service registered (or even
+		// running). Remove that registration using the verified replacement.
+		if out, err := in.Run(ctx, tmpPath, []string{"uninstall"}, nil); err != nil {
+			return "", fmt.Errorf("remove the orphaned agent service: %w: %s", err, trim(out))
+		}
 	}
 	// Keep enrolment/state on upgrades. If replacement or startup fails, put
 	// the old binary back and restart it using an independent recovery timeout.
 	success := false
 	defer func() {
+		if repair && !hadAgent && !success {
+			// Do not leave a failed first repair looking like a matching install:
+			// the version loop must be able to retry restoring a missing binary.
+			recoveryCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if _, err := os.Stat(final); err == nil {
+				_, _ = in.Run(recoveryCtx, final, []string{"uninstall"}, nil)
+				if err := os.Remove(final); err != nil {
+					installErr = errors.Join(installErr, fmt.Errorf("remove failed repair: %w", err))
+				}
+			}
+		}
 		if hadAgent && !success {
 			recoveryCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
@@ -213,7 +278,7 @@ func (in *Installer) InstallVersion(ctx context.Context, version string) (instal
 	if err := os.Rename(tmpPath, final); err != nil {
 		return "", fmt.Errorf("put the agent in place: %w", err)
 	}
-	if !hadAgent {
+	if !hadAgent || repair {
 		env := []string{"MYPORTAL_TRAY_TOKEN=" + token}
 		if out, err := in.Run(ctx, final, []string{"enrol", "--url", in.API.BaseURL()}, env); err != nil {
 			return "", fmt.Errorf("enrol the agent: %w: %s", err, trim(out))
@@ -221,6 +286,14 @@ func (in *Installer) InstallVersion(ctx context.Context, version string) (instal
 	}
 	if out, err := in.Run(ctx, final, []string{"install"}, nil); err != nil {
 		return "", fmt.Errorf("install the agent service: %w: %s", err, trim(out))
+	}
+	if repair {
+		verifyCtx, cancel := context.WithTimeout(ctx, time.Minute)
+		out, err := in.Run(verifyCtx, final, []string{"verify"}, nil)
+		cancel()
+		if err != nil {
+			return "", fmt.Errorf("verify the agent connection: %w: %s", err, trim(out))
+		}
 	}
 	success = true
 	if hadAgent {

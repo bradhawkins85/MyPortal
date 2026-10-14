@@ -413,7 +413,6 @@ async def assets_page(request: Request):
             can_push_rmm_agent
             and tray_device
             and str(tray_device.get("os") or "").lower() in TRAY_PLATFORMS
-            and int(record["id"]) not in rmm_agent_asset_ids
         )
         record["rmm_actions"] = bool(
             can_push_rmm_agent and record.get("id") and int(record["id"]) in rmm_agent_asset_ids

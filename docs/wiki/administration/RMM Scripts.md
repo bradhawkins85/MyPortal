@@ -403,13 +403,39 @@ The RMM agent (`myportal-rmm`) is a separate program from the tray app, built fo
 macOS and Linux by the **Build RMM agent** workflow. It enrols with the tray device's token so
 it joins the same company and asset, then waits for runs.
 
+### Repairing an asset's agent
+
+Choose **Repair RMM agent** from an asset's Actions menu or its Scripts card.
+The action works even when MyPortal still has an agent record for a machine whose
+agent has been removed. It also installs agents that have never been installed.
+An active MyPortal tray registration on Windows or macOS and RMM Scripts write
+access are required. Offline devices collect the queued repair when their tray
+app reconnects. Repair attempts appear in the asset's install history and audit trail.
+
+The tray downloads the RMM release matching its own version and checks its SHA-256
+before replacing anything. It reinstalls the service, refreshes enrolment using the
+tray's token, and checks that the service is running and an authenticated check-in
+reaches MyPortal. A failed repair reports the error; when an old binary exists,
+the installer restores it and attempts to restart its service.
+
+Tray restarts, including those after updates, check the RMM version immediately
+and retry every 30 minutes. Previously enrolled agents whose binary has disappeared
+are restored from the matching release. Devices without saved RMM enrolment remain
+subject to the company's automatic deployment setting or a manual push.
+
+Deploy the portal change together with tray and RMM builds from the same release.
+The new tray build provides refreshed enrolment and verification; the matching RMM
+build provides the `verify` command. Older tray builds perform their existing install
+behavior until updated. Publish matching RMM assets and checksums alongside the tray
+installers; unavailable or mismatched releases are rejected and retried.
+
 ### Pushing the agent from MyPortal
 
 The tray app installs the agent on Windows and macOS devices, so a device needs the tray app
 first:
 
 - **One device**: on **Assets**, open the device's **Actions** menu, or its page's **Scripts**
-  card, and choose **Install RMM agent** (write access to RMM scripts). The asset page shows
+  card, and choose **Repair RMM agent** (write access to RMM scripts). The asset page shows
   whether the install is queued, running or failed, and why.
 - **A whole company**: super admins tick **Install the RMM agent automatically** on the
   company's tray settings (**Edit company > Tray settings**). MyPortal then pushes the agent to

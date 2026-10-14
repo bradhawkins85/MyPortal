@@ -133,3 +133,7 @@ versions. Upstream source and license links are preserved in the bundled notices
 The disposable Windows CI runner also verifies silent PawnIO installation.
 That integration test requires `MYPORTAL_TEST_PAWNIO_INSTALL=1`; ordinary local
 test runs validate the setup policy without installing a driver.
+
+The `myportal-rmm verify` command checks that the agent service is running and
+sends an authenticated check-in using its saved enrolment. The tray uses this
+after repairs and reports failure if either check fails.

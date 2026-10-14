@@ -672,8 +672,8 @@ func (d *daemon) handleInstallRMMAgent(msg map[string]json.RawMessage) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	version, err := rmminstall.New(d.client).InstallVersion(ctx, updater.AgentVersion)
-	message := fmt.Sprintf("Installed the MyPortal RMM agent %s.", version)
+	version, err := rmminstall.New(d.client).RepairVersion(ctx, updater.AgentVersion)
+	message := fmt.Sprintf("Installed and verified the MyPortal RMM agent %s.", version)
 	if err != nil {
 		logger.Error("install_rmm_agent: %v", err)
 		message = err.Error()

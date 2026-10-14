@@ -69,6 +69,9 @@ func newInstaller(t *testing.T, f *fakeAPI, fail string) (*Installer, *[]call) {
 			if args[0] == fail {
 				return []byte("boom\n"), errors.New("exit status 1")
 			}
+			if args[0] == "version" {
+				return []byte("0.1.0"), nil
+			}
 			return nil, nil
 		},
 	}, calls
@@ -342,5 +345,114 @@ func TestNewEnablesPublicGitHubSource(t *testing.T) {
 	source, ok := in.GitHub.(*githubSource)
 	if !ok || source.baseURL != githubReleaseURL || source.client == nil {
 		t.Fatalf("source=%+v", in.GitHub)
+	}
+}
+
+func TestRepairReenrolsExistingAgentAndVerifiesConnection(t *testing.T) {
+	body := []byte("new")
+	in, calls := newInstaller(t, &fakeAPI{body: body, sha: digest(body), token: "tray-token"}, "")
+	_ = os.WriteFile(filepath.Join(in.Dir, binaryName()), []byte("old"), 0o755)
+	version, err := in.RepairVersion(context.Background(), "v1.2.3")
+	if err != nil || version != "1.2.3" {
+		t.Fatalf("version=%q err=%v", version, err)
+	}
+	var args []string
+	for _, c := range *calls {
+		args = append(args, c.args[0])
+	}
+	if strings.Join(args, ",") != "uninstall,enrol,install,verify" {
+		t.Fatalf("calls=%+v", *calls)
+	}
+	if (*calls)[1].env[0] != "MYPORTAL_TRAY_TOKEN=tray-token" {
+		t.Fatal("missing tray token")
+	}
+}
+
+func TestRepairMissingAgentAndConnectionFailure(t *testing.T) {
+	for _, failure := range []string{"", "verify"} {
+		t.Run(failure, func(t *testing.T) {
+			body := []byte("new")
+			in, calls := newInstaller(t, &fakeAPI{body: body, sha: digest(body), token: "t"}, failure)
+			_, err := in.RepairVersion(context.Background(), "1.2.3")
+			if (err != nil) != (failure != "") {
+				t.Fatalf("err=%v", err)
+			}
+			wantCalls := 4
+			if failure != "" {
+				wantCalls++
+			}
+			if len(*calls) != wantCalls || (*calls)[0].args[0] != "uninstall" || (*calls)[1].args[0] != "enrol" || (*calls)[3].args[0] != "verify" {
+				t.Fatalf("calls=%+v", *calls)
+			}
+			if failure != "" {
+				if !strings.Contains(err.Error(), "verify the agent connection") {
+					t.Fatal(err)
+				}
+				if _, statErr := os.Stat(filepath.Join(in.Dir, binaryName())); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("failed repair left binary: %v", statErr)
+				}
+			}
+		})
+	}
+}
+
+func TestRepairRestoresOldBinaryWhenVerificationFails(t *testing.T) {
+	body := []byte("new")
+	in, calls := newInstaller(t, &fakeAPI{body: body, sha: digest(body), token: "t"}, "verify")
+	final := filepath.Join(in.Dir, binaryName())
+	_ = os.WriteFile(final, []byte("old"), 0o755)
+	if _, err := in.RepairVersion(context.Background(), "1.2.3"); err == nil {
+		t.Fatal("expected verification failure")
+	}
+	got, _ := os.ReadFile(final)
+	if string(got) != "old" || (*calls)[len(*calls)-1].args[0] != "install" {
+		t.Fatalf("binary=%q calls=%+v", got, *calls)
+	}
+}
+
+func TestRepairUsesDownloadedBinaryWhenOldExecutableIsBroken(t *testing.T) {
+	body := []byte("new")
+	in, _ := newInstaller(t, &fakeAPI{body: body, sha: digest(body), token: "t"}, "")
+	final := filepath.Join(in.Dir, binaryName())
+	_ = os.WriteFile(final, []byte("broken"), 0o755)
+	removed := false
+	in.Run = func(_ context.Context, path string, args []string, _ []string) ([]byte, error) {
+		contents, _ := os.ReadFile(path)
+		if args[0] == "uninstall" {
+			if string(contents) == "broken" {
+				return nil, errors.New("cannot execute old binary")
+			}
+			removed = true
+		}
+		return nil, nil
+	}
+	if _, err := in.RepairVersion(context.Background(), "1.2.3"); err != nil || !removed {
+		t.Fatalf("removed=%v err=%v", removed, err)
+	}
+}
+
+func TestEnsureVersionRestoresPreviouslyEnrolledMissingBinary(t *testing.T) {
+	body := []byte("new")
+	in, calls := newInstaller(t, &fakeAPI{body: body, sha: digest(body), token: "t"}, "")
+	in.StateFile = filepath.Join(in.Dir, "rmm-state.json")
+	_ = os.WriteFile(in.StateFile, []byte("saved enrolment"), 0o600)
+	changed, err := in.EnsureVersion(context.Background(), "1.2.3")
+	if !changed || err != nil {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if len(*calls) != 4 || (*calls)[0].args[0] != "uninstall" || (*calls)[1].args[0] != "enrol" || (*calls)[3].args[0] != "verify" {
+		t.Fatalf("calls=%+v", *calls)
+	}
+}
+
+func TestEnsureVersionRepairsAnUnreadableExecutable(t *testing.T) {
+	body := []byte("new")
+	in, calls := newInstaller(t, &fakeAPI{body: body, sha: digest(body), token: "t"}, "version")
+	_ = os.WriteFile(filepath.Join(in.Dir, binaryName()), []byte("broken"), 0o755)
+	if changed, err := in.EnsureVersion(context.Background(), "1.2.3"); !changed || err != nil {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if len(*calls) != 5 || (*calls)[2].args[0] != "enrol" || (*calls)[4].args[0] != "verify" {
+		t.Fatalf("calls=%+v", *calls)
 	}
 }
