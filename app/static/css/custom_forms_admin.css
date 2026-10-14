@@ -203,4 +203,84 @@
   border: 1px dashed var(--color-border, #cbd5e1);
   border-radius: 8px;
   margin-bottom: 1rem;
+
+/* ============ Tab panels ============ */
+.cf-admin .scf-panels {
+  margin-top: 1rem;
+}
+
+.cf-admin .scf-panels .form-help {
+  margin-bottom: 1rem;
+}
+
+/* ============ Forms table ============ */
+.cf-admin .cf-table-actions-col {
+  width: 12rem;
+}
+
+.cf-table-actions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.cf-table-row--active > td {
+  background: var(--color-surface-2, #eef2f7);
+}
+
+/* ============ Per-type configuration ============ */
+.cf-config {
+  border: 1px dashed var(--color-border, #cbd5e1);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  background: var(--color-surface-2, #f8fafc);
+}
+
+.cf-config[hidden] {
+  display: none;
+}
+
+.cf-config__section .form-grid {
+  gap: 0 1rem;
+}
+
+/* ============ Submissions ============ */
+.cf-submission-date {
+  white-space: nowrap;
+}
+
+.cf-submission-data {
+  line-height: 1.5;
+}
+
+.cf-submission-kv {
+  display: inline-block;
+  margin-right: 0.75rem;
+}
+
+.cf-submission-kv strong {
+  font-weight: 600;
+}
+
+/* ============ Inline links / hints ============ */
+.cf-inline-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--color-primary, #2563eb);
+  text-decoration: underline;
+}
+
+.cf-inline-link:focus-visible {
+  outline: 2px solid var(--color-primary, #2563eb);
+  outline-offset: 1px;
+}
+
+.cf-empty-hint {
+  margin: 1.5rem 0;
+}
 }

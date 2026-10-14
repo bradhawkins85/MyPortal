@@ -36,6 +36,7 @@ class FormFieldBase(BaseModel):
     required: bool = False
     options: Optional[list[str]] = Field(default=None, max_items=100)
     default_value: Optional[str] = Field(default=None, max_length=255)
+    config: Optional[dict[str, Any]] = None
 
 
 class FormFieldCreate(FormFieldBase):
@@ -50,6 +51,7 @@ class FormFieldUpdate(BaseModel):
     required: Optional[bool] = None
     options: Optional[list[str]] = Field(default=None, max_items=100)
     default_value: Optional[str] = Field(default=None, max_length=255)
+    config: Optional[dict[str, Any]] = None
 
 
 class FormFieldResponse(FormFieldBase):

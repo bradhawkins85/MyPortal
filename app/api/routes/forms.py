@@ -22,7 +22,12 @@ from app.schemas.forms import (
     FormUpdate,
 )
 from app.services import custom_forms
-from app.services.custom_forms import FILE_TYPES, FormValidationError, OPTION_TYPES
+from app.services.custom_forms import (
+    CONFIG_TYPES,
+    FILE_TYPES,
+    FormValidationError,
+    OPTION_TYPES,
+)
 
 router = APIRouter(tags=["forms"])
 
@@ -130,11 +135,12 @@ async def api_create_field(
 ):
     await _get_admin_form(form_id, user)
     errors = custom_forms.validate_field_definition(
-        payload.field_type, payload.label, payload.options
+        payload.field_type, payload.label, payload.options, payload.config
     )
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
     options = payload.options if payload.field_type in OPTION_TYPES else None
+    config = payload.config if payload.field_type in CONFIG_TYPES else None
     sort_order = len(await forms_repo.list_fields(form_id))
     return await forms_repo.create_field(
         form_id=form_id,
@@ -145,6 +151,7 @@ async def api_create_field(
         required=payload.required,
         options=options,
         default_value=payload.default_value,
+        config=config,
         sort_order=sort_order,
     )
 
@@ -184,7 +191,14 @@ async def api_update_field(
     )
     if new_type not in OPTION_TYPES:
         new_options = None
-    errors = custom_forms.validate_field_definition(new_type, new_label, new_options)
+    new_config = (
+        payload.config if payload.config is not None else existing.get("config")
+    )
+    if new_type not in CONFIG_TYPES:
+        new_config = None
+    errors = custom_forms.validate_field_definition(
+        new_type, new_label, new_options, new_config
+    )
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
     return await forms_repo.update_field(
@@ -196,6 +210,7 @@ async def api_update_field(
         required=new_required,
         options=new_options,
         default_value=new_default,
+        config=new_config,
     )
 
 

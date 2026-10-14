@@ -20,25 +20,46 @@ FIELD_TYPES: dict[str, str] = {
     "textarea": "Multi-line text",
     "email": "Email address",
     "number": "Number",
+    "time": "Time",
+    "url": "URL",
     "select": "Dropdown (single choice)",
     "radio": "Radio buttons (single choice)",
     "multiselect": "Multiple choice",
     "checkbox": "Check box (yes/no)",
     "date": "Date",
+    "password": "Password",
+    "rating": "Rating (stars)",
+    "signature": "Signature",
+    "audio": "Audio upload",
     "file": "File upload",
+    "matrix": "Matrix grid",
     "hidden": "Hidden field",
 }
 
 #: Field types that expose an ``options`` list to the submitter.
 OPTION_TYPES: frozenset[str] = frozenset({"select", "radio", "multiselect"})
 
-#: Field types that accept uploaded files.
-FILE_TYPES: frozenset[str] = frozenset({"file"})
+#: Field types that accept uploaded files (file upload + audio clips).
+FILE_TYPES: frozenset[str] = frozenset({"file", "audio"})
+
+#: Field types that accept multiple uploaded files (multi-upload per question).
+MULTI_FILE_TYPES: frozenset[str] = frozenset({"audio"})
+
+#: Field types whose behaviour is configured via the ``config`` JSON column.
+CONFIG_TYPES: frozenset[str] = frozenset({"matrix", "rating", "audio"})
+
+#: Field types that store a base64/data-URL image.
+SIGNATURE_TYPES: frozenset[str] = frozenset({"signature"})
 
 MAX_OPTIONS = 100
 MAX_OPTION_LENGTH = 255
+MAX_AUDIO_CLIPS = 5
+MAX_RATING = 10
+MAX_MATRIX_ROWS = 50
+MAX_MATRIX_COLS = 25
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -65,6 +86,7 @@ def validate_field_definition(
     field_type: str,
     label: str,
     options: Sequence[str] | None,
+    config: dict[str, Any] | None = None,
 ) -> list[str]:
     """Validate a field definition; return a list of error messages."""
     errors: list[str] = []
@@ -82,6 +104,32 @@ def validate_field_definition(
         for opt in opts:
             if len(opt) > MAX_OPTION_LENGTH:
                 errors.append("Options must be at most 255 characters.")
+    cfg = config or {}
+    if field_type == "matrix":
+        rows = cfg.get("rows") or []
+        columns = cfg.get("columns") or []
+        if not rows:
+            errors.append("A matrix field requires at least one row.")
+        elif len(rows) > MAX_MATRIX_ROWS:
+            errors.append(f"A matrix field can have at most {MAX_MATRIX_ROWS} rows.")
+        if not columns:
+            errors.append("A matrix field requires at least one column.")
+        elif len(columns) > MAX_MATRIX_COLS:
+            errors.append(f"A matrix field can have at most {MAX_MATRIX_COLS} columns.")
+    elif field_type == "rating":
+        try:
+            max_value = int(cfg.get("max", MAX_RATING))
+        except (TypeError, ValueError):
+            max_value = 0
+        if not (1 <= max_value <= MAX_RATING):
+            errors.append(f"A rating field max value must be between 1 and {MAX_RATING}.")
+    elif field_type == "audio":
+        try:
+            max_clips = int(cfg.get("max_clips", MAX_AUDIO_CLIPS))
+        except (TypeError, ValueError):
+            max_clips = 0
+        if not (1 <= max_clips <= MAX_AUDIO_CLIPS):
+            errors.append(f"An audio field must allow between 1 and {MAX_AUDIO_CLIPS} clips.")
     return errors
 
 
@@ -122,18 +170,35 @@ def _is_valid_date(value: str) -> bool:
     return True
 
 
+def _is_valid_time(value: str) -> bool:
+    return bool(_TIME_RE.match(value))
+
+
+def _is_valid_url(value: str) -> bool:
+    return value.startswith("http://") or value.startswith("https://")
+
+
 def _truthy(raw: Any) -> bool:
     return raw in (True, 1, "1", "on", "true", "True")
 
 
 def _display_value(field: dict[str, Any], value: Any) -> str:
     """Render a stored value as a short display string for the ticket body."""
-    if value in (None, ""):
+    if value in (None, "", [], {}):
         return ""
+    field_type = field.get("field_type")
+    if isinstance(value, dict):
+        # Matrix: {row_label: column_label}
+        return "; ".join(f"{row}: {col}" for row, col in value.items())
     if isinstance(value, list):
         return ", ".join(str(item) for item in value)
-    if field["field_type"] == "checkbox":
+    if field_type == "checkbox":
         return "Yes" if value else "No"
+    if field_type == "rating":
+        max_value = field.get("config", {}).get("max", MAX_RATING)
+        return f"{value} / {max_value}"
+    if field_type in SIGNATURE_TYPES:
+        return "(signature image)"
     return str(value)
 
 
@@ -158,6 +223,7 @@ def validate_submission(
         label = field["label"]
         required = field.get("required", False)
         options = field.get("options") or []
+        config = field.get("config") or {}
 
         if field_type == "hidden":
             clean[field_id] = field.get("default_value") or ""
@@ -167,6 +233,10 @@ def validate_submission(
             uploaded = files.get(field_id) or []
             if required and not uploaded:
                 errors.append(f"'{label}' is required.")
+            if field_type in MULTI_FILE_TYPES:
+                max_clips = int(config.get("max_clips", MAX_AUDIO_CLIPS))
+                if len(uploaded) > max_clips:
+                    errors.append(f"'{label}' allows at most {max_clips} clips.")
             clean[field_id] = [getattr(item, "filename", None) or str(item) for item in uploaded]
             continue
 
@@ -200,6 +270,53 @@ def validate_submission(
                 clean[field_id] = value
             continue
 
+        if field_type == "matrix":
+            data = raw if isinstance(raw, dict) else {}
+            rows = config.get("rows") or []
+            cols = config.get("columns") or []
+            if required and not data:
+                errors.append(f"'{label}' is required.")
+            if rows:
+                for row in data:
+                    if row not in rows:
+                        errors.append(f"Invalid row selected in '{label}'.")
+                        break
+            if cols:
+                for col in data.values():
+                    if col not in cols:
+                        errors.append(f"Invalid column selected in '{label}'.")
+                        break
+            clean[field_id] = {str(k): str(v) for k, v in data.items()}
+            continue
+
+        if field_type == "rating":
+            try:
+                max_value = int(config.get("max", MAX_RATING))
+            except (TypeError, ValueError):
+                max_value = MAX_RATING
+            rating = 0
+            if raw not in (None, ""):
+                try:
+                    rating = int(str(raw).strip())
+                except ValueError:
+                    errors.append(f"'{label}' must be a whole number.")
+            if rating < 0 or rating > max_value:
+                errors.append(f"'{label}' must be between 0 and {max_value}.")
+                rating = max(0, min(rating, max_value))
+            if required and not rating:
+                errors.append(f"'{label}' is required.")
+            clean[field_id] = rating
+            continue
+
+        if field_type in SIGNATURE_TYPES:
+            value = "" if raw is None else str(raw).strip()
+            if required and not value:
+                errors.append(f"'{label}' is required.")
+            if value and not value.startswith("data:"):
+                errors.append(f"'{label}' must be an image.")
+            clean[field_id] = value
+            continue
+
         value = "" if raw is None else str(raw).strip()
         if field_type == "email":
             if required and not value:
@@ -216,6 +333,16 @@ def validate_submission(
                 errors.append(f"'{label}' is required.")
             elif value and not _is_valid_date(value):
                 errors.append(f"'{label}' must be a valid date (YYYY-MM-DD).")
+        elif field_type == "time":
+            if required and not value:
+                errors.append(f"'{label}' is required.")
+            elif value and not _is_valid_time(value):
+                errors.append(f"'{label}' must be a valid time (HH:MM).")
+        elif field_type == "url":
+            if required and not value:
+                errors.append(f"'{label}' is required.")
+            elif value and not _is_valid_url(value):
+                errors.append(f"'{label}' must be a valid URL.")
         else:
             if required and not value:
                 errors.append(f"'{label}' is required.")

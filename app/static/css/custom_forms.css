@@ -1,0 +1,50 @@
+/* Public custom-form widget styles. */
+.cf-pub-field { margin-bottom: var(--space-gap-base, 0.9rem); }
+
+.form-help { margin: 0.35rem 0 0; font-size: 0.8rem; color: var(--hf-muted, #9fb0c4); }
+
+/* Radio + check groups */
+.cf-radio-group { display: flex; flex-direction: column; gap: 0.45rem; }
+.scf-radio { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.9rem; }
+.scf-radio input { accent-color: var(--hf-accent, #38bdf8); width: 1rem; height: 1rem; }
+.scf-check { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.9rem; }
+.scf-check input { accent-color: var(--hf-accent, #38bdf8); }
+
+/* Rating (star) */
+.cf-rating { display: inline-flex; align-items: center; gap: 0.2rem; }
+.cf-rating__star { position: relative; cursor: pointer; }
+.cf-rating__star input { position: absolute; opacity: 0; pointer-events: none; }
+.cf-rating__star .cf-rating__glyph { font-size: 1.7rem; line-height: 1; color: var(--hf-line, rgba(148, 163, 184, 0.45)); transition: color 0.1s ease, transform 0.1s ease; }
+.cf-rating__star:hover .cf-rating__glyph { transform: scale(1.15); }
+.cf-rating__star.is-filled .cf-rating__glyph { color: var(--hf-accent, #38bdf8); }
+.cf-rating__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.cf-rating__value { margin-left: 0.6rem; font-size: 0.85rem; color: var(--hf-muted, #9fb0c4); font-variant-numeric: tabular-nums; }
+
+/* Matrix grid */
+.cf-matrix-wrap { overflow-x: auto; }
+.cf-matrix { border-collapse: collapse; width: 100%; min-width: 22rem; font-size: 0.85rem; }
+.cf-matrix th, .cf-matrix td { border: 1px solid var(--hf-line, rgba(148, 163, 184, 0.22)); padding: 0.4rem 0.6rem; text-align: center; }
+.cf-matrix thead th { font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--hf-muted, #9fb0c4); }
+.cf-matrix tbody th { text-align: left; font-weight: 600; }
+.cf-matrix__cell { display: inline-flex; cursor: pointer; }
+.cf-matrix__cell input { accent-color: var(--hf-accent, #38bdf8); width: 1rem; height: 1rem; cursor: pointer; }
+
+/* Signature */
+.cf-signature { display: flex; flex-direction: column; gap: 0.5rem; }
+.cf-signature__canvas { width: 100%; max-width: 560px; height: 160px; border: 1px dashed var(--hf-line, rgba(148, 163, 184, 0.35)); border-radius: var(--hf-radius-sm, 0.5rem); background: color-mix(in srgb, var(--hf-muted, #9fb0c4) 6%, transparent); touch-action: none; cursor: crosshair; }
+.cf-signature__actions { display: flex; align-items: center; gap: 0.75rem; }
+.cf-signature__hint { font-size: 0.8rem; color: var(--hf-muted, #9fb0c4); }
+
+/* Audio multi-clip */
+.cf-audio { margin-top: 0.5rem; }
+.cf-audio__list { display: flex; flex-direction: column; gap: 0.4rem; }
+.cf-audio__clip { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.5rem 0.65rem; border: 1px solid var(--hf-line, rgba(148, 163, 184, 0.22)); border-radius: var(--hf-radius-sm, 0.5rem); }
+.cf-audio__name { font-size: 0.82rem; font-weight: 600; overflow-wrap: anywhere; }
+.cf-audio__clip audio { width: 100%; max-width: 320px; }
+.cf-audio__hint { font-size: 0.82rem; color: var(--hf-muted, #9fb0c4); }
+
+/* Password toggle */
+.cf-password-field { display: flex; align-items: center; gap: 0.5rem; }
+.cf-password-field .form-input { flex: 1; }
+.cf-password-toggle { flex: none; font-size: 0.78rem; font-weight: 600; padding: 0.3rem 0.6rem; border: 1px solid var(--hf-line, rgba(148, 163, 184, 0.3)); border-radius: var(--hf-radius-sm, 0.5rem); background: transparent; color: var(--hf-copy, #f1f5f9); cursor: pointer; }
+.cf-password-toggle:hover { background: color-mix(in srgb, var(--hf-accent, #38bdf8) 15%, transparent); }

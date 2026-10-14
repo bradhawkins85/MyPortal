@@ -1146,6 +1146,14 @@
                   <span class="menu__label">Approvals</span>
                 </a>
               </li>
+              {% if feature_pack_available('forms') %}<li class="menu__item">
+                <a href="/admin/custom-forms" {% if current_path.startswith('/admin/custom-forms') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6V2zm2 2v2h8V4H8zm0 4v2h8V8H8zm0 4v2h5v-2H8zm0 4v2h8v-2H8z"/></svg>
+                  </span>
+                  <span class="menu__label">Custom Forms</span>
+                </a>
+              </li>{% endif %}
               {% if feature_pack_available('tray') %}<li class="menu__item">
                 <a href="/admin/tray/configurations" {% if current_path.startswith('/admin/tray') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
