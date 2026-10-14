@@ -81,7 +81,7 @@ waits until recording has stopped; failed JavaScript submissions retain the clip
 Resetting the form or leaving the page releases the microphone and local previews.
 Uploads remain available when recording is unsupported or permission is denied,
 and without JavaScript. Microphone permission and blob media playback are enabled
-only on `/forms/{slug}` pages by the portal's security headers.
+only on `/forms/{slug}` and `/public/forms/{slug}` pages by the portal's security headers.
 
 File fields offer **Take photo** and **Record video** controls using native mobile
 camera capture (`capture="environment"` with image/video file inputs). Devices
@@ -93,3 +93,44 @@ remain available, including without JavaScript. HEIC/HEIF photos and MP4/QuickTi
 videos are accepted; HEIC/HEIF photos are downloadable even when a browser cannot
 preview them. Native camera capture does not require enabling in-page camera
 streaming in the portal's Permissions-Policy.
+
+
+## Public magic links
+
+Open a form in `/admin/custom-forms` and choose **Share via magic link**.
+Select the company that should receive tickets, then choose a future expiry
+(date and time in UTC) or **Never expires**. Copy the generated URL immediately:
+raw links are shown once, and only a SHA-256 token digest is stored. The sharing
+page lists links and lets super admins revoke them, including links that never
+expire. Creating another link does not invalidate existing links.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/forms/{form_id}/share-links` | Create a link |
+| GET | `/api/forms/{form_id}/share-links` | List link metadata (no tokens) |
+| DELETE | `/api/forms/{form_id}/share-links/{link_id}` | Revoke a link belonging to the form |
+
+Creation accepts `{"company_id": 7, "expires_at": "2027-01-01T00:00:00Z"}`.
+`expires_at` must include a timezone and be in the future. Omit it or send `null`
+for a link that never expires. HTTP 201 returns link metadata and `url`.
+These management endpoints require a super admin and the normal CSRF policy.
+
+`GET /public/forms/{slug}?token=...` displays a standalone form without login.
+POST to that same URL accepts the same field and upload formats as authenticated
+submissions. Link access is independent of the form's portal user access list.
+Invalid, expired, revoked, mismatched, and inactive-form links return HTTP 404
+on both GET and POST. Expiry is checked again when submitting.
+
+Public submissions create tickets for the company stored on the link, with no
+requester or authenticated submitter identity. Browser cookies and submitted
+company IDs do not change this routing. Attachments remain private. JSON success
+returns only `{"status": "ok", "message": "Your submission was received."}`;
+HTML success displays a confirmation. Ticket IDs, attachment metadata, and portal
+navigation are not exposed to public recipients. Validation errors retain HTML
+answers as with signed-in forms. These capability endpoints do not use session
+identity and are exempt from session CSRF checks; the bearer token is required
+for every read and submission. Public pages disable caching, indexing, and
+referrer sharing. The link can be reused until expiry or revocation.
+
+Deployments must apply migration `492_custom_form_share_links.sql` before using
+this feature.

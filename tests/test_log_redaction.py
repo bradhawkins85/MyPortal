@@ -104,3 +104,9 @@ def test_tray_websocket_ignores_query_string_token():
 
     asyncio.run(app_main.tray_device_socket(FakeWebSocket(), "device-1"))
     assert closed == [4401]
+
+def test_referrer_masks_magic_link_tokens():
+    result = redact_headers({"Referer": "https://portal.test/public/forms/support?token=secret&page=2"})
+    assert "secret" not in result["Referer"]
+    assert "token=[REDACTED]" in result["Referer"]
+    assert "page=2" in result["Referer"]

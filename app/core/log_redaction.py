@@ -49,6 +49,8 @@ def redact_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
             key_lower = ""
         if key_lower in _SENSITIVE_HEADER_NAMES or _SENSITIVE_KEY_PATTERN.search(key_lower):
             redacted[str(name)] = _REDACTED
+        elif key_lower in {"referer", "referrer"}:
+            redacted[str(name)] = redact_url_query(str(value))
         else:
             redacted[str(name)] = str(value)
     return redacted

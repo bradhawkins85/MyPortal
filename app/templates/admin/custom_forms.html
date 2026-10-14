@@ -38,6 +38,7 @@
     </section>
     <div class="cf-workspace__main">
     {% if selected_form %}
+      <p><a class="button button--ghost" href="/admin/custom-forms/{{ selected_form.id }}/sharing">Share via magic link</a></p>
       <section class="card card--panel" aria-labelledby="cf-builder-heading">
         <header class="card__header cf-section-header"><div><h2 class="card__title" id="cf-builder-heading">{{ selected_form.name }}</h2><p class="card__subtitle">{{ selected_form.description or 'Add a description to help people understand this form.' }}</p></div><span class="status status--{{ 'success' if selected_form.active else 'neutral' }}">{{ 'Active' if selected_form.active else 'Inactive' }}</span></header>
         <div class="card__body">

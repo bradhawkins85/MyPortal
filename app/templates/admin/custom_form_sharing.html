@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block header_title %}<span class="header__title-text">Share {{ form.name }}</span>{% endblock %}
+{% block content %}
+<section class="card card--panel">
+  <header class="card__header"><div><h1 class="card__title">Public sharing links</h1><p class="card__subtitle">Anyone with a link can submit this form without signing in. Submissions create tickets for the company you choose.</p></div></header>
+  <div class="card__body">
+    <p><a href="/admin/custom-forms?form_id={{ form.id }}">Back to form</a></p>
+    {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+    {% if share_url %}<div role="status"><p>Link created. Copy and save it now; it will only be shown once.</p><label class="form-label" for="share-url">Magic link</label><textarea class="form-input" id="share-url" readonly rows="3">{{ share_url }}</textarea></div>{% endif %}
+    <form method="post" action="/admin/custom-forms/{{ form.id }}/sharing">
+      {% include "partials/csrf.html" %}
+      <div class="form-field"><label class="form-label" for="share-company">Company for submitted tickets</label><select class="form-input" id="share-company" name="company_id" required><option value="">Choose a company…</option>{% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select></div>
+      <fieldset><legend>Link expiry</legend>
+        <label><input type="radio" name="expiry_mode" value="date" checked /> Expires on a date</label>
+        <div class="form-field"><label class="form-label" for="share-expiry">Expiry date and time (UTC)</label><input class="form-input" id="share-expiry" type="datetime-local" name="expires_at" /></div>
+        <label><input type="radio" name="expiry_mode" value="never" /> Never expires</label>
+      </fieldset>
+      <p class="form-help">You can revoke any link at any time. Inactive forms cannot accept submissions.</p>
+      <button class="button button--primary" type="submit">Create magic link</button>
+    </form>
+    <h2>Existing links</h2>
+    {% for link in links %}
+    <div class="card"><div class="card__body"><p>Link #{{ link.id }} · {{ link.company_name }}</p><p>{{ 'Revoked' if link.revoked_at else ('Expires: ' ~ link.expires_at ~ ' UTC' if link.expires_at else 'Never expires') }}</p>
+      {% if not link.revoked_at %}<form method="post" action="/admin/custom-forms/{{ form.id }}/sharing">{% include "partials/csrf.html" %}<input type="hidden" name="action" value="revoke" /><input type="hidden" name="link_id" value="{{ link.id }}" /><button class="button button--danger" type="submit" aria-label="Revoke link {{ link.id }}">Revoke link</button></form>{% endif %}
+    </div></div>
+    {% else %}<p>No sharing links yet.</p>{% endfor %}
+  </div>
+</section>
+{% endblock %}

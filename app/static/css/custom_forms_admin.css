@@ -143,3 +143,5 @@
 .cf-submissions summary { cursor: pointer; }
 .cf-submissions dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--space-gap-base); }
 .cf-submissions dt, .cf-submissions dd { margin: 0; overflow-wrap: anywhere; }
+
+.cf-public-shell { max-width: 56rem; margin: 2rem auto; padding: 0 1rem; }

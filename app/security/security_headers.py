@@ -49,7 +49,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Skip security headers for exempted paths (e.g., static files)
         path = request.url.path
         # Only custom form pages need microphone access and local audio previews.
-        is_custom_form = bool(re.fullmatch(r"/forms/[^/]+/?", path))
+        is_custom_form = bool(re.fullmatch(r"/(?:public/)?forms/[^/]+/?", path))
         if any(path.startswith(prefix) for prefix in self.exempt_paths):
             return response
 
@@ -136,7 +136,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
 
         # Referrer-Policy: Control referrer information sent with requests
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
 
         # Permissions-Policy: Disable sensitive browser features
         permissions = [
