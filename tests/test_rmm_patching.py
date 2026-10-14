@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture
 async def patch_db(sqlite_db, monkeypatch):
     await sqlite_db.conn.executescript(Database()._adapt_sql_for_sqlite(
-        (ROOT / 'migrations/490_rmm_patch_policies.sql').read_text()))
+        (ROOT / 'migrations/491_rmm_patch_policies.sql').read_text()))
     monkeypatch.setattr(repo, 'db', sqlite_db)
     return sqlite_db
 

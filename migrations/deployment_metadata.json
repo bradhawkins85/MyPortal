@@ -199,7 +199,7 @@
       "compatible-to": "*",
       "maintenance": false
     },
-    "490_rmm_patch_policies.sql": {
+    "491_rmm_patch_policies.sql": {
       "phase": "expand",
       "compatible-from": "*",
       "compatible-to": "*",
