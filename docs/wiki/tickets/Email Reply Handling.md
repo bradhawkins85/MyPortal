@@ -2,11 +2,11 @@
 
 ## Overview
 
-Email replies received through IMAP are now intelligently matched to existing tickets instead of always creating new tickets. This document describes how the matching works and provides examples.
+Email replies received through IMAP or Microsoft 365 are matched to existing tickets instead of always creating new tickets. This document describes how the matching works and provides examples.
 
 ## How It Works
 
-When an email is received via IMAP, the system attempts to find an existing ticket to append the reply to. The matching process follows these rules:
+When an email is received via IMAP or Microsoft 365, the system attempts to find an existing ticket to append the reply to. The matching process follows these rules:
 
 ### 1. Ticket Number in Subject (Highest Priority)
 
@@ -33,9 +33,11 @@ Reply email subjects that will match:
 ### 2. Subject Matching (Fallback)
 
 If no ticket number is found in the subject, the system will try to match by normalized subject. This only works if:
-- The email sender is the ticket requester OR a watcher on the ticket
-- The ticket is NOT closed or resolved
+- The email sender is the ticket requester (portal user or staff), a watcher (including email-only CC recipients), or an external author recorded on a public ticket conversation entry
+- The ticket is NOT closed
 - The normalized subject matches an existing ticket's normalized subject
+
+Repeated deliveries from the same external sender can match even without reply headers or a portal account. CC recipients stored as email-only watchers can reply into the same ticket. The matcher checks all eligible tickets for the sender, including those outside their 20 most recently updated tickets. Addresses mentioned only in the email body or ticket description do not establish participation.
 
 **Subject normalization removes:**
 - Reply prefixes: RE:, FW:, FWD: (case insensitive, multiple levels)
