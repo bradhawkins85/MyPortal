@@ -1,260 +1,98 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
-
-{% block styles %}
-  <link rel="stylesheet" href="{{ static_url('/static/css/custom_forms_admin.css') }}" />
-{% endblock %}
-
-{% block header_title %}
-  <span class="header__title-text">Custom forms</span>
-{% endblock %}
-
+{% from "admin/_custom_form_editor.html" import form_details, field_editor %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/custom_forms_admin.css') }}" />{% endblock %}
+{% block header_title %}<span class="header__title-text">Custom forms</span>{% endblock %}
 {% block header_actions %}
-  {{ page_header_actions([
-    {"label": "New form", "type": "button", "variant": "primary", "id": "cf-new-form"}
-  ]) }}
+{{ page_header_actions([
+  {"label": "New form", "variant": "primary", "attrs": {"id": "cf-new-form", "data-cf-create-open": true, "aria-haspopup": "dialog", "aria-controls": "cf-create-modal"}},
+  {"label": "View available forms", "type": "link", "href": "/forms"}
+], menu_id="cf-page-actions") }}
 {% endblock %}
-
 {% block content %}
-<div class="admin-grid cf-admin">
-  {% if errors %}
-  <div class="alert alert--error" role="alert" data-cf-errors>
-    <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
-  </div>
-  {% endif %}
-
-  <section class="card card--panel" aria-labelledby="cf-page-heading">
-    <div class="card__header">
-      <div>
-        <h2 class="card__title" id="cf-page-heading">Custom forms</h2>
-        <p class="card__subtitle">Create forms, build their fields, and review the submissions they collect.</p>
+<div class="cf-workspace" data-cf-workspace>
+  <p class="cf-intro">Build request forms that turn each submission into a support ticket.</p>
+  <p class="cf-message" role="status" aria-live="polite" data-cf-status hidden></p>
+  <div class="cf-workspace__layout">
+    <section class="card card--panel cf-library" aria-labelledby="cf-list-heading">
+      <header class="card__header"><div><h2 class="card__title" id="cf-list-heading">Your forms <span class="cf-count">{{ forms | length }}</span></h2><p class="card__subtitle">Choose a form to manage its fields and access.</p></div></header>
+      <div class="card__body">
+        {% if forms %}
+        <div class="cf-search"><label class="sr-only" for="cf-form-search">Search forms</label><input class="form-input" type="search" id="cf-form-search" placeholder="Search forms…" data-cf-search="forms" aria-controls="cf-form-list" /></div>
+        <ul class="cf-form-list" id="cf-form-list">
+          {% for form in forms %}
+          <li class="cf-form-row{% if selected_form and selected_form.id == form.id %} cf-form-row--active{% endif %}" data-cf-form-card>
+            <a class="cf-form-row__link" href="/admin/custom-forms?form_id={{ form.id }}"{% if selected_form and selected_form.id == form.id %} aria-current="page"{% endif %}>
+              <strong>{{ form.name }}</strong><span class="status status--{{ 'success' if form.active else 'neutral' }}">{{ 'Active' if form.active else 'Inactive' }}</span>
+              <span class="cf-form-row__desc">{{ form.description or 'No description added.' }}</span>
+              <span class="cf-form-row__path">/forms/{{ form.slug }}</span>
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+        <p class="cf-empty" data-cf-no-results="forms" role="status" hidden>No forms match your search. Try another name.</p>
+        {% else %}
+        <div class="cf-empty"><h3>No request forms yet</h3><p>Create a form, add the questions you need, and choose who can submit it.</p><button type="button" class="button button--ghost" data-cf-create-open aria-haspopup="dialog" aria-controls="cf-create-modal">Create your first form</button></div>
+        {% endif %}
       </div>
-    </div>
-    <div class="card__body">
-      <nav class="scf-tabs" role="tablist" aria-label="Custom forms">
-        <button type="button" class="scf-tab{% if not selected_form %} is-active{% endif %}" role="tab" id="cf-tab-forms" aria-controls="cf-panel-forms" aria-selected="{% if not selected_form %}true{% else %}false{% endif %}" tabindex="{% if not selected_form %}0{% else %}-1{% endif %}" data-cf-tab="forms">Forms</button>
-        <button type="button" class="scf-tab{% if selected_form %} is-active{% endif %}" role="tab" id="cf-tab-builder" aria-controls="cf-panel-builder" aria-selected="{% if selected_form %}true{% else %}false{% endif %}" tabindex="{% if selected_form %}0{% else %}-1{% endif %}"{% if not selected_form %} disabled aria-disabled="true"{% endif %} data-cf-tab="builder">Builder</button>
-        <button type="button" class="scf-tab" role="tab" id="cf-tab-submissions" aria-controls="cf-panel-submissions" aria-selected="false" tabindex="-1"{% if not selected_form %} disabled aria-disabled="true"{% endif %} data-cf-tab="submissions">Submissions</button>
-      </nav>
-      <div class="scf-panels">
-        <!-- ============ Forms ============ -->
-        <section class="scf-panel" id="cf-panel-forms" role="tabpanel" aria-labelledby="cf-tab-forms" data-cf-panel="forms" {% if selected_form %}hidden{% endif %}>
-          <div data-cf-create-panel>
-            <h3 class="cf-subheading">Create a form</h3>
-            <form class="form" data-cf-create-form>
-              <div class="form-grid">
-                <div class="form-field">
-                  <label class="form-label required" for="cf-create-name">Form name</label>
-                  <input class="form-input" id="cf-create-name" name="name" required maxlength="255" placeholder="e.g. Support request" />
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="cf-create-description">Description <span class="scf-optional">optional</span></label>
-                  <textarea class="form-input" id="cf-create-description" name="description" rows="2" maxlength="1024" placeholder="What is this form for?"></textarea>
-                </div>
-              </div>
-              <div class="form-actions">
-                <button type="submit" class="button button--primary">Create form</button>
-              </div>
-            </form>
+    </section>
+    <div class="cf-workspace__main">
+    {% if selected_form %}
+      <section class="card card--panel" aria-labelledby="cf-builder-heading">
+        <header class="card__header cf-section-header"><div><h2 class="card__title" id="cf-builder-heading">{{ selected_form.name }}</h2><p class="card__subtitle">{{ selected_form.description or 'Add a description to help people understand this form.' }}</p></div><span class="status status--{{ 'success' if selected_form.active else 'neutral' }}">{{ 'Active' if selected_form.active else 'Inactive' }}</span></header>
+        <div class="card__body">
+          <dl class="cf-facts"><div><dt>Fields</dt><dd>{{ selected_fields | length }}</dd></div><div><dt>Required</dt><dd>{{ selected_fields | selectattr('required') | list | length }}</dd></div><div><dt>Access</dt><dd>{{ (access_user_ids | length ~ (' selected user' if access_user_ids | length == 1 else ' selected users')) if access_user_ids else 'All signed-in users' }}</dd></div></dl>
+          <div class="cf-toolbar">
+            <button class="button button--ghost" type="button" data-cf-details-open aria-haspopup="dialog" aria-controls="cf-details-modal">Edit form details</button>
+            {% if selected_form.active %}<a class="button button--ghost" href="/forms/{{ selected_form.slug }}">Open form</a>{% endif %}
+            <details class="cf-record-actions"><summary class="button button--ghost">More actions</summary><div><form action="/admin/custom-forms/save" method="post" data-cf-action="delete_form" data-cf-confirm="Delete this form and all its fields? This cannot be undone.">{% include "partials/csrf.html" %}<input type="hidden" name="action" value="delete_form" /><input type="hidden" name="form_id" value="{{ selected_form.id }}" /><noscript><label><input type="checkbox" required /> Permanently delete this form and its fields.</label></noscript><button type="submit" class="button button--danger">Delete form</button></form></div></details>
           </div>
-
-          <h3 class="cf-subheading">All forms</h3>
-          {% if forms %}
-          <div class="table-wrapper">
-            <table class="table" data-cf-forms-table>
-              <thead>
-                <tr><th scope="col">Form</th><th scope="col">Status</th><th scope="col" class="cf-table-actions-col">Actions</th></tr>
-              </thead>
-              <tbody>
-                {% for form in forms %}
-                <tr class="{% if selected_form and selected_form.id == form.id %}cf-table-row--active{% endif %}">
-                  <td>
-                    <a class="cf-form-row__name" href="/admin/custom-forms?form_id={{ form.id }}">{{ form.name }}</a>
-                    {% if form.description %}<p class="cf-form-row__desc">{{ form.description }}</p>{% endif %}
-                  </td>
-                  <td><span class="scf-chip{% if not form.active %} scf-chip--logic{% endif %}">{{ 'Active' if form.active else 'Inactive' }}</span></td>
-                  <td class="cf-table-actions">
-                    <a class="button button--ghost" href="/admin/custom-forms?form_id={{ form.id }}">Open</a>
-                    <button type="button" class="button button--danger" data-cf-delete-form="{{ form.id }}" data-cf-confirm="Delete this form and its fields?">Delete</button>
-                  </td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          {% else %}
-          <p class="text-muted">No forms yet. Create one above.</p>
-          {% endif %}
-        </section>
-
-        <!-- ============ Builder ============ -->
-        <section class="scf-panel" id="cf-panel-builder" role="tabpanel" aria-labelledby="cf-tab-builder" data-cf-panel="builder" {% if not selected_form %}hidden{% endif %}>
-          {% if selected_form %}
-          <form class="form cf-update-form" data-cf-update-form data-form-id="{{ selected_form.id }}">
-            <div class="form-grid">
-              <div class="form-field">
-                <label class="form-label required" for="cf-update-name">Form name</label>
-                <input class="form-input" id="cf-update-name" name="name" required maxlength="255" value="{{ selected_form.name }}" />
-              </div>
-              <div class="form-field">
-                <label class="scf-switch">
-                  <input type="checkbox" name="active" value="1"{% if selected_form.active %} checked{% endif %} />
-                  <span class="scf-switch__track" aria-hidden="true"></span>
-                  <span>Active (visible to users who have access)</span>
-                </label>
-              </div>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="cf-update-description">Description <span class="scf-optional">optional</span></label>
-              <textarea class="form-input" id="cf-update-description" name="description" rows="2" maxlength="1024">{{ selected_form.description or '' }}</textarea>
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="button button--primary">Save form</button>
-            </div>
-          </form>
-
-          <h3 class="cf-subheading">Fields</h3>
-          <ul class="cf-fields" data-cf-fields>
+        </div>
+      </section>
+      <section class="card card--panel" aria-labelledby="cf-fields-heading">
+        <header class="card__header cf-section-header"><div><h2 class="card__title" id="cf-fields-heading">Fields</h2><p class="card__subtitle">Questions appear in this order. Select a field to edit it.</p></div><button class="button button--primary" type="button" data-cf-field-add aria-haspopup="dialog" aria-controls="cf-field-modal">Add field</button></header>
+        <div class="card__body">
+          {% if selected_fields %}<div class="cf-search"><label class="sr-only" for="cf-field-search">Search fields</label><input class="form-input" type="search" id="cf-field-search" placeholder="Search fields…" data-cf-search="fields" aria-controls="cf-fields" /></div>{% endif %}
+          <ol class="cf-fields" id="cf-fields" data-cf-fields>
             {% for field in selected_fields %}
-            {% set cfg = field.config or {} %}
             <li class="cf-field-row" data-cf-field data-field-id="{{ field.id }}">
-              <div class="cf-field-row__main">
-                <span class="cf-field-row__label">{{ field.label }}</span>
-                <span class="scf-chips">
-                  <span class="scf-chip">{{ field_type_labels.get(field.field_type, field.field_type) }}</span>
-                  <span class="scf-chip{% if field.required %} scf-chip--logic{% endif %}">{{ 'Required' if field.required else 'Optional' }}</span>
-                  {% if field.options %}<span class="scf-chip">{{ field.options | length }} options</span>{% endif %}
-                  {% if field.field_type == 'matrix' and cfg.rows %}<span class="scf-chip">{{ cfg.rows | length }}&#215;{{ cfg.columns | length }} grid</span>{% endif %}
-                  {% if field.field_type == 'rating' and cfg.max %}<span class="scf-chip">max {{ cfg.max }}</span>{% endif %}
-                  {% if field.field_type == 'audio' and cfg.max_clips %}<span class="scf-chip">{{ cfg.max_clips }} clips</span>{% endif %}
-                </span>
+              <span class="cf-field-row__order" aria-label="Position {{ loop.index }}">{{ loop.index }}</span>
+              <div class="cf-field-row__main"><button type="button" class="cf-field-row__label" data-cf-field-edit="{{ field.id }}" aria-haspopup="dialog" aria-controls="cf-field-modal">{{ field.label }}</button>{% if field.help_text %}<p class="cf-field-row__help">{{ field.help_text }}</p>{% endif %}
+                <ul class="cf-chips" aria-label="Field settings"><li class="scf-chip">{{ field_type_labels.get(field.field_type, field.field_type) }}</li><li class="scf-chip{% if field.required %} scf-chip--logic{% endif %}">{{ 'Required' if field.required else 'Optional' }}</li>{% if field.options %}<li class="scf-chip">{{ field.options | length }} choices</li>{% endif %}{% if field.field_type == 'hidden' %}<li class="scf-chip">Not shown to users</li>{% endif %}</ul>
               </div>
-              <span class="cf-field-row__actions">
-                <button type="button" class="button button--ghost" data-cf-field-up="{{ field.id }}" aria-label="Move up">&uarr;</button>
-                <button type="button" class="button button--ghost" data-cf-field-down="{{ field.id }}" aria-label="Move down">&darr;</button>
-                <button type="button" class="button button--ghost" data-cf-field-edit="{{ field.id }}">Edit</button>
-                <button type="button" class="button button--danger" data-cf-field-delete="{{ field.id }}" data-cf-confirm="Remove this field?">Remove</button>
-              </span>
+              {% set first_field = loop.first %}{% set last_field = loop.last %}<div class="cf-field-row__actions">
+                {% for direction, title in [('up', 'Move up'), ('down', 'Move down')] %}<form action="/admin/custom-forms/save" method="post" data-cf-action="move_field">{% include "partials/csrf.html" %}<input type="hidden" name="action" value="move_field" /><input type="hidden" name="form_id" value="{{ selected_form.id }}" /><input type="hidden" name="field_id" value="{{ field.id }}" /><input type="hidden" name="direction" value="{{ direction }}" /><button class="button button--ghost cf-icon-button" type="submit" aria-label="{{ title }}: {{ field.label }}"{% if (direction == 'up' and first_field) or (direction == 'down' and last_field) %} disabled{% endif %}><svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="{{ 'm5 12 5-5 5 5' if direction == 'up' else 'm5 8 5 5 5-5' }}" /></svg></button></form>{% endfor %}
+                <button type="button" class="button button--ghost" data-cf-field-edit="{{ field.id }}" aria-label="Edit {{ field.label }}" aria-haspopup="dialog" aria-controls="cf-field-modal">Edit</button>
+              </div>
               <script type="application/json" data-cf-field-data="{{ field.id }}">{{ field | tojson }}</script>
             </li>
             {% endfor %}
-          </ul>
-          {% if not selected_fields %}
-          <p class="text-muted">No fields yet. Add the first one below.</p>
-          {% endif %}
-
-          <form class="form cf-field-editor" data-cf-field-editor data-form-id="{{ selected_form.id }}">
-            <input type="hidden" name="field_id" value="" data-cf-field-id />
-            <div class="form-field">
-              <label class="form-label required" for="cf-fe-label">Label</label>
-              <input class="form-input" id="cf-fe-label" name="label" required maxlength="255" />
-            </div>
-            <div class="form-grid">
-              <div class="form-field">
-                <label class="form-label required" for="cf-fe-type">Field type</label>
-                <select class="form-input" id="cf-fe-type" name="field_type" data-cf-field-type>
-                  {% for ft in field_types %}<option value="{{ ft.value }}">{{ ft.label }}</option>{% endfor %}
-                </select>
-              </div>
-              <div class="form-field" data-cf-options-wrap>
-                <label class="form-label" for="cf-fe-options">Options (one per line)</label>
-                <textarea class="form-input" id="cf-fe-options" name="options" rows="4" data-cf-options-input></textarea>
-              </div>
-            </div>
-            <!-- Per-type configuration -->
-            <div class="cf-config" data-cf-config>
-              <div class="cf-config__section" data-cf-config-for="matrix" hidden>
-                <div class="form-grid">
-                  <div class="form-field">
-                    <label class="form-label" for="cf-fe-matrix-rows">Matrix rows (one per line)</label>
-                    <textarea class="form-input" id="cf-fe-matrix-rows" data-cf-matrix-rows rows="3" placeholder="Row 1&#10;Row 2"></textarea>
-                  </div>
-                  <div class="form-field">
-                    <label class="form-label" for="cf-fe-matrix-cols">Matrix columns (one per line)</label>
-                    <textarea class="form-input" id="cf-fe-matrix-cols" data-cf-matrix-cols rows="3" placeholder="Yes&#10;No"></textarea>
-                  </div>
-                </div>
-              </div>
-              <div class="cf-config__section" data-cf-config-for="rating" hidden>
-                <div class="form-grid">
-                  <div class="form-field">
-                    <label class="form-label" for="cf-fe-rating-max">Max rating (1&ndash;10)</label>
-                    <input class="form-input" id="cf-fe-rating-max" data-cf-rating-max type="number" min="1" max="10" value="5" />
-                  </div>
-                </div>
-              </div>
-              <div class="cf-config__section" data-cf-config-for="audio" hidden>
-                <div class="form-grid">
-                  <div class="form-field">
-                    <label class="form-label" for="cf-fe-audio-max">Max clips (1&ndash;5)</label>
-                    <input class="form-input" id="cf-fe-audio-max" data-cf-audio-max type="number" min="1" max="5" value="5" />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="cf-fe-placeholder">Placeholder <span class="scf-optional">optional</span></label>
-              <input class="form-input" id="cf-fe-placeholder" name="placeholder" maxlength="255" />
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="cf-fe-help">Help text <span class="scf-optional">optional</span></label>
-              <textarea class="form-input" id="cf-fe-help" name="help_text" rows="2" maxlength="2000"></textarea>
-            </div>
-            <div class="form-grid">
-              <div class="form-field">
-                <label class="form-label" for="cf-fe-default">Default value <span class="scf-optional">optional</span></label>
-                <input class="form-input" id="cf-fe-default" name="default_value" maxlength="255" />
-              </div>
-              <div class="form-field">
-                <label class="scf-switch">
-                  <input type="checkbox" name="required" value="1" data-cf-required />
-                  <span class="scf-switch__track" aria-hidden="true"></span>
-                  <span>Required</span>
-                </label>
-              </div>
-            </div>
-            <div class="form-actions form-actions--inline">
-              <button type="submit" class="button button--primary" data-cf-field-submit>Add field</button>
-              <button type="button" class="button" data-cf-field-cancel>Cancel</button>
-            </div>
-          </form>
-
-          <h3 class="cf-subheading">Access</h3>
-          <p class="form-help">Leave empty to allow every signed-in user. Add user IDs to restrict who can view and submit this form.</p>
+          </ol>
+          {% if not selected_fields %}<div class="cf-empty"><h3>Start with your first question</h3><p>Add text, choices, dates or an upload. Use the live preview to check how each question will look.</p><button class="button button--ghost" type="button" data-cf-field-add aria-haspopup="dialog" aria-controls="cf-field-modal">Add your first field</button></div>{% endif %}
+          <p class="cf-empty" data-cf-no-results="fields" role="status" hidden>No fields match your search.</p>
+        </div>
+      </section>
+      <section class="card card--panel" aria-labelledby="cf-access-heading">
+        <header class="card__header"><div><h2 class="card__title" id="cf-access-heading">Who can submit?</h2><p class="card__subtitle">{% if access_user_ids %}Only the users below and super admins can open this form.{% else %}Every signed-in user can open this form. Add users below to restrict access.{% endif %}</p></div></header>
+        <div class="card__body">
           <ul class="cf-access" data-cf-access>
-            {% for uid in access_user_ids %}
-            <li class="cf-access__item" data-user-id="{{ uid }}">
-              <span class="scf-chip">{{ uid }}</span>
-              <button type="button" class="button button--ghost" data-cf-access-remove="{{ uid }}" aria-label="Remove user {{ uid }}">&times;</button>
-            </li>
-            {% endfor %}
+            {% for uid in access_user_ids %}<li class="cf-access__item" data-user-id="{{ uid }}"><span>{{ access_user_labels.get(uid, 'User #' ~ uid) }}</span><form action="/admin/custom-forms/save" method="post" data-cf-action="remove_access"{% if access_user_ids | length == 1 %} data-cf-confirm="Removing the last user will allow every signed-in user to submit this form. Continue?"{% endif %}>{% include "partials/csrf.html" %}<input type="hidden" name="action" value="remove_access" /><input type="hidden" name="form_id" value="{{ selected_form.id }}" /><input type="hidden" name="user_id" value="{{ uid }}" /><button class="button button--ghost" type="submit" aria-label="Remove {{ access_user_labels.get(uid, 'user ' ~ uid) }}">Remove</button></form></li>{% endfor %}
           </ul>
-          <form class="form cf-access-add" data-cf-access-add data-form-id="{{ selected_form.id }}">
-            <div class="form-actions form-actions--inline">
-              <input class="form-input" type="number" name="user_id" min="1" required placeholder="User ID" />
-              <button type="submit" class="button">Add user</button>
-            </div>
-          </form>
-          {% else %}
-          <p class="text-muted cf-empty-hint">Select a form from the <button type="button" class="cf-inline-link" data-cf-goto="forms">Forms</button> tab to build its fields.</p>
-          {% endif %}
-        </section>
-
-        <!-- ============ Submissions ============ -->
-        <section class="scf-panel" id="cf-panel-submissions" role="tabpanel" aria-labelledby="cf-tab-submissions" data-cf-panel="submissions" hidden>
-          {% if selected_form %}
-          <p class="form-help">Submissions collected for <strong>{{ selected_form.name }}</strong>. Each submission is stored with the ticket it created.</p>
-          <div data-cf-submissions data-form-id="{{ selected_form.id }}"></div>
-          {% else %}
-          <p class="text-muted cf-empty-hint">Select a form from the <button type="button" class="cf-inline-link" data-cf-goto="forms">Forms</button> tab first.</p>
-          {% endif %}
-        </section>
-      </div>
+          <form class="cf-access-add" action="/admin/custom-forms/save" method="post" data-cf-action="add_access">{% include "partials/csrf.html" %}<input type="hidden" name="action" value="add_access" /><input type="hidden" name="form_id" value="{{ selected_form.id }}" /><div class="form-field"><label class="form-label" for="cf-access-user">Add a user</label><select class="form-input" id="cf-access-user" name="user_id" data-searchable="on" required><option value="">Choose a user…</option>{% for user in available_users if user.id not in access_user_ids %}<option value="{{ user.id }}">{{ user.label }}</option>{% endfor %}</select></div><button type="submit" class="button button--ghost">Add user</button></form>
+        </div>
+      </section>
+      <section class="card card--panel" aria-labelledby="cf-submissions-heading"><header class="card__header"><div><h2 class="card__title" id="cf-submissions-heading">Recent submissions</h2><p class="card__subtitle">Review requests received through this form.</p></div></header><div class="card__body">{% if submissions %}<ol class="cf-submissions">{% for submission in submissions %}<li><details><summary>Submission #{{ submission.id }}{% if submission.created_at %} · <span data-utc="{{ submission.created_at.isoformat() if submission.created_at.isoformat is defined else submission.created_at }}">Received</span>{% endif %}</summary><p>Submitted by {{ access_user_labels.get(submission.submitted_by, 'User #' ~ submission.submitted_by) }}{% if submission.ticket_id %} · <a href="/tickets/{{ submission.ticket_id }}">View ticket #{{ submission.ticket_id }}</a>{% endif %}</p><dl>{% for answer in submission.answers %}<dt>{{ answer.label }}</dt><dd>{{ answer.value or 'No answer' }}</dd>{% endfor %}</dl></details></li>{% endfor %}</ol>{% else %}<p class="text-muted">No submissions yet. Requests will appear here when people submit this form.</p>{% endif %}</div></section>
+    {% else %}
+      <section class="card card--panel cf-welcome"><h2 class="card__title">{% if forms %}Choose a form to get started{% else %}A clearer way to collect requests{% endif %}</h2><p class="text-muted">{% if forms %}Select a form from the list to edit questions, preview fields and manage who can submit.{% else %}Give your form a name, build the questions, then make it available to the right people. Each submission creates a support ticket with the answers attached.{% endif %}</p></section>
+    {% endif %}
     </div>
-  </section>
+  </div>
+  <noscript><section class="card card--panel"><h2>Create a form</h2>{{ form_details(none, 'fallback-create', csrf_token) }}{% if selected_form %}<h2>Edit form details</h2>{{ form_details(selected_form, 'fallback-details', csrf_token) }}<h2>Add a field</h2>{{ field_editor(selected_form, field_types, 'fallback-field', csrf_token) }}{% for field in selected_fields %}<details><summary>Edit {{ field.label }}</summary>{{ field_editor(selected_form, field_types, 'fallback-field-' ~ field.id, csrf_token, field) }}<form action="/admin/custom-forms/save" method="post">{% include "partials/csrf.html" %}<input type="hidden" name="action" value="delete_field" /><input type="hidden" name="form_id" value="{{ selected_form.id }}" /><input type="hidden" name="field_id" value="{{ field.id }}" /><label><input type="checkbox" required /> I understand this field will be permanently deleted.</label><button type="submit" class="button button--danger">Delete field</button></form></details>{% endfor %}{% endif %}</section></noscript>
 </div>
+<div class="modal cf-modal" id="cf-create-modal" role="dialog" aria-modal="true" aria-labelledby="cf-create-title" hidden><div class="modal__panel cf-modal__panel"><header class="modal__header"><div><h2 class="modal__title" id="cf-create-title">Create a form</h2><p class="text-muted">Start with a name. Add your questions next.</p></div><button class="modal__close" type="button" data-modal-close aria-label="Close form editor"></button></header>{{ form_details(none, 'cf-create', csrf_token, true) }}</div></div>
+{% if selected_form %}
+<div class="modal cf-modal" id="cf-details-modal" role="dialog" aria-modal="true" aria-labelledby="cf-details-title" hidden><div class="modal__panel cf-modal__panel"><header class="modal__header"><div><h2 class="modal__title" id="cf-details-title">Form details</h2><p class="text-muted">Update the introduction and availability.</p></div><button class="modal__close" type="button" data-modal-close aria-label="Close form details"></button></header>{{ form_details(selected_form, 'cf-details', csrf_token, true) }}</div></div>
+<div class="modal cf-modal" id="cf-field-modal" role="dialog" aria-modal="true" aria-labelledby="cf-field-title" hidden><div class="modal__panel modal__panel--wide cf-modal__panel cf-modal__panel--wide"><header class="modal__header"><div><h2 class="modal__title" id="cf-field-title">Add field</h2><p class="text-muted">Build one question and check how it appears to users.</p></div><button class="modal__close" type="button" data-modal-close aria-label="Close field editor"></button></header>{{ field_editor(selected_form, field_types, 'cf-fe', csrf_token, none, true) }}</div></div>
+{% endif %}
 {% endblock %}
-
-{% block scripts %}
-  <script src="{{ static_url('/static/js/custom_forms_admin.js') }}" defer></script>
-{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/custom_forms_admin.js') }}" defer></script>{% endblock %}

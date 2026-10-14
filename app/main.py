@@ -6790,11 +6790,29 @@ async def custom_forms_admin_page(request: Request, form_id: int | None = None):
     selected_form = None
     selected_fields: list[dict[str, Any]] = []
     access_user_ids: list[int] = []
+    available_users: list[dict[str, Any]] = []
+    submissions: list[dict[str, Any]] = []
     if form_id is not None:
         selected_form = await forms_repo.get_form(form_id)
         if selected_form:
             selected_fields = await forms_repo.list_fields(form_id)
             access_user_ids = await forms_repo.list_access_user_ids(form_id)
+            field_lookup = {str(field["id"]): field for field in selected_fields}
+            for submission in await forms_api.api_list_submissions(form_id, user=current_user):
+                data = submission.get("data") or {}
+                answers = []
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        field = field_lookup.get(str(key), {"label": f"Field #{key}", "field_type": "text"})
+                        answers.append({"label": field["label"], "value": custom_forms._display_value(field, value)})
+                submissions.append({**submission, "answers": answers})
+            for user in await user_repo.list_active_users_for_admin():
+                name = " ".join(str(user.get(key) or "") for key in ("first_name", "last_name")).strip()
+                email = str(user.get("email") or "")
+                available_users.append({
+                    "id": int(user["id"]),
+                    "label": f"{name} ({email})" if name and email else name or email or f"User #{user['id']}",
+                })
     return await _render_template(
         "admin/custom_forms.html",
         request,
@@ -6804,8 +6822,11 @@ async def custom_forms_admin_page(request: Request, form_id: int | None = None):
             "errors": [],
             "forms": all_forms,
             "selected_form": selected_form,
-            "selected_fields": selected_fields,
+            "selected_fields": jsonable_encoder(selected_fields),
             "access_user_ids": access_user_ids,
+            "available_users": available_users,
+            "submissions": submissions,
+            "access_user_labels": {user["id"]: user["label"] for user in available_users},
             "field_types": custom_forms.field_type_choices(),
             "field_type_labels": dict(custom_forms.FIELD_TYPES),
         },

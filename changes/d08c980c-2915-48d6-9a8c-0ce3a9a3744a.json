@@ -1,0 +1,7 @@
+{
+  "guid": "d08c980c-2915-48d6-9a8c-0ce3a9a3744a",
+  "occurred_at": "2026-10-14T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fix custom form builder failing to load when database fields contain datetime timestamps.",
+  "content_hash": "fb1a449607174a68ceaca9bcc1f62f3bb3fa2e399ada18a49e69f5469e178b80"
+}

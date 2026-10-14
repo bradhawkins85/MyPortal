@@ -1,0 +1,44 @@
+{% macro form_details(form, prefix, csrf_token, modal=false) %}
+<form action="/admin/custom-forms/save" method="post" class="cf-details-form" data-cf-action="{{ 'update_form' if form else 'create_form' }}">
+  {% include "partials/csrf.html" %}<input type="hidden" name="action" value="{{ 'update_form' if form else 'create_form' }}" />{% if form %}<input type="hidden" name="form_id" value="{{ form.id }}" />{% endif %}
+  <div class="{{ 'modal__body' if modal else 'cf-fallback-body' }}">
+    <p class="cf-message" role="alert" data-cf-error hidden></p>
+    <div class="form-field"><label class="form-label" for="{{ prefix }}-name">Form name</label><input class="form-input" id="{{ prefix }}-name" name="name" required maxlength="255" value="{{ form.name if form else '' }}" placeholder="e.g. Support request" /></div>
+    <div class="form-field"><label class="form-label" for="{{ prefix }}-description">Description <span class="scf-optional">optional</span></label><textarea class="form-input" id="{{ prefix }}-description" name="description" rows="3" maxlength="1024" placeholder="Explain what this form is for.">{{ (form.description or '') if form else '' }}</textarea></div>
+    {% if form %}<label class="scf-switch"><input type="checkbox" name="active" value="1"{% if form.active %} checked{% endif %} /><span class="scf-switch__track" aria-hidden="true"></span><span>Active and available to users with access</span></label><p class="form-help">Turning this off hides the form and stops new submissions.</p><p class="form-help">Form address: <span>/forms/{{ form.slug }}</span></p>{% endif %}
+  </div>
+  <footer class="{{ 'modal__footer' if modal else 'form-actions' }}">{% if modal %}<button class="button button--ghost" type="button" data-modal-close>Cancel</button>{% endif %}<button class="button button--primary" type="submit">{{ 'Save details' if form else 'Create form' }}</button></footer>
+</form>
+{% endmacro %}
+
+{% macro field_editor(form, field_types, prefix, csrf_token, field=none, modal=false) %}
+<form action="/admin/custom-forms/save" method="post" class="cf-field-editor" data-cf-action="save_field"{% if modal %} data-cf-field-editor{% endif %}>
+  {% include "partials/csrf.html" %}<input type="hidden" name="action" value="save_field" /><input type="hidden" name="form_id" value="{{ form.id }}" /><input type="hidden" name="field_id" value="{{ field.id if field else '' }}" data-cf-field-id />
+  <div class="{{ 'modal__body cf-editor-body' if modal else 'cf-fallback-body' }}">
+    <div class="cf-editor-main">
+      <p class="cf-message" role="alert" data-cf-error hidden></p>
+      <div class="form-field"><label class="form-label" for="{{ prefix }}-label">Question or label</label><input class="form-input" id="{{ prefix }}-label" name="label" required maxlength="255" value="{{ field.label if field else '' }}" placeholder="e.g. What do you need help with?" /></div>
+      <fieldset class="cf-type-picker"><legend class="form-label">Field type</legend><div class="cf-type-grid">{% for ft in field_types %}<label class="cf-type-choice"><input type="radio" name="field_type" value="{{ ft.value }}"{% if (field and field.field_type == ft.value) or (not field and ft.value == 'text') %} checked{% endif %} /><span>{{ ft.label }}</span></label>{% endfor %}</div></fieldset>
+      <div class="form-field" data-cf-options-wrap>
+        {% if modal %}
+        <span class="form-label">Choices</span><ol class="cf-options" data-cf-options></ol><div class="cf-toolbar"><button class="button button--ghost" type="button" data-cf-option-add>Add choice</button><button class="button button--ghost" type="button" data-cf-bulk-toggle aria-expanded="false" aria-controls="cf-choice-bulk">Paste a list</button></div>
+        <div id="cf-choice-bulk" data-cf-bulk hidden><label class="form-label" for="cf-bulk-input">One choice per line</label><textarea class="form-input" id="cf-bulk-input" rows="4" data-cf-bulk-input></textarea><button class="button button--ghost" type="button" data-cf-bulk-apply>Add choices</button></div>
+        {% else %}<label class="form-label" for="{{ prefix }}-options">Choices (one per line)</label><textarea class="form-input" id="{{ prefix }}-options" name="options" rows="4">{{ (field.options | join('\n')) if field else '' }}</textarea>{% endif %}
+      </div>
+      {% set cfg = (field.config or {}) if field else {} %}
+      <div class="form-grid" data-cf-matrix-config>
+        <div class="form-field"><label class="form-label" for="{{ prefix }}-rows">Matrix rows (one per line)</label><textarea class="form-input" id="{{ prefix }}-rows" name="matrix_rows" rows="3">{{ cfg.get('rows', []) | join('\n') }}</textarea></div>
+        <div class="form-field"><label class="form-label" for="{{ prefix }}-columns">Matrix columns (one per line)</label><textarea class="form-input" id="{{ prefix }}-columns" name="matrix_columns" rows="3">{{ cfg.get('columns', []) | join('\n') }}</textarea></div>
+      </div>
+      <div class="form-field" data-cf-rating-config><label class="form-label" for="{{ prefix }}-rating">Rating maximum</label><input class="form-input" id="{{ prefix }}-rating" name="rating_max" type="number" min="1" max="10" value="{{ cfg.get('max', 5) }}" /></div>
+      <div class="form-field" data-cf-audio-config><label class="form-label" for="{{ prefix }}-clips">Maximum audio clips</label><input class="form-input" id="{{ prefix }}-clips" name="audio_max" type="number" min="1" max="5" value="{{ cfg.get('max_clips', 5) }}" /></div>
+      <div class="form-field" data-cf-placeholder-wrap><label class="form-label" for="{{ prefix }}-placeholder">Placeholder <span class="scf-optional">optional</span></label><input class="form-input" id="{{ prefix }}-placeholder" name="placeholder" maxlength="255" value="{{ (field.placeholder or '') if field else '' }}" /></div>
+      <div class="form-field"><label class="form-label" for="{{ prefix }}-help">Help text <span class="scf-optional">optional</span></label><textarea class="form-input" id="{{ prefix }}-help" name="help_text" rows="2" maxlength="2000">{{ (field.help_text or '') if field else '' }}</textarea></div>
+      <div class="form-field" data-cf-default-wrap><label class="form-label" for="{{ prefix }}-default">Default value <span class="scf-optional">optional</span></label><input class="form-input" id="{{ prefix }}-default" name="default_value" maxlength="255" value="{{ (field.default_value or '') if field else '' }}" /><p class="form-help" data-cf-default-help>Prefill this answer. People can change it before submitting.</p></div>
+      <div data-cf-required-wrap><label class="scf-switch"><input type="checkbox" name="required" value="1"{% if field and field.required %} checked{% endif %} /><span class="scf-switch__track" aria-hidden="true"></span><span>Require an answer</span></label></div>
+    </div>
+    {% if modal %}<aside class="cf-preview" aria-labelledby="cf-preview-heading"><h3 id="cf-preview-heading">Live preview</h3><p class="form-help">How this question appears on the form.</p><div class="cf-preview__control" data-cf-preview></div><p class="cf-preview__summary" data-cf-preview-summary></p></aside>{% endif %}
+  </div>
+  <footer class="{{ 'modal__footer cf-editor-footer' if modal else 'form-actions' }}">{% if modal %}<button class="button button--danger" type="button" data-cf-field-delete hidden>Delete field</button><span class="cf-spacer"></span><button class="button button--ghost" type="button" data-modal-close>Cancel</button>{% endif %}<button class="button button--primary" type="submit" data-cf-field-submit>{{ 'Save field' if field else 'Add field' }}</button></footer>
+</form>
+{% endmacro %}

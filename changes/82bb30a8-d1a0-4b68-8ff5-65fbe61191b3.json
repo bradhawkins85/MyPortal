@@ -1,0 +1,7 @@
+{
+  "guid": "82bb30a8-d1a0-4b68-8ff5-65fbe61191b3",
+  "occurred_at": "2026-10-14T00:00Z",
+  "change_type": "Improvement",
+  "summary": "Upgrade custom forms to the rack and staff-field design standard with searchable lists, modal editors, live previews, structured choices, accessible mobile layouts, and regular HTML form fallbacks; fix field ordering, clearing optional text, and uploads.",
+  "content_hash": "685a4910cdb0c9fb78fcf0d89ad246f2fd6e595667618e526397b97179d769d0"
+}
