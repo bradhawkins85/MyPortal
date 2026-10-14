@@ -13,6 +13,10 @@ class FormBase(BaseModel):
         default=None,
         description="Optional OpnForm embed snippet containing an iframe",
     )
+    is_public: bool = Field(
+        default=False,
+        description="When true the form is visible to every portal user",
+    )
 
 
 class FormCreate(FormBase):
@@ -26,6 +30,10 @@ class FormUpdate(BaseModel):
     embed_code: Optional[str] = Field(
         default=None,
         description="Optional OpnForm embed snippet containing an iframe",
+    )
+    is_public: Optional[bool] = Field(
+        default=None,
+        description="When set, controls whether the form is visible to every portal user",
     )
 
 

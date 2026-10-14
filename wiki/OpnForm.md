@@ -107,16 +107,20 @@ integrations always generate consistent links.
 6. Refresh the page—the form will now appear in the list for assignment to
    companies and users. When selected from the portal it loads directly from
    OpnForm in an iframe, so the upstream host must permit embedding from your
-   MyPortal origin.
+   MyPortal origin. If you tick **Make public** when saving, the form is
+   available to every portal user without an assignment (see the API endpoints
+   section below).
 
 ## 5. API endpoints
 
 The customer portal exposes a REST collection of published forms at
-`/api/forms`. Authenticated users receive only the forms assigned to them,
-while super admins can enumerate all records or filter by company. The
-endpoints are documented in the integrated Swagger UI (`/docs`) and respect the
-same authentication, rate limiting, and CSRF protections as the rest of the
-API.
+`/api/forms`. Authenticated users receive the forms assigned to them **and any
+forms marked public** — a super admin ticks "Make public" when creating or
+editing a form under **Admin → Forms**, which stores `is_public` on the form and
+makes it visible to every portal user without a company or user assignment.
+Super admins can also enumerate all records or filter by company. The endpoints
+are documented in the integrated Swagger UI (`/docs`) and respect the same
+authentication, rate limiting, and CSRF protections as the rest of the API.
 
 Troubleshooting tips:
 

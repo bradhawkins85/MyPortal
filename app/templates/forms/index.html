@@ -27,6 +27,9 @@
             data-form-url="{{ form.iframe_url }}"
           >
             <span class="forms-menu__name">{{ form.name }}</span>
+            {% if form.is_public %}
+              <span class="tag tag--muted forms-menu__public">Public</span>
+            {% endif %}
             {% if form.description %}
               <span class="forms-menu__description">{{ form.description }}</span>
             {% endif %}

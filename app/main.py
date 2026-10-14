@@ -6832,6 +6832,7 @@ async def forms_page(request: Request):
                 "id": form.get("id"),
                 "name": form.get("name"),
                 "description": form.get("description"),
+                "is_public": bool(form.get("is_public", False)),
                 "iframe_url": iframe_url,
                 "embed_html": embed_html,
             }
@@ -10056,6 +10057,7 @@ async def admin_create_form(
     name: str = Form(...),
     url: str = Form(...),
     description: str = Form(""),
+    is_public: str = Form(""),
 ):
     _, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -10073,6 +10075,7 @@ async def admin_create_form(
         url=normalized_url,
         embed_code=None,
         description=description.strip() or None,
+        is_public=_parse_bool(is_public),
     )
     return RedirectResponse(url="/admin/forms", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -10084,6 +10087,7 @@ async def admin_edit_form(
     name: str = Form(...),
     url: str = Form(...),
     description: str = Form(""),
+    is_public: str = Form(""),
 ):
     _, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -10109,6 +10113,7 @@ async def admin_edit_form(
         url=normalized_url,
         embed_code=existing.get("embed_code"),
         description=description.strip() or None,
+        is_public=_parse_bool(is_public),
     )
     return RedirectResponse(url="/admin/forms", status_code=status.HTTP_303_SEE_OTHER)
 

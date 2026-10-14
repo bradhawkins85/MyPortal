@@ -11,6 +11,8 @@ def _normalise_form(row: dict[str, Any]) -> dict[str, Any]:
     normalised = dict(row)
     if "id" in normalised and normalised["id"] is not None:
         normalised["id"] = int(normalised["id"])
+    if "is_public" in normalised:
+        normalised["is_public"] = bool(normalised["is_public"])
     return normalised
 
 
@@ -24,8 +26,8 @@ async def list_forms_for_user(user_id: int) -> list[dict[str, Any]]:
         """
         SELECT DISTINCT f.*
         FROM forms AS f
-        INNER JOIN form_permissions AS fp ON fp.form_id = f.id
-        WHERE fp.user_id = %s
+        LEFT JOIN form_permissions AS fp ON fp.form_id = f.id AND fp.user_id = %s
+        WHERE f.is_public = 1 OR fp.user_id IS NOT NULL
         ORDER BY f.name
         """,
         (user_id,),
@@ -58,15 +60,16 @@ async def create_form(
     url: str,
     embed_code: str | None,
     description: str | None,
+    is_public: bool = False,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await cursor.execute(
                 """
-                INSERT INTO forms (name, url, embed_code, description)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO forms (name, url, embed_code, description, is_public)
+                VALUES (%s, %s, %s, %s, %s)
                 """,
-                (name, url, embed_code, description),
+                (name, url, embed_code, description, int(is_public)),
             )
             form_id = int(cursor.lastrowid)
     form = await get_form(form_id)
@@ -82,14 +85,15 @@ async def update_form(
     url: str,
     embed_code: str | None,
     description: str | None,
+    is_public: bool = False,
 ) -> dict[str, Any]:
     await db.execute(
         """
         UPDATE forms
-        SET name = %s, url = %s, embed_code = %s, description = %s
+        SET name = %s, url = %s, embed_code = %s, description = %s, is_public = %s
         WHERE id = %s
         """,
-        (name, url, embed_code, description, form_id),
+        (name, url, embed_code, description, int(is_public), form_id),
     )
     form = await get_form(form_id)
     if not form:

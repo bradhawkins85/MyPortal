@@ -16,7 +16,7 @@
         <p class="card__subtitle">Design forms in OpnForm and manage granular visibility directly from the portal.</p>
       </div>
     </header>
-    <p class="text-muted">New forms stay private until you assign them to specific companies and users below.</p>
+    <p class="text-muted">New forms stay private until you tick <strong>Make public</strong> or assign them to specific companies and users below.</p>
   </section>
 
   <section class="card card--panel">
@@ -39,6 +39,13 @@
       <div class="form-field form-field--wide">
         <label class="form-label" for="new-form-description">Description</label>
         <input class="form-input" id="new-form-description" name="description" />
+      </div>
+      <div class="form-field form-field--checkbox">
+        <label class="form-checkbox" for="new-form-public">
+          <input type="checkbox" id="new-form-public" name="is_public" value="1" />
+          <span>Make public</span>
+        </label>
+        <p class="form-help">Public forms are available to every portal user without an explicit assignment.</p>
       </div>
       <div class="form-actions">
         <button type="submit" class="button">Save form</button>
@@ -69,6 +76,7 @@
             <th scope="col" data-sort="string">Name</th>
             <th scope="col" data-sort="string">URL</th>
             <th scope="col" data-sort="string">Description</th>
+            <th scope="col" data-sort="string">Public</th>
             <th scope="col" class="table__actions">Actions</th>
           </tr>
         </thead>
@@ -83,6 +91,12 @@
               </td>
               <td data-label="Description">
                 <input form="form-{{ form.id }}" class="form-input form-input--inline" type="text" name="description" value="{{ form.description or '' }}" />
+              </td>
+              <td data-label="Public">
+                <label class="form-checkbox forms-admin__row-checkbox">
+                  <input form="form-{{ form.id }}" type="checkbox" name="is_public" value="1" {% if form.is_public %}checked{% endif %} />
+                  <span>Public</span>
+                </label>
               </td>
               <td class="table__actions">
                 <div class="table__action-buttons">
@@ -101,7 +115,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="4" class="table__empty">No forms have been added yet.</td>
+              <td colspan="5" class="table__empty">No forms have been added yet.</td>
             </tr>
           {% endfor %}
         </tbody>

@@ -100,6 +100,7 @@ async def create_form(
         url=normalised_url,
         embed_code=sanitized_embed,
         description=description,
+        is_public=bool(payload.is_public),
     )
     return created
 
@@ -128,6 +129,11 @@ async def update_form(
 
     url = payload.url.strip() if payload.url is not None else existing["url"]
     embed_code = payload.embed_code.strip() if payload.embed_code is not None else existing.get("embed_code")
+    is_public = (
+        bool(payload.is_public)
+        if payload.is_public is not None
+        else bool(existing.get("is_public", False))
+    )
     try:
         normalised_url = normalize_opnform_form_url(url, allowed_host=OPNFORM_ALLOWED_HOST)
         sanitized_embed = None
@@ -144,6 +150,7 @@ async def update_form(
         url=normalised_url,
         embed_code=sanitized_embed,
         description=description,
+        is_public=is_public,
     )
     return updated
 
