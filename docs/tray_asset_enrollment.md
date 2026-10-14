@@ -25,3 +25,21 @@ Apply migration `485_tray_device_assets.sql` during the normal server deployment
 before starting the updated application. The startup check then backfills
 existing devices. Individual failures are logged and retried on later startup
 or, for unlinked devices, the next authenticated tray request.
+
+## New-device setup tickets
+
+After a new tray agent enrols, MyPortal creates an open, normal-priority setup
+ticket under its company and links the device's canonical asset. Standard ticket
+creation automations apply. No tray agent upgrade is required.
+
+The option **Create setup tickets for new devices** in the company's **Tray
+settings** is enabled by default. It can also be managed through the company API
+using `tray_setup_tickets_enabled`. Disabling it skips tickets for future
+enrolments. Re-enabling it does not create tickets for devices already skipped.
+
+Apply migration `490_tray_setup_tickets.sql` before starting the updated server.
+It excludes existing devices from ticket creation. Re-enrolment, heartbeat and
+WebSocket reconnects do not create additional tickets, even after the setup
+ticket is closed. Temporary failures are logged and retried on subsequent
+enrolment, heartbeat or WebSocket check-ins; a partially created ticket is reused.
+Company-less and revoked devices do not create tickets.

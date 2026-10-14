@@ -70,6 +70,15 @@
           </label>
           <p class="form-helper">When enabled, the server may send OS-native desktop notifications to enrolled devices belonging to this company.</p>
         </div>
+        <div class="form-field">
+          <label class="form-label form-label--checkbox">
+            <input type="checkbox" name="tray_setup_tickets_enabled" value="1"
+              {% if company.tray_setup_tickets_enabled is not defined or company.tray_setup_tickets_enabled %}checked{% endif %}
+            />
+            Create setup tickets for new devices
+          </label>
+          <p class="form-helper">Create a ticket under this company, linked to the device's asset, when a new tray agent first enrols. Reconnecting devices do not create additional tickets. Disable this to skip tickets for future devices.</p>
+        </div>
         {% if feature_pack_available('rmm') %}
         <div class="form-field">
           <label class="form-label form-label--checkbox">

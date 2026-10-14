@@ -306,6 +306,7 @@ async def enrol_device(
         if not device.get(key) and getattr(payload, key):
             device[key] = getattr(payload, key)
     asset_id = await tray_service.ensure_device_asset(device)
+    await tray_service.ensure_device_setup_ticket(device)
     await tray_repo.mark_install_token_used(int(token_record["id"]))
     log_info(
         "Tray device enrolled",
@@ -799,6 +800,7 @@ async def heartbeat(
         last_ip=client_ip,
         agent_version=payload.agent_version,
     )
+    await tray_service.ensure_device_setup_ticket(device)
     return JSONResponse({"status": "ok"})
 
 

@@ -17,7 +17,7 @@ _ALLOWED_COMPANY_COLUMNS = frozenset({
     "onedrive_export_site_id", "onedrive_export_site_name", "onedrive_export_drive_id",
     "trello_board_id", "trello_api_key", "trello_token", "csp_tenant_id", "archived",
     "is_demo", "customer_chat_enabled", "tray_chat_enabled", "tray_notifications_enabled",
-    "network_device_ticket_alerts_enabled", "defender_enabled",
+    "network_device_ticket_alerts_enabled", "tray_setup_tickets_enabled", "defender_enabled",
     "defender_scheduled_scan_type", "defender_scheduled_scan_day",
     "defender_scheduled_scan_time", "defender_auto_ticket_min_severity",
     "defender_auto_ticket_antivirus_off", "defender_auto_ticket_realtime_off",
