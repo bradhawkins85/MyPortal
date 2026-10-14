@@ -29,6 +29,58 @@
     messages.forEach((message) => { const line = document.createElement('p'); line.textContent = message; status.append(line); });
     status.focus();
   }
+  function initCaptureField(input, form) {
+    const wrap = input.closest('[data-cf-pub-field]');
+    const controls = wrap.querySelector('[data-cf-capture-controls]');
+    const preview = wrap.querySelector('[data-cf-capture-preview]');
+    const status = wrap.querySelector('[data-cf-capture-status]');
+    const photo = wrap.querySelector('[data-cf-photo-input]');
+    const video = wrap.querySelector('[data-cf-video-input]');
+    let file = null, url = null;
+    input.required = false;
+    controls.hidden = false;
+    const say = (message, error = false) => {
+      status.textContent = message;
+      status.classList.toggle('cf-public__field-error', error);
+    };
+    const update = () => {
+      const submitting = form.getAttribute('aria-busy') === 'true';
+      [input, ...controls.querySelectorAll('input, button'), ...preview.querySelectorAll('button')].forEach((control) => { control.disabled = submitting; });
+    };
+    const clear = () => {
+      if (url) URL.revokeObjectURL(url);
+      url = null; file = null; preview.replaceChildren();
+      [input, photo, video].forEach((control) => { control.value = ''; });
+      say('');
+    };
+    controls.querySelector('[data-cf-capture-photo]').addEventListener('click', () => photo.click());
+    controls.querySelector('[data-cf-capture-video]').addEventListener('click', () => video.click());
+    [input, photo, video].forEach((control) => control.addEventListener('change', () => {
+      const selected = control.files[0];
+      control.value = '';
+      // Cancelling the camera or file picker keeps the previous attachment.
+      if (!selected) return;
+      if (selected.size > 50 * 1024 * 1024) { say('The attachment must be 50 MB or smaller. Take a smaller photo, record a shorter video, or choose a smaller file.', true); return; }
+      clear(); file = selected;
+      const name = document.createElement('p'); name.textContent = file.name; preview.append(name);
+      // HEIC/HEIF can be attached even when the browser cannot display them.
+      const image = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type);
+      if (image || file.type.startsWith('video/')) {
+        url = URL.createObjectURL(file);
+        const media = document.createElement(image ? 'img' : 'video');
+        if (image) media.alt = `Preview of ${file.name}`;
+        else { media.controls = true; media.preload = 'metadata'; media.playsInline = true; media.setAttribute('aria-label', `Preview of ${file.name}`); }
+        media.src = url; preview.append(media);
+      }
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button button--ghost'; remove.textContent = 'Remove attachment';
+      remove.addEventListener('click', () => { clear(); input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); });
+      preview.append(remove); say('Attachment ready.'); update();
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }));
+    form.addEventListener('reset', clear);
+    window.addEventListener('pagehide', clear);
+    return { input, files: () => file ? [file] : [], update };
+  }
   function initAudioField(input, form, canRecord) {
     const wrap = input.closest('[data-cf-pub-field]');
     const list = wrap.querySelector('[data-cf-audio-list]');
@@ -168,6 +220,7 @@
     if (!form) return;
     const status = form.querySelector('[data-cf-status]');
     const button = form.querySelector('button[type="submit"]');
+    const captureFields = Array.from(form.querySelectorAll('[data-field-type="file"] [data-cf-file]')).map((input) => initCaptureField(input, form));
     const audioFields = [];
     form.querySelectorAll('[data-max-clips]').forEach((input) => {
       audioFields.push(initAudioField(input, form, () => !audioFields.some((field) => field.busy())));
@@ -222,9 +275,18 @@
         if (missing) errors.push('Record or upload an audio clip for ' + wrap.querySelector('label').textContent.trim() + '.');
         if (field.busy()) errors.push('Stop recording and wait for the clip to finish before submitting.');
       });
+      captureFields.forEach((field) => {
+        const wrap = field.input.closest('[data-cf-pub-field]');
+        const missing = wrap.dataset.required === 'true' && !field.files().length;
+        const error = wrap.querySelector('[data-cf-field-error]');
+        error.hidden = !missing;
+        error.textContent = missing ? 'Upload a file, take a photo, or record a video.' : '';
+        field.input.setAttribute('aria-invalid', String(missing));
+        if (missing) errors.push('Attach a file for ' + wrap.querySelector('label').textContent.trim() + '.');
+      });
       if (errors.length) { showStatus(status, errors, true); return; }
       const data = new FormData(form);
-      audioFields.forEach((field) => {
+      [...audioFields, ...captureFields].forEach((field) => {
         data.delete(field.input.name);
         field.files().forEach((file) => data.append(field.input.name, file, file.name));
       });
@@ -235,7 +297,7 @@
       button.disabled = true;
       button.textContent = 'Submitting…';
       form.setAttribute('aria-busy', 'true');
-      audioFields.forEach((field) => field.update());
+      [...audioFields, ...captureFields].forEach((field) => field.update());
       try {
         const response = await fetch(form.action, { method: 'POST', credentials: 'same-origin', headers, body: data });
         if (response.redirected || response.headers.get('content-type')?.includes('text/html')) throw new Error('Your session may have expired. Reload the page and sign in again.');
@@ -261,7 +323,7 @@
         button.disabled = false;
         button.textContent = 'Submit request';
         form.removeAttribute('aria-busy');
-        audioFields.forEach((field) => field.update());
+        [...audioFields, ...captureFields].forEach((field) => field.update());
       }
     });
   }

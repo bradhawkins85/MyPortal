@@ -100,6 +100,12 @@
 .cf-audio-clip { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-gap-base); padding-block: var(--space-gap-roomy); border-bottom: 1px solid var(--hf-line); min-width: 0; }
 .cf-audio-clip p { margin: 0; overflow-wrap: anywhere; }
 .cf-audio-clip audio { width: 100%; max-width: 24rem; }
+.cf-capture-controls { display: flex; flex-wrap: wrap; gap: var(--space-gap-base); margin-top: var(--space-gap-roomy); }
+.cf-capture-controls[hidden] { display: none; }
+.cf-capture-controls .button, .cf-capture-preview .button { min-height: 2.75rem; }
+.cf-capture-preview { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-gap-base); margin-top: var(--space-gap-roomy); min-width: 0; }
+.cf-capture-preview p { margin: 0; overflow-wrap: anywhere; }
+.cf-capture-preview img, .cf-capture-preview video { max-width: 100%; max-height: 20rem; }
 @media (max-width: 1024px) {
   .cf-workspace__layout { grid-template-columns: minmax(0, 1fr); }
   .cf-library { position: static; }
