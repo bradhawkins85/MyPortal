@@ -488,3 +488,9 @@ class TicketAssetTroubleshootRequest(BaseModel):
         max_length=2000,
         description="Optional technician notes appended to the ticket context fed to the LLM.",
     )
+
+
+class TicketReplyTroubleshootRequest(TicketAssetTroubleshootRequest):
+    """Resume an AI reply against a technician-selected linked asset."""
+
+    asset_id: int = Field(..., gt=0)

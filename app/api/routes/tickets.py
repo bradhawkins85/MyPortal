@@ -46,7 +46,7 @@ from app.repositories import ticket_tasks as ticket_tasks_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import tray as tray_repo
-from app.schemas.tray import TrayTroubleshootResponse, TicketAssetTroubleshootRequest
+from app.schemas.tray import TrayTroubleshootResponse, TicketAssetTroubleshootRequest, TicketReplyTroubleshootRequest
 from app.services import ai_consent
 from app.services import ai_troubleshooter
 from app.services import tray as tray_service
@@ -1881,32 +1881,10 @@ def _build_asset_troubleshoot_prompt(
     return "\n".join(lines)
 
 
-@router.post(
-    "/{ticket_id}/assets/{asset_id}/troubleshoot",
-    response_model=TrayTroubleshootResponse,
-    summary="Run the AI troubleshooting agent on a ticket's linked asset",
-)
-async def troubleshoot_ticket_asset(
-    ticket_id: int,
-    asset_id: int,
-    payload: TicketAssetTroubleshootRequest | None = None,
-    current_user: dict = Depends(require_helpdesk_technician),
-) -> TrayTroubleshootResponse:
-    """Trigger the AI troubleshooter on the device linked to a ticket asset.
-
-    A technician opens a ticket, finds an asset in the ticket's asset list, and
-    asks the AI troubleshooter to run on it. The troubleshooter works in
-    stages, each posted as an internal ticket note: it asks the LLM for
-    troubleshooting articles matching the ticket (plus internal KB articles),
-    turns them into recommended steps, and when those steps call for logs it
-    asks the asset's tray device for exactly those logs. The device uploads
-    them to ``POST /api/tickets/{ticket_id}/troubleshoot-complete`` and the
-    server asks the LLM to analyse them against the reason each was collected.
-
-    Requires helpdesk / super-admin access. The asset must be linked to the
-    ticket and have an active tray device in the same company as the ticket.
-    Refused when the ticket's requester has opted out of AI processing.
-    """
+async def _prepare_ticket_troubleshoot(
+    ticket_id: int, asset_id: int, payload: TicketAssetTroubleshootRequest | None,
+) -> tuple[dict, dict, dict, dict]:
+    """Shared consent, asset, company and active-device checks for both entry points."""
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(
@@ -1960,6 +1938,87 @@ async def troubleshoot_ticket_asset(
             status_code=status.HTTP_409_CONFLICT,
             detail="No LLM model is configured for the AI assistant.",
         )
+
+    return ticket, asset, device, llm
+
+
+@router.post(
+    "/{ticket_id}/replies/{reply_id}/troubleshoot",
+    response_model=TrayTroubleshootResponse,
+    summary="Continue read-only AI troubleshooting from a ticket reply",
+)
+async def troubleshoot_ticket_reply(
+    ticket_id: int,
+    reply_id: int,
+    payload: TicketReplyTroubleshootRequest,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TrayTroubleshootResponse:
+    ticket, asset, device, llm = await _prepare_ticket_troubleshoot(
+        ticket_id, payload.asset_id, payload
+    )
+    reply = await tickets_repo.get_reply_by_id(reply_id)
+    if not reply or reply.get("ticket_id") != ticket_id:
+        raise HTTPException(status_code=404, detail="Reply not found on this ticket.")
+    if not tray_service.is_troubleshoot_agent_reply(reply) or reply.get("split_to_ticket_id"):
+        raise HTTPException(status_code=409, detail="Choose a Troubleshooting Agent reply on this ticket.")
+    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+    # Keep the selected point even if it falls outside the recent history window.
+    visible = [r for r in replies if not r.get("split_to_ticket_id")]
+    recent = visible[-30:]
+    history = ([reply] if not any(r.get("id") == reply_id for r in recent) else []) + recent
+    lines = [
+        f"Continue from AI reply #{reply_id}. Ticket history is chronological; "
+        "later updates supersede earlier observations.",
+    ]
+    if len(visible) > len(recent):
+        lines.append("Earlier history is omitted; the selected AI reply is preserved.")
+    for item in history:
+        lines.append(
+            f"Reply #{item.get('id')} at {item.get('created_at')} "
+            f"({'AI' if tray_service.is_troubleshoot_agent_reply(item) else 'ticket update'}): "
+            + _strip_ticket_description(item.get("body"), limit=3000)
+        )
+    problem = _build_asset_troubleshoot_prompt(ticket, asset, payload.context)
+    problem += "\n\n" + "\n".join(lines)
+    await ai_troubleshooter.start_reply_troubleshoot(
+        ticket=ticket, asset=asset, device=device, problem=problem,
+        llm=llm, reply_id=reply_id, feedback=payload.context,
+        requested_by=current_user,
+    )
+    return TrayTroubleshootResponse(
+        command_id=None, device_uid=device["device_uid"], ticket_id=ticket_id,
+        status="started", delivered=True, model=llm["model"],
+    )
+
+
+@router.post(
+    "/{ticket_id}/assets/{asset_id}/troubleshoot",
+    response_model=TrayTroubleshootResponse,
+    summary="Run the AI troubleshooting agent on a ticket's linked asset",
+)
+async def troubleshoot_ticket_asset(
+    ticket_id: int,
+    asset_id: int,
+    payload: TicketAssetTroubleshootRequest | None = None,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TrayTroubleshootResponse:
+    """Trigger the AI troubleshooter on the device linked to a ticket asset.
+
+    A technician opens a ticket, finds an asset in the ticket's asset list, and
+    asks the AI troubleshooter to run on it. The troubleshooter works in
+    stages, each posted as an internal ticket note: it asks the LLM for
+    troubleshooting articles matching the ticket (plus internal KB articles),
+    turns them into recommended steps, and when those steps call for logs it
+    asks the asset's tray device for exactly those logs. The device uploads
+    them to ``POST /api/tickets/{ticket_id}/troubleshoot-complete`` and the
+    server asks the LLM to analyse them against the reason each was collected.
+
+    Requires helpdesk / super-admin access. The asset must be linked to the
+    ticket and have an active tray device in the same company as the ticket.
+    Refused when the ticket's requester has opted out of AI processing.
+    """
+    ticket, asset, device, llm = await _prepare_ticket_troubleshoot(ticket_id, asset_id, payload)
+    device_uid = str(asset.get("tray_device_uid") or "").strip()
 
     prompt = _build_asset_troubleshoot_prompt(
         ticket, asset, payload.context if payload else None
