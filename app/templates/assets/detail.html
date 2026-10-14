@@ -146,7 +146,7 @@
         <h2 class="card__title" id="asset-scripts-heading">Scripts {{ rmm_ui.agent_indicator(rmm.agent_state) }}</h2>
         <p class="card__subtitle">{% if rmm.agent %}RMM agent {{ rmm.agent.agent_version or '' }} on {{ (rmm.agent.os or 'unknown') | title }}{% if rmm.agent.os_version %} {{ rmm.agent.os_version }}{% endif %}, last seen {% if rmm.agent.last_seen_utc %}<span data-utc="{{ rmm.agent.last_seen_utc }}">{{ rmm.agent.last_seen_utc }}</span>{% else %}never{% endif %}.{% else %}The RMM agent is not installed on this device yet, so scripts cannot run here.{{ rmm_ui.agent_deploy_status(rmm.deploy) }}{% endif %} <a href="/rmm/scripts">All scripts</a></p>
       </div>
-      {% if rmm.can_push_agent %}<button type="button" class="button button--primary button--small" data-rmm-agent-install="{{ asset.id }}" data-rmm-agent-name="{{ asset.name or ('Asset ' ~ asset.id) }}">Install RMM agent</button>{% endif %}
+      {% if rmm.can_push_agent %}<button type="button" class="button button--primary button--small" data-rmm-agent-repair="{{ asset.id }}" data-rmm-agent-name="{{ asset.name or ('Asset ' ~ asset.id) }}">Repair RMM agent</button>{% endif %}
       {% if rmm.can_run or rmm.remote_control %}{{ rmm_ui.asset_menu(asset.id, asset.name or ('Asset ' ~ asset.id), rmm.remote_control or [], run_script=rmm.can_run) }}{% endif %}
     </header>
     <div class="ce-section__body">

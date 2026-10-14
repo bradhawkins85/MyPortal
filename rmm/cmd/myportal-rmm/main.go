@@ -72,6 +72,8 @@ func main() {
 		err = control("install")
 	case "uninstall":
 		err = control("uninstall")
+	case "verify":
+		err = verifyConnection()
 	case "run":
 		err = runService()
 	case "version", "--version":
@@ -86,7 +88,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: myportal-rmm enrol --url URL | install | uninstall | run | version")
+	fmt.Fprintln(os.Stderr, "usage: myportal-rmm enrol --url URL | install | uninstall | verify | run | version")
 }
 
 func details(r *runner.Runner) client.Details {
@@ -204,8 +206,51 @@ func control(action string) error {
 		}
 		return service.Control(svc, "start")
 	}
+	// Repair also covers a binary whose service has already been removed.
+	if _, err := svc.Status(); errors.Is(err, service.ErrNotInstalled) {
+		return nil
+	}
 	_ = service.Control(svc, "stop")
 	return service.Control(svc, "uninstall")
+}
+
+// verifyConnection checks the installed service and the saved agent credentials.
+// It sends a real check-in so the portal sees the restored version immediately.
+func verifyConnection() error {
+	st, err := state.Load()
+	if err != nil {
+		return fmt.Errorf("load agent enrolment: %w", err)
+	}
+	svc, err := service.New(&program{}, serviceConfig())
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return verifyAgent(ctx, svc.Status, func(ctx context.Context) error {
+		return client.New(st.PortalURL, st.AuthToken).Checkin(ctx, details(runner.New(os.TempDir())))
+	})
+}
+
+func verifyAgent(ctx context.Context, serviceStatus func() (service.Status, error), checkin func(context.Context) error) error {
+	// Service managers can take a moment to finish starting the process.
+	for {
+		status, err := serviceStatus()
+		if err != nil {
+			return fmt.Errorf("query agent service: %w", err)
+		}
+		if status == service.StatusRunning {
+			if err := checkin(ctx); err != nil {
+				return fmt.Errorf("agent portal check-in: %w", err)
+			}
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("agent service did not start: %w", ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 func runService() error {

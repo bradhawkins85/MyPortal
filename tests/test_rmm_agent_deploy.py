@@ -496,3 +496,70 @@ async def test_package_routes_keep_version_on_download_url(storage):
     with pytest.raises(HTTPException) as error:
         await _package("windows", "amd64", "../secret")
     assert error.value.status_code == 400
+
+
+@pytest.mark.anyio
+async def test_repair_repushes_an_existing_agent_and_keeps_offline_history(sqlite_db, storage, sent):
+    messages, live = sent
+    _cache(storage)
+    await _device(sqlite_db, asset_id=10)
+    await _enrol(sqlite_db, tray_id=5, asset_id=10)
+    first = await deploy.push_to_asset(10, company_id=1, user_id=9, repair=True)
+    assert first["status"] == "queued"
+    second = await deploy.push_to_asset(10, company_id=1, user_id=9, repair=True)
+    assert second["command_id"] == first["command_id"]
+    live["on"] = True
+    delivered = await deploy.push_to_asset(10, company_id=1, user_id=9, repair=True)
+    assert delivered == {"status": "sent", "command_id": first["command_id"]}
+    assert len(await _commands(sqlite_db)) == 1
+    assert messages[0][1]["type"] == "install_rmm_agent"
+    history = await deploy.asset_install_history(10)
+    assert all(item["source_label"] == "Technician repair" for item in history)
+    device = await deploy.deploy_repo.get_tray_device(5)
+    await deploy.record_result(device, first["command_id"], ok=True, message="verified")
+    assert (await deploy.asset_install_history(10))[0]["label"] == "Repaired"
+
+
+@pytest.mark.anyio
+async def test_repair_can_install_a_missing_agent_and_rejects_other_tenants(sqlite_db, storage, sent):
+    _cache(storage)
+    await _device(sqlite_db)
+    assert (await deploy.push_to_asset(11, company_id=1, user_id=9, repair=True))["status"] == "queued"
+    await _device(sqlite_db, device_id=6, company_id=2, asset_id=20)
+    with pytest.raises(deploy.AgentDeployError):
+        await deploy.push_to_asset(20, company_id=1, user_id=9, repair=True)
+    assert len(await _commands(sqlite_db)) == 1
+
+
+@pytest.mark.anyio
+async def test_repair_action_available_for_existing_agents_only_with_write_access(sqlite_db):
+    from app.features.rmm import routes
+    await _device(sqlite_db, asset_id=10)
+    await _enrol(sqlite_db, tray_id=5, asset_id=10)
+    assert (await routes.asset_rmm_context(1, 10, can_run=True))["can_push_agent"] is True
+    assert (await routes.asset_rmm_context(1, 10, can_run=False))["can_push_agent"] is False
+
+
+@pytest.mark.anyio
+async def test_repair_route_checks_tenant_write_access_and_audits(sqlite_db, storage, sent, monkeypatch):
+    from fastapi import HTTPException
+    from starlette.requests import Request
+    from app.features.rmm import agent_deploy_routes as routes
+    _cache(storage)
+    await _device(sqlite_db, asset_id=10)
+    await _enrol(sqlite_db, tray_id=5, asset_id=10)
+    audits = []
+    async def context(request, **kwargs):
+        assert kwargs == {"write": True, "api": True}
+        return {"id": 9}, {}, 1, True
+    async def audit(**kwargs):
+        audits.append(kwargs)
+    monkeypatch.setattr(routes, "_context", context)
+    monkeypatch.setattr(routes.audit_service, "record", audit)
+    request = Request({"type": "http", "method": "POST", "path": "/api/rmm/assets/10/agent-repair"})
+    result = await routes.repair_agent(10, request)
+    assert result["status"] == "queued" and "Repair queued" in result["message"]
+    assert audits[0]["action"] == "rmm.agent.repair" and audits[0]["entity_id"] == 10
+    with pytest.raises(HTTPException) as exc:
+        await routes.repair_agent(20, request)
+    assert exc.value.status_code == 404 and len(audits) == 1

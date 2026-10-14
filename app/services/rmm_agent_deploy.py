@@ -417,7 +417,7 @@ async def _record_attempt(
 
 
 async def push_to_device(
-    device: dict[str, Any], *, user_id: int | None, send: bool = True, source: str = "manual"
+    device: dict[str, Any], *, user_id: int | None, send: bool = True, source: str = "manual", repair: bool = False
 ) -> dict[str, Any]:
     """Queue (and try to deliver) an agent install on one tray device.
 
@@ -427,12 +427,15 @@ async def push_to_device(
     ``updating_tray`` (the tray app is too old: it was asked to update itself
     and gets the install once it reports the new version).
 
+    ``repair=True`` bypasses the server's existing agent record, so a missing
+    or broken endpoint agent can be re-pushed.
+
     Every call is kept in the asset's install history (``source`` says who
     started it); one MyPortal refuses is kept with the reason.
     """
 
     try:
-        result = await _push_to_device(device, user_id=user_id, send=send)
+        result = await _push_to_device(device, user_id=user_id, send=send, repair=repair)
     except AgentDeployError as exc:
         await _record_attempt(device, source=source, user_id=user_id, outcome="rejected", message=str(exc))
         raise
@@ -453,13 +456,13 @@ _ATTEMPT_MESSAGES = {
 }
 
 
-async def _push_to_device(device: dict[str, Any], *, user_id: int | None, send: bool) -> dict[str, Any]:
+async def _push_to_device(device: dict[str, Any], *, user_id: int | None, send: bool, repair: bool = False) -> dict[str, Any]:
     if str(device.get("status") or "") != "active":
         raise AgentDeployError("The tray app on this device is not active.")
     os_name = str(device.get("os") or "").lower()
     if os_name not in TRAY_PLATFORMS:
         raise AgentDeployError("The RMM agent can only be pushed to Windows and macOS devices.")
-    if await deploy_repo.device_has_agent(device):
+    if not repair and await deploy_repo.device_has_agent(device):
         return {"status": "installed", "command_id": None}
     if not has_any_package(os_name):
         await ensure_package(os_name, "amd64")
@@ -505,16 +508,16 @@ async def _push_to_device(device: dict[str, Any], *, user_id: int | None, send: 
     return {"status": "sent" if delivered else "queued", "command_id": command_id}
 
 
-async def push_to_asset(asset_id: int, *, company_id: int, user_id: int | None) -> dict[str, Any]:
+async def push_to_asset(asset_id: int, *, company_id: int, user_id: int | None, repair: bool = False) -> dict[str, Any]:
     device = await deploy_repo.get_asset_tray_device(asset_id)
     if not device or device.get("company_id") is None or int(device["company_id"]) != int(company_id):
         message = "This device has no MyPortal tray app, which installs the RMM agent. Install the tray app first."
         await _record_attempt(
-            None, source="manual", user_id=user_id, outcome="rejected", message=message,
+            None, source="repair" if repair else "manual", user_id=user_id, outcome="rejected", message=message,
             asset_id=asset_id, company_id=company_id,
         )
         raise AgentDeployError(message)
-    return await push_to_device(device, user_id=user_id)
+    return await push_to_device(device, user_id=user_id, repair=repair, source="repair" if repair else "manual")
 
 
 async def _auto_enabled(company_id: Any) -> bool:
@@ -653,7 +656,7 @@ async def record_result(device: dict[str, Any], command_id: int, *, ok: bool, me
 # A tray app that was sent the install but has not reported back by then
 # probably lost it (restarted, or an older build that ignores the command).
 NO_REPORT_HOURS = 2
-SOURCE_LABELS = {"manual": "Technician", "company": "Company-wide push", "auto": "Automatic install"}
+SOURCE_LABELS = {"manual": "Technician", "company": "Company-wide push", "auto": "Automatic install", "repair": "Technician repair"}
 
 
 def describe_attempt(attempt: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
@@ -692,6 +695,9 @@ def describe_attempt(attempt: dict[str, Any], *, now: datetime | None = None) ->
             reason = "Queued until the device's tray app connects."
     else:
         state, variant, label, reason = "unknown", "neutral", "Unknown", message or "The tray command is gone."
+    if attempt.get("source") == "repair" and state == "completed":
+        label = "Repaired"
+        reason = "The tray app reinstalled the RMM agent and verified its connection."
     return {
         "id": attempt.get("id"),
         "created_at": attempt.get("created_at"),
