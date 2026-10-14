@@ -92,6 +92,14 @@
 .cf-public__choice input { flex-shrink: 0; accent-color: var(--hf-accent); }
 .cf-public__field-error { color: var(--hf-danger); margin: var(--space-gap-base) 0; }
 .cf-public__form [aria-invalid="true"] { border-color: var(--hf-danger); }
+.cf-audio-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-gap-base); margin-top: var(--space-gap-roomy); }
+.cf-audio-controls[hidden] { display: none; }
+.cf-audio-controls .button, .cf-audio-list .button { min-height: 2.75rem; }
+.cf-audio-timer { font-variant-numeric: tabular-nums; }
+.cf-audio-list { display: flex; flex-direction: column; gap: var(--space-gap-roomy); margin-top: var(--space-gap-roomy); }
+.cf-audio-clip { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-gap-base); padding-block: var(--space-gap-roomy); border-bottom: 1px solid var(--hf-line); min-width: 0; }
+.cf-audio-clip p { margin: 0; overflow-wrap: anywhere; }
+.cf-audio-clip audio { width: 100%; max-width: 24rem; }
 @media (max-width: 1024px) {
   .cf-workspace__layout { grid-template-columns: minmax(0, 1fr); }
   .cf-library { position: static; }

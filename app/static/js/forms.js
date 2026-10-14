@@ -29,25 +29,148 @@
     messages.forEach((message) => { const line = document.createElement('p'); line.textContent = message; status.append(line); });
     status.focus();
   }
+  function initAudioField(input, form, canRecord) {
+    const wrap = input.closest('[data-cf-pub-field]');
+    const list = wrap.querySelector('[data-cf-audio-list]');
+    const controls = wrap.querySelector('[data-cf-audio-controls]');
+    const record = wrap.querySelector('[data-cf-audio-record]');
+    const stop = wrap.querySelector('[data-cf-audio-stop]');
+    const timer = wrap.querySelector('[data-cf-audio-timer]');
+    const status = wrap.querySelector('[data-cf-audio-status]');
+    const maxClips = Number(input.dataset.maxClips);
+    const maxBytes = 50 * 1024 * 1024;
+    const supported = window.isSecureContext && navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
+    let clips = [], recorder = null, stream = null, interval = null;
+    let busy = false, generation = 0, sequence = 0;
+    // Recorded clips live in memory and join uploads in FormData. Preserve native
+    // required validation for the no-JavaScript fallback in the template.
+    input.required = false;
+    controls.hidden = !supported;
+    const say = (message, error = false) => {
+      status.textContent = message;
+      status.classList.toggle('cf-public__field-error', error);
+    };
+    const update = () => {
+      const submitting = form.getAttribute('aria-busy') === 'true';
+      input.disabled = busy || submitting;
+      record.disabled = busy || submitting || clips.length >= maxClips;
+      list.querySelectorAll('button').forEach((button) => { button.disabled = busy || submitting; });
+    };
+    const releaseMicrophone = () => {
+      clearInterval(interval);
+      interval = null;
+      if (stream) stream.getTracks().forEach((track) => track.stop());
+      stream = null;
+      stop.hidden = true;
+      timer.hidden = true;
+    };
+    const render = () => {
+      list.replaceChildren();
+      clips.forEach((clip, index) => {
+        const row = document.createElement('div'); row.className = 'cf-audio-clip';
+        const name = document.createElement('p'); name.textContent = clip.file.name;
+        const audio = document.createElement('audio'); audio.controls = true; audio.preload = 'metadata'; audio.src = clip.url;
+        audio.setAttribute('aria-label', `Listen to ${clip.file.name}`);
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button button--ghost'; remove.textContent = 'Remove clip';
+        remove.setAttribute('aria-label', `Remove ${clip.file.name}`);
+        remove.addEventListener('click', () => {
+          URL.revokeObjectURL(clip.url); clips.splice(index, 1); render();
+          say(`${clips.length} of ${maxClips} clips attached.`);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          (list.querySelector('button') || (supported ? record : input)).focus();
+        });
+        row.append(name, audio, remove); list.append(row);
+      });
+      update();
+    };
+    const add = (files) => {
+      if (clips.length + files.length > maxClips) { say(`You can attach up to ${maxClips} clips. Remove a clip before adding more.`, true); return; }
+      if (files.some((file) => file.size > maxBytes)) { say('Each clip must be 50 MB or smaller. Choose a smaller file or record a shorter clip.', true); return; }
+      files.forEach((file) => clips.push({ file, url: URL.createObjectURL(file) }));
+      render(); say(`${clips.length} of ${maxClips} clips attached. Listen back or remove a clip to record again.`);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    input.addEventListener('change', () => { add(Array.from(input.files)); input.value = ''; });
+    const stopRecording = () => {
+      if (!recorder || recorder.state === 'inactive') return;
+      stop.disabled = true;
+      say('Finishing your recording…');
+      recorder.stop();
+      releaseMicrophone();
+    };
+    stop.addEventListener('click', stopRecording);
+    record.addEventListener('click', async () => {
+      if (busy || clips.length >= maxClips) return;
+      if (!canRecord()) { say('Stop the other recording before starting a new clip.', true); return; }
+      const token = ++generation;
+      let chunks = [], bytes = 0, tooLarge = false;
+      busy = true; update(); say('Allow microphone access to start recording.');
+      try {
+        const acquired = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (token !== generation) { acquired.getTracks().forEach((track) => track.stop()); return; }
+        stream = acquired;
+        const mimeType = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find((type) => MediaRecorder.isTypeSupported(type));
+        const current = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        recorder = current;
+        current.addEventListener('dataavailable', (event) => {
+          if (token !== generation || !event.data.size) return;
+          bytes += event.data.size;
+          if (bytes > maxBytes) { tooLarge = true; chunks = []; stopRecording(); }
+          else if (!tooLarge) chunks.push(event.data);
+        });
+        current.addEventListener('stop', () => {
+          if (token !== generation) return;
+          releaseMicrophone(); recorder = null; busy = false;
+          if (tooLarge) say('Recording exceeded 50 MB. Record a shorter clip.', true);
+          else if (chunks.length) {
+            const type = current.mimeType || chunks[0].type;
+            const extension = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+            add([new File(chunks, `recording-${++sequence}.${extension}`, { type })]);
+          } else say('No audio was captured. Try recording again or upload a clip.', true);
+          update(); record.focus();
+        });
+        current.addEventListener('error', () => {
+          // Invalidate the subsequent stop event so partial/error audio is discarded.
+          reset(false); say('Recording failed. Try again or upload an audio file.', true);
+        });
+        current.start(1000);
+        const started = Date.now();
+        timer.textContent = '0:00'; timer.hidden = false;
+        interval = setInterval(() => {
+          const seconds = Math.floor((Date.now() - started) / 1000);
+          timer.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+        }, 500);
+        stream.getAudioTracks().forEach((track) => track.addEventListener('ended', stopRecording));
+        stop.disabled = false; stop.hidden = false; stop.focus();
+        say('Recording. Tap Stop recording when you are finished.');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      } catch (error) {
+        if (token !== generation) return;
+        generation++; releaseMicrophone(); recorder = null; busy = false; update();
+        say(error.name === 'NotAllowedError' ? 'Microphone access was denied. Allow it in your browser settings and try again, or upload an audio file.' : 'The microphone could not be started. Check it is available and try again, or upload an audio file.', true);
+      }
+    });
+    function reset(clearClips = true) {
+      generation++;
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      recorder = null; releaseMicrophone(); busy = false;
+      if (clearClips) { clips.forEach((clip) => URL.revokeObjectURL(clip.url)); clips = []; input.value = ''; }
+      render();
+      say(supported ? '' : 'Direct recording is unavailable in this browser. You can upload an audio file instead.');
+    }
+    form.addEventListener('reset', () => reset());
+    window.addEventListener('pagehide', () => reset());
+    reset();
+    return { input, files: () => clips.map((clip) => clip.file), busy: () => busy, update };
+  }
   function init() {
     const form = document.querySelector('[data-cf-submit]');
     if (!form) return;
     const status = form.querySelector('[data-cf-status]');
     const button = form.querySelector('button[type="submit"]');
+    const audioFields = [];
     form.querySelectorAll('[data-max-clips]').forEach((input) => {
-      const list = input.closest('[data-cf-pub-field]').querySelector('[data-cf-audio-list]');
-      let urls = [];
-      const clear = () => { urls.forEach((url) => URL.revokeObjectURL(url)); urls = []; list.replaceChildren(); };
-      input.addEventListener('change', () => {
-        clear();
-        Array.from(input.files).forEach((file) => {
-          const name = document.createElement('p'); name.textContent = file.name;
-          const audio = document.createElement('audio'); audio.controls = true; audio.src = URL.createObjectURL(file);
-          urls.push(audio.src); list.append(name, audio);
-        });
-      });
-      form.addEventListener('reset', clear);
-      window.addEventListener('pagehide', clear);
+      audioFields.push(initAudioField(input, form, () => !audioFields.some((field) => field.busy())));
     });
     form.querySelectorAll('[data-cf-password-toggle]').forEach((toggle) => toggle.addEventListener('click', () => {
       const input = toggle.closest('[data-cf-pub-field]').querySelector('[data-cf-value]');
@@ -89,11 +212,22 @@
       form.querySelectorAll('[data-field-type="signature"]').forEach((wrap) => {
         if (wrap.dataset.required === 'true' && !wrap.querySelector('[data-cf-value]').value && !wrap.querySelector('[data-cf-signature-upload]').files.length) errors.push('Draw or upload your signature.');
       });
-      form.querySelectorAll('[data-max-clips]').forEach((input) => {
-        if (input.files.length > Number(input.dataset.maxClips)) errors.push(`Choose at most ${input.dataset.maxClips} audio clips.`);
+      audioFields.forEach((field) => {
+        const wrap = field.input.closest('[data-cf-pub-field]');
+        const missing = wrap.dataset.required === 'true' && !field.files().length;
+        const error = wrap.querySelector('[data-cf-field-error]');
+        error.hidden = !missing;
+        error.textContent = missing ? 'Record or upload at least one audio clip.' : '';
+        field.input.setAttribute('aria-invalid', String(missing));
+        if (missing) errors.push('Record or upload an audio clip for ' + wrap.querySelector('label').textContent.trim() + '.');
+        if (field.busy()) errors.push('Stop recording and wait for the clip to finish before submitting.');
       });
       if (errors.length) { showStatus(status, errors, true); return; }
       const data = new FormData(form);
+      audioFields.forEach((field) => {
+        data.delete(field.input.name);
+        field.files().forEach((file) => data.append(field.input.name, file, file.name));
+      });
       data.set('form_data', JSON.stringify(collectValues(form)));
       const headers = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
       const csrf = document.querySelector('meta[name="csrf-token"]');
@@ -101,6 +235,7 @@
       button.disabled = true;
       button.textContent = 'Submitting…';
       form.setAttribute('aria-busy', 'true');
+      audioFields.forEach((field) => field.update());
       try {
         const response = await fetch(form.action, { method: 'POST', credentials: 'same-origin', headers, body: data });
         if (response.redirected || response.headers.get('content-type')?.includes('text/html')) throw new Error('Your session may have expired. Reload the page and sign in again.');
@@ -126,6 +261,7 @@
         button.disabled = false;
         button.textContent = 'Submit request';
         form.removeAttribute('aria-busy');
+        audioFields.forEach((field) => field.update());
       }
     });
   }
