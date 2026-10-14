@@ -82,7 +82,7 @@ Windows Update and Chocolatey policies run as built-in PowerShell jobs through t
 existing runner, with policy targeting rechecked before dispatch. They appear in
 Scripts run history. Chocolatey must already be installed. See
 `docs/wiki/administration/RMM Patch Management.md` for scope, schedule and reboot behavior.
-Deploy MyPortal and migration 490 to enable policies; no agent upgrade is required.
+Deploy MyPortal and migration 491 to enable policies; no agent upgrade is required.
 
 ## Develop
 
