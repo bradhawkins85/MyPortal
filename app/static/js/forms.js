@@ -137,10 +137,9 @@
     form.querySelectorAll('[data-cf-file][data-max-clips]').forEach((input) => {
       const wrap = input.closest('[data-cf-pub-field]');
       const list = wrap ? wrap.querySelector('[data-cf-audio-list]') : null;
-      const max = parseInt(input.getAttribute('data-max-clips'), 10);
       const render = () => {
         if (!list) return;
-        list.innerHTML = '';
+        list.replaceChildren();
         const files = Array.from(input.files || []);
         if (!files.length) {
           const hint = document.createElement('span');
@@ -175,7 +174,7 @@
       if (hidden) hidden.value = '';
     });
     form.querySelectorAll('[data-cf-audio-list]').forEach((list) => {
-      list.innerHTML = '';
+      list.replaceChildren();
     });
     form.querySelectorAll('[data-cf-password-toggle]').forEach((btn) => {
       const wrap = btn.closest('[data-cf-pub-field]');
