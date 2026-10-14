@@ -36,7 +36,7 @@ _SUPER_ADMIN = {"id": 9, "is_super_admin": True, "company_id": 7}
 _FORM = {"id": 1, "slug": "support", "name": "Support", "description": None, "active": True}
 
 
-def _field(field_id, field_type="text", *, label="Issue", required=False, options=None):
+def _field(field_id, field_type="text", *, label="Issue", required=False, options=None, config=None):
     return {
         "id": field_id,
         "form_id": 1,
@@ -47,6 +47,7 @@ def _field(field_id, field_type="text", *, label="Issue", required=False, option
         "required": required,
         "options": options or [],
         "default_value": None,
+        "config": config or {},
         "sort_order": 0,
     }
 
@@ -112,6 +113,53 @@ def test_validate_field_definition_reports_errors():
         "This field type requires at least one option."
     ]
     assert custom_forms.validate_field_definition("text", "Name", None) == []
+
+
+def test_validate_field_definition_new_types():
+    # time / url / password / signature / hidden need no config.
+    for ft in ("time", "url", "password", "signature", "hidden"):
+        assert custom_forms.validate_field_definition(ft, "Label", []) == []
+    # rating and audio fall back to sensible defaults when config is absent.
+    assert custom_forms.validate_field_definition("rating", "Rate", None) == []
+    assert custom_forms.validate_field_definition("audio", "Clips", None) == []
+    # explicit config.
+    assert custom_forms.validate_field_definition("rating", "Rate", None, {"max": 5}) == []
+    assert custom_forms.validate_field_definition("audio", "Clips", None, {"max_clips": 3}) == []
+    assert (
+        custom_forms.validate_field_definition(
+            "matrix", "Grid", None, {"rows": ["a"], "columns": ["x"]}
+        )
+        == []
+    )
+
+
+def test_validate_field_definition_new_type_errors():
+    # matrix requires both rows and columns.
+    assert custom_forms.validate_field_definition("matrix", "Grid", None, {}) == [
+        "A matrix field requires at least one row.",
+        "A matrix field requires at least one column.",
+    ]
+    errors = custom_forms.validate_field_definition("matrix", "Grid", None, {"rows": ["a"]})
+    assert "A matrix field requires at least one column." in errors
+    # too many rows.
+    errors = custom_forms.validate_field_definition(
+        "matrix", "Grid", None, {"rows": ["r"] * 51, "columns": ["c"]}
+    )
+    assert any("50 rows" in e for e in errors)
+    # rating max out of range.
+    assert any(
+        "between 1 and 10" in e
+        for e in custom_forms.validate_field_definition("rating", "Rate", None, {"max": 0})
+    )
+    assert any(
+        "between 1 and 10" in e
+        for e in custom_forms.validate_field_definition("rating", "Rate", None, {"max": 11})
+    )
+    # audio max_clips out of range.
+    assert any(
+        "clips" in e
+        for e in custom_forms.validate_field_definition("audio", "Clips", None, {"max_clips": 0})
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +244,113 @@ def test_validate_submission_hidden_field_uses_default():
     assert clean[9] == "abc"
 
 
+def test_validate_submission_new_scalar_types():
+    fields = [
+        _field(1, "time", label="When", required=True),
+        _field(2, "url", label="Site", required=True),
+        _field(3, "password", label="Pass", required=True),
+    ]
+    clean, errors = custom_forms.validate_submission(
+        fields, {1: "09:30", 2: "https://example.com", 3: "hunter2"}
+    )
+    assert errors == []
+    assert clean == {1: "09:30", 2: "https://example.com", 3: "hunter2"}
+
+
+def test_validate_submission_new_scalar_type_errors():
+    fields = [
+        _field(1, "time", label="When"),
+        _field(2, "url", label="Site"),
+        _field(3, "password", label="Pass", required=True),
+    ]
+    _, errors = custom_forms.validate_submission(
+        fields, {1: "9:3", 2: "example.com", 3: ""}
+    )
+    assert any("time" in e for e in errors)
+    assert any("URL" in e for e in errors)
+    assert "'Pass' is required." in errors
+
+
+def test_validate_submission_rating():
+    fields = [_field(1, "rating", label="Rate", required=True, config={"max": 5})]
+    clean, errors = custom_forms.validate_submission(fields, {1: "4"})
+    assert errors == []
+    assert clean[1] == 4
+    # out-of-range value is clamped to the max and reported.
+    clean, errors = custom_forms.validate_submission(fields, {1: "9"})
+    assert clean[1] == 5
+    assert any("between 0 and 5" in e for e in errors)
+    # required and blank.
+    _, errors = custom_forms.validate_submission(fields, {1: ""})
+    assert "'Rate' is required." in errors
+
+
+def test_validate_submission_signature():
+    fields = [_field(1, "signature", label="Sign", required=True)]
+    clean, errors = custom_forms.validate_submission(
+        fields, {1: "data:image/png;base64,AAAA"}
+    )
+    assert errors == []
+    assert clean[1].startswith("data:")
+    # non-image rejected.
+    _, errors = custom_forms.validate_submission(fields, {1: "not-an-image"})
+    assert any("must be an image" in e for e in errors)
+    # required and blank.
+    _, errors = custom_forms.validate_submission(fields, {1: ""})
+    assert "'Sign' is required." in errors
+
+
+def test_validate_submission_matrix():
+    fields = [
+        _field(
+            1,
+            "matrix",
+            label="Grid",
+            config={"rows": ["a", "b"], "columns": ["yes", "no"]},
+        )
+    ]
+    clean, errors = custom_forms.validate_submission(fields, {1: {"a": "yes", "b": "no"}})
+    assert errors == []
+    assert clean[1] == {"a": "yes", "b": "no"}
+    # invalid row.
+    _, errors = custom_forms.validate_submission(fields, {1: {"z": "yes"}})
+    assert any("Invalid row" in e for e in errors)
+    # invalid column.
+    _, errors = custom_forms.validate_submission(fields, {1: {"a": "maybe"}})
+    assert any("Invalid column" in e for e in errors)
+    # required and empty.
+    req = [
+        _field(
+            1,
+            "matrix",
+            label="Grid",
+            required=True,
+            config={"rows": ["a"], "columns": ["x"]},
+        )
+    ]
+    _, errors = custom_forms.validate_submission(req, {1: {}})
+    assert "'Grid' is required." in errors
+
+
+def test_validate_submission_audio_multi_clip():
+    fields = [_field(1, "audio", label="Clips", config={"max_clips": 3})]
+    # up to max_clips passes.
+    clean, errors = custom_forms.validate_submission(
+        fields, {}, {1: [SimpleNamespace(filename=f"c{i}.mp3") for i in range(3)]}
+    )
+    assert errors == []
+    assert len(clean[1]) == 3
+    # exceeding max_clips is reported.
+    _, errors = custom_forms.validate_submission(
+        fields, {}, {1: [SimpleNamespace(filename=f"c{i}.mp3") for i in range(4)]}
+    )
+    assert any("at most 3 clips" in e for e in errors)
+    # required and none.
+    req = [_field(1, "audio", label="Clips", required=True)]
+    _, errors = custom_forms.validate_submission(req, {}, {})
+    assert "'Clips' is required." in errors
+
+
 # ---------------------------------------------------------------------------
 # Ticket description building
 # ---------------------------------------------------------------------------
@@ -220,6 +375,19 @@ def test_build_description_escapes_html():
     description = custom_forms.build_description("Form", fields, {1: "<script>"})
     assert "<script>" not in description
     assert "&lt;script&gt;" in description
+
+
+def test_display_value_new_types():
+    assert custom_forms._display_value(_field(1, "rating", config={"max": 5}), 4) == "4 / 5"
+    assert (
+        custom_forms._display_value(_field(1, "signature"), "data:image/png;base64,x")
+        == "(signature image)"
+    )
+    assert custom_forms._display_value(_field(1, "matrix"), {"a": "yes"}) == "a: yes"
+    assert (
+        custom_forms._display_value(_field(1, "audio"), ["a.mp3", "b.mp3"])
+        == "a.mp3, b.mp3"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +791,23 @@ def test_migration_runs_on_sqlite():
     assert connection.execute(
         "SELECT ticket_id FROM custom_form_submissions WHERE form_id = 1"
     ).fetchone() == (555,)
+
+
+def test_migration_489_adds_config_column():
+    base = Path("migrations/485_custom_forms.sql").read_text(encoding="utf-8")
+    alter = Path("migrations/489_custom_form_fields_config.sql").read_text(encoding="utf-8")
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+    connection.execute("CREATE TABLE tickets (id INTEGER PRIMARY KEY)")
+    connection.execute("CREATE TABLE forms (id INTEGER PRIMARY KEY)")
+    connection.execute("CREATE TABLE form_permissions (id INTEGER PRIMARY KEY)")
+    for migration in (base, alter):
+        adapted = db._adapt_sql_for_sqlite(migration)
+        for statement in db._split_sql_statements(adapted):
+            connection.execute(statement)
+    # The new JSON column exists on custom_form_fields.
+    cols = {row[1] for row in connection.execute("PRAGMA table_info(custom_form_fields)")}
+    assert "config" in cols
 
 
 def _form_request():

@@ -26,6 +26,22 @@ def _decode_options(value: Any) -> list[str]:
     return []
 
 
+def _decode_config(value: Any) -> dict[str, Any]:
+    """Decode the ``config`` column (stored as a JSON object)."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
 def _normalise_form(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -49,6 +65,7 @@ def _normalise_field(row: dict[str, Any] | None) -> dict[str, Any] | None:
     normalised["required"] = bool(int(normalised.get("required") or 0))
     normalised["sort_order"] = int(normalised.get("sort_order") or 0)
     normalised["options"] = _decode_options(normalised.get("options"))
+    normalised["config"] = _decode_config(normalised.get("config"))
     return normalised
 
 
@@ -191,13 +208,15 @@ async def create_field(
     options: list[str] | None,
     default_value: str | None,
     sort_order: int,
+    config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     options_json = json.dumps(options) if options else None
+    config_json = json.dumps(config) if config else None
     field_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO custom_form_fields
-        (form_id, field_type, label, placeholder, help_text, required, options, default_value, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (form_id, field_type, label, placeholder, help_text, required, options, default_value, config, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             form_id,
@@ -208,6 +227,7 @@ async def create_field(
             1 if required else 0,
             options_json,
             default_value,
+            config_json,
             sort_order,
         ),
     )
@@ -227,13 +247,15 @@ async def update_field(
     required: bool,
     options: list[str] | None,
     default_value: str | None,
+    config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     options_json = json.dumps(options) if options else None
+    config_json = json.dumps(config) if config else None
     await db.execute(
         """
         UPDATE custom_form_fields
         SET field_type = ?, label = ?, placeholder = ?, help_text = ?,
-            required = ?, options = ?, default_value = ?
+            required = ?, options = ?, default_value = ?, config = ?
         WHERE id = ?
         """,
         (
@@ -244,6 +266,7 @@ async def update_field(
             1 if required else 0,
             options_json,
             default_value,
+            config_json,
             field_id,
         ),
     )

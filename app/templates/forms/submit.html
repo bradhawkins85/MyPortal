@@ -1,19 +1,36 @@
 {% extends "base.html" %}
 
+{% block styles %}
+  <link rel="stylesheet" href="{{ static_url('/static/css/custom_forms.css') }}" />
+{% endblock %}
+
 {% macro render_field(field) %}
+{% if field.field_type == 'hidden' %}
+  {# Hidden fields are stored from their default; nothing to render. #}
+{% else %}
+{% set cfg = field.config or {} %}
 {% set fid = field.id %}
 <div class="form-field cf-pub-field" data-cf-pub-field data-field-id="{{ fid }}" data-field-type="{{ field.field_type }}">
   <label class="form-label{% if field.required %} required{% endif %}" for="cf-f-{{ fid }}">{{ field.label }}{% if field.required %} <span aria-hidden="true">*</span>{% endif %}</label>
   {% if field.field_type == 'text' %}
     <input class="form-input" id="cf-f-{{ fid }}" type="text" placeholder="{{ field.placeholder or '' }}" value="{{ field.default_value or '' }}" data-cf-value />
+  {% elif field.field_type == 'password' %}
+    <div class="cf-password-field">
+      <input class="form-input" id="cf-f-{{ fid }}" type="password" placeholder="{{ field.placeholder or '••••••••' }}" value="{{ field.default_value or '' }}" data-cf-value />
+      <button type="button" class="cf-password-toggle" data-cf-password-toggle aria-label="Show password">Show</button>
+    </div>
   {% elif field.field_type == 'textarea' %}
     <textarea class="form-input" id="cf-f-{{ fid }}" rows="4" placeholder="{{ field.placeholder or '' }}" data-cf-value>{{ field.default_value or '' }}</textarea>
   {% elif field.field_type == 'email' %}
     <input class="form-input" id="cf-f-{{ fid }}" type="email" placeholder="{{ field.placeholder or '' }}" data-cf-value />
+  {% elif field.field_type == 'url' %}
+    <input class="form-input" id="cf-f-{{ fid }}" type="url" placeholder="{{ field.placeholder or 'https://example.com' }}" value="{{ field.default_value or '' }}" data-cf-value />
   {% elif field.field_type == 'number' %}
     <input class="form-input" id="cf-f-{{ fid }}" type="number" placeholder="{{ field.placeholder or '' }}" value="{{ field.default_value or '' }}" data-cf-value />
   {% elif field.field_type == 'date' %}
     <input class="form-input" id="cf-f-{{ fid }}" type="date" value="{{ field.default_value or '' }}" data-cf-value />
+  {% elif field.field_type == 'time' %}
+    <input class="form-input" id="cf-f-{{ fid }}" type="time" value="{{ field.default_value or '' }}" data-cf-value />
   {% elif field.field_type == 'select' %}
     <select class="form-input" id="cf-f-{{ fid }}" data-cf-value>
       <option value="">Select an option…</option>
@@ -32,11 +49,54 @@
     </div>
   {% elif field.field_type == 'checkbox' %}
     <label class="scf-check"><input type="checkbox" name="cf-check-{{ fid }}"{% if field.default_value %} checked{% endif %} data-cf-value /> <span>{{ field.help_text or 'Yes' }}</span></label>
+  {% elif field.field_type == 'rating' %}
+    {% set rmax = cfg.get('max', 5) or 5 %}
+    <div class="cf-rating" data-cf-rating data-max="{{ rmax }}">
+      {% for i in range(1, rmax + 1) %}
+      <label class="cf-rating__star"><input type="radio" name="cf-rating-{{ fid }}" value="{{ i }}"{% if field.default_value and (field.default_value | int) == i %} checked{% endif %} data-cf-value /> <span class="cf-rating__glyph" aria-hidden="true">★</span><span class="cf-rating__label">{{ i }}</span></label>
+      {% endfor %}
+    </div>
+  {% elif field.field_type == 'matrix' %}
+    {% set mrows = cfg.get('rows', []) %}
+    {% set mcols = cfg.get('columns', []) %}
+    <div class="cf-matrix-wrap">
+      <table class="cf-matrix">
+        <thead>
+          <tr><th scope="col"></th>{% for col in mcols %}<th scope="col">{{ col }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for row in mrows %}
+          <tr>
+            <th scope="row">{{ row }}</th>
+            {% for col in mcols %}
+            <td><label class="cf-matrix__cell"><input type="radio" name="cf-matrix-{{ fid }}-{{ loop.index }}" value="{{ col }}" data-cf-matrix-row="{{ row }}" /></label></td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% elif field.field_type == 'signature' %}
+    <div class="cf-signature">
+      <canvas class="cf-signature__canvas" data-cf-signature width="560" height="160"></canvas>
+      <div class="cf-signature__actions">
+        <button type="button" class="button button--ghost" data-cf-signature-clear>Clear</button>
+        <span class="cf-signature__hint">Sign with your mouse or finger</span>
+      </div>
+      <input type="hidden" data-cf-value />
+    </div>
+  {% elif field.field_type == 'audio' %}
+    {% set amax = cfg.get('max_clips', 5) or 5 %}
+    <input class="form-input" id="cf-f-{{ fid }}" type="file" name="file_{{ fid }}" accept="audio/*" multiple data-cf-file data-max-clips="{{ amax }}" />
+    <div class="cf-audio">
+      <div class="cf-audio__list" data-cf-audio-list></div>
+    </div>
   {% elif field.field_type == 'file' %}
-    <input class="form-input" id="cf-f-{{ fid }}" type="file" data-cf-file />
+    <input class="form-input" id="cf-f-{{ fid }}" type="file" name="file_{{ fid }}" data-cf-file />
   {% endif %}
-  {% if field.help_text and field.field_type != 'checkbox' %}<p class="form-help">{{ field.help_text }}</p>{% endif %}
+  {% if field.help_text and field.field_type not in ('checkbox', 'rating', 'signature', 'audio') %}<p class="form-help">{{ field.help_text }}</p>{% endif %}
 </div>
+{% endif %}
 {% endmacro %}
 
 {% block header_title %}
