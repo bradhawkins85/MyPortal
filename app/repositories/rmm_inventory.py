@@ -57,6 +57,17 @@ async def list_software(agent_id: int) -> list[dict[str, Any]]:
     return [dict(row) for row in rows or []]
 
 
+async def list_catalog_software_names() -> list[str]:
+    """Current Software names on active Windows agents for Chocolatey lookups."""
+    rows = await db.fetch_all(
+        "SELECT DISTINCT s.name FROM rmm_device_software s "
+        "INNER JOIN rmm_agents a ON a.id = s.agent_id "
+        "WHERE a.status = 'active' AND LOWER(a.os) = 'windows' "
+        "AND TRIM(s.name) <> '' ORDER BY s.name"
+    )
+    return [str(row['name']) for row in rows or []]
+
+
 async def list_software_history(agent_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         "SELECT * FROM rmm_device_software_history WHERE agent_id = %s "

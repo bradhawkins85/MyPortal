@@ -52,12 +52,19 @@ failures are visible in run output. Feature upgrades are not included.
 
 ## Chocolatey applications
 
-The policy form's application search uses MyPortal's stored Chocolatey app list.
-The default **Update Chocolatey app list** scheduled task refreshes it daily from
-the stable community catalog; super admins can run it now, change its schedule,
-disable or delete it under **Admin → Scheduled tasks**, and recreate it with the
-**Update Chocolatey app list** command. A failed refresh keeps the previous list.
-Until the first refresh completes, searches query the community feed directly.
+The policy form's application search uses stored Chocolatey matches for the apps
+currently listed in Software on active Windows devices. The default **Update
+Chocolatey app list** scheduled task refreshes those matches daily. It searches
+each distinct installed application name, saves only unambiguous exact package
+ID or title matches, and skips names without a verified match. It does not
+download the full Chocolatey catalog.
+
+Super admins can run the task now, change its schedule, disable or delete it
+under **Admin → Scheduled tasks**, and recreate it with the **Update Chocolatey
+app list** command. A failed lookup keeps the previous list. A successful refresh
+removes matches for software no longer in the current inventory. Portal searches
+use only this stored list; before the first refresh, no applications are listed.
+The task result reports checked, matched, unmatched and ambiguous applications.
 
 Each policy specifies an exact package ID and exact installed application display
 name. The agent reads Chocolatey's local package list and machine-wide 32/64-bit
