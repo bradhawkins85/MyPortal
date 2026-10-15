@@ -111,6 +111,7 @@ from app.api.routes import (
 from app.api.dependencies.auth import is_user_active, require_super_admin
 from uuid import uuid4
 
+from app.core.ai_identity import get_agent_name
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
 from app.core.event_log_database import event_log_db
@@ -888,6 +889,7 @@ app.add_middleware(
 app.add_middleware(IncomingWebhookMonitorMiddleware)
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
+templates.env.globals["ai_agent_name"] = get_agent_name
 
 
 def _parse_tray_agent_version(value: str | None) -> tuple[int, int, int]:

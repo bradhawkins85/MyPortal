@@ -7,11 +7,11 @@
 
 {% block content %}
 <section class="dashboard__section dashboard__section--agent search-workspace" aria-labelledby="ai-search-heading">
-  <article class="card card--panel agent-panel" data-agent-panel>
+  <article class="card card--panel agent-panel" data-agent-panel data-ai-agent-name="{{ ai_agent_name() }}">
     <header class="agent-panel__header">
-      <h2 id="ai-search-heading" class="agent-panel__title">How can we assist you</h2>
+      <h2 id="ai-search-heading" class="agent-panel__title">Hi, I’m {{ ai_agent_name() }}. How can I help?</h2>
       <p class="agent-panel__subtitle">
-        Ask a question in plain English. The assistant searches the selected portal sources, including support,
+        Ask a question in plain English. I search the selected portal sources, including support,
         commerce, company, Microsoft 365, service, reporting, best-practice, and feature-pack data you can access.
       </p>
     </header>

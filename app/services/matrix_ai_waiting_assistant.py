@@ -14,6 +14,7 @@ from urllib.parse import urljoin
 import nh3
 import httpx
 
+from app.core.ai_identity import agent_instructions, get_agent_name, personalise_agent_text
 from app.services.monitored_http import monitored_client
 
 from app.core.config import get_settings
@@ -302,6 +303,7 @@ def _openai_chat_response_text(payload: Mapping[str, Any]) -> str:
 
 
 async def _ollama_generate(prompt: str, *, json_format: bool = False) -> str:
+    prompt = agent_instructions() + "\n" + prompt
     settings = get_settings()
     provider = _matrixbot_ai_provider(settings)
     default_base_url = "https://api.openai.com" if provider == "openai" else "http://127.0.0.1:11434"
@@ -550,6 +552,9 @@ async def _send_bot_message(
     response_count: int | None = None,
     idempotency_key: str | None = None,
 ) -> bool:
+    body = personalise_agent_text(body)
+    if formatted_body:
+        formatted_body = personalise_agent_text(formatted_body, rich_text=True)
     matrix_room_id = str(room["matrix_room_id"])
     monitor_event = await _create_monitor_event(
         "MATRIXBOT_AI Matrix message",
@@ -561,9 +566,9 @@ async def _send_bot_message(
         },
     )
     try:
-        send_kwargs: dict[str, Any] = {}
+        send_kwargs: dict[str, Any] = {"sender_display_name": get_agent_name()}
         if formatted_body:
-            send_kwargs["formatted_body"] = formatted_body
+            send_kwargs["formatted_body"] = f"<p><strong>{html.escape(get_agent_name())}</strong>:</p>{formatted_body}"
         if idempotency_key:
             send_kwargs["transaction_id"] = idempotency_key
         response = await matrix_service.send_message(matrix_room_id, body, **send_kwargs)
@@ -601,7 +606,7 @@ async def _send_bot_message(
         sender_matrix_id=get_settings().matrix_bot_user_id or "@myportal-ai-waiting-assistant",
         body=body,
         sender_user_id=None,
-        sender_display_name="AI Waiting Assistant",
+        sender_display_name=get_agent_name(),
         sent_at=now,
     )
     if response_count is None:
@@ -711,7 +716,7 @@ async def scan_waiting_rooms_once() -> None:
             reserved = await chat_repo.reserve_ai_bot_response(int(room["id"]), expected_count=0, when=_utcnow())
             if not reserved:
                 continue
-            if await _send_bot_message(room, _ACK_MESSAGE, response_count=1):
+            if await _send_bot_message(room, f"Hi, I’m {get_agent_name()}, your AI support assistant. {_ACK_MESSAGE}", response_count=1):
                 await _audit("matrix_ai_waiting_assistant.acknowledgement_sent", int(room["id"]))
             else:
                 await chat_repo.release_ai_bot_response_reservation(int(room["id"]), reserved_count=1)

@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 from importlib import import_module
 from typing import Any, Iterable, Sequence
 
+from app.core.ai_identity import normalise_agent_reply
 from app.core.database import db
 from app.core.logging import log_debug, log_error, log_info
 from app.repositories import site_settings as site_settings_repo
@@ -286,7 +287,7 @@ def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
 
 
 def _normalise_reply(row: dict[str, Any]) -> TicketRecord:
-    record = dict(row)
+    record = normalise_agent_reply(row)
     for key in ("id", "ticket_id", "author_id", "minutes_spent", "labour_type_id"):
         if key in record and record[key] is not None:
             record[key] = int(record[key])

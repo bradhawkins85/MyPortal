@@ -383,6 +383,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const panel = document.querySelector('[data-agent-panel]');
     if (!panel) return;
+    const aiAgentName = panel.dataset.aiAgentName || "Sophia";
 
     const form = panel.querySelector('[data-agent-form]');
     const input = panel.querySelector('[data-agent-input]');
@@ -409,7 +410,7 @@
 
     if (!form || !input) return;
 
-    const defaultStatus = 'Enter a question to ask the agent.';
+    const defaultStatus = `Enter a question to ask ${aiAgentName}.`;
     if (status) status.textContent = defaultStatus;
     let lastQuery = '';
     let lastAnswer = '';
@@ -494,7 +495,7 @@
       if (descriptionField) {
         let description = '';
         if (lastQuery) description += `Original Question:\n${lastQuery}\n\n`;
-        if (lastAnswer) description += `Agent Response:\n${lastAnswer}`;
+        if (lastAnswer) description += `${aiAgentName} Response:\n${lastAnswer}`;
         if (description) descriptionField.value = description;
       }
       ticketModal.hidden = false;
@@ -573,7 +574,7 @@
       if (activeQueryController) return;
       const query = input.value.trim();
       if (!query) {
-        if (status) status.textContent = 'Please enter a question for the agent.';
+        if (status) status.textContent = `Please enter a question for ${aiAgentName}.`;
         return;
       }
       const sourceFilters = selectedSourceFilters();
@@ -584,7 +585,7 @@
 
       setBusy(true);
       resetResults();
-      if (status) status.textContent = 'Contacting the agent…';
+      if (status) status.textContent = `Contacting ${aiAgentName}…`;
       lastQuery = query;
       lastAnswer = '';
 
@@ -636,11 +637,11 @@
             }
             if (item.event === 'clarification' && status) status.textContent = 'Let me ask a quick question…';
             if (item.event === 'result') payload = item;
-            if (item.event === 'error') throw new Error(item.message || 'Agent request failed');
+            if (item.event === 'error') throw new Error(item.message || `${aiAgentName} request failed`);
           });
           if (done) break;
         }
-        if (!payload) throw new Error('The agent stream ended without a result.');
+        if (!payload) throw new Error(`${aiAgentName}’s response ended without a result.`);
         if (status) status.textContent = formatStatus(payload) || defaultStatus;
         if (stages) renderStages(stages, payload.stages);
 
@@ -700,7 +701,7 @@
         }
       } catch (error) {
         if (error && error.name === 'AbortError') return;
-        if (status) status.textContent = 'Unable to contact the agent. Please try again later.';
+        if (status) status.textContent = `Unable to contact ${aiAgentName}. Please try again later.`;
         resetResults();
       } finally {
         activeQueryController = null;

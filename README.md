@@ -268,3 +268,5 @@ automatically. It's useful for exploring the UI, and it's what the screenshots a
 MyPortal is licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 See [LICENSE](LICENSE) for the full terms.
+
+The AI support assistant, chat bot and ticket troubleshooter share the name **Sophia**. Set `AI_AGENT_NAME` in `.env` to choose another name (blank values use Sophia). Restart the application after changing it. Existing portal chat history and AI-authored ticket notes display the configured name when loaded.

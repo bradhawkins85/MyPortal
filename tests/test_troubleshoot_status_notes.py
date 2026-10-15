@@ -90,7 +90,7 @@ def test_status_update_adds_internal_note(recorder):
     assert len(recorder.replies) == 1
     reply = recorder.replies[0]
     assert reply["is_internal"] is True
-    assert reply["author_display_name"] == "Troubleshooting Agent"
+    assert reply["author_display_name"] == "Sophia"
     assert "Collecting endpoint logs" in reply["body"]
     assert "ws-01" in reply["body"]
     assert "<logs>" not in reply["body"]

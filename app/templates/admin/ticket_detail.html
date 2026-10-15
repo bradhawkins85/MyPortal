@@ -4,6 +4,7 @@
 
 
 {% block header_title %}
+  <span hidden data-ai-agent-name="{{ ai_agent_name() }}"></span>
   <div class="header-title-menu ticket-detail-header">
     <span class="header-title-menu__label ticket-detail-header__subject" title="{{ ticket.subject }}">{{ ticket.subject }}</span>
     <span class="ticket-detail-header__sla">
@@ -1142,10 +1143,10 @@
                             {% if not asset.tray_device_uid or ticket_ai_opted_out %}disabled aria-disabled="true"{% endif %}
                             {% if ticket_ai_opted_out %}
                             title="AI is turned off for this ticket because the requester opted out"
-                            aria-label="AI troubleshooter unavailable for {{ display_name }}: the requester opted out of AI"
+                            aria-label="{{ ai_agent_name() }} unavailable for {{ display_name }}: the requester opted out of AI"
                             {% else %}
-                            title="Run AI troubleshooter on this asset"
-                            aria-label="Run AI troubleshooter on {{ display_name }}"
+                            title="Run {{ ai_agent_name() }} on this asset"
+                            aria-label="Run {{ ai_agent_name() }} on {{ display_name }}"
                             {% endif %}
                           >
                             <span aria-hidden="true">🤖</span>
@@ -1761,7 +1762,7 @@
                               {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
                               <span class="timeline__direction">{{ 'AI note' if reply.is_ai else ('Automation' if reply_is_automation else ('Internal note' if reply.is_internal else ('Technician reply' if reply.author_id and reply.author_id != ticket.requester_id else 'Customer message'))) }}</span>
                               {% if reply.is_ai %}
-                                <span class="badge badge--info" title="Written by the AI troubleshooter. Visible to staff only.">AI</span>
+                                <span class="badge badge--info" title="Written by {{ ai_agent_name() }}. Visible to staff only.">AI</span>
                               {% elif reply.is_internal %}
                                 <span class="badge badge--muted">Internal</span>
                               {% endif %}

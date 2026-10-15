@@ -1,0 +1,7 @@
+{
+  "guid": "ad3f1896-7a2d-4095-92e1-d17fde263ebd",
+  "occurred_at": "2026-10-15T07:06:04+00:00",
+  "change_type": "feature",
+  "summary": "Give the AI agent, chat bot and ticket troubleshooter the shared name Sophia by default, configurable through AI_AGENT_NAME, including existing portal conversation history.",
+  "content_hash": "7e20dc5608c06c1b1554bd27f17ffd831b8bc28c0046ff870286739c798ac63f"
+}

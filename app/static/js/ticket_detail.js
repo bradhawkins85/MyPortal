@@ -1,4 +1,5 @@
 (function () {
+  const aiAgentName = document.querySelector("[data-ai-agent-name]")?.dataset.aiAgentName || "Sophia";
 
   document.querySelectorAll('[data-resolution-classification]').forEach((checkbox) => {
     checkbox.addEventListener('change', () => {
@@ -1338,11 +1339,11 @@
           troubleshootButton.title = 'AI is turned off for this ticket because the requester opted out';
           troubleshootButton.setAttribute(
             'aria-label',
-            `AI troubleshooter unavailable for ${displayName}: the requester opted out of AI`,
+            `${aiAgentName} unavailable for ${displayName}: the requester opted out of AI`,
           );
         } else {
-          troubleshootButton.title = 'Run AI troubleshooter on this asset';
-          troubleshootButton.setAttribute('aria-label', `Run AI troubleshooter on ${displayName}`);
+          troubleshootButton.title = `Run ${aiAgentName} on this asset`;
+          troubleshootButton.setAttribute('aria-label', `Run ${aiAgentName} on ${displayName}`);
         }
         if (record.tray_device_uid) {
           troubleshootButton.setAttribute('data-device-uid', record.tray_device_uid);
@@ -1682,24 +1683,24 @@
         })
           .then(async (response) => {
             if (!response.ok) {
-              throw new Error(await getApiErrorMessage(response, `Unable to start the AI troubleshooter for ${assetName}.`));
+              throw new Error(await getApiErrorMessage(response, `Unable to start ${aiAgentName} for ${assetName}.`));
             }
             return response.json();
           })
           .then((data) => {
             const message = data.status === 'started'
-              ? `AI troubleshooter started for ${assetName}. Articles, recommended steps and any log analysis will be posted to this ticket as internal notes.`
+              ? `${aiAgentName} started for ${assetName}. Articles, recommended steps and any log analysis will be posted to this ticket as internal notes.`
               : data.delivered
-                ? `AI troubleshooter started on ${assetName}. Progress and the result will be posted to this ticket as internal notes.`
-                : `AI troubleshooter queued for ${assetName}. It will start when the device next checks in; progress will be posted as internal notes.`;
+                ? `${aiAgentName} started on ${assetName}. Progress and the result will be posted to this ticket as internal notes.`
+                : `${aiAgentName} queued for ${assetName}. It will start when the device next checks in; progress will be posted as internal notes.`;
             if (!showToast(message, 'success')) {
               window.alert(message);
             }
             troubleshootButton.disabled = false;
           })
           .catch((error) => {
-            console.error('Failed to start AI troubleshooter', error);
-            const message = `Failed to start the AI troubleshooter: ${error.message || 'Unknown error'}`;
+            console.error(`Failed to start ${aiAgentName}`, error);
+            const message = `Failed to start ${aiAgentName}: ${error.message || 'Unknown error'}`;
             if (!showToast(message, 'error')) {
               window.alert(message);
             }
