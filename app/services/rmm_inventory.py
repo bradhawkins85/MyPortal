@@ -25,6 +25,7 @@ from typing import Any, Iterable, Mapping
 
 from app.core.logging import log_info
 from app.repositories import rmm_inventory as repo
+from app.repositories import network_map as network_map_repo
 
 REFRESH_INTERVAL = timedelta(hours=24)
 POLL_SECONDS = 120
@@ -229,6 +230,10 @@ async def ingest(agent: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[s
     # A device clock in the future must not make the snapshot look fresh forever.
     collected_at = min(collected_at, _utcnow())
     await repo.save_snapshot(dict(agent), summary, details, software, collected_at=collected_at)
+    if agent.get("company_id") is not None and agent.get("asset_id") is not None:
+        await network_map_repo.sync_agent_interfaces(
+            int(agent["company_id"]), int(agent["asset_id"]), details["network_adapters"],
+        )
     log_info("RMM inventory received", agent_id=agent.get("id"), software=len(software))
     return {"ok": True, "software": len(software)}
 

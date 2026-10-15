@@ -35,6 +35,15 @@ within a few minutes of the device being online; the section says when a refresh
 Only the latest snapshot is kept, in MyPortal's main database (`rmm_device_inventory` and
 `rmm_device_software`). It is removed with the agent.
 
+Each snapshot also populates the asset's **Network interfaces** section and the network map
+with the reported adapter names, MAC addresses and IP addresses. Existing installations populate
+on the next inventory snapshot; **Refresh now** requests one sooner. Adapters match existing
+interfaces by MAC address or name, so refreshes preserve documented links, names, kinds and radio
+settings. An assigned IPAM address takes precedence over the observed device address; otherwise
+the first valid IPv4 address (or IPv6 if there is no IPv4 address) is shown. All reported addresses
+remain available in hardware inventory. Interfaces missing from a later snapshot are retained,
+since disconnected adapters may not be reported by the device.
+
 ## Picking devices by inventory
 
 Snapshots are also there to choose which devices a script, schedule or check runs on.

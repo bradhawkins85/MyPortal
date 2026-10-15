@@ -1,0 +1,7 @@
+{
+  "guid": "a17849e8-134f-47f3-be61-32af36329757",
+  "occurred_at": "2026-10-15T11:44Z",
+  "change_type": "Feature",
+  "summary": "RMM inventory automatically populates asset network interfaces while preserving documented links and IPAM assignments",
+  "content_hash": "c1b4449836ae40780d58baa19e631f26999725f8b97f77dc39c9dec0dc049985"
+}
