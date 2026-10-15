@@ -331,7 +331,7 @@ async def test_blocking_moves_updates_out_of_missing_and_stops_installs(updates_
     assert await updates.block_updates(agent, [CU], scope="device", reason="", user_id=9, is_super_admin=False) == 0
     # Without a KB number the block names the update itself.
     assert await updates.block_updates(agent, [EDGE], scope="company", reason="", user_id=9, is_super_admin=False) == 1
-    assert await updates.block_kb(1, " kb5030000 ", scope="global", reason="Bad", user_id=9, is_super_admin=True)
+    assert await updates.block_kb(1, " kb 5030000 ", scope="global", reason="Bad", user_id=9, is_super_admin=True)
     rules = {(updates.block_scope(rule), rule["kb"], rule["update_id"]) for rule in await repo.list_device_blocks(1, 10)}
     assert rules == {("device", "KB5031356", None), ("company", None, EDGE), ("global", "KB5030000", None)}
     assert await repo.list_device_blocks(1, 11) == [r for r in await repo.list_device_blocks(1, 11) if r["asset_id"] is None]
@@ -420,6 +420,7 @@ async def test_block_and_unblock_routes_check_scope_and_audit(updates_db, monkey
     assert response.headers["location"] == "/rmm/patching#blocked-updates" and len(audits) == 2
     await routes.block_kb(_form_request("/blocks", [("kb", "KB5030000"), ("scope", "company")]))
     await routes.block_kb(_form_request("/blocks", [("kb", "not a kb"), ("scope", "company")]))
+    await routes.block_kb(_form_request("/blocks", [("kb", " " * 50_000 + "KB"), ("scope", "company")]))
     assert len(audits) == 2  # duplicate and invalid
     user["is_super_admin"] = True
     await routes.block_kb(_form_request("/blocks", [("kb", "KB5040000"), ("scope", "global")]))

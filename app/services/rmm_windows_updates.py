@@ -43,7 +43,7 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_patching as patch_repo
 from app.repositories import rmm_windows_updates as repo
 from app.security.encryption import encrypt_secret
-from app.services import rmm_scripts
+from app.services import rmm_patching, rmm_scripts
 from app.services.rmm_inventory import format_bytes
 from app.services.rmm_scripts import RunRequestError
 
@@ -71,7 +71,7 @@ MAX_HOTFIXES = 1000
 
 UPDATE_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _KB = re.compile(r"\bKB(\d{5,9})\b", re.IGNORECASE)
-_KB_INPUT = re.compile(r"^\s*(?:KB)?\s*(\d{5,9})\s*$", re.IGNORECASE)
+_KB_INPUT = re.compile(r"(?:KB)?(\d{5,9})", re.IGNORECASE)
 _HRESULT = re.compile(r"^0x[0-9A-F]{8}$")
 
 OPERATIONS = {1: "install", 2: "uninstall"}
@@ -117,14 +117,10 @@ def is_windows(agent: Mapping[str, Any] | None) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def functions_script() -> str:
-    """The scan functions, shared by the scan job and patch jobs."""
-
-    return (_BUILTIN / "windows_updates.ps1").read_text(encoding="utf-8")
-
-
 def scan_script_content() -> str:
-    return (functions_script() + "\n$ErrorActionPreference = 'Stop'\nSend-MyPortalWindowsUpdateState\n"
+    # Patch jobs include the same functions (app.services.rmm_patching.script_content).
+    return ((_BUILTIN / "windows_updates.ps1").read_text(encoding="utf-8")
+            + "\n$ErrorActionPreference = 'Stop'\nSend-MyPortalWindowsUpdateState\n"
             "if ($script:MyPortalUpdateScanErrors) { exit 1 }\n")
 
 
@@ -442,8 +438,6 @@ async def queue_install(agent: Mapping[str, Any], update_ids: list[Any], *, rebo
         raise RunRequestError({"updates": "Blocked updates cannot be installed. Unblock them first."})
     if await patch_repo.has_active_run(agent_id):
         raise RunRequestError({"updates": "A patch job is already waiting or running on this device."})
-    from app.services import rmm_patching
-
     config = {"manual_windows": {"update_ids": wanted}, "windows": None, "apps": [], "reboot": reboot,
               "policies": [], "reboot_policy": None}
     content = rmm_patching.script_content()
@@ -465,16 +459,6 @@ async def queue_install(agent: Mapping[str, Any], update_ids: list[Any], *, rebo
     )
     rmm_scripts.notify_agent(agent_id)
     return run_id
-
-
-def install_is_current(agent: Mapping[str, Any], config: Mapping[str, Any]) -> bool:
-    """A chosen-updates job still applies at dispatch on a Windows device; the
-    device skips any update that has since been installed."""
-
-    manual = config.get("manual_windows")
-    return (is_windows(agent) and isinstance(manual, Mapping) and bool(manual.get("update_ids"))
-            and all(_update_id(value) for value in manual["update_ids"])
-            and not config.get("apps") and config.get("windows") is None)
 
 
 async def tick() -> None:
@@ -587,7 +571,9 @@ async def block_kb(company_id: int, kb: Any, *, scope: Any, reason: Any, user_id
     """Block a KB number for a company or every company before any device reports it.
     Returns the new block's ID, or ``None`` when it was already blocked there."""
 
-    match = _KB_INPUT.match(str(kb or ""))
+    # Whitespace is removed first, so the pattern never backtracks over it.
+    compact = "".join(str(kb or "")[:64].split())
+    match = _KB_INPUT.fullmatch(compact)
     if not match:
         raise RunRequestError({"kb": "Enter a KB number, such as KB5031356."})
     if scope not in ("company", "global"):
@@ -732,3 +718,19 @@ async def asset_context(agent: Mapping[str, Any] | None, *, can_run: bool,
         "default_reboot_delay": DEFAULT_REBOOT_DELAY_MINUTES,
         "max_selected": MAX_SELECTED,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Run hooks
+# --------------------------------------------------------------------------- #
+
+
+async def _add_blocks(agent: Mapping[str, Any], row: Mapping[str, Any], job: dict[str, Any]) -> None:
+    """Blocks are read when the device collects a scan or patch job, so a block
+    added after queueing still applies."""
+
+    if row.get("run_source") in CAPTURE_SOURCES:
+        job["env"]["MYPORTAL_WU_BLOCKS"] = json.dumps(await blocks_env(agent))
+
+
+rmm_scripts.register_run_hooks("windows_updates", dispatch=_add_blocks, live_output=strip_live_output, result=capture)

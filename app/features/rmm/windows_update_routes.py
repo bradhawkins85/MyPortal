@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 
+from app.core.logging import log_info
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_windows_updates as updates_repo
 from app.security.flash import flash_redirect
@@ -54,8 +55,9 @@ async def _rescan(agent: dict[str, Any] | None, user_id: int | None) -> None:
         return
     try:
         await rmm_windows_updates.queue_scan(agent, user_id=user_id)
-    except RunRequestError:
-        pass
+    except RunRequestError as exc:
+        # The block itself is saved; the device applies it at its next daily scan instead.
+        log_info("Windows Update rescan not queued", agent_id=agent.get("id"), reason=" ".join(exc.errors.values()))
 
 
 async def asset_windows_updates_context(company_id: int, asset_id: int, *, can_run: bool,

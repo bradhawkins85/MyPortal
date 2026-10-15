@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Iterable, Mapping
+from typing import Any, Awaitable, Callable, Iterable, Mapping
 
 from app.core.logging import log_info, log_warning
 from app.repositories import asset_custom_fields as asset_fields_repo
@@ -68,6 +68,24 @@ SENSITIVE_MASK = "••••••"
 # rmm_script_runs.run_source for a run started from a tray menu item.
 TRAY_RUN_SOURCE = "tray"
 CUSTOM_VALUE_SCOPES = ("asset", "company", "session")
+
+# Built-in jobs adjust their own runs through these hooks, registered by their
+# modules so this one need not import them (they import it): a dispatch hook
+# can add to a job as the device collects it, and output hooks can take
+# reported data out of live and final output. Each is keyed by name.
+DispatchHook = Callable[[Mapping[str, Any], Mapping[str, Any], dict[str, Any]], Awaitable[None]]
+LiveOutputHook = Callable[[Mapping[str, Any], int, str], Awaitable[str]]
+ResultHook = Callable[[Mapping[str, Any], Mapping[str, Any], str], Awaitable[str]]
+_DISPATCH_HOOKS: dict[str, DispatchHook] = {}
+_LIVE_OUTPUT_HOOKS: dict[str, LiveOutputHook] = {}
+_RESULT_HOOKS: dict[str, ResultHook] = {}
+
+
+def register_run_hooks(name: str, *, dispatch: DispatchHook | None = None, live_output: LiveOutputHook | None = None,
+                       result: ResultHook | None = None) -> None:
+    for hooks, hook in ((_DISPATCH_HOOKS, dispatch), (_LIVE_OUTPUT_HOOKS, live_output), (_RESULT_HOOKS, result)):
+        if hook is not None:
+            hooks[name] = hook
 
 _TRUE = {"1", "true", "yes", "on", "y", "$true"}
 _FALSE = {"0", "false", "no", "off", "n", "$false", ""}
@@ -862,10 +880,8 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
                         custom_values=[], error_message="Chocolatey sources are unavailable or disabled for this company.")
                     continue
                 job["env"]["MYPORTAL_PATCH_PLAN"] = json.dumps(config)
-        if row.get("run_source") in ("patch", "update_scan"):
-            # Blocked Windows updates are read at dispatch, so a block added after queueing still applies.
-            from app.services import rmm_windows_updates
-            job["env"]["MYPORTAL_WU_BLOCKS"] = json.dumps(await rmm_windows_updates.blocks_env(agent))
+        for hook in list(_DISPATCH_HOOKS.values()):
+            await hook(agent, row, job)
         if job["files"] and not agent.get("script_files_supported"):
             await rmm_repo.finish_run(
                 int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],
@@ -1027,10 +1043,9 @@ async def apply_custom_values(run: Mapping[str, Any], values: list[dict[str, str
 
 async def record_output(agent: Mapping[str, Any], run_id: int, payload: Mapping[str, Any]) -> bool:
     """Store live output without applying custom values or finishing the run."""
-    from app.services import rmm_windows_updates
-
     stdout, _ = _take_session_markers(readable_output(payload.get("stdout")))
-    stdout = await rmm_windows_updates.strip_live_output(agent, run_id, stdout)
+    for hook in list(_LIVE_OUTPUT_HOOKS.values()):
+        stdout = await hook(agent, run_id, stdout)
     stderr, _ = _take_session_markers(readable_output(payload.get("stderr")))
     return await rmm_repo.update_run_output(
         run_id, int(agent["id"]), stdout=_truncate(stdout), stderr=_truncate(stderr),
@@ -1056,13 +1071,13 @@ async def record_result(agent: Mapping[str, Any], run_id: int, payload: Mapping[
         status = "failed"
     else:
         status = "completed"
-    from app.services import rmm_remote_control, rmm_windows_updates
+    from app.services import rmm_remote_control
 
     values = normalise_custom_values(payload.get("custom_values"))
     # Session values (a remote access ID and password) never stay in the output.
     stdout, session_values = rmm_remote_control.take_session_markers(readable_output(payload.get("stdout")))
-    # Built-in scans report the device's Windows Update status in one output line.
-    stdout = await rmm_windows_updates.capture(agent, {**run, "id": run_id}, stdout)
+    for hook in list(_RESULT_HOOKS.values()):
+        stdout = await hook(agent, {**run, "id": run_id}, stdout)
     session_values.update({item["name"].lower(): item["value"] for item in values if item["scope"] == "session"})
     custom_values = await apply_custom_values(run, [item for item in values if item["scope"] != "session"])
     if session_values:
