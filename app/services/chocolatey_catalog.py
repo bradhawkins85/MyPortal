@@ -28,6 +28,10 @@ PAGE_SIZE = 100
 # The community feed is rate limited; pace full downloads and bound their size.
 PAGE_DELAY = 1.0
 MAX_PAGES = 1000
+PAGE_ATTEMPTS = 4
+RETRY_DELAY = 2.0
+MAX_RETRY_DELAY = 60.0
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
 class CatalogUnavailable(Exception):
@@ -95,6 +99,29 @@ async def query(term: str, *, exact: bool = False) -> list[dict]:
         return [dict(item) for item in result]
 
 
+async def _download_page(client: httpx.AsyncClient, params: dict) -> bytes:
+    """Retry transient failures without advancing to the next catalog page."""
+    for attempt in range(PAGE_ATTEMPTS):
+        delay = min(RETRY_DELAY * 2 ** attempt, MAX_RETRY_DELAY)
+        try:
+            response = await client.get(COMMUNITY + 'Packages()', params=params,
+                                        headers={'Accept': 'application/atom+xml'})
+            response.raise_for_status()
+            return response.content
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in RETRYABLE_STATUS or attempt == PAGE_ATTEMPTS - 1:
+                raise
+            # Respect numeric Retry-After values without allowing an unbounded wait.
+            retry_after = exc.response.headers.get('Retry-After', '')
+            if retry_after.isdigit():
+                delay = min(max(delay, float(retry_after)), MAX_RETRY_DELAY)
+        except httpx.TransportError:
+            if attempt == PAGE_ATTEMPTS - 1:
+                raise
+        await asyncio.sleep(delay)
+    raise AssertionError('Catalog page attempts exhausted')
+
+
 async def refresh() -> dict:
     """Download every stable package and replace the stored app list.
 
@@ -109,10 +136,7 @@ async def refresh() -> dict:
                 await asyncio.sleep(PAGE_DELAY)
             params = {'$filter': STABLE, '$orderby': 'Id', '$top': str(PAGE_SIZE), '$skip': str(skip)}
             try:
-                response = await client.get(COMMUNITY + 'Packages()', params=params,
-                                            headers={'Accept': 'application/atom+xml'})
-                response.raise_for_status()
-                count, rows = _parse(response.content)
+                count, rows = _parse(await _download_page(client, params))
             except httpx.HTTPStatusError as exc:
                 raise CatalogUnavailable(f'Chocolatey catalog download failed with HTTP {exc.response.status_code}; '
                                          'the stored app list was kept.') from None
