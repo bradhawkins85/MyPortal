@@ -214,6 +214,18 @@ async def _bulk_email_domains(company_ids: Sequence[int]) -> dict[int, list[str]
     return grouped
 
 
+async def list_company_labels_by_ids(company_ids: Iterable[int]) -> List[dict[str, Any]]:
+    """Fetch ticket company labels in one query, including archived companies."""
+    identifiers = sorted(set(company_ids))
+    if not identifiers:
+        return []
+    placeholders = ", ".join(["%s"] * len(identifiers))
+    return list(await db.fetch_all(
+        "SELECT id, name FROM companies WHERE id IN (" + placeholders + ")",  # nosec B608
+        tuple(identifiers),
+    ))
+
+
 async def list_companies(include_archived: bool = False) -> List[dict[str, Any]]:
     if include_archived:
         rows = await db.fetch_all("SELECT * FROM companies ORDER BY name")

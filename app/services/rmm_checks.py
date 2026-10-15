@@ -923,7 +923,8 @@ async def ingest_report(agent: Mapping[str, Any], report: Mapping[str, Any]) -> 
         outcome = evaluate(check, report)
         if outcome is None:
             continue
-        state = await record_result(check, agent, outcome[0], outcome[1], now=now, state=states.get(int(check["id"])))
+        state = await record_result(check, agent, outcome[0], outcome[1], now=now,
+                                    state=states.get(int(check["id"])) or _blank_state())
         results["checked"] += 1
         results["failing"] += 1 if state["status"] == "failing" else 0
     kinds = {check["check_type"] for check in checks} & set(STATS_TYPES)
@@ -960,11 +961,14 @@ async def evaluate_offline(now: datetime | None = None) -> int:
     recorded = 0
     agents = await repo.list_active_agents()
     selected = await targeted_checks_for_agents(checks, agents)
+    states_by_agent = await repo.list_states_for_agents(
+        agent_id for agent_id, applicable in selected.items() if applicable
+    )
     for agent in agents:
         applicable = selected[int(agent["id"])]
         if not applicable:
             continue
-        states = await repo.list_states_for_agent(int(agent["id"]))
+        states = states_by_agent[int(agent["id"])]
         last_seen = agent.get("last_seen_utc")
         for check in applicable:
             if last_seen is None:
@@ -973,7 +977,8 @@ async def evaluate_offline(now: datetime | None = None) -> int:
                 away = now - last_seen
                 problem = away >= timedelta(minutes=int(check.get("duration_minutes") or 30))
                 result = f"Last checked in {_ago(away)} ago" if away >= timedelta(minutes=1) else "Checked in just now"
-            await record_result(check, agent, problem, result, now=now, state=states.get(int(check["id"])),
+            await record_result(check, agent, problem, result, now=now,
+                                state=states.get(int(check["id"])) or _blank_state(),
                                 duration_minutes=0)
             recorded += 1
     return recorded
@@ -1016,11 +1021,14 @@ async def run_due_script_checks(now: datetime | None = None) -> int:
     queued = 0
     agents = await repo.list_active_agents()
     selected = await targeted_checks_for_agents(checks, agents)
+    states_by_agent = await repo.list_states_for_agents(
+        agent_id for agent_id, applicable in selected.items() if applicable
+    )
     for agent in agents:
         applicable = selected[int(agent["id"])]
         if not applicable:
             continue
-        states = await repo.list_states_for_agent(int(agent["id"]))
+        states = states_by_agent[int(agent["id"])]
         full_agent = None
         for check in applicable:
             state = {**_blank_state(), **(states.get(int(check["id"])) or {})}

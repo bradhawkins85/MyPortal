@@ -1,0 +1,7 @@
+{
+  "guid": "051b8ef9-2ad1-49a8-bee6-8ca5927565fd",
+  "occurred_at": "2026-10-15T01:21+00:00",
+  "change_type": "Fix",
+  "summary": "Speed up the admin ticket list by batching expense totals and requester, technician, and company label lookups.",
+  "content_hash": "7317a55f28916e0e3189d179b1fdd8d95da3008022b5bb04496ab4a07d248642"
+}

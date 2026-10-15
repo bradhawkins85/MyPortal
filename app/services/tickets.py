@@ -2503,10 +2503,7 @@ async def load_dashboard_state(
             continue
     staff_lookup: dict[int, dict[str, Any]] = {}
     if requester_staff_ids:
-        staff_results = await asyncio.gather(
-            *(staff_repo.get_staff_by_id(staff_id) for staff_id in requester_staff_ids),
-            return_exceptions=True,
-        )
+        staff_results = await staff_repo.list_staff_labels_by_ids(requester_staff_ids)
         for record in staff_results:
             if not isinstance(record, Mapping) or record.get("id") is None:
                 continue
@@ -2561,9 +2558,7 @@ async def load_dashboard_state(
             except (TypeError, ValueError):
                 continue
         if company_ids:
-            company_results = await asyncio.gather(
-                *(company_repo.get_company_by_id(company_id) for company_id in company_ids)
-            )
+            company_results = await company_repo.list_company_labels_by_ids(company_ids)
             for record in company_results:
                 if not record:
                     continue
@@ -2594,9 +2589,7 @@ async def load_dashboard_state(
                 except (TypeError, ValueError):
                     continue
         if user_ids:
-            user_results = await asyncio.gather(
-                *(user_repo.get_user_by_id(user_id) for user_id in user_ids)
-            )
+            user_results = await user_repo.list_user_labels_by_ids(user_ids)
             for record in user_results:
                 if not record:
                     continue
