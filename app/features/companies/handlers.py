@@ -3093,4 +3093,4 @@ async def admin_company_chocolatey_sources(company_id: int, request: Request):
     await audit.record(action="rmm.chocolatey.sources", request=request, user_id=user.get("id"),
                        entity_type="company", entity_id=company_id, metadata={"enabled_sources": keys})
     from app.security.flash import flash_redirect
-    return flash_redirect(f"/admin/companies/{company_id}/chocolatey-sources", "Chocolatey sources saved.", "success")
+    return flash_redirect(f"/admin/companies/{company_id}/edit#ce-chocolatey-sources", "Chocolatey sources saved.", "success")
