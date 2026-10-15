@@ -3671,6 +3671,32 @@ async def _check_audit_bypass_disabled_mailboxes(
                    f"{len(bypassed)} mailbox(es) bypass auditing: " + ", ".join(bypassed[:5]))
 
 
+async def _check_auto_expanding_archive_enabled(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_auto_expanding_archive_enabled"
+    check_name = "Auto-expanding archive mailboxes are enabled tenant-wide"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-OrganizationConfig: {exc}")
+    value = _exo_first_value(data).get("AutoExpandingArchiveEnabled")
+    if isinstance(value, dict):
+        value = value.get("value")
+    if isinstance(value, str):
+        value = {"true": True, "false": False}.get(value.strip().lower())
+    if value is True:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "AutoExpandingArchiveEnabled is True at the organization level.")
+    if value is False:
+        return _result(check_id, check_name, STATUS_FAIL,
+                       "Auto-expanding archiving is disabled at the organization level. "
+                       "Enable it tenant-wide with Set-OrganizationConfig -AutoExpandingArchive.")
+    return _result(check_id, check_name, STATUS_UNKNOWN,
+                   "Unable to determine the organization-level AutoExpandingArchiveEnabled state.")
+
+
 async def _check_audit_disabled_org_false(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -5365,6 +5391,31 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_get_params": {"ResultSize": "Unlimited"},
         "remediation_cmdlet": "Set-MailboxAuditBypassAssociation",
         "remediation_params": {"AuditBypassEnabled": False},
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_auto_expanding_archive_enabled",
+        "name": "Auto-expanding archive mailboxes are enabled tenant-wide",
+        "description": (
+            "Enable auto-expanding archiving at the organization level so eligible "
+            "archive mailboxes can grow automatically as they approach capacity. "
+            "Mailboxes still require an enabled archive and Exchange Online Plan 2 "
+            "or Exchange Online Plan 1 with Exchange Online Archiving licensing."
+        ),
+        "remediation": (
+            "Connect to Exchange Online PowerShell and run "
+            "Set-OrganizationConfig -AutoExpandingArchive. "
+            "This tenant-wide change cannot be disabled after it is enabled. "
+            "It applies to existing and future eligible archive mailboxes; "
+            "it does not enable archive mailboxes or assign licenses. "
+            "Verify with Get-OrganizationConfig | Select-Object AutoExpandingArchiveEnabled."
+        ),
+        "source": _check_auto_expanding_archive_enabled,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-OrganizationConfig",
+        "remediation_params": {"AutoExpandingArchive": True},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
