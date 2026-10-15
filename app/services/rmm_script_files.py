@@ -153,6 +153,7 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
     allowed = await available_files(settings, script, {int(agent["company_id"])})
     prepared: list[dict[str, Any]] = []
     metadata_by_sha: dict[str, dict[str, Any]] = {}
+    commit: str | None = None
     for item in associations:
         destination = item["destination"]
         windows = str(agent.get("os") or "").lower() == "windows"
@@ -165,7 +166,9 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
         if source.size > MAX_FILE_BYTES:
             raise ScriptFileError(f"{source.path} is larger than 50 MB.")
         if source.sha not in metadata_by_sha:
-            raw = await gitea.fetch_blob(settings, source.sha, max_bytes=MAX_FILE_BYTES)
+            if commit is None:
+                commit = await gitea.resolve_commit(settings)
+            raw = await gitea.fetch_blob(settings, source.sha, max_bytes=MAX_FILE_BYTES, path=source.path, ref=commit)
             metadata_by_sha[source.sha] = {
                 "size": len(raw), "md5": hashlib.md5(raw, usedforsecurity=False).hexdigest(),
                 "sha256": hashlib.sha256(raw).hexdigest(),
@@ -173,6 +176,7 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
         prepared.append({
             **item, "source_path": source.path, "blob_sha": source.sha, **metadata_by_sha[source.sha],
             "repository": f"{settings.owner}/{settings.repo}", "base_url": settings.base_url,
+            "commit_sha": commit,
         })
     return prepared
 
@@ -190,7 +194,8 @@ async def download_file(agent: Mapping[str, Any], run_id: int, index: int) -> tu
     settings = await gitea.load_settings()
     if settings.base_url != item["base_url"] or f"{settings.owner}/{settings.repo}" != item["repository"]:
         raise ScriptFileError("The Gitea repository configuration has changed. Queue a new run.")
-    raw = await gitea.fetch_blob(settings, item["blob_sha"], max_bytes=MAX_FILE_BYTES)
+    raw = await gitea.fetch_blob(settings, item["blob_sha"], max_bytes=MAX_FILE_BYTES,
+                                 path=item["source_path"], ref=item.get("commit_sha"))
     if len(raw) != item["size"] or hashlib.md5(raw, usedforsecurity=False).hexdigest() != item["md5"] or hashlib.sha256(raw).hexdigest() != item["sha256"]:
         raise ScriptFileError("The Gitea file failed download verification.")
     return raw, item["source_path"].rsplit("/", 1)[-1]
