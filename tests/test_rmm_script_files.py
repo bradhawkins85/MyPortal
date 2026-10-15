@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 
 import httpx
 import pytest
@@ -185,9 +186,13 @@ async def test_common_script_uses_the_run_company_file(monkeypatch):
     async def catalog(_settings, _script, company_ids=None):
         return {"Files/Companies/{company}/setup.exe": blob} if company_ids == {1} else {}
 
-    async def fetch_blob(_settings, _sha, *, max_bytes):
+    async def fetch_blob(_settings, _sha, **kwargs):
         return raw
 
+    async def resolve_commit(_settings):
+        return "d" * 40
+
+    monkeypatch.setattr(gitea, "resolve_commit", resolve_commit)
     monkeypatch.setattr(gitea, "load_settings", load_settings)
     monkeypatch.setattr(gitea, "fetch_blob", fetch_blob)
     monkeypatch.setattr(rmm_script_files, "available_files", catalog)
@@ -195,6 +200,59 @@ async def test_common_script_uses_the_run_company_file(monkeypatch):
     agent = {"company_id": 1, "os": "windows", "script_files_supported": True}
     prepared = await rmm_script_files.prepare_files(script, agent)
     assert prepared[0]["source_path"] == "Files/Companies/Contoso/setup.exe"
+    assert prepared[0]["commit_sha"] == "d" * 40
     assert prepared[0]["sha256"] == hashlib.sha256(raw).hexdigest()
     with pytest.raises(rmm_script_files.ScriptFileError, match="missing for this company"):
         await rmm_script_files.prepare_files(script, {**agent, "company_id": 2})
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("raw", [b"MZ\x00\xff\x80installer\r\n", b""])
+async def test_gitea_omitted_blob_content_downloads_raw_at_pinned_commit(monkeypatch, raw):
+    sha = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw, usedforsecurity=False).hexdigest()
+    commit = "d" * 40
+    settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
+    seen = []
+    response_raw = raw
+
+    def handler(request):
+        seen.append(request)
+        if "/branches/" in request.url.path:
+            return httpx.Response(200, json={"commit": {"id": commit}})
+        if "/git/blobs/" in request.url.path:
+            return httpx.Response(200, json={"sha": sha, "size": len(raw), "encoding": None, "content": None})
+        assert request.url.path == "/api/v1/repos/msp/scripts/raw/Files/Common/setup file.exe"
+        assert request.url.params["ref"] == commit
+        assert request.headers["Authorization"] == "token token"
+        return httpx.Response(200, content=response_raw)
+
+    monkeypatch.setattr(gitea, "_client", lambda settings: httpx.AsyncClient(transport=httpx.MockTransport(handler), headers=gitea._headers(settings)))
+    assert await gitea.resolve_commit(settings) == commit
+    kwargs = {"max_bytes": 100, "path": "Files/Common/setup file.exe", "ref": commit}
+    assert await gitea.fetch_blob(settings, sha, **kwargs) == raw
+    response_raw = b"changed on branch"
+    with pytest.raises(gitea.GiteaError, match="version"):
+        await gitea.fetch_blob(settings, sha, **kwargs)
+    response_raw = b"x" * 101
+    with pytest.raises(gitea.GiteaError, match="size limit"):
+        await gitea.fetch_blob(settings, sha, **kwargs)
+    count = len(seen)
+    with pytest.raises(gitea.GiteaError, match="Queue a new run"):
+        await gitea.fetch_blob(settings, sha, max_bytes=100)
+    assert len(seen) == count + 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("payload", [[], None, {"encoding": "base64", "content": None}, {"encoding": "base64", "content": "!!!"}])
+async def test_gitea_malformed_blob_is_rejected_without_raw_fallback(monkeypatch, payload):
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, content=json.dumps(payload))
+
+    monkeypatch.setattr(gitea, "_client", lambda settings: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    settings = gitea.GiteaSettings("https://git", "https://git", "", "msp", "scripts", "main", "", True)
+    with pytest.raises(gitea.GiteaError, match="unreadable"):
+        await gitea.fetch_blob(settings, "a" * 40, max_bytes=100, path="Files/Common/a", ref="d" * 40)
+    assert len(seen) == 1

@@ -843,8 +843,15 @@ async def test_associated_files_survive_sync_and_are_pinned_to_the_assigned_run(
     binary = b"MZ\x00\xffinstaller"
     downloaded_versions = []
 
+    async def resolve_commit(_settings):
+        return "d" * 40
+
+    monkeypatch.setattr(gitea, "resolve_commit", resolve_commit)
+
     async def fetch_blob(_settings, sha, **kwargs):
         downloaded_versions.append(sha)
+        assert kwargs["ref"] == "d" * 40
+        assert kwargs["path"] == source
         return binary
 
     monkeypatch.setattr(gitea, "fetch_blob", fetch_blob)
