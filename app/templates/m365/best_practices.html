@@ -379,28 +379,25 @@
       </div>
     </header>
     <div class="panel__body">
-      <div style="display:flex;flex-wrap:wrap;gap:1rem;align-items:baseline;margin-bottom:0.75rem">
-        <div>
-          <span class="text-muted" style="font-size:0.85rem">Current</span><br />
-          <strong style="font-size:1.5rem">{{ ss.current | round(1) }}</strong>
+      <div class="stat-strip" role="group" aria-label="Secure Score statistics">
+        <div class="stat-strip__stat stat-strip__stat--total">
+          <span class="stat-strip__stat-label">Current</span>
+          <span class="stat-strip__stat-value">{{ ss.current | round(1) }}</span>
         </div>
-        <div>
-          <span class="text-muted" style="font-size:0.85rem">Max for this license</span><br />
-          <strong style="font-size:1.5rem">{{ ss.maximum | round(1) }}</strong>
+        <div class="stat-strip__stat stat-strip__stat--neutral">
+          <span class="stat-strip__stat-label">Max for this license</span>
+          <span class="stat-strip__stat-value">{{ ss.maximum | round(1) }}</span>
         </div>
-        <div>
-          <span class="text-muted" style="font-size:0.85rem">Score</span><br />
-          <strong style="font-size:1.5rem">{{ ss.percentage | round(1) }}%</strong>
+        <div class="stat-strip__stat stat-strip__stat--{{ 'success' if ss.at_maximum else 'total' }}">
+          <span class="stat-strip__stat-label">Score</span>
+          <span class="stat-strip__stat-value">{{ ss.percentage | round(1) }}%</span>
         </div>
         {% if not ss.at_maximum %}
-        <div>
-          <span class="text-muted" style="font-size:0.85rem">Gap to close</span><br />
-          <strong style="font-size:1.5rem">{{ ss.gap | round(1) }} pts</strong>
+        <div class="stat-strip__stat stat-strip__stat--warning">
+          <span class="stat-strip__stat-label">Gap to close</span>
+          <span class="stat-strip__stat-value">{{ ss.gap | round(1) }} pts</span>
         </div>
         {% endif %}
-      </div>
-      <div style="height:0.6rem;background:rgba(0,0,0,0.08);border-radius:999px;overflow:hidden;margin-bottom:1rem">
-        <div style="height:100%;width:{{ ss.percentage if ss.percentage is not none else 0 }}%;background:var(--color-success,#16a34a)"></div>
       </div>
 
       {% if ss.at_maximum %}
