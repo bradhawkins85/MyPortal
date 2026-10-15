@@ -180,9 +180,16 @@ func (c *Checker) downloadAndInstall(ctx context.Context, resp *api.VersionRespo
 		return err
 	}
 
-	cmd := installerCommand(tmpPath, c.client.BaseURL(), c.autoUpdate, installerLogPath())
+	logPath := installerLogPath()
+	cmd := installerCommand(tmpPath, c.client.BaseURL(), c.autoUpdate, logPath)
+	installerLog := captureInstallerOutput(cmd, logPath)
 	logger.Info("Launching installer for version %s: %s", resp.Version, strings.Join(cmd.Args, " "))
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	// The installer holds its own handle to the log; this one is not needed.
+	if installerLog != nil {
+		installerLog.Close()
+	}
+	if err != nil {
 		os.Remove(tmpPath)
 		return err
 	}
@@ -224,14 +231,33 @@ func installerCommand(path, portalURL string, autoUpdate bool, logPath string) *
 		args = append(args, "AUTO_UPDATE="+strconv.FormatBool(autoUpdate))
 		cmd = exec.Command(msiexec, args...)
 	default:
-		cmd = exec.Command("/usr/sbin/installer", "-pkg", path, "-target", "/")
+		// -dumplog adds the detailed install log, including the package
+		// scripts' output, to the captured output.
+		cmd = exec.Command("/usr/sbin/installer", "-pkg", path, "-target", "/", "-verbose", "-dumplog")
 	}
 	detach(cmd)
 	return cmd
 }
 
-// installerLogPath returns where the Windows installer writes its log: next
-// to the service log, which only administrators can write to.
+// captureInstallerOutput sends the macOS installer's output to logPath, as
+// msiexec writes its own log on Windows, so a failed update can be diagnosed.
+// The caller closes the returned file once the installer has started.
+func captureInstallerOutput(cmd *exec.Cmd, logPath string) *os.File {
+	if runtime.GOOS == "windows" || logPath == "" {
+		return nil
+	}
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0640)
+	if err != nil {
+		logger.Warn("Auto-update: cannot open installer log %s: %v", logPath, err)
+		return nil
+	}
+	cmd.Stdout = f
+	cmd.Stderr = f
+	return f
+}
+
+// installerLogPath returns where the installer's log is written: next to the
+// service log, which only administrators can write to.
 func installerLogPath() string {
 	if p := logger.Path(); p != "" {
 		return filepath.Join(filepath.Dir(p), "update-installer.log")

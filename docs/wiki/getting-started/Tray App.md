@@ -487,8 +487,19 @@ On Windows the upgrade keeps the device's settings. The updater passes the
 portal URL and auto-update setting to the MSI, and MSIs from this release on
 read the saved portal URL, enrolment token and auto-update setting before the
 old version is removed. If an older installer has blanked the portal URL, the
-service falls back to the address saved when the device enrolled. The
-installer log is written to `update-installer.log` next to the service log.
+service falls back to the address saved when the device enrolled.
+
+On macOS the settings in `/Library/Preferences/io.myportal.tray.env` are not
+part of the package, so the upgrade leaves them in place.
+
+On both platforms the installer log is written to `update-installer.log` next
+to the service log (`/Library/Logs/MyPortal/tray` on macOS) and replaced by
+each update. On macOS it holds the `installer` output, including the package
+scripts' output.
+
+Publish each platform's installer under its own platform. A version published
+for **All** is offered to Windows and macOS devices alike, and neither can
+install the other's installer.
 
 ### Diagnostics upload (`POST /api/tray/{device_uid}/diagnostics`)
 

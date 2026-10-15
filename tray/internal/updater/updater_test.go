@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -77,11 +78,56 @@ func TestInstallerCommandPassesSettings(t *testing.T) {
 		if strings.Contains(args, "ENROL_TOKEN") {
 			t.Errorf("installer args %q must not carry the enrolment token", args)
 		}
-	} else if cmd.Path != "/usr/sbin/installer" {
-		t.Errorf("installer path = %q", cmd.Path)
+	} else {
+		if cmd.Path != "/usr/sbin/installer" {
+			t.Errorf("installer path = %q", cmd.Path)
+		}
+		if want := "-pkg /tmp/x.msi -target / -verbose -dumplog"; !strings.Contains(args, want) {
+			t.Errorf("installer args %q missing %q", args, want)
+		}
 	}
 	if cmd.SysProcAttr == nil {
 		t.Error("installer is not detached from the service")
+	}
+}
+
+func TestCaptureInstallerOutputWritesLog(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		if f := captureInstallerOutput(exec.Command("cmd"), filepath.Join(t.TempDir(), "u.log")); f != nil {
+			t.Fatal("msiexec writes its own log; output must not be captured on Windows")
+		}
+		return
+	}
+	logPath := filepath.Join(t.TempDir(), "update-installer.log")
+	if err := os.WriteFile(logPath, []byte("previous update\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", "-c", "echo out; echo err >&2")
+	f := captureInstallerOutput(cmd, logPath)
+	if f == nil {
+		t.Fatal("installer output is not captured")
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// The updater closes its handle after starting, before the installer ends.
+	f.Close()
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "out\nerr\n" {
+		t.Fatalf("installer log = %q, want only this update's output", got)
+	}
+}
+
+func TestCaptureInstallerOutputWithoutLogPath(t *testing.T) {
+	cmd := exec.Command("installer")
+	if f := captureInstallerOutput(cmd, ""); f != nil || cmd.Stdout != nil {
+		t.Fatal("output captured without a log path")
 	}
 }
 
