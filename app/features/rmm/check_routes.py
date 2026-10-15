@@ -121,6 +121,7 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
         "target_rules": check.get("target_rules"),
         "check_type": kind, "duration_minutes": check.get("duration_minutes") or 0,
         "check_script_id": check.get("check_script_id"), "action": check.get("action") or "none",
+        "auto_close_when_resolved": bool(check.get("auto_close_when_resolved")),
         "script_id": check.get("script_id"), "timeout_seconds": check.get("timeout_seconds") or 600,
         "cooldown_minutes": check.get("cooldown_minutes") if check.get("cooldown_minutes") is not None
         else rmm_checks.DEFAULT_COOLDOWN_MINUTES,
@@ -190,6 +191,7 @@ def _posted(form: Any, check_id: int | None) -> dict[str, Any]:
         "run_time": str(form.get("run_time") or ""),
         "schedule_timezone": str(form.get("schedule_timezone") or ""),
         "is_enabled": bool(form.get("is_enabled")),
+        "auto_close_when_resolved": str(form.get("auto_close_when_resolved") or "").lower() in {"1", "on", "true", "yes"},
     }
 
 
@@ -394,6 +396,7 @@ async def _save(request: Request, check_id: int | None):
             "settings": saved["settings"], "action": saved["action"], "company_id": saved.get("company_id"),
             "asset_id": saved.get("asset_id"), "script_id": saved.get("script_id"),
             "check_script_id": saved.get("check_script_id"), "enabled": saved["is_enabled"],
+            "auto_close_when_resolved": saved["auto_close_when_resolved"],
         },
     )
     message = f"Saved {saved['name']}."

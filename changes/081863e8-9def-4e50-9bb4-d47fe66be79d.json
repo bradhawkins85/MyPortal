@@ -1,0 +1,7 @@
+{
+  "guid": "081863e8-9def-4e50-9bb4-d47fe66be79d",
+  "occurred_at": "2026-10-15T11:36Z",
+  "change_type": "Feature",
+  "summary": "RMM Checks: optionally auto-close tickets on recovery, using Resolved when available and Closed otherwise",
+  "content_hash": "434b0aaf2fe5b20d3d1e7fd3aec828bd3b2976c82d66e7eac74bed3701d5feaf"
+}

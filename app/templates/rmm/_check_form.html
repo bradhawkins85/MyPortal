@@ -457,7 +457,14 @@
         <p class="rmm-note" data-rmm-script-pending="action" {% if e.action in script_actions and script %}hidden{% endif %}>Once you save, the script's parameters appear here to fill in.</p>
       </div>
 
-      <p class="rmm-note rmm-reveal" data-rmm-show="action:create_ticket">A device gets one open ticket for this check at a time. The ticket gets an update when the check passes again.</p>
+      <div class="rmm-reveal" data-rmm-show="action:create_ticket">
+        <p class="rmm-note">A device gets one open ticket for this check at a time. The ticket gets an update when the check passes again.</p>
+        <label class="toggle" for="rmm-check-auto-close">
+          <input type="checkbox" id="rmm-check-auto-close" name="auto_close_when_resolved" value="1" {% if e.auto_close_when_resolved %}checked{% endif %} aria-describedby="rmm-check-auto-close-help">
+          <span>Auto-close when resolved</span>
+        </label>
+        <p class="form-help" id="rmm-check-auto-close-help">When the check passes again, move its ticket to Resolved if that status exists, otherwise Closed.</p>
+      </div>
     </section>
 
     <footer class="rmm-check-form__footer">

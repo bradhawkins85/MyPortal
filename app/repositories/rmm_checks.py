@@ -12,7 +12,7 @@ _SELECT = (
     "SELECT c.id, c.name, c.company_id, c.asset_id, c.check_type, c.target, c.settings_json, c.duration_minutes, "
     "c.check_script_id, c.check_entries_encrypted, c.check_inputs_json, c.action, c.script_id, c.entries_encrypted, "
     "c.inputs_json, c.timeout_seconds, c.cooldown_minutes, c.schedule_mode, c.delay_minutes, c.run_time, "
-    "c.schedule_timezone, c.is_enabled, c.target_rules_json, c.last_failed_at, c.last_summary, "
+    "c.schedule_timezone, c.is_enabled, c.auto_close_when_resolved, c.target_rules_json, c.last_failed_at, c.last_summary, "
     "c.created_by_user_id, c.updated_by_user_id, c.created_at, c.updated_at, "
     "s.name AS script_name, cs.name AS check_script_name, a.name AS asset_name, co.name AS company_name "
     "FROM rmm_checks c "
@@ -68,6 +68,7 @@ def _check_row(row: dict[str, Any] | None, *, with_secrets: bool = False) -> dic
     # Corrupt stored rules must never silently become unrestricted targeting.
     check["target_rules"] = None if raw_rules is None else (_decode_json(raw_rules, {}) or {})
     check["is_enabled"] = bool(check.get("is_enabled"))
+    check["auto_close_when_resolved"] = bool(check.get("auto_close_when_resolved"))
     check["target"] = str(check.get("target") or "")
     if not with_secrets:
         check.pop("entries_encrypted", None)
@@ -140,6 +141,7 @@ def _values(values: dict[str, Any]) -> tuple:
         values["entries_encrypted"], json.dumps(values["inputs"]), values["timeout_seconds"],
         values["cooldown_minutes"], values.get("schedule_mode"), values.get("delay_minutes"), values.get("run_time"),
         values.get("schedule_timezone"), 1 if values["is_enabled"] else 0,
+        1 if values.get("auto_close_when_resolved") else 0,
         json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None, values["user_id"],
     )
 
@@ -150,8 +152,8 @@ async def create_check(values: dict[str, Any]) -> int:
         "INSERT INTO rmm_checks (name, company_id, asset_id, check_type, target, settings_json, duration_minutes, "
         "check_script_id, check_entries_encrypted, check_inputs_json, action, script_id, entries_encrypted, "
         "inputs_json, timeout_seconds, cooldown_minutes, schedule_mode, delay_minutes, run_time, schedule_timezone, "
-        "is_enabled, target_rules_json, created_by_user_id, updated_by_user_id, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, "
-        "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "is_enabled, auto_close_when_resolved, target_rules_json, created_by_user_id, updated_by_user_id, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, "
+        "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (*_values(values), values["user_id"], now, now),
     )
 
@@ -162,7 +164,7 @@ async def update_check(check_id: int, values: dict[str, Any]) -> None:
         "settings_json = %s, duration_minutes = %s, check_script_id = %s, check_entries_encrypted = %s, "
         "check_inputs_json = %s, action = %s, script_id = %s, entries_encrypted = %s, inputs_json = %s, "
         "timeout_seconds = %s, cooldown_minutes = %s, schedule_mode = %s, delay_minutes = %s, run_time = %s, "
-        "schedule_timezone = %s, is_enabled = %s, target_rules_json = %s, updated_by_user_id = %s, updated_at = %s WHERE id = %s",
+        "schedule_timezone = %s, is_enabled = %s, auto_close_when_resolved = %s, target_rules_json = %s, updated_by_user_id = %s, updated_at = %s WHERE id = %s",
         (*_values(values), _utcnow(), check_id),
     )
     # A changed check starts again on every device.

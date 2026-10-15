@@ -27,8 +27,8 @@ as an event log rule (:mod:`app.services.rmm_actions`): run a script on the
 device (again each ``cooldown_minutes`` while it keeps failing, or once when
 the cooldown is 0), schedule a script for later (dropped if the check passes
 before it runs; :func:`run_due_scheduled_checks`) or raise a ticket for the
-device. While that ticket is open later failures and the recovery are added to
-it as internal updates.
+device. Checks can optionally resolve that ticket on recovery. While that ticket
+is open, later failures and the recovery are added to it as internal updates.
 
 While a device has disk, ping, CPU, memory or network checks, the values it
 reports are kept in the separate stats database (:mod:`app.core.stats_database`)
@@ -548,6 +548,8 @@ async def save_check(
         "check_entries_encrypted": encrypt_secret(json.dumps(check_entries)) if check_entries else None,
         "check_inputs": rmm_scripts.stored_inputs(check_script, check_entries) if check_script else [],
         "action": action,
+        "auto_close_when_resolved": action == "create_ticket" and str(
+            form.get("auto_close_when_resolved") or "").lower() in {"1", "on", "true", "yes"},
         "script_id": int(script["id"]) if script else None,
         "entries_encrypted": encrypt_secret(json.dumps(entries)) if entries else None,
         "inputs": rmm_scripts.stored_inputs(script, entries) if script else [],
@@ -661,6 +663,19 @@ async def _on_recovery(check: Mapping[str, Any], agent: Mapping[str, Any], state
             reference=f"rmm-check:{int(check['id'])}:{int(agent['id'])}",
         )
         summary += f" Noted on ticket {rmm_actions.ticket_label(ticket)}."
+        if check.get("auto_close_when_resolved"):
+            from app.repositories import ticket_statuses as ticket_statuses_repo
+            from app.repositories import tickets as tickets_repo
+            from app.services import tickets as tickets_service
+
+            status = "resolved" if await ticket_statuses_repo.status_exists("resolved") else "closed"
+            if str(ticket.get("status") or "").casefold() != "resolved":
+                await tickets_repo.set_ticket_status(int(ticket["id"]), status, closed_at=_utcnow())
+                await tickets_service.broadcast_ticket_event(action="updated", ticket_id=int(ticket["id"]))
+                await tickets_service.emit_ticket_updated_event(int(ticket["id"]), actor_type="system")
+                summary += f" Automatically moved ticket to {status.title()}."
+            # A later failure should raise a fresh ticket rather than reuse a resolved one.
+            state["ticket_id"] = None
     await repo.set_summary(int(check["id"]), summary)
 
 
