@@ -182,6 +182,7 @@ async def sync_from_gitea() -> SyncSummary:
         summary.warnings.append(str(exc))
     seen: set[str] = set()
     unchanged: list[str] = []
+    downloads: dict[str, tuple[gitea.GiteaFile, str, str, int | None]] = {}
 
     for item in files:
         language = parser.language_for_path(item.path)
@@ -206,31 +207,35 @@ async def sync_from_gitea() -> SyncSummary:
             unchanged.append(item.path)
             summary.unchanged += 1
             continue
-        raw = await gitea.fetch_file(settings, item.path)
-        try:
-            content = raw.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            summary.skipped.append({"path": item.path, "reason": "Not UTF-8 text"})
-            continue
-        parsed = parser.parse_script(content, language)
-        await rmm_repo.upsert_script(
-            path=item.path,
-            name=_display_name(item.path),
-            folder=_folder(relative),
-            language=language,
-            description=parsed.description[:2000],
-            content=content,
-            content_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
-            source_sha=item.sha,
-            parameters=parsed.to_dict()["parameters"],
-            env_vars=parsed.to_dict()["env_vars"],
-            company_id=company_id,
-        )
-        if stored:
-            summary.updated += 1
-        else:
-            summary.added += 1
+        downloads[item.path] = (item, language, relative, company_id)
 
+    async with contextlib.aclosing(gitea.file_batches(settings, downloads)) as batches:
+        async for batch in batches:
+            for path, raw in batch:
+                item, language, relative, company_id = downloads[path]
+                try:
+                    content = raw.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    summary.skipped.append({"path": item.path, "reason": "Not UTF-8 text"})
+                    continue
+                parsed = parser.parse_script(content, language)
+                await rmm_repo.upsert_script(
+                    path=item.path,
+                    name=_display_name(item.path),
+                    folder=_folder(relative),
+                    language=language,
+                    description=parsed.description[:2000],
+                    content=content,
+                    content_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                    source_sha=item.sha,
+                    parameters=parsed.to_dict()["parameters"],
+                    env_vars=parsed.to_dict()["env_vars"],
+                    company_id=company_id,
+                )
+                if path in existing:
+                    summary.updated += 1
+                else:
+                    summary.added += 1
     await rmm_repo.touch_scripts(unchanged)
     removed = [path for path, row in existing.items() if path not in seen and row.get("is_active")]
     await rmm_repo.deactivate_scripts(removed)

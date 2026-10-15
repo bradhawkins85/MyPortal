@@ -8,6 +8,7 @@ finds the folders and the files still needed to create the missing ones.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -134,18 +135,24 @@ async def _read_layout(
         rel.split("/")[1] for rel in relative_paths if rel.startswith(COMPANIES_FOLDER + "/") and rel.count("/") >= 2
     }
 
+    markers: dict[str, str] = {}
     for item in files:
         rel = _relative(item.path, root)
         parts = rel.split("/") if rel else []
-        if len(parts) != 3 or parts[0] != COMPANIES_FOLDER or parts[2] != COMPANY_MARKER:
-            continue
-        try:
-            company_id = int(json.loads((await gitea.fetch_file(settings, item.path)).decode("utf-8"))["company_id"])
-        except (ValueError, KeyError, TypeError, UnicodeDecodeError):
-            log_warning("Ignoring an unreadable company folder marker", path=item.path)
-            continue
-        if company_id in known and parts[1] not in layout.company_folders:
-            layout.company_folders[parts[1]] = company_id
+        if len(parts) == 3 and parts[0] == COMPANIES_FOLDER and parts[2] == COMPANY_MARKER:
+            markers[item.path] = parts[1]
+
+    async with contextlib.aclosing(gitea.file_batches(settings, markers)) as batches:
+        async for batch in batches:
+            for path, raw in batch:
+                try:
+                    company_id = int(json.loads(raw.decode("utf-8"))["company_id"])
+                except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+                    log_warning("Ignoring an unreadable company folder marker", path=path)
+                    continue
+                folder = markers[path]
+                if company_id in known and folder not in layout.company_folders:
+                    layout.company_folders[folder] = company_id
 
     linked = set(layout.company_folders.values())
     by_name = {name.casefold(): name for name in company_dirs if name not in layout.company_folders}

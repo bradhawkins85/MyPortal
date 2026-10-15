@@ -14,9 +14,11 @@ repository (see ``app.services.gitea_sign_in``).
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any
+from itertools import islice
+from typing import Any, AsyncIterator, Iterable
 from urllib.parse import quote
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -29,6 +31,7 @@ from app.services import modules as modules_service
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 _TREE_PAGE_SIZE = 1000
 _MAX_TREE_PAGES = 50
+_DOWNLOAD_CONCURRENCY = 8
 
 
 class GiteaError(RuntimeError):
@@ -139,18 +142,46 @@ async def list_files(settings: GiteaSettings) -> list[GiteaFile]:
     return files
 
 
-async def fetch_file(settings: GiteaSettings, path: str) -> bytes:
+async def fetch_file(settings: GiteaSettings, path: str, *, client: httpx.AsyncClient | None = None) -> bytes:
     """Return the raw content of one file on the configured branch."""
 
     encoded = "/".join(quote(part, safe="") for part in path.split("/"))
     url = _repo_url(settings) + "/raw/" + encoded
     try:
-        async with _client(settings) as client:
+        if client is not None:
             response = await client.get(url, params={"ref": settings.branch})
+        else:
+            async with _client(settings) as owned_client:
+                response = await owned_client.get(url, params={"ref": settings.branch})
     except httpx.HTTPError as exc:
         raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
     _raise_for(response, "downloading " + path)
     return response.content
+
+
+async def file_batches(
+    settings: GiteaSettings, paths: Iterable[str],
+) -> AsyncIterator[list[tuple[str, bytes]]]:
+    """Download bounded batches using one connection pool, in input order.
+
+    Wait for every request in a batch before raising an error so no requests
+    outlive the client. File bodies are retained in bounded batches.
+    """
+    pending = iter(paths)
+    batch = list(islice(pending, _DOWNLOAD_CONCURRENCY))
+    if not batch:
+        return
+    async with _client(settings) as client:
+        while batch:
+            results = await asyncio.gather(
+                *(fetch_file(settings, path, client=client) for path in batch),
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
+            yield list(zip(batch, results))
+            batch = list(islice(pending, _DOWNLOAD_CONCURRENCY))
 
 
 async def fetch_blob(settings: GiteaSettings, sha: str, *, max_bytes: int) -> bytes:

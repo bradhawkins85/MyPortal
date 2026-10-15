@@ -335,7 +335,7 @@ async def _sync(monkeypatch, files: dict[str, str], shas: dict[str, str] | None 
 
     fetched = []
 
-    async def fetch_file(_settings, path):
+    async def fetch_file(_settings, path, **kwargs):
         fetched.append(path)
         return files[path].encode("utf-8")
 
@@ -384,6 +384,24 @@ async def test_sync_adds_updates_skips_and_removes(sqlite_db, monkeypatch):
 
     summary, fetched = await _sync(monkeypatch, {"rmm/Common/disk/Check-Disk.ps1": "x"}, {"rmm/Common/disk/Check-Disk.ps1": "sha-new"})
     assert summary.unchanged == 1 and fetched == []
+
+
+@pytest.mark.anyio
+async def test_sync_multiple_batches_preserves_scope_and_skips_unchanged(sqlite_db, monkeypatch):
+    files = {f"rmm/Common/script-{i}.sh": "echo common\n" for i in range(19)}
+    for company_id, name in ((1, "Renamed"), (2, "Other")):
+        for prefix in ("", "Files/"):
+            files[f"rmm/{prefix}Companies/{name}/.myportal-company"] = json.dumps({"company_id": company_id})
+        files[f"rmm/Companies/{name}/private.sh"] = "echo private\n"
+    summary, fetched = await _sync(monkeypatch, files)
+    assert summary.added == 21 and len(fetched) == 25
+    scripts = {script["path"]: script for script in await rmm_repo.list_scripts()}
+    assert scripts["rmm/Companies/Renamed/private.sh"]["company_id"] == 1
+    assert scripts["rmm/Companies/Other/private.sh"]["company_id"] == 2
+    assert scripts["rmm/Common/script-0.sh"]["company_id"] is None
+    summary, fetched = await _sync(monkeypatch, files)
+    assert (summary.added, summary.updated, summary.unchanged, summary.removed) == (0, 0, 21, 0)
+    assert len(fetched) == 4 and all(path.endswith(".myportal-company") for path in fetched)
 
 
 @pytest.mark.anyio
@@ -729,7 +747,7 @@ async def test_layout_links_markers_and_names_and_lists_missing_folders(monkeypa
     markers = {"rmm/Companies/Renamed/.myportal-company": b'{"company_id": 1}',
                "rmm/Companies/Broken/.myportal-company": b"not json"}
 
-    async def fetch_file(_settings, path):
+    async def fetch_file(_settings, path, **kwargs):
         return markers[path]
 
     monkeypatch.setattr(gitea, "fetch_file", fetch_file)
@@ -766,7 +784,7 @@ async def test_file_folders_preserve_markers_and_are_maintained_idempotently(mon
         prefix + "Files/Companies/Archived/.myportal-company": '{"company_id": 4}',
     }
 
-    async def fetch_file(_settings, path):
+    async def fetch_file(_settings, path, **kwargs):
         return contents[path].encode()
 
     monkeypatch.setattr(gitea, "fetch_file", fetch_file)
