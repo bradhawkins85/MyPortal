@@ -31,6 +31,7 @@ type Details struct {
 	Arch                 string            `json:"arch,omitempty"`
 	AgentVersion         string            `json:"agent_version,omitempty"`
 	Shells               []string          `json:"shells,omitempty"`
+	RunAnywaySupported   bool              `json:"run_anyway_supported"`
 	ScriptFilesSupported bool              `json:"script_files_supported"`
 }
 
@@ -43,6 +44,7 @@ type Enrolment struct {
 
 // Job is one script run to execute.
 type Job struct {
+	RunAnyway      bool                   `json:"run_anyway"`
 	ID             int64                  `json:"id"`
 	Name           string                 `json:"name"`
 	Path           string                 `json:"path"`

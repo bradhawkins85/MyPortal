@@ -33,12 +33,20 @@ the service.
 The agent long-polls `GET /api/rmm/agent/jobs`, runs up to four scripts at a
 time and reports each result to `/api/rmm/agent/runs/{id}/result`.
 Scripts default to sequential execution per device. A super administrator can
-enable **Allow this script to run in parallel** on its Scripts detail page.
-Parallel runs can overlap other parallel runs; a sequential run waits for active
-runs to finish and blocks later runs until it finishes. Queue order is preserved
-for manual and scheduled runs, and onboarding runs always execute sequentially.
+choose **Sequential**, **Parallel**, or **Run Anyway** under **Execution mode** on
+its Scripts detail page. Parallel runs share four ordinary agent slots. Sequential
+runs wait for ordinary active runs and block later ordinary runs. Run Anyway
+bypasses queued scripts, sequential runs, all four occupied slots, and the ordinary
+file-preparation lock. It does not hold up other scripts. Use it for independent
+tasks or urgent actions such as rebooting; it still verifies script checksums and
+associated files and observes the script timeout.
+
+Onboarding runs always execute sequentially, overriding every script mode.
 Execution settings are captured when runs are queued and survive Gitea sync.
-Deploy migration 493 with MyPortal; no agent upgrade is required.
+Deploy MyPortal and migration 495 before updating RMM agents for Run Anyway.
+Agents advertise `run_anyway_supported: true` on enrolment and check-in; Run Anyway
+runs fail with an update message on older agents. Sequential and parallel execution
+continue to work without an agent update.
 While executing, it sends cumulative stdout/stderr snapshots once a second to
 `/api/rmm/agent/runs/{id}/output`. The technician's result view refreshes every
 second, follows new lines when scrolled to the bottom, and preserves the scroll
