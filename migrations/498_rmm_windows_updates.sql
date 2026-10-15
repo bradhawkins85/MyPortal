@@ -2,7 +2,7 @@
 -- compatible-from: *
 -- compatible-to: *
 -- maintenance: false
--- Migration 496: Windows Update status per RMM device.
+-- Migration 498: Windows Update status per RMM device.
 --
 -- rmm_windows_update_scans holds the latest Windows Update scan each RMM agent
 -- reported (one row per agent): when it ran, the update source, a pending

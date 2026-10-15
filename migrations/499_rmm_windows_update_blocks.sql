@@ -2,7 +2,7 @@
 -- compatible-from: *
 -- compatible-to: *
 -- maintenance: false
--- Migration 497: blocked Windows updates.
+-- Migration 499: blocked Windows updates.
 --
 -- rmm_windows_update_blocks holds the updates technicians blocked: for one
 -- device (asset_id, with its company_id), one company (company_id only) or
