@@ -18,7 +18,8 @@
       packages = data.packages;
       results.replaceChildren(new Option('Choose an application', ''));
       packages.forEach((app, index) => results.add(new Option(app.title + ' — ' + app.version + ' (' + app.package_id + ')', String(index))));
-      status.textContent = packages.length ? 'Select an application below.' : 'No applications found.';
+      status.textContent = (packages.length ? 'Select an application below.' : 'No applications found.')
+        + (data.updated_at ? ' App list updated ' + new Date(data.updated_at).toLocaleString() + '.' : '');
     } catch (error) { if (sequence === searchSequence) status.textContent = error.message; }
     finally { if (sequence === searchSequence) searchButton.disabled = false; }
   }
