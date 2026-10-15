@@ -38,6 +38,60 @@ def transport(monkeypatch, handler):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize('name,wire_term', [
+    ('7zip', "'7zip'"),
+    ('Google Chrome', "'Google%20Chrome'"),
+    ("Vendor's App", "'Vendor''s%20App'"),
+    ('C++ & Tools (x64)', "'C%2B%2B%20%26%20Tools%20%28x64%29'"),
+    ('Tools?x=1#tag', "'Tools%3Fx%3D1%23tag'"),
+    ('Café', "'Caf%C3%A9'"),
+])
+async def test_search_matches_chocolatey_nuget_wire_format(monkeypatch, mocks, name, wire_term):
+    sleep, replace, names = mocks
+    names.return_value = [name]
+    # Fixture from Chocolatey's NuGet.Client V2FeedQueryBuilder and UriUtility,
+    # asserted on the transmitted bytes rather than HTTPX's decoded params.
+    expected = ("$filter=IsLatestVersion&$orderby=Id&searchTerm=" + wire_term +
+                "&targetFramework=''&includePrerelease=false&$skip=0&$top=30&semVerLevel=2.0.0").encode()
+    calls = []
+    def handle(request):
+        calls.append(request)
+        assert request.url.query == expected
+        assert request.url.path == '/api/v2/Search()'
+        return httpx.Response(200, text=feed())
+    transport(monkeypatch, handle)
+    await catalog.refresh()
+    assert len(calls) == 1
+
+
+@pytest.mark.anyio
+async def test_406_reports_application_and_odata_error_without_replacing_list(monkeypatch, mocks):
+    sleep, replace, names = mocks
+    names.return_value = ['Google Chrome']
+    xml = '''<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+        <error xmlns="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
+        <code></code><message xml:lang="en-US">Invalid or unsupported parameters used for package lookups,
+        unable to continue. Invalid Reason: InvalidQueryParameters.</message></error>'''
+    transport(monkeypatch, lambda request: httpx.Response(406, text=xml))
+    with pytest.raises(catalog.CatalogUnavailable) as exc:
+        await catalog.refresh()
+    message = str(exc.value)
+    assert "HTTP 406 for 'Google Chrome'" in message
+    assert 'Invalid Reason: InvalidQueryParameters.' in message
+    assert 'stored app list was kept' in message
+    assert '\n' not in message
+    sleep.assert_not_awaited()
+    replace.assert_not_awaited()
+
+
+@pytest.mark.parametrize('content', ['<html>untrusted error page</html>', '<broken', 'x' * 20_000])
+def test_error_does_not_echo_non_odata_responses(content):
+    response = httpx.Response(406, text=content)
+    assert catalog._lookup_error(response, 'App') == (
+        "Chocolatey software lookup failed with HTTP 406 for 'App'; the stored app list was kept.")
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize('failure', [429, 500, 502, 503, 504, 'timeout', 'connection'])
 async def test_refresh_retries_same_application(monkeypatch, mocks, failure):
     sleep, replace, names = mocks
