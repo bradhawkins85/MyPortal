@@ -322,6 +322,22 @@ runs and the devices with the RMM agent. Choose a script to see, on the right:
 
 ## Running a script
 
+Scripts default to **Sequential** execution on each device. A sequential run waits
+for all active scripts to finish, then runs alone while later scripts stay queued.
+This prevents conflicting tasks such as chkdsk and defrag from overlapping.
+
+A super administrator can open a script, enable **Allow this script to run in
+parallel**, and choose **Save execution setting**. Parallel scripts may overlap
+other parallel scripts, up to the agent's four-run limit. They still wait behind
+any earlier sequential run. Each device has its own queue, so scripts on different
+devices can run at the same time.
+
+This applies to manual and scheduled runs. Onboarding scripts always run in
+sequence, even when their script allows parallel execution. The setting is captured
+when a run is queued, applies to future runs, and survives Gitea sync. Existing
+scripts and runs default to sequential when migration 493 is applied; no RMM agent
+update is needed.
+
 Choose **Run** on a script, **Run a script** at the top of the page, or **Run script** on
 an asset's page. Then:
 

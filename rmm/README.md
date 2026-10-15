@@ -32,6 +32,13 @@ the service.
 
 The agent long-polls `GET /api/rmm/agent/jobs`, runs up to four scripts at a
 time and reports each result to `/api/rmm/agent/runs/{id}/result`.
+Scripts default to sequential execution per device. A super administrator can
+enable **Allow this script to run in parallel** on its Scripts detail page.
+Parallel runs can overlap other parallel runs; a sequential run waits for active
+runs to finish and blocks later runs until it finishes. Queue order is preserved
+for manual and scheduled runs, and onboarding runs always execute sequentially.
+Execution settings are captured when runs are queued and survive Gitea sync.
+Deploy migration 493 with MyPortal; no agent upgrade is required.
 While executing, it sends cumulative stdout/stderr snapshots once a second to
 `/api/rmm/agent/runs/{id}/output`. The technician's result view refreshes every
 second, follows new lines when scrolled to the bottom, and preserves the scroll
