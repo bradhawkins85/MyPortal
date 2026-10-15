@@ -158,9 +158,13 @@ async def touch_scripts(paths: Iterable[str]) -> None:
     """Mark unchanged scripts as seen in the latest sync."""
 
     now = _utcnow()
-    for path in paths:
+    paths = list(paths)
+    for offset in range(0, len(paths), 500):
+        batch = paths[offset:offset + 500]
+        placeholders = ", ".join(["%s"] * len(batch))
         await db.execute(
-            "UPDATE rmm_scripts SET synced_at = %s, is_active = 1 WHERE path = %s", (now, path)
+            f"UPDATE rmm_scripts SET synced_at = %s, is_active = 1 WHERE path IN ({placeholders})",
+            (now, *batch),
         )
 
 
@@ -168,9 +172,13 @@ async def deactivate_scripts(paths: Iterable[str]) -> None:
     """Hide scripts that are no longer in the repository; past runs keep their snapshot."""
 
     now = _utcnow()
-    for path in paths:
+    paths = list(paths)
+    for offset in range(0, len(paths), 500):
+        batch = paths[offset:offset + 500]
+        placeholders = ", ".join(["%s"] * len(batch))
         await db.execute(
-            "UPDATE rmm_scripts SET is_active = 0, updated_at = %s WHERE path = %s", (now, path)
+            f"UPDATE rmm_scripts SET is_active = 0, updated_at = %s WHERE path IN ({placeholders})",
+            (now, *batch),
         )
 
 

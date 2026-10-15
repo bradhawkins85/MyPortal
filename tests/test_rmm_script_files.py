@@ -52,7 +52,7 @@ async def test_file_catalog_respects_common_and_company_script_scope(monkeypatch
     async def companies(**kwargs):
         return [{"id": 1, "name": "Contoso"}, {"id": 2, "name": "Other"}]
 
-    async def fetch_file(_settings, _path):
+    async def fetch_file(_settings, _path, **kwargs):
         return b'{"company_id": 1}'
 
     monkeypatch.setattr(gitea, "list_files", list_files)
@@ -117,7 +117,7 @@ async def test_existing_files_are_never_recreated(monkeypatch):
     # A marker naming a deleted company, in the folder a current company would use.
     files = [gitea.GiteaFile("Files/Companies/Contoso/.myportal-company", "a" * 40, 1)]
 
-    async def fetch_file(_settings, _path):
+    async def fetch_file(_settings, _path, **kwargs):
         return b'{"company_id": 99}'
 
     monkeypatch.setattr(gitea, "fetch_file", fetch_file)
