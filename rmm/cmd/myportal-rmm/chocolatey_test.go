@@ -28,7 +28,9 @@ func TestRefreshChocolateyPlanUsesLatestCompanyPolicy(t *testing.T) {
 	}
 	var plan struct {
 		Sources []struct{ Name string }
-		Apps    []struct{ PackageID string `json:"package_id"` }
+		Apps    []struct {
+			PackageID string `json:"package_id"`
+		}
 	}
 	if err := json.Unmarshal([]byte(job.Env["MYPORTAL_PATCH_PLAN"]), &plan); err != nil {
 		t.Fatal(err)
