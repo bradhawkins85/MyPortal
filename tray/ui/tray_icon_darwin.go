@@ -4,6 +4,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -17,44 +19,91 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 )
 
+// darwinTrayIconPixels is the bitmap size picked from the portal .ico. systray
+// draws the menu-bar image at 16x16 points, so 32px stays sharp on Retina.
+const darwinTrayIconPixels = 32
+
+// trayIconRefreshCh wakes the icon worker. It is buffered so a refresh
+// requested while a fetch is in flight is kept rather than dropped.
+var trayIconRefreshCh = make(chan struct{}, 1)
+
 // configureTrayIcon displays a local fallback immediately, then replaces it
 // with the same portal-provided branded icon used by the Windows agent.
 func configureTrayIcon() {
 	systray.SetTitle("")
 	systray.SetIcon(defaultDarwinIcon())
-	go fetchAndSetDarwinIcon()
+	go runDarwinTrayIconWorker()
+	requestTrayIconRefresh()
 }
 
-// fetchAndSetDarwinIcon uses the same portal branding endpoint as the Windows
-// agent. NSImage accepts the ICO payload returned by this endpoint, allowing a
-// custom tray icon to remain consistent across both desktop platforms.
-func fetchAndSetDarwinIcon() {
+// requestTrayIconRefresh asks the icon worker to (re)load the portal icon. It
+// is called on config_changed, which arrives once the service has enrolled
+// the device, so a tray started before enrolment still picks up the icon.
+func requestTrayIconRefresh() {
+	select {
+	case trayIconRefreshCh <- struct{}{}:
+	default:
+	}
+}
+
+// runDarwinTrayIconWorker loads the portal icon on each refresh request. The
+// UI starts at login, often before the network is up, so failed downloads are
+// retried with backoff until one succeeds.
+func runDarwinTrayIconWorker() {
+	for range trayIconRefreshCh {
+		delay := 5 * time.Second
+		for attempt := 1; ; attempt++ {
+			err := fetchAndSetDarwinIcon()
+			if err == nil {
+				break
+			}
+			if errors.Is(err, errTrayIconUnusable) {
+				logger.Warn("Tray icon from portal cannot be displayed, keeping default: %v", err)
+				break
+			}
+			if attempt == 1 {
+				logger.Warn("Tray icon fetch failed, will retry: %v", err)
+			} else {
+				logger.Debug("Tray icon fetch attempt %d failed: %v", attempt, err)
+			}
+			select {
+			case <-time.After(delay):
+			case <-trayIconRefreshCh:
+			}
+			if delay *= 2; delay > 5*time.Minute {
+				delay = 5 * time.Minute
+			}
+		}
+	}
+}
+
+// fetchAndSetDarwinIcon downloads the branded .ico served to the Windows agent
+// and shows it as a PNG, which the menu bar renders reliably.
+func fetchAndSetDarwinIcon() error {
 	if strings.TrimSpace(gPortalURL) == "" {
-		return
+		return errors.New("portal URL not configured yet")
 	}
 	url := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		logger.Warn("Tray icon fetch failed: %v", err)
-		return
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		logger.Warn("Tray icon fetch HTTP %d, falling back to default", resp.StatusCode)
-		return
+		return fmt.Errorf("GET %s: HTTP %d", url, resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if err != nil {
-		logger.Warn("Tray icon read error: %v", err)
-		return
+		return err
 	}
-	if len(data) < 4 || data[0] != 0 || data[1] != 0 || data[2] != 1 || data[3] != 0 {
-		logger.Warn("Tray icon fetch returned invalid ICO data, falling back to default")
-		return
+	icon, err := trayIconPNGFromICO(data, darwinTrayIconPixels)
+	if err != nil {
+		return err
 	}
-	systray.SetIcon(data)
+	systray.SetIcon(icon)
 	logger.Info("Tray icon updated from portal")
+	return nil
 }
 
 func defaultDarwinIcon() []byte {
