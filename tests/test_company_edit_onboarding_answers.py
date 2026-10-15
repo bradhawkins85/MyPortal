@@ -62,6 +62,7 @@ async def test_approved_company_loads_saved_onboarding_only_for_super_admins(mon
     monkeypatch.setattr(main, "_render_template", render)
     request = Request({
         "type": "http", "method": "GET", "path": "/admin/companies/4/edit", "headers": [],
+        "query_string": b"",
     })
     response = await handlers._render_company_edit_page(
         request, {"id": 1, "is_super_admin": is_super_admin}, company_id=4,

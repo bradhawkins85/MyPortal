@@ -1,0 +1,7 @@
+{
+  "guid": "c0e9bb52-9a1b-47d8-a2ca-c2a9e9e93019",
+  "occurred_at": "2026-10-15T03:49+00:00",
+  "change_type": "Improvement",
+  "summary": "Move company tray feature settings, enrolment tokens, and ticket intake questions into Edit company > Tray icon, with redirects from the previous tray settings page.",
+  "content_hash": "47d412d8f1025a77ede69892f38cf107fe4918af37678e7c4432724e5a466fef"
+}

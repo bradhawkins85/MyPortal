@@ -41,7 +41,7 @@
   {% endif %}
   {% if is_super_admin %}
     {% set _ = ce_actions.append({"label": "Microsoft 365 connection", "type": "link", "href": "/admin/companies/" ~ company.id ~ "/m365"}) %}
-    {% set _ = ce_actions.append({"label": "Tray settings", "type": "link", "href": "/admin/companies/" ~ company.id ~ "/tray"}) %}
+    {% set _ = ce_actions.append({"label": "Tray settings", "type": "link", "href": "#ce-tray"}) %}
   {% endif %}
   {% set _ = ce_actions.append({"label": "Approvals", "type": "link", "href": "/admin/approvals"}) %}
   {% set _ = ce_actions.append({"label": "Back to companies", "type": "link", "href": "/admin/companies"}) %}
@@ -1621,46 +1621,11 @@
         <header class="ce-section__header">
           <div class="ce-section__heading">
             <h2 class="card__title" id="ce-tray-title">Tray icon</h2>
-            <p class="card__subtitle">Enrolment tokens used to install the MyPortal tray icon on this company's devices.</p>
+            <p class="card__subtitle">Manage tray features, enrolment tokens, and ticket intake questions for this company's devices.</p>
           </div>
         </header>
         <div class="ce-section__body">
-          {% if tray_tokens %}
-            <div class="table-wrapper">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Label</th><th>Prefix</th><th>Status</th><th>Uses</th><th>Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for token in tray_tokens %}
-                    <tr>
-                      <td>{{ token.label }}</td>
-                      <td><code>{{ token.token_prefix }}…</code></td>
-                      <td>
-                        {% if token.revoked_at %}
-                          <span class="status status--danger">Revoked</span>
-                        {% else %}
-                          <span class="status status--success">Active</span>
-                        {% endif %}
-                      </td>
-                      <td>{{ token.use_count }}</td>
-                      <td><span data-utc="{{ token.created_at }}">{{ token.created_at }}</span></td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          {% else %}
-            <div class="scf-empty">
-              <p class="scf-empty__title">No enrolment tokens yet</p>
-              <p class="text-muted">Create a token on the tray settings page, then use it when installing the tray icon on this company's devices.</p>
-            </div>
-          {% endif %}
-          <div class="form-actions">
-            <a class="button button--secondary" href="/admin/companies/{{ company.id }}/tray">Manage tray settings and tokens</a>
-          </div>
+          {% include "admin/tray/_company_settings.html" %}
         </div>
       </section>
 
@@ -2760,6 +2725,7 @@
     <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
     <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
     <script src="{{ static_url('/static/js/scheduled_ticket_payload.js') }}" defer></script>
+    <script src="{{ static_url('/static/js/tray_ticket_questions_admin.js') }}" defer></script>
     <script src="{{ static_url('/static/js/staff_custom_fields_admin.js') }}" defer></script>
     <script src="{{ static_url('/static/js/staff_intake_fields_admin.js') }}" defer></script>
     <script>

@@ -891,17 +891,14 @@ async def _render_company_edit_page(
             await staff_custom_fields_repo.list_company_owned_definitions(company_id)
         )
 
-    # Fetch tray install tokens for this company
-    tray_tokens: list[dict[str, Any]] = []
+    tray_context: dict[str, Any] = {
+        "tray_tokens": [], "tokens": [], "company_questions": [], "global_questions": [],
+    }
     if is_super_admin:
         try:
-            from app.repositories import tray as tray_repo
-
-            tray_tokens = await tray_repo.list_install_tokens(company_id=company_id)
+            tray_context.update(await _company_tray_settings_context(company_id, request))
         except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
-            if "Database pool not initialised" in str(exc):
-                tray_tokens = []
-            else:
+            if "Database pool not initialised" not in str(exc):
                 raise
 
     assign_form = {
@@ -945,7 +942,7 @@ async def _render_company_edit_page(
         ),
         "staff_field_config": staff_field_config,
         "staff_custom_field_definitions": staff_custom_field_definitions,
-        "tray_tokens": tray_tokens,
+        **tray_context,
         "company_variables": company_variables,
         "company_addresses": company_addresses,
         "company_sla": await __import__("app.repositories.slas", fromlist=["slas"]).get_for_company(company_id),
@@ -2691,22 +2688,9 @@ async def admin_delete_company_m365_credentials(company_id: int, request: Reques
     )
 
 
-async def admin_company_tray_settings_page(
-    company_id: int,
-    request: Request,
-    new_token: str | None = None,
-):
-    from app.repositories import companies as companies_repo
+async def _company_tray_settings_context(company_id: int, request: Request) -> dict[str, Any]:
     from app.repositories import tray as tray_repo
     from app.repositories import tray_ticket_questions as tq_repo
-
-    current_user, redirect = await _main()._require_super_admin_page(request)
-    if redirect:
-        return redirect
-
-    company = await companies_repo.get_company_by_id(company_id)
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found")
 
     tokens = await tray_repo.list_install_tokens(company_id=company_id)
     company_questions = await tq_repo.list_questions(
@@ -2726,18 +2710,38 @@ async def admin_company_tray_settings_page(
         if _main().settings.portal_url
         else str(request.base_url.replace(scheme="https")).rstrip("/")
     )
-    extra = {
-        "title": f"Tray settings — {company.get('name') or 'company'}",
-        "company": company,
+    return {
+        "tray_tokens": tokens,
         "tokens": tokens,
-        "new_token": new_token,
-        "now_iso": datetime.now(timezone.utc).isoformat(),
+        "new_token": request.query_params.get("new_token"),
         "portal_url": portal_url,
         "company_questions": company_questions,
         "global_questions": global_questions,
     }
-    return await _main()._render_template(
-        "admin/tray/company_settings.html", request, current_user, extra=extra
+
+
+def _company_tray_redirect(
+    company_id: int, *, success: str | None = None, new_token: str | None = None,
+) -> RedirectResponse:
+    response = _main()._company_edit_redirect(company_id=company_id, success=success)
+    url = f"/admin/companies/{company_id}/edit"
+    if new_token:
+        url += "?" + urlencode({"new_token": new_token})
+    response.headers["location"] = url + "#ce-tray"
+    return response
+
+
+async def admin_company_tray_settings_page(
+    company_id: int,
+    request: Request,
+    new_token: str | None = None,
+):
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    await _get_company_or_404(company_id)
+    return _company_tray_redirect(
+        company_id, success=request.query_params.get("success"), new_token=new_token,
     )
 
 
@@ -2784,12 +2788,7 @@ async def admin_company_tray_settings_save(company_id: int, request: Request):
             " The RMM agent is being rolled out in the background to devices"
             " without it; devices enrolled later get it when they connect."
         )
-    cid = int(company_id)
-    return RedirectResponse(
-        url=f"/admin/companies/{cid}/tray?"
-        + urlencode({"success": message}),
-        status_code=303,
-    )
+    return _company_tray_redirect(company_id, success=message)
 
 
 async def admin_company_tray_create_token(company_id: int, request: Request):
@@ -2834,11 +2833,7 @@ async def admin_company_tray_create_token(company_id: int, request: Request):
                 company_id=company_id,
                 error=str(exc),
             )
-    cid = int(company_id)
-    return RedirectResponse(
-        url=f"/admin/companies/{cid}/tray?" + urlencode({"new_token": raw_token}),
-        status_code=303,
-    )
+    return _company_tray_redirect(company_id, new_token=raw_token)
 
 
 async def admin_company_tray_revoke_token(
@@ -2851,11 +2846,7 @@ async def admin_company_tray_revoke_token(
         return redirect
 
     await tray_repo.revoke_install_token(token_id)
-    cid = int(company_id)
-    return RedirectResponse(
-        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Token revoked."}),
-        status_code=303,
-    )
+    return _company_tray_redirect(company_id, success="Token revoked.")
 
 
 # ---------------------------------------------------------------------------
@@ -2953,12 +2944,7 @@ async def admin_company_ticket_question_create(company_id: int, request: Request
     if conditions:
         await tq_repo.replace_conditions_for_question(int(record["id"]), conditions)
 
-    cid = int(company_id)
-    return RedirectResponse(
-        url=f"/admin/companies/{cid}/tray?"
-        + urlencode({"success": "Question created."}),
-        status_code=303,
-    )
+    return _company_tray_redirect(company_id, success="Question created.")
 
 
 async def admin_company_ticket_question_edit_page(
@@ -2972,9 +2958,7 @@ async def admin_company_ticket_question_edit_page(
 
     question = await tq_repo.get_question(question_id)
     if not question or question.get("company_id") != company_id:
-        return RedirectResponse(
-            url=f"/admin/companies/{company_id}/tray", status_code=303
-        )
+        return _company_tray_redirect(company_id)
     question["conditions"] = await tq_repo.list_conditions_for_question(question_id)
     all_questions = await tq_repo.list_questions(active_only=False)
     extra = {
@@ -3003,9 +2987,7 @@ async def admin_company_ticket_question_update(
 
     question = await tq_repo.get_question(question_id)
     if not question or question.get("company_id") != company_id:
-        return RedirectResponse(
-            url=f"/admin/companies/{company_id}/tray", status_code=303
-        )
+        return _company_tray_redirect(company_id)
 
     form = await request.form()
     field_type = str(form.get("field_type") or "text").strip()
@@ -3055,12 +3037,7 @@ async def admin_company_ticket_question_update(
     ]
     await tq_repo.replace_conditions_for_question(question_id, conditions)
 
-    cid = int(company_id)
-    return RedirectResponse(
-        url=f"/admin/companies/{cid}/tray?"
-        + urlencode({"success": "Question updated."}),
-        status_code=303,
-    )
+    return _company_tray_redirect(company_id, success="Question updated.")
 
 
 async def admin_company_ticket_question_delete(
@@ -3075,9 +3052,4 @@ async def admin_company_ticket_question_delete(
     if question and question.get("company_id") == company_id:
         await tq_repo.delete_question(question_id)
 
-    cid = int(company_id)
-    return RedirectResponse(
-        url=f"/admin/companies/{cid}/tray?"
-        + urlencode({"success": "Question deleted."}),
-        status_code=303,
-    )
+    return _company_tray_redirect(company_id, success="Question deleted.")

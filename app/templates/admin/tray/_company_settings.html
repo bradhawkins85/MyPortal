@@ -1,34 +1,7 @@
-{% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
-
-{% block header_title %}<span class="header__title-text">Tray settings — {{ company.name }}</span>{% endblock %}
-
-{% block header_actions %}
-  {{ page_header_actions([
-    {"label": "Edit company", "type": "link", "variant": "ghost", "href": "/admin/companies/" ~ company.id ~ "/edit"},
-    {"label": "All devices", "type": "link", "variant": "ghost", "href": "/admin/tray/devices"},
-    {"label": "All configurations", "type": "link", "variant": "ghost", "href": "/admin/tray/configurations"}
-  ]) }}
-{% endblock %}
-
-{% block content %}
-<div class="admin-grid admin-grid--columns">
-
-  {% if success_message %}
-    <div class="callout callout--success admin-grid__full">
-      <p>{{ success_message }}</p>
-    </div>
-  {% endif %}
-  {% if error_message %}
-    <div class="callout callout--danger admin-grid__full">
-      <p>{{ error_message }}</p>
-    </div>
-  {% endif %}
-
   {# ── Feature toggles ─────────────────────────────────────────────── #}
-  <section class="card card--panel admin-grid__full">
-    <header class="card__header">
-      <h2 class="card__title">Tray icon settings</h2>
+  <section class="ce-subsection">
+    <header class="ce-subsection__header">
+      <h3 class="scf-group__title">Tray icon settings</h3>
       <p class="card__subtitle">Control which tray features are enabled for devices enrolled under <strong>{{ company.name }}</strong>.</p>
     </header>
     <div class="card__body card__body--stacked">
@@ -94,16 +67,16 @@
         </div>
         {% endif %}
         <div class="form-actions">
-          <button type="submit" class="button button--primary">Save settings</button>
+          <button type="submit" class="button button--primary">Save tray settings</button>
         </div>
       </form>
     </div>
   </section>
 
   {# ── Enrol tokens ─────────────────────────────────────────────────── #}
-  <section class="card card--panel admin-grid__full">
-    <header class="card__header">
-      <h2 class="card__title">Enrol tokens</h2>
+  <section class="ce-subsection">
+    <header class="ce-subsection__header">
+      <h3 class="scf-group__title">Enrol tokens</h3>
       <p class="card__subtitle">Install tokens scoped to <strong>{{ company.name }}</strong>. Devices that enrol with these tokens are automatically assigned to this company.</p>
     </header>
     <div class="card__body card__body--stacked">
@@ -145,7 +118,7 @@ sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
       </form>
 
       {% if tokens %}
-        <div class="card__body--table">
+        <div class="table-wrapper">
           <table class="data-table">
             <thead>
               <tr>
@@ -195,9 +168,9 @@ sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
   </section>
 
   {# ── Ticket intake questions ─────────────────────────────────────── #}
-  <section class="card card--panel admin-grid__full" aria-labelledby="tq-card-title">
-    <header class="card__header card__header--stacked">
-      <h2 class="card__title" id="tq-card-title">Ticket intake questions</h2>
+  <section class="ce-subsection" aria-labelledby="tq-card-title">
+    <header class="ce-subsection__header">
+      <h3 class="scf-group__title" id="tq-card-title">Ticket intake questions</h3>
       <p class="card__subtitle">
         Asked only on devices enrolled under <strong>{{ company.name }}</strong> when they submit a ticket
         from the tray icon, after the questions for every company
@@ -213,11 +186,3 @@ sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
       {% include "admin/tray/_ticket_question_editor.html" %}
     </div>
   </section>
-
-</div>
-{% endblock %}
-
-{% block scripts %}
-  {{ super() }}
-  <script src="{{ static_url('/static/js/tray_ticket_questions_admin.js') }}" defer></script>
-{% endblock %}
