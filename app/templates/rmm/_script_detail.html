@@ -32,7 +32,7 @@
       </div>
       <dl class="rmm-detail__facts">
         <div><dt>Default timeout</dt><dd>{{ (script.default_timeout_seconds // 60) if script.default_timeout_seconds >= 60 else script.default_timeout_seconds }} {{ 'minutes' if script.default_timeout_seconds >= 60 else 'seconds' }}</dd></div>
-        <div><dt>Execution</dt><dd>{{ 'Parallel' if script.allow_parallel else 'Sequential' }}</dd></div>
+        <div><dt>Execution</dt><dd>{{ 'Run Anyway' if script.execution_mode == 'run_anyway' else ('Parallel' if script.allow_parallel else 'Sequential') }}</dd></div>
         <div><dt>Lines</dt><dd>{{ script.line_count }}</dd></div>
         <div><dt>Last synced</dt><dd>{% if script.synced_at %}<span data-utc="{{ script.synced_at }}">{{ script.synced_at }}</span>{% else %}–{% endif %}</dd></div>
       </dl>
@@ -40,11 +40,13 @@
       <form method="post" action="/rmm/scripts/{{ script.id }}/execution">
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
         <div class="form-field">
-          <label for="rmm-allow-parallel">
-            <input id="rmm-allow-parallel" type="checkbox" name="allow_parallel"{% if script.allow_parallel %} checked{% endif %} aria-describedby="rmm-execution-help">
-            Allow this script to run in parallel
-          </label>
-          <p class="form-help" id="rmm-execution-help">By default, this script waits for other scripts on the device to finish and runs alone. Parallel scripts can run together, but wait behind sequential scripts. Onboarding scripts always run in sequence. Changes apply to newly queued runs.</p>
+          <label class="form-label" for="rmm-execution-mode">Execution mode</label>
+          <select class="form-input" id="rmm-execution-mode" name="execution_mode" aria-describedby="rmm-execution-help">
+            <option value="sequential"{% if script.execution_mode == 'sequential' %} selected{% endif %}>Sequential</option>
+            <option value="parallel"{% if script.execution_mode == 'parallel' %} selected{% endif %}>Parallel</option>
+            <option value="run_anyway"{% if script.execution_mode == 'run_anyway' %} selected{% endif %}>Run Anyway</option>
+          </select>
+          <p class="form-help" id="rmm-execution-help">Sequential runs alone. Parallel runs share up to four slots and wait behind sequential scripts. Run Anyway bypasses the queue and runs regardless of other scripts, for independent tasks or urgent actions such as rebooting. Run Anyway requires an updated agent. Onboarding always runs in sequence. Changes apply to newly queued runs.</p>
         </div>
         <button type="submit" class="button button--ghost button--small">Save execution setting</button>
       </form>

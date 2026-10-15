@@ -30,7 +30,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.api.dependencies.auth import get_current_tray_device, get_optional_user
 from app.repositories import rmm as rmm_repo
@@ -105,6 +105,7 @@ def _script_summary(script: dict[str, Any]) -> dict[str, Any]:
         "env_count": len(script.get("env_vars") or []),
         "default_timeout_seconds": script.get("default_timeout_seconds") or 600,
         "allow_parallel": bool(script.get("allow_parallel")),
+        "execution_mode": rmm_repo.script_execution_mode(script),
         "synced_at": _iso(script.get("synced_at")),
         "files": script.get("files") or [],
     }
@@ -354,33 +355,51 @@ async def summarise_script_api(script_id: int, request: Request):
 
 
 class ScriptExecutionRequest(BaseModel):
-    allow_parallel: bool = Field(strict=True)
+    # Keep the existing boolean API for clients using the first two modes.
+    allow_parallel: bool | None = Field(default=None, strict=True)
+    execution_mode: Literal["sequential", "parallel", "run_anyway"] | None = None
+
+    @model_validator(mode="after")
+    def validate_mode(self):
+        if self.execution_mode is None and self.allow_parallel is None:
+            raise ValueError("Choose an execution mode")
+        if self.execution_mode is not None and self.allow_parallel is not None:
+            if self.allow_parallel != (self.execution_mode == "parallel"):
+                raise ValueError("Conflicting execution settings")
+        return self
+
+    @property
+    def resolved_mode(self) -> str:
+        return self.execution_mode or ("parallel" if self.allow_parallel else "sequential")
 
 
-async def _save_script_execution(request: Request, script_id: int, allow_parallel: bool) -> None:
+async def _save_script_execution(request: Request, script_id: int, execution_mode: str) -> None:
     user, _company, company_id, _can_run = await _context(request, api=True)
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=403, detail="Super admin privileges required")
     script = await rmm_repo.get_script(script_id)
     if not rmm_repo.script_available_to(script, company_id):
         raise HTTPException(status_code=404, detail="Script not found")
-    await rmm_repo.set_script_parallel(script_id, allow_parallel)
+    if execution_mode not in {"sequential", "parallel", "run_anyway"}:
+        raise HTTPException(status_code=400, detail="Choose a valid execution mode")
+    await rmm_repo.set_script_execution(script_id, execution_mode)
     await audit_service.record(
         action="rmm.script.execution.update", request=request, user_id=user.get("id"),
-        entity_type="rmm_script", entity_id=script_id, metadata={"allow_parallel": allow_parallel},
+        entity_type="rmm_script", entity_id=script_id, metadata={"execution_mode": execution_mode},
     )
 
 
-@router.put("/api/rmm/scripts/{script_id:int}/execution", summary="Set whether a script may run in parallel")
+@router.put("/api/rmm/scripts/{script_id:int}/execution", summary="Set a script's execution mode")
 async def update_script_execution_api(script_id: int, payload: ScriptExecutionRequest, request: Request):
-    await _save_script_execution(request, script_id, payload.allow_parallel)
-    return {"allow_parallel": payload.allow_parallel}
+    await _save_script_execution(request, script_id, payload.resolved_mode)
+    return {"allow_parallel": payload.resolved_mode == "parallel", "execution_mode": payload.resolved_mode}
 
 
 @router.post("/rmm/scripts/{script_id:int}/execution", summary="Save a script's execution mode")
 async def update_script_execution(script_id: int, request: Request):
     form = await request.form()
-    await _save_script_execution(request, script_id, form.get("allow_parallel") == "on")
+    execution_mode = str(form.get("execution_mode") or ("parallel" if form.get("allow_parallel") == "on" else "sequential"))
+    await _save_script_execution(request, script_id, execution_mode)
     return flash_redirect(f"/rmm/scripts?script={script_id}", "Script execution setting saved.", "success")
 
 
@@ -595,6 +614,7 @@ class AgentDetails(BaseModel):
     agent_version: str | None = Field(default=None, max_length=32)
     shells: list[str] = Field(default_factory=list, max_length=16)
     script_files_supported: bool | None = None
+    run_anyway_supported: bool | None = None
     thermal: ThermalSnapshot | None = None
 
 

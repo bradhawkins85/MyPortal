@@ -186,3 +186,20 @@ func TestFilePreparationSharesScriptTimeout(t *testing.T) {
 		t.Fatalf("file timeout not reported: %+v", result)
 	}
 }
+
+func TestRunAnywayBypassesOrdinaryFileRunLock(t *testing.T) {
+	fileRunSlot <- struct{}{}
+	defer func() { <-fileRunSlot }()
+	r := New(t.TempDir())
+	r.DownloadFile = func(context.Context, int64, int, io.Writer) error {
+		return errors.New("download attempted without waiting for the ordinary file lock")
+	}
+	file := testFile(filepath.Join(t.TempDir(), "tool"), []byte("data"))
+	result := r.Run(context.Background(), client.Job{
+		ID: 8, RunAnyway: true, Language: "bash", Script: "echo never-run", TimeoutSeconds: 1,
+		Files: []client.ScriptFile{file},
+	})
+	if result.TimedOut || !strings.Contains(result.Error, "download attempted") {
+		t.Fatalf("Run Anyway waited for the ordinary file lock: %+v", result)
+	}
+}

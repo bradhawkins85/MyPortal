@@ -702,6 +702,7 @@ def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[st
         "arch": text("arch", 32),
         "agent_version": text("agent_version", 32),
         "script_files_supported": bool(payload.get("script_files_supported")) if payload.get("agent_version") is not None else payload.get("script_files_supported"),
+        "run_anyway_supported": bool(payload.get("run_anyway_supported")) if payload.get("agent_version") is not None else payload.get("run_anyway_supported"),
         "shells": (str(shells).strip()[:255] or None) if shells else None,
         "last_ip": (client_ip or "")[:64] or None,
     }
@@ -778,6 +779,7 @@ def _job_payload(row: Mapping[str, Any]) -> dict[str, Any] | None:
         "script": row.get("script_content") or "",
         "sha256": row.get("content_sha256"),
         "timeout_seconds": int(row.get("timeout_seconds") or 600),
+        "run_anyway": bool(row.get("run_anyway")) and row.get("run_source") != "onboarding",
         "parameters": values.get("parameters") or {},
         "parameter_order": values.get("parameter_order") or [],
         "env": values.get("env") or {},
@@ -824,6 +826,12 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
             + RESULT_GRACE
         )
         if not await rmm_repo.mark_dispatched(int(row["id"]), agent_id, expires_at=expires_at):
+            continue
+        if row.get("run_anyway") and row.get("run_source") != "onboarding" and not agent.get("run_anyway_supported"):
+            await rmm_repo.finish_run(
+                int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],
+                error_message="Update the RMM agent before using Run Anyway execution mode.",
+            )
             continue
         job = _job_payload(row)
         if job is None:

@@ -38,6 +38,12 @@ def _decode_json(value: Any, default: Any) -> Any:
         return default
 
 
+def script_execution_mode(script: dict[str, Any]) -> str:
+    if script.get("run_anyway"):
+        return "run_anyway"
+    return "parallel" if script.get("allow_parallel") else "sequential"
+
+
 def _script_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if not row:
         return None
@@ -47,6 +53,8 @@ def _script_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     script["files"] = _decode_json(script.pop("files_json", None), [])
     script["is_active"] = bool(script.get("is_active"))
     script["allow_parallel"] = bool(script.get("allow_parallel"))
+    script["run_anyway"] = bool(script.get("run_anyway"))
+    script["execution_mode"] = script_execution_mode(script)
     if "ai_summary_json" in script:
         script["ai_summary"] = _decode_json(script.pop("ai_summary_json"), None)
     return script
@@ -75,13 +83,13 @@ async def list_scripts(*, company_id: int | None = None) -> list[dict[str, Any]]
     if company_id is None:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
             "created_at, updated_at, files_json FROM rmm_scripts WHERE is_active = 1 ORDER BY folder, name"
         )
     else:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
             "created_at, updated_at, files_json FROM rmm_scripts WHERE is_active = 1 "
             "AND (company_id IS NULL OR company_id = %s) ORDER BY folder, name",
             (company_id,),
@@ -102,7 +110,7 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
     if with_content:
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
             "created_at, updated_at, files_json, content, ai_summary_json, ai_summary_sha256, ai_summary_model, "
             "ai_summary_updated_at FROM rmm_scripts WHERE id = %s",
             (script_id,),
@@ -110,7 +118,7 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
     else:
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
             "created_at, updated_at, files_json FROM rmm_scripts WHERE id = %s",
             (script_id,),
         )
@@ -195,11 +203,17 @@ async def set_script_timeout(script_id: int, timeout_seconds: int) -> None:
     )
 
 
-async def set_script_parallel(script_id: int, allow_parallel: bool) -> None:
+async def set_script_execution(script_id: int, execution_mode: str) -> None:
+    if execution_mode not in {"sequential", "parallel", "run_anyway"}:
+        raise ValueError("Invalid script execution mode")
     await db.execute(
-        "UPDATE rmm_scripts SET allow_parallel = %s, updated_at = %s WHERE id = %s",
-        (allow_parallel, _utcnow(), script_id),
+        "UPDATE rmm_scripts SET allow_parallel = %s, run_anyway = %s, updated_at = %s WHERE id = %s",
+        (execution_mode == "parallel", execution_mode == "run_anyway", _utcnow(), script_id),
     )
+
+
+async def set_script_parallel(script_id: int, allow_parallel: bool) -> None:
+    await set_script_execution(script_id, "parallel" if allow_parallel else "sequential")
 
 
 async def set_script_files(script_id: int, files: list[dict[str, str]]) -> None:
@@ -254,13 +268,13 @@ async def create_agent(
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_agents (agent_uid, tray_device_id, company_id, asset_id, auth_token_hash, "
         "auth_token_prefix, hostname, os, os_version, arch, agent_version, shells, last_ip, last_seen_utc, "
-        "status, created_at, updated_at, script_files_supported) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-        "'active', %s, %s, %s)",
+        "status, created_at, updated_at, script_files_supported, run_anyway_supported) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+        "'active', %s, %s, %s, %s)",
         (
             agent_uid, tray_device_id, company_id, asset_id, auth_token_hash, auth_token_prefix,
             details.get("hostname"), details.get("os"), details.get("os_version"), details.get("arch"),
             details.get("agent_version"), details.get("shells"), details.get("last_ip"), now, now, now,
-            bool(details.get("script_files_supported")),
+            bool(details.get("script_files_supported")), bool(details.get("run_anyway_supported")),
         ),
     )
 
@@ -280,12 +294,12 @@ async def reenrol_agent(
         "UPDATE rmm_agents SET tray_device_id = %s, company_id = %s, asset_id = %s, auth_token_hash = %s, "
         "auth_token_prefix = %s, hostname = %s, os = %s, os_version = %s, arch = %s, agent_version = %s, "
         "shells = %s, last_ip = %s, last_seen_utc = %s, status = 'active', updated_at = %s, "
-        "script_files_supported = %s WHERE id = %s",
+        "script_files_supported = %s, run_anyway_supported = %s WHERE id = %s",
         (
             tray_device_id, company_id, asset_id, auth_token_hash, auth_token_prefix,
             details.get("hostname"), details.get("os"), details.get("os_version"), details.get("arch"),
             details.get("agent_version"), details.get("shells"), details.get("last_ip"), now, now,
-            bool(details.get("script_files_supported")), agent_id,
+            bool(details.get("script_files_supported")), bool(details.get("run_anyway_supported")), agent_id,
         ),
     )
 
@@ -301,11 +315,12 @@ async def record_agent_checkin(agent_id: int, details: dict[str, Any]) -> None:
         "UPDATE rmm_agents SET last_seen_utc = %s, last_ip = COALESCE(%s, last_ip), "
         "agent_version = COALESCE(%s, agent_version), shells = COALESCE(%s, shells), "
         "hostname = COALESCE(%s, hostname), os_version = COALESCE(%s, os_version), updated_at = %s, "
-        "script_files_supported = COALESCE(%s, script_files_supported) "
+        "script_files_supported = COALESCE(%s, script_files_supported), "
+        "run_anyway_supported = COALESCE(%s, run_anyway_supported) "
         + thermal_sql + " WHERE id = %s",
         (
             now, details.get("last_ip"), details.get("agent_version"), details.get("shells"),
-            details.get("hostname"), details.get("os_version"), now, details.get("script_files_supported"),
+            details.get("hostname"), details.get("os_version"), now, details.get("script_files_supported"), details.get("run_anyway_supported"),
         ) + thermal_params + (agent_id,),
     )
 
@@ -380,14 +395,15 @@ async def create_run(
         "INSERT INTO rmm_script_runs (script_id, script_name, script_path, language, script_content, "
         "content_sha256, agent_id, company_id, asset_id, requested_by_user_id, status, inputs_json, "
         "payload_encrypted, timeout_seconds, queued_at, expires_at, run_source, schedule_id, "
-        "onboarding_run_id, allow_parallel) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "onboarding_run_id, allow_parallel, run_anyway) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             script["id"], script["name"], script["path"], script["language"], content,
             script["content_sha256"], agent_id, company_id, asset_id, requested_by_user_id,
             json.dumps(inputs), payload_encrypted, timeout_seconds, _utcnow(), expires_at,
             run_source, schedule_id, onboarding_run_id,
-            bool(script.get("allow_parallel")) and run_source != "onboarding",
+            script_execution_mode(script) == "parallel" and run_source != "onboarding",
+            script_execution_mode(script) == "run_anyway" and run_source != "onboarding",
         ),
     )
 
@@ -460,8 +476,9 @@ async def has_active_run(agent_id: int, script_id: int, *, run_source: str) -> b
 async def next_jobs_for_agent(agent_id: int, *, limit: int = 5) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         "SELECT id, script_name, script_path, language, script_content, content_sha256, payload_encrypted, "
-        "timeout_seconds, run_source, expires_at, allow_parallel FROM rmm_script_runs WHERE agent_id = %s AND status = 'queued' "
-        "ORDER BY queued_at, id LIMIT %s",
+        "timeout_seconds, run_source, expires_at, allow_parallel, run_anyway FROM rmm_script_runs WHERE agent_id = %s AND status = 'queued' "
+        "ORDER BY CASE WHEN run_anyway = 1 AND run_source <> 'onboarding' THEN 0 ELSE 1 END, "
+        "queued_at, id LIMIT %s",
         (agent_id, limit),
     )
     return [dict(row) for row in rows or []]
@@ -492,26 +509,35 @@ async def mark_dispatched(run_id: int, agent_id: int, *, expires_at: datetime) -
     async with _dispatch_lock(agent_id) as acquired:
         if not acquired:
             return False
-        first = await db.fetch_one(
-            "SELECT id, allow_parallel, run_source FROM rmm_script_runs "
-            "WHERE agent_id = %s AND status = 'queued' ORDER BY queued_at, id LIMIT 1",
-            (agent_id,),
+        candidate = await db.fetch_one(
+            "SELECT id, allow_parallel, run_anyway, run_source FROM rmm_script_runs "
+            "WHERE id = %s AND agent_id = %s AND status = 'queued'",
+            (run_id, agent_id),
         )
-        if not first or int(first["id"]) != run_id:
+        if not candidate:
             return False
-        active = await db.fetch_all(
-            "SELECT allow_parallel, run_source FROM rmm_script_runs "
-            "WHERE agent_id = %s AND status IN ('dispatched', 'running')",
-            (agent_id,),
-        )
-        parallel = bool(first.get("allow_parallel")) and first.get("run_source") != "onboarding"
-        exclusive_active = any(
-            not row.get("allow_parallel") or row.get("run_source") == "onboarding" for row in active
-        )
-        # The agent has four execution slots; do not start timeouts for jobs
-        # that would only be waiting for a slot on the device.
-        if len(active) >= 4 or (active and (not parallel or exclusive_active)):
-            return False
+        run_anyway = bool(candidate.get("run_anyway")) and candidate.get("run_source") != "onboarding"
+        if not run_anyway:
+            first = await db.fetch_one(
+                "SELECT id FROM rmm_script_runs WHERE agent_id = %s AND status = 'queued' "
+                "AND (run_anyway = 0 OR run_source = 'onboarding') ORDER BY queued_at, id LIMIT 1",
+                (agent_id,),
+            )
+            if not first or int(first["id"]) != run_id:
+                return False
+            active = await db.fetch_all(
+                "SELECT allow_parallel, run_source FROM rmm_script_runs "
+                "WHERE agent_id = %s AND status IN ('dispatched', 'running') "
+                "AND (run_anyway = 0 OR run_source = 'onboarding')",
+                (agent_id,),
+            )
+            parallel = bool(candidate.get("allow_parallel")) and candidate.get("run_source") != "onboarding"
+            exclusive_active = any(
+                not row.get("allow_parallel") or row.get("run_source") == "onboarding" for row in active
+            )
+            # Run Anyway uses no ordinary execution slots and blocks no other runs.
+            if len(active) >= 4 or (active and (not parallel or exclusive_active)):
+                return False
         claimed = await db.execute_rowcount(
             "UPDATE rmm_script_runs SET status = 'dispatched', dispatched_at = %s, expires_at = %s "
             "WHERE id = %s AND agent_id = %s AND status = 'queued'",

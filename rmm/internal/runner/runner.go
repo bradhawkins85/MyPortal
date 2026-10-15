@@ -129,14 +129,16 @@ func (r *Runner) RunStreaming(ctx context.Context, job client.Job, report func(c
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if len(job.Files) > 0 {
-		// Keep one file-bearing run from replacing another run's dependencies.
-		select {
-		case fileRunSlot <- struct{}{}:
-			defer func() { <-fileRunSlot }()
-		case <-runCtx.Done():
-			result.Error = "File preparation was cancelled: " + runCtx.Err().Error()
-			result.TimedOut = errors.Is(runCtx.Err(), context.DeadlineExceeded)
-			return result
+		if !job.RunAnyway {
+			// Keep ordinary file-bearing runs from replacing each other's dependencies.
+			select {
+			case fileRunSlot <- struct{}{}:
+				defer func() { <-fileRunSlot }()
+			case <-runCtx.Done():
+				result.Error = "File preparation was cancelled: " + runCtx.Err().Error()
+				result.TimedOut = errors.Is(runCtx.Err(), context.DeadlineExceeded)
+				return result
+			}
 		}
 		var err error
 		result.Stdout, err = r.prepareFiles(runCtx, job)

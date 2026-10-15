@@ -44,7 +44,7 @@ func TestJobsAndReport(t *testing.T) {
 				http.Error(w, "wait", http.StatusBadRequest)
 				return
 			}
-			_, _ = w.Write([]byte(`{"jobs":[{"id":5,"language":"bash","script":"echo","parameters":{"A":1}}]}`))
+			_, _ = w.Write([]byte(`{"jobs":[{"id":5,"language":"bash","script":"echo","run_anyway":true,"parameters":{"A":1}}]}`))
 		case "/api/rmm/agent/runs/5/result":
 			_ = json.NewDecoder(r.Body).Decode(&reported)
 			_, _ = w.Write([]byte(`{"status":"completed"}`))
@@ -55,7 +55,7 @@ func TestJobsAndReport(t *testing.T) {
 	defer server.Close()
 	api := New(server.URL, "agent-token")
 	jobs, err := api.Jobs(context.Background(), 25*time.Second)
-	if err != nil || len(jobs) != 1 || jobs[0].ID != 5 {
+	if err != nil || len(jobs) != 1 || jobs[0].ID != 5 || !jobs[0].RunAnyway {
 		t.Fatalf("Jobs = %#v, %v", jobs, err)
 	}
 	code := 0

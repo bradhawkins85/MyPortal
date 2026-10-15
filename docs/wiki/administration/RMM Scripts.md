@@ -322,21 +322,30 @@ runs and the devices with the RMM agent. Choose a script to see, on the right:
 
 ## Running a script
 
-Scripts default to **Sequential** execution on each device. A sequential run waits
-for all active scripts to finish, then runs alone while later scripts stay queued.
-This prevents conflicting tasks such as chkdsk and defrag from overlapping.
+Scripts default to **Sequential** execution on each device. A super administrator
+can open a script, choose its **Execution mode**, and select **Save execution setting**:
 
-A super administrator can open a script, enable **Allow this script to run in
-parallel**, and choose **Save execution setting**. Parallel scripts may overlap
-other parallel scripts, up to the agent's four-run limit. They still wait behind
-any earlier sequential run. Each device has its own queue, so scripts on different
-devices can run at the same time.
+- **Sequential** waits for active sequential and parallel scripts to finish, runs
+  alone, and keeps later ordinary scripts queued. Use this for tasks such as chkdsk
+  and defrag that must not overlap.
+- **Parallel** shares up to four ordinary agent slots with other parallel scripts
+  and waits behind earlier sequential scripts.
+- **Run Anyway** bypasses the queue and starts regardless of other active scripts,
+  even when all four ordinary slots are occupied. Other scripts do not wait for it.
+  Use this for scripts that have no impact on other tasks or urgent actions such as
+  rebooting. A reboot may interrupt other running scripts.
 
-This applies to manual and scheduled runs. Onboarding scripts always run in
-sequence, even when their script allows parallel execution. The setting is captured
-when a run is queued, applies to future runs, and survives Gitea sync. Existing
-scripts and runs default to sequential when migration 493 is applied; no RMM agent
-update is needed.
+Each device has its own queue. These modes apply to manual and scheduled runs;
+onboarding always runs sequentially, overriding the script's mode. Settings apply
+to newly queued runs and survive Gitea sync. Existing scripts remain sequential
+unless an administrator changes their mode.
+
+Run Anyway requires migration 495 and an updated RMM agent. Deploy MyPortal first,
+then update agents. An older agent fails a Run Anyway run with an update message.
+Sequential and parallel scripts continue to work on older agents. Run Anyway still
+verifies script checksums and required files and applies the configured timeout;
+it bypasses the ordinary file-preparation lock, so choose it only when associated
+file destinations can also be used independently.
 
 Choose **Run** on a script, **Run a script** at the top of the page, or **Run script** on
 an asset's page. Then:

@@ -101,6 +101,7 @@ func details(r *runner.Runner) client.Details {
 		AgentVersion:         Version,
 		Shells:               r.AvailableShells(),
 		ScriptFilesSupported: true,
+		RunAnywaySupported:   true,
 	}
 }
 
@@ -393,19 +394,36 @@ func loop(ctx context.Context) {
 		}
 		backoff = 5 * time.Second
 		for _, job := range jobs {
-			select {
-			case slots <- struct{}{}:
-			case <-ctx.Done():
+			if !startJob(ctx, slots, &wg, job, func(job client.Job) {
+				execute(ctx, api, r, job)
+			}) {
 				return
 			}
-			wg.Add(1)
-			go func(job client.Job) {
-				defer wg.Done()
-				defer func() { <-slots }()
-				execute(ctx, api, r, job)
-			}(job)
 		}
 	}
+}
+
+// Run Anyway jobs must start even when every ordinary slot is occupied.
+func startJob(ctx context.Context, slots chan struct{}, wg *sync.WaitGroup, job client.Job, run func(client.Job)) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if !job.RunAnyway {
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			return false
+		}
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if !job.RunAnyway {
+			defer func() { <-slots }()
+		}
+		run(job)
+	}()
+	return true
 }
 
 func execute(ctx context.Context, api *client.Client, r *runner.Runner, job client.Job) {
