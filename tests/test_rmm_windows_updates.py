@@ -31,11 +31,7 @@ OLD = "3e4f5a6b-7c8d-4e9f-a0b1-c2d3e4f5a6b7"
 
 @pytest.fixture
 async def updates_db(sqlite_db):
-    # sqlite_db applies migrations 496 and 497 and points this repository at it.
-    async def execute_many(sql, rows):
-        await sqlite_db.conn.executemany(sqlite_db._sql(sql), list(rows))
-
-    sqlite_db.execute_many = execute_many
+    # sqlite_db applies migrations 498 and 499 and points this repository at it.
     yield sqlite_db
 
 

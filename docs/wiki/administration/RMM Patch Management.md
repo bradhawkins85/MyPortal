@@ -52,6 +52,13 @@ failures are visible in run output. Feature upgrades are not included.
 
 ## Chocolatey applications
 
+The policy form's application search uses MyPortal's stored Chocolatey app list.
+The default **Update Chocolatey app list** scheduled task refreshes it daily from
+the stable community catalog; super admins can run it now, change its schedule,
+disable or delete it under **Admin → Scheduled tasks**, and recreate it with the
+**Update Chocolatey app list** command. A failed refresh keeps the previous list.
+Until the first refresh completes, searches query the community feed directly.
+
 Each policy specifies an exact package ID and exact installed application display
 name. The agent reads Chocolatey's local package list and machine-wide 32/64-bit
 Windows uninstall registry inventory, then queries the latest stable version from
@@ -75,7 +82,7 @@ vendor installers can have their own restart behavior.
 ## Device Windows updates
 
 Open a Windows asset with an RMM agent and choose **Windows updates** to see the updates the
-device still needs and when each update was installed. Apply migrations **496** and **497** with the portal
+device still needs and when each update was installed. Apply migrations **498** and **499** with the portal
 deployment; no new agent version is required. Technicians with the `menu.rmm_scripts` permission
 see the section; those who can run scripts can also scan and install.
 

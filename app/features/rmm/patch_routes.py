@@ -165,7 +165,7 @@ async def packages(request: Request, q: str = Query('', max_length=255)):
     await _context(request, api=True)
     from app.services import chocolatey_catalog as catalog
     try:
-        return {'packages': await catalog.query(q)}
+        return {'packages': await catalog.query(q), 'updated_at': await catalog.last_updated()}
     except catalog.CatalogUnavailable as exc:
         raise HTTPException(503, str(exc)) from None
 

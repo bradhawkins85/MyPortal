@@ -29,7 +29,7 @@
 <div class="form-field"><label class="form-label" for="patch-package">Chocolatey package ID</label><input class="form-input" id="patch-package" name="package_id" value="{{ e.package_id }}" maxlength="128" placeholder="googlechrome"></div>
 <div class="form-field"><label class="form-label" for="patch-display">Installed application name</label><input class="form-input" id="patch-display" name="display_name" value="{{ e.display_name }}" maxlength="255" placeholder="Google Chrome"><p class="form-help">Exact name from the device's installed software. Older Chocolatey installations are upgraded; older installations from another source receive a forced install.</p></div>
 <label><input type="checkbox" name="install_missing" value="1" {% if e.install_missing %}checked{% endif %}> Also install on devices where this app is missing</label>
-<p class="form-help">Chocolatey must already be installed. Lists stable versions from the Chocolatey community repository. Agents use the sources enabled for their company. Per-user applications are outside the service's inventory.</p>
+<p class="form-help">Chocolatey must already be installed. Lists stable versions from the Chocolatey community repository, refreshed by the "Update Chocolatey app list" scheduled task. Agents use the sources enabled for their company. Per-user applications are outside the service's inventory.</p>
 </div>
 <div data-patch-windows>
 <fieldset><legend>Windows update categories</legend>{% for category in categories %}<label><input type="checkbox" name="categories" value="{{ category }}" {% if category in e.categories %}checked{% endif %}> {{ category }}</label>{% endfor %}</fieldset>
