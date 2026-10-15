@@ -529,24 +529,17 @@ async def expire_stale_runs(now: datetime | None = None) -> int:
     """Close runs whose agent never collected them, or never reported back."""
 
     now = now or _utcnow()
-    rows = await db.fetch_all(
-        "SELECT id, status FROM rmm_script_runs WHERE status IN ('queued', 'dispatched', 'running') "
+    return await db.execute_rowcount(
+        "UPDATE rmm_script_runs SET "
+        "error_message = CASE WHEN status = 'queued' "
+        "THEN 'The device did not collect the script before it expired.' "
+        "ELSE 'The device did not report a result in time.' END, "
+        "status = CASE WHEN status = 'queued' THEN 'expired' ELSE 'timed_out' END, "
+        "completed_at = %s, payload_encrypted = NULL "
+        "WHERE status IN ('queued', 'dispatched', 'running') "
         "AND expires_at IS NOT NULL AND expires_at < %s",
-        (now,),
+        (now, now),
     )
-    for row in rows or []:
-        status = "expired" if row["status"] == "queued" else "timed_out"
-        message = (
-            "The device did not collect the script before it expired."
-            if status == "expired"
-            else "The device did not report a result in time."
-        )
-        await db.execute(
-            "UPDATE rmm_script_runs SET status = %s, error_message = %s, completed_at = %s, "
-            "payload_encrypted = NULL WHERE id = %s AND status IN ('queued', 'dispatched', 'running')",
-            (status, message, now, row["id"]),
-        )
-    return len(rows or [])
 
 
 # --------------------------------------------------------------------------- #

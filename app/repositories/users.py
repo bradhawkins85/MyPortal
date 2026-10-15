@@ -85,6 +85,18 @@ async def count_users() -> int:
     return int(row["count"]) if row else 0
 
 
+async def list_user_labels_by_ids(user_ids: Iterable[int]) -> List[dict[str, Any]]:
+    """Fetch display fields for ticket lists without loading account secrets."""
+    identifiers = sorted(set(user_ids))
+    if not identifiers:
+        return []
+    placeholders = ", ".join(["%s"] * len(identifiers))
+    return list(await db.fetch_all(
+        "SELECT id, first_name, last_name, email FROM users WHERE id IN (" + placeholders + ")",  # nosec B608
+        tuple(identifiers),
+    ))
+
+
 async def list_users() -> List[dict[str, Any]]:
     rows = await db.fetch_all("SELECT * FROM users ORDER BY id DESC")
     return list(rows)

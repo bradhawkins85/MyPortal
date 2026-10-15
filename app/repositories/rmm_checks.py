@@ -211,6 +211,21 @@ async def list_states_for_agent(agent_id: int) -> dict[int, dict[str, Any]]:
     return {int(row["check_id"]): _state_row(row) for row in rows or []}
 
 
+async def list_states_for_agents(agent_ids: Iterable[int]) -> dict[int, dict[int, dict[str, Any]]]:
+    """Read background-check state in bounded batches instead of per device."""
+    identifiers = sorted(set(int(agent_id) for agent_id in agent_ids))
+    states: dict[int, dict[int, dict[str, Any]]] = {agent_id: {} for agent_id in identifiers}
+    for start in range(0, len(identifiers), 400):
+        batch = tuple(identifiers[start:start + 400])
+        placeholders = ", ".join(["%s"] * len(batch))
+        rows = await db.fetch_all(
+            _STATE_SELECT + "WHERE agent_id IN (" + placeholders + ")", batch,
+        )
+        for row in rows or []:
+            states[int(row["agent_id"])][int(row["check_id"])] = _state_row(row)
+    return states
+
+
 async def list_states_for_run(run_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(_STATE_SELECT + "WHERE run_id = %s", (run_id,))
     return [_state_row(row) for row in rows or []]

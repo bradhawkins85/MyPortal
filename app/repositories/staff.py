@@ -134,6 +134,18 @@ async def count_staff(
     return int(row["count"]) if row else 0
 
 
+async def list_staff_labels_by_ids(staff_ids: Iterable[int]) -> list[dict[str, Any]]:
+    """Fetch requester display fields without per-staff custom-field queries."""
+    identifiers = sorted(set(staff_ids))
+    if not identifiers:
+        return []
+    placeholders = ", ".join(["%s"] * len(identifiers))
+    return list(await db.fetch_all(
+        "SELECT id, first_name, last_name, email FROM staff WHERE id IN (" + placeholders + ")",  # nosec B608
+        tuple(identifiers),
+    ))
+
+
 async def list_staff(
     company_id: int,
     *,
