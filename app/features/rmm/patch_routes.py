@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from app.repositories import rmm_automation as agents_repo, rmm_patching as repo
 from app.services import audit, rmm_patching as patching, rmm_automation, rmm_targeting
@@ -11,7 +11,7 @@ from app.repositories import rmm_targeting as targeting_repo
 from .check_routes import TargetingPreviewRequest
 from app.services.rmm_scripts import RunRequestError
 from app.security.flash import flash_redirect
-from .routes import _context, _assets_routes
+from .routes import _context, _assets_routes, get_current_rmm_agent
 
 router = APIRouter(tags=["RMM patching"])
 PATH = "/rmm/patching"
@@ -34,11 +34,15 @@ def form_values(policy):
 
 async def render(request, context, editing=None, errors=None):
     user, company, company_id, can_edit = context
+    from app.features.companies.handlers import _get_company_management_scope
+    super_admin, _, memberships = await _get_company_management_scope(request, user)
+    can_manage_sources = super_admin or bool(memberships.get(company_id, {}).get("is_admin"))
     policies = await repo.list_policies(company_id)
     for policy in policies:
         policy["can_edit"] = can_edit and (policy["company_id"] is not None or bool(user.get("is_super_admin")))
     response = await _assets_routes()._main()._render_template("rmm/patching.html", request, user,
         extra={"title": "Patch management", "company": company, "policies": policies, "can_edit": can_edit,
+               "can_manage_sources": can_manage_sources,
                "is_super_admin": bool(user.get("is_super_admin")), "editing": editing, "errors": errors or {},
                "categories": sorted(patching.CATEGORIES)})
     if errors:
@@ -148,3 +152,70 @@ async def preview(request: Request, payload: TargetingPreviewRequest):
     return {"matched_count": len(matched), "eligible_count": len(contexts), "truncated": len(matched) > 100,
             "agents": [{"id": a["id"], "asset_id": a.get("asset_id"), "hostname": a.get("hostname"),
                         "company_name": contexts[int(a["id"])]["company"].get("name")} for a in matched[:100]]}
+
+
+@router.get('/api/rmm/chocolatey/packages')
+async def packages(request: Request, q: str = Query('', max_length=255)):
+    await _context(request, api=True)
+    from app.services import chocolatey_catalog as catalog
+    try:
+        return {'packages': await catalog.query(q)}
+    except catalog.CatalogUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
+
+
+@router.get('/api/rmm/assets/{asset_id:int}/software/upgrade')
+async def software_upgrade_info(asset_id: int, request: Request, name: str = Query(..., min_length=1, max_length=255)):
+    _, _, company_id, can_run = await _context(request, api=True)
+    from .inventory_routes import _company_agent
+    from app.services import rmm_software_updates, chocolatey_catalog
+    agent = await _company_agent(company_id, asset_id)
+    try:
+        app = await rmm_software_updates.upgrade_for(agent, name)
+    except chocolatey_catalog.CatalogUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
+    return {'application': app, 'can_run': can_run}
+
+
+@router.post('/rmm/assets/{asset_id:int}/software/upgrade')
+async def software_upgrade(asset_id: int, request: Request):
+    context = await _context(request, write=True)
+    if isinstance(context, RedirectResponse):
+        return context
+    user, _, company_id, _ = context
+    from .inventory_routes import _company_agent
+    from app.services import rmm_software_updates, chocolatey_catalog
+    agent = await _company_agent(company_id, asset_id)
+    form = await request.form()
+    name = str(form.get('name') or '')
+    if not 1 <= len(name) <= 255:
+        raise HTTPException(422, 'Choose an installed application')
+    try:
+        run_id = await rmm_software_updates.queue(agent, name, user['id'])
+    except RunRequestError as exc:
+        return flash_redirect(f'/assets/{asset_id}#software', ' '.join(exc.errors.values()), 'error')
+    except chocolatey_catalog.CatalogUnavailable as exc:
+        return flash_redirect(f'/assets/{asset_id}#software', str(exc), 'error')
+    await audit.record(action='rmm.software.upgrade', request=request, user_id=user['id'], entity_type='asset',
+                       entity_id=asset_id, metadata={'name': name, 'run_id': run_id})
+    return flash_redirect(f'/assets/{asset_id}#software', 'Upgrade queued. View results in Scripts run history.', 'success')
+
+
+@router.get('/api/rmm/agent/chocolatey/sources')
+async def agent_sources(agent: dict = Depends(get_current_rmm_agent)):
+    from app.services import chocolatey_sources
+    if str(agent.get('os') or '').lower() != 'windows':
+        raise HTTPException(400, 'Chocolatey requires Windows')
+    try:
+        config = await chocolatey_sources.for_company(int(agent['company_id']), secrets=True)
+    except ValueError:
+        raise HTTPException(503, 'Chocolatey source configuration is invalid') from None
+    # Reuse the same reconciliation implementation used before application jobs.
+    script = chocolatey_sources.script() + '''
+$ErrorActionPreference = 'Stop'
+$mutex = New-Object Threading.Mutex($false, 'Global\\MyPortalPatchManagement')
+if (-not $mutex.WaitOne(0)) { throw 'A patch operation is running; retry source reconciliation later.' }
+try { Sync-ChocolateySources @($env:MYPORTAL_CHOCO_SOURCES | ConvertFrom-Json) }
+finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
+'''
+    return JSONResponse({'script': script, 'sources': config}, headers={'Cache-Control': 'no-store'})

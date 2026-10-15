@@ -30,6 +30,7 @@ switch ($args[0]) {
 ''')
     harness = tmp_path / 'harness.ps1'
     harness.write_text('''
+function Sync-ChocolateySources { param($sources) }
 function Get-Command { [pscustomobject]@{ Source = $env:TEST_CHOCO } }
 function Test-Path { $false }
 function Get-ItemProperty {
@@ -41,7 +42,7 @@ function Get-ItemProperty {
 & $env:TEST_PATCH_SCRIPT
 ''')
     log = tmp_path / 'commands.txt'
-    plan = {'windows': None, 'reboot': {'reboot_mode': 'never'},
+    plan = {'sources': [{'name': 'chocolatey', 'enabled': True}], 'windows': None, 'reboot': {'reboot_mode': 'never'},
             'apps': [{'package_id': 'testapp', 'display_name': 'Test Application', 'install_missing': missing}]}
     env = {**os.environ, 'TEST_MANAGED': managed or '', 'TEST_INSTALLED': installed or '',
            'TEST_CHOCO': str(fake), 'TEST_COMMAND_LOG': str(log),
@@ -52,7 +53,7 @@ function Get-ItemProperty {
     commands = log.read_text() if log.exists() else ''
     if expected:
         assert commands.startswith(expected + ' testapp ')
-        assert '--version=2.0' in commands and '--source=https://community.chocolatey.org/api/v2/' in commands
+        assert '--version=2.0' in commands and '--source=' not in commands
         assert ('--force' in commands) == (expected == 'install')
     else:
         assert commands == ''

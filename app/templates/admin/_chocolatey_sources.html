@@ -1,0 +1,14 @@
+<header class="card__header"><h2 class="card__title" id="choco-sources-heading">Chocolatey sources</h2><p class="card__subtitle">Choose the repositories available to this company's RMM agents. Agents reconcile sources before app management and once a day. Sources outside this list are disabled.</p></header>
+<div class="card__body">
+{% if chocolatey_sources_error %}<p role="alert">{{ chocolatey_sources_error }}</p>{% else %}
+<form method="post" action="/admin/companies/{{ company.id }}/chocolatey-sources" class="form">
+  {% include "partials/csrf.html" %}
+  <fieldset><legend>Available sources</legend>
+  {% for source in chocolatey_sources %}<label class="form-label"><input type="checkbox" name="sources" value="{{ source.key }}" {% if source.enabled %}checked{% endif %}> {{ source.name }} <span class="text-muted">({{ 'Default' if source.key == 'DEFAULT' else 'Custom' }})</span></label>
+  {% else %}<p>No sources are configured in the environment.</p>{% endfor %}
+  </fieldset>
+  <p class="form-help">Custom sources start disabled. Repository URLs and credentials are configured in the server ENV file.</p>
+  <button class="button button--primary" type="submit">Save sources</button>
+</form>
+{% endif %}
+</div>

@@ -18,7 +18,7 @@
     <input type="search" id="rmm-software-filter" class="form-input rmm-inventory__filter" placeholder="Find a program…" autocomplete="off" data-rmm-software-filter="rmm-software-table">
     <div class="table-wrapper rmm-inventory__software"><table class="table" id="rmm-software-table">
       <caption class="visually-hidden">Software and installation history on this device</caption>
-      <thead><tr><th scope="col">Name</th><th scope="col">Version</th><th scope="col">Publisher</th><th scope="col">Install date</th><th scope="col">Status</th><th scope="col">History</th></tr></thead>
+      <thead><tr><th scope="col">Name</th><th scope="col">Version</th><th scope="col">Publisher</th><th scope="col">Install date</th><th scope="col">Status</th><th scope="col">History</th><th scope="col">Chocolatey version</th><th scope="col">Actions</th></tr></thead>
       <tbody>{% for program in hw.software_apps %}<tr data-rmm-software-row data-installed="{{ 'true' if program.installed else 'false' }}"{% if not program.installed %} hidden{% endif %}>
         <td data-label="Name">{{ program.name }}{% if program.source == 'user' %} <span class="text-muted">(user)</span>{% endif %}</td>
         <td data-label="Version">{{ program.version or '—' }}</td>
@@ -35,9 +35,17 @@
               <td data-label="First seen"><span data-utc="{{ entry.first_seen_at }}">{{ entry.first_seen_at }}</span></td>
               <td data-label="Last seen"><span data-utc="{{ entry.last_seen_at }}">{{ entry.last_seen_at }}</span></td>
               <td data-label="Removal detected">{% if entry.removed_at %}<span data-utc="{{ entry.removed_at }}">{{ entry.removed_at }}</span>{% else %}—{% endif %}</td>
-            </tr>{% endfor %}</tbody>
+      </tr>{% endfor %}</tbody>
           </table></div>
         </details></td>
+              <td data-label="Chocolatey version" data-choco-version>{% if program.installed and program.source != 'user' %}Not checked{% else %}—{% endif %}</td>
+        <td data-label="Actions">{% if program.installed and program.source != 'user' %}
+          <form method="post" action="/rmm/assets/{{ asset.id }}/software/upgrade" data-choco-upgrade data-asset-id="{{ asset.id }}" data-name="{{ program.name }}" data-confirm="Upgrade this application using the company's enabled Chocolatey sources?">
+            {% include "partials/csrf.html" %}<input type="hidden" name="name" value="{{ program.name }}">
+            <button type="submit" class="button button--secondary button--small" hidden data-choco-upgrade-button>Upgrade</button>
+            <button type="button" class="button button--ghost button--small" hidden data-choco-retry>Retry check</button>
+          </form>{% endif %}
+        </td>
       </tr>{% endfor %}</tbody>
     </table></div>
     <p class="text-muted" data-rmm-software-empty role="status"{% if hw.software %} hidden{% endif %}>No software matches the current filters.</p>

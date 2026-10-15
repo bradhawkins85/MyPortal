@@ -2,6 +2,34 @@
   'use strict';
   const form = document.querySelector('[data-rmm-patch-form]');
   if (!form) return;
+  const search = form.querySelector('[data-choco-search]');
+  const results = form.querySelector('[data-choco-results]');
+  const status = form.querySelector('[data-choco-status]');
+  const searchButton = form.querySelector('[data-choco-search-button]');
+  let packages = [];
+  let searchSequence = 0;
+  async function findPackages() {
+    const sequence = ++searchSequence;
+    searchButton.disabled = true;
+    status.textContent = 'Loading Chocolatey applications…';
+    try {
+      const data = await api('/api/rmm/chocolatey/packages?q=' + encodeURIComponent(search.value.trim()));
+      if (sequence !== searchSequence) return;
+      packages = data.packages;
+      results.replaceChildren(new Option('Choose an application', ''));
+      packages.forEach((app, index) => results.add(new Option(app.title + ' — ' + app.version + ' (' + app.package_id + ')', String(index))));
+      status.textContent = packages.length ? 'Select an application below.' : 'No applications found.';
+    } catch (error) { if (sequence === searchSequence) status.textContent = error.message; }
+    finally { if (sequence === searchSequence) searchButton.disabled = false; }
+  }
+  searchButton.addEventListener('click', findPackages);
+  search.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); findPackages(); } });
+  results.addEventListener('change', () => {
+    const app = results.value === '' ? null : packages[Number(results.value)];
+    if (!app) return;
+    form.querySelector('[name="package_id"]').value = app.package_id;
+    form.querySelector('[name="display_name"]').value = app.title;
+  });
   const mode = form.querySelector('[name="target_mode"]');
   const input = form.querySelector('[name="target_rules"]');
   const field = form.querySelector('[data-rmm-rules-field]');
@@ -47,7 +75,9 @@
     form.querySelector('[data-patch-app]').hidden = kind.value !== 'chocolatey';
     form.querySelector('[data-patch-windows]').hidden = kind.value !== 'windows';
   }
-  kind.addEventListener('change', updateKind);
+  let catalogLoaded = false;
+  kind.addEventListener('change', () => { updateKind(); if (kind.value === 'chocolatey' && !catalogLoaded) { catalogLoaded = true; findPackages(); } });
+  if (kind.value === 'chocolatey') { catalogLoaded = true; findPackages(); }
   updateKind();
   update();
 })();

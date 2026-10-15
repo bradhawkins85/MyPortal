@@ -138,6 +138,7 @@
             ("general", "ce-general", "Profile", "", true),
             ("addresses", "ce-addresses", "Addresses", company_addresses | length, true),
             ("company-variables", "ce-company-variables", "Variables", company_variables | length, true),
+            ("chocolatey-sources", "ce-chocolatey-sources", "Chocolatey sources", "", feature_pack_available('rmm')),
             ("tags", "ce-tags", "Tags", (ce_tags.tags | length) if ce_tags else "", ce_tags is not none),
             ("onboarding-answers", "ce-onboarding-answers", "Onboarding answers", "", ce_has_onboarding_answers),
           ]),
@@ -335,7 +336,10 @@
         </noscript>
       </div>
     </section>
-    <section class="card card--panel ce-section" id="ce-company-variables" data-company-edit-section="company-variables" aria-labelledby="ce-company-variables-title">
+    {% if feature_pack_available('rmm') %}<section class="card card--panel ce-section" id="ce-chocolatey-sources" data-company-edit-section="chocolatey-sources" aria-labelledby="choco-sources-heading">
+        {% include "admin/_chocolatey_sources.html" %}
+      </section>{% endif %}
+      <section class="card card--panel ce-section" id="ce-company-variables" data-company-edit-section="company-variables" aria-labelledby="ce-company-variables-title">
       <header class="ce-section__header">
         <div class="ce-section__heading">
           <h2 class="card__title" id="ce-company-variables-title">Variables</h2>
