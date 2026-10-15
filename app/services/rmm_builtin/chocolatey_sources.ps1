@@ -25,7 +25,7 @@ function Sync-ChocolateySources($sources) {
     }
     foreach ($source in $sources) {
         if (-not $source.enabled) { continue }
-        if ($source.name -notmatch '^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$' -or $source.url -notmatch '^https?://') {
+        if ($source.name -notmatch '^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$' -or $source.url -notmatch '^https?://' -or [int]$source.priority -lt 1) {
             throw 'Invalid Chocolatey source configuration.'
         }
         # Re-create an existing enabled source so removed/rotated credentials
@@ -33,7 +33,7 @@ function Sync-ChocolateySources($sources) {
         if ($existing -contains $source.name) {
             Source-Command @('source', 'remove', "--name=$($source.name)", '--yes', '--limit-output')
         }
-        $arguments = @('source', 'add', "--name=$($source.name)", "--source=$($source.url)", '--yes', '--limit-output')
+        $arguments = @('source', 'add', "--name=$($source.name)", "--source=$($source.url)", "--priority=$($source.priority)", '--yes', '--limit-output')
         if ($source.username) { $arguments += @("--user=$($source.username)", "--password=$($source.password)") }
         Source-Command $arguments
         Source-Command @('source', 'enable', "--name=$($source.name)", '--yes', '--limit-output')
@@ -43,9 +43,9 @@ function Sync-ChocolateySources($sources) {
     $enabledNames = @()
     foreach ($row in $actual) {
         $parts = ([string]$row).Split('|')
-        if ($parts.Count -lt 3) { throw 'Cannot parse Chocolatey source state.' }
+        if ($parts.Count -lt 7) { throw 'Cannot parse Chocolatey source state.' }
         if ($parts[2] -ieq 'false') {
-            $expected = @($sources | Where-Object { $_.enabled -and $_.name -ieq $parts[0] -and $_.url -eq $parts[1] })
+            $expected = @($sources | Where-Object { $_.enabled -and $_.name -ieq $parts[0] -and $_.url -eq $parts[1] -and [int]$_.priority -eq [int]$parts[6] })
             if ($expected.Count -ne 1) { throw 'Unexpected enabled Chocolatey source.' }
             $enabledNames += $parts[0]
         }

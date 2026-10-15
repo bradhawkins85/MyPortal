@@ -56,6 +56,17 @@ def definitions() -> list[dict]:
         names.add(name.casefold())
         sources.append({'key': key.removeprefix('CHOCO_SOURCE_'), 'name': name, 'url': args['-s'],
                         'username': args.get('-u', ''), 'password': args.get('-p', '')})
+    # Chocolatey treats lower positive priorities as preferred (zero is last).
+    # Keep display ordering stable while assigning execution order explicitly.
+    def order(source):
+        key = source['key']
+        if key == 'DEFAULT':
+            return (2, 0)
+        if key == 'CUSTOM':
+            return (1, 0)
+        return (0, int(key.removeprefix('CUSTOM')))
+    for priority, source in enumerate(sorted(sources, key=order), start=1):
+        source['priority'] = priority
     return sources
 
 

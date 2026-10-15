@@ -96,10 +96,19 @@ try {
                 try {
                     $id = [string]$app.package_id
                     if ($id -notmatch '^[a-z0-9][a-z0-9._-]{0,127}$') { throw 'Invalid package ID.' }
-                    $latestRows = @(Choco-Output @('search', $id, '--exact', '--limit-output'))
-                    $latestRow = @($latestRows | Where-Object { "$_" -match "^$([regex]::Escape($id))\|" })
-                    if ($latestRow.Count -ne 1) { throw "No unique stable Chocolatey version for $id." }
-                    $latest = ([string]$latestRow[0]).Split('|')[1]
+                    # Search each source separately: an aggregate search may select
+                    # a newer Default version over a package in a preferred custom feed.
+                    $latest = $null
+                    foreach ($source in @($plan.sources | Where-Object { $_.enabled } | Sort-Object { [int]$_.priority })) {
+                        $latestRows = @(Choco-Output @('search', $id, '--exact', '--limit-output', "--source=$($source.name)"))
+                        $latestRow = @($latestRows | Where-Object { "$_" -match "^$([regex]::Escape($id))\|" })
+                        if ($latestRow.Count -gt 1) { throw "No unique stable Chocolatey version for $id in $($source.name)." }
+                        if ($latestRow.Count -eq 1) {
+                            $latest = ([string]$latestRow[0]).Split('|')[1]
+                            break
+                        }
+                    }
+                    if (-not $latest) { throw "No stable Chocolatey version for $id in the enabled sources." }
                     $managed = @($local | Where-Object { "$_" -match "^$([regex]::Escape($id))\|" })
                     $chocoArgs = @('--yes', '--no-progress', '--use-package-exit-codes', '--ignore-detected-reboot',
                         "--version=$latest")

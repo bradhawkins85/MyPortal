@@ -202,3 +202,22 @@ async def test_all_sources_disabled_cancels_queued_app_job(sqlite_db, monkeypatc
     await sources.save(1, [])
     assert await rmm_scripts.claim_jobs(agent) == []
     assert (await rmm_repo.get_run(run_id))['status'] == 'cancelled'
+
+
+@pytest.mark.anyio
+async def test_numbered_sources_prioritize_numeric_order_default_last(sqlite_db, monkeypatch):
+    for suffix in ['10', '2', '', '1']:
+        monkeypatch.setenv('CHOCO_SOURCE_CUSTOM' + suffix,
+                          f'-n=custom{suffix or "unnumbered"} -s=https://repo{suffix}.example.com')
+    await sources.save(1, ['DEFAULT', 'CUSTOM', 'CUSTOM1', 'CUSTOM2', 'CUSTOM10'])
+    configured = await sources.for_company(1, secrets=True)
+    ordered = sorted(configured, key=lambda source: source['priority'])
+    assert [s['key'] for s in ordered] == ['CUSTOM1', 'CUSTOM2', 'CUSTOM10', 'CUSTOM', 'DEFAULT']
+    assert [s['priority'] for s in ordered] == [1, 2, 3, 4, 5]
+    # Disabling a preferred source keeps the remaining relative order intact.
+    await sources.save(1, ['DEFAULT', 'CUSTOM1', 'CUSTOM10'])
+    enabled = sorted((s for s in await sources.for_company(1, secrets=True) if s['enabled']),
+                     key=lambda source: source['priority'])
+    assert [s['key'] for s in enabled] == ['CUSTOM1', 'CUSTOM10', 'DEFAULT']
+    await sources.save(1, ['DEFAULT'])
+    assert [s['key'] for s in await sources.for_company(1, secrets=True) if s['enabled']] == ['DEFAULT']

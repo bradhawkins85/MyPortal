@@ -175,6 +175,16 @@ CHOCO_SOURCE_CUSTOM1='-n=internal -s="https://packages.example.com/chocolatey/"'
 CHOCO_SOURCE_CUSTOM2='-n=another -s="https://another.example.com/chocolatey/"'
 ```
 
+Enabled numbered sources are tried in numeric order (`CUSTOM1`, `CUSTOM2`,
+`CUSTOM3`, and so on), followed by unnumbered `CUSTOM`, with `DEFAULT` last.
+Disabled sources are skipped. Agents assign and verify positive Chocolatey source
+priorities in that order during daily checks and before app management. Package
+lookups use the first enabled source containing the package, even if a later feed
+has a newer version. Installation is pinned to the selected version; Chocolatey
+uses the configured source priorities to resolve that version and its dependencies.
+Default is used only when no preferred source contains the package; a repository
+error stops the job instead of silently changing feeds.
+
 `CUSTOM` and any positive numbered suffix are supported, including gaps. Source
 names (`-n`) must be unique. Each company starts with Default enabled and every
 Custom source disabled. Company administrators can manage their toggles at
