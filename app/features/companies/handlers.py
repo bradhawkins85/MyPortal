@@ -304,6 +304,13 @@ async def _render_company_edit_page(
             status_code=status.HTTP_404_NOT_FOUND, detail="Company not found"
         )
 
+    from app.services import chocolatey_sources
+    choco_sources, choco_sources_error = [], None
+    if _main()._feature_pack_available("rmm"):
+        try:
+            choco_sources = await chocolatey_sources.for_company(company_id)
+        except ValueError as exc:
+            choco_sources_error = str(exc)
     company_variables = await company_variables_repo.list_for_company(company_id)
     company_addresses = await company_addresses_repo.list_for_company(company_id)
 
@@ -943,6 +950,8 @@ async def _render_company_edit_page(
         "staff_field_config": staff_field_config,
         "staff_custom_field_definitions": staff_custom_field_definitions,
         **tray_context,
+        "chocolatey_sources": choco_sources,
+        "chocolatey_sources_error": choco_sources_error,
         "company_variables": company_variables,
         "company_addresses": company_addresses,
         "company_sla": await __import__("app.repositories.slas", fromlist=["slas"]).get_for_company(company_id),
@@ -3053,3 +3062,35 @@ async def admin_company_ticket_question_delete(
         await tq_repo.delete_question(question_id)
 
     return _company_tray_redirect(company_id, success="Question deleted.")
+
+
+async def admin_company_chocolatey_sources(company_id: int, request: Request):
+    from app.services import chocolatey_sources, audit
+    from app.repositories import companies as company_repo
+    user, redirect = await _main()._require_authenticated_user(request)
+    if redirect:
+        return redirect
+    await _ensure_company_permission(request, user, company_id, require_admin=True)
+    if not _main()._feature_pack_available("rmm"):
+        raise HTTPException(404, "RMM is unavailable")
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if request.method == "GET":
+        try:
+            sources, error = await chocolatey_sources.for_company(company_id), None
+        except ValueError as exc:
+            sources, error = [], str(exc)
+        return await _main()._render_template("admin/chocolatey_sources.html", request, user,
+            extra={"title": "Chocolatey sources", "company": company,
+                   "chocolatey_sources": sources, "chocolatey_sources_error": error})
+    form = await request.form()
+    keys = form.getlist("sources")
+    try:
+        await chocolatey_sources.save(company_id, keys)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    await audit.record(action="rmm.chocolatey.sources", request=request, user_id=user.get("id"),
+                       entity_type="company", entity_id=company_id, metadata={"enabled_sources": keys})
+    from app.security.flash import flash_redirect
+    return flash_redirect(f"/admin/companies/{company_id}/chocolatey-sources", "Chocolatey sources saved.", "success")

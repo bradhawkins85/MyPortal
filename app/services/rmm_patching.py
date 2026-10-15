@@ -14,6 +14,7 @@ from app.security.encryption import encrypt_secret
 from app.services import rmm_automation as automation, rmm_device_targeting as targeting, rmm_scripts, rmm_targeting
 from app.repositories import rmm_targeting as targeting_repo
 from app.services.rmm_scripts import RunRequestError
+from app.services import chocolatey_sources
 
 PACKAGE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 CATEGORIES = {"Security Updates", "Critical Updates", "Update Rollups", "Updates", "Definition Updates"}
@@ -146,12 +147,18 @@ def plan(policies: list[dict[str, Any]], selected: set[int]) -> dict[str, Any]:
             "reboot_policy": stamp(windows) if windows else None}
 
 
+def script_content() -> str:
+    return chocolatey_sources.script() + "\n" + (Path(__file__).parent / "rmm_builtin" / "patch.ps1").read_text(encoding="utf-8")
+
+
 async def queue(agent: Mapping[str, Any], policies: list[dict[str, Any]], selected: set[int],
                 expires_at: datetime, user_id: int | None = None) -> int | None:
     config = plan(policies, selected)
     if not config["policies"] or await repo.has_active_run(int(agent["id"])):
         return None
-    content = (Path(__file__).parent / "rmm_builtin" / "patch.ps1").read_text(encoding="utf-8")
+    if config["apps"]:
+        config["sources"] = await chocolatey_sources.for_company(int(agent["company_id"]), secrets=True)
+    content = script_content()
     script = {"id": None, "name": "Patch management", "path": "builtin/patch.ps1", "language": "powershell",
               "content_sha256": hashlib.sha256(content.encode()).hexdigest()}
     problem = rmm_scripts.device_problem(script, agent)
@@ -170,6 +177,13 @@ async def job_is_current(agent: Mapping[str, Any], job: Mapping[str, Any]) -> bo
     """Re-evaluate inventory, scopes and revisions immediately before dispatch."""
     try:
         config = json.loads(job["env"]["MYPORTAL_PATCH_PLAN"])
+        if "manual_upgrade" in config:
+            from app.services import rmm_software_updates
+            from app.services.chocolatey_catalog import CatalogUnavailable
+            try:
+                return await rmm_software_updates.is_current(dict(agent), config)
+            except CatalogUnavailable:
+                return False
         policies = await effective(await repo.list_policies(int(agent["company_id"])), agent)
         current = [stamp(p) for p in policies]
         return bool(config["policies"]) and all(p in current for p in config["policies"]) and (

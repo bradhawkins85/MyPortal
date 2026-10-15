@@ -33,4 +33,49 @@
   }
 
   document.querySelectorAll('[data-rmm-software-filter]').forEach(setUp);
+
+  // Check only visible rows, with bounded concurrency and a retry on feed errors.
+  const queue = [];
+  let running = 0;
+  function drain() {
+    while (running < 4 && queue.length) {
+      const form = queue.shift();
+      running += 1;
+      checkUpgrade(form).finally(() => { running -= 1; drain(); });
+    }
+  }
+  async function checkUpgrade(form) {
+    const row = form.closest('[data-rmm-software-row]');
+    const status = row.querySelector('[data-choco-version]');
+    const button = form.querySelector('[data-choco-upgrade-button]');
+    const retry = form.querySelector('[data-choco-retry]');
+    retry.hidden = true;
+    status.textContent = 'Checking…';
+    try {
+      const response = await fetch('/api/rmm/assets/' + form.dataset.assetId + '/software/upgrade?name=' + encodeURIComponent(form.dataset.name), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('Version check unavailable');
+      const data = await response.json();
+      const app = data.application;
+      status.textContent = app ? app.version : 'No unique package match';
+      button.hidden = !(app && app.can_upgrade && data.can_run);
+      if (app && !app.can_upgrade) status.textContent += ' · No upgrade available';
+      button.setAttribute('aria-label', 'Upgrade ' + form.dataset.name + (app ? ' to ' + app.version : ''));
+    } catch (error) {
+      status.textContent = 'Version check unavailable';
+      retry.hidden = false;
+    }
+  }
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        observer.unobserve(entry.target);
+        queue.push(entry.target.querySelector('[data-choco-upgrade]'));
+        drain();
+      }
+    });
+  });
+  document.querySelectorAll('[data-choco-upgrade]').forEach((form) => {
+    observer.observe(form.closest('[data-rmm-software-row]'));
+    form.querySelector('[data-choco-retry]').addEventListener('click', () => { queue.push(form); drain(); });
+  });
 })();

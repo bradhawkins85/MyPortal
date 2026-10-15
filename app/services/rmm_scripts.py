@@ -840,6 +840,20 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
                     error_message="Patch policy or device targeting changed before dispatch.",
                 )
                 continue
+        if row.get("run_source") == "patch":
+            # Source toggles and ENV credentials are resolved again at dispatch.
+            from app.services import chocolatey_sources
+            config = json.loads(job["env"]["MYPORTAL_PATCH_PLAN"])
+            if config.get("apps"):
+                try:
+                    config["sources"] = await chocolatey_sources.for_company(int(agent["company_id"]), secrets=True)
+                    if not any(source["enabled"] for source in config["sources"]):
+                        raise ValueError("No Chocolatey sources enabled")
+                except ValueError:
+                    await rmm_repo.finish_run(int(row["id"]), status="cancelled", exit_code=None, stdout="", stderr="",
+                        custom_values=[], error_message="Chocolatey sources are unavailable or disabled for this company.")
+                    continue
+                job["env"]["MYPORTAL_PATCH_PLAN"] = json.dumps(config)
         if job["files"] and not agent.get("script_files_supported"):
             await rmm_repo.finish_run(
                 int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],

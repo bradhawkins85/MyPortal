@@ -351,6 +351,12 @@ func loop(ctx context.Context) {
 		checksLoop(ctx, api)
 	}()
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		chocolateySourcesLoop(ctx, api, r)
+	}()
+
 	backoff := 5 * time.Second
 	lastCheckin := time.Time{}
 	for ctx.Err() == nil {
@@ -407,15 +413,20 @@ func execute(ctx context.Context, api *client.Client, r *runner.Runner, job clie
 	if err := api.Started(ctx, job.ID); err != nil {
 		log.Printf("run %d: could not mark as started: %v", job.ID, err)
 	}
-	result := r.RunStreaming(ctx, job, func(output client.Output) bool {
-		outputCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		if err := api.ReportOutput(outputCtx, job.ID, output); err != nil {
-			log.Printf("run %d: live output report failed: %v", job.ID, err)
-			return false
-		}
-		return true
-	})
+	var result client.Result
+	if !refreshChocolateyPlan(ctx, api, &job) {
+		result.Error = "Company Chocolatey sources could not be refreshed; app management was stopped."
+	} else {
+		result = r.RunStreaming(ctx, job, func(output client.Output) bool {
+			outputCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			if err := api.ReportOutput(outputCtx, job.ID, output); err != nil {
+				log.Printf("run %d: live output report failed: %v", job.ID, err)
+				return false
+			}
+			return true
+		})
+	}
 	// Report even if the service is stopping, so the run is not left open.
 	reportCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

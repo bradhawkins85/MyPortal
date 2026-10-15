@@ -6,6 +6,7 @@
 {% block header_actions %}{{ page_header_actions(([{"label": "Add policy", "type": "link", "variant": "primary", "href": "/rmm/patching?new=1#patch-form"}] if can_edit else []) + [{"label": "Run history", "type": "link", "href": "/rmm/scripts"}], menu_id="patch-actions") }}{% endblock %}
 {% block content %}
 <section class="rmm-page">
+{% if can_manage_sources %}<p><a class="button button--secondary" href="/admin/companies/{{ company.id }}/chocolatey-sources">Manage company Chocolatey sources</a></p>{% endif %}
 {% if editing %}
 {% set e = editing %}
 <section class="card card--panel" id="patch-form" aria-labelledby="patch-form-heading">
@@ -18,10 +19,17 @@
 <div class="form-field"><label class="form-label" for="patch-scope">Applies to</label><select class="form-input" id="patch-scope" name="scope"><option value="company" {% if e.scope == 'company' %}selected{% endif %}>This company</option>{% if is_super_admin %}<option value="global" {% if e.scope == 'global' %}selected{% endif %}>Every company</option>{% endif %}</select></div>
 <div class="form-field"><label class="form-label" for="patch-kind">Patch type</label><select class="form-input" id="patch-kind" name="kind"><option value="windows" {% if e.kind == 'windows' %}selected{% endif %}>Windows Update</option><option value="chocolatey" {% if e.kind == 'chocolatey' %}selected{% endif %}>Application via Chocolatey</option></select></div>
 <div data-patch-app>
+<div class="form-field">
+<label class="form-label" for="choco-search">Find an application in Chocolatey</label>
+<div class="form-field__group"><input type="search" class="form-input" id="choco-search" maxlength="255" placeholder="Search apps…" data-choco-search><button type="button" class="button button--secondary" data-choco-search-button>Search</button></div>
+<p role="status" data-choco-status></p>
+<label class="form-label" for="choco-results">Repository applications</label><select id="choco-results" class="form-input" data-choco-results><option value="">Search or browse applications</option></select>
+<p class="form-help">Selecting an app fills its package ID and name. Adjust the installed name to match the device inventory.</p>
+</div>
 <div class="form-field"><label class="form-label" for="patch-package">Chocolatey package ID</label><input class="form-input" id="patch-package" name="package_id" value="{{ e.package_id }}" maxlength="128" placeholder="googlechrome"></div>
 <div class="form-field"><label class="form-label" for="patch-display">Installed application name</label><input class="form-input" id="patch-display" name="display_name" value="{{ e.display_name }}" maxlength="255" placeholder="Google Chrome"><p class="form-help">Exact name from the device's installed software. Older Chocolatey installations are upgraded; older installations from another source receive a forced install.</p></div>
 <label><input type="checkbox" name="install_missing" value="1" {% if e.install_missing %}checked{% endif %}> Also install on devices where this app is missing</label>
-<p class="form-help">Chocolatey must already be installed. Uses stable versions from the Chocolatey community repository. Per-user applications are outside the service's inventory.</p>
+<p class="form-help">Chocolatey must already be installed. Lists stable versions from the Chocolatey community repository. Agents use the sources enabled for their company. Per-user applications are outside the service's inventory.</p>
 </div>
 <div data-patch-windows>
 <fieldset><legend>Windows update categories</legend>{% for category in categories %}<label><input type="checkbox" name="categories" value="{{ category }}" {% if category in e.categories %}checked{% endif %}> {{ category }}</label>{% endfor %}</fieldset>

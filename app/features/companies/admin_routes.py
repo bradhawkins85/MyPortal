@@ -271,3 +271,5 @@ _add(
 
 
 __all__ = ["router"]
+
+_add("/admin/companies/{company_id}/chocolatey-sources", handlers.admin_company_chocolatey_sources, ["GET", "POST"], response_class=HTMLResponse)

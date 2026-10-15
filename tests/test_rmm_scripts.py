@@ -26,6 +26,7 @@ from app.repositories import tags as tags_repo
 from app.repositories import tray as tray_repo
 from app.security.encryption import decrypt_secret
 from app.security.menu_permissions import normalize_menu_permissions
+from app.services import chocolatey_sources
 from app.services import gitea
 from app.services import rmm_script_parser as parser
 from app.services import rmm_script_layout, rmm_scripts
@@ -297,7 +298,8 @@ async def sqlite_db(monkeypatch):
                  "476_rmm_event_log_rule_schedules.sql", "477_rmm_device_inventory.sql", "478_rmm_checks.sql",
                  "479_rmm_check_target_rules.sql", "480_rmm_script_files.sql",
                  "484_rmm_agent_install_attempts.sql", "486_rmm_automation_target_rules.sql",
-                 "487_rmm_thermal_monitoring.sql", "488_rmm_software_history.sql", "491_rmm_patch_policies.sql", "493_rmm_script_parallel.sql"):
+                 "487_rmm_thermal_monitoring.sql", "488_rmm_software_history.sql", "491_rmm_patch_policies.sql",
+                 "493_rmm_script_parallel.sql", "494_rmm_chocolatey_sources.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -307,7 +309,7 @@ async def sqlite_db(monkeypatch):
     """)
     fake = _SqliteDb(conn)
     for module in (rmm_repo, automation_repo, remote_repo, event_log_repo, event_log_rules_repo, checks_repo, tags_repo,
-                   asset_fields_repo, company_variables_repo, assets_repo, deploy_repo, tray_repo, targeting_repo, patch_repo):
+                   asset_fields_repo, company_variables_repo, assets_repo, deploy_repo, tray_repo, targeting_repo, patch_repo, chocolatey_sources):
         monkeypatch.setattr(module, "db", fake)
 
     async def get_company(company_id):

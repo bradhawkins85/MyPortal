@@ -26,10 +26,15 @@ function Compare-Version($installed, $latest) {
 }
 function Choco-Output([string[]]$arguments) {
     $output = @(& $script:choco @arguments 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed ($LASTEXITCODE): $($output -join ' ')" }
+    if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed ($LASTEXITCODE)." }
     return $output
 }
 try {
+    if (@($plan.apps).Count -gt 0) {
+        if ($null -eq $plan.sources) { throw 'Company Chocolatey sources are missing.' }
+        Sync-ChocolateySources @($plan.sources)
+        if (@($plan.sources | Where-Object { $_.enabled }).Count -eq 0) { throw 'No Chocolatey sources are enabled.' }
+    }
     if (Pending-Reboot) {
         $rebootRequired = $true
         Write-Output 'Installation deferred: a restart is already pending.'
@@ -91,13 +96,22 @@ try {
                 try {
                     $id = [string]$app.package_id
                     if ($id -notmatch '^[a-z0-9][a-z0-9._-]{0,127}$') { throw 'Invalid package ID.' }
-                    $latestRows = @(Choco-Output @('search', $id, '--exact', '--limit-output', '--source=https://community.chocolatey.org/api/v2/'))
-                    $latestRow = @($latestRows | Where-Object { "$_" -match "^$([regex]::Escape($id))\|" })
-                    if ($latestRow.Count -ne 1) { throw "No unique stable Chocolatey version for $id." }
-                    $latest = ([string]$latestRow[0]).Split('|')[1]
+                    # Search each source separately: an aggregate search may select
+                    # a newer Default version over a package in a preferred custom feed.
+                    $latest = $null
+                    foreach ($source in @($plan.sources | Where-Object { $_.enabled } | Sort-Object { [int]$_.priority })) {
+                        $latestRows = @(Choco-Output @('search', $id, '--exact', '--limit-output', "--source=$($source.name)"))
+                        $latestRow = @($latestRows | Where-Object { "$_" -match "^$([regex]::Escape($id))\|" })
+                        if ($latestRow.Count -gt 1) { throw "No unique stable Chocolatey version for $id in $($source.name)." }
+                        if ($latestRow.Count -eq 1) {
+                            $latest = ([string]$latestRow[0]).Split('|')[1]
+                            break
+                        }
+                    }
+                    if (-not $latest) { throw "No stable Chocolatey version for $id in the enabled sources." }
                     $managed = @($local | Where-Object { "$_" -match "^$([regex]::Escape($id))\|" })
                     $chocoArgs = @('--yes', '--no-progress', '--use-package-exit-codes', '--ignore-detected-reboot',
-                        '--source=https://community.chocolatey.org/api/v2/', "--version=$latest")
+                        "--version=$latest")
                     $external = @($installedApps | Where-Object { $_.DisplayName -ieq $app.display_name })
                     if ($external.Count -gt 1) { throw "Multiple installations match $($app.display_name); review before patching." }
                     # Auto-updated binaries may be newer than Chocolatey's local metadata or catalog.

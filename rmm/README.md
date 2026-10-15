@@ -152,3 +152,59 @@ test runs validate the setup policy without installing a driver.
 The `myportal-rmm verify` command checks that the agent service is running and
 sends an authenticated check-in using its saved enrolment. The tray uses this
 after repairs and reports failure if either check fails.
+
+### Chocolatey application catalog and company sources
+
+Deploy MyPortal with migration **494** before updating the RMM agents. Chocolatey
+must already be installed on Windows endpoints. Patch management now browses and
+searches the stable Chocolatey community catalog. Selecting an application fills
+its package ID and display name; adjust the display name to match device inventory.
+The asset Software table checks visible rows against that catalog and offers
+**Upgrade** for a unique exact name/package match with a newer numeric version.
+Ambiguous names, unknown version formats, per-user applications, and versions
+already current or newer are not automatically upgraded. One-off upgrades are
+verified against current inventory again at dispatch and appear in Scripts run
+history. They do not reboot the device.
+
+Define available repositories in MyPortal's `.env` (or process environment):
+
+```dotenv
+CHOCO_SOURCE_DEFAULT='-n=chocolatey -s="https://community.chocolatey.org/api/v2/"'
+CHOCO_SOURCE_CUSTOM='-n=nexus -s="https://repo.example.com/repository/chocolatey/" -u username -p "password with spaces"'
+CHOCO_SOURCE_CUSTOM1='-n=internal -s="https://packages.example.com/chocolatey/"'
+CHOCO_SOURCE_CUSTOM2='-n=another -s="https://another.example.com/chocolatey/"'
+```
+
+Enabled numbered sources are tried in numeric order (`CUSTOM1`, `CUSTOM2`,
+`CUSTOM3`, and so on), followed by unnumbered `CUSTOM`, with `DEFAULT` last.
+Disabled sources are skipped. Agents assign and verify positive Chocolatey source
+priorities in that order during daily checks and before app management. Package
+lookups use the first enabled source containing the package, even if a later feed
+has a newer version. Installation is pinned to the selected version; Chocolatey
+uses the configured source priorities to resolve that version and its dependencies.
+Default is used only when no preferred source contains the package; a repository
+error stops the job instead of silently changing feeds.
+
+`CUSTOM` and any positive numbered suffix are supported, including gaps. Source
+names (`-n`) must be unique. Each company starts with Default enabled and every
+Custom source disabled. Company administrators can manage their toggles at
+`/admin/companies/{company_id}/chocolatey-sources`; super admins also see them in
+the company edit settings. Names are displayed, and URLs/passwords stay out of
+those settings and audit records. Store real credentials only in the deployment
+ENV, not in version control. Shell-quote values containing spaces; source strings
+are parsed as data and never evaluated as commands.
+
+The Windows RMM agent checks sources on startup and every 24 hours without
+requiring a patch policy or queued action, retrying failures after 15 minutes.
+Before app management it fetches current company sources again, reconciles and
+verifies them under the same mutex as app installation, and stops on failure.
+Repositories outside the enabled company list are disabled, including locally
+added repositories. Enabled sources are recreated to apply URL and credential
+changes. All-disabled companies perform no app management. Source definitions
+and credentials are refreshed at dispatch as well for older agents running new
+portal jobs; **the updated agent is required for the independent daily check**.
+
+Catalog listings use the public feed (cached for one hour); installation/version
+resolution uses the company's enabled feeds. A private-only company therefore
+needs matching packages in its own feed. The portal needs outbound HTTPS access
+to `community.chocolatey.org` for catalog listings.
