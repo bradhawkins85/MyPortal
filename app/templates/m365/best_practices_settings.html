@@ -13,15 +13,23 @@
 
 {% block styles %}
 <style>
-  .m365-best-practices-settings {
-    --m365-settings-sticky-top: 0;
+  .m365-best-practices-settings .m365-settings-table-scroll {
+    max-height: 70vh;
+    max-height: 70dvh;
+    overflow: auto;
+    scroll-padding-top: 4rem;
+  }
+
+  .m365-best-practices-settings .table {
+    border-collapse: separate;
+    border-spacing: 0;
   }
 
   .m365-best-practices-settings .table thead th {
     position: sticky;
-    top: var(--m365-settings-sticky-top);
+    top: 0;
     z-index: 5;
-    background: var(--color-surface-2);
+    background: var(--color-surface-2, var(--color-surface));
   }
 </style>
 {% endblock %}
@@ -51,7 +59,7 @@
       {# ---------------------------------------------------------------- #}
       {% set m365_catalog = catalog | rejectattr("cis_group", "defined") | list %}
       {% if m365_catalog %}
-      <div class="panel__body" style="padding:0">
+      <div class="panel__body m365-settings-table-scroll" style="padding:0" role="region" aria-label="Microsoft 365 best practice settings" tabindex="0">
         <table class="table">
           <thead>
             <tr>
@@ -140,7 +148,7 @@
       <div style="padding:1rem 1rem 0;border-top:1px solid var(--color-border,#e5e7eb)">
         <h3 style="margin:0 0 0.5rem;font-size:0.95rem;font-weight:600">CIS Intune Benchmark – Windows</h3>
       </div>
-      <div class="panel__body" style="padding:0">
+      <div class="panel__body m365-settings-table-scroll" style="padding:0" role="region" aria-label="CIS Intune Windows settings" tabindex="0">
         <table class="table">
           <thead>
             <tr>
@@ -191,7 +199,7 @@
       <div style="padding:1rem 1rem 0;border-top:1px solid var(--color-border,#e5e7eb)">
         <h3 style="margin:0 0 0.5rem;font-size:0.95rem;font-weight:600">CIS Intune Benchmark – iOS / iPadOS</h3>
       </div>
-      <div class="panel__body" style="padding:0">
+      <div class="panel__body m365-settings-table-scroll" style="padding:0" role="region" aria-label="CIS Intune iOS and iPadOS settings" tabindex="0">
         <table class="table">
           <thead>
             <tr>
@@ -242,7 +250,7 @@
       <div style="padding:1rem 1rem 0;border-top:1px solid var(--color-border,#e5e7eb)">
         <h3 style="margin:0 0 0.5rem;font-size:0.95rem;font-weight:600">CIS Intune Benchmark – macOS</h3>
       </div>
-      <div class="panel__body" style="padding:0">
+      <div class="panel__body m365-settings-table-scroll" style="padding:0" role="region" aria-label="CIS Intune macOS settings" tabindex="0">
         <table class="table">
           <thead>
             <tr>
