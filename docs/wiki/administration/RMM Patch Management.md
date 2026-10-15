@@ -72,6 +72,41 @@ Installer exit codes 1641 and 3010 indicate a required reboot; other nonzero
 installation codes fail. Review packages before deployment: package scripts and
 vendor installers can have their own restart behavior.
 
+## Device Windows updates
+
+Open a Windows asset with an RMM agent and choose **Windows updates** to see the updates the
+device still needs and when each update was installed. Apply migration **496** with the portal
+deployment; no new agent version is required. Technicians with the `menu.rmm_scripts` permission
+see the section; those who can run scripts can also scan and install.
+
+- **Missing updates** lists what the device's configured update service (Windows Update,
+  Microsoft Update or WSUS) still offers: classification, MSRC severity, release date, size, the
+  date MyPortal first saw it missing and the last failed attempt with its error code. Hidden updates
+  and drivers are not listed, matching patch policies.
+- **Installed updates** shows each update's latest successful installation from the device's own
+  Windows Update history, with who installed it (MyPortal, Windows automatic updates or another
+  client). Updates later uninstalled are left out. Hotfixes Windows reports as installed but that
+  are missing from its history, such as packages installed with DISM, are added with their install
+  date.
+- **Update history** lists every installation and uninstallation attempt with its result.
+  Defender definition updates are limited to the latest 25 entries.
+
+A built-in, read-only **Windows Update scan** runs through the RMM runner: once a day on connected
+Windows devices, when a technician presses **Scan now** (the request waits up to 24 hours for an
+offline device), and at the end of every patch job that installs Windows updates. Scans appear in
+**Scripts** run history as **Windows Update scan**. A failed or uncollected scan is retried after six
+hours. If part of a scan fails, for example the search for missing updates cannot reach WSUS, the
+section shows the error and keeps what the device last reported for that part.
+
+To push updates, select one or more missing updates (up to 100) and choose **Install selected
+updates**. Choose whether the device may restart afterwards — never, only when no one is signed
+in, or after warning signed-in users — and the warning time. The installation is a patch job, so it
+follows the one-patch-job-per-device rule and its results appear in **Scripts** run history as
+**Windows updates**. Patch policy categories, deferral and active hours do not apply to these
+chosen updates. A restart that is already pending postpones installation; choose a restart option to
+clear it first. Updates that need someone at the device cannot be selected. Queued installations
+expire if the device does not collect them within an hour.
+
 ## Reboot management
 
 The effective Windows Update policy controls reboot decisions for both Windows and

@@ -1023,7 +1023,10 @@ async def apply_custom_values(run: Mapping[str, Any], values: list[dict[str, str
 
 async def record_output(agent: Mapping[str, Any], run_id: int, payload: Mapping[str, Any]) -> bool:
     """Store live output without applying custom values or finishing the run."""
+    from app.services import rmm_windows_updates
+
     stdout, _ = _take_session_markers(readable_output(payload.get("stdout")))
+    stdout = await rmm_windows_updates.strip_live_output(agent, run_id, stdout)
     stderr, _ = _take_session_markers(readable_output(payload.get("stderr")))
     return await rmm_repo.update_run_output(
         run_id, int(agent["id"]), stdout=_truncate(stdout), stderr=_truncate(stderr),
@@ -1049,11 +1052,13 @@ async def record_result(agent: Mapping[str, Any], run_id: int, payload: Mapping[
         status = "failed"
     else:
         status = "completed"
-    from app.services import rmm_remote_control
+    from app.services import rmm_remote_control, rmm_windows_updates
 
     values = normalise_custom_values(payload.get("custom_values"))
     # Session values (a remote access ID and password) never stay in the output.
     stdout, session_values = rmm_remote_control.take_session_markers(readable_output(payload.get("stdout")))
+    # Built-in scans report the device's Windows Update status in one output line.
+    stdout = await rmm_windows_updates.capture(agent, {**run, "id": run_id}, stdout)
     session_values.update({item["name"].lower(): item["value"] for item in values if item["scope"] == "session"})
     custom_values = await apply_custom_values(run, [item for item in values if item["scope"] != "session"])
     if session_values:

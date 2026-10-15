@@ -22,6 +22,10 @@
   software the RMM agent reports daily, on start and when asked to refresh,
   ready for filtering which devices scripts run on
   (:mod:`app.services.rmm_inventory`)
+* each asset page's Windows updates section: the updates a Windows device
+  still needs and its installation history, from a built-in scan run daily
+  and on request, with a button to install the chosen updates
+  (:mod:`app.services.rmm_windows_updates`)
 * ``POST /api/rmm/assets/{id}/agent-install`` push the RMM agent to a device
   through its tray app, and the tray app's download and result APIs
   (:mod:`app.services.rmm_agent_deploy`)
@@ -45,7 +49,8 @@ from __future__ import annotations
 
 from app.core.features import FeaturePack
 
-from app.services import rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_scripts, rmm_patching
+from app.services import (rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_scripts, rmm_patching,
+                          rmm_windows_updates)
 
 from .agent_deploy_routes import router as agent_deploy_router
 from .automation_routes import router as automation_router
@@ -56,6 +61,7 @@ from .finding_routes import router as finding_router
 from .inventory_routes import router as inventory_router
 from .remote_control_routes import router as remote_control_router
 from .patch_routes import router as patch_router
+from .windows_update_routes import router as windows_update_router
 from .routes import router
 
 # Event log rules that schedule a script are queued on the automation tick,
@@ -64,14 +70,17 @@ from .routes import router
 rmm_automation.register_tick_job(rmm_event_log_rules.run_due_scheduled)
 rmm_automation.register_tick_job(rmm_checks.tick)
 rmm_automation.register_tick_job(rmm_patching.tick)
+# Connected Windows devices scan for Windows updates once a day.
+rmm_automation.register_tick_job(rmm_windows_updates.tick)
 # Findings analyses start on the tick when one is due and run in the background.
 rmm_automation.register_tick_job(rmm_findings.tick)
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.16.0",
+    version="1.17.0",
     routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router,
-             event_log_rule_router, inventory_router, check_router, finding_router, patch_router),
+             event_log_rule_router, inventory_router, check_router, finding_router, patch_router,
+             windows_update_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),
 )
 

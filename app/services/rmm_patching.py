@@ -14,7 +14,7 @@ from app.security.encryption import encrypt_secret
 from app.services import rmm_automation as automation, rmm_device_targeting as targeting, rmm_scripts, rmm_targeting
 from app.repositories import rmm_targeting as targeting_repo
 from app.services.rmm_scripts import RunRequestError
-from app.services import chocolatey_sources
+from app.services import chocolatey_sources, rmm_windows_updates
 
 PACKAGE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 CATEGORIES = {"Security Updates", "Critical Updates", "Update Rollups", "Updates", "Definition Updates"}
@@ -148,7 +148,9 @@ def plan(policies: list[dict[str, Any]], selected: set[int]) -> dict[str, Any]:
 
 
 def script_content() -> str:
-    return chocolatey_sources.script() + "\n" + (Path(__file__).parent / "rmm_builtin" / "patch.ps1").read_text(encoding="utf-8")
+    # Windows Update functions report the device's new update status after installing.
+    return (chocolatey_sources.script() + "\n" + rmm_windows_updates.functions_script() + "\n"
+            + (Path(__file__).parent / "rmm_builtin" / "patch.ps1").read_text(encoding="utf-8"))
 
 
 async def queue(agent: Mapping[str, Any], policies: list[dict[str, Any]], selected: set[int],
@@ -177,6 +179,8 @@ async def job_is_current(agent: Mapping[str, Any], job: Mapping[str, Any]) -> bo
     """Re-evaluate inventory, scopes and revisions immediately before dispatch."""
     try:
         config = json.loads(job["env"]["MYPORTAL_PATCH_PLAN"])
+        if "manual_windows" in config:
+            return rmm_windows_updates.install_is_current(agent, config)
         if "manual_upgrade" in config:
             from app.services import rmm_software_updates
             from app.services.chocolatey_catalog import CatalogUnavailable

@@ -1983,6 +1983,11 @@ async def asset_detail_page(
         rmm_context["inventory"] = await rmm_inventory_routes.asset_inventory_context(
             company_id, asset_id, can_refresh=can_run_scripts,
         )
+        from app.features.rmm import windows_update_routes as rmm_windows_update_routes
+
+        rmm_context["windows_updates"] = await rmm_windows_update_routes.asset_windows_updates_context(
+            company_id, asset_id, can_run=can_run_scripts,
+        )
     # Tags belong to the tags pack; the card disappears with it.
     tags_context = None
     if not customer_safe and main_module._feature_pack_available("tags"):

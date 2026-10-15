@@ -1,0 +1,111 @@
+{# The asset page's Windows updates section (rmm.windows_updates from app.features.rmm.windows_update_routes). #}
+{% from "macros/counters.html" import counter_strip %}
+{% set wu = rmm.windows_updates %}{% set scan = wu.scan %}
+<section class="card card--panel ce-section" id="windows-updates" data-asset-edit-section="windows-updates" aria-labelledby="asset-windows-updates-heading">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="asset-windows-updates-heading">Windows updates</h2>
+      <p class="card__subtitle">{% if scan %}Scanned <span data-utc="{{ scan.scanned_at }}">{{ scan.scanned_at }}</span> using {{ scan.update_source or 'Windows Update' }}. Install dates come from the device's own Windows Update history.{% else %}This device has not reported its Windows updates yet. Connected devices scan once a day{% if wu.can_run %}, or press <strong>Scan now</strong>{% endif %}.{% endif %}{% if wu.scan_pending %} <strong>A scan is waiting for the device.</strong>{% endif %}{% if wu.install_pending %} <strong>A patch job is waiting or running on this device.</strong>{% endif %}</p>
+    </div>
+    {% if wu.can_run %}<form method="post" action="/rmm/assets/{{ asset.id }}/windows-updates/scan">{% include "partials/csrf.html" %}
+      <button type="submit" class="button button--ghost button--small"{% if wu.scan_pending %} disabled{% endif %}>Scan now</button>
+    </form>{% endif %}
+  </header>
+  {% if scan %}
+  <div class="ce-section__body rmm-inventory rmm-updates">
+    {{ counter_strip([
+      {"label": "Missing", "value": wu.counts.missing, "variant": "warning" if wu.counts.missing else "success", "href": "#rmm-updates-missing"},
+      {"label": "Security & critical missing", "value": wu.counts.important, "variant": "danger" if wu.counts.important else "success", "href": "#rmm-updates-missing"},
+      {"label": "Installed", "value": wu.counts.installed, "variant": "info", "href": "#rmm-updates-installed"},
+      {"label": "Failed in the last 30 days", "value": wu.counts.failed_recently, "variant": "danger" if wu.counts.failed_recently else "neutral", "href": "#rmm-updates-history"},
+      {"label": "Restart pending", "value": "Yes" if scan.reboot_pending else "No", "variant": "warning" if scan.reboot_pending else "neutral"},
+    ], class="rmm-updates__stats") }}
+    {% if scan.errors %}<details class="rmm-inventory__errors" open><summary>Some of the device's update details could not be read ({{ scan.errors | length }})</summary>
+      <ul>{% for error in scan.errors %}<li><code>{{ error }}</code></li>{% endfor %}</ul>
+      <p class="text-muted">The lists below keep what the device last reported successfully.</p>
+    </details>{% endif %}
+
+    <h3 class="rmm-inventory__heading" id="rmm-updates-missing">Missing updates</h3>
+    {% if not scan.missing_checked_at %}
+    <p class="text-muted">The device has not yet completed a search for missing updates.</p>
+    {% elif wu.missing %}
+    <form method="post" action="/rmm/assets/{{ asset.id }}/windows-updates/install" class="rmm-updates__form" data-rmm-updates-install data-max="{{ wu.max_selected }}">
+      {% include "partials/csrf.html" %}
+      <p class="text-muted">Last checked <span data-utc="{{ scan.missing_checked_at }}">{{ scan.missing_checked_at }}</span>. Hidden updates and drivers are not listed.</p>
+      <label class="visually-hidden" for="rmm-updates-missing-filter">Find missing updates</label>
+      <input type="search" id="rmm-updates-missing-filter" class="form-input rmm-inventory__filter" placeholder="Find an update or KB…" autocomplete="off" data-rmm-updates-filter="rmm-updates-missing-table">
+      <div class="table-wrapper rmm-inventory__software"><table class="table table--stack-mobile" id="rmm-updates-missing-table">
+        <caption class="visually-hidden">Updates this device still needs</caption>
+        <thead><tr>
+          {% if wu.can_run %}<th scope="col"><input type="checkbox" id="rmm-updates-select-all" data-rmm-updates-select-all><label class="visually-hidden" for="rmm-updates-select-all">Select every listed update that can be installed remotely</label></th>{% endif %}
+          <th scope="col">Update</th><th scope="col">Classification</th><th scope="col">Severity</th><th scope="col">Released</th><th scope="col">Size</th><th scope="col">Missing since</th><th scope="col">Last attempt</th>
+        </tr></thead>
+        <tbody>{% for update in wu.missing %}<tr data-rmm-update-row>
+          {% if wu.can_run %}<td data-label="Install">{% if update.is_interactive %}<span class="text-muted" title="Needs someone at the device">—</span>{% else %}<input type="checkbox" name="update_ids" value="{{ update.update_id }}" id="rmm-update-{{ loop.index }}" data-rmm-update-choice><label class="visually-hidden" for="rmm-update-{{ loop.index }}">Install {{ update.title }}</label>{% endif %}</td>{% endif %}
+          <td data-label="Update"><div>{{ update.title }}
+            <ul class="rmm-chips" aria-label="Details">{% for kb in (update.kb or '').split(',') if kb %}<li class="rmm-chip">{{ kb }}</li>{% endfor %}{% if update.is_optional %}<li class="rmm-chip">Optional</li>{% endif %}{% if update.is_downloaded %}<li class="rmm-chip">Downloaded</li>{% endif %}{% if update.reboot_behavior == 1 %}<li class="rmm-chip rmm-chip--muted">Needs a restart</li>{% endif %}{% if update.is_interactive %}<li class="rmm-chip rmm-chip--muted">Needs someone at the device</li>{% endif %}</ul></div>
+          </td>
+          <td data-label="Classification">{{ update.classification or '—' }}</td>
+          <td data-label="Severity">{% if update.severity %}<span class="status status--{{ 'danger' if update.severity == 'Critical' else 'warning' if update.severity == 'Important' else 'neutral' }}">{{ update.severity }}</span>{% else %}—{% endif %}</td>
+          <td data-label="Released" class="rmm-updates__nowrap">{{ update.released_on or '—' }}</td>
+          <td data-label="Size" class="rmm-updates__nowrap">{{ update.size_label }}</td>
+          <td data-label="Missing since" class="rmm-updates__nowrap"><span data-utc="{{ update.first_seen_at }}">{{ update.first_seen_at }}</span></td>
+          <td data-label="Last attempt">{% if update.last_failure %}<span><span class="status status--danger">Failed</span> <span data-utc="{{ update.last_failure.occurred_at }}">{{ update.last_failure.occurred_at }}</span>{% if update.last_failure.hresult %} <code>{{ update.last_failure.hresult }}</code>{% endif %}</span>{% else %}—{% endif %}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+      <p class="text-muted" data-rmm-updates-empty role="status" hidden>No updates match the search.</p>
+      {% if wu.can_run %}
+      <fieldset class="rmm-updates__actions">
+        <legend class="visually-hidden">Install the selected updates</legend>
+        <label class="form-label" for="rmm-updates-reboot"><span>After installing</span>
+          <select class="form-input" id="rmm-updates-reboot" name="reboot_mode" data-rmm-updates-reboot>{% for value, label in wu.reboot_modes.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
+        </label>
+        <label class="form-label" for="rmm-updates-delay"><span>Restart warning <span class="text-muted">(minutes)</span></span>
+          <input class="form-input" type="number" id="rmm-updates-delay" name="reboot_delay_minutes" min="5" max="120" step="1" value="{{ wu.default_reboot_delay }}" data-rmm-updates-delay>
+        </label>
+        <button type="submit" class="button button--primary button--small" data-rmm-updates-submit{% if wu.install_pending %} disabled{% endif %}>Install selected updates</button>
+        <span class="text-muted" data-rmm-updates-count role="status" aria-live="polite"></span>
+      </fieldset>
+      <p class="text-muted">The device downloads and installs the chosen updates from its update service, then sends a new scan. A restart that is already pending postpones installation, so choose a restart option to clear it first. Restarts happen when you ask, regardless of patch policy active hours. Results appear in <a href="/rmm/scripts">Scripts</a> run history.</p>
+      {% endif %}
+    </form>
+    {% else %}
+    <p class="text-muted">Nothing is missing: this device has every update its update service offers (checked <span data-utc="{{ scan.missing_checked_at }}">{{ scan.missing_checked_at }}</span>).</p>
+    {% endif %}
+
+    <h3 class="rmm-inventory__heading" id="rmm-updates-installed">Installed updates</h3>
+    {% if wu.installed %}
+    <label class="visually-hidden" for="rmm-updates-installed-filter">Find installed updates</label>
+    <input type="search" id="rmm-updates-installed-filter" class="form-input rmm-inventory__filter" placeholder="Find an update or KB…" autocomplete="off" data-rmm-updates-filter="rmm-updates-installed-table">
+    <div class="table-wrapper rmm-inventory__software"><table class="table table--stack-mobile" id="rmm-updates-installed-table">
+      <caption class="visually-hidden">Updates installed on this device, newest first</caption>
+      <thead><tr><th scope="col">Update</th><th scope="col">KB</th><th scope="col">Installed</th><th scope="col">Result</th><th scope="col">Installed by</th></tr></thead>
+      <tbody>{% for update in wu.installed %}<tr data-rmm-update-row>
+        <td data-label="Update"><span>{{ update.title }}{% if update.source == 'hotfix' %} <span class="text-muted">(installed hotfix)</span>{% endif %}</span></td>
+        <td data-label="KB">{{ (update.kb or '—') | replace(',', ', ') }}</td>
+        <td data-label="Installed" class="rmm-updates__nowrap">{% if update.installed_on %}{{ update.installed_on }}{% elif update.occurred_at %}<span data-utc="{{ update.occurred_at }}">{{ update.occurred_at }}</span>{% else %}Unknown{% endif %}</td>
+        <td data-label="Result"><span class="status status--{{ update.result_status }}">{{ update.result_label }}</span></td>
+        <td data-label="Installed by">{{ update.client_label }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="text-muted" data-rmm-updates-empty role="status" hidden>No updates match the search.</p>
+    {% else %}<p class="text-muted">The device did not report any installed updates.</p>{% endif %}
+
+    {% if wu.history %}
+    <details class="rmm-updates__history" id="rmm-updates-history"><summary>Update history: every install and uninstall attempt ({{ wu.history | length }})</summary>
+      <div class="table-wrapper rmm-inventory__software"><table class="table table--stack-mobile">
+        <caption class="visually-hidden">Windows Update history on this device, newest first</caption>
+        <thead><tr><th scope="col">Update</th><th scope="col">When</th><th scope="col">Action</th><th scope="col">Result</th><th scope="col">By</th></tr></thead>
+        <tbody>{% for entry in wu.history %}<tr>
+          <td data-label="Update">{{ entry.title }}</td>
+          <td data-label="When" class="rmm-updates__nowrap">{% if entry.occurred_at %}<span data-utc="{{ entry.occurred_at }}">{{ entry.occurred_at }}</span>{% else %}Unknown{% endif %}</td>
+          <td data-label="Action">{{ {"install": "Install", "uninstall": "Uninstall"}.get(entry.operation, "Other") }}</td>
+          <td data-label="Result"><span><span class="status status--{{ entry.result_status }}">{{ entry.result_label }}</span>{% if entry.hresult %} <code>{{ entry.hresult }}</code>{% endif %}</span></td>
+          <td data-label="By">{{ entry.client_label }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    </details>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>

@@ -842,7 +842,10 @@
     } else if (run.run_source === 'remote_control') {
       source = ' · remote control' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     } else if (run.run_source === 'patch') {
-      source = ' · patch policy' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
+      source = (run.script_name === 'Install Windows updates' ? ' · Windows updates' : ' · patch policy')
+        + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
+    } else if (run.run_source === 'update_scan') {
+      source = ' · Windows Update scan' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     } else if (run.run_source === 'tray') {
       source = ' · tray menu';
     }

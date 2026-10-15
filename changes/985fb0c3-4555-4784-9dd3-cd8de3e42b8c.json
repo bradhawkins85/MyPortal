@@ -1,0 +1,7 @@
+{
+  "guid": "985fb0c3-4555-4784-9dd3-cd8de3e42b8c",
+  "occurred_at": "2026-10-15T09:40Z",
+  "change_type": "Feature",
+  "summary": "RMM: asset pages show each Windows device's missing and installed Windows updates, and technicians can install chosen updates",
+  "content_hash": "aed0f836755b158c4487fb064cccaca44a7b535b968b3c931d9c23016834b7b4"
+}
