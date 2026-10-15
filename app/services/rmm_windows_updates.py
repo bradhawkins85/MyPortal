@@ -15,6 +15,15 @@ scan and patch runs can report a status.
 shares the one-patch-job-per-device rule and run history of patch policies)
 that installs just the chosen missing updates, with the restart the
 technician picks. No new RMM agent version is needed.
+
+Technicians can block updates for one device, one company or every company
+(:func:`block_updates`, :func:`block_kb`). A block names a KB number, or the
+update ID of an update without one. MyPortal never installs a blocked update:
+chosen installs refuse it and every patch job skips it. Scan and patch jobs
+receive the device's blocks in ``MYPORTAL_WU_BLOCKS`` when the device collects
+them (:func:`blocks_env`), hide blocked updates from Windows Update so
+automatic updates leave them alone, and show again the updates MyPortal hid
+that are no longer blocked.
 """
 
 from __future__ import annotations
@@ -62,6 +71,7 @@ MAX_HOTFIXES = 1000
 
 UPDATE_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _KB = re.compile(r"\bKB(\d{5,9})\b", re.IGNORECASE)
+_KB_INPUT = re.compile(r"^\s*(?:KB)?\s*(\d{5,9})\s*$", re.IGNORECASE)
 _HRESULT = re.compile(r"^0x[0-9A-F]{8}$")
 
 OPERATIONS = {1: "install", 2: "uninstall"}
@@ -80,6 +90,10 @@ REBOOT_MODES = {
     "always": "Restart if needed, after warning signed-in users",
 }
 DEFAULT_REBOOT_DELAY_MINUTES = 15
+BLOCK_SCOPES = {"device": "This device", "company": "This company", "global": "Every company"}
+MAX_REASON = 500
+# Windows limits one environment variable to 32,767 characters.
+MAX_RELEASE = 500
 _CLIENT_LABELS = {
     "myportal patch management": "MyPortal",
     "updateorchestrator": "Windows automatic updates",
@@ -240,6 +254,7 @@ def normalise(payload: Any) -> dict[str, Any]:
                 "reboot_behavior": _int(item.get("reboot_behavior"), 0, 2),
                 "is_interactive": item.get("interactive") is True,
                 "is_optional": item.get("optional") is True,
+                "is_hidden": item.get("hidden") is True,
             })
     history = None
     if isinstance(payload.get("history"), list):
@@ -275,7 +290,12 @@ def normalise(payload: Any) -> dict[str, Any]:
                 "occurred_at": datetime(installed_on.year, installed_on.month, installed_on.day) if installed_on else None,
                 "client_application": _text(item.get("installed_by")),
             })
+    changes = {}
+    for key in ("hid", "unhid"):
+        values = payload.get(key) if isinstance(payload.get(key), list) else []
+        changes[key] = list(dict.fromkeys(filter(None, (_update_id(value) for value in values[:MAX_MISSING]))))
     return {
+        **changes,
         "scanned_at": _time(payload.get("scanned_at")),
         "source": _text(payload.get("source")),
         "reboot_pending": payload.get("reboot_pending") is True,
@@ -296,9 +316,12 @@ async def ingest(agent: Mapping[str, Any], run: Mapping[str, Any], payload: Any)
         reboot_pending=state["reboot_pending"], errors=state["errors"], missing=state["missing"],
         history=state["history"], hotfixes=state["hotfixes"],
     )
+    present = {item["update_id"] for item in state["missing"]} if state["missing"] is not None else None
+    await repo.save_hidden(int(agent["id"]), hid=state["hid"], unhid=state["unhid"], present=present)
     summary = {key: None if state[key] is None else len(state[key]) for key in ("missing", "history", "hotfixes")}
-    log_info("RMM Windows Update status received", agent_id=agent.get("id"), run_id=run.get("id"), **summary)
-    return {**summary, "errors": len(state["errors"])}
+    log_info("RMM Windows Update status received", agent_id=agent.get("id"), run_id=run.get("id"), **summary,
+             hid=len(state["hid"]), unhid=len(state["unhid"]))
+    return {**summary, "errors": len(state["errors"]), "hid": len(state["hid"]), "unhid": len(state["unhid"])}
 
 
 def _summary_note(summary: Mapping[str, Any]) -> str:
@@ -309,7 +332,10 @@ def _summary_note(summary: Mapping[str, Any]) -> str:
         parts.append(f"{summary['history']} history entr{'ies' if summary['history'] != 1 else 'y'}")
     if summary["hotfixes"] is not None:
         parts.append(f"{summary['hotfixes']} installed hotfix{'es' if summary['hotfixes'] != 1 else ''}")
-    return "MyPortal saved the Windows Update status: " + (", ".join(parts) or "nothing could be read") + "."
+    note = "MyPortal saved the Windows Update status: " + (", ".join(parts) or "nothing could be read") + "."
+    if summary.get("hid") or summary.get("unhid"):
+        note += f" Blocked updates hidden: {summary.get('hid', 0)}; unblocked updates shown again: {summary.get('unhid', 0)}."
+    return note
 
 
 async def capture(agent: Mapping[str, Any], run: Mapping[str, Any], stdout: str) -> str:
@@ -411,6 +437,9 @@ async def queue_install(agent: Mapping[str, Any], update_ids: list[Any], *, rebo
                                           "Scan again and choose from the new list."})
     if any(row.get("is_interactive") for row in chosen):
         raise RunRequestError({"updates": "Updates that need someone at the device cannot be installed remotely."})
+    rules = await repo.list_device_blocks(int(agent["company_id"]), agent.get("asset_id"))
+    if any(blocked_by(row, rules) for row in chosen):
+        raise RunRequestError({"updates": "Blocked updates cannot be installed. Unblock them first."})
     if await patch_repo.has_active_run(agent_id):
         raise RunRequestError({"updates": "A patch job is already waiting or running on this device."})
     from app.services import rmm_patching
@@ -461,6 +490,137 @@ async def tick() -> None:
             await queue_scan(agent, expires_in=AUTO_SCAN_EXPIRY)
         except Exception as exc:  # noqa: BLE001 - one device must not stop the others
             log_warning("Could not queue a Windows Update scan", agent_id=agent.get("id"), error=str(exc))
+
+
+# --------------------------------------------------------------------------- #
+# Blocking updates
+# --------------------------------------------------------------------------- #
+
+
+def block_scope(rule: Mapping[str, Any]) -> str:
+    if rule.get("asset_id") is not None:
+        return "device"
+    return "company" if rule.get("company_id") is not None else "global"
+
+
+def block_key(update: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    """``(kb, update_id)`` for a new block: the KB number when the update has
+    exactly one, which covers its other revisions and architectures; otherwise
+    the update itself."""
+
+    kbs = [kb for kb in str(update.get("kb") or "").split(",") if kb]
+    return (kbs[0], None) if len(kbs) == 1 else (None, str(update["update_id"]).lower())
+
+
+def rule_matches(rule: Mapping[str, Any], update: Mapping[str, Any]) -> bool:
+    if rule.get("update_id"):
+        return str(rule["update_id"]).lower() == str(update.get("update_id") or "").lower()
+    return bool(rule.get("kb")) and str(rule["kb"]).upper() in str(update.get("kb") or "").upper().split(",")
+
+
+def blocked_by(update: Mapping[str, Any], rules: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    return [rule for rule in rules if rule_matches(rule, update)]
+
+
+def can_edit_block(rule: Mapping[str, Any], *, can_edit: bool, is_super_admin: bool) -> bool:
+    """Company and device blocks need Scripts write access; blocks for every company need a super admin."""
+
+    return bool(can_edit) and (block_scope(rule) != "global" or bool(is_super_admin))
+
+
+async def blocks_env(agent: Mapping[str, Any]) -> dict[str, Any]:
+    """What a scan or patch job needs at dispatch: the device's blocked KBs and
+    update IDs, and the updates MyPortal hid that may be shown again (the
+    device keeps hiding any that are still blocked)."""
+
+    rules = await repo.list_device_blocks(int(agent["company_id"]), agent.get("asset_id"))
+    return {
+        "kbs": sorted({str(rule["kb"]).upper() for rule in rules if rule.get("kb")}),
+        "update_ids": sorted({str(rule["update_id"]).lower() for rule in rules if rule.get("update_id")}),
+        "release": (await repo.list_hidden(int(agent["id"])))[:MAX_RELEASE],
+    }
+
+
+def _scope_ids(scope: Any, *, company_id: int, asset_id: int | None, is_super_admin: bool) -> tuple[int | None, int | None]:
+    if scope not in BLOCK_SCOPES or (scope == "device" and asset_id is None):
+        raise RunRequestError({"scope": "Choose where to block the update."})
+    if scope == "global" and not is_super_admin:
+        raise RunRequestError({"scope": "Only super admins can block updates for every company."})
+    if scope == "global":
+        return None, None
+    return int(company_id), (int(asset_id) if scope == "device" else None)
+
+
+def _reason(value: Any) -> str | None:
+    return _text(value, MAX_REASON)
+
+
+async def block_updates(agent: Mapping[str, Any], update_ids: list[Any], *, scope: Any, reason: Any,
+                        user_id: int | None, is_super_admin: bool) -> int:
+    """Block chosen missing updates of a device; return how many new blocks were added."""
+
+    wanted = list(dict.fromkeys(filter(None, (_update_id(value) for value in update_ids))))
+    if not wanted:
+        raise RunRequestError({"updates": "Choose at least one missing update."})
+    if len(wanted) > MAX_SELECTED:
+        raise RunRequestError({"updates": f"Choose at most {MAX_SELECTED} updates at a time."})
+    company_id, asset_id = _scope_ids(scope, company_id=int(agent["company_id"]), asset_id=agent.get("asset_id"),
+                                      is_super_admin=is_super_admin)
+    missing = {str(row["update_id"]).lower(): row for row in await repo.list_missing(int(agent["id"]))}
+    if any(update_id not in missing for update_id in wanted):
+        raise RunRequestError({"updates": "Some of the chosen updates are no longer missing on this device. "
+                                          "Scan again and choose from the new list."})
+    added = 0
+    for update_id in wanted:
+        row = missing[update_id]
+        kb, block_update_id = block_key(row)
+        if await repo.find_block(company_id=company_id, asset_id=asset_id, kb=kb, update_id=block_update_id):
+            continue
+        await repo.create_block(company_id=company_id, asset_id=asset_id, kb=kb, update_id=block_update_id,
+                                title=row["title"], reason=_reason(reason), user_id=user_id)
+        added += 1
+    return added
+
+
+async def block_kb(company_id: int, kb: Any, *, scope: Any, reason: Any, user_id: int | None,
+                   is_super_admin: bool) -> int | None:
+    """Block a KB number for a company or every company before any device reports it.
+    Returns the new block's ID, or ``None`` when it was already blocked there."""
+
+    match = _KB_INPUT.match(str(kb or ""))
+    if not match:
+        raise RunRequestError({"kb": "Enter a KB number, such as KB5031356."})
+    if scope not in ("company", "global"):
+        raise RunRequestError({"scope": "Choose this company or every company."})
+    company, _asset = _scope_ids(scope, company_id=company_id, asset_id=None, is_super_admin=is_super_admin)
+    number = "KB" + match.group(1)
+    if await repo.find_block(company_id=company, asset_id=None, kb=number, update_id=None):
+        return None
+    return await repo.create_block(company_id=company, asset_id=None, kb=number, update_id=None, title=number,
+                                   reason=_reason(reason), user_id=user_id)
+
+
+async def editable_block(block_id: int, company_id: int, *, can_edit: bool, is_super_admin: bool) -> dict[str, Any]:
+    """A block this technician's company can see and they may remove."""
+
+    rule = await repo.get_block(block_id)
+    if not rule or rule.get("company_id") not in (None, int(company_id)):
+        raise LookupError("block not found")
+    if not can_edit_block(rule, can_edit=can_edit, is_super_admin=is_super_admin):
+        raise PermissionError("Only super admins can unblock updates for every company.")
+    return rule
+
+
+def describe_block(rule: Mapping[str, Any], *, can_edit: bool, is_super_admin: bool) -> dict[str, Any]:
+    item = _iso(rule)
+    scope = block_scope(rule)
+    item["scope"] = scope
+    item["scope_label"] = {"device": rule.get("asset_name") or f"Asset {rule.get('asset_id')}",
+                           "company": rule.get("company_name") or "This company",
+                           "global": "Every company"}[scope]
+    item["matches_label"] = rule.get("kb") or "This update only"
+    item["can_unblock"] = can_edit_block(rule, can_edit=can_edit, is_super_admin=is_super_admin)
+    return item
 
 
 # --------------------------------------------------------------------------- #
@@ -516,7 +676,8 @@ def _display(row: Mapping[str, Any]) -> dict[str, Any]:
     return item
 
 
-async def asset_context(agent: Mapping[str, Any] | None, *, can_run: bool) -> dict[str, Any] | None:
+async def asset_context(agent: Mapping[str, Any] | None, *, can_run: bool,
+                        is_super_admin: bool = False) -> dict[str, Any] | None:
     """The asset page's Windows updates section, or ``None`` for devices
     without an RMM agent on Windows."""
 
@@ -527,18 +688,22 @@ async def asset_context(agent: Mapping[str, Any] | None, *, can_run: bool) -> di
     received = scan.get("received_at") if scan else None
     missing = await repo.list_missing(agent_id) if received else []
     history = await repo.list_history(agent_id) if received else []
+    can_edit = bool(can_run) and agent.get("status") == "active"
+    rules = [describe_block(rule, can_edit=can_edit, is_super_admin=is_super_admin)
+             for rule in await repo.list_device_blocks(int(agent["company_id"]), agent.get("asset_id"))]
     failures: dict[str, Mapping[str, Any]] = {}
     for row in sorted(history, key=_sort_time, reverse=True):
         if row.get("source") == "history" and row.get("operation") == "install" and row.get("result") == "failed":
             failures.setdefault(_key(row), row)
-    missing_items = []
+    missing_items, blocked_items = [], []
     for row in missing:
         item = _iso(row)
         failure = failures.get(_key(row))
         item["last_failure"] = _display(failure) if failure else None
         item["important"] = row.get("classification") in IMPORTANT_CLASSIFICATIONS or row.get("severity") in IMPORTANT_SEVERITIES
         item["size_label"] = format_bytes(row.get("size_bytes")) or "—"
-        missing_items.append(item)
+        item["blocked_by"] = blocked_by(row, rules)
+        (blocked_items if item["blocked_by"] else missing_items).append(item)
     installed = [_display(row) for row in installed_updates(history)]
     attempts = [_display(row) for row in sorted(history, key=_sort_time, reverse=True)
                 if row.get("source") == "history"]
@@ -547,10 +712,13 @@ async def asset_context(agent: Mapping[str, Any] | None, *, can_run: bool) -> di
         "scan": _iso(scan) if received else None,
         "requested_at": _iso(scan).get("scan_requested_at") if scan else None,
         "missing": missing_items,
+        "blocked": blocked_items,
+        "block_rules": rules,
         "installed": installed,
         "history": attempts,
         "counts": {
             "missing": len(missing_items),
+            "blocked": len(blocked_items),
             "important": sum(1 for item in missing_items if item["important"]),
             "installed": len(installed),
             "failed_recently": sum(1 for item in attempts
@@ -558,7 +726,8 @@ async def asset_context(agent: Mapping[str, Any] | None, *, can_run: bool) -> di
         },
         "scan_pending": await repo.has_active_scan(agent_id, RUN_SOURCE),
         "install_pending": await patch_repo.has_active_run(agent_id),
-        "can_run": bool(can_run) and agent.get("status") == "active",
+        "can_run": can_edit,
+        "block_scopes": {key: label for key, label in BLOCK_SCOPES.items() if key != "global" or is_super_admin},
         "reboot_modes": REBOOT_MODES,
         "default_reboot_delay": DEFAULT_REBOOT_DELAY_MINUTES,
         "max_selected": MAX_SELECTED,

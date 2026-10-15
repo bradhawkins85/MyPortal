@@ -56,6 +56,35 @@
 {% if policies %}<div class="table-wrapper"><table class="table"><caption class="visually-hidden">Patch policies</caption><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Schedule</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>
 {% for p in policies %}<tr><td data-label="Policy"><strong>{{ p.name }}</strong><br>{{ 'Windows Update' if p.kind == 'windows' else p.package_id }}</td><td data-label="Scope">{{ 'Every company' if p.company_id is none else 'This company' }}{% if p.target_rules is not none %}<br>Advanced rules{% endif %}</td><td data-label="Schedule">{{ p.cron }}<br>{{ p.timezone }}</td><td data-label="Status">{{ 'Enabled' if p.is_enabled else 'Disabled' }}</td><td data-label="Actions">{% if p.can_edit %}<a class="button button--ghost button--small" href="/rmm/patching?policy={{ p.id }}#patch-form">Edit</a>{% if p.is_enabled %}<form method="post" action="/rmm/patching/{{ p.id }}/run" data-confirm="Run this patch policy now on matching Windows devices?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button--secondary button--small">Run now</button></form>{% endif %}<form method="post" action="/rmm/patching/{{ p.id }}/delete" data-confirm="Delete this patch policy?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button--ghost button--small">Delete</button></form>{% endif %}</td></tr>{% endfor %}
 </tbody></table></div>{% else %}<div class="empty-state"><h3 class="empty-state__title">No patch policies</h3><p class="empty-state__subtitle">Add a Windows Update or application policy to start managing patches.</p></div>{% endif %}
-</div></section></section>
+</div></section>
+<section class="card card--panel" id="blocked-updates" aria-labelledby="blocked-updates-heading">
+<header class="card__header card__header--stacked"><h2 class="card__title" id="blocked-updates-heading">Blocked Windows updates</h2><p class="card__subtitle">MyPortal never installs a blocked update: patch policies skip it and technicians cannot choose it on a device. Devices hide blocked updates from Windows Update at their next daily scan, so automatic updates leave them alone, and show them again after you unblock. Block an update for one device, this company or every company from the device's asset page, or block a KB number here. Blocks for every company need a super admin.</p></header>
+<div class="card__body rmm-inventory">
+{% if can_edit %}<form class="form" method="post" action="/rmm/patching/blocks">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<fieldset class="rmm-updates__actions"><legend class="visually-hidden">Block an update by KB number</legend>
+<label class="form-label" for="block-kb"><span>KB number</span><input class="form-input" id="block-kb" name="kb" required maxlength="16" placeholder="KB5031356" autocomplete="off"></label>
+<label class="form-label" for="block-scope"><span>Block for</span><select class="form-input" id="block-scope" name="scope"><option value="company">This company</option>{% if is_super_admin %}<option value="global">Every company</option>{% endif %}</select></label>
+<label class="form-label" for="block-reason"><span>Reason <span class="text-muted">optional</span></span><input class="form-input" id="block-reason" name="reason" maxlength="500" placeholder="Why it is blocked"></label>
+<button class="button button--secondary button--small" type="submit">Block update</button>
+</fieldset>
+<p class="form-help">A KB number blocks every revision and architecture of that update, including updates devices have not reported yet.</p>
+</form>{% endif %}
+{% if blocks %}
+<label class="visually-hidden" for="blocked-updates-filter">Find blocked updates</label>
+<input type="search" id="blocked-updates-filter" class="form-input rmm-inventory__filter" placeholder="Find an update, KB or device…" autocomplete="off" data-rmm-updates-filter="blocked-updates-table">
+<div class="table-wrapper"><table class="table table--stack-mobile" id="blocked-updates-table"><caption class="visually-hidden">Blocked Windows updates for this company, its devices and every company</caption>
+<thead><tr><th scope="col">Update</th><th scope="col">Applies to</th><th scope="col">Reason</th><th scope="col">Blocked by</th>{% if can_edit %}<th scope="col"><span class="visually-hidden">Actions</span></th>{% endif %}</tr></thead>
+<tbody>{% for b in blocks %}<tr data-rmm-update-row>
+<td data-label="Update"><span><strong>{{ b.matches_label }}</strong>{% if b.title and b.title != b.kb %}<br><span class="text-muted">{{ b.title }}</span>{% endif %}</span></td>
+<td data-label="Applies to">{% if b.scope == 'device' %}<a href="/assets/{{ b.asset_id }}#windows-updates">{{ b.scope_label }}</a>{% elif b.scope == 'company' %}This company{% else %}Every company{% endif %}</td>
+<td data-label="Reason">{{ b.reason or '—' }}</td>
+<td data-label="Blocked by"><span>{{ b.created_by_email or '—' }}<br><span class="text-muted" data-utc="{{ b.created_at }}">{{ b.created_at }}</span></span></td>
+{% if can_edit %}<td class="table__actions">{% if b.can_unblock %}<form method="post" action="/rmm/patching/blocks/{{ b.id }}/delete" data-rmm-updates-confirm="Unblock {{ b.matches_label }}{{ ' for every company' if b.scope == 'global' else ' for this company' if b.scope == 'company' else ' on ' ~ b.scope_label }}? MyPortal may install it again."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="button button--ghost button--small">Unblock<span class="visually-hidden"> {{ b.matches_label }}</span></button></form>{% else %}<span class="text-muted">Super admins only</span>{% endif %}</td>{% endif %}
+</tr>{% endfor %}</tbody></table></div>
+<p class="text-muted" data-rmm-updates-empty role="status" hidden>No blocked updates match the search.</p>
+{% else %}<div class="empty-state"><h3 class="empty-state__title">No blocked updates</h3><p class="empty-state__subtitle">Block an update by KB number here, or choose missing updates in the Windows updates section of a device's asset page.</p></div>{% endif %}
+</div></section>
+</section>
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_patching.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_patching.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_windows_updates.js') }}" defer></script>{% endblock %}

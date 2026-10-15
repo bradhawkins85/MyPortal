@@ -70,7 +70,9 @@ try {
                     'Definition Updates' = 'e0789628-ce08-4437-be74-2495b842f43b'
                 }
                 $allowed = @($plan.windows.categories | ForEach-Object { $ids[$_] })
+                $blocks = Get-MyPortalUpdateBlocks
                 foreach ($update in $found.Updates) {
+                    if (Test-MyPortalUpdateBlocked $update $blocks) { Write-Output "Blocked in MyPortal, skipped: $($update.Title)"; continue }
                     $match = @($update.Categories | Where-Object { $allowed -contains $_.CategoryID }).Count -gt 0
                     if ($match -and $update.LastDeploymentChangeTime.ToUniversalTime() -le $cutoff -and
                         -not $update.InstallationBehavior.CanRequestUserInput) {
@@ -89,13 +91,17 @@ try {
                 $wanted = @($plan.manual_windows.update_ids | ForEach-Object { ([string]$_).ToLowerInvariant() })
                 $session = New-Object -ComObject Microsoft.Update.Session
                 $session.ClientApplicationID = 'MyPortal Patch Management'
-                $found = $session.CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
+                # A technician may choose an update someone hid on the device; blocked ones are never installed.
+                $found = $session.CreateUpdateSearcher().Search("IsInstalled=0 and Type='Software'")
                 $updates = New-Object -ComObject Microsoft.Update.UpdateColl
+                $blocks = Get-MyPortalUpdateBlocks
                 foreach ($update in $found.Updates) {
                     if ($wanted -notcontains ([string]$update.Identity.UpdateID).ToLowerInvariant()) { continue }
+                    if (Test-MyPortalUpdateBlocked $update $blocks) { Write-Output "Blocked in MyPortal, skipped: $($update.Title)"; continue }
                     if ($update.InstallationBehavior.CanRequestUserInput) {
                         Write-Output "Skipped, needs someone at the device: $($update.Title)"; continue
                     }
+                    if ($update.IsHidden) { $update.IsHidden = $false }
                     if (-not $update.EulaAccepted) { $update.AcceptEula() }
                     [void]$updates.Add($update)
                     Write-Output "Windows Update: $($update.Title)"

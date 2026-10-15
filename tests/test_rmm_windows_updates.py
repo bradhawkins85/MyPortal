@@ -14,7 +14,6 @@ from urllib.parse import urlencode
 import pytest
 from starlette.requests import Request
 
-from app.core.database import Database
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_windows_updates as repo
 from app.services import rmm_patching, rmm_scripts
@@ -31,15 +30,12 @@ OLD = "3e4f5a6b-7c8d-4e9f-a0b1-c2d3e4f5a6b7"
 
 
 @pytest.fixture
-async def updates_db(sqlite_db, monkeypatch):
-    sql = (ROOT / "migrations" / "496_rmm_windows_updates.sql").read_text()
-    await sqlite_db.conn.executescript(Database()._adapt_sql_for_sqlite(sql))
-
+async def updates_db(sqlite_db):
+    # sqlite_db applies migrations 496 and 497 and points this repository at it.
     async def execute_many(sql, rows):
         await sqlite_db.conn.executemany(sqlite_db._sql(sql), list(rows))
 
     sqlite_db.execute_many = execute_many
-    monkeypatch.setattr(repo, "db", sqlite_db)
     yield sqlite_db
 
 
@@ -295,12 +291,17 @@ async def test_asset_section_lists_missing_installed_and_actions(updates_db):
 
     await _finish_scan(agent, _status(reboot_pending=True))
     context = await routes.asset_windows_updates_context(1, 10, can_run=True)
-    assert context["counts"] == {"missing": 2, "important": 1, "installed": 2, "failed_recently": 1}
+    assert context["counts"] == {"missing": 2, "blocked": 0, "important": 1, "installed": 2, "failed_recently": 1}
     cumulative = next(item for item in context["missing"] if item["update_id"] == CU)
     assert cumulative["last_failure"]["hresult"] == "0x80240022" and cumulative["size_label"] == "700 MB"
     html = env.get_template("rmm/_asset_windows_updates.html").render(rmm={"windows_updates": context}, asset={"id": 10}, csrf_token="t")
     assert 'id="windows-updates"' in html and 'action="/rmm/assets/10/windows-updates/install"' in html
-    assert f'name="update_ids" value="{CU}"' in html and f'value="{EDGE}"' not in html
+    assert f'name="update_ids" value="{CU}"' in html
+    # Updates that need someone at the device can be chosen to block, not to install.
+    assert f'value="{EDGE}" id="rmm-update-2" data-rmm-update-choice data-interactive>' in html
+    assert 'formaction="/rmm/assets/10/windows-updates/block"' in html and 'name="block_scope"' in html
+    assert '<option value="global">' not in html  # not a super admin
+    assert "None of the updates this device needs are blocked." in html
     assert "Needs someone at the device" in html and "&lt;b&gt;Edge&lt;/b&gt;" in html and "<b>Edge" not in html
     assert "0x80240022" in html and "Install selected updates" in html and 'name="reboot_mode"' in html
     assert "Security Update (KB5029999)" in html and "2026-08-01" in html and "Windows automatic updates" in html
@@ -312,6 +313,158 @@ async def test_asset_section_lists_missing_installed_and_actions(updates_db):
     detail = (ROOT / "app/templates/assets/detail.html").read_text()
     env.parse(detail)
     assert '{% include "rmm/_asset_windows_updates.html" %}' in detail and "rmm_windows_updates.js" in detail
+
+
+@pytest.mark.anyio
+async def test_blocking_moves_updates_out_of_missing_and_stops_installs(updates_db):
+    from app.repositories import rmm_patching as patch_repo
+
+    _, agent = await _enrol(updates_db)
+    await _finish_scan(agent, _status())
+    with pytest.raises(RunRequestError, match="super admins"):
+        await updates.block_updates(agent, [CU], scope="global", reason="", user_id=9, is_super_admin=False)
+    for chosen, scope in (([], "device"), ([OLD], "device"), ([CU], "nowhere")):
+        with pytest.raises(RunRequestError):
+            await updates.block_updates(agent, chosen, scope=scope, reason="", user_id=9, is_super_admin=True)
+    assert await updates.block_updates(agent, [CU.upper()], scope="device", reason="Breaks printing", user_id=9,
+                                       is_super_admin=False) == 1
+    assert await updates.block_updates(agent, [CU], scope="device", reason="", user_id=9, is_super_admin=False) == 0
+    # Without a KB number the block names the update itself.
+    assert await updates.block_updates(agent, [EDGE], scope="company", reason="", user_id=9, is_super_admin=False) == 1
+    assert await updates.block_kb(1, " kb5030000 ", scope="global", reason="Bad", user_id=9, is_super_admin=True)
+    rules = {(updates.block_scope(rule), rule["kb"], rule["update_id"]) for rule in await repo.list_device_blocks(1, 10)}
+    assert rules == {("device", "KB5031356", None), ("company", None, EDGE), ("global", "KB5030000", None)}
+    assert await repo.list_device_blocks(1, 11) == [r for r in await repo.list_device_blocks(1, 11) if r["asset_id"] is None]
+    assert len(await repo.list_device_blocks(2, 20)) == 1  # another company only sees the global block
+
+    context = await updates.asset_context(agent, can_run=True)
+    assert context["missing"] == [] and [item["update_id"] for item in context["blocked"]] == [CU, EDGE]
+    assert context["counts"]["blocked"] == 2 and context["counts"]["missing"] == 0
+    assert context["blocked"][0]["blocked_by"][0]["reason"] == "Breaks printing"
+    assert {rule["scope"]: rule["can_unblock"] for rule in context["block_rules"]} == {
+        "device": True, "company": True, "global": False}
+    assert "global" not in context["block_scopes"]
+    assert "global" in (await updates.asset_context(agent, can_run=True, is_super_admin=True))["block_scopes"]
+    with pytest.raises(RunRequestError, match="Blocked updates cannot be installed"):
+        await updates.queue_install(agent, [CU], reboot_mode="never", reboot_delay_minutes=15, user_id=9)
+    assert not await patch_repo.has_active_run(agent["id"])
+
+    html = _environment().get_template("rmm/_asset_windows_updates.html").render(
+        rmm={"windows_updates": context}, asset={"id": 10}, csrf_token="t")
+    assert 'id="rmm-updates-blocked-table"' in html and "hidden at the next scan" in html
+    assert "Breaks printing" in html and 'action="/rmm/patching/blocks/' in html and 'name="asset_id" value="10"' in html
+    assert "Nothing is missing apart from blocked updates" in html and "Every company" in html
+
+
+@pytest.mark.anyio
+async def test_devices_receive_blocks_at_dispatch_and_hidden_updates_are_tracked(updates_db):
+    _, agent = await _enrol(updates_db)
+    await _finish_scan(agent, _status())
+    await updates.block_updates(agent, [CU], scope="device", reason="", user_id=9, is_super_admin=False)
+    run_id = await updates.queue_scan(agent)
+    [job] = await rmm_scripts.claim_jobs(agent)
+    assert json.loads(job["env"]["MYPORTAL_WU_BLOCKS"]) == {"kbs": ["KB5031356"], "update_ids": [], "release": []}
+    hidden = _status(hid=[CU, "not-a-guid"])
+    hidden["missing"][0]["hidden"] = True
+    await rmm_scripts.record_result(agent, run_id, {"exit_code": 0, "stdout": _output(hidden)})
+    assert "Blocked updates hidden: 1" in (await rmm_repo.get_run(run_id))["stdout"]
+    assert await repo.list_hidden(agent["id"]) == [CU]
+    context = await updates.asset_context(agent, can_run=True)
+    assert context["blocked"][0]["is_hidden"]
+
+    # Unblocked: the next job may show it again, and the device reports it did.
+    for rule in await repo.list_device_blocks(1, 10):
+        await repo.delete_block(rule["id"])
+    run_id = await updates.queue_scan(agent)
+    [job] = await rmm_scripts.claim_jobs(agent)
+    assert json.loads(job["env"]["MYPORTAL_WU_BLOCKS"])["release"] == [CU]
+    await rmm_scripts.record_result(agent, run_id, {"exit_code": 0, "stdout": _output(_status(unhid=[CU]))})
+    assert await repo.list_hidden(agent["id"]) == []
+    # Updates the device no longer offers stop being tracked.
+    await repo.save_hidden(agent["id"], hid=[EDGE], unhid=[], present=None)
+    await repo.save_hidden(agent["id"], hid=[], unhid=[], present={CU})
+    assert await repo.list_hidden(agent["id"]) == []
+    # Patch jobs receive blocks too.
+    await updates.queue_install(agent, [CU], reboot_mode="never", reboot_delay_minutes=15, user_id=9)
+    [job] = await rmm_scripts.claim_jobs(agent)
+    assert "MYPORTAL_WU_BLOCKS" in job["env"] and "MYPORTAL_PATCH_PLAN" in job["env"]
+
+
+@pytest.mark.anyio
+async def test_block_and_unblock_routes_check_scope_and_audit(updates_db, monkeypatch):
+    from fastapi import HTTPException
+    from app.features.rmm import windows_update_routes as routes
+
+    _, agent = await _enrol(updates_db)
+    await _finish_scan(agent, _status())
+    audits = []
+    user = {"id": 9}
+
+    async def context(request, **kwargs):
+        return user, {}, 1, True
+
+    async def audit(**kwargs):
+        audits.append(kwargs)
+
+    monkeypatch.setattr(routes, "_context", context)
+    monkeypatch.setattr(routes.audit_service, "record", audit)
+    response = await routes.block_windows_updates(10, _form_request("/block", [
+        ("update_ids", CU), ("block_scope", "company"), ("block_reason", "Breaks VPN")]))
+    assert response.headers["location"] == "/assets/10#windows-updates"
+    assert audits[-1]["action"] == "rmm.windows_updates.block" and audits[-1]["metadata"]["scope"] == "company"
+    assert len(await rmm_repo.next_jobs_for_agent(agent["id"])) == 1  # rescans so the device hides it now
+    await routes.block_windows_updates(10, _form_request("/block", [("update_ids", CU), ("block_scope", "global")]))
+    assert len(audits) == 1  # super admins only
+
+    response = await routes.block_kb(_form_request("/blocks", [("kb", "5030000"), ("scope", "company")]))
+    assert response.headers["location"] == "/rmm/patching#blocked-updates" and len(audits) == 2
+    await routes.block_kb(_form_request("/blocks", [("kb", "KB5030000"), ("scope", "company")]))
+    await routes.block_kb(_form_request("/blocks", [("kb", "not a kb"), ("scope", "company")]))
+    assert len(audits) == 2  # duplicate and invalid
+    user["is_super_admin"] = True
+    await routes.block_kb(_form_request("/blocks", [("kb", "KB5040000"), ("scope", "global")]))
+    user.pop("is_super_admin")
+    api = await routes.blocks_api(_form_request("/api", []))
+    by_kb = {block["kb"]: block for block in api["blocks"]}
+    assert set(by_kb) == {"KB5031356", "KB5030000", "KB5040000"} and not by_kb["KB5040000"]["can_unblock"]
+
+    with pytest.raises(HTTPException) as exc:
+        await routes.unblock(by_kb["KB5040000"]["id"], _form_request("/delete", []))
+    assert exc.value.status_code == 403
+    other = await repo.create_block(company_id=2, asset_id=None, kb="KB5000001", update_id=None, title="KB5000001",
+                                    reason=None, user_id=None)
+    with pytest.raises(HTTPException) as exc:
+        await routes.unblock(other, _form_request("/delete", []))
+    assert exc.value.status_code == 404
+    response = await routes.unblock(by_kb["KB5031356"]["id"], _form_request("/delete", [("asset_id", "10")]))
+    assert response.headers["location"] == "/assets/10#windows-updates"
+    assert audits[-1]["action"] == "rmm.windows_updates.unblock" and audits[-1]["before"]["kb"] == "KB5031356"
+    assert {block["kb"] for block in (await routes.blocks_api(_form_request("/api", [])))["blocks"]} == {"KB5030000", "KB5040000"}
+
+
+def test_patch_management_lists_blocks_with_unblock_and_block_by_kb():
+    env = _environment()
+    env.globals["static_url"] = lambda path: path
+    template = env.get_template("rmm/patching.html")
+    blocks = [
+        {"id": 1, "scope": "device", "scope_label": "PC-01", "asset_id": 10, "kb": "KB5031356", "matches_label": "KB5031356",
+         "title": "<b>Cumulative</b>", "reason": "Breaks VPN", "created_by_email": "tech@example.com",
+         "created_at": "2026-10-15T00:00:00", "can_unblock": True},
+        {"id": 2, "scope": "global", "scope_label": "Every company", "asset_id": None, "kb": "KB5030000",
+         "matches_label": "KB5030000", "title": "KB5030000", "reason": None, "created_by_email": None,
+         "created_at": "2026-10-14T00:00:00", "can_unblock": False},
+    ]
+    context = template.new_context({"blocks": blocks, "policies": [], "can_edit": True, "is_super_admin": False,
+                                    "csrf_token": "t", "editing": None, "errors": {}, "company": {"id": 1}})
+    html = "".join(template.blocks["content"](context))
+    assert 'id="blocked-updates"' in html and 'action="/rmm/patching/blocks"' in html and 'name="kb"' in html
+    assert 'action="/rmm/patching/blocks/1/delete"' in html and 'action="/rmm/patching/blocks/2/delete"' not in html
+    assert 'href="/assets/10#windows-updates">PC-01</a>' in html and "Super admins only" in html
+    assert "&lt;b&gt;Cumulative&lt;/b&gt;" in html and '<option value="global">' not in html
+    empty = template.new_context({"blocks": [], "policies": [], "can_edit": False, "is_super_admin": False,
+                                  "csrf_token": "t", "editing": None, "errors": {}, "company": {"id": 1}})
+    html = "".join(template.blocks["content"](empty))
+    assert "No blocked updates" in html and 'action="/rmm/patching/blocks"' not in html
 
 
 def _form_request(path: str, data: list[tuple[str, str]]) -> Request:
@@ -364,12 +517,12 @@ async def test_routes_queue_scan_and_install_with_audit(updates_db, monkeypatch)
 
 COM_MOCKS = r'''
 $global:Installed = New-Object System.Collections.Generic.List[string]
-function New-FakeUpdate($id, $title, $interactive) {
+function New-FakeUpdate($id, $title, $interactive, $kb) {
     $update = [pscustomobject]@{
-        Identity = [pscustomobject]@{ UpdateID = $id; RevisionNumber = 1 }; Title = $title; KBArticleIDs = @('5031356')
+        Identity = [pscustomobject]@{ UpdateID = $id; RevisionNumber = 1 }; Title = $title; KBArticleIDs = @($kb)
         Categories = @([pscustomobject]@{ CategoryID = '0FA1201D-4330-4FA8-8AE9-B877473B6441'; Name = 'Sicherheit'; Type = 'UpdateClassification' })
         MsrcSeverity = 'Critical'; MaxDownloadSize = [decimal]1048576; LastDeploymentChangeTime = [datetime]'2026-10-08'
-        IsDownloaded = $false; EulaAccepted = $false; BrowseOnly = $false
+        IsDownloaded = $false; EulaAccepted = $false; BrowseOnly = $false; IsHidden = ($env:TEST_HIDDEN -eq $id)
         InstallationBehavior = [pscustomobject]@{ RebootBehavior = 1; CanRequestUserInput = $interactive }
     }
     $update | Add-Member ScriptMethod AcceptEula { $this.EulaAccepted = $true }
@@ -383,9 +536,9 @@ function New-Object {
             $searcher | Add-Member ScriptMethod Search { param($query)
                 if ($env:TEST_SEARCH_FAILS) { throw 'Search failed {0}' }
                 [pscustomobject]@{ Updates = @(
-                    (New-FakeUpdate $env:TEST_CU '2026-10 Cumulative Update (KB5031356)' $false),
-                    (New-FakeUpdate $env:TEST_OTHER 'Other update (KB5031357)' $false),
-                    (New-FakeUpdate $env:TEST_INTERACTIVE 'Interactive update (KB5031358)' $true)) } }
+                    (New-FakeUpdate $env:TEST_CU '2026-10 Cumulative Update (KB5031356)' $false '5031356'),
+                    (New-FakeUpdate $env:TEST_OTHER 'Other update (KB5031357)' $false '5031357'),
+                    (New-FakeUpdate $env:TEST_INTERACTIVE 'Interactive update (KB5031358)' $true '5031358')) } }
             $searcher | Add-Member ScriptMethod GetTotalHistoryCount { 1 }
             $searcher | Add-Member ScriptMethod QueryHistory { param($start, $count) @(
                 [pscustomobject]@{ Title = 'Earlier (KB5030000)'; UpdateIdentity = [pscustomobject]@{ UpdateID = $env:TEST_OTHER }
@@ -492,3 +645,36 @@ def test_patch_policy_still_installs_by_category_and_reports_status(tmp_path):
     # Interactive updates are never installed by a policy.
     assert f"INSTALLED={CU},{OLD}" in result.stdout and "Reboot pending: True" in result.stdout
     assert updates.take_marker(result.stdout)[1]
+
+
+@pytest.mark.skipif(not POWERSHELL, reason="Requires PowerShell; Windows Update is mocked")
+def test_scan_script_hides_blocked_updates_and_shows_released_ones(tmp_path):
+    script = tmp_path / "scan.ps1"
+    script.write_text(updates.scan_script_content(), encoding="utf-8")
+    base = {"TEST_CU": CU, "TEST_OTHER": OLD, "TEST_INTERACTIVE": EDGE, "TEST_SEARCH_FAILS": "", "TEST_HIDDEN": OLD}
+    # Without blocks from MyPortal nothing changes, even an update someone else hid.
+    result = _run_powershell(tmp_path, f"& '{script}'\n", base)
+    state = updates.normalise(updates.decode(updates.take_marker(result.stdout)[1]))
+    assert state["hid"] == [] and state["unhid"] == [] and [m["is_hidden"] for m in state["missing"]] == [False, True, False]
+    blocks = {"kbs": ["kb5031356"], "update_ids": [EDGE], "release": [OLD.upper()]}
+    result = _run_powershell(tmp_path, f"& '{script}'\n", {**base, "MYPORTAL_WU_BLOCKS": json.dumps(blocks)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    state = updates.normalise(updates.decode(updates.take_marker(result.stdout)[1]))
+    assert state["hid"] == [CU, EDGE] and state["unhid"] == [OLD]
+    assert [m["is_hidden"] for m in state["missing"]] == [True, False, True]
+
+
+@pytest.mark.skipif(not POWERSHELL, reason="Requires PowerShell; Windows Update is mocked")
+@pytest.mark.parametrize("kind", ["manual", "policy"])
+def test_patch_jobs_never_install_blocked_updates(tmp_path, kind):
+    script = tmp_path / "patch.ps1"
+    script.write_text(rmm_patching.script_content(), encoding="utf-8")
+    plan = ({"manual_windows": {"update_ids": [CU, OLD]}, "windows": None} if kind == "manual"
+            else {"windows": {"categories": ["Security Updates"], "deferral_days": 0}})
+    plan.update({"apps": [], "policies": [], "reboot": {"reboot_mode": "never"}})
+    result = _run_powershell(tmp_path, f"& '{script}'\n'INSTALLED=' + ($global:Installed -join ',')\n", {
+        "TEST_CU": CU, "TEST_OTHER": OLD, "TEST_INTERACTIVE": EDGE, "TEST_SEARCH_FAILS": "", "TEST_HIDDEN": "",
+        "TEST_SHUTDOWN_LOG": str(tmp_path / "shutdown.txt"), "MYPORTAL_PATCH_PLAN": json.dumps(plan),
+        "MYPORTAL_WU_BLOCKS": json.dumps({"kbs": ["KB5031356"], "update_ids": [], "release": []})})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"INSTALLED={OLD}" in result.stdout and "Blocked in MyPortal, skipped: 2026-10 Cumulative Update" in result.stdout

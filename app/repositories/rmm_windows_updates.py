@@ -11,7 +11,7 @@ from app.core.database import db
 # Insert order of the values each scan stores.
 _MISSING_COLUMNS = (
     "update_id", "revision", "title", "kb", "classification", "severity", "size_bytes", "released_on",
-    "is_downloaded", "reboot_behavior", "is_interactive", "is_optional",
+    "is_downloaded", "reboot_behavior", "is_interactive", "is_optional", "is_hidden",
 )
 _HISTORY_COLUMNS = (
     "source", "update_id", "title", "kb", "classification", "operation", "result", "hresult", "occurred_at",
@@ -94,8 +94,8 @@ async def save_scan(agent: dict[str, Any], *, run_id: int | None, scanned_at: da
         if missing:
             await db.execute_many(
                 "INSERT INTO rmm_windows_updates (agent_id, update_id, revision, title, kb, classification, severity, "
-                "size_bytes, released_on, is_downloaded, reboot_behavior, is_interactive, is_optional, first_seen_at, "
-                "last_seen_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "size_bytes, released_on, is_downloaded, reboot_behavior, is_interactive, is_optional, is_hidden, "
+                "first_seen_at, last_seen_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 [(agent_id, *(item.get(column) for column in _MISSING_COLUMNS),
                   first_seen.get(item["update_id"].lower(), now), now) for item in missing],
             )
@@ -119,6 +119,112 @@ async def save_scan(agent: dict[str, Any], *, run_id: int | None, scanned_at: da
          scanned_at if missing is not None else None, source, 1 if reboot_pending else 0,
          int((count or {}).get("total") or 0), json.dumps(errors), now, row_id),
     )
+
+
+async def list_hidden(agent_id: int) -> list[str]:
+    """The updates MyPortal hid on the device."""
+
+    rows = await db.fetch_all(
+        "SELECT update_id FROM rmm_windows_update_hidden WHERE agent_id = %s ORDER BY id", (agent_id,),
+    )
+    return [str(row["update_id"]) for row in rows or []]
+
+
+async def save_hidden(agent_id: int, *, hid: list[str], unhid: list[str], present: set[str] | None) -> None:
+    """Record what a scan hid and showed again. ``present`` is every update the
+    scan found still needed; updates no longer offered stop being tracked."""
+
+    now = _utcnow()
+    known = set(await list_hidden(agent_id))
+    new = [update_id for update_id in dict.fromkeys(hid) if update_id not in known]
+    if new:
+        await db.execute_many(
+            "INSERT INTO rmm_windows_update_hidden (agent_id, update_id, hidden_at) VALUES (%s, %s, %s)",
+            [(agent_id, update_id, now) for update_id in new],
+        )
+    gone = set(unhid) | ({update_id for update_id in known if update_id not in present} if present is not None else set())
+    gone -= set(hid)
+    if gone:
+        await db.execute_many(
+            "DELETE FROM rmm_windows_update_hidden WHERE agent_id = %s AND update_id = %s",
+            [(agent_id, update_id) for update_id in sorted(gone)],
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Blocks
+# --------------------------------------------------------------------------- #
+
+_BLOCK_COLUMNS = (
+    "b.id, b.company_id, b.asset_id, b.kb, b.update_id, b.title, b.reason, b.created_by_user_id, b.created_at, "
+    "a.name AS asset_name, c.name AS company_name, u.email AS created_by_email"
+)
+_BLOCK_JOINS = (
+    "LEFT JOIN assets a ON a.id = b.asset_id LEFT JOIN companies c ON c.id = b.company_id "
+    "LEFT JOIN users u ON u.id = b.created_by_user_id"
+)
+
+
+async def list_device_blocks(company_id: int, asset_id: int | None) -> list[dict[str, Any]]:
+    """Blocks that reach one device: every company's, its company's and its own."""
+
+    rows = await db.fetch_all(
+        "SELECT " + _BLOCK_COLUMNS + " FROM rmm_windows_update_blocks b " + _BLOCK_JOINS + " "  # nosec B608 - fixed fragments
+        "WHERE (b.company_id IS NULL AND b.asset_id IS NULL) "
+        "OR (b.company_id = %s AND (b.asset_id IS NULL OR b.asset_id = %s)) ORDER BY b.id",
+        (company_id, asset_id if asset_id is not None else -1),
+    )
+    return [dict(row) for row in rows or []]
+
+
+async def list_company_blocks(company_id: int) -> list[dict[str, Any]]:
+    """Every block a company's technicians see: global, the company's and its devices'."""
+
+    rows = await db.fetch_all(
+        "SELECT " + _BLOCK_COLUMNS + " FROM rmm_windows_update_blocks b " + _BLOCK_JOINS + " "  # nosec B608 - fixed fragments
+        "WHERE (b.company_id IS NULL AND b.asset_id IS NULL) OR b.company_id = %s "
+        "ORDER BY b.created_at DESC, b.id DESC",
+        (company_id,),
+    )
+    return [dict(row) for row in rows or []]
+
+
+async def get_block(block_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT " + _BLOCK_COLUMNS + " FROM rmm_windows_update_blocks b " + _BLOCK_JOINS + " "  # nosec B608 - fixed fragments
+        "WHERE b.id = %s",
+        (block_id,),
+    )
+    return dict(row) if row else None
+
+
+async def find_block(*, company_id: int | None, asset_id: int | None, kb: str | None,
+                     update_id: str | None) -> dict[str, Any] | None:
+    """The same block at the same scope, if there is one."""
+
+    rows = await db.fetch_all(
+        "SELECT id, company_id, asset_id, kb, update_id FROM rmm_windows_update_blocks "
+        "WHERE (kb = %s OR update_id = %s)",
+        (kb or "", update_id or ""),
+    )
+    for row in rows or []:
+        if row.get("company_id") == company_id and row.get("asset_id") == asset_id \
+                and (row.get("kb") or None) == kb and (row.get("update_id") or None) == update_id:
+            return dict(row)
+    return None
+
+
+async def create_block(*, company_id: int | None, asset_id: int | None, kb: str | None, update_id: str | None,
+                       title: str, reason: str | None, user_id: int | None) -> int:
+    return await db.execute_returning_lastrowid(
+        "INSERT INTO rmm_windows_update_blocks (company_id, asset_id, kb, update_id, title, reason, "
+        "created_by_user_id, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+        (company_id, asset_id, kb, update_id, title, reason, user_id, _utcnow()),
+    )
+
+
+async def delete_block(block_id: int) -> None:
+    await db.execute("DELETE FROM rmm_windows_update_blocks WHERE id = %s", (block_id,))
 
 
 async def has_active_scan(agent_id: int, run_source: str) -> bool:

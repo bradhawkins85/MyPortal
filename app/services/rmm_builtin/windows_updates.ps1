@@ -1,7 +1,30 @@
-# Reports the device's Windows Update state to MyPortal. Read-only: it searches the
-# configured update service and reads update history, but never downloads or installs.
+# Reports the device's Windows Update state to MyPortal. It searches the configured
+# update service and reads update history, but never downloads or installs. Its only
+# change is hiding the updates blocked in MyPortal (MYPORTAL_WU_BLOCKS) so automatic
+# updates leave them alone, and showing again those MyPortal hid that are unblocked.
 # The state is one line of gzip-compressed, base64-encoded JSON, which MyPortal reads
 # and removes from the run output.
+function Get-MyPortalUpdateBlocks {
+    # Without MYPORTAL_WU_BLOCKS nothing is hidden or shown again.
+    $blocks = $null
+    try { if ($env:MYPORTAL_WU_BLOCKS) { $blocks = $env:MYPORTAL_WU_BLOCKS | ConvertFrom-Json } } catch { $blocks = $null }
+    return [pscustomobject]@{
+        managed = $null -ne $blocks
+        kbs = @(if ($blocks) { $blocks.kbs | Where-Object { $_ } | ForEach-Object { ([string]$_).ToUpperInvariant() } })
+        ids = @(if ($blocks) { $blocks.update_ids | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() } })
+        release = @(if ($blocks) { $blocks.release | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() } })
+    }
+}
+
+function Test-MyPortalUpdateBlocked($update, $blocks) {
+    if (-not $blocks.managed) { return $false }
+    if ($blocks.ids -contains ([string]$update.Identity.UpdateID).ToLowerInvariant()) { return $true }
+    foreach ($kb in @($update.KBArticleIDs)) {
+        if ($kb -and $blocks.kbs -contains ('KB' + $kb).ToUpperInvariant()) { return $true }
+    }
+    return $false
+}
+
 function Get-MyPortalWindowsUpdateState {
     # Stable classification IDs avoid localized Windows category names.
     $classifications = @{
@@ -36,6 +59,9 @@ function Get-MyPortalWindowsUpdateState {
         return $null
     }
     $errors = New-Object System.Collections.Generic.List[string]
+    $blocks = Get-MyPortalUpdateBlocks
+    $hid = New-Object System.Collections.Generic.List[string]
+    $unhid = New-Object System.Collections.Generic.List[string]
     $state = [ordered]@{
         version = 1
         scanned_at = Format-Time ([datetime]::UtcNow) "yyyy-MM-dd'T'HH:mm:ss'Z'"
@@ -45,6 +71,8 @@ function Get-MyPortalWindowsUpdateState {
         missing = $null
         history = $null
         hotfixes = $null
+        hid = @()
+        unhid = @()
     }
     $searcher = $null
     try {
@@ -54,11 +82,20 @@ function Get-MyPortalWindowsUpdateState {
     } catch { $errors.Add('Windows Update is unavailable: ' + (Format-Error $_)) }
     if ($searcher) {
         try {
-            $found = $searcher.Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
+            # Hidden updates are included so blocked updates stay listed in MyPortal.
+            $found = $searcher.Search("IsInstalled=0 and Type='Software'")
             $missing = New-Object System.Collections.Generic.List[object]
             foreach ($update in $found.Updates) {
                 $optional = $false
                 try { $optional = [bool]$update.BrowseOnly } catch { }
+                $id = ([string]$update.Identity.UpdateID).ToLowerInvariant()
+                try {
+                    if (Test-MyPortalUpdateBlocked $update $blocks) {
+                        if (-not $update.IsHidden) { $update.IsHidden = $true; $hid.Add($id) }
+                    } elseif ($update.IsHidden -and $blocks.release -contains $id) {
+                        $update.IsHidden = $false; $unhid.Add($id)
+                    }
+                } catch { $errors.Add("Could not change whether '$($update.Title)' is hidden: " + (Format-Error $_)) }
                 $missing.Add([ordered]@{
                     update_id = [string]$update.Identity.UpdateID
                     revision = [int]$update.Identity.RevisionNumber
@@ -72,6 +109,7 @@ function Get-MyPortalWindowsUpdateState {
                     reboot_behavior = [int]$update.InstallationBehavior.RebootBehavior
                     interactive = [bool]$update.InstallationBehavior.CanRequestUserInput
                     optional = $optional
+                    hidden = [bool]$update.IsHidden
                 })
                 if ($missing.Count -ge 500) { break }
             }
@@ -144,6 +182,8 @@ function Get-MyPortalWindowsUpdateState {
         $state.reboot_pending = $true
     }
     $state.errors = $errors.ToArray()
+    $state.hid = $hid.ToArray()
+    $state.unhid = $unhid.ToArray()
     return $state
 }
 

@@ -862,6 +862,10 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
                         custom_values=[], error_message="Chocolatey sources are unavailable or disabled for this company.")
                     continue
                 job["env"]["MYPORTAL_PATCH_PLAN"] = json.dumps(config)
+        if row.get("run_source") in ("patch", "update_scan"):
+            # Blocked Windows updates are read at dispatch, so a block added after queueing still applies.
+            from app.services import rmm_windows_updates
+            job["env"]["MYPORTAL_WU_BLOCKS"] = json.dumps(await rmm_windows_updates.blocks_env(agent))
         if job["files"] and not agent.get("script_files_supported"):
             await rmm_repo.finish_run(
                 int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],

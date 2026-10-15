@@ -1986,7 +1986,7 @@ async def asset_detail_page(
         from app.features.rmm import windows_update_routes as rmm_windows_update_routes
 
         rmm_context["windows_updates"] = await rmm_windows_update_routes.asset_windows_updates_context(
-            company_id, asset_id, can_run=can_run_scripts,
+            company_id, asset_id, can_run=can_run_scripts, is_super_admin=bool(is_super_admin),
         )
     # Tags belong to the tags pack; the card disappears with it.
     tags_context = None
