@@ -14,7 +14,7 @@
 .rmm-page .card__header { flex-wrap: wrap; }
 
 /* Component display rules (grid, flex) would otherwise override the hidden attribute. */
-.rmm-page [hidden],
+[data-rmm-page] [hidden],
 .rmm-modal [hidden] { display: none !important; }
 
 .rmm-stats {

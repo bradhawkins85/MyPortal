@@ -144,7 +144,7 @@
             <th scope="col" data-column-key="queued">Queued</th>
             <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
           </tr></thead>
-          <tbody>{{ rmm.run_rows(script.runs) }}</tbody>
+          <tbody>{{ rmm.run_rows(script.runs, can_run=can_run) }}</tbody>
         </table>
       </div>
       {% else %}

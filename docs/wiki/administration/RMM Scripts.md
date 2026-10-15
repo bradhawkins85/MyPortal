@@ -333,9 +333,17 @@ collects them and are deleted when the run finishes.
 
 A run is **Waiting for device** until the device collects it, then **Sent**, **Running**, and
 finally **Completed** (exit code 0), **Failed**, or **Timed out**. A run the device has not
-collected within 24 hours **expires**, and one that is still waiting can be cancelled from its
-details. Choose **View** on a run to see its output, errors, the values sent, and which custom
-values were updated.
+collected within 24 hours **expires**. Choose **Cancel** in the asset's Scripts list (or in a
+run's details) while it is still **Waiting for device**. Once the agent has picked it up,
+including **Sent** runs that have not started executing yet, it cannot be cancelled.
+Choose **View** on a run to see its output, errors, the values sent, and which custom values
+were updated.
+
+**Retry** is available for **Expired**, **Timed out**, and **Failed** runs. It opens the run
+editor with the original device, timeout, and saved inputs selected. Review the values and
+re-enter any secret values typed directly into the previous run; variable references are
+kept and resolved again. Retrying uses the current script and creates a new manual attempt,
+keeping the original result in history. Run and cancel actions require Scripts write access.
 
 ## Schedules and onboarding
 

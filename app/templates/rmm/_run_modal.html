@@ -22,6 +22,7 @@
           <p class="form-help">Scripts are written in Gitea and loaded with <em>Sync from Gitea</em>.</p>
         </div>
 
+        <p class="form-help" data-rmm-retry-help role="status" hidden></p>
         <fieldset class="rmm-fieldset" data-rmm-automation-section hidden>
           <legend class="visually-hidden" data-rmm-automation-legend>Settings</legend>
           <div class="form-field" data-rmm-mode-only="schedule">
@@ -172,6 +173,7 @@
     </div>
     <footer class="modal__footer">
       <button type="button" class="button button--danger" data-rmm-cancel-run hidden>Cancel run</button>
+      <button type="button" class="button button--primary" data-rmm-retry-run hidden>Retry run</button>
       <span class="rmm-editor__spacer"></span>
       <button type="button" class="button button--ghost" data-rmm-close>Close</button>
     </footer>

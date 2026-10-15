@@ -26,6 +26,7 @@
     expired: ['neutral', 'Expired'],
   };
   const ACTIVE = new Set(['queued', 'dispatched', 'running']);
+  const RETRYABLE = new Set(['expired', 'timed_out', 'failed']);
   const TYPE_LABELS = {
     string: 'Text', integer: 'Whole number', number: 'Number', boolean: 'Yes / no', switch: 'Switch',
     choice: 'Choice', list: 'List', secret: 'Secret',
@@ -342,7 +343,8 @@
     }
     summary.textContent = count ? 'Runs on ' + count + ' device' + (count === 1 ? '' : 's') + envText + '.' : 'Choose at least one device.';
     submitButton.disabled = !count;
-    submitButton.textContent = count > 1 ? 'Run on ' + count + ' devices' : 'Run script';
+    const retry = state.item && state.item.retry && Number(state.item.script_id) === Number(detail.script.id);
+    submitButton.textContent = count > 1 ? 'Run on ' + count + ' devices' : (retry ? 'Retry script' : 'Run script');
   }
 
   // ------------------------------------------------------------------ //
@@ -466,8 +468,9 @@
       const id = 'rmm-device-' + agent.asset_id;
       const item = el('li', { className: 'rmm-device', 'data-search': ((agent.asset_name || '') + ' ' + (agent.hostname || '') + ' ' + (agent.os || '')).toLowerCase() });
       const box = el('input', { type: 'checkbox', id: id, value: agent.asset_id });
-      const chosen = state.mode === 'schedule' && state.item ? (state.item.asset_ids || []).map(Number) : [];
-      if ((config.asset_id && Number(config.asset_id) === Number(agent.asset_id)) || chosen.includes(Number(agent.asset_id))) {
+      const chosen = state.item && (state.mode === 'schedule' || state.mode === 'run')
+        ? (state.item.asset_ids || []).map(Number) : [Number(config.asset_id)];
+      if (chosen.includes(Number(agent.asset_id))) {
         box.checked = true;
       }
       const label = el('label', { for: id });
@@ -486,6 +489,7 @@
     [devicesSection, fieldsSection, timeoutSection, previewSection].forEach((section) => { section.hidden = true; });
     formError.hidden = true;
     assetsError.hidden = true;
+    runModal.querySelector('[data-rmm-retry-help]').hidden = true;
     submitButton.disabled = true;
     const texts = editorTexts();
     submitButton.textContent = texts[3];
@@ -513,11 +517,17 @@
     runModal.querySelector('[data-rmm-run-subtitle]').textContent = detail.script.description || 'Fill in the values this script needs, then run it.';
     renderDevices(detail.agents || []);
     const groups = groupedVariables(detail.variables);
-    detail.fields.forEach((field) => fieldsHost.append(renderField(field, groups)));
-    noFields.hidden = detail.fields.length > 0;
     const saved = state.item && Number(state.item.script_id) === Number(detail.script.id) ? state.item : null;
+    detail.fields.forEach((field) => {
+      const needsSecret = saved && saved.retry && saved.secret_keys.includes(field.key);
+      fieldsHost.append(renderField(needsSecret ? Object.assign({}, field, { mandatory: true }) : field, groups));
+    });
+    noFields.hidden = detail.fields.length > 0;
     const timeout = saved ? saved.timeout_seconds : detail.script.default_timeout_seconds;
-    timeoutInput.value = Math.max(1, Math.round((timeout || 600) / 60));
+    const retry = saved && saved.retry;
+    timeoutInput.min = retry ? String(10 / 60) : '1';
+    timeoutInput.step = retry ? 'any' : '1';
+    timeoutInput.value = retry ? (timeout || 600) / 60 : Math.max(1, Math.round((timeout || 600) / 60));
     if (saved) {
       Object.entries(saved.values || {}).forEach(([key, value]) => {
         const control = fieldsHost.querySelector('[data-rmm-value="' + CSS.escape(key) + '"]');
@@ -525,6 +535,14 @@
           control.value = value;
         }
       });
+    }
+    if (saved && saved.retry) {
+      const help = runModal.querySelector('[data-rmm-retry-help]');
+      help.textContent = 'Review the saved values, then run a new attempt using the current script. The original run stays in history.';
+      if (saved.secret_keys.length) {
+        help.textContent += ' Re-enter the secret values; they are not retained after a run finishes.';
+      }
+      help.hidden = false;
     }
     runModal.querySelector('[data-rmm-source]').textContent = detail.script.content || '';
     const link = runModal.querySelector('[data-rmm-source-link]');
@@ -601,6 +619,16 @@
   }
 
   document.addEventListener('click', (event) => {
+    const action = event.target.closest('[data-rmm-cancel-run-id], [data-rmm-retry-run-id]');
+    if (action && config.can_run) {
+      event.preventDefault();
+      if (action.hasAttribute('data-rmm-cancel-run-id')) {
+        cancelRun(action.getAttribute('data-rmm-cancel-run-id'), action);
+      } else {
+        retryRun(action.getAttribute('data-rmm-retry-run-id'), action);
+      }
+      return;
+    }
     const opener = event.target.closest('[data-rmm-run-open]');
     if (opener && config.can_run) {
       event.preventDefault();
@@ -669,6 +697,19 @@
     formError.hidden = true;
     assetsError.hidden = true;
     runModal.querySelectorAll('[data-rmm-error]').forEach((node) => { node.hidden = true; });
+    if (state.item && state.item.retry && Number(state.item.script_id) === Number(state.detail.script.id)) {
+      const values = collectValues();
+      const errors = {};
+      state.item.secret_keys.forEach((key) => {
+        if (state.detail.fields.some((field) => field.key === key) && !values[key]) {
+          errors[key] = 'Re-enter this secret value to retry the script.';
+        }
+      });
+      if (Object.keys(errors).length) {
+        showErrors(errors);
+        return;
+      }
+    }
     submitButton.disabled = true;
     const minutes = Number(timeoutInput.value) || 10;
     if (state.mode !== 'run') {
@@ -856,6 +897,97 @@
     });
     resultModal.querySelector('[data-rmm-result-inputs-section]').hidden = inputs.length === 0;
     resultModal.querySelector('[data-rmm-cancel-run]').hidden = !(config.can_run && run.status === 'queued');
+    resultModal.querySelector('[data-rmm-retry-run]').hidden = !(config.can_run && RETRYABLE.has(run.status) && run.script_id && run.asset_id);
+    updateRunRow(run);
+  }
+
+  function updateRunRow(run) {
+    const row = document.querySelector('[data-rmm-run-row="' + Number(run.id) + '"]');
+    if (!row) return;
+    const status = row.querySelector('[data-column-key="status"]');
+    status.replaceChildren(statusPill(run.status));
+    status.setAttribute('data-sort-value', run.status);
+    const actions = row.querySelector('[data-column-key="actions"]');
+    if (config.can_run && RETRYABLE.has(run.status) && run.script_id && run.asset_id && !actions.querySelector('[data-rmm-retry-run-id]')) {
+      actions.append(el('button', {
+        type: 'button', className: 'button button--ghost button--small', 'data-rmm-retry-run-id': run.id,
+        'aria-label': 'Retry run of ' + run.script_name, 'aria-haspopup': 'dialog', 'aria-controls': 'rmm-run-modal',
+      }, 'Retry'));
+    }
+    row.querySelectorAll('[data-rmm-cancel-run-id], [data-rmm-retry-run-id]').forEach((button) => {
+      button.hidden = button.hasAttribute('data-rmm-cancel-run-id') ? run.status !== 'queued' : !(RETRYABLE.has(run.status) && run.script_id && run.asset_id);
+    });
+  }
+
+  function actionError(button, message) {
+    const row = button.closest('[data-rmm-run-row]');
+    let target = row ? row.querySelector('[data-rmm-action-error]') : resultModal.querySelector('[data-rmm-result-error]');
+    if (!target && row) {
+      target = el('p', { className: 'form-help form-help--error', 'data-rmm-action-error': true, role: 'alert' });
+      row.querySelector('[data-column-key="actions"]').append(target);
+    }
+    target.textContent = message;
+    target.hidden = !message;
+  }
+
+  async function retryRun(runId, button) {
+    if (button.disabled) return;
+    button.disabled = true;
+    actionError(button, '');
+    try {
+      const data = await api('/api/rmm/runs/' + encodeURIComponent(runId));
+      const run = data.run;
+      updateRunRow(run);
+      if (!RETRYABLE.has(run.status) || !run.script_id || !run.asset_id) {
+        throw new Error('Only expired, timed out or failed runs with an available script and device can be retried.');
+      }
+      const values = {};
+      const secretKeys = [];
+      (run.inputs || []).forEach((input) => {
+        const key = input.kind + ':' + input.name;
+        if (input.sensitive && !input.is_variable) {
+          secretKeys.push(key);
+        } else {
+          values[key] = input.value;
+        }
+      });
+      stopPolling();
+      closeModal(resultModal);
+      await openRunEditor(run.script_id, { item: {
+        retry: true, script_id: run.script_id, asset_ids: [run.asset_id],
+        values: values, timeout_seconds: run.timeout_seconds, secret_keys: secretKeys,
+      } });
+    } catch (error) {
+      actionError(button, error.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function cancelRun(runId, button) {
+    if (button.disabled) return;
+    button.disabled = true;
+    actionError(button, '');
+    try {
+      const data = await api('/api/rmm/runs/' + encodeURIComponent(runId) + '/cancel', { method: 'POST' });
+      updateRunRow(data.run);
+      if (currentRun && Number(currentRun.id) === Number(runId) && !resultModal.hidden) {
+        stopPolling();
+        renderRun(data.run);
+      }
+    } catch (error) {
+      // An agent may have picked it up since the list was rendered.
+      try {
+        const data = await api('/api/rmm/runs/' + encodeURIComponent(runId));
+        updateRunRow(data.run);
+        if (currentRun && Number(currentRun.id) === Number(runId) && !resultModal.hidden) renderRun(data.run);
+      } catch (refreshError) {
+        // Keep the original action failure visible when refresh also fails.
+      }
+      actionError(button, error.message);
+    } finally {
+      button.disabled = false;
+    }
   }
 
   let pollGeneration = 0;
@@ -888,6 +1020,9 @@
 
   function openResult(runId, reload) {
     stopPolling();
+    currentRun = null;
+    resultModal.querySelector('[data-rmm-cancel-run]').hidden = true;
+    resultModal.querySelector('[data-rmm-retry-run]').hidden = true;
     reloadOnClose = Boolean(reload) || reloadOnClose;
     openModal(resultModal);
     resultModal.querySelector('.modal__close').focus();
@@ -902,18 +1037,10 @@
     }
   }));
 
-  resultModal.querySelector('[data-rmm-cancel-run]').addEventListener('click', async () => {
-    if (!currentRun) {
-      return;
-    }
-    try {
-      const data = await api('/api/rmm/runs/' + currentRun.id + '/cancel', { method: 'POST' });
-      reloadOnClose = true;
-      renderRun(Object.assign({}, currentRun, data.run));
-    } catch (error) {
-      const message = resultModal.querySelector('[data-rmm-result-error]');
-      message.textContent = error.message;
-      message.hidden = false;
-    }
+  resultModal.querySelector('[data-rmm-cancel-run]').addEventListener('click', (event) => {
+    if (currentRun) cancelRun(currentRun.id, event.currentTarget);
+  });
+  resultModal.querySelector('[data-rmm-retry-run]').addEventListener('click', (event) => {
+    if (currentRun) retryRun(currentRun.id, event.currentTarget);
   });
 })();
