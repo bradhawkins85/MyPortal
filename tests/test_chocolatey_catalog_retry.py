@@ -1,4 +1,4 @@
-"""Scheduled catalog refresh recovery, with no network or database writes."""
+"""Targeted inventory lookups, retry behavior, and safe refresh failures."""
 from unittest.mock import AsyncMock
 
 import httpx
@@ -12,24 +12,24 @@ def anyio_backend():
     return 'asyncio'
 
 
-def feed(package=None):
-    entry = (f'<entry><m:properties><d:Id>{package}</d:Id><d:Title>{package}</d:Title>'
-             '<d:Version>1.0</d:Version><d:IsPrerelease>false</d:IsPrerelease>'
-             '</m:properties></entry>') if package else ''
+def feed(entries=()):
     return ('<feed xmlns="http://www.w3.org/2005/Atom" '
             'xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata" '
-            'xmlns:d="http://schemas.microsoft.com/ado/2007/08/dataservices">' + entry + '</feed>')
+            'xmlns:d="http://schemas.microsoft.com/ado/2007/08/dataservices">' +
+            ''.join(f'<entry><m:properties><d:Id>{package}</d:Id><d:Title>{title}</d:Title>'
+                    '<d:Version>2.0</d:Version><d:IsPrerelease>false</d:IsPrerelease>'
+                    '</m:properties></entry>' for package, title in entries) + '</feed>')
 
 
 @pytest.fixture
-def refresh_mocks(monkeypatch):
+def mocks(monkeypatch):
     sleep = AsyncMock()
     replace = AsyncMock(return_value={'stored': 2, 'removed': 0})
+    names = AsyncMock(return_value=['Alpha', 'Beta'])
     monkeypatch.setattr(catalog.asyncio, 'sleep', sleep)
     monkeypatch.setattr(catalog.catalog_repo, 'replace_all', replace)
-    catalog._CACHE.clear()
-    yield sleep, replace
-    catalog._CACHE.clear()
+    monkeypatch.setattr(catalog.inventory_repo, 'list_catalog_software_names', names)
+    return sleep, replace, names
 
 
 def transport(monkeypatch, handler):
@@ -39,61 +39,60 @@ def transport(monkeypatch, handler):
 
 @pytest.mark.anyio
 @pytest.mark.parametrize('failure', [429, 500, 502, 503, 504, 'timeout', 'connection'])
-async def test_refresh_recovers_same_page(monkeypatch, refresh_mocks, failure):
-    sleep, replace = refresh_mocks
-    offsets = []
+async def test_refresh_retries_same_application(monkeypatch, mocks, failure):
+    sleep, replace, names = mocks
+    terms = []
 
     def handle(request):
-        offset = request.url.params['$skip']
-        offsets.append(offset)
-        if len(offsets) == 2:
+        term = request.url.params['searchTerm']
+        terms.append(term)
+        assert request.url.path.endswith('/Search()')
+        assert request.url.params['$skip'] == '0'
+        assert request.url.params['$filter'] == 'IsLatestVersion'
+        assert request.url.params['includePrerelease'] == 'false'
+        if len(terms) == 2:
             if failure == 'timeout':
                 raise httpx.ReadTimeout('upstream timeout', request=request)
             if failure == 'connection':
                 raise httpx.ConnectError('connection failed', request=request)
             return httpx.Response(failure)
-        return httpx.Response(200, text=feed({'0': 'alpha', '1': 'beta'}.get(offset)))
+        name = term.strip("'")
+        return httpx.Response(200, text=feed([(name.lower(), name)]))
 
     transport(monkeypatch, handle)
-    catalog._CACHE[('old', False)] = (0, [])
     result = await catalog.refresh()
-    assert offsets == ['0', '1', '1', '2']
+    assert terms == ["'Alpha'", "'Beta'", "'Beta'"]
     assert [p['package_id'] for p in replace.await_args.args[0]] == ['alpha', 'beta']
-    assert result['pages'] == 3
-    assert result['stored'] == 2
-    assert 2.0 in [call.args[0] for call in sleep.await_args_list]
-    assert not catalog._CACHE
+    assert result == {'source': catalog.COMMUNITY, 'applications': 2, 'matched': 2,
+                      'unmatched': 0, 'ambiguous': 0, 'stored': 2, 'removed': 0}
+    assert [c.args[0] for c in sleep.await_args_list] == [catalog.PAGE_DELAY, 2]
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize('failure', [504, 'timeout'])
-async def test_exhausted_retries_preserve_stored_list_and_cache(monkeypatch, refresh_mocks, failure):
-    sleep, replace = refresh_mocks
-    offsets = []
-
+async def test_exhausted_retries_do_not_save_partial_matches(monkeypatch, mocks, failure):
+    sleep, replace, names = mocks
+    terms = []
     def handle(request):
-        offset = request.url.params['$skip']
-        offsets.append(offset)
-        if offset == '0':
-            return httpx.Response(200, text=feed('alpha'))
+        term = request.url.params['searchTerm']
+        terms.append(term)
+        if term == "'Alpha'":
+            return httpx.Response(200, text=feed([('alpha', 'Alpha')]))
         if failure == 'timeout':
             raise httpx.ReadTimeout('upstream timeout', request=request)
         return httpx.Response(failure)
-
     transport(monkeypatch, handle)
-    catalog._CACHE[('old', False)] = (0, [])
     with pytest.raises(catalog.CatalogUnavailable, match='stored app list was kept'):
         await catalog.refresh()
-    assert offsets == ['0', '1', '1', '1', '1']
-    assert [call.args[0] for call in sleep.await_args_list] == [catalog.PAGE_DELAY, 2, 4, 8]
+    assert terms == ["'Alpha'"] + ["'Beta'"] * 4
+    assert [c.args[0] for c in sleep.await_args_list] == [catalog.PAGE_DELAY, 2, 4, 8]
     replace.assert_not_awaited()
-    assert ('old', False) in catalog._CACHE
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize('status', [400, 401, 403, 404])
-async def test_permanent_http_errors_are_not_retried(monkeypatch, refresh_mocks, status):
-    sleep, replace = refresh_mocks
+@pytest.mark.parametrize('status', [400, 401, 403, 404, 406])
+async def test_permanent_errors_are_not_retried(monkeypatch, mocks, status):
+    sleep, replace, names = mocks
     calls = []
     def handle(request):
         calls.append(request)
@@ -108,14 +107,15 @@ async def test_permanent_http_errors_are_not_retried(monkeypatch, refresh_mocks,
 
 @pytest.mark.anyio
 @pytest.mark.parametrize('retry_after,expected', [('12', 12), ('999999', 60), ('invalid', 2)])
-async def test_rate_limit_retry_after_is_bounded(monkeypatch, refresh_mocks, retry_after, expected):
-    sleep, replace = refresh_mocks
+async def test_retry_after_is_bounded(monkeypatch, mocks, retry_after, expected):
+    sleep, replace, names = mocks
+    names.return_value = ['Alpha']
     calls = []
     def handle(request):
         calls.append(request)
         if len(calls) == 1:
             return httpx.Response(429, headers={'Retry-After': retry_after})
-        return httpx.Response(200, text=feed('alpha') if len(calls) == 2 else feed())
+        return httpx.Response(200, text=feed([('alpha', 'Alpha')]))
     transport(monkeypatch, handle)
     await catalog.refresh()
     assert sleep.await_args_list[0].args == (expected,)
@@ -123,10 +123,110 @@ async def test_rate_limit_retry_after_is_bounded(monkeypatch, refresh_mocks, ret
 
 
 @pytest.mark.anyio
-async def test_malformed_feed_does_not_retry_or_replace(monkeypatch, refresh_mocks):
-    sleep, replace = refresh_mocks
-    transport(monkeypatch, lambda request: httpx.Response(200, text='<broken'))
+async def test_only_inventory_names_are_queried_and_exact_matches_saved(monkeypatch, mocks):
+    sleep, replace, names = mocks
+    names.return_value = [' Alpha ', 'alpha', 'Beta', "Vendor's App", 'Missing', 'Ambiguous', '']
+    responses = {
+        "'alpha'": [('alpha', 'Alpha'), ('unrelated', 'Alpha Tools')],
+        "'Beta'": [('alpha', 'Beta')],
+        "'Vendor''s App'": [('vendor', "Vendor's App")],
+        "'Missing'": [('other', 'Missing Tools')],
+        "'Ambiguous'": [('one', 'Ambiguous'), ('two', 'Ambiguous')],
+    }
+    calls = []
+    def handle(request):
+        term = request.url.params['searchTerm']
+        calls.append(term)
+        assert term in responses  # A blank or uninstalled search is never allowed.
+        return httpx.Response(200, text=feed(responses[term]))
+    transport(monkeypatch, handle)
+    result = await catalog.refresh()
+    assert calls == list(responses)
+    assert result['applications'] == 5 and result['matched'] == 3
+    assert result['unmatched'] == result['ambiguous'] == 1
+    assert [p['package_id'] for p in replace.await_args.args[0]] == ['alpha', 'vendor']
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('names_value', [[], ['Missing']])
+async def test_empty_or_unmatched_inventory_clears_old_full_catalog(monkeypatch, mocks, names_value):
+    sleep, replace, names = mocks
+    names.return_value = names_value
+    transport(monkeypatch, lambda request: httpx.Response(200, text=feed()))
+    result = await catalog.refresh()
+    replace.assert_awaited_once()
+    assert replace.await_args.args[0] == []
+    assert result['matched'] == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('content', ['<broken', '<html/>'])
+async def test_malformed_response_does_not_replace(monkeypatch, mocks, content):
+    sleep, replace, names = mocks
+    transport(monkeypatch, lambda request: httpx.Response(200, text=content))
     with pytest.raises(catalog.CatalogUnavailable, match='stored app list was kept'):
         await catalog.refresh()
     sleep.assert_not_awaited()
     replace.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_ui_search_never_calls_public_catalog_even_when_empty(monkeypatch):
+    monkeypatch.setattr(catalog.catalog_repo, 'search', AsyncMock(return_value=[]))
+    monkeypatch.setattr(catalog.catalog_repo, 'find_exact', AsyncMock(return_value=[]))
+    def no_network(*args, **kwargs):
+        raise AssertionError('Only the scheduled inventory refresh may contact Chocolatey')
+    monkeypatch.setattr(catalog, 'monitored_client', no_network)
+    assert await catalog.query('') == []
+    assert await catalog.query('not installed') == []
+    assert await catalog.match('not installed') is None
+
+
+@pytest.mark.anyio
+async def test_inventory_selection_and_catalog_replacement_sql(monkeypatch):
+    import sqlite3
+
+    connection = sqlite3.connect(':memory:')
+    connection.row_factory = sqlite3.Row
+    connection.executescript('''
+        CREATE TABLE rmm_agents (id INTEGER PRIMARY KEY, status TEXT, os TEXT);
+        CREATE TABLE rmm_device_software (agent_id INTEGER, name TEXT, version TEXT);
+        CREATE TABLE rmm_chocolatey_packages (package_id TEXT PRIMARY KEY, title TEXT,
+            version TEXT, download_count INTEGER, updated_at TEXT);
+        INSERT INTO rmm_agents VALUES (1, 'active', 'windows'), (2, 'revoked', 'windows'),
+            (3, 'active', 'linux'), (4, 'active', 'Windows');
+        INSERT INTO rmm_device_software VALUES (1, 'Alpha', '1'), (1, 'Alpha', '2'),
+            (2, 'Revoked App', '1'), (3, 'Linux App', '1'), (4, 'Alpha', '3'), (1, ' ', '1');
+        INSERT INTO rmm_chocolatey_packages VALUES ('uninstalled', 'Uninstalled', '1', 0, NULL);
+    ''')
+
+    class Database:
+        def is_sqlite(self):
+            return True
+
+        async def fetch_all(self, sql, params=()):
+            return [dict(row) for row in connection.execute(sql.replace('%s', '?'), params)]
+
+        async def execute_many(self, sql, rows):
+            # Match the production DB parameter binding while avoiding worker threads.
+            rows = [tuple(value.isoformat() if hasattr(value, 'isoformat') else value for value in row)
+                    for row in rows]
+            connection.executemany(sql.replace('%s', '?'), rows)
+
+    database = Database()
+    monkeypatch.setattr(catalog.inventory_repo, 'db', database)
+    monkeypatch.setattr(catalog.catalog_repo, 'db', database)
+    calls = []
+    def handle(request):
+        calls.append(request.url.params['searchTerm'])
+        return httpx.Response(200, text=feed([('alpha', 'Alpha')]))
+    transport(monkeypatch, handle)
+    try:
+        assert await catalog.inventory_repo.list_catalog_software_names() == ['Alpha']
+        result = await catalog.refresh()
+        assert calls == ["'Alpha'"]
+        assert result['stored'] == result['removed'] == 1
+        assert await catalog.query('') == [{'package_id': 'alpha', 'title': 'Alpha', 'version': '2.0'}]
+        assert await catalog.query('uninstalled') == []
+    finally:
+        connection.close()

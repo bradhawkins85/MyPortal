@@ -26,10 +26,9 @@ def clean_sources(monkeypatch, tmp_path, request):
     for key in list(sources.os.environ):
         if sources.KEY.fullmatch(key):
             monkeypatch.delenv(key)
-    catalog._CACHE.clear()
     monkeypatch.setattr(catalog, 'PAGE_DELAY', 0)
     if 'sqlite_db' not in request.fixturenames:
-        # No stored app list yet: lookups use the live feed.
+        # Empty local inventory-derived catalog.
         monkeypatch.setattr(catalog_repo, 'search', AsyncMock(return_value=[]))
         monkeypatch.setattr(catalog_repo, 'find_exact', AsyncMock(return_value=[]))
         monkeypatch.setattr(catalog_repo, 'has_packages', AsyncMock(return_value=False))
@@ -87,30 +86,25 @@ def mock_feed(monkeypatch, request):
 
 
 @pytest.mark.anyio
-async def test_catalog_parses_stable_feed_caches_and_escapes_queries(monkeypatch):
-    calls = []
-    def request(req):
-        calls.append(req)
-        return httpx.Response(200, text=feed([('googlechrome', 'Google Chrome', '150.0'), ('bad;id', 'Bad', '1')]))
-    transport = httpx.MockTransport(request)
-    monkeypatch.setattr(catalog, 'monitored_client', lambda *a, **kw: httpx.AsyncClient(transport=transport))
-    rows = await catalog.query("Vendor's App", exact=True)
-    assert rows == [{'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0'}]
-    assert "Vendor''s App" in calls[0].url.params['$filter']
-    await catalog.query("Vendor's App", exact=True)
-    assert len(calls) == 1
-    assert await catalog.match('Google Chrome') == rows[0]
+async def test_catalog_uses_stored_matches_and_parses_stable_feed(monkeypatch):
+    count, rows = catalog._parse(feed([('googlechrome', 'Google Chrome', '150.0'),
+                                     ('bad;id', 'Bad', '1')]).encode())
+    assert count == 2
+    assert rows == [{'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0',
+                     'download_count': 0}]
+    monkeypatch.setattr(catalog_repo, 'find_exact', AsyncMock(return_value=rows))
+    mock_feed(monkeypatch, _no_network)
+    assert await catalog.query('Google Chrome', exact=True) == [
+        {'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0'}]
+    assert await catalog.match('Google Chrome') == {'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0'}
     assert await catalog.match('Chrome') is None
 
 
 @pytest.mark.anyio
-async def test_catalog_unavailable_does_not_cache_false_no_match(monkeypatch):
-    def request(req):
-        return httpx.Response(503)
-    monkeypatch.setattr(catalog, 'monitored_client', lambda *a, **kw: httpx.AsyncClient(transport=httpx.MockTransport(request)))
-    with pytest.raises(catalog.CatalogUnavailable):
-        await catalog.match('Google Chrome')
-    assert not catalog._CACHE
+async def test_empty_catalog_does_not_query_public_repository(monkeypatch):
+    mock_feed(monkeypatch, _no_network)
+    assert await catalog.query('') == []
+    assert await catalog.match('Google Chrome') is None
 
 
 @pytest.mark.parametrize('installed,latest,expected', [('1.0', '2.0', True), ('2', '2.0.0', False),
@@ -244,56 +238,60 @@ def _no_network(req):
 
 
 @pytest.mark.anyio
-async def test_refresh_downloads_every_page_and_replaces_stored_list(sqlite_db, monkeypatch):
+async def test_refresh_looks_up_only_current_software_and_replaces_stored_list(sqlite_db, monkeypatch):
+    monkeypatch.setattr(catalog_repo, 'db', sqlite_db)
+    monkeypatch.setattr(inventory_repo, 'db', sqlite_db)
+    _, agent = await _enrol(sqlite_db)
     await sqlite_db.execute("INSERT INTO rmm_chocolatey_packages (package_id, title, version) VALUES ('retired', 'Retired', '1')")
-    pages = {0: [('7zip', '7-Zip', '24.08', 900), ('Bad;Id', 'Bad', '1'), ('googlechrome', 'Google Chrome', '150.0', 5000)],
-             3: [('vlc', 'VLC media player', '3.0.21', 700)], 4: []}
+    for name, version in [('Google Chrome', '1'), ('Google Chrome', '2'), ('VLC', '3'), ('No Match', '1')]:
+        await sqlite_db.execute("INSERT INTO rmm_device_software (agent_id, name, version) VALUES (%s, %s, %s)",
+                               (agent['id'], name, version))
     calls = []
     def request(req):
-        calls.append(req)
-        return httpx.Response(200, text=feed(pages[int(req.url.params['$skip'])]))
+        term = req.url.params['searchTerm']
+        calls.append(term)
+        entries = {"'Google Chrome'": [('googlechrome', 'Google Chrome', '150.0', 5000)],
+                   "'VLC'": [('vlc', 'VLC', '3.0.21', 700)], "'No Match'": []}
+        return httpx.Response(200, text=feed(entries[term]))
     mock_feed(monkeypatch, request)
     result = await catalog.refresh()
-    # Pages advance by entries returned, so a server-side page cap never skips packages.
-    assert [c.url.params['$skip'] for c in calls] == ['0', '3', '4']
-    assert all(c.url.path.endswith('/Packages()') and c.url.params['$orderby'] == 'Id'
-               and c.url.params['$filter'] == catalog.STABLE for c in calls)
-    assert result == {'source': catalog.COMMUNITY, 'pages': 3, 'stored': 3, 'removed': 1}
-    assert await _stored(sqlite_db) == [
-        {'package_id': '7zip', 'title': '7-Zip', 'version': '24.08', 'download_count': 900},
-        {'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0', 'download_count': 5000},
-        {'package_id': 'vlc', 'title': 'VLC media player', 'version': '3.0.21', 'download_count': 700}]
+    assert set(calls) == {"'Google Chrome'", "'VLC'", "'No Match'"} and len(calls) == 3
+    assert result == {'source': catalog.COMMUNITY, 'applications': 3, 'matched': 2,
+                      'unmatched': 1, 'ambiguous': 0, 'stored': 2, 'removed': 1}
+    assert [p['package_id'] for p in await _stored(sqlite_db)] == ['googlechrome', 'vlc']
     assert await catalog.last_updated()
-
     mock_feed(monkeypatch, _no_network)
-    chrome = {'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0'}
-    assert [p['package_id'] for p in await catalog.query('')] == ['googlechrome', '7zip', 'vlc']
-    assert await catalog.query('chrome') == [chrome]
-    assert await catalog.query('%') == []
-    assert await catalog.match('google chrome') == chrome
-    assert await catalog.match('Chrome') is None
-    assert await catalog.match('Missing App') is None
+    assert await catalog.match('google chrome') == {'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0'}
+    assert await catalog.query('not installed') == []
 
 
 @pytest.mark.anyio
-async def test_failed_refresh_keeps_previous_list(sqlite_db, monkeypatch):
+async def test_failed_inventory_refresh_keeps_previous_list(sqlite_db, monkeypatch):
+    monkeypatch.setattr(catalog_repo, 'db', sqlite_db)
     await sqlite_db.execute("INSERT INTO rmm_chocolatey_packages (package_id, title, version) VALUES ('vlc', 'VLC', '3')")
+    monkeypatch.setattr(inventory_repo, 'list_catalog_software_names', AsyncMock(return_value=['Chrome', 'VLC']))
+    monkeypatch.setattr(catalog.asyncio, 'sleep', AsyncMock())
     def request(req):
-        if req.url.params['$skip'] == '0':
-            return httpx.Response(200, text=feed([('googlechrome', 'Google Chrome', '150.0')]))
+        if req.url.params['searchTerm'] == "'Chrome'":
+            return httpx.Response(200, text=feed([('googlechrome', 'Chrome', '150.0')]))
         return httpx.Response(429)
     mock_feed(monkeypatch, request)
-    with pytest.raises(catalog.CatalogUnavailable) as exc:
+    with pytest.raises(catalog.CatalogUnavailable, match='HTTP 429'):
         await catalog.refresh()
-    assert 'HTTP 429' in str(exc.value)
     assert [p['package_id'] for p in await _stored(sqlite_db)] == ['vlc']
 
 
 @pytest.mark.anyio
-async def test_empty_stored_list_falls_back_to_live_feed(sqlite_db, monkeypatch):
-    mock_feed(monkeypatch, lambda req: httpx.Response(200, text=feed([('googlechrome', 'Google Chrome', '150.0')])))
-    assert await catalog.match('Google Chrome') == {'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0'}
-    assert await catalog.last_updated() is None
+async def test_catalog_candidates_exclude_removed_and_non_windows_agents(sqlite_db, monkeypatch):
+    monkeypatch.setattr(inventory_repo, 'db', sqlite_db)
+    _, active = await _enrol(sqlite_db)
+    _, revoked = await _enrol(sqlite_db, tray_id=7, asset_id=11, uid='revoked-agent')
+    _, linux = await _enrol(sqlite_db, tray_id=8, asset_id=20, uid='linux-agent', os_name='linux')
+    await sqlite_db.execute("UPDATE rmm_agents SET status = 'revoked' WHERE id = %s", (revoked['id'],))
+    for agent, name in [(active, 'Active App'), (active, 'Active App'), (active, ' '),
+                        (revoked, 'Removed App'), (linux, 'Linux App')]:
+        await sqlite_db.execute("INSERT INTO rmm_device_software (agent_id, name) VALUES (%s, %s)", (agent['id'], name))
+    assert await inventory_repo.list_catalog_software_names() == ['Active App']
 
 
 @pytest.mark.anyio

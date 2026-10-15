@@ -212,14 +212,23 @@ changes. All-disabled companies perform no app management. Source definitions
 and credentials are refreshed at dispatch as well for older agents running new
 portal jobs; **the updated agent is required for the independent daily check**.
 
-Catalog listings and asset upgrade checks use a stored copy of the stable public
-feed (migrations **496** and **497**). The **Update Chocolatey app list** scheduled
-task is created by default (daily at 04:23 in the scheduler's time zone) and
-downloads the whole catalog page by page; super admins can run, reschedule,
-disable or delete it under **Admin → Scheduled tasks**, or recreate it with the
-**Update Chocolatey app list** command. A failed download keeps the previous
-list. Until the first refresh completes, listings query the public feed directly
-(cached for one hour). Installation/version resolution uses the company's enabled
-feeds. A private-only company therefore needs matching packages in its own feed.
+Catalog listings and asset upgrade checks use stored Chocolatey matches for
+applications currently listed in Software on active Windows agents (migrations
+**496** and **497**). The **Update Chocolatey app list** scheduled task is created
+by default (daily at 04:23 in the scheduler's time zone). It deduplicates installed
+application names across devices and versions, then searches Chocolatey for each
+name. Only an unambiguous, exact package ID or title match is saved; missing and
+ambiguous matches are skipped. It does not enumerate the public repository.
+
+Super admins can run, reschedule, disable or delete the task under **Admin →
+Scheduled tasks**, or recreate it with the **Update Chocolatey app list** command.
+A failed lookup keeps the previous list; a successful refresh removes matches no
+longer in the current inventory. Task results report applications checked,
+matched, unmatched and ambiguous, plus packages stored and removed. Searches in
+the portal use only the stored matches, including before the first refresh,
+when the list is empty. Run the task after receiving the first Software inventory.
+
+Installation/version resolution still uses the company's enabled feeds. A
+private-only company therefore needs matching packages in its own feed.
 The portal needs outbound HTTPS access to `community.chocolatey.org` for catalog
 listings.

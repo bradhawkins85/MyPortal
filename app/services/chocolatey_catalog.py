@@ -1,33 +1,25 @@
-"""Chocolatey's stable public NuGet v2 catalog.
+"""Chocolatey package matches for applications in the Software inventory.
 
-The ``update_chocolatey_catalog`` scheduled task stores the catalog locally and
-lookups use that copy. Until the first refresh completes, lookups fall back to
-bounded, cached queries of the public feed.
+Only the scheduled refresh contacts Chocolatey, using targeted searches for
+installed application names. UI lookups always use the stored matches.
 """
 from __future__ import annotations
 
 import asyncio
-from collections import OrderedDict
 from datetime import datetime, timezone
 import re
-import time
 
 import httpx
 from defusedxml import ElementTree
-from app.repositories import chocolatey_catalog as catalog_repo
+from app.repositories import chocolatey_catalog as catalog_repo, rmm_inventory as inventory_repo
 from app.services.chocolatey_sources import COMMUNITY
 from app.services.monitored_http import monitored_client
 
-_CACHE: OrderedDict[tuple, tuple[float, list[dict]]] = OrderedDict()
-_LIMIT = asyncio.Semaphore(4)
 NS = {'a': 'http://www.w3.org/2005/Atom', 'm': 'http://schemas.microsoft.com/ado/2007/08/dataservices/metadata',
       'd': 'http://schemas.microsoft.com/ado/2007/08/dataservices'}
-STABLE = 'IsLatestVersion eq true and IsPrerelease eq false'
 RESULT_LIMIT = 30
-PAGE_SIZE = 100
-# The community feed is rate limited; pace full downloads and bound their size.
+# The community feed is rate limited; pace targeted lookups.
 PAGE_DELAY = 1.0
-MAX_PAGES = 1000
 PAGE_ATTEMPTS = 4
 RETRY_DELAY = 2.0
 MAX_RETRY_DELAY = 60.0
@@ -42,7 +34,10 @@ def _parse(content: bytes) -> tuple[int, list[dict]]:
     """Return the feed's entry count and its valid stable packages."""
     if len(content) > 4 * 1024 * 1024:
         raise ValueError('Catalog response too large')
-    entries = ElementTree.fromstring(content).findall('a:entry', NS)
+    root = ElementTree.fromstring(content)
+    if root.tag != '{' + NS['a'] + '}feed':
+        raise ValueError('Expected an Atom package feed')
+    entries = root.findall('a:entry', NS)
     result = []
     for entry in entries:
         props = entry.find('m:properties', NS)
@@ -67,44 +62,18 @@ def _public(package: dict) -> dict:
 
 
 async def query(term: str, *, exact: bool = False) -> list[dict]:
+    """Search only the inventory-derived package list, never the public catalog."""
     term = term.strip()[:255]
     stored = await (catalog_repo.find_exact if exact else catalog_repo.search)(term, RESULT_LIMIT)
-    if stored or await catalog_repo.has_packages():
-        return [_public(row) for row in stored]
-    key = (term.casefold(), exact)
-    async with _LIMIT:
-        cached = _CACHE.get(key)
-        if cached and cached[0] > time.monotonic():
-            _CACHE.move_to_end(key)
-            return [dict(item) for item in cached[1]]
-        escaped = term.replace("'", "''")
-        params = {'$top': str(RESULT_LIMIT), '$filter': STABLE}
-        if exact:
-            params['$filter'] += f" and (Id eq '{escaped}' or Title eq '{escaped}')"
-            endpoint = 'Packages'
-        else:
-            endpoint = 'Search()'
-            params.update(searchTerm=f"'{escaped}'", targetFramework="''", includePrerelease='false', **{'$skip': '0'})
-        try:
-            async with monitored_client(httpx.AsyncClient, timeout=15, follow_redirects=False) as client:
-                response = await client.get(COMMUNITY + endpoint, params=params, headers={'Accept': 'application/atom+xml'})
-                response.raise_for_status()
-            result = [_public(item) for item in _parse(response.content)[1]]
-        except Exception:
-            raise CatalogUnavailable('Chocolatey catalog is unavailable. Please try again.') from None
-        _CACHE[key] = (time.monotonic() + 3600, result)
-        _CACHE.move_to_end(key)
-        while len(_CACHE) > 2000:
-            _CACHE.popitem(last=False)
-        return [dict(item) for item in result]
+    return [_public(row) for row in stored]
 
 
-async def _download_page(client: httpx.AsyncClient, params: dict) -> bytes:
-    """Retry transient failures without advancing to the next catalog page."""
+async def _request_packages(client: httpx.AsyncClient, params: dict) -> bytes:
+    """Retry a targeted search without changing its application name."""
     for attempt in range(PAGE_ATTEMPTS):
         delay = min(RETRY_DELAY * 2 ** attempt, MAX_RETRY_DELAY)
         try:
-            response = await client.get(COMMUNITY + 'Packages()', params=params,
+            response = await client.get(COMMUNITY + 'Search()', params=params,
                                         headers={'Accept': 'application/atom+xml'})
             response.raise_for_status()
             return response.content
@@ -123,40 +92,46 @@ async def _download_page(client: httpx.AsyncClient, params: dict) -> bytes:
 
 
 async def refresh() -> dict:
-    """Download every stable package and replace the stored app list.
+    """Refresh exact Chocolatey matches for current Windows Software inventory.
 
-    The stored list is only changed after the whole catalog downloads, so a
-    failed or rate-limited run keeps the previous list.
+    Application names are deduplicated across devices and versions. All lookups
+    must succeed before replacing the stored matches; failures keep the old list.
+    Missing and ambiguous names are skipped rather than guessed.
     """
+    names = list({name.strip().casefold(): name.strip()
+                  for name in await inventory_repo.list_catalog_software_names()
+                  if name.strip()}.values())
     packages: dict[str, dict] = {}
-    skip = 0
+    unmatched = ambiguous = matched = 0
     async with monitored_client(httpx.AsyncClient, timeout=60, follow_redirects=False) as client:
-        for page in range(MAX_PAGES):
-            if page:
+        for index, name in enumerate(names):
+            if index:
                 await asyncio.sleep(PAGE_DELAY)
-            params = {'$filter': STABLE, '$orderby': 'Id', '$top': str(PAGE_SIZE), '$skip': str(skip)}
+            escaped = name.replace("'", "''")
+            params = {'$filter': 'IsLatestVersion', '$orderby': 'Id',
+                      'searchTerm': f"'{escaped}'", 'targetFramework': "''",
+                      'includePrerelease': 'false', '$top': str(RESULT_LIMIT), '$skip': '0'}
             try:
-                count, rows = _parse(await _download_page(client, params))
+                _, rows = _parse(await _request_packages(client, params))
             except httpx.HTTPStatusError as exc:
-                raise CatalogUnavailable(f'Chocolatey catalog download failed with HTTP {exc.response.status_code}; '
+                raise CatalogUnavailable(f'Chocolatey software lookup failed with HTTP {exc.response.status_code}; '
                                          'the stored app list was kept.') from None
             except Exception as exc:
-                raise CatalogUnavailable(f'Chocolatey catalog download failed ({type(exc).__name__}); '
+                raise CatalogUnavailable(f'Chocolatey software lookup failed ({type(exc).__name__}); '
                                          'the stored app list was kept.') from None
-            if not count:
-                break
-            for row in rows:
-                packages.setdefault(row['package_id'], row)
-            # Servers may cap page sizes, so advance by what was actually returned.
-            skip += count
-        else:
-            raise CatalogUnavailable('Chocolatey catalog exceeded the download limit; the stored app list was kept.')
-    if not packages:
-        raise CatalogUnavailable('Chocolatey catalog returned no packages; the stored app list was kept.')
+            matches = [row for row in rows if name.casefold() in
+                       {row['package_id'].casefold(), row['title'].casefold()}]
+            if len(matches) == 1:
+                packages.setdefault(matches[0]['package_id'], matches[0])
+                matched += 1
+            elif matches:
+                ambiguous += 1
+            else:
+                unmatched += 1
     refreshed_at = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
     summary = await catalog_repo.replace_all(list(packages.values()), refreshed_at)
-    _CACHE.clear()
-    return {'source': COMMUNITY, 'pages': page + 1, **summary}
+    return {'source': COMMUNITY, 'applications': len(names), 'matched': matched,
+            'unmatched': unmatched, 'ambiguous': ambiguous, **summary}
 
 
 async def last_updated() -> str | None:
