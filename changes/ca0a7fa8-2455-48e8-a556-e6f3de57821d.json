@@ -1,0 +1,7 @@
+{
+  "guid": "ca0a7fa8-2455-48e8-a556-e6f3de57821d",
+  "occurred_at": "2026-10-15T09:16Z",
+  "change_type": "Feature",
+  "summary": "Added a default \"Update Chocolatey app list\" scheduled task that stores the stable Chocolatey community catalog for patch policy searches and asset upgrade checks; administrators can run, reschedule, disable, delete or recreate it from Scheduled Tasks.",
+  "content_hash": "f2f41c4a81f96a116df5510580b154a82993e048d5b6724f9dd7463b484ea476"
+}

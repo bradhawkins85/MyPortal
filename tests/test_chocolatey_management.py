@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from jinja2 import Environment, FileSystemLoader
 
 from app.services import chocolatey_sources as sources, chocolatey_catalog as catalog
+from app.repositories import chocolatey_catalog as catalog_repo
 from app.services import rmm_software_updates as updates, rmm_patching as patch, rmm_scripts
 from app.repositories import rmm as rmm_repo, rmm_inventory as inventory_repo
 from app.features.rmm import patch_routes, inventory_routes
@@ -20,12 +21,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
-def clean_sources(monkeypatch, tmp_path):
+def clean_sources(monkeypatch, tmp_path, request):
     monkeypatch.setattr(sources, 'ENV_FILE', tmp_path / '.env')
     for key in list(sources.os.environ):
         if sources.KEY.fullmatch(key):
             monkeypatch.delenv(key)
     catalog._CACHE.clear()
+    monkeypatch.setattr(catalog, 'PAGE_DELAY', 0)
+    if 'sqlite_db' not in request.fixturenames:
+        # No stored app list yet: lookups use the live feed.
+        monkeypatch.setattr(catalog_repo, 'search', AsyncMock(return_value=[]))
+        monkeypatch.setattr(catalog_repo, 'find_exact', AsyncMock(return_value=[]))
+        monkeypatch.setattr(catalog_repo, 'has_packages', AsyncMock(return_value=False))
 
 
 def test_numbered_env_definitions_and_safe_errors(monkeypatch):
@@ -70,8 +77,13 @@ async def test_company_source_defaults_isolation_and_no_secret_views(sqlite_db, 
 
 def feed(entries):
     return '''<feed xmlns="http://www.w3.org/2005/Atom" xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata" xmlns:d="http://schemas.microsoft.com/ado/2007/08/dataservices">''' + ''.join(
-        f'<entry><m:properties><d:Id>{id}</d:Id><d:Title>{title}</d:Title><d:Version>{version}</d:Version><d:IsPrerelease>false</d:IsPrerelease></m:properties></entry>'
-        for id, title, version in entries) + '</feed>'
+        f'<entry><m:properties><d:Id>{entry[0]}</d:Id><d:Title>{entry[1]}</d:Title><d:Version>{entry[2]}</d:Version><d:IsPrerelease>false</d:IsPrerelease>'
+        + (f'<d:DownloadCount>{entry[3]}</d:DownloadCount>' if len(entry) > 3 else '') + '</m:properties></entry>'
+        for entry in entries) + '</feed>'
+
+
+def mock_feed(monkeypatch, request):
+    monkeypatch.setattr(catalog, 'monitored_client', lambda *a, **kw: httpx.AsyncClient(transport=httpx.MockTransport(request)))
 
 
 @pytest.mark.anyio
@@ -221,3 +233,122 @@ async def test_numbered_sources_prioritize_numeric_order_default_last(sqlite_db,
     assert [s['key'] for s in enabled] == ['CUSTOM1', 'CUSTOM10', 'DEFAULT']
     await sources.save(1, ['DEFAULT'])
     assert [s['key'] for s in await sources.for_company(1, secrets=True) if s['enabled']] == ['DEFAULT']
+
+
+async def _stored(db):
+    return await db.fetch_all('SELECT package_id, title, version, download_count FROM rmm_chocolatey_packages ORDER BY package_id')
+
+
+def _no_network(req):
+    raise AssertionError('The stored app list should be used')
+
+
+@pytest.mark.anyio
+async def test_refresh_downloads_every_page_and_replaces_stored_list(sqlite_db, monkeypatch):
+    await sqlite_db.execute("INSERT INTO rmm_chocolatey_packages (package_id, title, version) VALUES ('retired', 'Retired', '1')")
+    pages = {0: [('7zip', '7-Zip', '24.08', 900), ('Bad;Id', 'Bad', '1'), ('googlechrome', 'Google Chrome', '150.0', 5000)],
+             3: [('vlc', 'VLC media player', '3.0.21', 700)], 4: []}
+    calls = []
+    def request(req):
+        calls.append(req)
+        return httpx.Response(200, text=feed(pages[int(req.url.params['$skip'])]))
+    mock_feed(monkeypatch, request)
+    result = await catalog.refresh()
+    # Pages advance by entries returned, so a server-side page cap never skips packages.
+    assert [c.url.params['$skip'] for c in calls] == ['0', '3', '4']
+    assert all(c.url.path.endswith('/Packages()') and c.url.params['$orderby'] == 'Id'
+               and c.url.params['$filter'] == catalog.STABLE for c in calls)
+    assert result == {'source': catalog.COMMUNITY, 'pages': 3, 'stored': 3, 'removed': 1}
+    assert await _stored(sqlite_db) == [
+        {'package_id': '7zip', 'title': '7-Zip', 'version': '24.08', 'download_count': 900},
+        {'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0', 'download_count': 5000},
+        {'package_id': 'vlc', 'title': 'VLC media player', 'version': '3.0.21', 'download_count': 700}]
+    assert await catalog.last_updated()
+
+    mock_feed(monkeypatch, _no_network)
+    chrome = {'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0'}
+    assert [p['package_id'] for p in await catalog.query('')] == ['googlechrome', '7zip', 'vlc']
+    assert await catalog.query('chrome') == [chrome]
+    assert await catalog.query('%') == []
+    assert await catalog.match('google chrome') == chrome
+    assert await catalog.match('Chrome') is None
+    assert await catalog.match('Missing App') is None
+
+
+@pytest.mark.anyio
+async def test_failed_refresh_keeps_previous_list(sqlite_db, monkeypatch):
+    await sqlite_db.execute("INSERT INTO rmm_chocolatey_packages (package_id, title, version) VALUES ('vlc', 'VLC', '3')")
+    def request(req):
+        if req.url.params['$skip'] == '0':
+            return httpx.Response(200, text=feed([('googlechrome', 'Google Chrome', '150.0')]))
+        return httpx.Response(429)
+    mock_feed(monkeypatch, request)
+    with pytest.raises(catalog.CatalogUnavailable) as exc:
+        await catalog.refresh()
+    assert 'HTTP 429' in str(exc.value)
+    assert [p['package_id'] for p in await _stored(sqlite_db)] == ['vlc']
+
+
+@pytest.mark.anyio
+async def test_empty_stored_list_falls_back_to_live_feed(sqlite_db, monkeypatch):
+    mock_feed(monkeypatch, lambda req: httpx.Response(200, text=feed([('googlechrome', 'Google Chrome', '150.0')])))
+    assert await catalog.match('Google Chrome') == {'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0'}
+    assert await catalog.last_updated() is None
+
+
+@pytest.mark.anyio
+async def test_scheduler_dispatches_chocolatey_catalog_refresh(monkeypatch):
+    from app.services.scheduler import SchedulerService
+
+    class Lock:
+        async def __aenter__(self):
+            return True
+
+        async def __aexit__(self, *_args):
+            return None
+
+    refresh = AsyncMock(return_value={'stored': 10})
+    record = AsyncMock()
+    monkeypatch.setattr(catalog, 'refresh', refresh)
+    monkeypatch.setattr('app.services.scheduler.scheduled_tasks_repo.record_task_run', record)
+    monkeypatch.setattr('app.services.scheduler.scheduled_tasks_repo.has_run_since', AsyncMock(return_value=False))
+    monkeypatch.setattr('app.services.scheduler.db.acquire_lock', lambda *_args, **_kwargs: Lock())
+    await SchedulerService()._run_task({'id': 5, 'command': 'update_chocolatey_catalog'})
+    refresh.assert_awaited_once_with()
+    assert record.await_args.kwargs['status'] == 'succeeded'
+    assert '"stored": 10' in record.await_args.kwargs['details']
+
+
+@pytest.mark.anyio
+async def test_default_task_is_seeded_once_and_keeps_admin_changes():
+    import aiosqlite
+    from app.core.database import Database
+    sql = Database()._adapt_sql_for_sqlite((ROOT / 'migrations/497_chocolatey_catalog_scheduled_task.sql').read_text())
+    async with aiosqlite.connect(':memory:') as conn:
+        await conn.execute('CREATE TABLE scheduled_tasks (id INTEGER PRIMARY KEY, company_id INT, name TEXT, command TEXT, '
+                           'cron TEXT, active INT, description TEXT, max_retries INT, retry_backoff_seconds INT)')
+        await conn.executescript(sql)
+        rows = await (await conn.execute('SELECT name, command, cron, active, company_id FROM scheduled_tasks')).fetchall()
+        assert [tuple(row) for row in rows] == [('Update Chocolatey app list', 'update_chocolatey_catalog', '23 4 * * *', 1, None)]
+        await conn.execute("UPDATE scheduled_tasks SET cron = '0 */6 * * *'")
+        await conn.executescript(sql)
+        assert [tuple(row) for row in await (await conn.execute('SELECT cron FROM scheduled_tasks')).fetchall()] == [('0 */6 * * *',)]
+
+
+@pytest.mark.anyio
+async def test_admins_can_create_chocolatey_catalog_task(monkeypatch):
+    from app import main
+    captured = {}
+
+    async def render(template, request, user, extra):
+        captured.update(extra)
+        return 'rendered'
+
+    monkeypatch.setattr(main, '_require_super_admin_page', AsyncMock(return_value=({'id': 1, 'is_super_admin': True}, None)))
+    monkeypatch.setattr(main.scheduled_tasks_repo, 'list_tasks', AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.company_repo, 'list_companies', AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.modules_service, 'list_modules', AsyncMock(return_value=[]))
+    monkeypatch.setattr(main, '_render_template', render)
+    await main.admin_scheduled_tasks(SimpleNamespace(), show_inactive=False)
+    assert {'value': 'update_chocolatey_catalog', 'label': 'Update Chocolatey app list',
+            'group': 'Staff and assets'} in captured['command_options']

@@ -26,6 +26,7 @@ from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import m365 as m365_repo
 from app.services import asset_importer
 from app.services import automations as automations_service
+from app.services import chocolatey_catalog as chocolatey_catalog_service
 from app.services import company_id_lookup
 from app.services import imap as imap_service
 from app.services import invoice_generator as invoice_generator_service
@@ -1018,6 +1019,10 @@ class SchedulerService:
                 if command == "update_mac_vendors":
                     details = json.dumps(
                         await mac_vendors_service.update_mac_vendors(), default=str
+                    )
+                elif command == "update_chocolatey_catalog":
+                    details = json.dumps(
+                        await chocolatey_catalog_service.refresh(), default=str
                     )
                 elif command == "sync_staff":
                     company_id = task.get("company_id")

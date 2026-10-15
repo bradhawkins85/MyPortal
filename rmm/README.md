@@ -212,7 +212,14 @@ changes. All-disabled companies perform no app management. Source definitions
 and credentials are refreshed at dispatch as well for older agents running new
 portal jobs; **the updated agent is required for the independent daily check**.
 
-Catalog listings use the public feed (cached for one hour); installation/version
-resolution uses the company's enabled feeds. A private-only company therefore
-needs matching packages in its own feed. The portal needs outbound HTTPS access
-to `community.chocolatey.org` for catalog listings.
+Catalog listings and asset upgrade checks use a stored copy of the stable public
+feed (migrations **496** and **497**). The **Update Chocolatey app list** scheduled
+task is created by default (daily at 04:23 in the scheduler's time zone) and
+downloads the whole catalog page by page; super admins can run, reschedule,
+disable or delete it under **Admin → Scheduled tasks**, or recreate it with the
+**Update Chocolatey app list** command. A failed download keeps the previous
+list. Until the first refresh completes, listings query the public feed directly
+(cached for one hour). Installation/version resolution uses the company's enabled
+feeds. A private-only company therefore needs matching packages in its own feed.
+The portal needs outbound HTTPS access to `community.chocolatey.org` for catalog
+listings.
