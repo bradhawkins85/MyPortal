@@ -189,6 +189,10 @@ include it in the repository path (for example `rmm/Files/Common/setup.exe`).
 - When a run is queued, MyPortal reads each Gitea file and calculates its MD5, SHA-256 and
   size. The run keeps that exact Git file version, so a later Gitea update does not change an
   already queued run's files.
+- If Gitea omits a file's content because of its blob API size threshold, MyPortal
+  downloads the raw file at the queued commit and verifies its Git hash. No Gitea
+  size-setting change is needed for files within the 50 MB limit. Runs queued before
+  commit pinning was added must be queued again if Gitea omits their file content.
 - Before starting the script, the RMM agent compares the file already at each destination
   with the queued checksums and size. Matching files are reused without a download.
   Missing or different files are downloaded through MyPortal with the agent's token;

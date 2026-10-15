@@ -184,7 +184,27 @@ async def file_batches(
             batch = list(islice(pending, _DOWNLOAD_CONCURRENCY))
 
 
-async def fetch_blob(settings: GiteaSettings, sha: str, *, max_bytes: int) -> bytes:
+async def resolve_commit(settings: GiteaSettings) -> str:
+    """Pin the configured branch before downloading associated files."""
+    try:
+        async with _client(settings) as client:
+            response = await client.get(_repo_url(settings) + "/branches/" + quote(settings.branch, safe=""))
+    except httpx.HTTPError as exc:
+        raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
+    _raise_for(response, "resolving the script file version")
+    try:
+        sha = response.json()["commit"]["id"]
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise ValueError("Invalid commit")
+    except (ValueError, KeyError, TypeError) as exc:
+        raise GiteaError("Gitea returned an invalid file commit.") from exc
+    return sha
+
+
+async def fetch_blob(
+    settings: GiteaSettings, sha: str, *, max_bytes: int,
+    path: str | None = None, ref: str | None = None,
+) -> bytes:
     """Fetch an immutable Git blob, preserving the file version queued for a run."""
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise GiteaError("Gitea returned an invalid file version.")
@@ -202,9 +222,31 @@ async def fetch_blob(settings: GiteaSettings, sha: str, *, max_bytes: int) -> by
         raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
     try:
         payload = json.loads(data)
-        if payload.get("encoding") != "base64":
-            raise ValueError("Unexpected blob encoding")
-        raw = base64.b64decode("".join(payload["content"].split()), validate=True)
+        if not isinstance(payload, dict):
+            raise ValueError("Unexpected blob response")
+        # Gitea omits content above API.DEFAULT_MAX_BLOB_SIZE. The raw
+        # endpoint has no such threshold; only use it at a pinned commit.
+        omitted = payload.get("encoding") is None and payload.get("content") is None
+        if omitted and path and ref and re.fullmatch(r"[0-9a-f]{40}", ref):
+            encoded = "/".join(quote(part, safe="") for part in path.split("/"))
+            try:
+                async with _client(settings) as client:
+                    async with client.stream("GET", _repo_url(settings) + "/raw/" + encoded, params={"ref": ref}) as response:
+                        _raise_for(response, "downloading a script file")
+                        data = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            data.extend(chunk)
+                            if len(data) > max_bytes:
+                                raise GiteaError("The script file exceeds the download size limit.")
+            except httpx.HTTPError as exc:
+                raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
+            raw = bytes(data)
+        elif omitted:
+            raise GiteaError("Gitea omitted the script file content. Queue a new run to download it at a pinned commit.")
+        else:
+            if payload.get("encoding") != "base64" or not isinstance(payload.get("content"), str):
+                raise ValueError("Unexpected blob encoding")
+            raw = base64.b64decode("".join(payload["content"].split()), validate=True)
     except (ValueError, KeyError, TypeError) as exc:
         raise GiteaError("Gitea returned an unreadable script file.") from exc
     if len(raw) > max_bytes:
