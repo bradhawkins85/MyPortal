@@ -859,6 +859,39 @@ body.navigation--top .rmm-library {
   margin: var(--space-gap-tight, 0.5rem) 0 0;
   padding-left: 1.25rem;
 }
+
+/* The asset page's Windows updates section (rmm/_asset_windows_updates.html). */
+.rmm-updates__form {
+  display: grid;
+  gap: var(--space-gap-base);
+  min-width: 0;
+}
+
+.rmm-updates__form > p { margin: 0; }
+
+.rmm-updates__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-gap-base);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rmm-updates__actions .form-label {
+  display: grid;
+  gap: var(--space-gap-tight, 0.5rem);
+  margin: 0;
+}
+
+.rmm-updates__actions input[type="number"] { max-width: 8rem; }
+
+.rmm-updates__nowrap { white-space: nowrap; }
+
+.rmm-updates__history summary { cursor: pointer; }
+
+.rmm-updates__history .table-wrapper { margin-top: var(--space-gap-tight, 0.5rem); }
 .rmm-files { list-style: none; margin: 0; padding: 0; }
 .rmm-files__item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-gap-roomy); padding-block: var(--space-gap-roomy); border-bottom: 1px solid var(--color-border); }
 .rmm-files__paths { display: grid; gap: var(--space-gap-tight); min-width: 0; overflow-wrap: anywhere; }

@@ -24,6 +24,21 @@ function Compare-Version($installed, $latest) {
     }
     return 0
 }
+function Install-PatchUpdates($session, $updates) {
+    # Throws when any update fails; a partial installation still records its restart need.
+    $downloader = $session.CreateUpdateDownloader(); $downloader.Updates = $updates
+    $download = $downloader.Download()
+    if ($download.ResultCode -ne 2) { throw "Windows Update download failed: $($download.ResultCode)" }
+    $installer = $session.CreateUpdateInstaller(); $installer.Updates = $updates
+    $installer.AllowSourcePrompts = $false
+    $result = $installer.Install()
+    if ($result.RebootRequired) { $script:rebootRequired = $true }
+    for ($i = 0; $i -lt $updates.Count; $i++) {
+        $detail = $result.GetUpdateResult($i)
+        Write-Output "$($updates.Item($i).Title): result=$($detail.ResultCode), HRESULT=$($detail.HResult)"
+    }
+    if ($result.ResultCode -ne 2) { throw "Windows Update installation failed or partially succeeded: $($result.ResultCode)" }
+}
 function Choco-Output([string[]]$arguments) {
     $output = @(& $script:choco @arguments 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed ($LASTEXITCODE)." }
@@ -55,7 +70,9 @@ try {
                     'Definition Updates' = 'e0789628-ce08-4437-be74-2495b842f43b'
                 }
                 $allowed = @($plan.windows.categories | ForEach-Object { $ids[$_] })
+                $blocks = Get-MyPortalUpdateBlocks
                 foreach ($update in $found.Updates) {
+                    if (Test-MyPortalUpdateBlocked $update $blocks) { Write-Output "Blocked in MyPortal, skipped: $($update.Title)"; continue }
                     $match = @($update.Categories | Where-Object { $allowed -contains $_.CategoryID }).Count -gt 0
                     if ($match -and $update.LastDeploymentChangeTime.ToUniversalTime() -le $cutoff -and
                         -not $update.InstallationBehavior.CanRequestUserInput) {
@@ -64,20 +81,36 @@ try {
                         Write-Output "Windows Update: $($update.Title)"
                     }
                 }
-                if ($updates.Count -gt 0) {
-                    $downloader = $session.CreateUpdateDownloader(); $downloader.Updates = $updates
-                    $download = $downloader.Download()
-                    if ($download.ResultCode -ne 2) { throw "Windows Update download failed: $($download.ResultCode)" }
-                    $installer = $session.CreateUpdateInstaller(); $installer.Updates = $updates
-                    $installer.AllowSourcePrompts = $false
-                    $result = $installer.Install()
-                    $rebootRequired = $result.RebootRequired
-                    for ($i = 0; $i -lt $updates.Count; $i++) {
-                        $detail = $result.GetUpdateResult($i)
-                        Write-Output "$($updates.Item($i).Title): result=$($detail.ResultCode), HRESULT=$($detail.HResult)"
+                if ($updates.Count -gt 0) { Install-PatchUpdates $session $updates }
+                else { Write-Output 'No applicable Windows updates.' }
+            } catch { $failed = $true; Write-Output "Windows Update error: $_" }
+        }
+        if ($plan.manual_windows) {
+            # A technician chose these updates on the asset page; categories and deferral do not apply.
+            try {
+                $wanted = @($plan.manual_windows.update_ids | ForEach-Object { ([string]$_).ToLowerInvariant() })
+                $session = New-Object -ComObject Microsoft.Update.Session
+                $session.ClientApplicationID = 'MyPortal Patch Management'
+                # A technician may choose an update someone hid on the device; blocked ones are never installed.
+                $found = $session.CreateUpdateSearcher().Search("IsInstalled=0 and Type='Software'")
+                $updates = New-Object -ComObject Microsoft.Update.UpdateColl
+                $blocks = Get-MyPortalUpdateBlocks
+                foreach ($update in $found.Updates) {
+                    if ($wanted -notcontains ([string]$update.Identity.UpdateID).ToLowerInvariant()) { continue }
+                    if (Test-MyPortalUpdateBlocked $update $blocks) { Write-Output "Blocked in MyPortal, skipped: $($update.Title)"; continue }
+                    if ($update.InstallationBehavior.CanRequestUserInput) {
+                        Write-Output "Skipped, needs someone at the device: $($update.Title)"; continue
                     }
-                    if ($result.ResultCode -ne 2) { throw "Windows Update installation failed or partially succeeded: $($result.ResultCode)" }
-                } else { Write-Output 'No applicable Windows updates.' }
+                    if ($update.IsHidden) { $update.IsHidden = $false }
+                    if (-not $update.EulaAccepted) { $update.AcceptEula() }
+                    [void]$updates.Add($update)
+                    Write-Output "Windows Update: $($update.Title)"
+                }
+                if ($updates.Count -lt $wanted.Count) {
+                    Write-Output "$($wanted.Count - $updates.Count) selected update(s) are no longer needed or cannot install unattended."
+                }
+                if ($updates.Count -gt 0) { Install-PatchUpdates $session $updates }
+                else { Write-Output 'None of the selected updates can be installed.' }
             } catch { $failed = $true; Write-Output "Windows Update error: $_" }
         }
         if (@($plan.apps).Count -gt 0) {
@@ -138,6 +171,10 @@ try {
     }
     $rebootRequired = $rebootRequired -or (Pending-Reboot)
     Write-Output "Reboot pending: $rebootRequired"
+    if ($plan.windows -or $plan.manual_windows) {
+        # Refresh the asset page's Windows updates list; a failed scan never fails the patch run.
+        try { Send-MyPortalWindowsUpdateState } catch { Write-Output "Could not report Windows Update status: $_" }
+    }
     if ($rebootRequired -and -not $failed -and $plan.reboot.reboot_mode -ne 'never') {
         $start = [int]$plan.reboot.active_start; $end = [int]$plan.reboot.active_end
         function Active-Hour([datetime]$time) {
@@ -147,8 +184,11 @@ try {
         }
         $delay = [int]$plan.reboot.reboot_delay_minutes
         $safe = $true
-        # Check the whole countdown, including overnight active hours.
-        for ($i = 0; $i -le $delay; $i++) { if (Active-Hour (Get-Date).AddMinutes($i)) { $safe = $false } }
+        # Check the whole countdown, including overnight active hours. A technician's
+        # install from the asset page restarts when they asked, regardless of active hours.
+        if (-not $plan.reboot.immediate) {
+            for ($i = 0; $i -le $delay; $i++) { if (Active-Hour (Get-Date).AddMinutes($i)) { $safe = $false } }
+        }
         if ($plan.reboot.reboot_mode -eq 'no_users') {
             # WTS includes disconnected RDP sessions; query failures prevent reboot.
             Add-Type @'

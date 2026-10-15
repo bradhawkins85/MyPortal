@@ -17,6 +17,7 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_automation as automation_repo
 from app.repositories import rmm_checks as checks_repo
 from app.repositories import rmm_patching as patch_repo
+from app.repositories import rmm_windows_updates as windows_updates_repo
 from app.repositories import rmm_targeting as targeting_repo
 from app.repositories import rmm_event_log_rules as event_log_rules_repo
 from app.repositories import rmm_event_logs as event_log_repo
@@ -304,7 +305,8 @@ async def sqlite_db(monkeypatch):
                  "484_rmm_agent_install_attempts.sql", "486_rmm_automation_target_rules.sql",
                  "487_rmm_thermal_monitoring.sql", "488_rmm_software_history.sql", "491_rmm_patch_policies.sql",
                  "493_rmm_script_parallel.sql", "494_rmm_chocolatey_sources.sql", "495_rmm_script_run_anyway.sql",
-                 "496_rmm_chocolatey_catalog.sql"):
+                 "496_rmm_chocolatey_catalog.sql", "498_rmm_windows_updates.sql",
+                 "499_rmm_windows_update_blocks.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -315,7 +317,7 @@ async def sqlite_db(monkeypatch):
     fake = _SqliteDb(conn)
     for module in (rmm_repo, automation_repo, remote_repo, event_log_repo, event_log_rules_repo, checks_repo, tags_repo,
                    asset_fields_repo, company_variables_repo, assets_repo, deploy_repo, tray_repo, targeting_repo, patch_repo, chocolatey_sources,
-                   chocolatey_catalog_repo):
+                   chocolatey_catalog_repo, windows_updates_repo):
         monkeypatch.setattr(module, "db", fake)
 
     async def get_company(company_id):

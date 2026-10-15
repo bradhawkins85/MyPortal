@@ -20,7 +20,8 @@ the `menu.rmm_scripts` permission see the section; those who can run scripts can
 | Installed software | the registry's uninstall entries, for the machine and each signed-in user | applications outside `/System` | `dpkg`, `rpm` or `pacman` packages |
 
 On Windows, software that hides itself from **Apps & features** (system components and updates) is
-left out. A part that cannot be read (for example a broken WMI class) is skipped; the rest is still
+left out; installed and missing Windows updates have their own **Windows updates** section (see
+[RMM Patch Management](RMM%20Patch%20Management.md#device-windows-updates)). A part that cannot be read (for example a broken WMI class) is skipped; the rest is still
 sent and the section lists what failed under **Some details could not be read**. At most 5000
 programs are kept per device.
 

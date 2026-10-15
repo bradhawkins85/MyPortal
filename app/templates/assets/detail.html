@@ -87,6 +87,7 @@
           ("tags", "tags", "Tags", "", asset_tags is not none),
           ("hardware", "hardware", "Hardware", "", rmm and rmm.inventory),
           ("software", "software", "Software", rmm.inventory.software | length if rmm and rmm.inventory and rmm.inventory.software else "", rmm and rmm.inventory),
+          ("windows-updates", "windows-updates", "Windows updates", rmm.windows_updates.counts.missing or "" if rmm and rmm.windows_updates else "", rmm and rmm.windows_updates),
           ("scripts", "scripts", "Scripts", "", rmm),
           ("checks", "checks", "Checks", rmm.checks.failing or "" if rmm and rmm.checks else "", rmm and rmm.checks),
           ("machine-stats", "machine-stats", "Machine stats", "", rmm and rmm.checks),
@@ -281,6 +282,7 @@
     </div>
   </section>{% endif %}
   {% if rmm and rmm.inventory %}{% include "rmm/_asset_inventory.html" %}{% include "rmm/_asset_software.html" %}{% endif %}
+  {% if rmm and rmm.windows_updates %}{% include "rmm/_asset_windows_updates.html" %}{% endif %}
 
   {% if rmm and rmm.event_logs %}{% set elog = rmm.event_logs %}{% set LEVEL_STATUS = {"Critical": "error", "Error": "error", "Warning": "warning", "Information": "info", "Verbose": "neutral"} %}<section class="card card--panel ce-section" id="event-logs" data-asset-edit-section="event-logs" aria-labelledby="asset-event-logs-heading">
     <header class="ce-section__header"><div class="ce-section__heading">
@@ -717,4 +719,4 @@
 {% include "partials/csrf.html" %}
 {% if rmm %}{% include "rmm/_run_modal.html" %}{% endif %}
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script><script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if asset_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}{% if rmm %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script>{% if rmm.inventory %}<script src="{{ static_url('/static/js/rmm_inventory.js') }}" defer></script>{% endif %}{% if rmm.can_push_agent %}<script src="{{ static_url('/static/js/rmm_agent_deploy.js') }}" defer></script>{% endif %}{% endif %}{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script><script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if asset_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}{% if rmm %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script>{% if rmm.inventory %}<script src="{{ static_url('/static/js/rmm_inventory.js') }}" defer></script>{% endif %}{% if rmm.windows_updates %}<script src="{{ static_url('/static/js/rmm_windows_updates.js') }}" defer></script>{% endif %}{% if rmm.can_push_agent %}<script src="{{ static_url('/static/js/rmm_agent_deploy.js') }}" defer></script>{% endif %}{% endif %}{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}

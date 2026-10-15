@@ -17,6 +17,7 @@ from app.services.rmm_scripts import RunRequestError
 from app.services import chocolatey_sources
 
 PACKAGE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+UPDATE_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 CATEGORIES = {"Security Updates", "Critical Updates", "Update Rollups", "Updates", "Definition Updates"}
 DEFAULTS = {"name": "", "scope": "company", "kind": "windows", "package_id": "", "display_name": "",
             "cron": "0 2 * * 0", "timezone": "", "target_mode": "all", "target_rules": None,
@@ -148,7 +149,22 @@ def plan(policies: list[dict[str, Any]], selected: set[int]) -> dict[str, Any]:
 
 
 def script_content() -> str:
-    return chocolatey_sources.script() + "\n" + (Path(__file__).parent / "rmm_builtin" / "patch.ps1").read_text(encoding="utf-8")
+    # Windows Update functions skip blocked updates and report the device's new
+    # update status after installing (see app.services.rmm_windows_updates).
+    builtin = Path(__file__).parent / "rmm_builtin"
+    return (chocolatey_sources.script() + "\n" + (builtin / "windows_updates.ps1").read_text(encoding="utf-8") + "\n"
+            + (builtin / "patch.ps1").read_text(encoding="utf-8"))
+
+
+def chosen_updates_current(agent: Mapping[str, Any], config: Mapping[str, Any]) -> bool:
+    """A job installing updates a technician chose still applies at dispatch on
+    a Windows device; the device skips any update since installed or blocked."""
+
+    manual = config.get("manual_windows")
+    return (str(agent.get("os") or "").lower() == "windows" and isinstance(manual, Mapping)
+            and bool(manual.get("update_ids"))
+            and all(UPDATE_ID.fullmatch(str(value or "")) for value in manual["update_ids"])
+            and not config.get("apps") and config.get("windows") is None)
 
 
 async def queue(agent: Mapping[str, Any], policies: list[dict[str, Any]], selected: set[int],
@@ -177,6 +193,8 @@ async def job_is_current(agent: Mapping[str, Any], job: Mapping[str, Any]) -> bo
     """Re-evaluate inventory, scopes and revisions immediately before dispatch."""
     try:
         config = json.loads(job["env"]["MYPORTAL_PATCH_PLAN"])
+        if "manual_windows" in config:
+            return chosen_updates_current(agent, config)
         if "manual_upgrade" in config:
             from app.services import rmm_software_updates
             from app.services.chocolatey_catalog import CatalogUnavailable

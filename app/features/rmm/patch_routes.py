@@ -40,10 +40,16 @@ async def render(request, context, editing=None, errors=None):
     policies = await repo.list_policies(company_id)
     for policy in policies:
         policy["can_edit"] = can_edit and (policy["company_id"] is not None or bool(user.get("is_super_admin")))
+    from app.repositories import rmm_windows_updates as updates_repo
+    from app.services import rmm_windows_updates
+
+    blocks = [rmm_windows_updates.describe_block(rule, can_edit=can_edit, is_super_admin=bool(user.get("is_super_admin")))
+              for rule in await updates_repo.list_company_blocks(company_id)]
     response = await _assets_routes()._main()._render_template("rmm/patching.html", request, user,
         extra={"title": "Patch management", "company": company, "policies": policies, "can_edit": can_edit,
                "can_manage_sources": can_manage_sources,
                "is_super_admin": bool(user.get("is_super_admin")), "editing": editing, "errors": errors or {},
+               "blocks": blocks,
                "categories": sorted(patching.CATEGORIES)})
     if errors:
         response.status_code = 400

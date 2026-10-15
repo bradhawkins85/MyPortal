@@ -1,0 +1,7 @@
+{
+  "guid": "b2605a76-8693-41ce-8d8a-70a8106517ea",
+  "occurred_at": "2026-10-15T10:30Z",
+  "change_type": "Feature",
+  "summary": "RMM: block Windows updates for a device, a company or every company; blocked updates are listed separately, never installed by MyPortal, hidden from Windows Update on devices, and can be unblocked from Patch management",
+  "content_hash": "be40b2522f7273c2ddac42ade2e9fc05ea9ead910fdc7a65c0bf4552850851d3"
+}
