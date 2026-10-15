@@ -9,7 +9,7 @@
 
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "Tray settings", "type": "link", "variant": "ghost", "href": "/admin/companies/" ~ company.id ~ "/tray"}
+    {"label": "Tray settings", "type": "link", "variant": "ghost", "href": "/admin/companies/" ~ company.id ~ "/edit#ce-tray"}
   ]) }}
 {% endblock %}
 
@@ -135,7 +135,7 @@
 
         <div class="form-actions">
           <button type="submit" class="button button--primary">{% if question %}Save changes{% else %}Create question{% endif %}</button>
-          <a href="/admin/companies/{{ company.id }}/tray" class="button button--ghost">Cancel</a>
+          <a href="/admin/companies/{{ company.id }}/edit#ce-tray" class="button button--ghost">Cancel</a>
         </div>
       </form>
     </div>
