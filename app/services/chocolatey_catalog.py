@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import re
+from urllib.parse import quote, urlencode
 
 import httpx
 from defusedxml import ElementTree
@@ -70,10 +71,14 @@ async def query(term: str, *, exact: bool = False) -> list[dict]:
 
 async def _request_packages(client: httpx.AsyncClient, params: dict) -> bytes:
     """Retry a targeted search without changing its application name."""
+    # Match NuGet's V2FeedQueryBuilder/UrlEncodeOdataParameter: literal OData
+    # keys and quotes, percent-encoded values, and %20 rather than form '+' spaces.
+    # Do not pass params= here: HTTPX would re-encode this OData query as a form.
+    url = COMMUNITY + 'Search()?' + urlencode(params, quote_via=quote, safe="$'")
     for attempt in range(PAGE_ATTEMPTS):
         delay = min(RETRY_DELAY * 2 ** attempt, MAX_RETRY_DELAY)
         try:
-            response = await client.get(COMMUNITY + 'Search()', params=params,
+            response = await client.get(url,
                                         headers={'Accept': 'application/atom+xml'})
             response.raise_for_status()
             return response.content
@@ -89,6 +94,22 @@ async def _request_packages(client: httpx.AsyncClient, params: dict) -> bytes:
                 raise
         await asyncio.sleep(delay)
     raise AssertionError('Catalog page attempts exhausted')
+
+
+def _lookup_error(response: httpx.Response, name: str) -> str:
+    """Include a bounded upstream OData message, without echoing arbitrary HTML."""
+    reason = ''
+    if len(response.content) <= 16_384:
+        try:
+            root = ElementTree.fromstring(response.content)
+            if root.tag == '{' + NS['m'] + '}error':
+                message = root.findtext('m:message', default='', namespaces=NS)
+                reason = ' '.join(message.split())[:300]
+        except Exception:
+            pass
+    detail = f': {reason}' if reason else ''
+    return (f'Chocolatey software lookup failed with HTTP {response.status_code} for {name!r}{detail}; '
+            'the stored app list was kept.')
 
 
 async def refresh() -> dict:
@@ -110,12 +131,12 @@ async def refresh() -> dict:
             escaped = name.replace("'", "''")
             params = {'$filter': 'IsLatestVersion', '$orderby': 'Id',
                       'searchTerm': f"'{escaped}'", 'targetFramework': "''",
-                      'includePrerelease': 'false', '$top': str(RESULT_LIMIT), '$skip': '0'}
+                      'includePrerelease': 'false', '$skip': '0', '$top': str(RESULT_LIMIT),
+                      'semVerLevel': '2.0.0'}
             try:
                 _, rows = _parse(await _request_packages(client, params))
             except httpx.HTTPStatusError as exc:
-                raise CatalogUnavailable(f'Chocolatey software lookup failed with HTTP {exc.response.status_code}; '
-                                         'the stored app list was kept.') from None
+                raise CatalogUnavailable(_lookup_error(exc.response, name)) from None
             except Exception as exc:
                 raise CatalogUnavailable(f'Chocolatey software lookup failed ({type(exc).__name__}); '
                                          'the stored app list was kept.') from None
