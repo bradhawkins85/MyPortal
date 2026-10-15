@@ -32,9 +32,23 @@
       </div>
       <dl class="rmm-detail__facts">
         <div><dt>Default timeout</dt><dd>{{ (script.default_timeout_seconds // 60) if script.default_timeout_seconds >= 60 else script.default_timeout_seconds }} {{ 'minutes' if script.default_timeout_seconds >= 60 else 'seconds' }}</dd></div>
+        <div><dt>Execution</dt><dd>{{ 'Parallel' if script.allow_parallel else 'Sequential' }}</dd></div>
         <div><dt>Lines</dt><dd>{{ script.line_count }}</dd></div>
         <div><dt>Last synced</dt><dd>{% if script.synced_at %}<span data-utc="{{ script.synced_at }}">{{ script.synced_at }}</span>{% else %}–{% endif %}</dd></div>
       </dl>
+      {% if is_super_admin %}
+      <form method="post" action="/rmm/scripts/{{ script.id }}/execution">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <div class="form-field">
+          <label for="rmm-allow-parallel">
+            <input id="rmm-allow-parallel" type="checkbox" name="allow_parallel"{% if script.allow_parallel %} checked{% endif %} aria-describedby="rmm-execution-help">
+            Allow this script to run in parallel
+          </label>
+          <p class="form-help" id="rmm-execution-help">By default, this script waits for other scripts on the device to finish and runs alone. Parallel scripts can run together, but wait behind sequential scripts. Onboarding scripts always run in sequence. Changes apply to newly queued runs.</p>
+        </div>
+        <button type="submit" class="button button--ghost button--small">Save execution setting</button>
+      </form>
+      {% endif %}
     </div>
   </section>
 

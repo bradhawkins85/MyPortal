@@ -104,6 +104,7 @@ def _script_summary(script: dict[str, Any]) -> dict[str, Any]:
         "parameter_count": len(script.get("parameters") or []),
         "env_count": len(script.get("env_vars") or []),
         "default_timeout_seconds": script.get("default_timeout_seconds") or 600,
+        "allow_parallel": bool(script.get("allow_parallel")),
         "synced_at": _iso(script.get("synced_at")),
         "files": script.get("files") or [],
     }
@@ -350,6 +351,37 @@ async def summarise_script_api(script_id: int, request: Request):
         metadata={"script": script["name"], "model": state["model"]},
     )
     return state
+
+
+class ScriptExecutionRequest(BaseModel):
+    allow_parallel: bool = Field(strict=True)
+
+
+async def _save_script_execution(request: Request, script_id: int, allow_parallel: bool) -> None:
+    user, _company, company_id, _can_run = await _context(request, api=True)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    script = await rmm_repo.get_script(script_id)
+    if not rmm_repo.script_available_to(script, company_id):
+        raise HTTPException(status_code=404, detail="Script not found")
+    await rmm_repo.set_script_parallel(script_id, allow_parallel)
+    await audit_service.record(
+        action="rmm.script.execution.update", request=request, user_id=user.get("id"),
+        entity_type="rmm_script", entity_id=script_id, metadata={"allow_parallel": allow_parallel},
+    )
+
+
+@router.put("/api/rmm/scripts/{script_id:int}/execution", summary="Set whether a script may run in parallel")
+async def update_script_execution_api(script_id: int, payload: ScriptExecutionRequest, request: Request):
+    await _save_script_execution(request, script_id, payload.allow_parallel)
+    return {"allow_parallel": payload.allow_parallel}
+
+
+@router.post("/rmm/scripts/{script_id:int}/execution", summary="Save a script's execution mode")
+async def update_script_execution(script_id: int, request: Request):
+    form = await request.form()
+    await _save_script_execution(request, script_id, form.get("allow_parallel") == "on")
+    return flash_redirect(f"/rmm/scripts?script={script_id}", "Script execution setting saved.", "success")
 
 
 async def _editable_script_files(request: Request, script_id: int) -> tuple[dict, dict, int]:

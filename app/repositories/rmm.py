@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, AsyncIterator, Iterable
+from weakref import WeakValueDictionary
 
 from app.core.database import db
 
 ACTIVE_RUN_STATUSES = ("queued", "dispatched", "running")
+_dispatch_locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
+
 FINISHED_RUN_STATUSES = ("completed", "failed", "timed_out", "cancelled", "expired")
 
 # Fixed SQL fragments naming what queued a run (manual, schedule or onboarding).
@@ -41,6 +46,7 @@ def _script_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     script["env_vars"] = _decode_json(script.pop("env_vars_json", None), [])
     script["files"] = _decode_json(script.pop("files_json", None), [])
     script["is_active"] = bool(script.get("is_active"))
+    script["allow_parallel"] = bool(script.get("allow_parallel"))
     if "ai_summary_json" in script:
         script["ai_summary"] = _decode_json(script.pop("ai_summary_json"), None)
     return script
@@ -69,13 +75,13 @@ async def list_scripts(*, company_id: int | None = None) -> list[dict[str, Any]]
     if company_id is None:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, company_id, is_active, synced_at, "
             "created_at, updated_at, files_json FROM rmm_scripts WHERE is_active = 1 ORDER BY folder, name"
         )
     else:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, company_id, is_active, synced_at, "
             "created_at, updated_at, files_json FROM rmm_scripts WHERE is_active = 1 "
             "AND (company_id IS NULL OR company_id = %s) ORDER BY folder, name",
             (company_id,),
@@ -96,7 +102,7 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
     if with_content:
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, company_id, is_active, synced_at, "
             "created_at, updated_at, files_json, content, ai_summary_json, ai_summary_sha256, ai_summary_model, "
             "ai_summary_updated_at FROM rmm_scripts WHERE id = %s",
             (script_id,),
@@ -104,7 +110,7 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
     else:
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, company_id, is_active, synced_at, "
             "created_at, updated_at, files_json FROM rmm_scripts WHERE id = %s",
             (script_id,),
         )
@@ -186,6 +192,13 @@ async def set_script_timeout(script_id: int, timeout_seconds: int) -> None:
     await db.execute(
         "UPDATE rmm_scripts SET default_timeout_seconds = %s, updated_at = %s WHERE id = %s",
         (timeout_seconds, _utcnow(), script_id),
+    )
+
+
+async def set_script_parallel(script_id: int, allow_parallel: bool) -> None:
+    await db.execute(
+        "UPDATE rmm_scripts SET allow_parallel = %s, updated_at = %s WHERE id = %s",
+        (allow_parallel, _utcnow(), script_id),
     )
 
 
@@ -367,13 +380,14 @@ async def create_run(
         "INSERT INTO rmm_script_runs (script_id, script_name, script_path, language, script_content, "
         "content_sha256, agent_id, company_id, asset_id, requested_by_user_id, status, inputs_json, "
         "payload_encrypted, timeout_seconds, queued_at, expires_at, run_source, schedule_id, "
-        "onboarding_run_id) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s)",
+        "onboarding_run_id, allow_parallel) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             script["id"], script["name"], script["path"], script["language"], content,
             script["content_sha256"], agent_id, company_id, asset_id, requested_by_user_id,
             json.dumps(inputs), payload_encrypted, timeout_seconds, _utcnow(), expires_at,
             run_source, schedule_id, onboarding_run_id,
+            bool(script.get("allow_parallel")) and run_source != "onboarding",
         ),
     )
 
@@ -446,7 +460,7 @@ async def has_active_run(agent_id: int, script_id: int, *, run_source: str) -> b
 async def next_jobs_for_agent(agent_id: int, *, limit: int = 5) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         "SELECT id, script_name, script_path, language, script_content, content_sha256, payload_encrypted, "
-        "timeout_seconds, run_source, expires_at FROM rmm_script_runs WHERE agent_id = %s AND status = 'queued' "
+        "timeout_seconds, run_source, expires_at, allow_parallel FROM rmm_script_runs WHERE agent_id = %s AND status = 'queued' "
         "ORDER BY queued_at, id LIMIT %s",
         (agent_id, limit),
     )
@@ -460,15 +474,50 @@ async def has_queued_jobs(agent_id: int) -> bool:
     return bool(row)
 
 
-async def mark_dispatched(run_id: int, agent_id: int, *, expires_at: datetime) -> bool:
-    """Claim a queued run for an agent. Returns ``False`` if another poll got it first."""
+@asynccontextmanager
+async def _dispatch_lock(agent_id: int) -> AsyncIterator[bool]:
+    # Local locking also protects SQLite, whose advisory lock is a no-op.
+    lock = _dispatch_locks.setdefault(agent_id, asyncio.Lock())
+    async with lock:
+        if db.is_sqlite():
+            yield True
+        else:
+            async with db.acquire_lock(f"rmm_dispatch_{agent_id}", timeout=0) as acquired:
+                yield acquired
 
-    claimed = await db.execute_rowcount(
-        "UPDATE rmm_script_runs SET status = 'dispatched', dispatched_at = %s, expires_at = %s "
-        "WHERE id = %s AND agent_id = %s AND status = 'queued'",
-        (_utcnow(), expires_at, run_id, agent_id),
-    )
-    return claimed > 0
+
+async def mark_dispatched(run_id: int, agent_id: int, *, expires_at: datetime) -> bool:
+    """Claim in queue order, reserving exclusive runs across concurrent polls/workers."""
+
+    async with _dispatch_lock(agent_id) as acquired:
+        if not acquired:
+            return False
+        first = await db.fetch_one(
+            "SELECT id, allow_parallel, run_source FROM rmm_script_runs "
+            "WHERE agent_id = %s AND status = 'queued' ORDER BY queued_at, id LIMIT 1",
+            (agent_id,),
+        )
+        if not first or int(first["id"]) != run_id:
+            return False
+        active = await db.fetch_all(
+            "SELECT allow_parallel, run_source FROM rmm_script_runs "
+            "WHERE agent_id = %s AND status IN ('dispatched', 'running')",
+            (agent_id,),
+        )
+        parallel = bool(first.get("allow_parallel")) and first.get("run_source") != "onboarding"
+        exclusive_active = any(
+            not row.get("allow_parallel") or row.get("run_source") == "onboarding" for row in active
+        )
+        # The agent has four execution slots; do not start timeouts for jobs
+        # that would only be waiting for a slot on the device.
+        if len(active) >= 4 or (active and (not parallel or exclusive_active)):
+            return False
+        claimed = await db.execute_rowcount(
+            "UPDATE rmm_script_runs SET status = 'dispatched', dispatched_at = %s, expires_at = %s "
+            "WHERE id = %s AND agent_id = %s AND status = 'queued'",
+            (_utcnow(), expires_at, run_id, agent_id),
+        )
+        return claimed > 0
 
 
 async def get_agent_run(run_id: int, agent_id: int) -> dict[str, Any] | None:
