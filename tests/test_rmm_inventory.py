@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.core.database import Database
 from app.repositories import rmm_inventory as inventory_repo
+from app.repositories import network_map as network_map_repo
 from app.services import rmm_inventory as inventory
 from tests.test_rmm_scripts import _enrol, _environment, anyio_backend, sqlite_db  # noqa: F401 - fixtures
 
@@ -20,6 +21,13 @@ GIB = 1024 ** 3
 async def inventory_db(sqlite_db, monkeypatch):
     sql = (ROOT / "migrations" / "477_rmm_device_inventory.sql").read_text()
     await sqlite_db.conn.executescript(Database()._adapt_sql_for_sqlite(sql))
+    await sqlite_db.conn.execute("DROP TABLE asset_interfaces")
+    sql = (ROOT / "migrations" / "438_network_map.sql").read_text()
+    sql = "CREATE TABLE IF NOT EXISTS asset_interfaces" + sql.split("CREATE TABLE IF NOT EXISTS asset_interfaces", 1)[1]
+    await sqlite_db.conn.executescript(Database()._adapt_sql_for_sqlite(sql))
+    sql = (ROOT / "migrations" / "501_rmm_asset_interfaces.sql").read_text()
+    await sqlite_db.conn.executescript(Database()._adapt_sql_for_sqlite(sql))
+    monkeypatch.setattr(network_map_repo, "db", sqlite_db)
 
     async def execute_many(sql, rows):
         await sqlite_db.conn.executemany(sqlite_db._sql(sql), list(rows))
@@ -64,6 +72,63 @@ def test_normalise_splits_and_cleans_the_snapshot():
     assert [item["name"] for item in software][:2] == ["Google Chrome", "Mozilla Firefox (x64 en-US)"]
     assert len(software) == 3 and len(software[2]["name"]) == 255 and software[2]["install_date"] is None
     assert details["physical_disks"][0]["media_type"] == "SSD" and details["errors"] == ["gpus: Access denied"]
+
+
+@pytest.mark.anyio
+async def test_inventory_populates_interfaces_and_refreshes_without_duplicates(inventory_db):
+    _result, agent = await _enrol(inventory_db)
+    await inventory.ingest(agent, _snapshot())
+    rows = await network_map_repo.list_interfaces(1, 10)
+    assert len(rows) == 1
+    interface_id = rows[0]["id"]
+    assert (rows[0]["name"], rows[0]["kind"], rows[0]["mac_address"], rows[0]["ip_address"]) == (
+        "Wi-Fi", "wifi", "aa:bb:cc:dd:ee:ff", "10.0.0.5")
+
+    await inventory.ingest(agent, _snapshot(network_adapters=[{
+        "name": "Renamed Wi-Fi", "mac": "AA-BB-CC-DD-EE-FF",
+        "addresses": ["2001:db8::1/64", "10.0.0.9/24"],
+    }]))
+    rows = await network_map_repo.list_interfaces(1, 10)
+    assert len(rows) == 1 and rows[0]["id"] == interface_id
+    assert rows[0]["ip_address"] == "10.0.0.9"
+    # Offline or failed collectors must not destroy documented interfaces.
+    await inventory.ingest(agent, _snapshot(network_adapters=[], errors=["network: failed"]))
+    assert (await network_map_repo.list_interfaces(1, 10))[0]["id"] == interface_id
+
+
+@pytest.mark.anyio
+async def test_inventory_preserves_documented_settings_ipam_and_links(inventory_db):
+    _result, agent = await _enrol(inventory_db)
+    await inventory_db.execute("INSERT INTO ip_addresses (id, company_id, asset_id, address) VALUES (1, 1, 10, '10.0.0.20')")
+    interface_id = await network_map_repo.create_interface(1, 10, {
+        "name": "Wi-Fi", "kind": "wifi", "notes": "Office AP", "ssid": "Office", "speed_mbps": 300,
+    }, ip_address_id=1)
+    await inventory_db.execute(
+        "INSERT INTO network_links (company_id, a_kind, a_id, b_kind, b_id, medium) "
+        "VALUES (1, 'interface', %s, 'interface', 999, 'wireless')", (interface_id,))
+    await inventory.ingest(agent, _snapshot())
+    row, = await network_map_repo.list_interfaces(1, 10)
+    assert row["id"] == interface_id and row["ip_address_id"] == 1 and row["ip_address"] == "10.0.0.20"
+    assert row["observed_ip_address"] == "10.0.0.5"
+    assert (row["notes"], row["ssid"], row["speed_mbps"]) == ("Office AP", "Office", 300)
+    assert len(await network_map_repo.list_links(1)) == 1
+
+
+@pytest.mark.anyio
+async def test_inventory_interfaces_are_company_scoped_and_validate_addresses(inventory_db):
+    _result, agent = await _enrol(inventory_db)
+    await inventory.ingest({**agent, "asset_id": 20}, _snapshot())
+    assert await network_map_repo.list_interfaces(1) == []
+    assert await network_map_repo.list_interfaces(2) == []
+    await inventory.ingest({**agent, "asset_id": None}, _snapshot())
+    assert await network_map_repo.list_interfaces(1) == []
+    await inventory.ingest(agent, _snapshot(network_adapters=[
+        {"name": "", "addresses": ["10.0.0.5"]},
+        {"name": "eth0", "mac": "invalid", "addresses": ["invalid", "127.0.0.1", "fe80::1", "::", "2001:db8::5"]},
+        {"name": "eth0", "addresses": ["2001:db8::5"]},
+    ]))
+    row, = await network_map_repo.list_interfaces(1, 10)
+    assert row["ip_address"] == "2001:db8::5" and row["mac_address"] is None
 
 
 @pytest.mark.anyio

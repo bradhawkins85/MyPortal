@@ -10,7 +10,9 @@ Endpoints are written ``interface:<id>`` or ``rack_port:<id>``.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from ipaddress import ip_interface
 from typing import Any
 
 from app.core.database import db
@@ -124,7 +126,7 @@ INTERFACE_COLUMNS = ("name", "kind", "mac_address", "speed_mbps", "vlan", "notes
 
 
 async def list_interfaces(company_id: int, asset_id: int | None = None) -> list[dict[str, Any]]:
-    sql = """SELECT i.*, a.name asset_name, ip.address ip_address
+    sql = """SELECT i.*, a.name asset_name, COALESCE(ip.address, i.observed_ip_address) ip_address
              FROM asset_interfaces i JOIN assets a ON a.id=i.asset_id
              LEFT JOIN ip_addresses ip ON ip.id=i.ip_address_id
              WHERE i.company_id=%s"""
@@ -133,6 +135,57 @@ async def list_interfaces(company_id: int, asset_id: int | None = None) -> list[
         sql += " AND i.asset_id=%s"
         params += (asset_id,)
     return list(await db.fetch_all(sql + " ORDER BY a.name, i.name", params) or [])
+
+
+async def sync_agent_interfaces(company_id: int, asset_id: int, adapters: list[dict[str, Any]]) -> None:
+    """Merge observed adapters without replacing documented ports or their links.
+
+    Missing adapters are retained: an offline/disconnected NIC is not evidence
+    that a documented connection has been removed. IPAM assignments take priority
+    over the observed address when displaying an interface.
+    """
+    if not await db.fetch_one("SELECT id FROM assets WHERE id=%s AND company_id=%s", (asset_id, company_id)):
+        return
+    rows = await list_interfaces(company_id, asset_id)
+
+    def mac_key(value: Any) -> str:
+        return re.sub(r"[^0-9a-f]", "", str(value or "").lower())
+
+    for adapter in adapters:
+        name = str(adapter.get("name") or "").strip()[:64]
+        if not name:
+            continue
+        mac = mac_key(adapter.get("mac"))
+        mac = ":".join(mac[i:i + 2] for i in range(0, len(mac), 2)) if len(mac) == 12 else None
+        addresses = []
+        for value in adapter.get("addresses") or []:
+            try:
+                address = ip_interface(str(value)).ip
+            except ValueError:
+                continue
+            if not (address.is_loopback or address.is_link_local or address.is_unspecified or address.is_multicast):
+                addresses.append(address)
+        # Prefer IPv4 for the single address shown in the interfaces table.
+        addresses.sort(key=lambda address: address.version)
+        ip = str(addresses[0]) if addresses else None
+        by_name = next((row for row in rows if row["name"].casefold() == name.casefold()), None)
+        by_mac = [row for row in rows if mac and mac_key(row.get("mac_address")) == mac_key(mac)]
+        existing = by_mac[0] if len(by_mac) == 1 else by_name
+        if existing:
+            # Keep a technician's name, kind, radio settings, IPAM assignment,
+            # notes and links. The MAC matches even after a device-side rename.
+            await db.execute(
+                "UPDATE asset_interfaces SET mac_address=COALESCE(%s, mac_address), observed_ip_address=%s "
+                "WHERE id=%s AND company_id=%s AND asset_id=%s",
+                (mac, ip, existing["id"], company_id, asset_id))
+            existing.update(mac_address=mac or existing.get("mac_address"), observed_ip_address=ip)
+        else:
+            lower_name = name.casefold()
+            kind = "wifi" if any(word in lower_name for word in ("wi-fi", "wifi", "wlan", "wireless")) else "ethernet"
+            interface_id = await db.execute_returning_lastrowid(
+                "INSERT INTO asset_interfaces (company_id, asset_id, name, kind, mac_address, observed_ip_address) "
+                "VALUES (%s, %s, %s, %s, %s, %s)", (company_id, asset_id, name, kind, mac, ip))
+            rows.append({"id": interface_id, "name": name, "mac_address": mac})
 
 
 async def _check_ip(company_id: int, asset_id: int, ip_address_id: int | None) -> None:
