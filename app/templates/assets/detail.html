@@ -16,6 +16,7 @@
 {% block header_actions %}
     {% set detail_actions = [] %}
     {% if can_edit and not customer_safe %}{% set _ = detail_actions.append({"label": "Save changes", "type": "submit", "variant": "primary", "form": "asset-settings-form", "attrs": {"data-asset-save": "", "title": "Save the asset profile and editable custom fields"}}) %}{% endif %}
+    {% if rmm and rmm.can_push_agent and not customer_safe %}{% set _ = detail_actions.append({"label": "Repair RMM agent", "type": "button", "attrs": {"data-rmm-agent-repair": asset.id, "data-rmm-agent-name": asset_display_name}}) %}{% endif %}
     {% set _ = detail_actions.append({"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id}) %}
     {% if not customer_safe %}{% set _ = detail_actions.append({"label": "Company credentials", "type": "link", "href": "/admin/companies/" ~ asset.company_id ~ "/edit#credentials"}) %}{% endif %}
     {% if is_super_admin and not customer_safe %}{% set _ = detail_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true"}) %}{% endif %}
@@ -146,8 +147,7 @@
         <h2 class="card__title" id="asset-scripts-heading">Scripts {{ rmm_ui.agent_indicator(rmm.agent_state) }}</h2>
         <p class="card__subtitle">{% if rmm.agent %}RMM agent {{ rmm.agent.agent_version or '' }} on {{ (rmm.agent.os or 'unknown') | title }}{% if rmm.agent.os_version %} {{ rmm.agent.os_version }}{% endif %}, last seen {% if rmm.agent.last_seen_utc %}<span data-utc="{{ rmm.agent.last_seen_utc }}">{{ rmm.agent.last_seen_utc }}</span>{% else %}never{% endif %}.{% else %}The RMM agent is not installed on this device yet, so scripts cannot run here.{{ rmm_ui.agent_deploy_status(rmm.deploy) }}{% endif %} <a href="/rmm/scripts">All scripts</a></p>
       </div>
-      {% if rmm.can_push_agent %}<button type="button" class="button button--primary button--small" data-rmm-agent-repair="{{ asset.id }}" data-rmm-agent-name="{{ asset.name or ('Asset ' ~ asset.id) }}">Repair RMM agent</button>{% endif %}
-      {% if rmm.can_run or rmm.remote_control %}{{ rmm_ui.asset_menu(asset.id, asset.name or ('Asset ' ~ asset.id), rmm.remote_control or [], run_script=rmm.can_run) }}{% endif %}
+      {% if rmm.can_run or rmm.remote_control %}{{ rmm_ui.asset_menu(asset.id, asset_display_name, rmm.remote_control or [], run_script=rmm.can_run, rustdesk_in_menu=true) }}{% endif %}
     </header>
     <div class="ce-section__body">
       {% if rmm.remote_control %}<div class="rmm-remote__status" data-rmm-remote-status role="status" aria-live="polite" hidden>
