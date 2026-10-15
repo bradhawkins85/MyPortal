@@ -407,6 +407,7 @@ func handleIPCMessages(conn net.Conn) {
 			// until a systray library version that exposes ResetMenu is adopted.
 			gConfig = loadCachedConfig()
 			triggerOutlookSignatureSync()
+			requestTrayIconRefresh()
 			if trayReady.Load() {
 				systray.SetTooltip(trayTooltip(gConfig))
 			} else {
