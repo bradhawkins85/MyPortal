@@ -1,0 +1,7 @@
+{
+  "guid": "8b45cd28-7637-4f12-ac1e-9d0988ea1f2a",
+  "occurred_at": "2026-10-15T06:47Z",
+  "change_type": "Fix",
+  "summary": "Move Repair RMM agent to the asset Actions menu and group RustDesk session options inside the asset RMM menu.",
+  "content_hash": "e4ecf1855dffb524a9d9b1704ba4fb9b07b08127a5cf0e08d97120f963f83998"
+}
