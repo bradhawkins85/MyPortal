@@ -11,6 +11,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
+from app.core.ai_identity import agent_instructions, get_agent_name, personalise_agent_text
 from app.core.database import db
 from app.core.features import get_registry, module_name_for_slug
 from app.core.logging import log_error, log_info, log_warning
@@ -529,7 +530,7 @@ async def _invoke_agent_llm(
 ) -> dict[str, Any]:
     """Invoke the configured LLM module for one internal agent stage."""
 
-    stage_prompt = f"MyPortal internal stage: {stage_name}\n\n{prompt}"
+    stage_prompt = agent_instructions() + f"MyPortal internal stage: {stage_name}\n\n{prompt}"
     try:
         module_response = await modules_service.trigger_module(
             "ollama",
@@ -539,7 +540,7 @@ async def _invoke_agent_llm(
                     {
                         "role": "system",
                         "content": (
-                            "You are running a MyPortal multi-stage RAG "
+                            agent_instructions() + "You are running a MyPortal multi-stage RAG "
                             f"pipeline step named {stage_name}."
                         ),
                     },
@@ -606,7 +607,9 @@ def _build_conversation_context(
         content = str(turn.get("content") or "").strip()
         if not content:
             continue
-        speaker = "User" if role == "user" else "Agent"
+        speaker = "User" if role == "user" else get_agent_name()
+        if role != "user":
+            content = personalise_agent_text(content)
         lines.append(f"{speaker}: {content}")
     if not lines:
         return None
@@ -636,7 +639,7 @@ def _build_clarification_prompt(
     """Prompt the model for one focused clarifying question as strict JSON."""
 
     parts = [
-        "You are the MyPortal Agent. Retrieval found no authorised evidence "
+        agent_instructions() + "Retrieval found no authorised evidence "
         "relevant enough to answer the user's question confidently.",
         f"User question: {query_text}",
     ]
@@ -788,7 +791,7 @@ def _build_llm_context(
     conversation_context: str | None = None,
 ) -> str:
     trusted = (
-        "You are the MyPortal Agent. Answer using only supplied evidence. If it does not directly answer the query, say no relevant information was found. "
+        agent_instructions() + "Answer using only supplied evidence. If it does not directly answer the query, say no relevant information was found. "
         "Never reference data outside the supplied records. Use Markdown and cite only the exact record IDs supplied in the evidence. "
         f"Context mode: {mode.value}."
     )

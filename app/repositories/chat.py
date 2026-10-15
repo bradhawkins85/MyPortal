@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from app.core.ai_identity import normalise_agent_message
 from app.core.database import db
 
 
@@ -361,7 +362,7 @@ async def get_messages(
                 ORDER BY m.sent_at DESC LIMIT %s OFFSET %s""",
                 (room_id, pivot["sent_at"], limit, offset),
             )
-            return [dict(r) for r in reversed(rows)]
+            return [normalise_agent_message(r) for r in reversed(rows)]
 
     rows = await db.fetch_all(
         select + """
@@ -369,7 +370,7 @@ async def get_messages(
         ORDER BY m.sent_at ASC LIMIT %s OFFSET %s""",
         (room_id, limit, offset),
     )
-    return [dict(r) for r in rows]
+    return [normalise_agent_message(r) for r in rows]
 
 
 async def get_message_by_event_id(matrix_event_id: str) -> dict[str, Any] | None:
@@ -377,7 +378,7 @@ async def get_message_by_event_id(matrix_event_id: str) -> dict[str, Any] | None
         "SELECT * FROM chat_messages WHERE matrix_event_id = %s",
         (matrix_event_id,),
     )
-    return dict(row) if row else None
+    return normalise_agent_message(row) if row else None
 
 
 async def add_message(
@@ -426,7 +427,7 @@ async def add_message(
                 "SELECT * FROM chat_messages WHERE matrix_event_id = %s",
                 (matrix_event_id,),
             )
-    return dict(row) if row else {}
+    return normalise_agent_message(row) if row else {}
 
 
 async def get_chat_user_link(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.core.ai_identity import personalise_agent_text
 from app.core.database import db
 
 _VALID_ROLES = {"user", "agent"}
@@ -90,12 +91,18 @@ async def get(
         role = str(turn.get("role") or "")
         if role not in _VALID_ROLES:
             continue
+        content = str(turn.get("content") or "")
+        payload = _parse_payload(turn.get("payload"))
+        if role == "agent":
+            content = personalise_agent_text(content)
+            if payload is not None and isinstance(payload.get("clarifying_question"), str):
+                payload = {**payload, "clarifying_question": personalise_agent_text(payload["clarifying_question"])}
         turns.append(
             {
                 "turn_number": int(turn.get("turn_number") or 0),
                 "role": role,
-                "content": str(turn.get("content") or ""),
-                "payload": _parse_payload(turn.get("payload")),
+                "content": content,
+                "payload": payload,
             }
         )
     return {

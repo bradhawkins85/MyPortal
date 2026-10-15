@@ -81,7 +81,7 @@ def test_scan_waiting_rooms_sends_ack_before_analysis(monkeypatch):
 
     asyncio.run(assistant.scan_waiting_rooms_once())
 
-    assert sent == [assistant._ACK_MESSAGE]
+    assert sent == [f"Hi, I’m Sophia, your AI support assistant. {assistant._ACK_MESSAGE}"]
     assert queued == []
 
 
@@ -259,7 +259,7 @@ def test_ollama_generate_records_webhook_monitor_success(monkeypatch):
     assert result == "ok"
     assert events[0]["name"] == "MATRIXBOT_AI Ollama generate"
     assert events[0]["target_url"] == "http://ollama.test/api/generate"
-    assert events[0]["payload"]["prompt_length"] == len("secret transcript")
+    assert events[0]["payload"]["prompt_length"] == len(assistant.agent_instructions() + "\nsecret transcript")
     assert "prompt_preview" not in events[0]["payload"]
     assert successes[0]["event_id"] == 123
     assert successes[0]["response_status"] == 200
@@ -316,7 +316,7 @@ def test_ollama_generate_supports_openai_compatible_chat_completions(monkeypatch
     assert requests[0]["url"] == "https://llamacpp.test/v1/chat/completions"
     assert requests[0]["json"] == {
         "model": "local-model",
-        "messages": [{"role": "user", "content": "return json"}],
+        "messages": [{"role": "user", "content": assistant.agent_instructions() + "\nreturn json"}],
         "stream": False,
         "response_format": {"type": "json_object"},
     }
@@ -466,7 +466,8 @@ def test_send_bot_message_forwards_formatted_body(monkeypatch):
         {
             "room_id": "!room:id",
             "body": "plain",
-            "formatted_body": '<p><a href="https://example.test">https://example.test</a></p>',
+            "formatted_body": '<p><strong>Sophia</strong>:</p><p><a href="https://example.test">https://example.test</a></p>',
+            "sender_display_name": "Sophia",
             "transaction_id": "stable-recommendation-key",
         }
     ]
@@ -487,7 +488,7 @@ def test_send_bot_message_records_webhook_monitor_failure(monkeypatch):
         failures.append({"event_id": event_id, **kwargs})
         return {"id": event_id, "status": "failed"}
 
-    async def fake_send_message(room_id, body):
+    async def fake_send_message(room_id, body, **kwargs):
         raise RuntimeError("matrix unavailable")
 
     monkeypatch.setattr(assistant.webhook_monitor, "create_manual_event", fake_create_manual_event)

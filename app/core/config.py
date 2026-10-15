@@ -980,6 +980,8 @@ class Settings(BaseSettings):
     matrix_invite_domain: str | None = Field(
         default=None, validation_alias="MATRIX_INVITE_DOMAIN"
     )
+    ai_agent_name: str = Field(default="Sophia", validation_alias="AI_AGENT_NAME")
+
     matrixbot_ai_waiting_assistant_enabled: bool = Field(
         default=False, validation_alias="MATRIXBOT_AI_WAITING_ASSISTANT_ENABLED"
     )

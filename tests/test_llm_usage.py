@@ -115,7 +115,7 @@ def test_build_report_calculates_token_share_and_lists_unused_functions(monkeypa
     features = {row["feature"]: row for row in report["features"]}
     assert features["agent"]["share"] == 75.0
     assert features["agent"]["models"] == ["llama3", "qwen"]
-    assert features["agent"]["label"] == "MyPortal Agent"
+    assert features["agent"]["label"] == "Sophia (search)"
     assert features["agent"]["last_used_at"] == "2026-10-02T09:30:00Z"
     assert features["legacy_caller"]["share"] == 25.0
     assert features["legacy_caller"]["last_used_at"] == "2026-10-01T08:00:00Z"
@@ -337,7 +337,7 @@ def page_client(monkeypatch):
             "totals": {"requests": 2, "input_tokens": 1500, "output_tokens": 500,
                        "total_tokens": 2000, "failed_requests": 0, "estimated_requests": 1},
             "features": [
-                {"feature": "agent", "label": "MyPortal Agent", "description": "Agent chat.",
+                {"feature": "agent", "label": "Sophia (search)", "description": "Agent chat.",
                  "models": ["llama3", "qwen"],
                  "requests": 2, "input_tokens": 1500, "output_tokens": 500, "total_tokens": 2000,
                  "failed_requests": 0, "share": 100.0, "last_used_at": "2026-10-02T09:30:00Z"},
@@ -367,7 +367,7 @@ def test_llm_usage_page_renders_date_range_and_function_share(page_client):
     body = response.text
     assert 'name="start" value="2026-10-01"' in body
     assert 'name="end" value="2026-10-02"' in body
-    assert "MyPortal Agent" in body
+    assert "Sophia (search)" in body
     assert '>Model(s)</th>' in body
     assert 'data-value="llama3, qwen">llama3, qwen</td>' in body
     assert 'class="llmu-muted">Not in range</span>' in body

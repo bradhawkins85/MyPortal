@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 from weakref import WeakValueDictionary
 
+from app.core.ai_identity import TROUBLESHOOT_AGENT_EMAIL, get_agent_name, personalise_agent_text
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import assets as assets_repo
@@ -981,10 +982,6 @@ async def dispatch_troubleshoot_command(
     return command_id, delivered
 
 
-TROUBLESHOOT_AGENT_EMAIL = "troubleshooting-agent@myportal.local"
-TROUBLESHOOT_AGENT_NAME = "Troubleshooting Agent"
-
-
 def is_troubleshoot_agent_reply(reply: dict[str, Any]) -> bool:
     """True for notes the AI troubleshooter wrote (shown as the "AI" type)."""
 
@@ -997,7 +994,7 @@ def is_troubleshoot_agent_reply(reply: dict[str, Any]) -> bool:
 async def add_troubleshoot_note(ticket_id: int, body_html: str) -> dict[str, Any] | None:
     """Store an internal (staff-only) troubleshooter status note on a ticket.
 
-    Notes are authored by the "Troubleshooting Agent" pseudo-user and a ticket
+    Notes are authored by the configured AI support pseudo-user and a ticket
     refresh is broadcast so an open ticket view picks the note up live.
     """
 
@@ -1009,10 +1006,10 @@ async def add_troubleshoot_note(ticket_id: int, body_html: str) -> dict[str, Any
     reply = await tickets_repo.create_reply(
         ticket_id=ticket_id,
         author_id=None,
-        body=sanitize_rich_text(body_html).html,
+        body=sanitize_rich_text(personalise_agent_text(body_html, rich_text=True)).html,
         is_internal=True,
         author_email=TROUBLESHOOT_AGENT_EMAIL,
-        author_display_name=TROUBLESHOOT_AGENT_NAME,
+        author_display_name=get_agent_name(),
     )
     try:
         await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
@@ -1101,7 +1098,7 @@ async def add_troubleshoot_requested_note(
     target_html = f"{html.escape(target)} ({html.escape(device_label)})" if target else html.escape(device_label)
     delivery_html = troubleshoot_delivery_html(delivered=delivered, device=device)
     body_html = (
-        "<p><strong>AI Troubleshooting Agent</strong> - troubleshooter requested by "
+        f"<p><strong>{html.escape(get_agent_name())}</strong> - troubleshooting requested by "
         f"{html.escape(requester_label)} for {target_html} "
         f"(command #{int(command_id)}, model {html.escape(model or 'default')}).</p>"
         + delivery_html

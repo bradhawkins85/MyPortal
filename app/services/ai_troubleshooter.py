@@ -43,6 +43,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.core.ai_identity import agent_instructions, get_agent_name
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import rmm as rmm_repo
@@ -209,7 +210,8 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
-NOTE_HEADER = "<p><strong>AI Troubleshooting Agent</strong> - "
+def _note_header() -> str:
+    return f"<p><strong>{html.escape(get_agent_name())}</strong> - "
 
 
 # ---------------------------------------------------------------------------
@@ -499,7 +501,7 @@ async def _consent_withdrawn(ticket_id: int) -> bool:
         return False
     await _note(
         ticket_id,
-        NOTE_HEADER
+        _note_header()
         + "stopped because the ticket's requester has opted out of AI processing.</p>",
     )
     return True
@@ -541,6 +543,7 @@ async def _chat(
 ) -> str:
     """Send one chat request to the troubleshooter's OpenAI-compatible LLM."""
 
+    messages = [{"role": "system", "content": agent_instructions()}, *messages]
     base_url = str(llm.get("base_url") or "").rstrip("/")
     model = str(llm.get("model") or "")
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
@@ -703,7 +706,7 @@ def _research_note(
     web_pages: Sequence[Mapping[str, Any]] = (),
     web_error: str | None = None,
 ) -> str:
-    parts = [NOTE_HEADER + "Stage 1 of 4: troubleshooting articles found.</p>"]
+    parts = [_note_header() + "Stage 1 of 4: troubleshooting articles found.</p>"]
     if kb_articles:
         items = [
             f'<a href="/knowledge-base/articles/{html.escape(str(a["slug"]))}">'
@@ -867,7 +870,7 @@ def _web_steps_note(sources: Sequence[Mapping[str, Any]]) -> str:
     """A note gathering each public page's steps with its URL, ready for a KB article."""
 
     parts = [
-        NOTE_HEADER
+        _note_header()
         + "troubleshooting steps found on the public web. Useful as a starting "
         "point for an internal knowledge base article; check each source first.</p>"
     ]
@@ -886,7 +889,7 @@ def _web_steps_note(sources: Sequence[Mapping[str, Any]]) -> str:
 def _plan_note(
     plan: Mapping[str, Any], *, can_collect: bool, stored_sources: frozenset[str] = frozenset()
 ) -> str:
-    parts = [NOTE_HEADER + "Stage 2 of 4: recommended troubleshooting steps.</p>"]
+    parts = [_note_header() + "Stage 2 of 4: recommended troubleshooting steps.</p>"]
     if plan.get("summary"):
         parts.append(f"<p><strong>Likely cause:</strong> {html.escape(plan['summary'])}</p>")
     items = []
@@ -1072,7 +1075,7 @@ async def start_asset_troubleshoot(
     device_label = str(device.get("hostname") or device.get("device_uid") or "device")
     await _note(
         ticket_id,
-        NOTE_HEADER
+        _note_header()
         + "troubleshooter requested by "
         + html.escape(tray_service.troubleshoot_requester_label(dict(requested_by or {})))
         + f" for {html.escape(target)} ({html.escape(device_label)}), model "
@@ -1123,7 +1126,7 @@ async def start_reply_troubleshoot(
     ticket_id = int(ticket["id"])
     await _note(
         ticket_id,
-        NOTE_HEADER + f"Read-only follow-up from reply #{reply_id} requested by "
+        _note_header() + f"Read-only follow-up from reply #{reply_id} requested by "
         + html.escape(tray_service.troubleshoot_requester_label(dict(requested_by or {})))
         + " for " + html.escape(str(asset.get("name") or device.get("hostname") or "endpoint"))
         + ".</p><p>Reviewing current evidence, error trends, resolution and manual changes; "
@@ -1175,7 +1178,7 @@ async def run_research_and_plan(
         except Exception as exc:  # noqa: BLE001 - reported on the ticket
             await _note(
                 ticket_id,
-                NOTE_HEADER
+                _note_header()
                 + "Stage 1 of 4 failed: the AI model could not be reached ("
                 + html.escape(str(exc)[:300])
                 + ").</p>",
@@ -1246,7 +1249,7 @@ async def run_research_and_plan(
     except Exception as exc:  # noqa: BLE001 - reported on the ticket
         await _note(
             ticket_id,
-            NOTE_HEADER
+            _note_header()
             + "Stage 2 of 4 failed: the AI model could not be reached ("
             + html.escape(str(exc)[:300])
             + ").</p>",
@@ -1304,7 +1307,7 @@ async def run_research_and_plan(
             if remote_requests
             else "<p>Nothing needs to be collected from the endpoint.</p>"
         )
-        await _note(ticket_id, NOTE_HEADER + "Stage 3 of 4: logs collected.</p>" + stored_html + skipped_html)
+        await _note(ticket_id, _note_header() + "Stage 3 of 4: logs collected.</p>" + stored_html + skipped_html)
         log_info(
             "AI troubleshooter used stored event logs",
             ticket_id=ticket_id,
@@ -1338,7 +1341,7 @@ async def run_research_and_plan(
     )
     await _note(
         ticket_id,
-        NOTE_HEADER
+        _note_header()
         + f"Stage 3 of 4: requested {len(remote_requests)} log source(s) from "
         + html.escape(str(device.get("hostname") or device_uid))
         + f" (command #{int(command_id)}).</p>"
@@ -1487,7 +1490,7 @@ Rules:
 
 def _analysis_note(data: Mapping[str, Any] | None, raw_text: str, endpoint_label: str) -> str:
     parts = [
-        NOTE_HEADER
+        _note_header()
         + "Stage 4 of 4: log analysis for "
         + html.escape(endpoint_label)
         + ".</p>"
@@ -1573,7 +1576,7 @@ async def analyse_collected_logs(
     if not ordered:
         await _note(
             ticket_id,
-            NOTE_HEADER + "Stage 4 of 4 skipped: the endpoint returned no log entries.</p>",
+            _note_header() + "Stage 4 of 4 skipped: the endpoint returned no log entries.</p>",
         )
         return
 
@@ -1624,7 +1627,7 @@ async def analyse_collected_logs(
     except Exception as exc:  # noqa: BLE001 - reported on the ticket
         await _note(
             ticket_id,
-            NOTE_HEADER
+            _note_header()
             + "Stage 4 of 4 failed: the AI model could not analyse the logs ("
             + html.escape(str(exc)[:300])
             + ")."

@@ -25,6 +25,7 @@ from typing import Any, Iterable, Mapping
 
 from loguru import logger
 
+from app.core.ai_identity import get_agent_name
 from app.repositories import llm_usage as usage_repo
 
 
@@ -187,6 +188,13 @@ _current_feature: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 
 
 def feature_label(key: str) -> str:
+    agent_roles = {
+        "agent": "search",
+        "ai_troubleshooter": "troubleshooting",
+        "matrix_waiting_assistant": "chat",
+    }
+    if key in agent_roles:
+        return f"{get_agent_name()} ({agent_roles[key]})"
     feature = FEATURES_BY_KEY.get(key)
     if feature:
         return feature.label
