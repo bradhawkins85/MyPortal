@@ -109,6 +109,9 @@ Checks use the same actions as event log rules:
 * **Create a ticket**: raise a ticket for the device's company with the device linked. While that
   ticket is not closed, a later failure on the same device adds an internal update to it instead of
   raising another, and the ticket gets an internal update when the check passes again.
+  Enable **Auto-close when resolved** to also move the ticket to **Resolved** when that status
+  exists, or **Closed** otherwise. This option is off by default. With it enabled, a later
+  failure raises a new ticket, and tickets already resolved or closed are left in that state.
 
 Script runs started by checks show as **Check** in run history.
 

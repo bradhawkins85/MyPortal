@@ -187,6 +187,7 @@ async def test_save_check_checks_scope_type_and_scripts(sqlite_db, monkeypatch):
                            "duration_minutes": "5", "action": "create_ticket"})
     disk = await checks_repo.get_check(disk_id)
     assert (disk["target"], disk["settings"]["threshold"], disk["duration_minutes"], disk["action"]) == ("C:", 10.0, 5, "create_ticket")
+    assert disk["auto_close_when_resolved"] is False
     assert checks.describe(disk) == "Free space on C: is below 10% for 5 minutes"
 
     form = {"name": "Site health", "scope": "asset", "asset_id": "10", "check_type": "script",
@@ -234,6 +235,8 @@ async def test_cpu_check_waits_for_its_duration_then_raises_and_updates_a_ticket
     await checks.ingest_report(agent, {"cpu_percent": 20})
     assert (await checks_repo.get_state(check_id, agent["id"]))["status"] == "passing"
     assert tickets["replies"][-1]["ticket_id"] == 100 and "passing again" in tickets["replies"][-1]["body"]
+
+    assert ticket["status"] == "open"  # Auto-close is opt-in.
 
     # Failing again while the ticket is open updates it instead of raising another.
     now["value"] = start + timedelta(minutes=50)
@@ -466,6 +469,9 @@ def test_checks_page_and_asset_sections_render():
     # The service error is summarised, linked to its field and shown beside it.
     assert '<a href="#rmm-check-service-name">' in html and 'id="rmm-check-error-service_name"' in html
     assert 'aria-invalid="true" aria-describedby="rmm-check-service-name-help rmm-check-error-service_name"' in html
+    assert 'name="auto_close_when_resolved" value="1"' in html
+    assert 'aria-describedby="rmm-check-auto-close-help"' in html
+    assert "Auto-close when resolved" in html and "otherwise Closed" in html
     assert 'action="/rmm/checks/3/enabled"' in html and "/static/js/rmm_checks.js" in html
 
     detail = (ROOT / "app/templates/assets/detail.html").read_text()
@@ -529,3 +535,81 @@ def test_temperature_long_history_downsampling_preserves_real_gaps():
     interrupted = rmm_stats.chart("Temperature", "°C", [("CPU", points)], since=since, until=until,
                                   gap=timedelta(minutes=45), allow_negative=True)
     assert len(interrupted["series"][0]["segments"]) == 2
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("has_resolved", [True, False])
+async def test_auto_close_ticket_on_recovery(sqlite_db, stats_db, tickets, monkeypatch, has_resolved):
+    from app.repositories import ticket_statuses as statuses_repo
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+    from app.features.rmm import check_routes
+    from unittest.mock import AsyncMock
+
+    status_exists = AsyncMock(return_value=has_resolved)
+    broadcast = AsyncMock()
+    emit = AsyncMock()
+    monkeypatch.setattr(statuses_repo, "status_exists", status_exists)
+    monkeypatch.setattr(tickets_service, "broadcast_ticket_event", broadcast)
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", emit)
+
+    async def set_status(ticket_id, status, **fields):
+        tickets["tickets"][ticket_id].update(status=status, **fields)
+        return tickets["tickets"][ticket_id]
+
+    update = AsyncMock(side_effect=set_status)
+    monkeypatch.setattr(tickets_repo, "set_ticket_status", update)
+    _, agent = await _enrol(sqlite_db)
+    form = {"name": "Busy CPU", "check_type": "cpu", "cpu_threshold": "80",
+            "action": "create_ticket", "auto_close_when_resolved": "1"}
+    check_id = await _save(form)
+    saved = await checks_repo.get_check(check_id)
+    assert saved["auto_close_when_resolved"] is True
+    assert check_routes.form_values(saved)["auto_close_when_resolved"] is True
+    assert check_routes._posted(form, check_id)["auto_close_when_resolved"] is True
+
+    await checks.ingest_report(agent, {"cpu_percent": 95})
+    assert tickets["tickets"][100]["status"] == "open"
+    update.assert_not_awaited()
+    await checks.ingest_report(agent, {"cpu_percent": 20})
+    expected = "resolved" if has_resolved else "closed"
+    assert tickets["tickets"][100]["status"] == expected
+    assert tickets["tickets"][100]["closed_at"] is not None
+    assert "passing again" in tickets["replies"][-1]["body"]
+    assert (await checks_repo.get_state(check_id, agent["id"]))["ticket_id"] is None
+    status_exists.assert_awaited_once_with("resolved")
+    broadcast.assert_awaited_once_with(action="updated", ticket_id=100)
+    emit.assert_awaited_once_with(100, actor_type="system")
+
+    # Repeated healthy reports do not update the ticket again; recurrence gets a new ticket.
+    await checks.ingest_report(agent, {"cpu_percent": 15})
+    update.assert_awaited_once()
+    await checks.ingest_report(agent, {"cpu_percent": 95})
+    assert tickets["tickets"][101]["status"] == "open"
+    assert tickets["tickets"][100]["status"] == expected
+
+    # Editing persists the option, and unchecking it turns it off.
+    await _save(form, check_id=check_id)
+    assert (await checks_repo.get_check(check_id))["auto_close_when_resolved"] is True
+    await _save({**form, "auto_close_when_resolved": "0"}, check_id=check_id)
+    assert (await checks_repo.get_check(check_id))["auto_close_when_resolved"] is False
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", ["resolved", "closed"])
+async def test_auto_close_preserves_manually_completed_ticket(sqlite_db, stats_db, tickets, monkeypatch, status):
+    from app.repositories import ticket_statuses as statuses_repo
+    from app.repositories import tickets as tickets_repo
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(statuses_repo, "status_exists", AsyncMock(return_value=False))
+    update = AsyncMock()
+    monkeypatch.setattr(tickets_repo, "set_ticket_status", update)
+    _, agent = await _enrol(sqlite_db)
+    await _save({"name": "Busy CPU", "check_type": "cpu", "cpu_threshold": "80",
+                 "action": "create_ticket", "auto_close_when_resolved": "on"})
+    await checks.ingest_report(agent, {"cpu_percent": 95})
+    tickets["tickets"][100]["status"] = status
+    await checks.ingest_report(agent, {"cpu_percent": 20})
+    assert tickets["tickets"][100]["status"] == status
+    update.assert_not_awaited()
