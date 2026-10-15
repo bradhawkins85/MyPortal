@@ -1,0 +1,7 @@
+{
+  "guid": "c2efa22d-2bd9-431a-9ccf-3ba487a8ef1c",
+  "occurred_at": "2026-10-15T22:59Z",
+  "change_type": "Fix",
+  "summary": "Tray app: macOS self-updates now keep the installer's output in update-installer.log next to the service log, as Windows updates already do",
+  "content_hash": "23703958460a4ee88d3db7bce292f71d2d032a43fdda9ee0b6000c5afc18e39f"
+}
