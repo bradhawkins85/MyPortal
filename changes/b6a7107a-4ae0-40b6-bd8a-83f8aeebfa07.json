@@ -1,0 +1,7 @@
+{
+  "guid": "b6a7107a-4ae0-40b6-bd8a-83f8aeebfa07",
+  "occurred_at": "2026-10-16T01:08Z",
+  "change_type": "Feature",
+  "summary": "Added a myportal-docker refresh command that recreates every running container (database, Redis, Gitea, proxy and MyPortal) on the installed release, so changes to myportal.env, mariadb.env, gitea.env, .env or docker-compose.override.yml reach the containers.",
+  "content_hash": "154b51858db47a98550a882e32eb09a6bb7126a721900dd3e5538478b90aa726"
+}

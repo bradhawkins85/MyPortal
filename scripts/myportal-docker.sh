@@ -101,6 +101,11 @@ Commands:
   restore-db FILE      Restore a database backup (.sql.gz) made by this script.
   restart              Restart MyPortal without downtime (applies changes to
                        myportal.env).
+  refresh [--yes]      Recreate all running containers on the installed
+                       release, so they pick up changes to any configuration
+                       file (myportal.env, mariadb.env, gitea.env, .env and
+                       docker-compose.override.yml). The portal is briefly
+                       unavailable while the database restarts.
   setup [--check | --list | --feature NAME]
         Run the onboarding wizard: choose which feature packs and modules are
         enabled and configure their settings in myportal.env. Re-run it at any
@@ -863,6 +868,14 @@ service_container() {
     --filter "label=com.docker.compose.service=$1" 2>/dev/null | head -n1
 }
 
+running_services() {
+  # The services with a running container, one per line. One-off containers
+  # ('compose run') are left out.
+  docker ps --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
+    --format '{{.Label "com.docker.compose.service"}} {{.Label "com.docker.compose.oneoff"}}' 2>/dev/null \
+    | awk '$1 != "" && $2 != "True" {print $1}' | sort -u
+}
+
 app_exec() {
   # app_exec COMMAND...: run COMMAND in the serving application container,
   # with standard input attached.
@@ -1479,12 +1492,12 @@ self_update() {
 }
 
 take_deploy_lock() {
-  # One upgrade, rollback or restart at a time, whether from the shell, the
-  # nightly job or the portal. The descriptor and variable survive the
-  # self-update exec.
+  # One upgrade, rollback, restart or refresh at a time, whether from the
+  # shell, the nightly job or the portal. The descriptor and variable survive
+  # the self-update exec.
   [[ -z "${MYPORTAL_UPGRADE_LOCKED:-}" ]] || return 0
   exec 9>"$(dirname "$PROJECT_ENV")/.upgrade.lock"
-  flock -n 9 || die "another upgrade, rollback or restart is already running."
+  flock -n 9 || die "another upgrade, rollback, restart or refresh is already running."
   export MYPORTAL_UPGRADE_LOCKED=1
 }
 
@@ -1723,6 +1736,62 @@ cmd_restart() {
   current=$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)
   deploy_release "$(get_setting "$PROJECT_ENV" MYPORTAL_IMAGE)" "$current" \
     || die "MyPortal ${current} did not become ready with the current configuration; the running container was left serving. Check ${APP_ENV}."
+}
+
+cmd_refresh() {
+  # Recreate every running container on the installed release, so each starts
+  # afresh from the current configuration files, not only myportal.env. The
+  # services MyPortal uses are recreated in place first; MyPortal itself then
+  # starts in the idle slot and takes over, as with 'restart'.
+  local assume_yes=false
+  while (($#)); do
+    case "$1" in
+      --yes|-y) assume_yes=true; shift ;;
+      *) die "unknown option for refresh: $1" ;;
+    esac
+  done
+  require_root
+  require_installed
+  ensure_docker
+  take_deploy_lock
+
+  local current image
+  current=$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)
+  image=$(get_setting "$PROJECT_ENV" MYPORTAL_IMAGE)
+  [[ -n "$current" && -n "$image" ]] || die "no installed release is recorded in ${PROJECT_ENV}."
+  if [[ "$assume_yes" != true && -t 0 ]]; then
+    local answer
+    read -r -p "Recreate MyPortal's containers on ${current}? The portal is unavailable for a short time while the database restarts. [y/N] " answer
+    [[ "$answer" =~ ^[Yy] ]] || die "refresh cancelled."
+  fi
+  # Stays on the installed release; its image is fetched again only when it
+  # is no longer on this host.
+  docker image inspect "$image" >/dev/null 2>&1 || image=$(obtain_image "$current")
+
+  local failed="MyPortal ${current} did not become ready with the current configuration; the running container was left serving. Check ${APP_ENV}."
+  # A pre-blue/green installation is converted first, so the services below
+  # are recreated from the current compose file.
+  [[ -n "$(active_slot)" ]] || deploy_release "$image" "$current" || die "$failed"
+
+  info "Refreshing MyPortal ${current}: recreating its containers from the current configuration…"
+  write_compose_file
+  ensure_redis_settings
+  ensure_gitea_settings
+  ensure_slot_settings
+  write_proxy_config "$(active_slot)"
+  # The database goes first, with time to shut down cleanly, and is healthy
+  # again before anything that uses it is recreated.
+  compose up -d --no-deps --force-recreate --timeout 60 --wait db >&2 \
+    || die "the database did not start again. Inspect it with 'myportal-docker logs db', correct ${DB_ENV} or docker-compose.override.yml, then rerun refresh."
+  local -a services=()
+  mapfile -t services < <(running_services | grep -Evx 'db|app|app_blue|app_green')
+  if ((${#services[@]})); then
+    compose up -d --no-deps --force-recreate "${services[@]}" >&2 \
+      || warn "could not recreate all of: ${services[*]}."
+  fi
+  # Also waits for Redis and Gitea to report healthy before MyPortal starts.
+  deploy_release "$image" "$current" || die "$failed"
+  info "MyPortal ${current} is running in freshly created containers."
 }
 
 cmd_setup() {
@@ -2177,6 +2246,7 @@ main() {
     backup) cmd_backup ;;
     restore-db) cmd_restore_db "$@" ;;
     restart) cmd_restart ;;
+    refresh) cmd_refresh "$@" ;;
     setup|onboard) cmd_setup "$@" ;;
     auto-upgrade) cmd_auto_upgrade "$@" ;;
     web-upgrades) cmd_web_upgrades "$@" ;;

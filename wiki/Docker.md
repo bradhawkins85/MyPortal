@@ -142,6 +142,7 @@ the portal with a reminder to run `web-upgrades on`.
 | `myportal-docker status` | Running release, containers and readiness |
 | `myportal-docker logs [--tail 100]` | Application logs (follows by default) |
 | `sudo myportal-docker restart` | Apply changes made to `myportal.env`, without downtime (the idle slot starts with them, then takes over) |
+| `sudo myportal-docker refresh` | Recreate every running container (database, Redis, Gitea, proxy and MyPortal) on the installed release, so changes to any configuration file apply: `myportal.env`, `mariadb.env`, `gitea.env`, `.env` or `docker-compose.override.yml`. The portal is unavailable for a short time while the database restarts |
 | `sudo myportal-docker rollback` | Switch back to the release before the last upgrade |
 | `sudo myportal-docker backup` | Database dump plus uploaded files |
 | `sudo myportal-docker restore-db FILE` | Restore a database backup |
@@ -206,7 +207,7 @@ source `myportal-docker`.
 | `/opt/myportal-docker/.env` | Installed release, image, port (managed by the script) |
 | `/opt/myportal-docker/docker-compose.yml` | Generated; rewritten on upgrade |
 | `/opt/myportal-docker/docker-compose.override.yml` | Optional local additions, merged automatically |
-| `/opt/myportal-docker/proxy/` | nginx configuration; generated, rewritten on upgrade and restart. `active-slot.inc` names the serving slot |
+| `/opt/myportal-docker/proxy/` | nginx configuration; generated, rewritten on upgrade, restart and refresh. `active-slot.inc` names the serving slot |
 | `/opt/myportal-docker/backups/` | Database and file backups (the newest 10 of each are kept) |
 
 Data lives in the Docker volumes `myportal_db_data`, `myportal_uploads`,
@@ -214,6 +215,12 @@ Data lives in the Docker volumes `myportal_db_data`, `myportal_uploads`,
 
 Any setting from [`.env.example`](https://github.com/bradhawkins85/MyPortal/blob/main/.env.example) can be added to
 `myportal.env`. `DB_HOST`/`DB_PORT` are set by the compose file.
+Apply changes to `myportal.env` with `sudo myportal-docker restart`. Changes to
+`mariadb.env`, `gitea.env` or `.env`, and environment variables set in
+`docker-compose.override.yml`, reach the other containers with
+`sudo myportal-docker refresh`, which recreates them all. MariaDB reads the
+`MARIADB_*` passwords only when it creates the database, so changing them in
+`mariadb.env` afterwards does not change the database's passwords.
 
 ## TLS and reverse proxies
 
