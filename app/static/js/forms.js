@@ -14,12 +14,10 @@
     return items.map((item) => String(item).trim()).filter(Boolean);
   }
   function compare(type, answer, target) {
-    let left = answer;
-    let right = target;
-    if (NUMERIC_TYPES.has(type)) {
-      left = Number(answer); right = Number(target);
-      if (!target || Number.isNaN(left) || Number.isNaN(right)) return null;
-    } else { left = answer.toLowerCase(); right = target.toLowerCase(); }
+    const numeric = NUMERIC_TYPES.has(type);
+    const left = numeric ? Number(answer) : answer.toLowerCase();
+    const right = numeric ? Number(target) : target.toLowerCase();
+    if (numeric && (!target || Number.isNaN(left) || Number.isNaN(right))) return null;
     return (left > right) - (left < right);
   }
   function ruleMatches(type, answers, operator, value) {
