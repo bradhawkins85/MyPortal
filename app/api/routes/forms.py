@@ -331,6 +331,7 @@ async def save_custom_form_page(
                 config = {
                     "rows": [line.strip() for line in str(parsed.get("matrix_rows") or "").splitlines() if line.strip()],
                     "columns": [line.strip() for line in str(parsed.get("matrix_columns") or "").splitlines() if line.strip()],
+                    "mode": str(parsed.get("matrix_mode") or "row"),
                 }
             elif field_type == "rating":
                 config = {"max": int(parsed.get("rating_max") or 5)}
@@ -430,11 +431,18 @@ async def _submit_form_request(form, request, user, *, public=False, submit_acti
             key = f"field_{field['id']}"
             values[field["id"]] = parsed.getlist(key) if field["field_type"] == "multiselect" else parsed.get(key, "")
             if field["field_type"] == "matrix":
-                values[field["id"]] = {
-                    row: parsed.get(f"matrix_{field['id']}_{index}")
-                    for index, row in enumerate((field.get("config") or {}).get("rows", []))
-                    if parsed.get(f"matrix_{field['id']}_{index}")
-                }
+                config = field.get("config") or {}
+                if custom_forms.matrix_mode(config) == "table":
+                    answer = custom_forms.matrix_cell_answer(config, parsed.get(f"matrix_{field['id']}"))
+                    if answer is None:
+                        raise HTTPException(status_code=400, detail=f"Choose a valid answer for '{field.get('label', 'the matrix')}'.")
+                    values[field["id"]] = answer
+                else:
+                    values[field["id"]] = {
+                        row: parsed.get(f"matrix_{field['id']}_{index}")
+                        for index, row in enumerate(config.get("rows", []))
+                        if parsed.get(f"matrix_{field['id']}_{index}")
+                    }
     for field in fields:
         if field["field_type"] == "signature":
             upload = parsed.get(f"signature_{field['id']}")

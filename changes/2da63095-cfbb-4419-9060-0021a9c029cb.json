@@ -1,0 +1,7 @@
+{
+  "guid": "2da63095-cfbb-4419-9060-0021a9c029cb",
+  "occurred_at": "2026-10-16T01:01Z",
+  "change_type": "Feature",
+  "summary": "Custom forms: Matrix questions now show as a rating table with a radio button per cell, and admins choose one answer per row or one answer per table; tickets list each row with its answer, or the single row and column chosen",
+  "content_hash": "2dff38c985332d45a72b3654c7b40e50b6054323adac45b3385741e201d7c97c"
+}

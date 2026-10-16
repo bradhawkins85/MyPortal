@@ -58,6 +58,12 @@ MAX_RATING = 10
 MAX_MATRIX_ROWS = 50
 MAX_MATRIX_COLS = 25
 
+#: How people answer a matrix: one column per row, or one cell in the table.
+MATRIX_MODES: dict[str, str] = {
+    "row": "One answer per row",
+    "table": "One answer per table",
+}
+
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -80,6 +86,32 @@ def unique_slug(name: str, existing: Sequence[str]) -> str:
         suffix += 1
         candidate = f"{base}-{suffix}"
     return candidate
+
+
+def matrix_mode(config: dict[str, Any] | None) -> str:
+    """Return the matrix answer mode, treating legacy fields as one per row."""
+    return "table" if (config or {}).get("mode") == "table" else "row"
+
+
+def matrix_cell_answer(config: dict[str, Any] | None, cell: Any) -> dict[str, str] | None:
+    """Map a ``"row_index:column_index"`` table cell to ``{row: column}``.
+
+    Returns an empty dict when nothing was chosen and ``None`` when the cell
+    does not exist in the matrix.
+    """
+    text = "" if cell is None else str(cell).strip()
+    if not text:
+        return {}
+    rows = (config or {}).get("rows") or []
+    columns = (config or {}).get("columns") or []
+    row_index, _, column_index = text.partition(":")
+    try:
+        row, column = int(row_index), int(column_index)
+    except ValueError:
+        return None
+    if not (0 <= row < len(rows) and 0 <= column < len(columns)):
+        return None
+    return {str(rows[row]): str(columns[column])}
 
 
 def validate_field_definition(
@@ -116,6 +148,12 @@ def validate_field_definition(
             errors.append("A matrix field requires at least one column.")
         elif len(columns) > MAX_MATRIX_COLS:
             errors.append(f"A matrix field can have at most {MAX_MATRIX_COLS} columns.")
+        if len({str(row) for row in rows}) != len(rows):
+            errors.append("Matrix rows must be unique.")
+        if len({str(column) for column in columns}) != len(columns):
+            errors.append("Matrix columns must be unique.")
+        if cfg.get("mode", "row") not in MATRIX_MODES:
+            errors.append("Choose one answer per row or one answer per table for a matrix field.")
     elif field_type == "rating":
         try:
             max_value = int(cfg.get("max", MAX_RATING))
@@ -272,10 +310,16 @@ def validate_submission(
 
         if field_type == "matrix":
             data = raw if isinstance(raw, dict) else {}
+            data = {k: v for k, v in data.items() if v not in (None, "")}
             rows = config.get("rows") or []
             cols = config.get("columns") or []
             if required and not data:
                 errors.append(f"'{label}' is required.")
+            elif matrix_mode(config) == "table":
+                if len(data) > 1:
+                    errors.append(f"Choose only one answer in '{label}'.")
+            elif required and rows and any(row not in data for row in rows):
+                errors.append(f"Answer every row in '{label}'.")
             if rows:
                 for row in data:
                     if row not in rows:
@@ -286,7 +330,12 @@ def validate_submission(
                     if col not in cols:
                         errors.append(f"Invalid column selected in '{label}'.")
                         break
-            clean[field_id] = {str(k): str(v) for k, v in data.items()}
+            # Keep answers in the order the rows appear on the form.
+            order = {str(row): index for index, row in enumerate(rows)}
+            clean[field_id] = {
+                str(k): str(v)
+                for k, v in sorted(data.items(), key=lambda item: order.get(str(item[0]), len(order)))
+            }
             continue
 
         if field_type == "rating":
@@ -358,7 +407,21 @@ def build_description(form_name: str, fields: list[dict[str, Any]], clean: dict[
         if field["field_type"] == "hidden":
             continue
         label = html.escape(field["label"])
-        value = _display_value(field, clean.get(field["id"]))
+        raw = clean.get(field["id"])
+        if (
+            field["field_type"] == "matrix"
+            and isinstance(raw, dict)
+            and raw
+            and matrix_mode(field.get("config")) == "row"
+        ):
+            # One answer per row: list each row with its chosen column.
+            items = "".join(
+                f"<li>{html.escape(str(row))}: {html.escape(str(column))}</li>"
+                for row, column in raw.items()
+            )
+            lines.append(f"<p><strong>{label}:</strong></p><ul>{items}</ul>")
+            continue
+        value = _display_value(field, raw)
         lines.append(f"<p><strong>{label}:</strong> {html.escape(value)}</p>")
     return "\n".join(lines)
 

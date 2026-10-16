@@ -332,6 +332,86 @@ def test_validate_submission_matrix():
     assert "'Grid' is required." in errors
 
 
+def test_validate_field_definition_matrix_mode_and_unique_labels():
+    base = {"rows": ["a", "b"], "columns": ["x", "y"]}
+    assert custom_forms.validate_field_definition("matrix", "Grid", None, {**base, "mode": "row"}) == []
+    assert custom_forms.validate_field_definition("matrix", "Grid", None, {**base, "mode": "table"}) == []
+    assert any(
+        "one answer per row or one answer per table" in e
+        for e in custom_forms.validate_field_definition("matrix", "Grid", None, {**base, "mode": "cell"})
+    )
+    errors = custom_forms.validate_field_definition(
+        "matrix", "Grid", None, {"rows": ["a", "a"], "columns": ["x", "x"]}
+    )
+    assert "Matrix rows must be unique." in errors
+    assert "Matrix columns must be unique." in errors
+
+
+def test_matrix_mode_defaults_to_one_answer_per_row():
+    assert custom_forms.matrix_mode(None) == "row"
+    assert custom_forms.matrix_mode({"rows": ["a"]}) == "row"
+    assert custom_forms.matrix_mode({"mode": "table"}) == "table"
+
+
+def test_matrix_cell_answer_maps_indexes_to_labels():
+    config = {"rows": ["Support", "Docs"], "columns": ["Poor", "Good"]}
+    assert custom_forms.matrix_cell_answer(config, "1:0") == {"Docs": "Poor"}
+    assert custom_forms.matrix_cell_answer(config, "") == {}
+    assert custom_forms.matrix_cell_answer(config, None) == {}
+    for bad in ["2:0", "0:2", "-1:0", "a:b", "0", "Support", "\u00b2:0"]:
+        assert custom_forms.matrix_cell_answer(config, bad) is None
+
+
+def test_validate_submission_matrix_one_answer_per_row_requires_every_row():
+    fields = [
+        _field(
+            1,
+            "matrix",
+            label="Services",
+            required=True,
+            config={"rows": ["Support", "Docs"], "columns": ["Poor", "Good"], "mode": "row"},
+        )
+    ]
+    _, errors = custom_forms.validate_submission(fields, {1: {"Support": "Good"}})
+    assert errors == ["Answer every row in 'Services'."]
+    clean, errors = custom_forms.validate_submission(fields, {1: {"Docs": "Poor", "Support": "Good"}})
+    assert errors == []
+    # Answers follow the row order on the form, not the order they arrived in.
+    assert list(clean[1].items()) == [("Support", "Good"), ("Docs", "Poor")]
+
+
+def test_validate_submission_matrix_one_answer_per_table():
+    config = {"rows": ["Support", "Docs"], "columns": ["Poor", "Good"], "mode": "table"}
+    fields = [_field(1, "matrix", label="Best", required=True, config=config)]
+    clean, errors = custom_forms.validate_submission(fields, {1: {"Docs": "Good"}})
+    assert errors == []
+    assert clean[1] == {"Docs": "Good"}
+    _, errors = custom_forms.validate_submission(fields, {1: {"Support": "Poor", "Docs": "Good"}})
+    assert errors == ["Choose only one answer in 'Best'."]
+    _, errors = custom_forms.validate_submission(fields, {1: {}})
+    assert errors == ["'Best' is required."]
+    optional = [_field(1, "matrix", label="Best", config=config)]
+    clean, errors = custom_forms.validate_submission(optional, {1: {}})
+    assert errors == [] and clean[1] == {}
+
+
+def test_build_description_matrix_modes():
+    rows = {"rows": ["Customer service", "Ease of use"], "columns": ["Not so good", "Awesome!"]}
+    per_row = [_field(1, "matrix", label="Rate our services", config={**rows, "mode": "row"})]
+    description = custom_forms.build_description(
+        "Survey", per_row, {1: {"Customer service": "Awesome!", "Ease of use": "Not so good"}}
+    )
+    assert (
+        "<p><strong>Rate our services:</strong></p><ul><li>Customer service: Awesome!</li>"
+        "<li>Ease of use: Not so good</li></ul>"
+    ) in description
+    per_table = [_field(1, "matrix", label="Best area", config={**rows, "mode": "table"})]
+    description = custom_forms.build_description("Survey", per_table, {1: {"Ease of use": "Awesome!"}})
+    assert "<p><strong>Best area:</strong> Ease of use: Awesome!</p>" in description
+    escaped = custom_forms.build_description("Survey", per_row, {1: {"<b>": "<i>"}})
+    assert "<li>&lt;b&gt;: &lt;i&gt;</li>" in escaped
+
+
 def test_validate_submission_audio_multi_clip():
     fields = [_field(1, "audio", label="Clips", config={"max_clips": 3})]
     # up to max_clips passes.

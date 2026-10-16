@@ -61,12 +61,22 @@ inputs must be selected again after a failed HTML submission.
 
 The editor retains the field types available on the current main branch, including
 time, URL, password, rating, matrix, signature, and multiple audio clips. Matrix
-configuration uses `config.rows` and `config.columns`; ratings use `config.max`
+configuration uses `config.rows` and `config.columns` (each label unique) plus
+`config.mode`: `"row"` (one answer per row, the default for older fields) or
+`"table"` (one answer for the whole table); ratings use `config.max`
 (1–10); audio uses `config.max_clips` (1–5). The editor previews these types and
 retains the recent submissions view.
 
-HTML matrix answers use `matrix_{field_id}_{row_index}`, which the server maps to
-the configured row labels. Signatures can be drawn with a pointer or uploaded as
+Matrix questions render as a table with the columns across the top and a radio
+button in every cell. Answers are submitted and stored as `{row label: column
+label}`. With one answer per row, a required matrix needs every row answered and
+the ticket lists each row with its chosen column. With one answer per table, at
+most one row is accepted and the ticket shows that row and its column.
+
+HTML matrix answers use `matrix_{field_id}_{row_index}` (the column label) for one
+answer per row, or a single `matrix_{field_id}` of `"{row_index}:{column_index}"`
+for one answer per table; the server maps both to the configured labels and
+rejects a cell outside the table with a 400. Signatures can be drawn with a pointer or uploaded as
 a PNG/JPEG image (up to 1 MB) under `signature_{field_id}`; uploaded images are
 converted to the existing data URL format before submission validation. Audio
 uploads repeat `file_{field_id}` for each clip.

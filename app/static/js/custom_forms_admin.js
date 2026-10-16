@@ -17,6 +17,8 @@
     return node;
   }
   function fieldType() { return qs('[name="field_type"]:checked', editor).value; }
+  function lines(name) { return qs(`[name="${name}"]`, editor).value.split('\n').map((v) => v.trim()).filter(Boolean); }
+  function matrixMode() { return qs('[name="matrix_mode"]:checked', editor)?.value === 'table' ? 'table' : 'row'; }
   function modalState() {
     if (!activeModal) return '';
     return JSON.stringify([qsa('input[name], select[name], textarea[name]', activeModal).filter((input) => !input.closest('[data-cf-preview]')).map((input) =>
@@ -201,16 +203,34 @@
       } else if (type === 'matrix') {
         title.removeAttribute('for');
         control = element('div', 'cf-preview__choices');
-        const columns = qs('[name="matrix_columns"]', editor).value.split('\n').map((v) => v.trim()).filter(Boolean);
-        const rows = qs('[name="matrix_rows"]', editor).value.split('\n').map((v) => v.trim()).filter(Boolean);
-        rows.forEach((row, index) => {
-          const rowLabel = element('label', 'form-label', row); rowLabel.htmlFor = `cf-preview-row-${index}`;
-          const select = element('select', 'form-input'); select.id = rowLabel.htmlFor;
-          select.append(element('option', '', 'Choose an answer…'));
-          columns.forEach((col) => select.append(element('option', '', col)));
-          control.append(rowLabel, select);
-        });
-        if (!rows.length) control.append(element('p', 'form-help', 'Add rows and columns to preview the grid.'));
+        const columns = lines('matrix_columns');
+        const rows = lines('matrix_rows');
+        if (rows.length && columns.length) {
+          const perTable = matrixMode() === 'table';
+          control.append(element('p', 'form-help', perTable ? 'Choose one answer from the table.' : 'Choose one answer for each row.'));
+          const wrap = element('div', 'cf-matrix-wrap');
+          const table = element('table', 'cf-matrix');
+          const head = element('tr');
+          head.append(element('td'));
+          columns.forEach((column) => { const th = element('th', '', column); th.scope = 'col'; head.append(th); });
+          const body = element('tbody');
+          rows.forEach((row, rowIndex) => {
+            const tr = element('tr');
+            const th = element('th', '', row); th.scope = 'row';
+            tr.append(th);
+            columns.forEach((column) => {
+              const cell = element('label', 'cf-matrix__cell');
+              const input = element('input');
+              input.type = 'radio';
+              input.name = perTable ? 'cf-preview-matrix' : `cf-preview-matrix-${rowIndex}`;
+              cell.append(input, element('span', 'sr-only', `${row}: ${column}`));
+              const td = element('td'); td.append(cell); tr.append(td);
+            });
+            body.append(tr);
+          });
+          const thead = element('thead'); thead.append(head);
+          table.append(thead, body); wrap.append(table); control.append(wrap);
+        } else control.append(element('p', 'form-help', 'Add rows and columns to preview the grid.'));
       } else if (type === 'signature') {
         control = element('p', 'form-help', 'People can draw their signature or upload an image.');
       } else if (type === 'rating') {
@@ -238,7 +258,9 @@
       preview.append(control);
       if (help) preview.append(element('p', 'form-help', help));
     }
-    qs('[data-cf-preview-summary]').textContent = type === 'hidden' ? 'Included automatically in every submission.' : `${required ? 'An answer is required.' : 'People can leave this blank.'} ${OPTION_TYPES.has(type) ? `${choices.length} choices available.` : ''}`;
+    const matrixSummary = matrixMode() === 'table' ? 'People choose one cell; the ticket shows that row and its column.' : 'People choose a column on each row; the ticket lists every row with its answer.';
+    const requiredSummary = type === 'matrix' && required && matrixMode() === 'row' ? 'Every row needs an answer.' : required ? 'An answer is required.' : 'People can leave this blank.';
+    qs('[data-cf-preview-summary]').textContent = type === 'hidden' ? 'Included automatically in every submission.' : `${requiredSummary} ${OPTION_TYPES.has(type) ? `${choices.length} choices available.` : type === 'matrix' ? matrixSummary : ''}`;
   }
   function openField(trigger, data) {
     editor.reset();
@@ -249,6 +271,7 @@
     options = (data?.options || []).slice();
     qs('[name="matrix_rows"]', editor).value = (data?.config?.rows || []).join('\n');
     qs('[name="matrix_columns"]', editor).value = (data?.config?.columns || []).join('\n');
+    qsa('[name="matrix_mode"]', editor).forEach((input) => { input.checked = input.value === (data?.config?.mode === 'table' ? 'table' : 'row'); });
     qs('[name="rating_max"]', editor).value = data?.config?.max || 5;
     qs('[name="audio_max"]', editor).value = data?.config?.max_clips || 5;
     qs('[data-cf-bulk]', editor).hidden = true;
@@ -269,8 +292,9 @@
     const value = (name) => qs(`[name="${name}"]`, editor).value.trim() || null;
     let config = null;
     if (type === 'matrix') {
-      config = { rows: qs('[name="matrix_rows"]', editor).value.split('\n').map((v) => v.trim()).filter(Boolean), columns: qs('[name="matrix_columns"]', editor).value.split('\n').map((v) => v.trim()).filter(Boolean) };
+      config = { rows: lines('matrix_rows'), columns: lines('matrix_columns'), mode: matrixMode() };
       if (!config.rows.length || !config.columns.length) throw new Error('Add at least one matrix row and column.');
+      if (new Set(config.rows).size !== config.rows.length || new Set(config.columns).size !== config.columns.length) throw new Error('Each matrix row and column needs a different name.');
     } else if (type === 'rating') config = { max: Number(qs('[name="rating_max"]', editor).value) };
     else if (type === 'audio') config = { max_clips: Number(qs('[name="audio_max"]', editor).value) };
     return {
