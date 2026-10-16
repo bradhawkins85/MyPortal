@@ -908,3 +908,99 @@ def test_connect_gitea_adds_public_on_upgrade_without_replacing_token(tmp_path):
     assert '"name":"Public"' in log and '"private":false' in log
     assert 'stdin=user = "myportal:installer-password"' in log
     assert "GITEA_API_TOKEN=existing" in app_env.read_text()
+
+
+# ---------------------------------------------------------------------------
+# refresh
+# ---------------------------------------------------------------------------
+def test_help_lists_refresh():
+    result = subprocess.run(["bash", str(SCRIPT), "help"], text=True, capture_output=True, check=False)
+    assert "refresh [--yes]" in result.stdout
+
+
+def test_refresh_rejects_unknown_options_before_touching_docker():
+    result = subprocess.run(
+        ["bash", "-c", f'"{SCRIPT}" refresh --bogus'],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "MYPORTAL_DIR": "/nonexistent"},
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "unknown option for refresh: --bogus" in result.stderr
+
+
+def test_running_services_leaves_out_one_off_containers():
+    result = _run(
+        "docker() { printf 'proxy False\\ndb False\\napp_green False\\napp_green True\\nmigrate True\\n\\ndb False\\n'; }\n"
+        "running_services"
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["app_green", "db", "proxy"]
+
+
+def _refresh_harness(tmp_path, *, settings: str, image_present: bool = True, db_starts: bool = True) -> str:
+    """Stub Docker for cmd_refresh; blue serves v1 with Redis, Gitea and the proxy running."""
+    (tmp_path / ".env").write_text(settings, encoding="utf-8")
+    (tmp_path / "myportal.env").write_text("REDIS_URL=redis://redis:6379/0\n", encoding="utf-8")
+    calls = tmp_path / "calls"
+    return (
+        f'PROJECT_ENV="{tmp_path}/.env"; COMPOSE_FILE="{tmp_path}/docker-compose.yml"\n'
+        f'APP_ENV="{tmp_path}/myportal.env"; PROXY_DIR="{tmp_path}/proxy"; GITEA_ENV="{tmp_path}/gitea.env"\n'
+        "require_root() { :; }; require_installed() { :; }; ensure_docker() { :; }; take_deploy_lock() { :; }\n"
+        f'docker() {{ echo "docker $*" >> "{calls}"; {"true" if image_present else "false"}; }}\n'
+        "running_services() { printf 'app_blue\\ndb\\ngitea\\nproxy\\nredis\\n'; }\n"
+        f'compose() {{ echo "compose $*" >> "{calls}"; {"true" if db_starts else "[[ $* != *db ]]"}; }}\n'
+        f'obtain_image() {{ echo "obtain_image $*" >> "{calls}"; printf img:pulled-again; }}\n'
+        f'deploy_release() {{ echo "deploy_release $*" >> "{calls}"; set_setting "$PROJECT_ENV" ACTIVE_SLOT blue; }}\n'
+    )
+
+
+def test_refresh_recreates_the_database_then_the_other_services_then_the_app(tmp_path):
+    settings = "MYPORTAL_VERSION=v1\nMYPORTAL_IMAGE=img:v1\nACTIVE_SLOT=blue\n"
+    result = _run(_refresh_harness(tmp_path, settings=settings) + "cmd_refresh --yes")
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "calls").read_text(encoding="utf-8").splitlines() == [
+        "docker image inspect img:v1",
+        "compose up -d --no-deps --force-recreate --timeout 60 --wait db",
+        "compose up -d --no-deps --force-recreate gitea proxy redis",
+        "deploy_release img:v1 v1",
+    ]
+    # Recreated from freshly written configuration, still pointing at the serving slot.
+    assert (tmp_path / "docker-compose.yml").is_file()
+    assert "app_blue" in (tmp_path / "proxy" / "active-slot.inc").read_text(encoding="utf-8")
+
+
+def test_refresh_fetches_the_installed_release_again_when_its_image_is_gone(tmp_path):
+    settings = "MYPORTAL_VERSION=v1\nMYPORTAL_IMAGE=img:v1\nACTIVE_SLOT=blue\n"
+    result = _run(_refresh_harness(tmp_path, settings=settings, image_present=False) + "cmd_refresh --yes")
+    assert result.returncode == 0, result.stderr
+    calls = (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
+    assert "obtain_image v1" in calls
+    assert calls[-1] == "deploy_release img:pulled-again v1"
+
+
+def test_refresh_converts_a_pre_blue_green_installation_first(tmp_path):
+    settings = "MYPORTAL_VERSION=v1\nMYPORTAL_IMAGE=img:v1\n"
+    result = _run(_refresh_harness(tmp_path, settings=settings) + "cmd_refresh --yes")
+    assert result.returncode == 0, result.stderr
+    calls = (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
+    assert calls[1] == "deploy_release img:v1 v1"
+    assert calls[2] == "compose up -d --no-deps --force-recreate --timeout 60 --wait db"
+    assert calls[-1] == "deploy_release img:v1 v1"
+
+
+def test_refresh_stops_when_the_database_does_not_start(tmp_path):
+    settings = "MYPORTAL_VERSION=v1\nMYPORTAL_IMAGE=img:v1\nACTIVE_SLOT=blue\n"
+    result = _run(_refresh_harness(tmp_path, settings=settings, db_starts=False) + "cmd_refresh --yes")
+    assert result.returncode != 0
+    assert "the database did not start again" in result.stderr
+    calls = (tmp_path / "calls").read_text(encoding="utf-8")
+    assert "gitea proxy redis" not in calls and "deploy_release" not in calls
+
+
+def test_refresh_requires_an_installed_release(tmp_path):
+    result = _run(_refresh_harness(tmp_path, settings="MYPORTAL_VERSION=\n") + "cmd_refresh --yes")
+    assert result.returncode != 0
+    assert "no installed release is recorded" in result.stderr
+    assert not (tmp_path / "calls").exists()
