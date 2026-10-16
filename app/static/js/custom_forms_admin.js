@@ -346,7 +346,8 @@
               const input = element('input');
               input.type = 'radio';
               input.name = perTable ? 'cf-preview-matrix' : `cf-preview-matrix-${rowIndex}`;
-              cell.append(input, element('span', 'sr-only', `${row}: ${column}`));
+              const shown = element('span', 'cf-matrix__column', column); shown.setAttribute('aria-hidden', 'true');
+              cell.append(input, element('span', 'sr-only', `${row}: ${column}`), shown);
               const td = element('td'); td.append(cell); tr.append(td);
             });
             body.append(tr);
