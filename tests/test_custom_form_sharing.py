@@ -275,12 +275,17 @@ async def test_qr_code_png_download_and_print(sharing, monkeypatch):
         assert "content-disposition" not in png.headers
         download = await client.get("/admin/custom-forms/1/sharing/3/qr.png?download=1")
         assert download.headers["content-disposition"] == 'attachment; filename="support-link-3-qr.png"'
-        printable = await client.get("/admin/custom-forms/1/sharing/3/print")
-        assert printable.status_code == 200
-        assert "data:image/png;base64," in printable.text
-        assert f"token={TOKEN}" in printable.text
-        assert "data-cf-print" in printable.text
     api.forms_repo.get_share_link.assert_awaited_with(1, 3)
+
+    import app.main as main_module
+    monkeypatch.setattr(main_module, "_require_super_admin_page", AsyncMock(return_value=(ADMIN, None)))
+    printable = await main_module.custom_form_share_link_print(1, 3, _admin_request(app, "/admin/custom-forms/1/sharing/3/print"))
+    body = printable.body.decode()
+    assert printable.status_code == 200
+    assert printable.headers["cache-control"] == "no-store"
+    assert "data:image/png;base64," in body
+    assert f"token={TOKEN}" in body
+    assert "data-cf-print" in body
 
 
 @pytest.mark.asyncio
@@ -299,17 +304,24 @@ async def test_qr_code_unavailable_without_revealable_link(sharing, monkeypatch,
     monkeypatch.setattr(api.forms_repo, "get_share_link", AsyncMock(return_value=None if case == "missing" else link))
     app.dependency_overrides[get_current_user] = lambda: ADMIN
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="https://portal.test") as client:
-        for path in ["/admin/custom-forms/1/sharing/3/qr.png", "/admin/custom-forms/1/sharing/3/print"]:
-            assert (await client.get(path)).status_code == 404
+        assert (await client.get("/admin/custom-forms/1/sharing/3/qr.png")).status_code == 404
+    import app.main as main_module
+    monkeypatch.setattr(main_module, "_require_super_admin_page", AsyncMock(return_value=(ADMIN, None)))
+    with pytest.raises(HTTPException) as exc:
+        await main_module.custom_form_share_link_print(1, 3, _admin_request(app))
+    assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_non_admin_cannot_view_qr_codes(sharing):
     app, _ = sharing
-    for fn in [api.share_link_qr, api.share_link_print]:
-        with pytest.raises(HTTPException) as exc:
-            await fn(1, 3, _admin_request(app), user={"id": 4})
-        assert exc.value.status_code == 403
+    with pytest.raises(HTTPException) as exc:
+        await api.share_link_qr(1, 3, _admin_request(app), user={"id": 4})
+    assert exc.value.status_code == 403
+    import app.main as main_module
+    with pytest.raises(HTTPException) as exc:
+        await main_module.forms_api._revealed_share_link(1, 3, _admin_request(app), {"id": 4})
+    assert exc.value.status_code == 403
 
 
 def test_reveal_migration_adds_nullable_column():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 from importlib import import_module
 import json
@@ -6782,6 +6783,20 @@ async def search_by_phone_number(request: Request):
         url=f"/tickets?q={search_param}",
         status_code=status.HTTP_303_SEE_OTHER
     )
+
+
+@app.get("/admin/custom-forms/{form_id}/sharing/{link_id}/print", response_class=HTMLResponse, include_in_schema=False)
+async def custom_form_share_link_print(form_id: int, link_id: int, request: Request):
+    """Printable QR code sheet for one share link (lives here to avoid an import cycle)."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form, link = await forms_api._revealed_share_link(form_id, link_id, request, current_user)
+    qr_png = forms_api._qr_png(link["url"])
+    return templates.TemplateResponse(request, "admin/custom_form_share_print.html", {
+        "request": request, "form": form, "link": link,
+        "qr_data_uri": "data:image/png;base64," + base64.b64encode(qr_png).decode("ascii"),
+    }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 @app.get("/admin/custom-forms", response_class=HTMLResponse)

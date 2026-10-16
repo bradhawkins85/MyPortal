@@ -605,16 +605,6 @@ async def share_link_qr(form_id: int, link_id: int, request: Request,
     return Response(content=_qr_png(link["url"]), media_type="image/png", headers=headers)
 
 
-@router.get("/admin/custom-forms/{form_id}/sharing/{link_id}/print", include_in_schema=False)
-async def share_link_print(form_id: int, link_id: int, request: Request, user: dict[str, Any] = Depends(get_current_user)):
-    form, link = await _revealed_share_link(form_id, link_id, request, user)
-    from app.main import templates
-    return templates.TemplateResponse(request, "admin/custom_form_share_print.html", {
-        "request": request, "form": form, "link": link,
-        "qr_data_uri": "data:image/png;base64," + base64.b64encode(_qr_png(link["url"])).decode("ascii"),
-    }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
-
-
 @router.get("/admin/custom-forms/{form_id}/sharing", include_in_schema=False)
 async def share_links_page(form_id: int, request: Request, user: dict[str, Any] = Depends(get_current_user)):
     return await _share_links_page(form_id, request, user)

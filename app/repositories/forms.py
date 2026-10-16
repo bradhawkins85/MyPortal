@@ -400,7 +400,6 @@ async def revoke_access(form_id: int, user_id: int) -> None:
 
 # Lookups use a digest of each bearer token; an encrypted copy lets admins
 # reveal the link (and its QR code) again later.
-_SHARE_LINK_COLUMNS = "id, form_id, company_id, token_encrypted, expires_at, revoked_at, created_at"
 
 
 async def create_share_link(*, form_id: int, company_id: int, token_hash: str,
@@ -410,7 +409,10 @@ async def create_share_link(*, form_id: int, company_id: int, token_hash: str,
         "INSERT INTO custom_form_share_links (form_id, company_id, token_hash, token_encrypted, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?)",
         (form_id, company_id, token_hash, token_encrypted, expires_at, created_by),
     )
-    return await db.fetch_one(f"SELECT {_SHARE_LINK_COLUMNS} FROM custom_form_share_links WHERE id = ?", (link_id,))
+    return await db.fetch_one(
+        "SELECT id, form_id, company_id, token_encrypted, expires_at, revoked_at, created_at FROM custom_form_share_links WHERE id = ?",
+        (link_id,),
+    )
 
 
 async def list_share_links(form_id: int) -> list[dict[str, Any]]:
