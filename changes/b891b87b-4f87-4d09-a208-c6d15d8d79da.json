@@ -1,0 +1,7 @@
+{
+  "guid": "b891b87b-4f87-4d09-a208-c6d15d8d79da",
+  "occurred_at": "2026-10-16T07:55Z",
+  "change_type": "Feature",
+  "summary": "Custom forms: public sharing links can now be shown again after the page is refreshed, and every new link gets a QR code that admins can view, download as a PNG or print for users to scan. Links created before this change cannot be shown again; create a new link if needed.",
+  "content_hash": "bf0379062e64c8e9fe1241b480597a6207e8bc076a19c784f80b06a31673be02"
+}

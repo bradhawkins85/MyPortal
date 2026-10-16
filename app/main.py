@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 from importlib import import_module
 import json
@@ -6784,6 +6785,20 @@ async def search_by_phone_number(request: Request):
     )
 
 
+@app.get("/admin/custom-forms/{form_id}/sharing/{link_id}/print", response_class=HTMLResponse, include_in_schema=False)
+async def custom_form_share_link_print(form_id: int, link_id: int, request: Request):
+    """Printable QR code sheet for one share link (lives here to avoid an import cycle)."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form, link = await forms_api._revealed_share_link(form_id, link_id, request, current_user)
+    qr_png = forms_api._qr_png(link["url"])
+    return templates.TemplateResponse(request, "admin/custom_form_share_print.html", {
+        "request": request, "form": form, "link": link,
+        "qr_data_uri": "data:image/png;base64," + base64.b64encode(qr_png).decode("ascii"),
+    }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
 @app.get("/admin/custom-forms", response_class=HTMLResponse)
 async def custom_forms_admin_page(request: Request, form_id: int | None = None):
     current_user, redirect = await _require_super_admin_page(request)
@@ -6832,6 +6847,10 @@ async def custom_forms_admin_page(request: Request, form_id: int | None = None):
             "access_user_labels": {user["id"]: user["label"] for user in available_users},
             "field_types": custom_forms.field_type_choices(),
             "field_type_labels": dict(custom_forms.FIELD_TYPES),
+            "condition_meta": custom_forms.condition_builder_meta(),
+            "condition_summaries": {
+                field["id"]: custom_forms.condition_summary(field, selected_fields) for field in selected_fields
+            },
         },
     )
 

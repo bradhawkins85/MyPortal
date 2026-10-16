@@ -163,3 +163,36 @@
 .cf-submissions dt, .cf-submissions dd { margin: 0; overflow-wrap: anywhere; }
 
 .cf-public-shell { max-width: 56rem; margin: 2rem auto; padding: 0 1rem; }
+
+/* Public sharing links: revealable URL and QR code, plus a print sheet. */
+.cf-share-reveal { margin-block: var(--space-gap-base); }
+.cf-share-reveal summary { cursor: pointer; font-weight: 600; }
+.cf-share-reveal__body { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-gap-base); margin-top: var(--space-gap-base); }
+.cf-share-reveal__body .form-field { width: 100%; }
+.cf-share-reveal__body textarea { overflow-wrap: anywhere; }
+.cf-share-reveal__qr { background: #fff; padding: 0.5rem; border-radius: var(--hf-radius-md); max-width: 100%; height: auto; }
+.cf-share-reveal__actions, .cf-share-print__actions { display: flex; flex-wrap: wrap; gap: var(--space-gap-base); }
+.cf-share-print { max-width: 36rem; margin: 2rem auto; padding: 0 1rem; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.75rem; }
+.cf-share-print__qr { background: #fff; width: min(320px, 100%); height: auto; }
+.cf-share-print__url { font-size: 0.8rem; overflow-wrap: anywhere; color: var(--hf-muted); }
+@media print {
+  body:has(.cf-share-print) { background: #fff !important; }
+  .cf-share-print__actions { display: none; }
+  .cf-share-print, .cf-share-print * { color: #000 !important; }
+}
+
+/* Conditional logic editor: question · comparison · value · remove. */
+.cf-conditions { border: 1px solid var(--hf-line); border-radius: var(--hf-radius-md); padding: calc(var(--space-gap-roomy) * 1.5); margin: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--space-gap-base); }
+.cf-conditions legend { padding-inline: 0.25rem; }
+.cf-conditions [hidden] { display: none !important; }
+.cf-conditions__body { display: flex; flex-direction: column; gap: var(--space-gap-base); align-items: flex-start; }
+.cf-conditions__body > .form-field { width: 100%; }
+.cf-condition-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-gap-base); width: 100%; }
+.cf-condition { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: var(--space-gap-base); align-items: center; }
+.cf-condition > button { grid-column: 4; }
+@media (max-width: 640px) {
+  .cf-condition { grid-template-columns: minmax(0, 1fr) auto; }
+  .cf-condition > .form-input { grid-column: 1; }
+  .cf-condition > button { grid-column: 2; grid-row: 1; }
+  .cf-condition + .cf-condition { border-top: 1px solid var(--hf-line-soft); padding-top: var(--space-gap-base); }
+}

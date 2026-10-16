@@ -10,8 +10,11 @@ import base64
 import hashlib
 import secrets
 from datetime import datetime, timezone
+from io import BytesIO
 from typing import Any
 
+import qrcode
+from cryptography.exceptions import InvalidTag
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import ValidationError
 from starlette.responses import JSONResponse
@@ -30,6 +33,7 @@ from app.schemas.forms import (
 )
 from app.services import custom_forms
 from app.services.custom_forms import CONFIG_TYPES, FILE_TYPES, FormValidationError, OPTION_TYPES
+from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import flash_redirect
 
 
@@ -143,9 +147,15 @@ async def api_create_field(
     )
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
+    siblings = await forms_repo.list_fields(form_id)
+    conditions, errors = custom_forms.validate_conditions(
+        payload.conditions.model_dump() if payload.conditions else None, field_id=None, fields=siblings,
+    )
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
     options = payload.options if payload.field_type in OPTION_TYPES else None
     config = payload.config if payload.field_type in CONFIG_TYPES else None
-    sort_order = len(await forms_repo.list_fields(form_id))
+    sort_order = len(siblings)
     return await forms_repo.create_field(
         form_id=form_id,
         field_type=payload.field_type,
@@ -156,6 +166,7 @@ async def api_create_field(
         options=options,
         default_value=payload.default_value,
         config=config,
+        conditions=conditions,
         sort_order=sort_order,
     )
 
@@ -203,6 +214,13 @@ async def api_update_field(
     errors = custom_forms.validate_field_definition(
         new_type, new_label, new_options, new_config
     )
+    new_conditions = existing.get("conditions")
+    if "conditions" in payload.model_fields_set:
+        new_conditions, condition_errors = custom_forms.validate_conditions(
+            payload.conditions.model_dump() if payload.conditions else None,
+            field_id=field_id, fields=await forms_repo.list_fields(form_id),
+        )
+        errors += condition_errors
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
     return await forms_repo.update_field(
@@ -215,6 +233,7 @@ async def api_update_field(
         options=new_options,
         default_value=new_default,
         config=new_config,
+        conditions=new_conditions,
     )
 
 
@@ -508,6 +527,25 @@ async def _submit_form_request(form, request, user, *, public=False, submit_acti
 
 
 # Public sharing is a separate bearer-token capability, never a portal session.
+def _share_link_url(request: Request, form: dict[str, Any], token: str) -> str:
+    return str(request.url_for("public_shared_form", slug=form["slug"]).include_query_params(token=token))
+
+
+def _reveal_share_link(request: Request, form: dict[str, Any], link: dict[str, Any]) -> dict[str, Any]:
+    """Replace the stored ciphertext with the usable URL (None when unrecoverable)."""
+    revealed = {k: v for k, v in link.items() if k not in ("token_encrypted", "token_hash")}
+    revealed["url"] = None
+    encrypted = link.get("token_encrypted")
+    if encrypted and not link.get("revoked_at"):
+        try:
+            revealed["url"] = _share_link_url(request, form, decrypt_secret(encrypted, allow_plaintext=False))
+        except (ValueError, InvalidTag):
+            # Encryption key changed since creation; the link still works but
+            # can no longer be displayed.
+            pass
+    return revealed
+
+
 @router.post("/api/forms/{form_id}/share-links", status_code=201)
 async def api_create_share_link(form_id: int, payload: FormShareLinkCreate,
                                 request: Request, response: Response, user: dict[str, Any] = Depends(get_current_user)):
@@ -519,17 +557,19 @@ async def api_create_share_link(form_id: int, payload: FormShareLinkCreate,
     expires_at = payload.expires_at.astimezone(timezone.utc).replace(tzinfo=None) if payload.expires_at else None
     link = await forms_repo.create_share_link(
         form_id=form_id, company_id=payload.company_id,
-        token_hash=hashlib.sha256(token.encode()).hexdigest(), expires_at=expires_at,
-        created_by=user.get("id"),
+        token_hash=hashlib.sha256(token.encode()).hexdigest(), token_encrypted=encrypt_secret(token),
+        expires_at=expires_at, created_by=user.get("id"),
     )
-    url = str(request.url_for("public_shared_form", slug=form["slug"]).include_query_params(token=token))
-    return {**link, "url": url}
+    link = {k: v for k, v in link.items() if k != "token_encrypted"}
+    return {**link, "url": _share_link_url(request, form, token)}
 
 
 @router.get("/api/forms/{form_id}/share-links")
-async def api_list_share_links(form_id: int, user: dict[str, Any] = Depends(get_current_user)):
-    await _get_admin_form(form_id, user)
-    return await forms_repo.list_share_links(form_id)
+async def api_list_share_links(form_id: int, request: Request, response: Response,
+                               user: dict[str, Any] = Depends(get_current_user)):
+    form = await _get_admin_form(form_id, user)
+    response.headers["Cache-Control"] = "no-store"
+    return [_reveal_share_link(request, form, link) for link in await forms_repo.list_share_links(form_id)]
 
 
 @router.delete("/api/forms/{form_id}/share-links/{link_id}")
@@ -539,17 +579,45 @@ async def api_revoke_share_link(form_id: int, link_id: int, user: dict[str, Any]
     return {"ok": True}
 
 
+async def _revealed_share_link(form_id: int, link_id: int, request: Request, user: dict[str, Any]):
+    form = await _get_admin_form(form_id, user)
+    link = await forms_repo.get_share_link(form_id, link_id)
+    revealed = _reveal_share_link(request, form, link) if link else None
+    if not revealed or not revealed["url"]:
+        raise HTTPException(status_code=404, detail="This link cannot be shown.")
+    return form, revealed
+
+
+def _qr_png(data: str) -> bytes:
+    """Render locally so share tokens are never sent to a third-party QR service."""
+    buffer = BytesIO()
+    qrcode.make(data, border=4, box_size=10).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+@router.get("/admin/custom-forms/{form_id}/sharing/{link_id}/qr.png", include_in_schema=False)
+async def share_link_qr(form_id: int, link_id: int, request: Request,
+                        download: bool = False, user: dict[str, Any] = Depends(get_current_user)):
+    form, link = await _revealed_share_link(form_id, link_id, request, user)
+    headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{form["slug"]}-link-{link["id"]}-qr.png"'
+    return Response(content=_qr_png(link["url"]), media_type="image/png", headers=headers)
+
+
 @router.get("/admin/custom-forms/{form_id}/sharing", include_in_schema=False)
 async def share_links_page(form_id: int, request: Request, user: dict[str, Any] = Depends(get_current_user)):
     return await _share_links_page(form_id, request, user)
 
 
-async def _share_links_page(form_id, request, user, *, url=None, error=None):
+async def _share_links_page(form_id, request, user, *, error=None):
     form = await _get_admin_form(form_id, user)
+    created = request.query_params.get("created", "")
     from app.main import _render_template
     response = await _render_template("admin/custom_form_sharing.html", request, user, extra={
-        "title": "Share form", "form": form, "share_url": url, "error": error,
-        "links": await forms_repo.list_share_links(form_id),
+        "title": "Share form", "form": form, "error": error,
+        "created_link_id": int(created) if created.isdigit() else None,
+        "links": [_reveal_share_link(request, form, link) for link in await forms_repo.list_share_links(form_id)],
         "companies": await companies_repo.list_companies(),
     })
     response.headers["Cache-Control"] = "no-store"
@@ -579,7 +647,8 @@ async def save_share_links_page(form_id: int, request: Request, user: dict[str, 
         if exc.status_code != 400:
             raise
         return await _share_links_page(form_id, request, user, error=str(exc.detail))
-    return await _share_links_page(form_id, request, user, url=result["url"])
+    return flash_redirect(f"/admin/custom-forms/{form_id}/sharing?created={result['id']}",
+                          "Link created. Its link and QR code can be shown again at any time.", "success")
 
 
 async def _resolve_shared_form(slug: str, request: Request):

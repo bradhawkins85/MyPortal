@@ -40,6 +40,19 @@
       <div class="form-field"><label class="form-label" for="{{ prefix }}-help">Help text <span class="scf-optional">optional</span></label><textarea class="form-input" id="{{ prefix }}-help" name="help_text" rows="2" maxlength="2000">{{ (field.help_text or '') if field else '' }}</textarea></div>
       <div class="form-field" data-cf-default-wrap><label class="form-label" for="{{ prefix }}-default">Default value <span class="scf-optional">optional</span></label><input class="form-input" id="{{ prefix }}-default" name="default_value" maxlength="255" value="{{ (field.default_value or '') if field else '' }}" /><p class="form-help" data-cf-default-help>Prefill this answer. People can change it before submitting.</p></div>
       <div data-cf-required-wrap><label class="scf-switch"><input type="checkbox" name="required" value="1"{% if field and field.required %} checked{% endif %} /><span class="scf-switch__track" aria-hidden="true"></span><span>Require an answer</span></label></div>
+      {% if modal %}
+      <fieldset class="cf-conditions" data-cf-conditions>
+        <legend class="form-label">Conditional logic</legend>
+        <label class="scf-switch"><input type="checkbox" id="cf-conditions-toggle" data-cf-conditions-toggle aria-controls="cf-conditions-body" /><span class="scf-switch__track" aria-hidden="true"></span><span>Only show this question when other answers match</span></label>
+        <p class="form-help" data-cf-conditions-none hidden>Add a text, number, date, choice, check box or rating question first. Conditions compare its answer.</p>
+        <div class="cf-conditions__body" id="cf-conditions-body" data-cf-conditions-body hidden>
+          <div class="form-field"><label class="form-label" for="cf-conditions-match">Show this question when</label><select class="form-input" id="cf-conditions-match" data-cf-conditions-match><option value="all">all of these are true</option><option value="any">any of these are true</option></select></div>
+          <ol class="cf-condition-list" data-cf-condition-list></ol>
+          <button class="button button--ghost" type="button" data-cf-condition-add>Add condition</button>
+          <p class="form-help">While hidden, this question isn't required and its answer isn't added to the ticket.</p>
+        </div>
+      </fieldset>
+      {% endif %}
     </div>
     {% if modal %}<aside class="cf-preview" aria-labelledby="cf-preview-heading"><h3 id="cf-preview-heading">Live preview</h3><p class="form-help">How this question appears on the form.</p><div class="cf-preview__control" data-cf-preview></div><p class="cf-preview__summary" data-cf-preview-summary></p></aside>{% endif %}
   </div>

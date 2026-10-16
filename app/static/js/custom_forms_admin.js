@@ -9,6 +9,11 @@
   let inertNodes = [];
   let options = [];
   let editor;
+  let conditionMeta = {};
+  let conditionsOn = false;
+  let conditionMatch = 'all';
+  let conditionRules = [];
+  let editingFieldId = null;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -22,7 +27,7 @@
   function modalState() {
     if (!activeModal) return '';
     return JSON.stringify([qsa('input[name], select[name], textarea[name]', activeModal).filter((input) => !input.closest('[data-cf-preview]')).map((input) =>
-      [input.name, input.value, input.checked]), activeModal.id === 'cf-field-modal' ? options : []]);
+      [input.name, input.value, input.checked]), activeModal.id === 'cf-field-modal' ? [options, conditionsOn, conditionMatch, conditionRules] : []]);
   }
   function isDirty() { return !!activeModal && snapshot !== modalState(); }
   function errorMessage(detail) {
@@ -161,6 +166,124 @@
     renderOptions(index);
     updatePreview();
   }
+  function allFields() {
+    return qsa('script[data-cf-field-data]').map((node) => {
+      try { return JSON.parse(node.textContent); } catch (_) { return null; }
+    }).filter(Boolean);
+  }
+  function conditionSources() {
+    const types = conditionMeta.operators_by_type || {};
+    return allFields().filter((field) => types[field.field_type] && String(field.id) !== String(editingFieldId));
+  }
+  function isValueless(operator) { return (conditionMeta.valueless || []).includes(operator); }
+  function defaultRule(source) {
+    let value = '';
+    if (source.field_type === 'checkbox') value = (conditionMeta.checkbox_values || ['Yes'])[0];
+    else if (OPTION_TYPES.has(source.field_type)) value = (source.options || [])[0] || '';
+    return { field_id: source.id, operator: 'equals', value };
+  }
+  function labelled(control, id, text) {
+    const label = element('label', 'sr-only', text);
+    label.htmlFor = id;
+    control.id = id;
+    return label;
+  }
+  function choiceSelect(values, current) {
+    const select = element('select', 'form-input');
+    values.forEach((value) => { const option = element('option', '', value); option.value = value; select.append(option); });
+    select.value = current;
+    return select;
+  }
+  function renderConditions(focusId) {
+    const sources = conditionSources();
+    const toggle = qs('[data-cf-conditions-toggle]', editor);
+    toggle.checked = conditionsOn;
+    toggle.disabled = !sources.length && !conditionsOn;
+    toggle.setAttribute('aria-expanded', String(conditionsOn));
+    qs('[data-cf-conditions-none]', editor).hidden = sources.length > 0;
+    qs('[data-cf-conditions-body]', editor).hidden = !conditionsOn;
+    qs('[data-cf-conditions-match]', editor).value = conditionMatch;
+    const list = qs('[data-cf-condition-list]', editor);
+    list.replaceChildren();
+    conditionRules.forEach((rule, index) => {
+      const position = index + 1;
+      const source = sources.find((field) => String(field.id) === String(rule.field_id));
+      const row = element('li', 'cf-condition');
+      const sourceSelect = element('select', 'form-input');
+      if (!source) {
+        const missing = element('option', '', 'Choose a question…');
+        missing.value = '';
+        sourceSelect.append(missing);
+      }
+      sources.forEach((field) => { const option = element('option', '', field.label); option.value = String(field.id); sourceSelect.append(option); });
+      sourceSelect.value = source ? String(source.id) : '';
+      sourceSelect.addEventListener('change', () => {
+        const next = sources.find((field) => String(field.id) === sourceSelect.value);
+        if (next) conditionRules[index] = defaultRule(next);
+        renderConditions(sourceSelect.id);
+        updatePreview();
+      });
+      row.append(labelled(sourceSelect, `cf-condition-source-${index}`, `Question for condition ${position}`), sourceSelect);
+      if (source) {
+        const operators = (conditionMeta.operators_by_type || {})[source.field_type] || [];
+        const operatorSelect = element('select', 'form-input');
+        operators.forEach((operator) => {
+          const option = element('option', '', (conditionMeta.operators || {})[operator] || operator);
+          option.value = operator;
+          operatorSelect.append(option);
+        });
+        operatorSelect.value = rule.operator;
+        operatorSelect.addEventListener('change', () => {
+          rule.operator = operatorSelect.value;
+          if (isValueless(rule.operator)) rule.value = '';
+          renderConditions(operatorSelect.id);
+          updatePreview();
+        });
+        row.append(labelled(operatorSelect, `cf-condition-operator-${index}`, `Comparison for condition ${position}`), operatorSelect);
+        if (!isValueless(rule.operator)) {
+          let valueControl;
+          if (source.field_type === 'checkbox') valueControl = choiceSelect(conditionMeta.checkbox_values || ['Yes', 'No'], rule.value);
+          else if (OPTION_TYPES.has(source.field_type)) valueControl = choiceSelect(source.options || [], rule.value);
+          else {
+            valueControl = element('input', 'form-input');
+            valueControl.type = ['number', 'rating'].includes(source.field_type) ? 'number' : ['date', 'time'].includes(source.field_type) ? source.field_type : 'text';
+            if (valueControl.type === 'number') valueControl.step = 'any';
+            valueControl.maxLength = 255;
+            valueControl.placeholder = 'Value';
+            valueControl.value = rule.value || '';
+          }
+          rule.value = valueControl.value;
+          const sync = () => { rule.value = valueControl.value; };
+          valueControl.addEventListener('input', sync);
+          valueControl.addEventListener('change', sync);
+          row.append(labelled(valueControl, `cf-condition-value-${index}`, `Value for condition ${position}`), valueControl);
+        }
+      }
+      const remove = element('button', 'button button--ghost cf-option__button', 'Remove');
+      remove.type = 'button';
+      remove.setAttribute('aria-label', `Remove condition ${position}`);
+      remove.addEventListener('click', () => {
+        conditionRules.splice(index, 1);
+        if (!conditionRules.length) conditionsOn = false;
+        renderConditions(conditionRules.length ? `cf-condition-source-${Math.max(0, index - 1)}` : 'cf-conditions-toggle');
+        updatePreview();
+      });
+      row.append(remove);
+      list.append(row);
+    });
+    qs('[data-cf-condition-add]', editor).disabled = conditionRules.length >= 20 || !sources.length;
+    if (focusId) (qs(`#${focusId}`, editor) || (focusId === 'cf-conditions-toggle' ? toggle : null))?.focus();
+  }
+  function conditionsPayload() {
+    if (!conditionsOn || !conditionRules.length) return null;
+    const rules = conditionRules.map((rule) => {
+      if (!rule.field_id || !conditionSources().some((field) => String(field.id) === String(rule.field_id))) throw new Error('Choose a question for each condition, or remove it.');
+      const value = isValueless(rule.operator) ? null : String(rule.value || '').trim();
+      if (value === '') throw new Error('Enter a value for each condition, or remove it.');
+      return { field_id: Number(rule.field_id), operator: rule.operator, value };
+    });
+    return { match: conditionMatch, rules };
+  }
   function updatePreview() {
     const type = fieldType();
     qs('[data-cf-matrix-config]', editor).hidden = type !== 'matrix';
@@ -260,7 +383,8 @@
     }
     const matrixSummary = matrixMode() === 'table' ? 'People choose one cell; the ticket shows that row and its column.' : 'People choose a column on each row; the ticket lists every row with its answer.';
     const requiredSummary = type === 'matrix' && required && matrixMode() === 'row' ? 'Every row needs an answer.' : required ? 'An answer is required.' : 'People can leave this blank.';
-    qs('[data-cf-preview-summary]').textContent = type === 'hidden' ? 'Included automatically in every submission.' : `${requiredSummary} ${OPTION_TYPES.has(type) ? `${choices.length} choices available.` : type === 'matrix' ? matrixSummary : ''}`;
+    const conditionSummary = conditionsOn && conditionRules.length ? ` Shown only when ${conditionMatch === 'any' ? 'any' : 'all'} of its ${conditionRules.length === 1 ? 'condition matches' : `${conditionRules.length} conditions match`}.` : '';
+    qs('[data-cf-preview-summary]').textContent = (type === 'hidden' ? 'Included automatically in every submission.' : `${requiredSummary} ${OPTION_TYPES.has(type) ? `${choices.length} choices available.` : type === 'matrix' ? matrixSummary : ''}`) + conditionSummary;
   }
   function openField(trigger, data) {
     editor.reset();
@@ -274,6 +398,11 @@
     qsa('[name="matrix_mode"]', editor).forEach((input) => { input.checked = input.value === (data?.config?.mode === 'table' ? 'table' : 'row'); });
     qs('[name="rating_max"]', editor).value = data?.config?.max || 5;
     qs('[name="audio_max"]', editor).value = data?.config?.max_clips || 5;
+    editingFieldId = data?.id || null;
+    conditionRules = (data?.conditions?.rules || []).map((rule) => ({ ...rule }));
+    conditionMatch = data?.conditions?.match === 'any' ? 'any' : 'all';
+    conditionsOn = conditionRules.length > 0;
+    renderConditions();
     qs('[data-cf-bulk]', editor).hidden = true;
     qs('[data-cf-bulk-input]', editor).value = '';
     qs('[data-cf-bulk-toggle]', editor).setAttribute('aria-expanded', 'false');
@@ -298,6 +427,7 @@
     } else if (type === 'rating') config = { max: Number(qs('[name="rating_max"]', editor).value) };
     else if (type === 'audio') config = { max_clips: Number(qs('[name="audio_max"]', editor).value) };
     return {
+      conditions: conditionsPayload(),
       config, label: value('label'), field_type: type, required: type !== 'hidden' && qs('[name="required"]', editor).checked,
       placeholder: value('placeholder'), help_text: value('help_text'),
       default_value: ['file', 'audio', 'signature', 'matrix'].includes(type) ? null : value('default_value'), options: OPTION_TYPES.has(type) ? choices : [],
@@ -378,7 +508,23 @@
       qs(`[data-cf-no-results="${kind}"]`).hidden = rows.some((row) => !row.hidden);
     }));
     if (!editor) return;
+    try { conditionMeta = JSON.parse(qs('[data-cf-condition-meta]')?.textContent || '{}'); } catch (_) { conditionMeta = {}; }
     for (const eventName of ['input', 'change']) editor.addEventListener(eventName, (event) => { if (!event.target.closest('[data-cf-preview]')) updatePreview(); });
+    qs('[data-cf-conditions-toggle]', editor).addEventListener('change', (event) => {
+      conditionsOn = event.target.checked;
+      const sources = conditionSources();
+      if (conditionsOn && !conditionRules.length && sources.length) conditionRules.push(defaultRule(sources[0]));
+      renderConditions(conditionsOn ? 'cf-conditions-match' : undefined);
+      updatePreview();
+    });
+    qs('[data-cf-conditions-match]', editor).addEventListener('change', (event) => { conditionMatch = event.target.value === 'any' ? 'any' : 'all'; updatePreview(); });
+    qs('[data-cf-condition-add]', editor).addEventListener('click', () => {
+      const sources = conditionSources();
+      if (!sources.length || conditionRules.length >= 20) return;
+      conditionRules.push(defaultRule(sources[0]));
+      renderConditions(`cf-condition-source-${conditionRules.length - 1}`);
+      updatePreview();
+    });
     qs('[data-cf-option-add]', editor).addEventListener('click', () => addOption());
     qs('[data-cf-bulk-toggle]', editor).addEventListener('click', (event) => {
       const bulk = qs('[data-cf-bulk]', editor);
