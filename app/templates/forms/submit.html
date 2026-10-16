@@ -25,7 +25,21 @@
           {% elif field.field_type == 'rating' %}
           <fieldset class="cf-public__choices"><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend><div class="cf-rating-choices">{% for score in range(1, (cfg.get('max', 5) | int) + 1) %}<label class="cf-type-choice"><input type="radio" name="field_{{ fid }}" value="{{ score }}"{% if value | int == score %} checked{% endif %}{% if field.required %} required{% endif %} data-cf-value /><span>{{ score }}</span></label>{% endfor %}</div><p class="form-help">Choose a rating from 1 to {{ cfg.get('max', 5) }}.</p></fieldset>
           {% elif field.field_type == 'matrix' %}
-          <fieldset class="cf-public__choices"><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend>{% for row in cfg.get('rows', []) %}<div class="form-field"><label class="form-label" for="cf-matrix-{{ fid }}-{{ loop.index0 }}">{{ row }}</label><select class="form-input" id="cf-matrix-{{ fid }}-{{ loop.index0 }}" name="matrix_{{ fid }}_{{ loop.index0 }}" data-cf-matrix-row="{{ row }}"{% if field.required %} required{% endif %}><option value="">Choose an answer…</option>{% for column in cfg.get('columns', []) %}<option value="{{ column }}"{% if value is mapping and value.get(row) == column %} selected{% endif %}>{{ column }}</option>{% endfor %}</select></div>{% endfor %}</fieldset>
+          {% set per_table = cfg.get('mode') == 'table' %}
+          {% set columns = cfg.get('columns', []) %}
+          <fieldset class="cf-public__choices" aria-describedby="cf-matrix-hint-{{ fid }}{% if field.help_text %} cf-help-{{ fid }}{% endif %}"><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend>
+            <p class="form-help" id="cf-matrix-hint-{{ fid }}">{{ 'Choose one answer from the table.' if per_table else 'Choose one answer for each row.' }}</p>
+            <div class="cf-matrix-wrap">
+              <table class="cf-matrix">
+                <thead><tr><td></td>{% for column in columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead>
+                <tbody>
+                  {% for row in cfg.get('rows', []) %}{% set row_index = loop.index0 %}
+                  <tr><th scope="row" id="cf-matrix-{{ fid }}-{{ row_index }}">{{ row }}</th>{% for column in columns %}<td><label class="cf-matrix__cell"><input type="radio" name="{{ 'matrix_' ~ fid if per_table else 'matrix_' ~ fid ~ '_' ~ row_index }}" value="{{ row_index ~ ':' ~ loop.index0 if per_table else column }}" data-cf-matrix-row="{{ row }}" data-cf-matrix-column="{{ column }}"{% if value is mapping and value.get(row) == column %} checked{% endif %}{% if field.required %} required{% endif %} /><span class="sr-only">{{ row }}: {{ column }}</span></label></td>{% endfor %}</tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </fieldset>
           {% elif field.field_type == 'signature' %}
           <fieldset class="cf-public__choices"><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend><div class="cf-signature" data-cf-signature-wrap hidden><canvas width="560" height="160" data-cf-signature aria-label="Draw your signature"></canvas><input type="hidden" name="field_{{ fid }}" data-cf-value /><button class="button button--ghost" type="button" data-cf-signature-clear>Clear signature</button><p class="form-help">Draw with your mouse or finger, or upload an image below.</p></div><label class="form-label" for="cf-signature-upload-{{ fid }}">Upload a signature image</label><input class="form-input" type="file" id="cf-signature-upload-{{ fid }}" name="signature_{{ fid }}" accept="image/png,image/jpeg" data-cf-signature-upload /><p class="form-help">PNG or JPEG, up to 1 MB.</p></fieldset>
           {% elif field.field_type == 'checkbox' %}

@@ -8,7 +8,7 @@
       if (type === 'file' || type === 'audio') return;
       if (type === 'matrix') {
         values[id] = {};
-        wrap.querySelectorAll('[data-cf-matrix-row]').forEach((select) => { if (select.value) values[id][select.dataset.cfMatrixRow] = select.value; });
+        wrap.querySelectorAll('[data-cf-matrix-row]:checked').forEach((input) => { values[id][input.dataset.cfMatrixRow] = input.dataset.cfMatrixColumn; });
         return;
       }
       if (type === 'multiselect') values[id] = Array.from(wrap.querySelectorAll('input:checked')).map((input) => input.value);

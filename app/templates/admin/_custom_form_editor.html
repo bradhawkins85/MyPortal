@@ -27,6 +27,10 @@
       </div>
       {% set cfg = (field.config or {}) if field else {} %}
       <div class="form-grid" data-cf-matrix-config>
+        <fieldset class="cf-type-picker cf-matrix-mode"><legend class="form-label">How people answer</legend><div class="cf-matrix-modes">
+          <label class="cf-type-choice"><input type="radio" name="matrix_mode" value="row"{% if cfg.get('mode') != 'table' %} checked{% endif %} /><span>One answer per row<small>People pick a column on every row. Each row is recorded with its answer.</small></span></label>
+          <label class="cf-type-choice"><input type="radio" name="matrix_mode" value="table"{% if cfg.get('mode') == 'table' %} checked{% endif %} /><span>One answer per table<small>People pick a single cell. The row and column chosen are recorded.</small></span></label>
+        </div></fieldset>
         <div class="form-field"><label class="form-label" for="{{ prefix }}-rows">Matrix rows (one per line)</label><textarea class="form-input" id="{{ prefix }}-rows" name="matrix_rows" rows="3">{{ cfg.get('rows', []) | join('\n') }}</textarea></div>
         <div class="form-field"><label class="form-label" for="{{ prefix }}-columns">Matrix columns (one per line)</label><textarea class="form-input" id="{{ prefix }}-columns" name="matrix_columns" rows="3">{{ cfg.get('columns', []) | join('\n') }}</textarea></div>
       </div>

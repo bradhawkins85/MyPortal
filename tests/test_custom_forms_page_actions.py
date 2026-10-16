@@ -191,6 +191,27 @@ async def test_html_submission_preserves_matrix_and_multiple_audio_clips(submiss
 
 
 @pytest.mark.asyncio
+async def test_html_submission_maps_one_answer_per_table_matrix_cell(submission, monkeypatch):
+    monkeypatch.setattr(forms_api.forms_repo, "list_fields", AsyncMock(return_value=[
+        {"id": 10, "field_type": "matrix", "label": "Best", "config": {"rows": ["Support", "Hardware"], "columns": ["Good", "Bad"], "mode": "table"}},
+    ]))
+    response = await forms_api.api_submit_form("support", request([("matrix_10", "1:0")], html=True), ADMIN)
+    assert response.status_code == 303
+    assert submission.await_args.kwargs["values"][10] == {"Hardware": "Good"}
+
+
+@pytest.mark.asyncio
+async def test_html_submission_rejects_unknown_matrix_cell(submission, monkeypatch):
+    monkeypatch.setattr(forms_api.forms_repo, "list_fields", AsyncMock(return_value=[
+        {"id": 10, "field_type": "matrix", "label": "Best", "config": {"rows": ["Support"], "columns": ["Good"], "mode": "table"}},
+    ]))
+    with pytest.raises(HTTPException) as exc:
+        await forms_api.api_submit_form("support", request([("matrix_10", "5:0")], html=True), ADMIN)
+    assert exc.value.status_code == 400
+    submission.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_html_signature_upload_is_encoded_for_existing_validation(submission, monkeypatch):
     from tempfile import SpooledTemporaryFile
     from starlette.datastructures import Headers
@@ -205,7 +226,8 @@ async def test_html_signature_upload_is_encoded_for_existing_validation(submissi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("field_type, extra, expected", [
-    ("matrix", {"matrix_rows": "A\nB", "matrix_columns": "Yes\nNo"}, {"rows": ["A", "B"], "columns": ["Yes", "No"]}),
+    ("matrix", {"matrix_rows": "A\nB", "matrix_columns": "Yes\nNo"}, {"rows": ["A", "B"], "columns": ["Yes", "No"], "mode": "row"}),
+    ("matrix", {"matrix_rows": "A\nB", "matrix_columns": "Yes\nNo", "matrix_mode": "table"}, {"rows": ["A", "B"], "columns": ["Yes", "No"], "mode": "table"}),
     ("rating", {"rating_max": "7"}, {"max": 7}),
     ("audio", {"audio_max": "3"}, {"max_clips": 3}),
 ])
