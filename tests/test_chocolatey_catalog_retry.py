@@ -27,6 +27,7 @@ def mocks(monkeypatch):
     replace = AsyncMock(return_value={'stored': 2, 'removed': 0})
     names = AsyncMock(return_value=['Alpha', 'Beta'])
     monkeypatch.setattr(catalog.asyncio, 'sleep', sleep)
+    monkeypatch.setattr(catalog.catalog_repo, 'find_exact', AsyncMock(return_value=[]))
     monkeypatch.setattr(catalog.catalog_repo, 'replace_all', replace)
     monkeypatch.setattr(catalog.inventory_repo, 'list_catalog_software_names', names)
     return sleep, replace, names
@@ -62,6 +63,47 @@ async def test_search_matches_chocolatey_nuget_wire_format(monkeypatch, mocks, n
     transport(monkeypatch, handle)
     await catalog.refresh()
     assert len(calls) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('status', [400, 406])
+async def test_rejected_name_is_skipped_and_keeps_its_stored_match(monkeypatch, mocks, status):
+    sleep, replace, names = mocks
+    names.return_value = ['Alpha', 'A&D WinCT-Moisture', 'Beta']
+    previous = {'package_id': 'ad-winct', 'title': 'A&D WinCT-Moisture', 'version': '1.0', 'download_count': 5}
+    find_exact = AsyncMock(return_value=[previous])
+    monkeypatch.setattr(catalog.catalog_repo, 'find_exact', find_exact)
+    calls = []
+    def handle(request):
+        term = request.url.params['searchTerm']
+        calls.append(term)
+        if '&' in term:
+            return httpx.Response(status)
+        name = term.strip("'")
+        return httpx.Response(200, text=feed([(name.lower(), name)]))
+    transport(monkeypatch, handle)
+    result = await catalog.refresh()
+    # Rejections are not retried, and later names are still looked up.
+    assert calls == ["'Alpha'", "'A&D WinCT-Moisture'", "'Beta'"]
+    find_exact.assert_awaited_once_with('A&D WinCT-Moisture', catalog.RESULT_LIMIT)
+    assert [p['package_id'] for p in replace.await_args.args[0]] == ['alpha', 'ad-winct', 'beta']
+    assert result['matched'] == 2 and result['unmatched'] == result['ambiguous'] == 0
+    assert result['rejected'] == 1 and result['rejected_names'] == ['A&D WinCT-Moisture']
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('status', [400, 406])
+async def test_all_rejected_does_not_replace(monkeypatch, mocks, status):
+    sleep, replace, names = mocks
+    calls = []
+    def handle(request):
+        calls.append(request)
+        return httpx.Response(status)
+    transport(monkeypatch, handle)
+    with pytest.raises(catalog.CatalogUnavailable, match=f"HTTP {status} for 'Alpha'"):
+        await catalog.refresh()
+    assert len(calls) == 2
+    replace.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -118,7 +160,8 @@ async def test_refresh_retries_same_application(monkeypatch, mocks, failure):
     assert terms == ["'Alpha'", "'Beta'", "'Beta'"]
     assert [p['package_id'] for p in replace.await_args.args[0]] == ['alpha', 'beta']
     assert result == {'source': catalog.COMMUNITY, 'applications': 2, 'matched': 2,
-                      'unmatched': 0, 'ambiguous': 0, 'stored': 2, 'removed': 0}
+                      'unmatched': 0, 'ambiguous': 0, 'rejected': 0, 'rejected_names': [],
+                      'stored': 2, 'removed': 0}
     assert [c.args[0] for c in sleep.await_args_list] == [catalog.PAGE_DELAY, 2]
 
 
@@ -144,7 +187,7 @@ async def test_exhausted_retries_do_not_save_partial_matches(monkeypatch, mocks,
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize('status', [400, 401, 403, 404, 406])
+@pytest.mark.parametrize('status', [401, 403, 404])
 async def test_permanent_errors_are_not_retried(monkeypatch, mocks, status):
     sleep, replace, names = mocks
     calls = []
