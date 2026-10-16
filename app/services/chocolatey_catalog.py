@@ -12,6 +12,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 from defusedxml import ElementTree
+from app.core.logging import log_warning
 from app.repositories import chocolatey_catalog as catalog_repo, rmm_inventory as inventory_repo
 from app.services.chocolatey_sources import COMMUNITY
 from app.services.monitored_http import monitored_client
@@ -25,6 +26,10 @@ PAGE_ATTEMPTS = 4
 RETRY_DELAY = 2.0
 MAX_RETRY_DELAY = 60.0
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+# The community feed rejects some search terms (for example names containing
+# '&') with 406 InvalidQueryParameters. Such a rejection only affects that name.
+REJECTED_STATUS = {400, 406}
+REJECTED_NAMES_REPORTED = 20
 
 
 class CatalogUnavailable(Exception):
@@ -115,15 +120,19 @@ def _lookup_error(response: httpx.Response, name: str) -> str:
 async def refresh() -> dict:
     """Refresh exact Chocolatey matches for current Windows Software inventory.
 
-    Application names are deduplicated across devices and versions. All lookups
-    must succeed before replacing the stored matches; failures keep the old list.
-    Missing and ambiguous names are skipped rather than guessed.
+    Application names are deduplicated across devices and versions. Transport,
+    server and parse failures abort before replacing the stored matches.
+    Missing and ambiguous names are skipped rather than guessed. A name whose
+    search Chocolatey rejects keeps its previously stored match; the refresh
+    only fails when every lookup is rejected.
     """
     names = list({name.strip().casefold(): name.strip()
                   for name in await inventory_repo.list_catalog_software_names()
                   if name.strip()}.values())
     packages: dict[str, dict] = {}
     unmatched = ambiguous = matched = 0
+    rejected: list[str] = []
+    first_rejection = ''
     async with monitored_client(httpx.AsyncClient, timeout=60, follow_redirects=False) as client:
         for index, name in enumerate(names):
             if index:
@@ -136,7 +145,16 @@ async def refresh() -> dict:
             try:
                 _, rows = _parse(await _request_packages(client, params))
             except httpx.HTTPStatusError as exc:
-                raise CatalogUnavailable(_lookup_error(exc.response, name)) from None
+                error = _lookup_error(exc.response, name)
+                if exc.response.status_code not in REJECTED_STATUS:
+                    raise CatalogUnavailable(error) from None
+                log_warning('Chocolatey rejected a software lookup; keeping its stored match',
+                            application=name, status=exc.response.status_code)
+                first_rejection = first_rejection or error
+                rejected.append(name)
+                for row in await catalog_repo.find_exact(name, RESULT_LIMIT):
+                    packages.setdefault(row['package_id'], dict(row))
+                continue
             except Exception as exc:
                 raise CatalogUnavailable(f'Chocolatey software lookup failed ({type(exc).__name__}); '
                                          'the stored app list was kept.') from None
@@ -149,10 +167,13 @@ async def refresh() -> dict:
                 ambiguous += 1
             else:
                 unmatched += 1
+    if names and len(rejected) == len(names):
+        raise CatalogUnavailable(first_rejection)
     refreshed_at = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
     summary = await catalog_repo.replace_all(list(packages.values()), refreshed_at)
     return {'source': COMMUNITY, 'applications': len(names), 'matched': matched,
-            'unmatched': unmatched, 'ambiguous': ambiguous, **summary}
+            'unmatched': unmatched, 'ambiguous': ambiguous, 'rejected': len(rejected),
+            'rejected_names': rejected[:REJECTED_NAMES_REPORTED], **summary}
 
 
 async def last_updated() -> str | None:

@@ -257,7 +257,8 @@ async def test_refresh_looks_up_only_current_software_and_replaces_stored_list(s
     result = await catalog.refresh()
     assert set(calls) == {"'Google Chrome'", "'VLC'", "'No Match'"} and len(calls) == 3
     assert result == {'source': catalog.COMMUNITY, 'applications': 3, 'matched': 2,
-                      'unmatched': 1, 'ambiguous': 0, 'stored': 2, 'removed': 1}
+                      'unmatched': 1, 'ambiguous': 0, 'rejected': 0, 'rejected_names': [],
+                      'stored': 2, 'removed': 1}
     assert [p['package_id'] for p in await _stored(sqlite_db)] == ['googlechrome', 'vlc']
     assert await catalog.last_updated()
     mock_feed(monkeypatch, _no_network)
