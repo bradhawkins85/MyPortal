@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>{{ form.name }} QR code</title>
+  <link rel="stylesheet" href="{{ static_url('/static/css/app.css') }}" />
+  <link rel="stylesheet" href="{{ static_url('/static/css/custom_forms_admin.css') }}" />
+</head>
+<body class="theme-default">
+  <main class="cf-share-print">
+    <h1 class="cf-share-print__title">{{ form.name }}</h1>
+    {% if form.description %}<p class="cf-share-print__desc">{{ form.description }}</p>{% endif %}
+    <img class="cf-share-print__qr" src="{{ qr_data_uri }}" alt="QR code for the {{ form.name }} form" width="320" height="320" />
+    <p class="cf-share-print__hint">Scan with your phone camera to open the form.</p>
+    <p class="cf-share-print__url">{{ link.url }}</p>
+    <div class="cf-share-print__actions">
+      <button class="button button--primary" type="button" data-cf-print>Print</button>
+      <a class="button button--ghost" href="/admin/custom-forms/{{ form.id }}/sharing">Back to sharing links</a>
+    </div>
+  </main>
+  <script src="{{ static_url('/static/js/custom_form_sharing.js') }}" defer></script>
+</body>
+</html>

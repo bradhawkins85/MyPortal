@@ -391,20 +391,32 @@ async def revoke_access(form_id: int, user_id: int) -> None:
         (form_id, user_id),
     )
 
-# Only a digest of each bearer token is persisted. Raw links are shown once.
+# Lookups use a digest of each bearer token; an encrypted copy lets admins
+# reveal the link (and its QR code) again later.
+_SHARE_LINK_COLUMNS = "id, form_id, company_id, token_encrypted, expires_at, revoked_at, created_at"
+
+
 async def create_share_link(*, form_id: int, company_id: int, token_hash: str,
-                            expires_at: Any, created_by: int | None) -> dict[str, Any]:
+                            token_encrypted: str | None, expires_at: Any,
+                            created_by: int | None) -> dict[str, Any]:
     link_id = await db.execute_returning_lastrowid(
-        "INSERT INTO custom_form_share_links (form_id, company_id, token_hash, expires_at, created_by) VALUES (?, ?, ?, ?, ?)",
-        (form_id, company_id, token_hash, expires_at, created_by),
+        "INSERT INTO custom_form_share_links (form_id, company_id, token_hash, token_encrypted, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+        (form_id, company_id, token_hash, token_encrypted, expires_at, created_by),
     )
-    return await db.fetch_one("SELECT id, form_id, company_id, expires_at, revoked_at, created_at FROM custom_form_share_links WHERE id = ?", (link_id,))
+    return await db.fetch_one(f"SELECT {_SHARE_LINK_COLUMNS} FROM custom_form_share_links WHERE id = ?", (link_id,))
 
 
 async def list_share_links(form_id: int) -> list[dict[str, Any]]:
     return await db.fetch_all(
-        "SELECT l.id, l.company_id, c.name AS company_name, l.expires_at, l.revoked_at, l.created_at FROM custom_form_share_links l JOIN companies c ON c.id = l.company_id WHERE l.form_id = ? ORDER BY l.id DESC",
+        "SELECT l.id, l.company_id, c.name AS company_name, l.token_encrypted, l.expires_at, l.revoked_at, l.created_at FROM custom_form_share_links l JOIN companies c ON c.id = l.company_id WHERE l.form_id = ? ORDER BY l.id DESC",
         (form_id,),
+    )
+
+
+async def get_share_link(form_id: int, link_id: int) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT l.id, l.form_id, l.company_id, c.name AS company_name, l.token_encrypted, l.expires_at, l.revoked_at, l.created_at FROM custom_form_share_links l JOIN companies c ON c.id = l.company_id WHERE l.id = ? AND l.form_id = ?",
+        (link_id, form_id),
     )
 
 

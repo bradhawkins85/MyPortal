@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/custom_forms_admin.css') }}" />{% endblock %}
 {% block header_title %}<span class="header__title-text">Share {{ form.name }}</span>{% endblock %}
 {% block content %}
 <section class="card card--panel">
@@ -6,7 +7,6 @@
   <div class="card__body">
     <p><a href="/admin/custom-forms?form_id={{ form.id }}">Back to form</a></p>
     {% if error %}<p role="alert">{{ error }}</p>{% endif %}
-    {% if share_url %}<div role="status"><p>Link created. Copy and save it now; it will only be shown once.</p><label class="form-label" for="share-url">Magic link</label><textarea class="form-input" id="share-url" readonly rows="3">{{ share_url }}</textarea></div>{% endif %}
     <form method="post" action="/admin/custom-forms/{{ form.id }}/sharing">
       {% include "partials/csrf.html" %}
       <div class="form-field"><label class="form-label" for="share-company">Company for submitted tickets</label><select class="form-input" id="share-company" name="company_id" required><option value="">Choose a company…</option>{% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select></div>
@@ -21,9 +21,27 @@
     <h2>Existing links</h2>
     {% for link in links %}
     <div class="card"><div class="card__body"><p>Link #{{ link.id }} · {{ link.company_name }}</p><p>{{ 'Revoked' if link.revoked_at else ('Expires: ' ~ link.expires_at ~ ' UTC' if link.expires_at else 'Never expires') }}</p>
+      {% if link.url %}
+      <details class="cf-share-reveal"{% if link.id == created_link_id %} open{% endif %}>
+        <summary>Show link and QR code</summary>
+        <div class="cf-share-reveal__body">
+          <div class="form-field"><label class="form-label" for="share-url-{{ link.id }}">Magic link</label><textarea class="form-input" id="share-url-{{ link.id }}" readonly rows="3">{{ link.url }}</textarea></div>
+          <button class="button button--ghost" type="button" data-cf-copy="share-url-{{ link.id }}">Copy link</button>
+          <img class="cf-share-reveal__qr" src="/admin/custom-forms/{{ form.id }}/sharing/{{ link.id }}/qr.png" alt="QR code for link {{ link.id }}" width="200" height="200" loading="lazy" />
+          <div class="cf-share-reveal__actions">
+            <a class="button button--ghost" href="/admin/custom-forms/{{ form.id }}/sharing/{{ link.id }}/qr.png?download=1" download>Download QR code</a>
+            <a class="button button--ghost" href="/admin/custom-forms/{{ form.id }}/sharing/{{ link.id }}/print" target="_blank" rel="noopener noreferrer">Print QR code</a>
+          </div>
+        </div>
+      </details>
+      {% elif not link.revoked_at %}<p class="form-help">This link was created before links could be shown again. Create a new link if you need to share it.</p>{% endif %}
       {% if not link.revoked_at %}<form method="post" action="/admin/custom-forms/{{ form.id }}/sharing">{% include "partials/csrf.html" %}<input type="hidden" name="action" value="revoke" /><input type="hidden" name="link_id" value="{{ link.id }}" /><button class="button button--danger" type="submit" aria-label="Revoke link {{ link.id }}">Revoke link</button></form>{% endif %}
     </div></div>
     {% else %}<p>No sharing links yet.</p>{% endfor %}
   </div>
 </section>
+{% endblock %}
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/custom_form_sharing.js') }}" defer></script>
 {% endblock %}
