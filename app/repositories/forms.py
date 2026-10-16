@@ -66,6 +66,7 @@ def _normalise_field(row: dict[str, Any] | None) -> dict[str, Any] | None:
     normalised["sort_order"] = int(normalised.get("sort_order") or 0)
     normalised["options"] = _decode_options(normalised.get("options"))
     normalised["config"] = _decode_config(normalised.get("config"))
+    normalised["conditions"] = _decode_config(normalised.get("conditions")) or None
     return normalised
 
 
@@ -209,14 +210,16 @@ async def create_field(
     default_value: str | None,
     sort_order: int,
     config: dict[str, Any] | None = None,
+    conditions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     options_json = json.dumps(options) if options else None
     config_json = json.dumps(config) if config else None
+    conditions_json = json.dumps(conditions) if conditions else None
     field_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO custom_form_fields
-        (form_id, field_type, label, placeholder, help_text, required, options, default_value, config, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (form_id, field_type, label, placeholder, help_text, required, options, default_value, config, conditions, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             form_id,
@@ -228,6 +231,7 @@ async def create_field(
             options_json,
             default_value,
             config_json,
+            conditions_json,
             sort_order,
         ),
     )
@@ -248,14 +252,16 @@ async def update_field(
     options: list[str] | None,
     default_value: str | None,
     config: dict[str, Any] | None = None,
+    conditions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     options_json = json.dumps(options) if options else None
     config_json = json.dumps(config) if config else None
+    conditions_json = json.dumps(conditions) if conditions else None
     await db.execute(
         """
         UPDATE custom_form_fields
         SET field_type = ?, label = ?, placeholder = ?, help_text = ?,
-            required = ?, options = ?, default_value = ?, config = ?
+            required = ?, options = ?, default_value = ?, config = ?, conditions = ?
         WHERE id = ?
         """,
         (
@@ -267,6 +273,7 @@ async def update_field(
             options_json,
             default_value,
             config_json,
+            conditions_json,
             field_id,
         ),
     )

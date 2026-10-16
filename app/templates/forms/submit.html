@@ -17,13 +17,15 @@
         {% set cfg = field.config or {} %}
         {% set value = (submitted_values | default({})).get(fid, field.default_value or '') %}
         {% set described = ' aria-describedby="cf-help-' ~ fid ~ '"' if field.help_text else '' %}
-        <div class="form-field cf-pub-field" data-cf-pub-field data-field-id="{{ fid }}" data-field-type="{{ field.field_type }}" data-required="{{ 'true' if field.required else 'false' }}">
+        {# Conditional questions get "required" from forms.js only while shown; the server enforces it too. #}
+        {% set native_required = field.required and not field.conditions %}
+        <div class="form-field cf-pub-field" data-cf-pub-field data-field-id="{{ fid }}" data-field-type="{{ field.field_type }}" data-required="{{ 'true' if field.required else 'false' }}"{% if field.conditions %} data-cf-conditions="{{ field.conditions | tojson | forceescape }}"{% endif %}>
           {% if field.field_type in ['radio', 'multiselect'] %}
           <fieldset class="cf-public__choices"{% if field.help_text %} aria-describedby="cf-help-{{ fid }}"{% endif %}><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend>
-            {% for opt in field.options %}<label class="cf-public__choice"><input type="{{ 'radio' if field.field_type == 'radio' else 'checkbox' }}" name="field_{{ fid }}" value="{{ opt }}"{% if opt == value or (value is not string and opt in value) %} checked{% endif %}{% if field.required and field.field_type == 'radio' %} required{% endif %} data-cf-value /><span>{{ opt }}</span></label>{% endfor %}
+            {% for opt in field.options %}<label class="cf-public__choice"><input type="{{ 'radio' if field.field_type == 'radio' else 'checkbox' }}" name="field_{{ fid }}" value="{{ opt }}"{% if opt == value or (value is not string and opt in value) %} checked{% endif %}{% if native_required and field.field_type == 'radio' %} required{% endif %} data-cf-value /><span>{{ opt }}</span></label>{% endfor %}
           </fieldset>
           {% elif field.field_type == 'rating' %}
-          <fieldset class="cf-public__choices"><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend><div class="cf-rating-choices">{% for score in range(1, (cfg.get('max', 5) | int) + 1) %}<label class="cf-type-choice"><input type="radio" name="field_{{ fid }}" value="{{ score }}"{% if value | int == score %} checked{% endif %}{% if field.required %} required{% endif %} data-cf-value /><span>{{ score }}</span></label>{% endfor %}</div><p class="form-help">Choose a rating from 1 to {{ cfg.get('max', 5) }}.</p></fieldset>
+          <fieldset class="cf-public__choices"><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend><div class="cf-rating-choices">{% for score in range(1, (cfg.get('max', 5) | int) + 1) %}<label class="cf-type-choice"><input type="radio" name="field_{{ fid }}" value="{{ score }}"{% if value | int == score %} checked{% endif %}{% if native_required %} required{% endif %} data-cf-value /><span>{{ score }}</span></label>{% endfor %}</div><p class="form-help">Choose a rating from 1 to {{ cfg.get('max', 5) }}.</p></fieldset>
           {% elif field.field_type == 'matrix' %}
           {% set per_table = cfg.get('mode') == 'table' %}
           {% set columns = cfg.get('columns', []) %}
@@ -34,7 +36,7 @@
                 <thead><tr><td></td>{% for column in columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead>
                 <tbody>
                   {% for row in cfg.get('rows', []) %}{% set row_index = loop.index0 %}
-                  <tr><th scope="row" id="cf-matrix-{{ fid }}-{{ row_index }}">{{ row }}</th>{% for column in columns %}<td><label class="cf-matrix__cell"><input type="radio" name="{{ 'matrix_' ~ fid if per_table else 'matrix_' ~ fid ~ '_' ~ row_index }}" value="{{ row_index ~ ':' ~ loop.index0 if per_table else column }}" data-cf-matrix-row="{{ row }}" data-cf-matrix-column="{{ column }}"{% if value is mapping and value.get(row) == column %} checked{% endif %}{% if field.required %} required{% endif %} /><span class="sr-only">{{ row }}: {{ column }}</span></label></td>{% endfor %}</tr>
+                  <tr><th scope="row" id="cf-matrix-{{ fid }}-{{ row_index }}">{{ row }}</th>{% for column in columns %}<td><label class="cf-matrix__cell"><input type="radio" name="{{ 'matrix_' ~ fid if per_table else 'matrix_' ~ fid ~ '_' ~ row_index }}" value="{{ row_index ~ ':' ~ loop.index0 if per_table else column }}" data-cf-matrix-row="{{ row }}" data-cf-matrix-column="{{ column }}"{% if value is mapping and value.get(row) == column %} checked{% endif %}{% if native_required %} required{% endif %} /><span class="sr-only">{{ row }}: {{ column }}</span></label></td>{% endfor %}</tr>
                   {% endfor %}
                 </tbody>
               </table>
@@ -43,15 +45,15 @@
           {% elif field.field_type == 'signature' %}
           <fieldset class="cf-public__choices"><legend class="form-label">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></legend><div class="cf-signature" data-cf-signature-wrap hidden><canvas width="560" height="160" data-cf-signature aria-label="Draw your signature"></canvas><input type="hidden" name="field_{{ fid }}" data-cf-value /><button class="button button--ghost" type="button" data-cf-signature-clear>Clear signature</button><p class="form-help">Draw with your mouse or finger, or upload an image below.</p></div><label class="form-label" for="cf-signature-upload-{{ fid }}">Upload a signature image</label><input class="form-input" type="file" id="cf-signature-upload-{{ fid }}" name="signature_{{ fid }}" accept="image/png,image/jpeg" data-cf-signature-upload /><p class="form-help">PNG or JPEG, up to 1 MB.</p></fieldset>
           {% elif field.field_type == 'checkbox' %}
-          <label class="cf-public__choice" for="cf-f-{{ fid }}"><input id="cf-f-{{ fid }}" type="checkbox" name="field_{{ fid }}" value="1"{% if value in [true, 1, '1', 'true', 'on'] %} checked{% endif %}{% if field.required %} required{% endif %}{{ described | safe }} data-cf-value /><span>{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></span></label>
+          <label class="cf-public__choice" for="cf-f-{{ fid }}"><input id="cf-f-{{ fid }}" type="checkbox" name="field_{{ fid }}" value="1"{% if value in [true, 1, '1', 'true', 'on'] %} checked{% endif %}{% if native_required %} required{% endif %}{{ described | safe }} data-cf-value /><span>{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></span></label>
           {% else %}
           <label class="form-label" for="cf-f-{{ fid }}">{{ field.label }} <span class="scf-optional">{{ 'required' if field.required else 'optional' }}</span></label>
           {% if field.field_type == 'textarea' %}
-          <textarea class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}" rows="4" placeholder="{{ field.placeholder or '' }}"{% if field.required %} required{% endif %}{{ described | safe }} data-cf-value>{{ value }}</textarea>
+          <textarea class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}" rows="4" placeholder="{{ field.placeholder or '' }}"{% if native_required %} required{% endif %}{{ described | safe }} data-cf-value>{{ value }}</textarea>
           {% elif field.field_type == 'select' %}
-          <select class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}"{% if field.required %} required{% endif %}{{ described | safe }} data-cf-value><option value="">Select an option…</option>{% for opt in field.options %}<option value="{{ opt }}"{% if opt == value %} selected{% endif %}>{{ opt }}</option>{% endfor %}</select>
+          <select class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}"{% if native_required %} required{% endif %}{{ described | safe }} data-cf-value><option value="">Select an option…</option>{% for opt in field.options %}<option value="{{ opt }}"{% if opt == value %} selected{% endif %}>{{ opt }}</option>{% endfor %}</select>
           {% elif field.field_type in ['file', 'audio'] %}
-          <input class="form-input" id="cf-f-{{ fid }}" name="file_{{ fid }}" type="file"{% if field.field_type == 'audio' %} accept="audio/*" multiple data-max-clips="{{ cfg.get('max_clips', 5) }}"{% endif %}{% if field.required %} required{% endif %}{{ described | safe }} data-cf-file />
+          <input class="form-input" id="cf-f-{{ fid }}" name="file_{{ fid }}" type="file"{% if field.field_type == 'audio' %} accept="audio/*" multiple data-max-clips="{{ cfg.get('max_clips', 5) }}"{% endif %}{% if native_required %} required{% endif %}{{ described | safe }} data-cf-file />
           {% if field.field_type == 'file' %}
           <div class="cf-capture-controls" data-cf-capture-controls hidden>
             <button class="button button--ghost" type="button" data-cf-capture-photo>Take photo</button>
@@ -74,7 +76,7 @@
           <div class="cf-audio-list" data-cf-audio-list></div>
           {% endif %}
           {% else %}
-          <input class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}" type="{{ field.field_type }}"{% if field.field_type == 'number' %} step="any"{% endif %} placeholder="{{ field.placeholder or '' }}" value="{{ value }}"{% if field.required %} required{% endif %}{{ described | safe }} data-cf-value />
+          <input class="form-input" id="cf-f-{{ fid }}" name="field_{{ fid }}" type="{{ field.field_type }}"{% if field.field_type == 'number' %} step="any"{% endif %} placeholder="{{ field.placeholder or '' }}" value="{{ value }}"{% if native_required %} required{% endif %}{{ described | safe }} data-cf-value />
           {% if field.field_type == 'password' %}<button type="button" class="button button--ghost" data-cf-password-toggle aria-label="Show password" aria-pressed="false">Show</button>{% endif %}
           {% endif %}
           {% endif %}

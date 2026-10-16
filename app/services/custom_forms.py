@@ -64,6 +64,33 @@ MATRIX_MODES: dict[str, str] = {
     "table": "One answer per table",
 }
 
+#: Field types whose answers can decide whether another field is shown.
+CONDITION_SOURCE_TYPES: frozenset[str] = frozenset({
+    "text", "textarea", "email", "number", "time", "url", "date",
+    "select", "radio", "multiselect", "checkbox", "rating",
+})
+
+#: Conditional logic operators, in the order the builder lists them.
+CONDITION_OPERATORS: dict[str, str] = {
+    "equals": "is",
+    "not_equals": "is not",
+    "contains": "contains",
+    "not_contains": "does not contain",
+    "greater_than": "is greater than",
+    "less_than": "is less than",
+    "empty": "is empty",
+    "not_empty": "is not empty",
+}
+
+#: Operators that test for an answer rather than compare it with a value.
+VALUELESS_OPERATORS: frozenset[str] = frozenset({"empty", "not_empty"})
+
+#: Answers to these types are compared as numbers.
+NUMERIC_CONDITION_TYPES: frozenset[str] = frozenset({"number", "rating"})
+
+#: A checkbox answer as conditions see it.
+CHECKBOX_CONDITION_VALUES: tuple[str, str] = ("Yes", "No")
+
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -171,6 +198,192 @@ def validate_field_definition(
     return errors
 
 
+def condition_operators_for(field_type: str) -> list[str]:
+    """Operators that make sense for answers to ``field_type``."""
+    if field_type == "checkbox":
+        return ["equals", "not_equals"]
+    if field_type in OPTION_TYPES:
+        return ["equals", "not_equals", "empty", "not_empty"]
+    if field_type in NUMERIC_CONDITION_TYPES or field_type in {"date", "time"}:
+        return ["equals", "not_equals", "greater_than", "less_than", "empty", "not_empty"]
+    return ["equals", "not_equals", "contains", "not_contains", "empty", "not_empty"]
+
+
+def _condition_dependencies(field: dict[str, Any]) -> set[int]:
+    rules = (field.get("conditions") or {}).get("rules") or []
+    return {int(rule["field_id"]) for rule in rules if str(rule.get("field_id", "")).isdigit()}
+
+
+def validate_conditions(
+    conditions: dict[str, Any] | None,
+    *,
+    field_id: int | None,
+    fields: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Validate a field's conditional logic against the other fields on its form.
+
+    Returns the normalised conditions (``None`` when the field is always
+    shown) and any error messages.
+    """
+    rules = (conditions or {}).get("rules") or []
+    if not rules:
+        return None, []
+    by_id = {int(field["id"]): field for field in fields}
+    errors: list[str] = []
+    clean_rules: list[dict[str, Any]] = []
+    for rule in rules:
+        source = by_id.get(int(rule.get("field_id") or 0))
+        if source is None or source["id"] == field_id:
+            errors.append("Choose another question on this form for each condition.")
+            continue
+        source_type = source["field_type"]
+        label = source["label"]
+        if source_type not in CONDITION_SOURCE_TYPES:
+            errors.append(f"'{label}' can't be used in a condition.")
+            continue
+        operator = str(rule.get("operator") or "")
+        if operator not in condition_operators_for(source_type):
+            errors.append(f"Choose a valid comparison for '{label}'.")
+            continue
+        value = str(rule.get("value") or "").strip()
+        if operator in VALUELESS_OPERATORS:
+            value = ""
+        elif not value:
+            errors.append(f"Enter the value to compare '{label}' with.")
+            continue
+        elif source_type == "checkbox" and value not in CHECKBOX_CONDITION_VALUES:
+            errors.append(f"Choose Yes or No for '{label}'.")
+            continue
+        elif source_type in OPTION_TYPES and value not in (source.get("options") or []):
+            errors.append(f"Choose one of the choices for '{label}'.")
+            continue
+        elif source_type in NUMERIC_CONDITION_TYPES and not _is_valid_number(value):
+            errors.append(f"Enter a number to compare '{label}' with.")
+            continue
+        clean_rules.append({"field_id": int(source["id"]), "operator": operator, "value": value})
+    if errors:
+        return None, errors
+
+    # Reject loops (A shows when B..., B shows when A...) before they are saved.
+    if field_id is not None:
+        graph = {fid: _condition_dependencies(field) for fid, field in by_id.items()}
+        graph[field_id] = {rule["field_id"] for rule in clean_rules}
+        pending, seen = list(graph[field_id]), set()
+        while pending:
+            current = pending.pop()
+            if current == field_id:
+                return None, ["These conditions depend on this question, which would create a loop."]
+            if current not in seen:
+                seen.add(current)
+                pending.extend(graph.get(current, ()))
+    match = "any" if (conditions or {}).get("match") == "any" else "all"
+    return {"match": match, "rules": clean_rules}, []
+
+
+def _condition_answers(field: dict[str, Any], raw: Any) -> list[str]:
+    """Normalise a submitted answer into the list of strings rules compare."""
+    if field["field_type"] == "checkbox":
+        return [CHECKBOX_CONDITION_VALUES[0] if _truthy(raw) else CHECKBOX_CONDITION_VALUES[1]]
+    if field["field_type"] == "hidden":
+        raw = field.get("default_value")
+    items = raw if isinstance(raw, (list, tuple)) else ([] if raw is None else [raw])
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
+def _compare(field_type: str, answer: str, target: str) -> int | None:
+    """Compare two answers: -1, 0 or 1, or None when they can't be compared."""
+    if field_type in NUMERIC_CONDITION_TYPES:
+        try:
+            left, right = float(answer), float(target)
+        except ValueError:
+            return None
+    else:
+        left, right = answer.casefold(), target.casefold()
+    return (left > right) - (left < right)
+
+
+def condition_rule_matches(field_type: str, answers: list[str], operator: str, value: str | None) -> bool:
+    """Return whether one rule holds for the source field's ``answers``."""
+    target = str(value or "").strip()
+    if operator == "empty":
+        return not answers
+    if operator == "not_empty":
+        return bool(answers)
+    if operator in {"equals", "not_equals"}:
+        hit = any(_compare(field_type, answer, target) == 0 for answer in answers)
+        return hit if operator == "equals" else not hit
+    if operator in {"contains", "not_contains"}:
+        hit = any(target.casefold() in answer.casefold() for answer in answers)
+        return hit if operator == "contains" else not hit
+    if operator in {"greater_than", "less_than"}:
+        wanted = 1 if operator == "greater_than" else -1
+        return any(_compare(field_type, answer, target) == wanted for answer in answers)
+    return False
+
+
+def visible_field_ids(fields: list[dict[str, Any]], values: dict[Any, Any]) -> set[int]:
+    """Return the ids of fields whose conditions are met by ``values``.
+
+    A field that depends on a hidden field sees that field as unanswered.
+    Rules that point at a deleted field are ignored. Loops are rejected when
+    conditions are saved; if one exists anyway, the field where the loop
+    closes is treated as unanswered so evaluation always finishes.
+    """
+    by_id = {int(field["id"]): field for field in fields}
+    state: dict[int, bool | None] = {}
+
+    def visible(field_id: int) -> bool:
+        if field_id in state:
+            return bool(state[field_id])  # ``None``: still being evaluated (a loop)
+        state[field_id] = None
+        conditions = by_id[field_id].get("conditions") or {}
+        results = []
+        for rule in conditions.get("rules") or []:
+            source = by_id.get(int(rule.get("field_id") or 0))
+            if source is None or source["id"] == field_id:
+                continue
+            answers = _condition_answers(source, values.get(source["id"])) if visible(source["id"]) else []
+            results.append(condition_rule_matches(source["field_type"], answers, rule.get("operator", ""), rule.get("value")))
+        if not results:
+            shown = True
+        elif conditions.get("match") == "any":
+            shown = any(results)
+        else:
+            shown = all(results)
+        state[field_id] = shown
+        return shown
+
+    return {field_id for field_id in by_id if visible(field_id)}
+
+
+def condition_builder_meta() -> dict[str, Any]:
+    """Operator labels and per-type choices for the builder's condition editor."""
+    return {
+        "operators": dict(CONDITION_OPERATORS),
+        "operators_by_type": {t: condition_operators_for(t) for t in sorted(CONDITION_SOURCE_TYPES)},
+        "valueless": sorted(VALUELESS_OPERATORS),
+        "checkbox_values": list(CHECKBOX_CONDITION_VALUES),
+    }
+
+
+def condition_summary(field: dict[str, Any], fields: list[dict[str, Any]]) -> str:
+    """Describe a field's conditions in words for the builder, e.g. ``Shown when Urgent is Yes``."""
+    by_id = {int(item["id"]): item for item in fields}
+    conditions = field.get("conditions") or {}
+    parts = []
+    for rule in conditions.get("rules") or []:
+        source = by_id.get(int(rule.get("field_id") or 0))
+        if source is None:
+            continue
+        operator = CONDITION_OPERATORS.get(rule.get("operator", ""), rule.get("operator", ""))
+        value = "" if rule.get("operator") in VALUELESS_OPERATORS else f" {rule.get('value', '')}"
+        parts.append(f"{source['label']} {operator}{value}")
+    if not parts:
+        return ""
+    joiner = " or " if conditions.get("match") == "any" else " and "
+    return "Shown when " + joiner.join(parts)
+
+
 def serialize_form(form: dict[str, Any], fields: list[dict[str, Any]]) -> dict[str, Any]:
     """Shape a form and its fields for the frontend."""
     return {
@@ -254,9 +467,13 @@ def validate_submission(
     files = files or {}
     clean: dict[str, Any] = {}
     errors: list[str] = []
+    # Answers to fields hidden by conditional logic are neither required nor kept.
+    visible = visible_field_ids(fields, values)
 
     for field in fields:
         field_id = field["id"]
+        if field_id not in visible:
+            continue
         field_type = field["field_type"]
         label = field["label"]
         required = field.get("required", False)
@@ -404,7 +621,7 @@ def build_description(form_name: str, fields: list[dict[str, Any]], clean: dict[
     """Build a human-readable, HTML-safe ticket description from submission data."""
     lines = [f"<h2>Form submission: {html.escape(form_name)}</h2>"]
     for field in fields:
-        if field["field_type"] == "hidden":
+        if field["field_type"] == "hidden" or field["id"] not in clean:
             continue
         label = html.escape(field["label"])
         raw = clean.get(field["id"])
@@ -485,7 +702,7 @@ async def submit_form(
 
     attachments: list[dict[str, Any]] = []
     for field in fields:
-        if field["field_type"] not in FILE_TYPES:
+        if field["field_type"] not in FILE_TYPES or field["id"] not in clean:
             continue
         for uploaded in (files.get(field["id"]) or []):
             try:

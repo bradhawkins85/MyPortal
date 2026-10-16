@@ -1,8 +1,97 @@
 (function () {
   'use strict';
+  // Conditional logic. Mirrors visible_field_ids() in app/services/custom_forms.py,
+  // which re-checks every submission.
+  const NUMERIC_TYPES = new Set(['number', 'rating']);
+  const NATIVE_REQUIRED_TYPES = new Set(['text', 'textarea', 'email', 'number', 'time', 'url', 'select', 'radio', 'checkbox', 'date', 'password', 'rating']);
+  function conditionAnswers(wrap) {
+    const type = wrap.dataset.fieldType;
+    if (type === 'checkbox') return [wrap.querySelector('input').checked ? 'Yes' : 'No'];
+    let items;
+    if (type === 'multiselect') items = Array.from(wrap.querySelectorAll('input:checked')).map((input) => input.value);
+    else if (type === 'radio' || type === 'rating') items = [wrap.querySelector('input:checked')?.value || ''];
+    else items = [wrap.querySelector('[data-cf-value]')?.value || ''];
+    return items.map((item) => String(item).trim()).filter(Boolean);
+  }
+  function compare(type, answer, target) {
+    let left = answer;
+    let right = target;
+    if (NUMERIC_TYPES.has(type)) {
+      left = Number(answer); right = Number(target);
+      if (!target || Number.isNaN(left) || Number.isNaN(right)) return null;
+    } else { left = answer.toLowerCase(); right = target.toLowerCase(); }
+    return (left > right) - (left < right);
+  }
+  function ruleMatches(type, answers, operator, value) {
+    const target = String(value || '').trim();
+    if (operator === 'empty') return !answers.length;
+    if (operator === 'not_empty') return answers.length > 0;
+    if (operator === 'equals' || operator === 'not_equals') {
+      const hit = answers.some((answer) => compare(type, answer, target) === 0);
+      return operator === 'equals' ? hit : !hit;
+    }
+    if (operator === 'contains' || operator === 'not_contains') {
+      const hit = answers.some((answer) => answer.toLowerCase().includes(target.toLowerCase()));
+      return operator === 'contains' ? hit : !hit;
+    }
+    if (operator === 'greater_than' || operator === 'less_than') {
+      const wanted = operator === 'greater_than' ? 1 : -1;
+      return answers.some((answer) => compare(type, answer, target) === wanted);
+    }
+    return false;
+  }
+  function initConditions(form) {
+    const wraps = new Map(Array.from(form.querySelectorAll('[data-cf-pub-field]')).map((wrap) => [wrap.dataset.fieldId, wrap]));
+    const conditional = Array.from(wraps.values()).filter((wrap) => wrap.dataset.cfConditions);
+    if (!conditional.length) return;
+    const rulesFor = new Map();
+    conditional.forEach((wrap) => {
+      try { rulesFor.set(wrap, JSON.parse(wrap.dataset.cfConditions)); } catch (_) { /* show the field */ }
+    });
+    function apply() {
+      const state = new Map();
+      function visible(wrap) {
+        if (state.has(wrap)) return !!state.get(wrap); // null: still being evaluated (a loop)
+        state.set(wrap, null);
+        const conditions = rulesFor.get(wrap) || {};
+        const results = [];
+        (conditions.rules || []).forEach((rule) => {
+          const source = wraps.get(String(rule.field_id));
+          if (!source || source === wrap) return;
+          const answers = visible(source) ? conditionAnswers(source) : [];
+          results.push(ruleMatches(source.dataset.fieldType, answers, rule.operator, rule.value));
+        });
+        const shown = !results.length || (conditions.match === 'any' ? results.some(Boolean) : results.every(Boolean));
+        state.set(wrap, shown);
+        return shown;
+      }
+      conditional.forEach((wrap) => {
+        const shown = visible(wrap);
+        if (wrap.hidden === !shown && wrap.dataset.cfConditionsApplied) return;
+        wrap.dataset.cfConditionsApplied = 'true';
+        wrap.hidden = !shown;
+        // Disabled controls are skipped by browser validation and FormData.
+        wrap.querySelectorAll('input, select, textarea').forEach((input) => {
+          if (!shown && !input.disabled) { input.disabled = true; input.dataset.cfConditionDisabled = 'true'; }
+          else if (shown && input.dataset.cfConditionDisabled) { input.disabled = false; delete input.dataset.cfConditionDisabled; }
+        });
+        if (wrap.dataset.required === 'true') {
+          const type = wrap.dataset.fieldType;
+          const selector = type === 'matrix' ? '[data-cf-matrix-row]' : NATIVE_REQUIRED_TYPES.has(type) ? '[data-cf-value]' : null;
+          if (selector) wrap.querySelectorAll(selector).forEach((input) => { input.required = shown; });
+        }
+      });
+    }
+    form.addEventListener('input', apply);
+    form.addEventListener('change', apply);
+    form.addEventListener('reset', () => setTimeout(apply));
+    apply();
+  }
+  function isHiddenByCondition(node) { return !!node.closest('[data-cf-pub-field]')?.hidden; }
   function collectValues(form) {
     const values = {};
     form.querySelectorAll('[data-cf-pub-field]').forEach((wrap) => {
+      if (wrap.hidden) return;
       const id = wrap.dataset.fieldId;
       const type = wrap.dataset.fieldType;
       if (type === 'file' || type === 'audio') return;
@@ -245,13 +334,14 @@
       wrap.querySelector('[data-cf-signature-clear]').addEventListener('click', () => { ctx.clearRect(0, 0, canvas.width, canvas.height); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); });
       form.addEventListener('reset', () => { drawing = false; ctx.clearRect(0, 0, canvas.width, canvas.height); input.value = ''; });
     });
+    initConditions(form);
     let dirty = false;
     form.addEventListener('input', () => { dirty = true; });
     window.addEventListener('beforeunload', (event) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (button.disabled) return;
-      const multiselects = Array.from(form.querySelectorAll('[data-field-type="multiselect"]'));
+      const multiselects = Array.from(form.querySelectorAll('[data-field-type="multiselect"]')).filter((wrap) => !wrap.hidden);
       const errors = [];
       multiselects.forEach((wrap) => {
         const required = wrap.dataset.required === 'true';
@@ -263,10 +353,11 @@
         if (missing) errors.push('Choose at least one option for ' + wrap.querySelector('legend').textContent.trim() + '.');
       });
       form.querySelectorAll('[data-field-type="signature"]').forEach((wrap) => {
-        if (wrap.dataset.required === 'true' && !wrap.querySelector('[data-cf-value]').value && !wrap.querySelector('[data-cf-signature-upload]').files.length) errors.push('Draw or upload your signature.');
+        if (!wrap.hidden && wrap.dataset.required === 'true' && !wrap.querySelector('[data-cf-value]').value && !wrap.querySelector('[data-cf-signature-upload]').files.length) errors.push('Draw or upload your signature.');
       });
       audioFields.forEach((field) => {
         const wrap = field.input.closest('[data-cf-pub-field]');
+        if (wrap.hidden) return;
         const missing = wrap.dataset.required === 'true' && !field.files().length;
         const error = wrap.querySelector('[data-cf-field-error]');
         error.hidden = !missing;
@@ -277,6 +368,7 @@
       });
       captureFields.forEach((field) => {
         const wrap = field.input.closest('[data-cf-pub-field]');
+        if (wrap.hidden) return;
         const missing = wrap.dataset.required === 'true' && !field.files().length;
         const error = wrap.querySelector('[data-cf-field-error]');
         error.hidden = !missing;
@@ -288,6 +380,7 @@
       const data = new FormData(form);
       [...audioFields, ...captureFields].forEach((field) => {
         data.delete(field.input.name);
+        if (isHiddenByCondition(field.input)) return;
         field.files().forEach((file) => data.append(field.input.name, file, file.name));
       });
       data.set('form_data', JSON.stringify(collectValues(form)));

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
@@ -29,6 +29,19 @@ class FormResponse(BaseModel):
         from_attributes = True
 
 
+class FieldConditionRule(BaseModel):
+    field_id: int = Field(gt=0)
+    operator: str = Field(..., min_length=1, max_length=20)
+    value: Optional[str] = Field(default=None, max_length=255)
+
+
+class FieldConditions(BaseModel):
+    """Show a field only when its rules match the answers to other fields."""
+
+    match: Literal["all", "any"] = "all"
+    rules: list[FieldConditionRule] = Field(default_factory=list, max_length=20)
+
+
 class FormFieldBase(BaseModel):
     field_type: str = Field(..., min_length=1, max_length=40)
     label: str = Field(..., min_length=1, max_length=255)
@@ -38,6 +51,7 @@ class FormFieldBase(BaseModel):
     options: Optional[list[str]] = Field(default=None, max_items=100)
     default_value: Optional[str] = Field(default=None, max_length=255)
     config: Optional[dict[str, Any]] = None
+    conditions: Optional[FieldConditions] = None
 
 
 class FormFieldCreate(FormFieldBase):
@@ -53,6 +67,7 @@ class FormFieldUpdate(BaseModel):
     options: Optional[list[str]] = Field(default=None, max_items=100)
     default_value: Optional[str] = Field(default=None, max_length=255)
     config: Optional[dict[str, Any]] = None
+    conditions: Optional[FieldConditions] = None
 
 
 class FormFieldResponse(FormFieldBase):

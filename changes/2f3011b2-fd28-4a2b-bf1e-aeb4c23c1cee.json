@@ -1,0 +1,7 @@
+{
+  "guid": "2f3011b2-fd28-4a2b-bf1e-aeb4c23c1cee",
+  "occurred_at": "2026-10-16T08:06Z",
+  "change_type": "Feature",
+  "summary": "Custom forms: questions can now use conditional logic, showing only when other answers match rules such as is, is not, contains, is empty, greater than or less than (all or any). Hidden questions aren't required and their answers and uploads are left out of the ticket.",
+  "content_hash": "eef495f41f5ca2fda149556b2e7cd67d0ee884f5e16f39cd3d7f13e9f676d1d5"
+}

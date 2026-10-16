@@ -147,9 +147,15 @@ async def api_create_field(
     )
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
+    siblings = await forms_repo.list_fields(form_id)
+    conditions, errors = custom_forms.validate_conditions(
+        payload.conditions.model_dump() if payload.conditions else None, field_id=None, fields=siblings,
+    )
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
     options = payload.options if payload.field_type in OPTION_TYPES else None
     config = payload.config if payload.field_type in CONFIG_TYPES else None
-    sort_order = len(await forms_repo.list_fields(form_id))
+    sort_order = len(siblings)
     return await forms_repo.create_field(
         form_id=form_id,
         field_type=payload.field_type,
@@ -160,6 +166,7 @@ async def api_create_field(
         options=options,
         default_value=payload.default_value,
         config=config,
+        conditions=conditions,
         sort_order=sort_order,
     )
 
@@ -207,6 +214,13 @@ async def api_update_field(
     errors = custom_forms.validate_field_definition(
         new_type, new_label, new_options, new_config
     )
+    new_conditions = existing.get("conditions")
+    if "conditions" in payload.model_fields_set:
+        new_conditions, condition_errors = custom_forms.validate_conditions(
+            payload.conditions.model_dump() if payload.conditions else None,
+            field_id=field_id, fields=await forms_repo.list_fields(form_id),
+        )
+        errors += condition_errors
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
     return await forms_repo.update_field(
@@ -219,6 +233,7 @@ async def api_update_field(
         options=new_options,
         default_value=new_default,
         config=new_config,
+        conditions=new_conditions,
     )
 
 

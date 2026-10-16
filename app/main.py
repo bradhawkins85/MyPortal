@@ -6832,6 +6832,10 @@ async def custom_forms_admin_page(request: Request, form_id: int | None = None):
             "access_user_labels": {user["id"]: user["label"] for user in available_users},
             "field_types": custom_forms.field_type_choices(),
             "field_type_labels": dict(custom_forms.FIELD_TYPES),
+            "condition_meta": custom_forms.condition_builder_meta(),
+            "condition_summaries": {
+                field["id"]: custom_forms.condition_summary(field, selected_fields) for field in selected_fields
+            },
         },
     )
 
