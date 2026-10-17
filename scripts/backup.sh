@@ -3,6 +3,10 @@
 #
 # Dumps the configured database (MySQL/MariaDB), archives the shared uploads
 # directories, and prunes old backups to the configured retention count.
+# A copy of the account erasure ledger (PRIVACY_ERASURE_LEDGER_PATH) is kept
+# as erasure-ledger.jsonl in the backup directory; restoring a database backup
+# puts it back if the live ledger is missing, so anonymised accounts stay
+# anonymised (docs/security/gdpr-erasure.md).
 # The RMM event log database (EVENT_LOG_DB_*) is left out unless
 # EVENT_LOG_DB_BACKUP=true, when it is dumped to its own eventlog-* file; the
 # RMM stats database (STATS_DB_*) likewise with STATS_DB_BACKUP=true, to
@@ -138,6 +142,11 @@ EVENT_LOG_DB_USER="${EVENT_LOG_DB_USER:-$(read_env_var EVENT_LOG_DB_USER "")}"
 EVENT_LOG_DB_PASSWORD="${EVENT_LOG_DB_PASSWORD:-$(read_env_var EVENT_LOG_DB_PASSWORD "")}"
 EVENT_LOG_DB_NAME="${EVENT_LOG_DB_NAME:-$(read_env_var EVENT_LOG_DB_NAME "")}"
 
+LEDGER_FILE="${PRIVACY_ERASURE_LEDGER_PATH:-$(read_env_var PRIVACY_ERASURE_LEDGER_PATH "")}"
+# Releases link var/ to the shared root, so the default lands in its data/.
+LEDGER_FILE="${LEDGER_FILE:-${SHARED_ROOT}/data/privacy/erasure-ledger.jsonl}"
+LEDGER_COPY="${BACKUP_DIR}/erasure-ledger.jsonl"
+
 STATS_DB_BACKUP="${STATS_DB_BACKUP:-$(read_env_var STATS_DB_BACKUP false)}"
 STATS_DB_HOST="${STATS_DB_HOST:-$(read_env_var STATS_DB_HOST "")}"
 STATS_DB_PORT="${STATS_DB_PORT:-$(read_env_var STATS_DB_PORT 3306)}"
@@ -177,6 +186,44 @@ create_mysqld_defaults() {
   printf '%s' "$path"
 }
 
+line_count() {
+  if [[ -f "$1" ]]; then wc -l <"$1"; else printf '0'; fi
+}
+
+save_erasure_ledger() {
+  # The ledger only grows, so a live file shorter than the saved copy has lost
+  # entries: keep the saved copy and warn instead of overwriting it.
+  [[ -f "$LEDGER_FILE" ]] || return 0
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[dry-run] Would copy the erasure ledger to ${LEDGER_COPY}"
+    return 0
+  fi
+  if (( $(line_count "$LEDGER_FILE") < $(line_count "$LEDGER_COPY") )); then
+    warn "the erasure ledger ${LEDGER_FILE} has fewer entries than ${LEDGER_COPY}; kept the saved copy. Merge it back with: manage.py erasure-ledger import ${LEDGER_COPY}"
+    return 0
+  fi
+  install -m 0600 "$LEDGER_FILE" "$LEDGER_COPY"
+  info "Erasure ledger saved: ${LEDGER_COPY}"
+}
+
+restore_erasure_ledger() {
+  # On a rebuilt server the live ledger is missing; put the saved copy back
+  # before MyPortal starts, so it re-applies anonymisations to the restored data.
+  [[ -f "$LEDGER_COPY" ]] || return 0
+  if [[ ! -f "$LEDGER_FILE" ]]; then
+    local dir
+    dir=$(dirname "$LEDGER_FILE")
+    install -d -m 0700 "$dir"
+    install -m 0600 "$LEDGER_COPY" "$LEDGER_FILE"
+    if [[ -d "${SHARED_ROOT}/data" ]]; then
+      chown --reference="${SHARED_ROOT}/data" "$dir" "$LEDGER_FILE" 2>/dev/null || true
+    fi
+    info "Erasure ledger restored from ${LEDGER_COPY}."
+  elif (( $(line_count "$LEDGER_FILE") < $(line_count "$LEDGER_COPY") )); then
+    warn "${LEDGER_COPY} has entries the live erasure ledger lacks. Merge them with: manage.py erasure-ledger import ${LEDGER_COPY}"
+  fi
+}
+
 restore_db() {
   local file="$1"
   [[ -f "$file" ]] || die "backup file not found: ${file}"
@@ -189,6 +236,7 @@ restore_db() {
   if [[ "$DRY_RUN" == true ]]; then
     info "[dry-run] Would stop myportal@blue.service and myportal@green.service."
     info "[dry-run] Would decompress and apply ${file} to ${DB_NAME}@${DB_HOST}:${DB_PORT}."
+    info "[dry-run] Would restore the erasure ledger from ${LEDGER_COPY} if ${LEDGER_FILE} is missing."
     info "[dry-run] Would start myportal@blue.service and myportal@green.service."
     return 0
   fi
@@ -207,9 +255,11 @@ restore_db() {
 
   rm -f "$defaults_file"
 
+  restore_erasure_ledger
+
   info "Starting MyPortal services…"
   systemctl start myportal@blue.service myportal@green.service 2>/dev/null || true
-  info "Database restored."
+  info "Database restored. MyPortal re-applies recorded account anonymisations as it starts."
 }
 
 if [[ -n "$RESTORE_FILE" ]]; then
@@ -407,6 +457,7 @@ fi
 
 if [[ "$DO_DB" == true ]]; then
   backup_database "$LABEL"
+  save_erasure_ledger
   backup_event_logs "$LABEL"
   backup_stats "$LABEL"
 fi

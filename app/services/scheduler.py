@@ -386,6 +386,18 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        if not self._scheduler.get_job("erasure-ledger-reconcile"):
+            from app.services import erasure_ledger
+
+            self._scheduler.add_job(
+                self._run_erasure_ledger_reconcile,
+                "interval",
+                seconds=erasure_ledger.RECONCILE_INTERVAL_SECONDS,
+                id="erasure-ledger-reconcile",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         if not self._scheduler.get_job("marketing-campaign-runner"):
             self._scheduler.add_job(
                 self._run_marketing_campaign_runner,
@@ -702,6 +714,15 @@ class SchedulerService:
             result = await marketing_campaigns_service.process_due_sends()
             if any(result.values()):
                 log_info("Marketing campaign runner processed recipients", **result)
+
+    async def _run_erasure_ledger_reconcile(self) -> None:
+        """Re-apply anonymisations undone by a database restored while running."""
+        from app.services import erasure_ledger
+
+        try:
+            await erasure_ledger.reconcile(reason="scheduled")
+        except Exception as exc:
+            log_error("Erasure ledger check failed", error=type(exc).__name__)
 
     async def _run_staff_workflow_due_runner(self) -> None:
         """Run due approved staff workflow executions with distributed lock."""

@@ -144,6 +144,36 @@ async def export_related_feedback(args: argparse.Namespace) -> None:
     print(f"labels={len(dataset['labels'])} output={args.output}")
 
 
+async def erasure_ledger_command(args: argparse.Namespace) -> int:
+    """Check, verify, export or import the account erasure ledger."""
+    from pathlib import Path
+
+    from app.services import erasure_ledger
+
+    if args.action == "verify":
+        read = erasure_ledger.read_ledger()
+        print(f"path={erasure_ledger.ledger_path()} entries={len(read.entries)} problems={len(read.problems)}")
+        for problem in read.problems:
+            print(problem)
+        return 1 if read.problems else 0
+    if args.action == "export":
+        path = erasure_ledger.ledger_path()
+        sys.stdout.write(path.read_text(encoding="utf-8") if path.exists() else "")
+        return 0
+    if args.action == "import":
+        added = erasure_ledger.import_entries(Path(args.file))
+        print(f"Added {added} entr{'y' if added == 1 else 'ies'} to {erasure_ledger.ledger_path()}.")
+        return 0
+    await db.connect()
+    try:
+        result = await erasure_ledger.reconcile(reason="command")
+    finally:
+        await db.disconnect()
+    for key, value in result.summary().items():
+        print(f"{key}={value}")
+    return 1 if result.failed or result.needs_review or result.problems else 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="manage.py")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -183,6 +213,16 @@ def main() -> None:
         help="write technician Related-item votes as an evals/ai_quality dataset",
     )
     export_parser.add_argument("--output", default="evals/ai_quality/related_feedback.json")
+    ledger_parser = sub.add_parser(
+        "erasure-ledger",
+        help="re-apply recorded account anonymisations, or verify, export or import the ledger",
+    )
+    ledger_sub = ledger_parser.add_subparsers(dest="action", required=True)
+    ledger_sub.add_parser("check", help="re-apply anonymisations a database restore undid")
+    ledger_sub.add_parser("verify", help="report unreadable or altered ledger entries")
+    ledger_sub.add_parser("export", help="print the ledger, to keep a copy off the server")
+    import_parser = ledger_sub.add_parser("import", help="merge a saved copy into the ledger")
+    import_parser.add_argument("file")
     args = parser.parse_args()
     if args.command == "migrate":
         asyncio.run(migrate(args))
@@ -196,6 +236,8 @@ def main() -> None:
         asyncio.run(m365_spam_process_once(args))
     elif args.command == "export-related-feedback":
         asyncio.run(export_related_feedback(args))
+    elif args.command == "erasure-ledger":
+        sys.exit(asyncio.run(erasure_ledger_command(args)))
 
 
 if __name__ == "__main__":

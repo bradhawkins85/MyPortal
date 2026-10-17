@@ -1,0 +1,7 @@
+{
+  "guid": "2b2d58f5-ff11-4588-829f-50cf45a339f6",
+  "occurred_at": "2026-10-17T04:18Z",
+  "change_type": "Feature",
+  "summary": "Account anonymisation: restoring an older database backup no longer brings an anonymised person back, because every anonymisation is recorded in an erasure ledger outside the database and applied again automatically; full names are now also redacted from ticket text",
+  "content_hash": "22d54c25bd258c48b29b3584d5dcc6584afa0e5f5aec748e389d351498d43495"
+}

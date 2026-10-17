@@ -1684,6 +1684,7 @@ cmd_backup() {
   info "Backing up uploaded files to ${files}…"
   app_exec tar -czf - -C /app private_uploads app/static/uploads var >"$files"
   chmod 0600 "$files"
+  save_erasure_ledger
   local gitea=""
   if [[ -n "$(service_container gitea)" ]]; then
     gitea="${BACKUP_DIR}/gitea-${version}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
@@ -1701,6 +1702,41 @@ Backups written:
   ${gitea}}
 Also keep a copy of ${APP_ENV} (it holds the encryption keys).
 EOF
+}
+
+save_erasure_ledger() {
+  # Keep the newest copy of the account erasure ledger with the backups. It
+  # only grows, so a shorter export means the live file lost entries: keep the
+  # saved copy and warn.
+  local dest="${BACKUP_DIR}/erasure-ledger.jsonl" tmp
+  tmp=$(mktemp "${BACKUP_DIR}/.erasure-ledger.XXXXXX")
+  if ! app_exec python manage.py erasure-ledger export >"$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    warn "could not export the erasure ledger; the previous copy (if any) is kept."
+    return 0
+  fi
+  local new_lines old_lines=0
+  new_lines=$(wc -l <"$tmp")
+  [[ -f "$dest" ]] && old_lines=$(wc -l <"$dest")
+  if ((new_lines < old_lines)); then
+    rm -f "$tmp"
+    warn "the live erasure ledger has fewer entries than ${dest}; kept the saved copy. Merge it back with 'myportal-docker restore-db' or 'manage.py erasure-ledger import'."
+    return 0
+  fi
+  chmod 0600 "$tmp"
+  mv -f "$tmp" "$dest"
+}
+
+restore_erasure_ledger() {
+  # Merge the saved ledger copy into the live one (entries are only added),
+  # then re-apply anonymisations to the restored database.
+  local saved="${BACKUP_DIR}/erasure-ledger.jsonl"
+  if [[ -f "$saved" ]]; then
+    app_exec python manage.py erasure-ledger import /dev/stdin <"$saved" >/dev/null || \
+      warn "could not merge ${saved} into the erasure ledger."
+  fi
+  app_exec python manage.py erasure-ledger check >/dev/null || \
+    warn "the erasure ledger check reported accounts to review; see Admin → Account anonymisation."
 }
 
 cmd_restore_db() {
@@ -1721,7 +1757,8 @@ cmd_restore_db() {
   gunzip -c "$file" | compose exec -T db sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
   compose up -d "$service"
   wait_for_release "$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)" || die "MyPortal did not become ready after the restore."
-  info "Database restored."
+  restore_erasure_ledger
+  info "Database restored. Recorded account anonymisations have been re-applied."
 }
 
 cmd_restart() {

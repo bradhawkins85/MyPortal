@@ -163,6 +163,81 @@
       {% endcall %}
     </div>
   </section>
+
+  {% set ledger = erasure_ledger %}
+  <section class="card card--panel" aria-labelledby="erasure-ledger-title">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="erasure-ledger-title">Backups and restores</h2>
+        <p class="card__subtitle">Database backups taken before an account was anonymised still hold the person's details. Every anonymisation is recorded in the erasure ledger, a file kept outside the database, and applied again when MyPortal starts and every 5 minutes, so restoring an older backup never brings the person back.</p>
+      </div>
+      <form method="post" action="/admin/anonymisation/ledger/check">
+        {% include "partials/csrf.html" %}
+        <button type="submit" class="button button--ghost">Check now</button>
+      </form>
+    </header>
+    <div class="card__body">
+      {% if not ledger %}
+        <p class="alert alert--error" role="alert">The erasure ledger couldn't be checked. See the server log.</p>
+      {% else %}
+        {% if not ledger.writable %}
+          <p class="alert alert--error" role="alert">MyPortal can't write the ledger file, so new anonymisations aren't protected from backup restores. Make <code>{{ ledger.path }}</code> writable by the MyPortal service.</p>
+        {% endif %}
+        {% if ledger.unrecorded %}
+          <p class="alert alert--warning" role="status">{{ ledger.unrecorded }} completed anonymisation(s) aren't in the ledger yet. They're added at the next check.</p>
+        {% endif %}
+        {% if ledger.pending %}
+          <p class="alert alert--warning" role="status">{{ ledger.pending }} anonymised account(s) were brought back by a restore and will be anonymised again at the next check. Select Check now to do it straight away.</p>
+        {% endif %}
+        {% if ledger.problems %}
+          <div class="alert alert--warning" role="status">
+            <p>The ledger file has been changed outside MyPortal. Every entry it still holds is applied. Restore the file from your off-site copy if entries are missing.</p>
+            <ul>{% for problem in ledger.problems[:10] %}<li>{{ problem }}</li>{% endfor %}</ul>
+          </div>
+        {% endif %}
+        <div class="table-wrapper">
+          <table class="table">
+            <tbody>
+              <tr><th scope="row">Ledger file</th><td><code>{{ ledger.path }}</code>{% if not ledger.exists %} <span class="text-muted">(created at the first anonymisation)</span>{% endif %}</td></tr>
+              <tr><th scope="row">Anonymised accounts recorded</th><td>{{ ledger.entries }}</td></tr>
+              {% set last = ledger.last_result %}
+              <tr><th scope="row">Last check on this server</th><td>{% if last %}{{ utc(last.checked_at) }}: re-applied {{ last.reapplied }}{% if last.failed %}, {{ last.failed }} failed{% endif %}{% else %}Not since this server started{% endif %}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-muted">Keep a copy of the ledger off this server with your environment file, and restore it before starting MyPortal on a new server. It holds user ids and one-way email codes only. <code>python manage.py erasure-ledger export</code> prints it.</p>
+
+        {% if ledger.review %}
+          <h3 class="card__title">Needs a decision</h3>
+          <p>These ids belong to anonymised accounts, but the account the database holds now has a different email address. Either a restored backup brought the person back under an older address, or a new account was given the same id after a restore. Check who the account belongs to before you choose.</p>
+          <div class="table-wrapper">
+            <table class="table">
+              <thead><tr><th scope="col">User</th><th scope="col">Account now</th><th scope="col">Anonymised</th><th scope="col">Actions</th></tr></thead>
+              <tbody>
+                {% for row in ledger.review %}
+                <tr>
+                  <td>#{{ row.user_id }}</td>
+                  <td>{{ row.name or "—" }}<br><span class="text-muted">{{ row.email }}</span></td>
+                  <td>{{ utc(row.erased_at) }}</td>
+                  <td>
+                    <form method="post" action="/admin/anonymisation/ledger/{{ row.user_id }}/reapply" class="inline-form">
+                      {% include "partials/csrf.html" %}
+                      <button type="submit" class="button button--danger button--small" data-ledger-confirm="Anonymise {{ row.email }} again? This can't be undone.">Same person: anonymise again</button>
+                    </form>
+                    <form method="post" action="/admin/anonymisation/ledger/{{ row.user_id }}/clear" class="inline-form">
+                      {% include "partials/csrf.html" %}
+                      <button type="submit" class="button button--ghost button--small" data-ledger-confirm="Record {{ row.email }} as a different person? The account is left as it is.">Different person</button>
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      {% endif %}
+    </div>
+  </section>
 {% endif %}
 {% endblock %}
 

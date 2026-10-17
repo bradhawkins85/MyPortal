@@ -3357,6 +3357,18 @@ async def on_startup() -> None:
             log_info("BCP default template bootstrapped")
     log_info("Application startup phase complete", phase="local_bootstrap_tasks")
 
+    # Re-apply recorded anonymisations before serving, so a restored database
+    # backup never brings an anonymised account back.
+    log_info("Application startup phase", phase="erasure_ledger")
+    try:
+        from app.services import erasure_ledger
+
+        await erasure_ledger.reconcile(reason="startup")
+    except Exception as exc:
+        # The scheduled check retries; a failure here must not stop startup.
+        log_error("Erasure ledger check failed at startup", error=type(exc).__name__)
+    log_info("Application startup phase complete", phase="erasure_ledger")
+
     if settings.matrix_enabled:
         from app.services import matrix_sync, matrix_ai_waiting_assistant
         import asyncio as _asyncio
@@ -7254,6 +7266,13 @@ async def admin_anonymisation_list(request: Request):
     if status_filter not in {"pending", "approved", "rejected", "completed"}:
         status_filter = ""
     anon_requests = await anonymisation_service.list_requests(status=status_filter or None, limit=200)
+    try:
+        from app.services import erasure_ledger
+
+        ledger_status = await erasure_ledger.status()
+    except Exception as exc:
+        log_error("Erasure ledger status failed", error=type(exc).__name__)
+        ledger_status = None
     context = await _build_base_context(
         request,
         current_user,
@@ -7263,6 +7282,7 @@ async def admin_anonymisation_list(request: Request):
             "anonymisation_request": None,
             "anonymisation_requests": anon_requests,
             "anonymisation_status_filter": status_filter,
+            "erasure_ledger": ledger_status,
         },
     )
     return templates.TemplateResponse(context["request"], "admin/anonymisation.html", context)
@@ -7303,7 +7323,7 @@ async def admin_anonymisation_approve(request: Request, request_id: int):
     form = await request.form()
     detail_url = "/admin/anonymisation/" + str(request_id)
     try:
-        await anonymisation_service.approve_request(
+        result = await anonymisation_service.approve_request(
             request_id=request_id,
             actor_user=current_user,
             notes=str(form.get("notes") or ""),
@@ -7311,7 +7331,69 @@ async def admin_anonymisation_approve(request: Request, request_id: int):
         )
     except anonymisation_service.AnonymisationError as exc:
         return flash_redirect(detail_url, str(exc), "error")
+    if not result.get("ledger_recorded"):
+        return flash_redirect(detail_url, _ERASURE_LEDGER_WRITE_FAILED, "warning")
     return flash_redirect(detail_url, "The account has been anonymised.", "success")
+
+
+_ERASURE_LEDGER_WRITE_FAILED = (
+    "The account has been anonymised, but it couldn't be recorded in the erasure ledger, so restoring an "
+    "older backup could bring it back. Check that the ledger file is writable (see Account anonymisation). "
+    "It is recorded automatically once it is."
+)
+
+
+@app.post("/admin/anonymisation/ledger/check")
+async def admin_erasure_ledger_check(request: Request):
+    """Re-apply recorded anonymisations now, e.g. straight after a restore."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import erasure_ledger
+
+    try:
+        result = await erasure_ledger.reconcile(reason="admin")
+    except Exception as exc:
+        log_error("Erasure ledger check failed", error=type(exc).__name__)
+        return flash_redirect("/admin/anonymisation", "The erasure ledger check failed. See the server log.", "error")
+    message = (
+        "Checked " + str(result.entries) + " anonymised account(s): re-applied " + str(result.reapplied)
+        + ", " + str(result.needs_review) + " need a decision"
+        + (", " + str(result.failed) + " failed" if result.failed else "") + "."
+    )
+    variant = "warning" if result.failed or result.needs_review or result.problems else "success"
+    return flash_redirect("/admin/anonymisation", message, variant)
+
+
+@app.post("/admin/anonymisation/ledger/{user_id}/reapply")
+async def admin_erasure_ledger_reapply(request: Request, user_id: int):
+    """Confirm a restored account is the anonymised person and anonymise it again."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import anonymisation as anonymisation_service
+    from app.services import erasure_ledger
+
+    try:
+        await erasure_ledger.confirm_and_reapply(user_id, actor_user_id=int(current_user["id"]), request=request)
+    except (LookupError, anonymisation_service.AnonymisationError) as exc:
+        return flash_redirect("/admin/anonymisation", str(exc), "error")
+    return flash_redirect("/admin/anonymisation", "The account has been anonymised again.", "success")
+
+
+@app.post("/admin/anonymisation/ledger/{user_id}/clear")
+async def admin_erasure_ledger_clear(request: Request, user_id: int):
+    """Record that the account now holding an anonymised user's id is someone else."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import erasure_ledger
+
+    try:
+        await erasure_ledger.clear(user_id, actor_user_id=int(current_user["id"]), request=request)
+    except LookupError as exc:
+        return flash_redirect("/admin/anonymisation", str(exc), "error")
+    return flash_redirect("/admin/anonymisation", "Recorded as a different person. The account is unchanged.", "success")
 
 
 @app.post("/admin/anonymisation/{request_id}/reject")
@@ -7723,11 +7805,10 @@ async def _admin_anonymise_user(
         )
     except anonymisation_service.AnonymisationError as exc:
         return flash_redirect("/admin/users", str(exc), "error")
-    return flash_redirect(
-        "/admin/anonymisation/" + str(result["request_id"]),
-        "The account has been anonymised.",
-        "success",
-    )
+    detail_url = "/admin/anonymisation/" + str(result["request_id"])
+    if not result.get("ledger_recorded"):
+        return flash_redirect(detail_url, _ERASURE_LEDGER_WRITE_FAILED, "warning")
+    return flash_redirect(detail_url, "The account has been anonymised.", "success")
 
 
 @app.post("/admin/users/{user_id}/{action}", response_class=HTMLResponse)
