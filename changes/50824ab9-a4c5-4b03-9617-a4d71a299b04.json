@@ -1,0 +1,7 @@
+{
+  "guid": "50824ab9-a4c5-4b03-9617-a4d71a299b04",
+  "occurred_at": "2026-10-16T00:00Z",
+  "change_type": "Fix",
+  "summary": "Custom forms: fit phone screens, with matrix questions stacked one row at a time",
+  "content_hash": "c90c97a502aa9c0d62b245ba321672447e8b66bf163d054066f785e5ce7fd991"
+}

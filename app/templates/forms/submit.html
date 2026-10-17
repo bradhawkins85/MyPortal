@@ -36,7 +36,7 @@
                 <thead><tr><td></td>{% for column in columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead>
                 <tbody>
                   {% for row in cfg.get('rows', []) %}{% set row_index = loop.index0 %}
-                  <tr><th scope="row" id="cf-matrix-{{ fid }}-{{ row_index }}">{{ row }}</th>{% for column in columns %}<td><label class="cf-matrix__cell"><input type="radio" name="{{ 'matrix_' ~ fid if per_table else 'matrix_' ~ fid ~ '_' ~ row_index }}" value="{{ row_index ~ ':' ~ loop.index0 if per_table else column }}" data-cf-matrix-row="{{ row }}" data-cf-matrix-column="{{ column }}"{% if value is mapping and value.get(row) == column %} checked{% endif %}{% if native_required %} required{% endif %} /><span class="sr-only">{{ row }}: {{ column }}</span></label></td>{% endfor %}</tr>
+                  <tr><th scope="row" id="cf-matrix-{{ fid }}-{{ row_index }}">{{ row }}</th>{% for column in columns %}<td><label class="cf-matrix__cell"><input type="radio" name="{{ 'matrix_' ~ fid if per_table else 'matrix_' ~ fid ~ '_' ~ row_index }}" value="{{ row_index ~ ':' ~ loop.index0 if per_table else column }}" data-cf-matrix-row="{{ row }}" data-cf-matrix-column="{{ column }}"{% if value is mapping and value.get(row) == column %} checked{% endif %}{% if native_required %} required{% endif %} /><span class="sr-only">{{ row }}: {{ column }}</span><span class="cf-matrix__column" aria-hidden="true">{{ column }}</span></label></td>{% endfor %}</tr>
                   {% endfor %}
                 </tbody>
               </table>
