@@ -152,17 +152,12 @@
 .cf-matrix__cell { display: inline-flex; align-items: center; justify-content: center; min-width: 2.75rem; min-height: 2.75rem; cursor: pointer; }
 .cf-matrix__cell input { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: var(--hf-accent); cursor: pointer; }
 .cf-matrix__column { display: none; }
-/* Narrow screens: each row becomes a block with its answers listed underneath, so nothing scrolls sideways. */
+/* Narrow screens: keep the grid but compact it, with column headings turned upright so every answer fits across. */
 @container (max-width: 36rem) {
-  .cf-matrix, .cf-matrix tbody, .cf-matrix tr, .cf-matrix tbody th, .cf-matrix td { display: block; }
-  .cf-matrix thead { display: none; }
-  .cf-matrix tbody tr { border: 1px solid var(--hf-line); border-radius: var(--hf-radius-sm); padding: var(--space-gap-base); margin-bottom: var(--space-gap-roomy); }
-  .cf-matrix tbody tr:nth-child(even) { background: transparent; }
-  .cf-matrix tbody th { min-width: 0; padding: 0 0 var(--space-gap-tight); border-right: 0; font-weight: 600; overflow-wrap: anywhere; }
-  .cf-matrix td { text-align: left; }
-  .cf-matrix__cell { display: flex; justify-content: flex-start; gap: var(--space-gap-roomy); width: 100%; min-width: 0; padding-inline: var(--space-gap-tight); border-radius: var(--hf-radius-sm); }
-  .cf-matrix__cell:has(input:checked) { background: var(--hf-accent-soft); }
-  .cf-matrix__column { display: inline; overflow-wrap: anywhere; }
+  .cf-matrix { font-size: 0.8rem; }
+  .cf-matrix thead th { min-width: 0; padding: var(--space-gap-base) 0; writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; vertical-align: middle; white-space: nowrap; }
+  .cf-matrix tbody th { min-width: 0; padding: var(--space-gap-tight) var(--space-gap-base); overflow-wrap: anywhere; hyphens: auto; }
+  .cf-matrix__cell { min-width: 2.25rem; }
 }
 .cf-matrix-mode { grid-column: 1 / -1; margin-bottom: 0; }
 .cf-matrix-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-gap-base); margin-top: var(--space-gap-base); }
