@@ -272,31 +272,36 @@ def _build_index(entries: Iterable[LedgerEntry]) -> dict[int, _Marks]:
     return {user_id: marks for user_id, marks in index.items() if marks.erased}
 
 
-# In-memory index for the per-request session check: (checked_at, file stamp, index).
-_index_cache: tuple[float, tuple[int, int] | None, dict[int, _Marks]] | None = None
+@dataclass
+class _IndexCache:
+    """In-memory index for the per-request session check."""
+
+    checked_at: float = 0.0
+    stamp: tuple[int, int] | None = None
+    index: dict[int, _Marks] | None = None
+
+
+_cache = _IndexCache()
 
 
 def _invalidate_index() -> None:
-    global _index_cache
-    _index_cache = None
+    _cache.index = None
 
 
 def _index() -> dict[int, _Marks]:
-    global _index_cache
     now = time.monotonic()
-    if _index_cache is not None and now - _index_cache[0] < _INDEX_TTL_SECONDS:
-        return _index_cache[2]
+    if _cache.index is not None and now - _cache.checked_at < _INDEX_TTL_SECONDS:
+        return _cache.index
     try:
         stat = ledger_path().stat()
         stamp: tuple[int, int] | None = (stat.st_mtime_ns, stat.st_size)
     except OSError:
         stamp = None
-    if _index_cache is not None and _index_cache[1] == stamp:
-        _index_cache = (now, stamp, _index_cache[2])
-        return _index_cache[2]
-    index = _build_index(read_ledger().entries) if stamp else {}
-    _index_cache = (now, stamp, index)
-    return index
+    if _cache.index is None or _cache.stamp != stamp:
+        _cache.index = _build_index(read_ledger().entries) if stamp else {}
+        _cache.stamp = stamp
+    _cache.checked_at = now
+    return _cache.index
 
 
 # ---------------------------------------------------------------------------
