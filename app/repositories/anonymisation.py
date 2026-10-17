@@ -20,6 +20,7 @@ MySQL, so the same statements run on the SQLite fallback.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -256,6 +257,101 @@ async def record_error(request_id: int, error_message: str | None) -> None:
     )
 
 
+async def list_completed_requests() -> list[dict[str, Any]]:
+    """Completed requests, oldest first, for copying into the erasure ledger."""
+    rows = await db.fetch_all(
+        "SELECT id, user_id, original_email_hash, completed_at FROM account_anonymisation_requests "
+        "WHERE status = ? ORDER BY completed_at, id",
+        (STATUS_COMPLETED,),
+    )
+    return [dict(row) for row in rows]
+
+
+async def record_reapplied(user_id: int, *, original_email_hash: str | None, notes: str) -> int:
+    """Mark the user's request completed after the run was re-applied.
+
+    A restored backup may hold the request as pending, approved or rejected,
+    or not at all if it predates the request, so the row is updated or
+    inserted. Returns the request id.
+    """
+    now = _now()
+    existing = await get_request_for_user(user_id)
+    if existing is not None:
+        await db.execute(
+            "UPDATE account_anonymisation_requests SET status = ?, "
+            "completed_at = COALESCE(completed_at, ?), executed_at = COALESCE(executed_at, ?), "
+            "original_email_hash = COALESCE(original_email_hash, ?), error_message = NULL, "
+            "ip_address = NULL, user_agent = NULL WHERE id = ?",
+            (STATUS_COMPLETED, now, now, original_email_hash, int(existing["id"])),
+        )
+        return int(existing["id"])
+    return int(
+        await db.execute_returning_lastrowid(
+            "INSERT INTO account_anonymisation_requests "
+            "(user_id, status, original_email_hash, requested_at, executed_at, completed_at, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, STATUS_COMPLETED, original_email_hash, now, now, now, _clean_text(notes, 2000)),
+        )
+    )
+
+
+async def get_users_by_ids(user_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
+    """The id, email and name of each listed user that exists."""
+    ids = sorted({int(user_id) for user_id in user_ids})
+    found: dict[int, dict[str, Any]] = {}
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        rows = await db.fetch_all(
+            "SELECT id, email, first_name, last_name FROM users "  # nosec B608 - only "?" placeholders are joined in
+            "WHERE id IN (" + _placeholders(chunk) + ")",
+            tuple(chunk),
+        )
+        found.update({int(row["id"]): dict(row) for row in rows})
+    return found
+
+
+async def reserve_user_ids(highest_erased_id: int) -> bool:
+    """Move the users id counter past *highest_erased_id*.
+
+    A restored backup resets the counter, so the next sign-up could be given
+    an erased account's id. Returns True when the counter was moved. MySQL
+    only: the SQLite fallback is a development database.
+    """
+    if db.is_sqlite():
+        return False
+    highest = int(highest_erased_id)
+    row = await db.fetch_one("SELECT MAX(id) AS max_id FROM users")
+    if row and row.get("max_id") is not None and int(row["max_id"]) > highest:
+        return False
+    row = await db.fetch_one(
+        "SELECT AUTO_INCREMENT AS next_id FROM information_schema.TABLES "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'"
+    )
+    if row and row.get("next_id") is not None and int(row["next_id"]) > highest:
+        return False
+    # AUTO_INCREMENT takes no placeholder; the value is an int.
+    await db.execute("ALTER TABLE users AUTO_INCREMENT = " + str(highest + 1))  # nosec B608 - int only
+    return True
+
+
+_LEDGER_LOCK_NAME = "myportal_erasure_ledger"
+_local_ledger_lock = asyncio.Lock()
+
+
+@asynccontextmanager
+async def ledger_lock(timeout_seconds: int = 120) -> AsyncIterator[None]:
+    """Serialise erasure ledger checks across workers and hosts.
+
+    The in-process lock keeps one worker from holding two lock connections;
+    ``db.acquire_lock`` coordinates workers on MySQL.
+    """
+    async with _local_ledger_lock:
+        async with db.acquire_lock(_LEDGER_LOCK_NAME, timeout=int(timeout_seconds)) as acquired:
+            if not acquired:
+                raise RuntimeError("Could not obtain the erasure ledger lock")
+            yield
+
+
 async def list_anonymised_email_hashes(emails: Iterable[str]) -> set[str]:
     """Return the hashes of *emails* that belong to anonymised accounts."""
     hashes = sorted({h for h in (email_hash(e) for e in emails) if h})
@@ -453,6 +549,7 @@ async def anonymise_user(
     *,
     original_email: str | None,
     phones: Sequence[str] = (),
+    names: Sequence[str] = (),
     staff_ids: Sequence[int] = (),
     ticket_ids: Sequence[int] = (),
     call_recording_ids: Sequence[int] = (),
@@ -462,15 +559,17 @@ async def anonymise_user(
 
     Business records (tickets, replies, invoices, orders) are kept, still
     linked to the now-anonymised user row, but with names, email addresses
-    and phone numbers replaced. Returns per-table counts for the audit log;
-    the summary holds no personal data.
+    and phone numbers replaced. *names* are full names ("Jane Doe") redacted
+    from reply and ticket text, as signatures and greetings carry them.
+    Returns per-table counts for the audit log; the summary holds no
+    personal data.
     """
     email = (original_email or "").strip() or None
     email_lower = email.lower() if email else None
     phones = sorted({p.strip() for p in phones if p and p.strip()})
     placeholder = placeholder_email_for(user_id)
     summary: dict[str, int] = {}
-    secrets = [value for value in (email, *phones) if value]
+    secrets = [value for value in (email, *phones, *names) if value]
 
     async with _transaction() as w:
         # Authentication material and sessions.

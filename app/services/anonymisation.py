@@ -13,10 +13,15 @@ This module gathers what the run needs, then handles the side effects: the
 final email (sent *before* the address is replaced), the marketing opt-out,
 RAG cleanup, deleting recording and voicemail files, and the audit trail.
 Audit entries never hold the person's original personal data in plain text.
+
+Each completed run is recorded in the erasure ledger
+(:mod:`app.services.erasure_ledger`), which re-applies it with
+:func:`reapply_erasure` if a database backup from before the run is restored.
 """
 
 from __future__ import annotations
 
+import asyncio
 import html
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -202,15 +207,26 @@ async def approve_request(
         raise AnonymisationError("Anonymisation failed part-way. It is safe to approve the request again to retry.") from exc
 
     await anonymisation_repo.mark_completed(request_id)
+    ledger_recorded = await _record_in_ledger(
+        user_id,
+        request_id=request_id,
+        email_hash=anonymisation_repo.email_hash(original_email) or record.get("original_email_hash"),
+    )
     await _audit(
         "account_anonymisation.complete",
         actor_id=actor_id,
         request_id=request_id,
         user_id=user_id,
-        details=details,
+        details={**details, "ledger_recorded": ledger_recorded},
         request=request,
     )
-    return {"request_id": request_id, "user_id": user_id, "status": STATUS_COMPLETED, "details": details}
+    return {
+        "request_id": request_id,
+        "user_id": user_id,
+        "status": STATUS_COMPLETED,
+        "details": details,
+        "ledger_recorded": ledger_recorded,
+    }
 
 
 async def reject_request(
@@ -272,12 +288,70 @@ async def start_for_user(
     )
 
 
+async def reapply_erasure(
+    user_id: int, *, reason: str, actor_user_id: int | None = None, request: Any = None
+) -> dict[str, int]:
+    """Anonymise an account again after a database restore brought it back.
+
+    Called by the erasure ledger. The person was told when their request was
+    approved, so nothing is emailed. The request row is marked completed (or
+    recreated when the restored backup predates it).
+    """
+    target = await users_repo.get_user_by_id(int(user_id))
+    if not target:
+        raise AnonymisationError("User not found.")
+    current_email = str(target.get("email") or "").strip() or None
+    original_email = None if anonymisation_repo.is_anonymised_email(current_email) else current_email
+    details = await _run(int(user_id), target, original_email, notify=False)
+    request_id = await anonymisation_repo.record_reapplied(
+        int(user_id),
+        original_email_hash=anonymisation_repo.email_hash(original_email),
+        notes="Re-applied from the erasure ledger after a database restore.",
+    )
+    await _audit(
+        "account_anonymisation.reapply",
+        actor_id=actor_user_id,
+        request_id=request_id,
+        user_id=int(user_id),
+        details={**details, "reason": reason},
+        request=request,
+    )
+    return details
+
+
+async def _record_in_ledger(user_id: int, *, request_id: int, email_hash: str | None) -> bool:
+    """Record the completed run. On failure the next ledger check copies it in."""
+    try:
+        from app.services import erasure_ledger
+
+        await asyncio.to_thread(
+            erasure_ledger.record_erasure, user_id, email_hash=email_hash, request_id=request_id
+        )
+        return True
+    except Exception as exc:
+        logger.error("Could not write the erasure ledger for request {}: {}", request_id, type(exc).__name__)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # The run
 # ---------------------------------------------------------------------------
 
 
-async def _run(user_id: int, target: Mapping[str, Any], original_email: str | None) -> dict[str, int]:
+def _full_names(*values: Any) -> list[str]:
+    """The person's full name, for redacting signatures and greetings.
+
+    A first name alone is left: replacing every "Sam" would garble other text.
+    """
+    name = " ".join(str(v).strip() for v in values if v is not None and str(v).strip())
+    if " " not in name or len(name) < 5 or name == anonymisation_repo.ANON_DISPLAY_NAME:
+        return []
+    return [name]
+
+
+async def _run(
+    user_id: int, target: Mapping[str, Any], original_email: str | None, *, notify: bool = True
+) -> dict[str, int]:
     staff = await anonymisation_repo.list_staff_for_user(user_id, original_email)
     staff_ids = [int(row["id"]) for row in staff]
     phones = _phones(target.get("mobile_phone"), *(row.get("mobile_phone") for row in staff))
@@ -285,17 +359,18 @@ async def _run(user_id: int, target: Mapping[str, Any], original_email: str | No
     recordings = await anonymisation_repo.list_call_recordings(phones, staff_ids)
     voicemail = await anonymisation_repo.list_audio_attachments(ticket_ids)
 
-    # Emailed before the address is replaced, so the person can still receive it.
-    await _send(
-        original_email,
-        "Your account is being anonymised",
-        [
-            "Your request to delete or anonymise your account has been approved and is being actioned now.",
-            "Once it is complete you won't be able to sign in, and this email address will no longer be linked to the account.",
-            "We keep some records, such as invoices, where the law requires us to, but your personal details are removed from them.",
-            "This is the last email we'll send to this address about your account.",
-        ],
-    )
+    if notify:
+        # Emailed before the address is replaced, so the person can still receive it.
+        await _send(
+            original_email,
+            "Your account is being anonymised",
+            [
+                "Your request to delete or anonymise your account has been approved and is being actioned now.",
+                "Once it is complete you won't be able to sign in, and this email address will no longer be linked to the account.",
+                "We keep some records, such as invoices, where the law requires us to, but your personal details are removed from them.",
+                "This is the last email we'll send to this address about your account.",
+            ],
+        )
     # Before the run, so the opt-out holds even if a later step fails.
     await _opt_out_marketing(original_email, anonymisation_repo.placeholder_email_for(user_id))
     rag_counts = await _purge_rag(user_id)
@@ -304,6 +379,7 @@ async def _run(user_id: int, target: Mapping[str, Any], original_email: str | No
         user_id,
         original_email=original_email,
         phones=phones,
+        names=_full_names(target.get("first_name"), target.get("last_name")),
         staff_ids=staff_ids,
         ticket_ids=ticket_ids,
         call_recording_ids=[int(row["id"]) for row in recordings],
@@ -442,7 +518,7 @@ async def _send(recipient: Any, subject: str, paragraphs: Sequence[str]) -> bool
 async def _audit(
     action: str,
     *,
-    actor_id: int,
+    actor_id: int | None,
     request_id: int,
     user_id: int,
     details: Mapping[str, Any] | None,

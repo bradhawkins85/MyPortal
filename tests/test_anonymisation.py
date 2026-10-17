@@ -19,6 +19,7 @@ from app.repositories import users as users_repo
 from app.services import anonymisation as anon_service
 from app.services import audit as audit_service
 from app.services import email as email_service
+from app.services import erasure_ledger
 
 MIGRATIONS = Path(__file__).resolve().parent.parent / "migrations"
 
@@ -536,6 +537,195 @@ async def test_optional_steps_tolerate_missing_tables(sqlite_db):
     assert summary["users"] == 1
 
 
+@pytest.mark.anyio("asyncio")
+async def test_full_name_is_redacted_from_ticket_text(sqlite_db, monkeypatch):
+    await _seed(sqlite_db)
+    await sqlite_db.execute(
+        "INSERT INTO ticket_replies (id, ticket_id, author_id, author_email, author_display_name, body) "
+        "VALUES (24, 10, 7, ?, 'Jane Doe', 'Thanks, Jane Doe')",
+        (EMAIL,),
+    )
+
+    async def _lookup(user_id):
+        return await sqlite_db.fetch_one("SELECT * FROM users WHERE id = ?", (user_id,))
+
+    _patch_side_effects(monkeypatch, user_lookup=_lookup)
+    request_id, _ = await anon_repo.create_request(user_id=7)
+    await anon_service.approve_request(request_id=request_id, actor_user={"id": 1})
+    reply = (await _rows(sqlite_db, "SELECT body FROM ticket_replies WHERE id = 24"))[0]
+    assert reply["body"] == "Thanks, " + anon_repo.REDACTED
+    # A first name alone is left, so other text isn't garbled.
+    summary = (await _rows(sqlite_db, "SELECT ai_summary FROM tickets WHERE id = 10"))[0]
+    assert summary["ai_summary"].startswith("Jane (")
+
+
+# ---------------------------------------------------------------------------
+# Erasure ledger: restoring a backup taken before the anonymisation
+# ---------------------------------------------------------------------------
+
+_ALL_TABLES = (
+    "users", "staff", "tickets", "ticket_replies", "ticket_attachments", "email_tracking_events",
+    "chat_messages", "chat_user_links", "sms_ticket_links", "call_recordings", "user_sessions",
+    "user_totp_authenticators", "user_passkeys", "passkey_challenges", "password_tokens",
+    "account_verification_tokens", "marketing_email_opt_outs", "account_anonymisation_requests",
+)
+
+
+async def _restore_backup_from_before(sqlite_db, *, email=EMAIL):
+    """Replace every row with the seed data, as restoring an old backup would.
+
+    The backup predates the request, so it holds no request row. *email*
+    swaps user 7's address, for a backup whose id 7 is someone else.
+    """
+    for table in _ALL_TABLES:
+        await sqlite_db.execute("DELETE FROM " + table)
+    await _seed(sqlite_db)
+    if email != EMAIL:
+        await sqlite_db.execute("UPDATE users SET email = ?, first_name = 'Sam', last_name = 'New' WHERE id = 7", (email,))
+
+
+@pytest.mark.anyio("asyncio")
+async def test_approval_records_the_erasure_in_the_ledger(sqlite_db, monkeypatch):
+    request_id, result, _, audits = await _approve(sqlite_db, monkeypatch)
+    assert result["ledger_recorded"] is True
+    entries = erasure_ledger.read_ledger().entries
+    assert [(e.kind, e.user_id, e.email_hash, e.request_id) for e in entries] == [
+        ("erased", 7, anon_repo.email_hash(EMAIL), request_id)
+    ]
+    assert audits[-1]["new_value"]["details"]["ledger_recorded"] is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ledger_write_failure_is_reported_and_backfilled(sqlite_db, monkeypatch):
+    real_record = erasure_ledger.record_erasure
+    read_only = {"on": True}
+
+    def _record(*args, **kwargs):
+        if read_only["on"]:
+            raise PermissionError("read-only")
+        return real_record(*args, **kwargs)
+
+    monkeypatch.setattr(erasure_ledger, "record_erasure", _record)
+    _, result, _, _ = await _approve(sqlite_db, monkeypatch)
+    assert result["ledger_recorded"] is False
+    assert erasure_ledger.read_ledger().entries == []
+
+    # The next check copies the completed request into the ledger.
+    read_only["on"] = False
+    outcome = await erasure_ledger.reconcile(reason="test")
+    assert outcome.backfilled == 1 and outcome.reapplied == 0
+    assert [e.user_id for e in erasure_ledger.read_ledger().entries] == [7]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_restored_backup_is_anonymised_again(sqlite_db, monkeypatch):
+    await _approve(sqlite_db, monkeypatch)
+    await _restore_backup_from_before(sqlite_db)
+    assert (await _rows(sqlite_db, "SELECT email FROM users WHERE id = 7"))[0]["email"] == EMAIL
+
+    async def _lookup(user_id):
+        return await sqlite_db.fetch_one("SELECT * FROM users WHERE id = ?", (user_id,))
+
+    sent, audits = _patch_side_effects(monkeypatch, user_lookup=_lookup)
+    outcome = await erasure_ledger.reconcile(reason="startup")
+    assert (outcome.reapplied, outcome.failed, outcome.needs_review) == (1, 0, 0)
+
+    user = (await _rows(sqlite_db, "SELECT * FROM users WHERE id = 7"))[0]
+    assert user["email"] == "anonymised+7@invalid" and user["is_active"] == 0
+    assert await _rows(sqlite_db, "SELECT * FROM user_sessions WHERE user_id = 7") == []
+    replies = {row["id"]: row for row in await _rows(sqlite_db, "SELECT * FROM ticket_replies")}
+    assert replies[20]["author_display_name"] == "Anonymised user"
+    assert EMAIL not in replies[20]["body"]
+    assert {row["id"] for row in await _rows(sqlite_db, "SELECT id FROM call_recordings")} == {42}
+
+    # The person was told when the request was approved; a restore emails no one.
+    assert sent == []
+    assert audits[-1]["action"] == "account_anonymisation.reapply"
+    assert EMAIL.lower() not in repr(audits).lower()
+    request = await anon_repo.get_request_for_user(7)
+    assert request["status"] == "completed"
+    assert request["original_email_hash"] == anon_repo.email_hash(EMAIL)
+
+    # Nothing left to do on the next check.
+    again = await erasure_ledger.reconcile(reason="scheduled")
+    assert (again.reapplied, again.backfilled) == (0, 0)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_restored_session_is_refused_until_reapplied(sqlite_db, monkeypatch):
+    await _approve(sqlite_db, monkeypatch)
+    await _restore_backup_from_before(sqlite_db)
+    started: list[str] = []
+    monkeypatch.setattr(erasure_ledger, "request_reconcile", started.append)
+    assert await erasure_ledger.blocks_session(7) is True
+    assert started == ["session"]
+    assert await erasure_ledger.blocks_session(1) is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_reused_id_is_left_alone_and_listed_for_review(sqlite_db, monkeypatch):
+    await _approve(sqlite_db, monkeypatch)
+    await _restore_backup_from_before(sqlite_db, email="sam.new@example.com")
+    _patch_side_effects(monkeypatch, user_lookup=lambda _id: None)
+
+    outcome = await erasure_ledger.reconcile(reason="startup")
+    assert (outcome.reapplied, outcome.needs_review) == (0, 1)
+    user = (await _rows(sqlite_db, "SELECT email, is_active FROM users WHERE id = 7"))[0]
+    assert user == {"email": "sam.new@example.com", "is_active": 1}
+    assert await erasure_ledger.blocks_session(7) is False
+
+    status = await erasure_ledger.status()
+    assert [(row["user_id"], row["email"], row["name"]) for row in status["review"]] == [
+        (7, "sam.new@example.com", "Sam New")
+    ]
+
+    await erasure_ledger.clear(7, actor_user_id=1)
+    assert (await erasure_ledger.reconcile(reason="scheduled")).needs_review == 0
+    with pytest.raises(LookupError):
+        await erasure_ledger.clear(7, actor_user_id=1)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_admin_can_confirm_a_restored_account_under_an_older_address(sqlite_db, monkeypatch):
+    # The person changed their address after the backup was taken.
+    await _approve(sqlite_db, monkeypatch)
+    await _restore_backup_from_before(sqlite_db, email="jane.old@example.com")
+
+    async def _lookup(user_id):
+        return await sqlite_db.fetch_one("SELECT * FROM users WHERE id = ?", (user_id,))
+
+    _patch_side_effects(monkeypatch, user_lookup=_lookup)
+    await erasure_ledger.confirm_and_reapply(7, actor_user_id=1)
+    assert (await _rows(sqlite_db, "SELECT email FROM users WHERE id = 7"))[0]["email"] == "anonymised+7@invalid"
+    hashes = {e.email_hash for e in erasure_ledger.read_ledger().entries}
+    assert anon_repo.email_hash("jane.old@example.com") in hashes
+
+    # Restoring the same backup again now re-applies without asking.
+    await _restore_backup_from_before(sqlite_db, email="jane.old@example.com")
+    outcome = await erasure_ledger.reconcile(reason="startup")
+    assert (outcome.reapplied, outcome.needs_review) == (1, 0)
+
+
+def test_admin_list_shows_ledger_review_actions():
+    html = _render(
+        "admin/anonymisation.html",
+        anonymisation_request=None,
+        anonymisation_requests=[],
+        anonymisation_status_filter="",
+        erasure_ledger={
+            "path": "/srv/ledger.jsonl", "exists": True, "writable": False, "entries": 2,
+            "problems": ["line 2: chain broken"], "pending": 0, "unrecorded": 0, "last_result": None,
+            "review": [{"user_id": 7, "email": "sam.new@example.com", "name": "Sam New", "erased_at": "2026-10-01T00:00:00Z"}],
+        },
+    )
+    assert 'action="/admin/anonymisation/ledger/check"' in html
+    assert 'action="/admin/anonymisation/ledger/7/reapply"' in html
+    assert 'action="/admin/anonymisation/ledger/7/clear"' in html
+    assert "data-ledger-confirm" in html
+    assert "can&#39;t write the ledger file" in html or "can't write the ledger file" in html
+    assert "line 2: chain broken" in html
+
+
 # ---------------------------------------------------------------------------
 # Routes and SQL hygiene
 # ---------------------------------------------------------------------------
@@ -551,6 +741,9 @@ def test_anonymisation_routes_are_registered():
         ("POST", "/admin/anonymisation/{request_id}/approve"),
         ("POST", "/admin/anonymisation/{request_id}/reject"),
         ("POST", "/admin/users/{user_id}/{action}"),
+        ("POST", "/admin/anonymisation/ledger/check"),
+        ("POST", "/admin/anonymisation/ledger/{user_id}/reapply"),
+        ("POST", "/admin/anonymisation/ledger/{user_id}/clear"),
     }
     registered = {
         (method, route.path)

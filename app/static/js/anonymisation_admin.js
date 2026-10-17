@@ -1,4 +1,5 @@
-// Opens the account anonymisation modals (approve, reject, anonymise user).
+// Opens the account anonymisation modals (approve, reject, anonymise user)
+// and confirms erasure ledger decisions.
 // Closing is handled by the shared modal handler in main.js.
 (function () {
   'use strict';
@@ -31,6 +32,14 @@
       const modal = document.getElementById(trigger.getAttribute('data-anonymise-open'));
       if (!modal) return;
       trigger.addEventListener('click', () => openModal(modal, trigger));
+    });
+    // Erasure ledger decisions on the requests page.
+    document.querySelectorAll('[data-ledger-confirm]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        if (!window.confirm(button.getAttribute('data-ledger-confirm') || 'Are you sure?')) {
+          event.preventDefault();
+        }
+      });
     });
   }
 

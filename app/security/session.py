@@ -105,6 +105,13 @@ class SessionManager:
             return None
         if not allow_inactive and int(record.get("is_active", 0)) != 1:
             return None
+        # A restored backup can bring back an anonymised account's sessions
+        # until the erasure ledger re-applies the anonymisation.
+        from app.services import erasure_ledger
+
+        if await erasure_ledger.blocks_session(record.get("user_id")):
+            await auth_repo.update_session(record["id"], is_active=False)
+            return None
         expires_at = ensure_datetime(record.get("expires_at"))
         now = datetime.utcnow()
         if expires_at and expires_at < now:

@@ -47,6 +47,12 @@ and restore it the same way from a `stats-….sql.gz` file.
 Backups are written to `BACKUP_DIR` (default: `/opt/myportal/backups`)
 with directory mode `0700` and file mode `0600`.
 
+Each database backup also saves the current
+[erasure ledger](../../security/gdpr-erasure.md) as `erasure-ledger.jsonl`
+in the same directory. The ledger records every anonymised account, so a
+restored backup can't bring one back. The saved copy is never replaced by a
+shorter one. Copy it off the server with the environment file.
+
 ### Pre-upgrade backup
 
 Every `upgrade.sh` run takes a database-only backup before migrations execute.
@@ -91,6 +97,16 @@ MYPORTAL_BACKUPS_TO_KEEP=14
    sudo systemctl start myportal@blue.service myportal@green.service
    ```
 
+### Restoring and anonymised accounts
+
+A database backup taken before an account was anonymised still holds that
+person's details. When MyPortal starts after a restore, it applies every
+anonymisation recorded in the erasure ledger again before it serves requests.
+If the live ledger is missing, as on a rebuilt server, `--restore` first puts
+back the copy saved in `BACKUP_DIR`. Check **Admin → Account anonymisation**
+afterwards for accounts that need a decision. See
+[Account erasure and backups](../../security/gdpr-erasure.md).
+
 ### Restoring uploaded files
 
 Extract the files backup to the shared root:
@@ -109,6 +125,7 @@ tar -xzf /opt/myportal/backups/files-scheduled-20260101T000000Z.tar.gz -C /opt/m
 | `STATS_DB_BACKUP` | `false` | Set `true` to also back up the RMM stats database (`stats-*.sql.gz`) |
 | `SKIP_PRE_UPGRADE_BACKUP` | `false` | Set `true` to skip the pre-upgrade database backup |
 | `MYPORTAL_SHARED_ROOT` | `/opt/myportal/shared` | Shared data root containing upload directories |
+| `PRIVACY_ERASURE_LEDGER_PATH` | `$MYPORTAL_SHARED_ROOT/data/privacy/erasure-ledger.jsonl` | Erasure ledger saved with each database backup |
 
 ## Docker installs
 
@@ -129,8 +146,12 @@ stored in the directory configured for the Docker deployment.
 To restore a database backup in a Docker install:
 
 ```bash
-sudo myportal-docker restore /path/to/db-backup.sql.gz
+sudo myportal-docker restore-db /path/to/db-backup.sql.gz
 ```
+
+`myportal-docker backup` saves the erasure ledger as `erasure-ledger.jsonl`
+in the backup directory. `restore-db` merges that copy back into the live
+ledger and re-applies recorded anonymisations once MyPortal is running.
 
 ## Development installs
 

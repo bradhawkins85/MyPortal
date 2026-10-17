@@ -127,6 +127,15 @@ class Settings(BaseSettings):
             "legal pages. Falls back to SMTP_FROM when empty."
         ),
     )
+    privacy_erasure_ledger_path: str = Field(
+        default="",
+        validation_alias="PRIVACY_ERASURE_LEDGER_PATH",
+        description=(
+            "File that records every account anonymisation so it is re-applied "
+            "when an older database backup is restored. Keep it out of database "
+            "backups. Defaults to var/data/privacy/erasure-ledger.jsonl."
+        ),
+    )
     environment: str = "development"
     app_instance_id: str = Field(default="", validation_alias="APP_INSTANCE_ID")
     secret_key: str = Field(

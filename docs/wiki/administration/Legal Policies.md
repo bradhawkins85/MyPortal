@@ -95,3 +95,6 @@ their account to be deleted or anonymised. Records that must be kept
 - **Audit trail.** Audit entries hold ids and row counts only. The request
   keeps a SHA-256 hash of the original email so future marketing campaigns
   still exclude it.
+- **Backups.** Each completed run is recorded in the erasure ledger, a file
+  outside the database, and re-applied whenever a restored backup brings the
+  account back. See [Account erasure and backups](../../security/gdpr-erasure.md).
