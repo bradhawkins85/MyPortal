@@ -38,12 +38,44 @@ def transport(monkeypatch, handler):
                         httpx.AsyncClient(transport=httpx.MockTransport(handler)))
 
 
+@pytest.mark.parametrize('name,expected', [
+    ('7-Zip 24.09 (x64)', '7-Zip'),
+    ('Mozilla Firefox (x64 en-US)', 'Mozilla Firefox'),
+    ('Google Chrome (64-bit)', 'Google Chrome'),
+    ('7-Zip (Install)', '7-Zip'),
+    ('App version 1.2.3', 'App'),
+    ('App v1.2.3 (ARM64)', 'App'),
+    ('Visual Studio 2022', 'Visual Studio 2022'),
+    ('Firefox ESR', 'Firefox ESR'),
+    ('App (Portable)', 'App (Portable)'),
+    ('App Enterprise', 'App Enterprise'),
+])
+def test_matching_removes_only_known_packaging_decorations(name, expected):
+    assert catalog._application_name(name) == expected
+
+
+@pytest.mark.anyio
+async def test_normalized_matching_still_rejects_ambiguity_editions_and_substrings(monkeypatch, mocks):
+    sleep, replace, names = mocks
+    names.return_value = ['7-Zip 24.09 (x64)', 'App', 'App Enterprise', 'Firefox ESR']
+    responses = {
+        "'7-Zip'": [('7zip', '7-Zip (Install)'), ('7zip.install', '7-Zip (Install)')],
+        "'App'": [('app-tools', 'App Tools')],
+        "'App Enterprise'": [('app', 'App')],
+        "'Firefox ESR'": [('firefox', 'Firefox')],
+    }
+    transport(monkeypatch, lambda req: httpx.Response(200, text=feed(responses[req.url.params['searchTerm']])))
+    summary = await catalog.refresh()
+    assert summary['ambiguous'] == 1 and summary['unmatched'] == 3
+    assert replace.await_args.args[0] == [] and replace.await_args.kwargs['matches'] == []
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize('name,wire_term', [
     ('7zip', "'7zip'"),
     ('Google Chrome', "'Google%20Chrome'"),
     ("Vendor's App", "'Vendor''s%20App'"),
-    ('C++ & Tools (x64)', "'C%2B%2B%20%26%20Tools%20%28x64%29'"),
+    ('C++ & Tools (x64)', "'C%2B%2B%20%26%20Tools'"),
     ('Tools?x=1#tag', "'Tools%3Fx%3D1%23tag'"),
     ('Café', "'Caf%C3%A9'"),
 ])
@@ -290,6 +322,7 @@ async def test_inventory_selection_and_catalog_replacement_sql(monkeypatch):
         CREATE TABLE rmm_device_software (agent_id INTEGER, name TEXT, version TEXT);
         CREATE TABLE rmm_chocolatey_packages (package_id TEXT PRIMARY KEY, title TEXT,
             version TEXT, download_count INTEGER, updated_at TEXT);
+        CREATE TABLE rmm_chocolatey_software_matches (name TEXT PRIMARY KEY, package_id TEXT);
         INSERT INTO rmm_agents VALUES (1, 'active', 'windows'), (2, 'revoked', 'windows'),
             (3, 'active', 'linux'), (4, 'active', 'Windows');
         INSERT INTO rmm_device_software VALUES (1, 'Alpha', '1'), (1, 'Alpha', '2'),
@@ -323,7 +356,8 @@ async def test_inventory_selection_and_catalog_replacement_sql(monkeypatch):
         result = await catalog.refresh()
         assert calls == ["'Alpha'"]
         assert result['stored'] == result['removed'] == 1
-        assert await catalog.query('') == [{'package_id': 'alpha', 'title': 'Alpha', 'version': '2.0'}]
+        assert await catalog.query('') == [{'package_id': 'alpha', 'title': 'Alpha', 'version': '2.0',
+                                           'display_name': 'Alpha'}]
         assert await catalog.query('uninstalled') == []
     finally:
         connection.close()

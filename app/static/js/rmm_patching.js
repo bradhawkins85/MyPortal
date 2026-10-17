@@ -17,7 +17,7 @@
       if (sequence !== searchSequence) return;
       packages = data.packages;
       results.replaceChildren(new Option('Choose an application', ''));
-      packages.forEach((app, index) => results.add(new Option(app.title + ' — ' + app.version + ' (' + app.package_id + ')', String(index))));
+      packages.forEach((app, index) => results.add(new Option((app.display_name || app.title) + ' — ' + app.version + ' (' + app.package_id + ')', String(index))));
       status.textContent = (packages.length ? 'Select an application below.' : 'No applications found.')
         + (data.updated_at ? ' App list updated ' + new Date(data.updated_at).toLocaleString() + '.' : '');
     } catch (error) { if (sequence === searchSequence) status.textContent = error.message; }
@@ -29,7 +29,7 @@
     const app = results.value === '' ? null : packages[Number(results.value)];
     if (!app) return;
     form.querySelector('[name="package_id"]').value = app.package_id;
-    form.querySelector('[name="display_name"]').value = app.title;
+    form.querySelector('[name="display_name"]').value = app.display_name || app.title;
   });
   const mode = form.querySelector('[name="target_mode"]');
   const input = form.querySelector('[name="target_rules"]');

@@ -1,0 +1,7 @@
+{
+  "guid": "bea04371-e95e-4520-8ff1-3f3ec4a7337e",
+  "occurred_at": "2026-10-17T04:15Z",
+  "change_type": "Fix",
+  "summary": "Fix Chocolatey package matching for mixed-case IDs and versioned software names; retain installed names in Software upgrades and Patch management",
+  "content_hash": "bfc0582ce91837222cf2fcb562a09055cb3f74fb3d7a961e118468cf04d3e562"
+}
