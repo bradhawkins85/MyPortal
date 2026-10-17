@@ -55,8 +55,11 @@ failures are visible in run output. Feature upgrades are not included.
 The policy form's application search uses stored Chocolatey matches for the apps
 currently listed in Software on active Windows devices. The default **Update
 Chocolatey app list** scheduled task refreshes those matches daily. It searches
-each distinct installed application name, saves only unambiguous exact package
-ID or title matches, and skips names without a verified match. It does not
+each distinct installed application name, saves only unambiguous package
+ID or title matches, and skips names without a verified match. Matching ignores
+release numbers and architecture/language suffixes such as `24.09 (x64)` or
+`(x64 en-US)`, and Chocolatey's `(Install)` title suffix. Editions and channels
+remain distinct; ambiguous results are skipped. It does not
 download the full Chocolatey catalog.
 
 Super admins can run the task now, change its schedule, disable or delete it
@@ -65,6 +68,10 @@ app list** command. A failed lookup keeps the previous list. A successful refres
 removes matches for software no longer in the current inventory. Portal searches
 use only this stored list; before the first refresh, no applications are listed.
 The task result reports checked, matched, unmatched and ambiguous applications.
+The original installed name is stored with each verified package match and is
+used by both Software upgrade checks and the patch policy application picker.
+After updating MyPortal, run **Update Chocolatey app list** again to populate
+these mappings for existing inventory.
 
 Each policy specifies an exact package ID and exact installed application display
 name. The agent reads Chocolatey's local package list and machine-wide 32/64-bit

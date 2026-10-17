@@ -15,6 +15,14 @@ _UPSERT_SQLITE = (
     'VALUES (%s, %s, %s, %s, %s) ON CONFLICT(package_id) DO UPDATE SET title = excluded.title, '
     'version = excluded.version, download_count = excluded.download_count, updated_at = excluded.updated_at'
 )
+_MATCH_UPSERT_MYSQL = (
+    'INSERT INTO rmm_chocolatey_software_matches (name, package_id) VALUES (%s, %s) '
+    'ON DUPLICATE KEY UPDATE name = VALUES(name), package_id = VALUES(package_id)'
+)
+_MATCH_UPSERT_SQLITE = (
+    'INSERT INTO rmm_chocolatey_software_matches (name, package_id) VALUES (%s, %s) '
+    'ON CONFLICT(name) DO UPDATE SET package_id = excluded.package_id'
+)
 
 
 def _like(term: str) -> str:
@@ -32,25 +40,32 @@ async def last_updated() -> datetime | None:
 
 
 async def search(term: str, limit: int) -> list[dict]:
+    select = (
+        'SELECT p.package_id, p.title, p.version, p.download_count, m.name AS display_name '
+        'FROM rmm_chocolatey_packages p '
+        'LEFT JOIN rmm_chocolatey_software_matches m ON m.package_id = p.package_id '
+    )
     if not term:
         return await db.fetch_all(
-            'SELECT package_id, title, version, download_count FROM rmm_chocolatey_packages '
-            'ORDER BY download_count DESC, title LIMIT %s', (limit,))
+            select + 'ORDER BY p.download_count DESC, p.title, m.name LIMIT %s', (limit,))
     pattern = _like(term)
     return await db.fetch_all(
-        'SELECT package_id, title, version, download_count FROM rmm_chocolatey_packages '
-        "WHERE package_id LIKE %s ESCAPE '!' OR title LIKE %s ESCAPE '!' "
-        'ORDER BY download_count DESC, title LIMIT %s', (pattern, pattern, limit))
+        select + "WHERE p.package_id LIKE %s ESCAPE '!' OR p.title LIKE %s ESCAPE '!' "
+        "OR m.name LIKE %s ESCAPE '!' "
+        'ORDER BY p.download_count DESC, p.title, m.name LIMIT %s', (pattern, pattern, pattern, limit))
 
 
 async def find_exact(name: str, limit: int) -> list[dict]:
     key = name.lower()
     return await db.fetch_all(
-        'SELECT package_id, title, version, download_count FROM rmm_chocolatey_packages '
-        'WHERE package_id = %s OR LOWER(title) = %s ORDER BY package_id LIMIT %s', (key, key, limit))
+        'SELECT p.package_id, p.title, p.version, p.download_count, m.name AS display_name '
+        'FROM rmm_chocolatey_packages p '
+        'LEFT JOIN rmm_chocolatey_software_matches m ON m.package_id = p.package_id AND LOWER(m.name) = %s '
+        'WHERE LOWER(p.package_id) = %s OR LOWER(p.title) = %s OR m.name IS NOT NULL '
+        'ORDER BY p.package_id LIMIT %s', (key, key, key, limit))
 
 
-async def replace_all(packages: list[dict], refreshed_at: datetime) -> dict[str, int]:
+async def replace_all(packages: list[dict], refreshed_at: datetime, *, matches: list[dict] | None = None) -> dict[str, int]:
     """Upsert a complete download, then remove packages no longer listed.
 
     Rows are never cleared first, so lookups keep working during a refresh.
@@ -60,6 +75,17 @@ async def replace_all(packages: list[dict], refreshed_at: datetime) -> dict[str,
             for p in packages]
     for offset in range(0, len(rows), 500):
         await db.execute_many(upsert, rows[offset:offset + 500])
+    # Upsert aliases before pruning old ones so lookups keep working throughout.
+    match_upsert = _MATCH_UPSERT_SQLITE if db.is_sqlite() else _MATCH_UPSERT_MYSQL
+    match_rows = [(item['name'], item['package_id']) for item in matches or []]
+    for offset in range(0, len(match_rows), 500):
+        await db.execute_many(match_upsert, match_rows[offset:offset + 500])
+    names = {name for name, _ in match_rows}
+    stale_matches = [(row['name'],) for row in await db.fetch_all('SELECT name FROM rmm_chocolatey_software_matches')
+                     if row['name'] not in names]
+    for offset in range(0, len(stale_matches), 500):
+        await db.execute_many('DELETE FROM rmm_chocolatey_software_matches WHERE name = %s',
+                              stale_matches[offset:offset + 500])
     current = {p['package_id'] for p in packages}
     stale = [(row['package_id'],) for row in await db.fetch_all('SELECT package_id FROM rmm_chocolatey_packages')
              if row['package_id'] not in current]

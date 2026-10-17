@@ -53,7 +53,7 @@ def _parse(content: bytes) -> tuple[int, list[dict]]:
             continue
         def value(name):
             return props.findtext('d:' + name, default='', namespaces=NS).strip()
-        package, version = value('Id'), value('Version')
+        package, version = value('Id').lower(), value('Version')
         title = value('Title') or package
         if (re.fullmatch(r'[a-z0-9][a-z0-9._-]{0,127}', package) and version and len(version) <= 64
                 and len(title) <= 255 and value('IsPrerelease').lower() != 'true'):
@@ -64,7 +64,39 @@ def _parse(content: bytes) -> tuple[int, list[dict]]:
 
 
 def _public(package: dict) -> dict:
-    return {key: package[key] for key in ('package_id', 'title', 'version')}
+    result = {key: package[key] for key in ('package_id', 'title', 'version')}
+    if package.get('display_name'):
+        result['display_name'] = package['display_name']
+    return result
+
+
+def _application_name(name: str) -> str:
+    """Remove packaging decorations, preserving editions, channels and products.
+
+    Registry names often include a release and architecture, while Chocolatey
+    titles may end in '(Install)'. Do not use substrings or similarity scores:
+    the remaining product name must still match in full and be unambiguous.
+    """
+    name = ' '.join(name.split())
+    previous = None
+    while name != previous:
+        previous = name
+        name = re.sub(
+            r'\s*\((?:install|(?:x64|x86|amd64|arm64|32[ -]bit|64[ -]bit)'
+            r'(?:\s+[a-z]{2}(?:-[a-z]{2})?)?)\)$', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\s+(?:version\s+|v)?\d+(?:\.\d+)+(?:\s*\((?:x64|x86)\))?$', '', name,
+                      flags=re.IGNORECASE)
+    return name.strip()
+
+
+def _package_matches(name: str, packages: list[dict]) -> list[dict]:
+    # Prefer literal matches; normalized matches may not override an exact one.
+    exact = [p for p in packages if name.casefold() in
+             {p['package_id'].casefold(), p['title'].casefold()}]
+    key = _application_name(name).casefold()
+    candidates = exact or [p for p in packages if key and key in
+                          {_application_name(p['package_id']).casefold(), _application_name(p['title']).casefold()}]
+    return list({p['package_id']: p for p in candidates}.values())
 
 
 async def query(term: str, *, exact: bool = False) -> list[dict]:
@@ -118,7 +150,7 @@ def _lookup_error(response: httpx.Response, name: str) -> str:
 
 
 async def refresh() -> dict:
-    """Refresh exact Chocolatey matches for current Windows Software inventory.
+    """Refresh verified Chocolatey matches for current Windows Software inventory.
 
     Application names are deduplicated across devices and versions. Transport,
     server and parse failures abort before replacing the stored matches.
@@ -130,6 +162,7 @@ async def refresh() -> dict:
                   for name in await inventory_repo.list_catalog_software_names()
                   if name.strip()}.values())
     packages: dict[str, dict] = {}
+    software_matches: list[dict] = []
     unmatched = ambiguous = matched = 0
     rejected: list[str] = []
     first_rejection = ''
@@ -137,7 +170,7 @@ async def refresh() -> dict:
         for index, name in enumerate(names):
             if index:
                 await asyncio.sleep(PAGE_DELAY)
-            escaped = name.replace("'", "''")
+            escaped = _application_name(name).replace("'", "''")
             params = {'$filter': 'IsLatestVersion', '$orderby': 'Id',
                       'searchTerm': f"'{escaped}'", 'targetFramework': "''",
                       'includePrerelease': 'false', '$skip': '0', '$top': str(RESULT_LIMIT),
@@ -152,16 +185,19 @@ async def refresh() -> dict:
                             application=name, status=exc.response.status_code)
                 first_rejection = first_rejection or error
                 rejected.append(name)
-                for row in await catalog_repo.find_exact(name, RESULT_LIMIT):
+                previous = await catalog_repo.find_exact(name, RESULT_LIMIT)
+                if len(previous) == 1:
+                    row = previous[0]
                     packages.setdefault(row['package_id'], dict(row))
+                    software_matches.append({'name': name, 'package_id': row['package_id']})
                 continue
             except Exception as exc:
                 raise CatalogUnavailable(f'Chocolatey software lookup failed ({type(exc).__name__}); '
                                          'the stored app list was kept.') from None
-            matches = [row for row in rows if name.casefold() in
-                       {row['package_id'].casefold(), row['title'].casefold()}]
+            matches = _package_matches(name, rows)
             if len(matches) == 1:
                 packages.setdefault(matches[0]['package_id'], matches[0])
+                software_matches.append({'name': name, 'package_id': matches[0]['package_id']})
                 matched += 1
             elif matches:
                 ambiguous += 1
@@ -170,7 +206,7 @@ async def refresh() -> dict:
     if names and len(rejected) == len(names):
         raise CatalogUnavailable(first_rejection)
     refreshed_at = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
-    summary = await catalog_repo.replace_all(list(packages.values()), refreshed_at)
+    summary = await catalog_repo.replace_all(list(packages.values()), refreshed_at, matches=software_matches)
     return {'source': COMMUNITY, 'applications': len(names), 'matched': matched,
             'unmatched': unmatched, 'ambiguous': ambiguous, 'rejected': len(rejected),
             'rejected_names': rejected[:REJECTED_NAMES_REPORTED], **summary}
@@ -194,7 +230,9 @@ def version_key(value: str) -> tuple[int, ...] | None:
 
 
 async def match(name: str) -> dict | None:
-    # Never guess from fuzzy search: a wrong match could install a different app.
+    # Only saved aliases or literal titles/IDs may authorize an upgrade. Runtime
+    # lookups must not invent matches from a different application's search hits.
     matches = [p for p in await query(name, exact=True)
-               if name.casefold() in {p['title'].casefold(), p['package_id'].casefold()}]
+               if name.casefold() in {p['title'].casefold(), p['package_id'].casefold(),
+                                      str(p.get('display_name') or '').casefold()}]
     return matches[0] if len(matches) == 1 else None

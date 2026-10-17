@@ -262,8 +262,61 @@ async def test_refresh_looks_up_only_current_software_and_replaces_stored_list(s
     assert [p['package_id'] for p in await _stored(sqlite_db)] == ['googlechrome', 'vlc']
     assert await catalog.last_updated()
     mock_feed(monkeypatch, _no_network)
-    assert await catalog.match('google chrome') == {'package_id': 'googlechrome', 'title': 'Google Chrome', 'version': '150.0'}
+    assert await catalog.match('google chrome') == {'package_id': 'googlechrome', 'title': 'Google Chrome',
+                                                   'version': '150.0', 'display_name': 'Google Chrome'}
     assert await catalog.query('not installed') == []
+
+
+@pytest.mark.anyio
+async def test_decorated_registry_names_reach_patch_picker_and_software_upgrade(sqlite_db, monkeypatch):
+    monkeypatch.setattr(catalog_repo, 'db', sqlite_db)
+    monkeypatch.setattr(inventory_repo, 'db', sqlite_db)
+    _, agent = await _enrol(sqlite_db)
+    installed = [('7-Zip 24.09 (x64)', '24.09'), ('7-Zip 23.01 (x64)', '23.01'),
+                 ('Mozilla Firefox (x64 en-US)', '130.0'), ('Google Chrome', '129.0')]
+    for name, version in installed:
+        await sqlite_db.execute("INSERT INTO rmm_device_software (agent_id, name, version, source) "
+                                "VALUES (%s, %s, %s, 'machine')", (agent['id'], name, version))
+
+    def request(req):
+        entries = {
+            "'7-Zip'": [('7zip.install', '7-Zip (Install)', '25.01', 100)],
+            "'Mozilla Firefox'": [('Firefox', 'Mozilla Firefox', '143.0', 200)],
+            "'Google Chrome'": [('GoogleChrome', 'Google Chrome', '150.0', 300)],
+        }
+        return httpx.Response(200, text=feed(entries[req.url.params['searchTerm']]))
+
+    mock_feed(monkeypatch, request)
+    summary = await catalog.refresh()
+    assert summary['matched'] == 4 and summary['stored'] == 3
+    mock_feed(monkeypatch, _no_network)
+
+    async def context(*args, **kwargs):
+        return {'id': 9}, {}, 1, True
+
+    monkeypatch.setattr(patch_routes, '_context', context)
+    picker = await patch_routes.packages(SimpleNamespace(), q='')
+    assert len(picker['packages']) == 4
+    assert {p['display_name'] for p in picker['packages']} == {name for name, _ in installed}
+    assert len(await catalog.query('24.09')) == 1
+    # Every original registry name resolves to the verified package after refresh.
+    # Two versions of the same product must not overwrite each other's mapping.
+    for name, version in installed:
+        info = await patch_routes.software_upgrade_info(10, SimpleNamespace(), name=name)
+        assert info['application']['display_name'] == name
+        assert info['application']['installed_version'] == version
+        assert info['application']['can_upgrade'] is True
+
+    # Refreshes and rejected lookups preserve the mapping, but removed apps lose it.
+    mock_feed(monkeypatch, lambda req: httpx.Response(406) if '7-Zip' in req.url.params['searchTerm']
+              else request(req))
+    assert (await catalog.refresh())['rejected'] == 2
+    assert (await catalog.match(installed[0][0]))['package_id'] == '7zip.install'
+    await sqlite_db.execute("DELETE FROM rmm_device_software WHERE name = %s", (installed[0][0],))
+    mock_feed(monkeypatch, request)
+    await catalog.refresh()
+    assert await catalog.match(installed[0][0]) is None
+    assert (await catalog.match(installed[1][0]))['package_id'] == '7zip.install'
 
 
 @pytest.mark.anyio
