@@ -102,13 +102,18 @@ def test_form_fits_phone_width(mount, width, public_share):
     assert outside == []
 
 
-def test_matrix_stacks_on_phones_and_can_be_answered(mount):
-    page = mount(width=390, public_share=True)
+@pytest.mark.parametrize("width", [320, 390])
+def test_matrix_keeps_grid_on_phones_and_can_be_answered(mount, width):
+    page = mount(width=width, public_share=True)
     risk = page.locator('[data-field-id="3"]')
-    assert not risk.locator("thead").is_visible()
-    choice = risk.locator("tbody tr").nth(4).get_by_text("Catastrophic", exact=True)
-    assert choice.is_visible()
-    choice.click()
+    assert risk.locator("thead").is_visible()
+    assert not risk.locator(".cf-matrix__column").first.is_visible()
+    wrap = risk.locator(".cf-matrix-wrap")
+    assert wrap.evaluate("(element) => element.scrollWidth <= element.clientWidth")
+    rows = risk.locator("tbody tr")
+    first, last = rows.nth(0).bounding_box(), rows.nth(4).bounding_box()
+    assert last["y"] > first["y"] and abs(last["x"] - first["x"]) < 1
+    risk.get_by_role("radio", name="Rare: Catastrophic").click()
     assert risk.get_by_role("radio", name="Rare: Catastrophic").is_checked()
     assert risk.locator("label.cf-matrix__cell").first.bounding_box()["height"] >= 44
 
