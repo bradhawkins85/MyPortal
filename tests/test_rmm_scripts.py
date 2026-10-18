@@ -551,6 +551,91 @@ async def test_long_poll_wakes_when_a_run_is_queued(sqlite_db, monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_long_poll_finds_runs_queued_on_another_worker_with_one_shared_check(sqlite_db, monkeypatch):
+    import asyncio
+
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": "Write-Output 1\n"})
+    script = (await rmm_repo.list_scripts())[0]
+    _r, agent = await _enrol(sqlite_db)
+    _r2, other = await _enrol(sqlite_db, tray_id=6, asset_id=11, uid="agent-uid-0002")
+    monkeypatch.setattr(rmm_scripts, "QUEUE_WATCH_SECONDS", 0.05)
+    claims = []
+    real_claim = rmm_scripts.claim_jobs
+
+    async def counting_claim(polling_agent):
+        claims.append(int(polling_agent["id"]))
+        return await real_claim(polling_agent)
+
+    monkeypatch.setattr(rmm_scripts, "claim_jobs", counting_claim)
+    waiters = [asyncio.create_task(rmm_scripts.wait_for_jobs(a, wait_seconds=10)) for a in (agent, other)]
+    await asyncio.sleep(0.3)
+    # Idle agents are not claimed again while their queue stays empty.
+    assert sorted(claims) == sorted([agent["id"], other["id"]])
+    # Queued on another worker: no local wake-up reaches this poll.
+    monkeypatch.setattr(rmm_scripts, "notify_agent", lambda _agent_id: None)
+    await rmm_scripts.queue_runs(script_id=script["id"], company_id=1, asset_ids=[10], submitted={},
+                                 timeout_seconds=60, requested_by_user_id=None)
+    jobs = await asyncio.wait_for(waiters[0], timeout=2)
+    assert len(jobs) == 1
+    assert not waiters[1].done()
+    waiters[1].cancel()
+
+
+@pytest.mark.anyio
+async def test_long_poll_does_not_reclaim_a_blocked_queue_until_it_changes(sqlite_db, monkeypatch):
+    import asyncio
+
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": "Write-Output 1\n"})
+    script = (await rmm_repo.list_scripts())[0]
+    _r, agent = await _enrol(sqlite_db)
+    for _ in range(2):
+        await rmm_scripts.queue_runs(script_id=script["id"], company_id=1, asset_ids=[10], submitted={},
+                                     timeout_seconds=60, requested_by_user_id=None)
+    first = (await rmm_scripts.wait_for_jobs(agent, wait_seconds=0))[0]
+    monkeypatch.setattr(rmm_scripts, "QUEUE_WATCH_SECONDS", 0.05)
+    claims = []
+    real_claim = rmm_scripts.claim_jobs
+
+    async def counting_claim(polling_agent):
+        jobs = await real_claim(polling_agent)
+        claims.append(len(jobs))
+        return jobs
+
+    monkeypatch.setattr(rmm_scripts, "claim_jobs", counting_claim)
+    waiter = asyncio.create_task(rmm_scripts.wait_for_jobs(agent, wait_seconds=10))
+    await asyncio.sleep(0.4)
+    # The second run waits behind the first; at most one recheck once the
+    # watcher first sees the queue, not one every watch interval.
+    assert len(claims) <= 2 and not any(claims)
+    assert await rmm_scripts.mark_started(agent, first["id"])
+    await rmm_repo.finish_run(first["id"], status="succeeded", exit_code=0, stdout="", stderr="",
+                              custom_values=[], error_message=None)
+    jobs = await asyncio.wait_for(waiter, timeout=2)
+    assert len(jobs) == 1 and jobs[0]["id"] != first["id"]
+
+
+@pytest.mark.anyio
+async def test_job_poll_heartbeat_skips_recent_check_ins(sqlite_db, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    _r, agent = await _enrol(sqlite_db)
+    writes = []
+
+    async def record(agent_id, details):
+        writes.append(agent_id)
+
+    monkeypatch.setattr(rmm_repo, "record_agent_checkin", record)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    await rmm_scripts.heartbeat({**agent, "last_seen_utc": now - timedelta(seconds=5)})
+    await rmm_scripts.heartbeat({**agent, "last_seen_utc": (now - timedelta(seconds=10)).isoformat(sep=" ")})
+    assert writes == []
+    await rmm_scripts.heartbeat({**agent, "last_seen_utc": now - rmm_scripts.HEARTBEAT_INTERVAL})
+    await rmm_scripts.heartbeat({**agent, "last_seen_utc": None})
+    assert writes == [agent["id"], agent["id"]]
+    assert rmm_scripts.HEARTBEAT_INTERVAL + timedelta(seconds=rmm_scripts.POLL_WAIT_SECONDS) < rmm_scripts.AGENT_CONNECTED_WINDOW
+
+
+@pytest.mark.anyio
 async def test_available_variables_list_asset_fields_and_company_variables(sqlite_db):
     tokens = [item["token"] for item in await rmm_scripts.available_variables()]
     assert "{{asset.custom.BitLocker}}" in tokens and "{{company.variables.Tenant}}" in tokens
