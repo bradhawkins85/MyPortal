@@ -32,6 +32,9 @@ the service.
 
 The agent long-polls `GET /api/rmm/agent/jobs`, runs up to four scripts at a
 time and reports each result to `/api/rmm/agent/runs/{id}/result`.
+While agents wait, each MyPortal worker checks the run queue once every two
+seconds for all of them, and job polls update the agent's last-seen time at
+most every 45 seconds, so database load stays flat as more agents come online.
 Scripts default to sequential execution per device. A super administrator can
 choose **Sequential**, **Parallel**, or **Run Anyway** under **Execution mode** on
 its Scripts detail page. Parallel runs share four ordinary agent slots. Sequential

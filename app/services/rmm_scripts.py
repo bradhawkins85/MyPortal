@@ -96,6 +96,17 @@ _NAMED_VALUE_TOKEN = re.compile(r"\{\{\s*(asset\.custom|company\.variables)\.([^
 
 # Wakes an agent's long-poll on this worker when a run is queued for it.
 _agent_events: dict[int, asyncio.Event] = {}
+# Runs queued or finished on another worker are found by one queue check per
+# worker for all of its waiting agents, rather than by each long-poll querying
+# the database itself, so many idle agents do not crowd out the web UI.
+QUEUE_WATCH_SECONDS = 2.0
+# Each agent's queue state from the latest check, and as of its last claim.
+_queue_states: dict[int, tuple[int, int, int]] = {}
+_queue_seen: dict[int, tuple[int, int, int] | None] = {}
+_queue_watcher: asyncio.Task | None = None
+# Job polls refresh last_seen_utc at most this often; well inside
+# AGENT_CONNECTED_WINDOW, as one poll may follow the refresh by a full wait.
+HEARTBEAT_INTERVAL = timedelta(seconds=45)
 
 
 class RunRequestError(ValueError):
@@ -892,6 +903,42 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
     return jobs
 
 
+async def _watch_queue() -> None:
+    global _queue_states
+    while _agent_events:
+        try:
+            _queue_states = await rmm_repo.queue_states()
+        except Exception as exc:  # noqa: BLE001 - keep watching; polls still claim when they start
+            log_warning("RMM job queue check failed", error=str(exc))
+        else:
+            for agent_id, event in list(_agent_events.items()):
+                state = _queue_states.get(agent_id)
+                if state is not None and state != _queue_seen.get(agent_id):
+                    event.set()
+        await asyncio.sleep(QUEUE_WATCH_SECONDS)
+
+
+def _ensure_queue_watcher() -> None:
+    global _queue_watcher
+    loop = asyncio.get_running_loop()
+    if _queue_watcher is None or _queue_watcher.done() or _queue_watcher.get_loop() is not loop:
+        _queue_watcher = loop.create_task(_watch_queue())
+
+
+async def heartbeat(agent: Mapping[str, Any]) -> None:
+    """Record a job poll as a check-in, skipping the write when one is recent."""
+
+    last_seen = agent.get("last_seen_utc")
+    if isinstance(last_seen, str):
+        with contextlib.suppress(ValueError):
+            last_seen = datetime.fromisoformat(last_seen)
+    if isinstance(last_seen, datetime):
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if timedelta(0) <= now - last_seen.replace(tzinfo=None) < HEARTBEAT_INTERVAL:
+            return
+    await rmm_repo.record_agent_checkin(int(agent["id"]), {})
+
+
 async def wait_for_jobs(agent: Mapping[str, Any], *, wait_seconds: float) -> list[dict[str, Any]]:
     """Long-poll: return queued jobs as soon as there are any, or ``[]`` after ``wait_seconds``."""
 
@@ -902,17 +949,20 @@ async def wait_for_jobs(agent: Mapping[str, Any], *, wait_seconds: float) -> lis
     try:
         while True:
             event.clear()
+            # Runs that stay queued (waiting behind a sequential run) wake
+            # this poll again only when the agent's queue changes.
+            _queue_seen[agent_id] = _queue_states.get(agent_id)
             jobs = await claim_jobs(agent)
             remaining = deadline - loop.time()
             if jobs or remaining <= 0:
                 return jobs
-            # Runs queued on another worker are found on the next pass, so a
-            # timeout here just means "check the database again".
+            _ensure_queue_watcher()
             with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(event.wait(), timeout=min(5.0, remaining))
+                await asyncio.wait_for(event.wait(), timeout=remaining)
     finally:
         if _agent_events.get(agent_id) is event and not event.is_set():
             _agent_events.pop(agent_id, None)
+            _queue_seen.pop(agent_id, None)
 
 
 async def mark_started(agent: Mapping[str, Any], run_id: int) -> bool:

@@ -484,6 +484,26 @@ async def next_jobs_for_agent(agent_id: int, *, limit: int = 5) -> list[dict[str
     return [dict(row) for row in rows or []]
 
 
+async def queue_states() -> dict[int, tuple[int, int, int]]:
+    """Each agent with queued runs: (queued count, newest queued run ID, active count).
+
+    Long-polls compare these instead of each querying the queue themselves; a
+    change means a run was queued or a blocking run finished.
+    """
+    rows = await db.fetch_all(
+        "SELECT agent_id, SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued, "
+        "MAX(CASE WHEN status = 'queued' THEN id ELSE 0 END) AS newest, "
+        "SUM(CASE WHEN status = 'queued' THEN 0 ELSE 1 END) AS active "
+        "FROM rmm_script_runs WHERE status IN ('queued', 'dispatched', 'running') AND agent_id IS NOT NULL "
+        "GROUP BY agent_id",
+    )
+    return {
+        int(row["agent_id"]): (int(row["queued"] or 0), int(row["newest"] or 0), int(row["active"] or 0))
+        for row in rows or []
+        if int(row["queued"] or 0)
+    }
+
+
 async def has_queued_jobs(agent_id: int) -> bool:
     row = await db.fetch_one(
         "SELECT id FROM rmm_script_runs WHERE agent_id = %s AND status = 'queued' LIMIT 1", (agent_id,)

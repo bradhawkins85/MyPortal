@@ -658,7 +658,7 @@ async def agent_jobs(
     wait: int = Query(default=rmm_scripts.POLL_WAIT_SECONDS, ge=0, le=rmm_scripts.POLL_WAIT_SECONDS),
     agent: dict = Depends(get_current_rmm_agent),
 ):
-    await rmm_repo.record_agent_checkin(int(agent["id"]), {})
+    await rmm_scripts.heartbeat(agent)
     return {"jobs": await rmm_scripts.wait_for_jobs(agent, wait_seconds=wait)}
 
 
