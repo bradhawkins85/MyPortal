@@ -61,7 +61,7 @@ jobs:
         with:
           go-version-file: rmm/go.mod
           cache-dependency-path: rmm/go.sum
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Prepare bundled libraries
@@ -95,7 +95,7 @@ jobs:
         with:
           go-version-file: rmm/go.mod
           cache-dependency-path: rmm/go.sum
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         if: matrix.goos == 'windows'
         with:
           dotnet-version: '8.0.x'
