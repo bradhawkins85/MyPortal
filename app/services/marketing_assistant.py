@@ -10,12 +10,11 @@ and runs the assistant from the page editor. A run:
    troubleshooter's LLM) to draft the article as short statements, each citing
    the sources it came from. A *refresh* also shows the model the sections the
    assistant wrote before so it can keep their structure.
-3. Cross-checks every statement: the cited sources must exist, every number
-   in it must appear in a confirming source, and a second, independent model
-   pass must find it stated in at least ``MARKETING_ASSISTANT_MIN_SOURCES_PER_CLAIM``
-   sources without any source contradicting it. Statements that fail are left
-   out and listed in the run report; nothing is written from the model's own
-   knowledge.
+3. Uses the listed websites as the source of truth. Cited sources must be
+   readable and numbers must occur in them. A second model pass checks for
+   disagreements between pages; uncertainty or missing corroboration alone
+   does not exclude a cited statement. Conflicting claims are left out and
+   listed in the run report; nothing is added from the model's own knowledge.
 4. Copies the images it placed (only images shown on the sources; JPEG, PNG,
    GIF or WebP, checked with Pillow) into the database, so the public page
    serves them itself, and credits the site each came from.
@@ -30,6 +29,7 @@ import hashlib
 import io
 import re
 import time
+import traceback
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -122,7 +122,9 @@ def max_images() -> int:
 
 
 def min_sources_per_claim() -> int:
-    return max(1, min(5, int(get_settings().marketing_assistant_min_sources_per_claim or 1)))
+    """One supplied source is sufficient; the legacy minimum setting is ignored."""
+
+    return 1
 
 
 async def normalise_source_url(raw: str) -> str:
@@ -412,7 +414,9 @@ supplied source web pages. You never add facts from your own knowledge, never gu
 
 Write the article as short factual statements. Each statement is one or two sentences of plain English (no
 markdown, no HTML, no headings inside statements) and lists the ids of the sources ("S1", "S2", ...) that state
-it. When sources disagree, leave the point out. Prices, numbers, dates, product names and claims about
+it. Treat the supplied websites as the source of truth: a single page is sufficient, and lack of independent
+corroboration is not a reason to leave its information out. When sources disagree, leave only the conflicting
+point out and keep the consistent information. Prices, numbers, dates, product names and claims about
 performance or security must be copied exactly from a source. Write in an engaging, benefit-led tone for small
 and medium business owners, but only with what the sources say.
 
@@ -478,16 +482,20 @@ def _draft_messages(
     return ai_prompt_security.build_messages(system, records, task=task)
 
 
-_VERIFY_INSTRUCTIONS = """You are a strict fact checker. For every numbered statement, check the supplied source
-web pages and decide whether the statement is stated by them. Do not use your own knowledge.
+_VERIFY_INSTRUCTIONS = """You are a source conflict checker. For every numbered statement, compare the supplied
+source web pages. Treat these user-selected pages as the source of truth. Do not use your own knowledge
+or require independent corroboration: information from one supplied page is sufficient.
 
-- "supported": the sources state it (a close paraphrase is fine; any number, price, date, name or comparison
-  must match exactly). List every source id that states it.
-- "contradicted": any source says something different.
-- "unsupported": no source states it, it overstates or generalises what the sources say, or you are unsure.
+- "supported": a source states it or there is no explicit disagreement between the pages.
+- "contradicted": two or more supplied pages make incompatible claims about the same product, plan,
+  time period and conditions. List the ids of BOTH conflicting pages and explain the conflicting facts.
+  Different products, plans, dates or conditions are not conflicts.
+- "unsupported": the draft invents or exaggerates a fact absent from the cited pages. Explain the
+  specific added detail. Do not use this verdict just because you are unsure or only one page states it.
+- "uncertain": you cannot establish support or are unsure. This is not a conflict.
 
 Respond with one JSON object and no other text:
-{"results": [{"id": str, "verdict": "supported" | "contradicted" | "unsupported", "sources": [str],
+{"results": [{"id": str, "verdict": "supported" | "contradicted" | "unsupported" | "uncertain", "sources": [str],
               "reason": str}]}
 Return one result per statement id. Keep "reason" under 200 characters."""
 
@@ -628,7 +636,6 @@ async def verify_statements(
     """Mark each statement verified (``supported_by``) or rejected (``rejected_reason``)."""
 
     by_id = {source.source_id: source for source in sources if source.usable}
-    needed = required_confirmations(len(by_id))
     pending: list[Statement] = []
     for statement in statements:
         cited = [source_id for source_id in statement.cited if source_id in by_id]
@@ -636,6 +643,10 @@ async def verify_statements(
             statement.rejected_reason = "No source was cited for it."
         else:
             statement.cited = cited
+            if not numbers_confirmed(statement.text, [by_id[source_id].text for source_id in cited]):
+                statement.rejected_reason = "A number in it does not appear in the cited sources."
+                continue
+            statement.supported_by = cited
             pending.append(statement)
 
     verdicts: dict[str, Mapping[str, Any]] = {}
@@ -652,26 +663,16 @@ async def verify_statements(
     for statement in pending:
         result = verdicts.get(statement.statement_id)
         if result is None:
-            statement.rejected_reason = "The fact check did not return a result for it."
             continue
         verdict = str(result.get("verdict") or "").strip().lower()
         reason = _clip(result.get("reason"), 200)
-        if verdict == "contradicted":
-            statement.rejected_reason = "The sources disagree" + (f": {reason}" if reason else ".")
-            continue
-        if verdict != "supported":
-            statement.rejected_reason = "Not stated by the sources" + (f": {reason}" if reason else ".")
-            continue
-        supported = [source_id for source_id in _source_ids(result.get("sources")) if source_id in by_id]
-        if len(supported) < needed:
-            statement.rejected_reason = (
-                f"Confirmed by {len(supported)} source(s); {needed} are required."
-            )
-            continue
-        if not numbers_confirmed(statement.text, [by_id[source_id].text for source_id in supported]):
-            statement.rejected_reason = "A number in it does not appear in the confirming sources."
-            continue
-        statement.supported_by = supported
+        conflicting = [source_id for source_id in _source_ids(result.get("sources")) if source_id in by_id]
+        if verdict == "contradicted" and len(conflicting) >= 2 and reason:
+            statement.rejected_reason = f"The sources disagree: {reason}"
+            statement.supported_by = []
+        elif verdict == "unsupported" and reason:
+            statement.rejected_reason = f"Not stated by the cited sources: {reason}"
+            statement.supported_by = []
 
 
 # --------------------------------------------------------------------------- #
@@ -924,7 +925,8 @@ async def run_assistant(
         built = build_sections(draft, usable)
         if not built:
             raise AssistantError(
-                "None of the drafted statements could be verified against the sources, so the page was not changed."
+                "None of the drafted statements had usable citations without conflicts or unsupported numbers, "
+                "so the page was not changed."
             )
 
         placed = await place_images(draft, built, usable, max_images())
@@ -950,7 +952,13 @@ async def run_assistant(
         await repo.finish_run(run_id, status="failed", model=llm.get("model"), error=str(exc), report=report,
                               sources_read=sum(1 for s in report["sources"] if s["status"] == "read"))
     except Exception as exc:  # noqa: BLE001 - recorded on the run for the admin
-        log_error("Marketing assistant run failed", run_id=run_id, page_id=page_id, error=str(exc))
+        # Record locations only: source text, credentials and local variable
+        # values do not belong in a user-facing failure report.
+        report["failure_trace"] = [
+            {"file": frame.filename.rsplit("/", 1)[-1], "line": frame.lineno, "function": frame.name}
+            for frame in traceback.extract_tb(exc.__traceback__)
+        ]
+        log_error("Marketing assistant run failed", exc=exc, run_id=run_id, page_id=page_id)
         await repo.finish_run(
             run_id, status="failed", model=llm.get("model"),
             error=f"The run failed: {type(exc).__name__}: {exc}"[:512], report=report,

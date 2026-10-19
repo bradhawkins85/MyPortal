@@ -18,9 +18,9 @@
       <div>
         <h2 class="card__title">Source websites</h2>
         <p class="card__subtitle">
-          The assistant only uses information from these websites. Every statement it writes must be confirmed by
-          {% if assistant_min_sources_per_claim > 1 %}at least {{ assistant_min_sources_per_claim }} of them{% else %}at least one of them{% endif %},
-          and images are only taken from these pages. Up to {{ assistant_max_sources }} websites are read per run.
+          The assistant uses these websites as the source of truth. One website is enough; conflicting
+          claims are left out while consistent information is kept. Images are only taken from these pages.
+          Up to {{ assistant_max_sources }} websites are read per run.
         </p>
       </div>
     </header>
@@ -127,7 +127,7 @@
     <header class="card__header card__header--stacked">
       <div>
         <h2 class="card__title">Runs</h2>
-        <p class="card__subtitle">What each run read, wrote and left out because it could not be verified.</p>
+        <p class="card__subtitle">What each run read, wrote and left out, with the reasons.</p>
       </div>
     </header>
     {% for run in assistant_runs %}
@@ -157,12 +157,22 @@
         {% if run.status == 'succeeded' %}
           <p class="text-muted">
             Read {{ run.sources_read }} website(s); wrote {{ run.sections_written }} section(s) with
-            {{ run.images_used }} image(s) from {{ run.claims_verified }} verified statement(s);
-            left out {{ run.claims_rejected }} item(s) that could not be verified.
+            {{ run.images_used }} image(s) from {{ run.claims_verified }} accepted statement(s);
+            left out {{ run.claims_rejected }} item(s); see the reasons below.
           </p>
         {% endif %}
         {% if run.instructions %}<p class="text-muted">Brief: {{ run.instructions }}</p>{% endif %}
         {% set report = run.report or {} %}
+        {% if report.failure_trace %}
+          <details>
+            <summary>Failure details</summary>
+            <ul>
+              {% for frame in report.failure_trace %}
+                <li><code>{{ frame.file }}:{{ frame.line }} in {{ frame.function }}</code></li>
+              {% endfor %}
+            </ul>
+          </details>
+        {% endif %}
         {% if report.warnings %}
           <ul>{% for warning in report.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
         {% endif %}
@@ -181,7 +191,7 @@
         {% endif %}
         {% if report.rejected %}
           <details>
-            <summary>Left out — could not be verified ({{ report.rejected | length }})</summary>
+            <summary>Left out — review reasons ({{ report.rejected | length }})</summary>
             <ul>
               {% for item in report.rejected %}
                 <li><strong>{{ item.location }}:</strong> {{ item.text }} <span class="text-muted">— {{ item.reason }}</span></li>

@@ -2,8 +2,9 @@
 
 The Marketing Assistant writes marketing pages for you from websites you choose, so you don't have
 to copy vendor information into pages by hand. It only uses what those websites say: every
-statement is checked against them before it is used, and anything it cannot verify is left out and
-listed for you to review. Pages get a mix of text and images taken from the same websites.
+supplied website is treated as a credible source by default. One page is enough; the assistant does
+not require independent confirmation. Conflicting claims are left out while consistent information
+is kept. Pages get a mix of text and images taken from the same websites.
 
 Anyone who can manage marketing pages (`marketing.access`) can use it.
 
@@ -36,18 +37,20 @@ Each run:
 1. Reads every listed website (up to `MARKETING_ASSISTANT_MAX_SOURCES`, 10 by default). Only public
    addresses can be read; private, local and cloud metadata addresses are refused on every redirect.
 2. Drafts the page as short statements, each naming the websites it came from.
-3. Cross-checks every statement in a separate fact-checking pass. A statement is used only when:
-   - at least `MARKETING_ASSISTANT_MIN_SOURCES_PER_CLAIM` of the websites state it (1 by default;
-     raise it to require corroboration from several websites — when fewer websites could be read,
-     all of them must confirm it),
-   - no website contradicts it, and
-   - every number in it (prices, percentages, dates, counts) appears in a confirming website.
-4. Builds the sections only from verified statements and lists the websites each section relied on
+3. Checks for explicit disagreements between the supplied pages about the same product, plan,
+   time period and conditions. Only the disputed claims are removed; differences between products
+   or plans are not conflicts. An uncertain or missing checker verdict does not exclude cited content.
+   The assistant still rejects missing or unreadable citations, invented details identified by the
+   checker, and numbers absent from the cited pages.
+4. Builds sections from the accepted statements and lists the websites each section relied on
    under **Sources** at the bottom of the public page.
 
-The run report under **Runs** shows which websites were read (and why any failed) and every
-statement that was **left out**, with the reason, so you can see what the assistant could not
-verify.
+The run report under **Runs** shows which websites were read (and why any failed), plus every
+statement that was **left out**, with its specific reason.
+
+If a run fails unexpectedly, open **Failure details** in its report. It lists the file, function and
+line numbers so the failing call can be identified without server log access. Source text,
+credentials and local variable values are not included.
 
 ## Images
 
@@ -74,7 +77,7 @@ touched.
 | `MARKETING_ASSISTANT_LLM_API_KEY` | *(empty)* | API key, when the endpoint needs one. |
 | `MARKETING_ASSISTANT_MAX_SOURCES` | `10` | Most websites read per run (1-25). |
 | `MARKETING_ASSISTANT_MAX_IMAGES` | `6` | Most images placed on a page (0-12). |
-| `MARKETING_ASSISTANT_MIN_SOURCES_PER_CLAIM` | `1` | Websites that must confirm each statement (1-5). |
+| `MARKETING_ASSISTANT_MIN_SOURCES_PER_CLAIM` | `1` | Legacy setting, accepted for compatibility but ignored. One supplied website is sufficient. |
 
 Leave the three LLM settings empty to use the AI troubleshooter's model (`TROUBLESHOOT_LLM_*`, which
 itself falls back to `MATRIXBOT_AI_OLLAMA_*`). A model with a large context window gives the best

@@ -98,7 +98,15 @@ def test_llm_config_falls_back_to_troubleshooter(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_source_urls_must_be_public_http():
+async def test_source_urls_must_be_public_http(monkeypatch):
+    from app.services import outbound_url_guard
+
+    monkeypatch.setattr(outbound_url_guard, "_resolve", lambda host: ["127.0.0.1"])
+
+    async def validate(url, **kwargs):
+        return outbound_url_guard.validate_outbound_url(url, **kwargs)
+
+    monkeypatch.setattr(assistant, "validate_outbound_url_async", validate)
     for bad in ("ftp://example.com/file", "https://user:pw@example.com/", "http://127.0.0.1/admin",
                 "http://169.254.169.254/latest/meta-data", "not a url"):
         with pytest.raises(ValueError):
@@ -194,24 +202,25 @@ def _verdicts(*results: dict[str, Any]):
 
 
 @pytest.mark.anyio
-async def test_verify_rejects_unsupported_contradicted_and_uncited(monkeypatch):
+async def test_verify_accepts_cited_content_without_independent_confirmation(monkeypatch):
     sources = [
         _source("S1", "Backups run every 15 minutes. Files restore in under 5 minutes."),
         _source("S2", "Restores take under 5 minutes. Rated highly by customers."),
     ]
     draft = assistant.parse_draft(json.dumps(DRAFT))
     statements = draft.statements()
+    statements[3].text = "Rated highly by customers."
     monkeypatch.setattr(assistant, "_chat", _verdicts(
         {"id": "C1", "verdict": "supported", "sources": ["S1"]},
         {"id": "C2", "verdict": "supported", "sources": ["S1"]},
         {"id": "C3", "verdict": "supported", "sources": ["S1", "S2"]},
-        {"id": "C4", "verdict": "unsupported", "sources": [], "reason": "Opinion"},
+        {"id": "C4", "verdict": "uncertain", "sources": [], "reason": "Cannot independently verify"},
     ))
     await assistant.verify_statements({"model": "m"}, statements, sources)
     by_id = {s.statement_id: s for s in statements}
     assert by_id["C1"].verified and by_id["C2"].verified and by_id["C3"].verified
     assert by_id["C3"].supported_by == ["S1", "S2"]
-    assert not by_id["C4"].verified and "Opinion" in by_id["C4"].rejected_reason
+    assert by_id["C4"].verified and by_id["C4"].supported_by == ["S2"]
     assert by_id["C5"].rejected_reason == "No source was cited for it."  # S9 does not exist
 
 
@@ -227,17 +236,16 @@ async def test_verify_checks_numbers_contradictions_and_required_sources(monkeyp
     monkeypatch.setattr(assistant, "_chat", _verdicts(
         {"id": "C1", "verdict": "supported", "sources": ["S1", "S2"]},
         {"id": "C2", "verdict": "supported", "sources": ["S1"]},
-        {"id": "C3", "verdict": "contradicted", "sources": ["S1"], "reason": "S2 says $109"},
+        {"id": "C3", "verdict": "contradicted", "sources": ["S1", "S2"], "reason": "S1 says $99; S2 says $109"},
     ))
     settings = Settings()
     settings.marketing_assistant_min_sources_per_claim = 2
     monkeypatch.setattr(assistant, "get_settings", lambda: settings)
     await assistant.verify_statements({"model": "m"}, statements, sources)
     assert "number" in statements[0].rejected_reason
-    assert statements[1].rejected_reason == "Confirmed by 1 source(s); 2 are required."
+    assert statements[1].verified and statements[1].supported_by == ["S1"]
     assert statements[2].rejected_reason.startswith("The sources disagree")
-    assert statements[3].rejected_reason == "The fact check did not return a result for it."
-    assert not any(statement.verified for statement in statements)
+    assert statements[3].verified and statements[3].supported_by == ["S1"]
 
 
 def test_required_confirmations_never_exceed_usable_sources(monkeypatch):
@@ -245,7 +253,7 @@ def test_required_confirmations_never_exceed_usable_sources(monkeypatch):
     settings.marketing_assistant_min_sources_per_claim = 3
     monkeypatch.setattr(assistant, "get_settings", lambda: settings)
     assert assistant.required_confirmations(1) == 1
-    assert assistant.required_confirmations(5) == 3
+    assert assistant.required_confirmations(5) == 1
 
 
 def test_sections_contain_only_verified_statements():
@@ -335,13 +343,14 @@ async def test_run_writes_verified_sections_with_images(monkeypatch, store):
     calls: list[str] = []
 
     async def fake_chat(llm, messages):
-        if "strict fact checker" in messages[0]["content"]:
+        if "source conflict checker" in messages[0]["content"]:
             calls.append("verify")
             return json.dumps({"results": [
                 {"id": "C1", "verdict": "supported", "sources": ["S1"]},
                 {"id": "C2", "verdict": "supported", "sources": ["S1"]},
                 {"id": "C3", "verdict": "supported", "sources": ["S1", "S2"]},
-                {"id": "C4", "verdict": "unsupported", "sources": []},
+                {"id": "C4", "verdict": "contradicted", "sources": ["S1", "S2"],
+                 "reason": "The pages give conflicting product rankings."},
             ]})
         calls.append("draft")
         assert "CURRENT_ARTICLE" in messages[1]["content"]  # refresh shows the old sections
@@ -380,23 +389,30 @@ async def test_run_writes_verified_sections_with_images(monkeypatch, store):
 
 
 @pytest.mark.anyio
-async def test_run_leaves_page_alone_when_nothing_verifies(monkeypatch, store):
+async def test_run_uses_cited_content_when_checker_returns_no_verdict(monkeypatch, store):
     async def read_sources(entries):
-        return [_source("S1", "Some text", url="https://s1.example.com/page")]
+        return [
+            _source("S1", "Backups run every 15 minutes. Restores take under 5 minutes.",
+                    url="https://s1.example.com/page"),
+            _source("S2", "Managed backup for small business.", url="https://s2.example.com/page"),
+        ]
 
     async def fake_chat(llm, messages):
-        if "strict fact checker" in messages[0]["content"]:
+        if "source conflict checker" in messages[0]["content"]:
             return json.dumps({"results": []})
-        return json.dumps(DRAFT)
+        draft = json.loads(json.dumps(DRAFT))
+        draft["sections"][0]["paragraphs"][0][1]["text"] = "Managed backup for small business."
+        return json.dumps(draft)
 
     monkeypatch.setattr(assistant, "read_sources", read_sources)
     monkeypatch.setattr(assistant, "_chat", fake_chat)
 
     await assistant.run_assistant(4, 7, mode="generate", instructions=None, update_intro=True)
 
-    assert store.finished["status"] == "failed"
-    assert "could be verified" in store.finished["error"]
-    assert not store.created and not store.deleted_assistant and store.page_text is None
+    assert store.finished["status"] == "succeeded"
+    assert store.created and store.deleted_assistant
+    assert store.created[0]["source_urls"] == ["https://s1.example.com/page", "https://s2.example.com/page"]
+    assert store.finished["claims_verified"] == 4
 
 
 @pytest.mark.anyio
@@ -411,3 +427,85 @@ async def test_run_fails_when_no_source_can_be_read(monkeypatch, store):
     assert store.finished["status"] == "failed"
     assert store.finished["error"] == "None of the source websites could be read."
     assert store.finished["report"]["sources"][0]["error"] == "The website returned HTTP 404"
+
+
+@pytest.mark.anyio
+async def test_conflicts_require_two_readable_sources_and_an_explanation(monkeypatch):
+    sources = [_source("S1", "Support is included."), _source("S2", "Support is included.")]
+    statements = [assistant.Statement(f"C{i}", "Support is included.", ["S1"], "Support")
+                  for i in range(1, 5)]
+    monkeypatch.setattr(assistant, "_chat", _verdicts(
+        {"id": "C1", "verdict": "contradicted", "sources": ["S1"], "reason": "Unsure"},
+        {"id": "C2", "verdict": "contradicted", "sources": ["S1", "S9"], "reason": "Unsure"},
+        {"id": "C3", "verdict": "contradicted", "sources": ["S1", "S2"], "reason": ""},
+        {"id": "C4", "verdict": "unsupported", "sources": [], "reason": "The draft adds free support."},
+    ))
+    await assistant.verify_statements({}, statements, sources)
+    assert all(statement.verified for statement in statements[:3])
+    assert statements[3].rejected_reason == "Not stated by the cited sources: The draft adds free support."
+
+
+@pytest.mark.anyio
+async def test_run_reads_http_sources_and_model_responses(monkeypatch, store):
+    import httpx
+
+    requests = []
+    usage = []
+
+    def respond(request):
+        requests.append(request)
+        if request.url.path == "/v1/chat/completions":
+            body = json.loads(request.content)
+            if "source conflict checker" in body["messages"][0]["content"]:
+                content = {"results": []}
+            else:
+                content = {
+                    "sections": [{"title": "Backup", "paragraphs": [[
+                        {"text": "Backups run every 15 minutes.", "sources": ["S1"]}
+                    ]]}]
+                }
+            return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(content)}}]})
+        return httpx.Response(200, text="<title>Backup</title><p>Backups run every 15 minutes.</p>",
+                              headers={"content-type": "text/html"})
+
+    async def validate(url, **kwargs):
+        return url
+
+    async def record_usage(**kwargs):
+        usage.append(kwargs)
+
+    transport = httpx.MockTransport(respond)
+    monkeypatch.setattr(assistant, "monitored_client",
+                        lambda cls, **kwargs: httpx.AsyncClient(transport=transport, **kwargs))
+    monkeypatch.setattr(assistant, "validate_outbound_url_async", validate)
+    monkeypatch.setattr(assistant, "redirect_guard_hooks", lambda **kwargs: {})
+    monkeypatch.setattr(assistant.llm_usage, "record_usage", record_usage)
+    monkeypatch.setattr(assistant, "max_images", lambda: 0)
+
+    await assistant.run_assistant(8, 7, mode="generate", instructions=None, update_intro=False)
+
+    assert store.finished["status"] == "succeeded"
+    assert store.created[0]["content_text"] == "Backups run every 15 minutes."
+    assert len(requests) == 4  # two supplied pages, draft, conflict check
+    assert len(usage) == 2 and all(event["status"] == "succeeded" for event in usage)
+
+
+@pytest.mark.anyio
+async def test_unexpected_failure_records_locations_without_local_values(monkeypatch, store):
+    logged = []
+
+    async def read_sources(entries):
+        secret_value = "private-source-text"
+        raise TypeError("'str' object is not callable")
+
+    monkeypatch.setattr(assistant, "read_sources", read_sources)
+    monkeypatch.setattr(assistant, "log_error", lambda message, **kwargs: logged.append(kwargs))
+    await assistant.run_assistant(9, 7, mode="generate", instructions=None, update_intro=False)
+
+    assert store.finished["status"] == "failed"
+    assert store.finished["error"] == "The run failed: TypeError: 'str' object is not callable"
+    frames = store.finished["report"]["failure_trace"]
+    assert frames[-1]["function"] == "read_sources"
+    assert all(set(frame) == {"file", "line", "function"} for frame in frames)
+    assert "private-source-text" not in json.dumps(frames)
+    assert isinstance(logged[0]["exc"], TypeError)
