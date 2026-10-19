@@ -5946,10 +5946,6 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
   word-break: break-word;
 }
 
-.defender-detections-section {
-  margin-top: calc(var(--space-gap-roomy) * 1.5);
-}
-
 .notification-preference__hint {
   font-size: 0.75rem;
   margin-top: 0.25rem;
@@ -20781,10 +20777,6 @@ progress {
     --hf-line-strong: rgba(226, 232, 240, 0.6);
     --hf-muted: #cbd5e1;
   }
-}
-
-.defender-commands-section {
-  margin-top: calc(var(--space-gap-roomy) * 1.5);
 }
 
 .defender-policy-issues {

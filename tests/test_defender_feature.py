@@ -289,13 +289,11 @@ def test_defender_ui_exposes_management_workflows():
     assert "Domain:" in template
     assert "Private:" in template
     assert "Public:" in template
-    assert 'data-defender-modal-open": "protection-policy-modal"' in template
-    assert 'data-defender-modal-open": "ticket-actions-modal"' in template
-    assert 'data-defender-modal-open": "exclusions-modal"' in template
-    assert 'data-defender-modal-open": "exclusion-lists-modal"' in template
-    assert 'id="exclusion-lists-modal"' in template
+    # Policy, ticket actions and exclusions are sections of the settings workspace, not modals.
+    for key in ("endpoints", "detections", "actions", "policy", "tickets", "exclusions", "lists"):
+        assert f'data-ae-section="{key}"' in template, key
+    assert "data-defender-modal-open" not in template
     assert "Apply to companies" in template
-    assert 'class="card defender-detections-section"' in template
     assert 'data-label="Infected files"' in template
     assert 'data-detection-exclude-value="{{ file }}"' in template
     assert 'data-detection-device-id="{{ d.tray_device_id }}"' in template

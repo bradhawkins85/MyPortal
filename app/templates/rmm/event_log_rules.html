@@ -8,14 +8,59 @@
   {{ page_header_actions(([{"label": "Add rule", "type": "link", "variant": "primary", "href": "/rmm/event-logs/rules?new=1#rmm-event-log-rule-form"}] if can_edit else []) + [{"label": "Event logs", "type": "link", "href": "/rmm/event-logs"}], menu_id="rmm-event-log-rule-actions") }}
 {% endblock %}
 {% block content %}
-<section class="rmm-page" data-rmm-event-log-rules>
+{% from "macros/counters.html" import counter_strip %}
+{% set rules = rules or [] %}
+{% set enabled_rules = rules | selectattr("is_enabled") | list | length %}
+{% set action_names = {"drop": "Drop", "run_script": "Run a script", "schedule_script": "Schedule a script", "create_ticket": "Create a ticket"} %}
+<div class="settings-workspace rmm-page ce-workspace" data-rmm-event-log-rules data-ae-workspace data-ae-storage-key="myportal:rmm-event-log-rules:active-section" data-ae-default="rules"{% if run_now %} data-ae-initial="run-now"{% elif editing %} data-ae-initial="editor" data-ae-form="rmm-event-rule-settings-form"{% endif %}>
+  <section class="ce-overview" aria-label="Event log rules at a glance">
+    <div class="ce-overview__identity">
+      <div class="ce-overview__summary">
+        <ul class="scf-item__chips ce-overview__chips" aria-label="Rules summary">
+          {% if company and company.name %}<li class="scf-chip">{{ company.name }}</li>{% endif %}
+          <li class="scf-chip">{{ enabled_rules }} of {{ rules | length }} rule{{ 's' if rules | length != 1 }} on</li>
+        </ul>
+      </div>
+    </div>
+    {% set rule_counters = [{"label": "Rules", "value": rules | length, "variant": "neutral", "href": "#rmm-event-log-rules-list"}] %}
+    {% for key, label in action_names.items() %}{% set _ = rule_counters.append({"label": label, "value": rules | selectattr("action", "equalto", key) | list | length, "variant": "info", "href": "#rmm-event-log-rules-list"}) %}{% endfor %}
+    {{ counter_strip(rule_counters, class="ce-overview__stats") }}
+  </section>
+
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Event log rule sections" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="rmm-rules-nav-search">Find a rule setting</label>
+        <input type="search" id="rmm-rules-nav-search" class="form-input" placeholder="Find a setting…" autocomplete="off" data-ae-search>
+      </div>
+      {% set rule_items = [
+        ("rules", "rmm-event-log-rules-list", "All rules", rules | length, true),
+        ("run-now", "rmm-event-log-run-now", "Run now", "", run_now),
+        ("editor", "rmm-event-log-rule-form", ("Edit rule" if editing and editing.id else "New rule"), "", editing),
+      ] | selectattr(4) | list %}
+      <div class="ce-nav__group" data-ae-nav-group>
+        <p class="ce-nav__group-title" id="rmm-rules-nav-group">Rules</p>
+        <ul class="ce-nav__list" aria-labelledby="rmm-rules-nav-group">
+          {% for key, target, label, count, _visible in rule_items %}
+            <li><a class="ce-nav__link" href="#{{ target }}" data-ae-link="{{ key }}">
+              <span class="ce-nav__label">{{ label }}</span>
+              <span class="ce-nav__dirty" data-ae-dirty-dot hidden><span class="visually-hidden">Unsaved changes</span></span>
+              {% if count != "" %}<span class="ce-nav__count">{{ count }}</span>{% endif %}
+            </a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No settings match your search.</p>
+    </nav>
+
+    <div class="ce-panels">
   {% if run_now %}{% set target = run_now.rule %}
-  <section class="card card--panel" id="rmm-event-log-run-now" aria-labelledby="rmm-event-log-run-now-heading">
-    <header class="card__header card__header--stacked"><div>
+  <section class="card card--panel ce-section" id="rmm-event-log-run-now" data-ae-section="run-now" aria-labelledby="rmm-event-log-run-now-heading">
+    <header class="ce-section__header"><div class="ce-section__heading">
       <h2 class="card__title" id="rmm-event-log-run-now-heading">Run {{ target.name }} now</h2>
       <p class="card__subtitle">{{ target.scope_label }}: {% for text in target.conditions_text %}{{ text }}{% if not loop.last %} and {% endif %}{% endfor %}.</p>
     </div></header>
-    <div class="card__body">
+    <div class="ce-section__body">
       {% if not run_now.available %}
       <p>The event log database is not available, so the rule cannot run now.</p>
       <div class="form-actions"><a class="button button--ghost" href="{{ '/assets/' ~ run_now.asset_id ~ '#event-log-rules' if run_now.asset_id else '/rmm/event-logs/rules' }}">Back</a></div>
@@ -37,12 +82,12 @@
   </section>
   {% endif %}
 
-  <section class="card card--panel" aria-labelledby="rmm-event-log-rules-heading">
-    <header class="card__header card__header--stacked"><div>
+  <section class="card card--panel ce-section" id="rmm-event-log-rules-list" data-ae-section="rules" aria-labelledby="rmm-event-log-rules-heading">
+    <header class="ce-section__header"><div class="ce-section__heading">
       <h2 class="card__title" id="rmm-event-log-rules-heading">Rules</h2>
       <p class="card__subtitle">Rules check each event as a device sends it. Drop rules stop matching events being stored; use a drop rule's <strong>Run now</strong> to delete the matching events already stored. Script rules run an RMM script on the device that sent the event, at most once per cooldown on each device. Schedule rules run a script on the device later, after a delay or at a time of day. Ticket rules raise a ticket for the device's company with the device linked; while that ticket is not closed, new matches on the device are added to it as internal updates. Every condition of a rule must match.</p>
     </div></header>
-    <div class="card__body">
+    <div class="ce-section__body">
       {% if rules %}
       <div class="table-wrapper rmm-rule-table">
         <table class="table" data-table data-table-id="rmm-event-log-rules">
@@ -83,12 +128,12 @@
   </section>
 
   {% if editing %}
-  <section class="card card--panel" id="rmm-event-log-rule-form" aria-labelledby="rmm-event-log-rule-form-heading">
-    <header class="card__header card__header--stacked"><div>
+  <section class="card card--panel ce-section" id="rmm-event-log-rule-form" data-ae-section="editor" aria-labelledby="rmm-event-log-rule-form-heading">
+    <header class="ce-section__header"><div class="ce-section__heading">
       <h2 class="card__title" id="rmm-event-log-rule-form-heading">{{ "Edit " ~ editing.name if editing.id else "Add a rule" }}</h2>
       <p class="card__subtitle">Text comparisons ignore case. For “is one of”, separate values with commas. Levels are Critical, Error, Warning, Information and Verbose; “is at least” matches that level and anything more severe.</p>
     </div></header>
-    <form method="post" action="/rmm/event-logs/rules{% if editing.id %}/{{ editing.id }}{% endif %}" class="card__body form" data-rmm-event-rule-form>
+    <form method="post" action="/rmm/event-logs/rules{% if editing.id %}/{{ editing.id }}{% endif %}" class="ce-section__body form" id="rmm-event-rule-settings-form" data-rmm-event-rule-form>
       {% include "partials/csrf.html" %}
       {% if errors %}
       <div class="alert alert--error" role="alert"><ul>{% for message in errors.values() %}<li>{{ message }}</li>{% endfor %}</ul></div>
@@ -234,10 +279,22 @@
     </form>
   </section>
   {% endif %}
-</section>
+    </div>
+  </div>
+
+  {% if editing and not run_now %}
+  <div class="ce-savebar" data-ae-savebar role="region" aria-label="Unsaved rule changes" hidden>
+    <p class="ce-savebar__text" aria-live="polite"><strong data-ae-savebar-count>Unsaved changes</strong> <span class="text-muted">in <span data-ae-savebar-sections></span></span></p>
+    <span class="ae-savebar__spacer" aria-hidden="true"></span>
+    <button type="button" class="button button--ghost" data-ae-discard>Discard</button>
+    <button type="submit" class="button button--primary" form="rmm-event-rule-settings-form">Save rule</button>
+  </div>
+  {% endif %}
+</div>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_event_rule_targeting.js') }}" defer></script>
 {% endblock %}

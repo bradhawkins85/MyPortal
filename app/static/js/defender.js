@@ -8,25 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('[data-defender-enable]')?.addEventListener('click', async () => {
     try { await send('/api/defender/enabled', { method: 'POST', body: JSON.stringify({ enabled: true }) }); location.reload(); } catch (error) { alert(error.message); }
   });
-  const closeModal = (modal) => {
-    if (!modal) return;
-    modal.hidden = true;
-    modal.setAttribute('aria-hidden', 'true');
-  };
-  const openModal = (modal, preferredFocus) => {
-    if (!modal) return;
-    modal.hidden = false;
-    modal.setAttribute('aria-hidden', 'false');
-    (preferredFocus || modal.querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])'))?.focus();
-  };
   const looksLikeRegistryPath = (value) => /^(HKLM|HKCU|HKCR|HKU|HKCC|HKEY_)/i.test((value || '').trim());
-  document.querySelectorAll('[data-defender-modal-open]').forEach((button) => button.addEventListener('click', () => {
-    openModal(document.getElementById(button.dataset.defenderModalOpen));
-  }));
-  document.querySelectorAll('[data-defender-modal-close]').forEach((button) => button.addEventListener('click', () => closeModal(button.closest('.modal'))));
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeModal(document.querySelector('.modal:not([hidden])'));
-  });
   document.querySelector('#defender-exclusion-form')?.addEventListener('submit', async (event) => {
     event.preventDefault(); const form = event.currentTarget; const data = Object.fromEntries(new FormData(form));
     data.tray_device_id = data.tray_device_id ? Number(data.tray_device_id) : null;
@@ -133,6 +115,14 @@ document.addEventListener('DOMContentLoaded', () => {
     exclusionForm.elements.tray_device_id.value = detectionDeviceId;
     exclusionForm.elements.exclusion_type.value = looksLikeRegistryPath(value) ? 'registry' : 'path';
     exclusionForm.elements.value.value = value;
-    openModal(document.getElementById('exclusions-modal'), exclusionForm.elements.value);
+    // Exclusions are a section of the settings workspace; its hash shows it,
+    // then the value field takes focus from the section heading.
+    const focusValue = () => exclusionForm.elements.value.focus();
+    if (window.location.hash === '#defender-exclusions') {
+      focusValue();
+    } else {
+      window.addEventListener('hashchange', () => window.setTimeout(focusValue, 0), { once: true });
+      window.location.hash = 'defender-exclusions';
+    }
   }));
 });
