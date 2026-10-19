@@ -140,4 +140,3 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int) -> in
         timeout_seconds=7200, expires_at=patch.utcnow() + timedelta(minutes=15), run_source='patch')
     rmm_scripts.notify_agent(int(agent['id']))
     return run_id
-
