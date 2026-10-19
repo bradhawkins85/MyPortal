@@ -12689,6 +12689,12 @@ a.service-card__ai-icon:hover {
   border-bottom-right-radius: 0;
 }
 
+.rmm-split__icon {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+}
+
 .rmm-split__more > summary {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;

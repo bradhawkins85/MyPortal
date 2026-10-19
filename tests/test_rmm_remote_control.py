@@ -272,6 +272,7 @@ def test_asset_menu_has_a_rustdesk_split_button_and_an_rmm_menu():
     html = template.render(providers=providers, run=True)
     # RustDesk: the button starts a remote desktop session, its menu all three kinds.
     assert 'class="button button--ghost button--small rmm-split__main" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote"' in html
+    assert 'src="/static/images/rustdesk.svg"' in html and 'aria-label="Start a RustDesk remote session for &lt;PC&gt;"' in html
     for mode in ("remote", "file_transfer", "terminal"):
         assert f'data-rmm-remote="rustdesk" data-rmm-remote-mode="{mode}"' in html
         assert f'data-rmm-remote="meshcentral" data-rmm-remote-mode="{mode}"' in html

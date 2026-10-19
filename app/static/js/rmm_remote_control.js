@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  // RMM actions beside each asset (rmm/_macros.html asset_menu): a RustDesk button
+  // RMM actions beside each asset (rmm/_macros.html asset_menu): a RustDesk icon button
   // with a menu for remote desktop, file transfer and terminal sessions, and an
   // "RMM" menu with every other action. Choosing a session runs the activation
   // script on the device, then opens the session for the technician as soon as
@@ -60,6 +60,14 @@
       main.className = 'button button--ghost button--small rmm-split__main';
       main.removeAttribute('role');
       main.title = 'Start a RustDesk remote session';
+      main.setAttribute('aria-label', 'Start a RustDesk remote session for ' + assetName);
+      const icon = document.createElement('img');
+      icon.className = 'rmm-split__icon';
+      icon.src = '/static/images/rustdesk.svg';
+      icon.alt = '';
+      icon.width = 16;
+      icon.height = 16;
+      main.replaceChildren(icon);
       split.append(main);
       const more = dropdown('', 'More RustDesk sessions for ' + assetName, 'RustDesk sessions for ' + assetName, 'rmm-split__more');
       MODES.forEach(function (entry) {
