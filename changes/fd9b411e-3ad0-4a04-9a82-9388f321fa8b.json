@@ -1,0 +1,7 @@
+{
+  "guid": "fd9b411e-3ad0-4a04-9a82-9388f321fa8b",
+  "occurred_at": "2026-10-19T00:00Z",
+  "change_type": "Improvement",
+  "summary": "RMM: the RustDesk session button now shows the RustDesk icon instead of text",
+  "content_hash": "a30d2dc5c93a91abbd26b765b2685563f6b39fe2df0f8be31c9ea877f2779613"
+}
