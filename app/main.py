@@ -8635,18 +8635,21 @@ async def admin_bulk_redistribute_scheduled_tasks(request: Request):
 # ---------------------------------------------------------------------------
 
 
-@app.get("/admin/tray/devices", response_class=HTMLResponse)
-async def admin_tray_devices_page(
-    request: Request,
-    search: str | None = None,
-    status: str | None = None,
-):
-    current_user, redirect = await _require_authenticated_user(request)
-    if redirect:
-        return redirect
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
-        return RedirectResponse(url="/", status_code=303)
+def _tray_workspace_redirect(
+    request: Request, section: str, rename: dict[str, str] | None = None
+) -> RedirectResponse:
+    """Send an old tray admin page URL to its section of the tray workspace."""
+    params = [((rename or {}).get(key, key), value) for key, value in request.query_params.multi_items()]
+    query = urlencode(params)
+    return RedirectResponse(
+        url="/admin/tray" + (f"?{query}" if query else "") + f"#{section}",
+        status_code=303,
+    )
 
+
+async def _tray_devices_context(
+    current_user: dict, search: str | None = None, status: str | None = None
+) -> dict[str, Any]:
     from app.repositories import tray as tray_repo
     from app.services import tray_installer as tray_installer_service
 
@@ -8673,8 +8676,7 @@ async def admin_tray_devices_page(
         if device.get("status") != "revoked"
         and _is_tray_agent_outdated(device.get("agent_version"), latest_tray_version)
     )
-    extra = {
-        "title": "Tray devices",
+    return {
         "devices": devices,
         "filters": {"search": search or "", "status": status or ""},
         "matrix_enabled": settings.matrix_enabled,
@@ -8684,7 +8686,51 @@ async def admin_tray_devices_page(
         "trmm_scripts_error": trmm_scripts_error,
         "selected_update_script_id": selected_update_script_id,
     }
-    return await _render_template("admin/tray/devices.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/tray", response_class=HTMLResponse)
+async def admin_tray_workspace_page(
+    request: Request,
+    search: str | None = None,
+    status: str | None = None,
+    new_token: str | None = None,
+    show_revoked_tokens: bool = False,
+    show_revoked_links: bool = False,
+):
+    """Tray settings workspace: every tray admin area as a section of one page."""
+    current_user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    is_super_admin = bool(current_user.get("is_super_admin"))
+    if not (is_super_admin or current_user.get("is_helpdesk_technician")):
+        return RedirectResponse(url="/", status_code=303)
+
+    tray: dict[str, Any] = {"devices": await _tray_devices_context(current_user, search, status)}
+    if is_super_admin:
+        (
+            tray["tokens"],
+            tray["links"],
+            tray["configurations"],
+            tray["questions"],
+            tray["versions"],
+            tray["diagnostics"],
+            tray["branding"],
+        ) = await asyncio.gather(
+            _tray_install_tokens_context(request, new_token=new_token, show_revoked=show_revoked_tokens),
+            _tray_deployment_links_context(request, show_revoked=show_revoked_links),
+            _tray_configurations_context(),
+            _tray_ticket_questions_context(request),
+            _tray_versions_context(request),
+            _tray_diagnostics_context(),
+            _tray_branding_context(),
+        )
+    extra = {"title": "Tray settings", "tray": tray}
+    return await _render_template("admin/tray/index.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/tray/devices", response_class=HTMLResponse)
+async def admin_tray_devices_page(request: Request):
+    return _tray_workspace_redirect(request, "devices")
 
 
 @app.post("/admin/tray/update-script", response_class=HTMLResponse)
@@ -8698,7 +8744,7 @@ async def admin_tray_save_update_script(request: Request):
     if not raw_script_id:
         await site_settings_repo.set_tray_update_trmm_script_id(None)
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             "Tray update Tactical RMM script selection cleared.",
             "success",
         )
@@ -8706,13 +8752,13 @@ async def admin_tray_save_update_script(request: Request):
         script_id = int(raw_script_id)
     except ValueError:
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             "Select a valid Tactical RMM script for tray updates.",
             "error",
         )
     await site_settings_repo.set_tray_update_trmm_script_id(script_id)
     return flash_redirect(
-        "/admin/tray/devices",
+        "/admin/tray#devices",
         "Tray update Tactical RMM script saved.",
         "success",
     )
@@ -8729,10 +8775,10 @@ async def admin_tray_update_device(device_id: int, request: Request):
 
     device = await tray_repo.get_device_by_id(device_id)
     if not device:
-        return flash_redirect("/admin/tray/devices", "Tray device not found.", "error")
+        return flash_redirect("/admin/tray#devices", "Tray device not found.", "error")
     if device.get("status") == "revoked":
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             "Revoked tray devices cannot receive update commands.",
             "error",
         )
@@ -8740,14 +8786,14 @@ async def admin_tray_update_device(device_id: int, request: Request):
     script_id = await site_settings_repo.get_tray_update_trmm_script_id()
     if not script_id:
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             "Select a Tactical RMM script before running tray updates.",
             "error",
         )
     asset_id = device.get("asset_id")
     if not asset_id:
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             "This tray device is not linked to an asset with a Tactical RMM agent ID.",
             "error",
         )
@@ -8755,7 +8801,7 @@ async def admin_tray_update_device(device_id: int, request: Request):
     tactical_agent_id = str((asset or {}).get("tactical_asset_id") or "").strip()
     if not tactical_agent_id:
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             "The linked asset is missing a Tactical RMM agent ID.",
             "error",
         )
@@ -8778,14 +8824,14 @@ async def admin_tray_update_device(device_id: int, request: Request):
     except Exception as exc:  # pragma: no cover - external integration availability
         await tray_repo.mark_command_delivered(command_id, error=str(exc))
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             f"Unable to start Tactical RMM update script: {exc}",
             "error",
         )
     payload["tactical_rmm_response"] = result.get("response")
     await tray_repo.mark_command_delivered(command_id)
     return flash_redirect(
-        "/admin/tray/devices",
+        "/admin/tray#devices",
         "Tactical RMM update script started for the tray device.",
         "success",
     )
@@ -8804,7 +8850,7 @@ async def admin_tray_bulk_update_outdated_devices(request: Request):
     script_id = await site_settings_repo.get_tray_update_trmm_script_id()
     if not script_id:
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             "Select a Tactical RMM script before running tray updates.",
             "error",
         )
@@ -8813,7 +8859,7 @@ async def admin_tray_bulk_update_outdated_devices(request: Request):
     latest_tray_version = tray_release.get("version") if isinstance(tray_release, dict) else None
     if not latest_tray_version:
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             "The latest tray app release is not loaded, so outdated devices cannot be determined.",
             "error",
         )
@@ -8827,7 +8873,7 @@ async def admin_tray_bulk_update_outdated_devices(request: Request):
     ]
     if not outdated_devices:
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             "No linked tray devices are outdated.",
             "info",
         )
@@ -8874,7 +8920,7 @@ async def admin_tray_bulk_update_outdated_devices(request: Request):
     if skipped_count or failed_count:
         message += f" Skipped {skipped_count}; failed {failed_count}."
     category = "success" if started_count else "warning"
-    return flash_redirect("/admin/tray/devices", message, category)
+    return flash_redirect("/admin/tray#devices", message, category)
 
 
 @app.post("/admin/tray/devices/{device_id}/revoke", response_class=HTMLResponse)
@@ -8885,7 +8931,7 @@ async def admin_tray_revoke_device(device_id: int, request: Request):
     from app.repositories import tray as tray_repo
 
     await tray_repo.revoke_device(device_id)
-    return RedirectResponse(url="/admin/tray/devices?status=", status_code=303)
+    return RedirectResponse(url="/admin/tray#devices", status_code=303)
 
 
 @app.post("/admin/tray/devices/{device_id}/reactivate", response_class=HTMLResponse)
@@ -8904,7 +8950,7 @@ async def admin_tray_reactivate_device(device_id: int, request: Request):
             detail="Cannot reactivate device: device is not in revoked state",
         )
     await tray_repo.reactivate_device(device_id)
-    return RedirectResponse(url="/admin/tray/devices?status=", status_code=303)
+    return RedirectResponse(url="/admin/tray#devices", status_code=303)
 
 
 @app.post("/admin/tray/devices/{device_id}/delete", response_class=HTMLResponse)
@@ -8916,16 +8962,16 @@ async def admin_tray_delete_device(device_id: int, request: Request):
 
     device = await tray_repo.get_device_by_id(device_id)
     if not device:
-        return flash_redirect("/admin/tray/devices", "Tray device not found.", "error")
+        return flash_redirect("/admin/tray#devices", "Tray device not found.", "error")
     if device.get("status") != "revoked":
         return flash_redirect(
-            "/admin/tray/devices",
+            "/admin/tray#devices",
             "Only revoked tray devices can be deleted.",
             "error",
         )
     await tray_repo.delete_device(device_id)
     return flash_redirect(
-        "/admin/tray/devices",
+        "/admin/tray#devices",
         "Deleted revoked tray device.",
         "success",
     )
@@ -8940,25 +8986,18 @@ async def admin_tray_bulk_delete_revoked_devices(request: Request):
 
     deleted_count = await tray_repo.delete_revoked_devices()
     if deleted_count <= 0:
-        return flash_redirect("/admin/tray/devices", "No revoked tray devices to delete.", "info")
+        return flash_redirect("/admin/tray#devices", "No revoked tray devices to delete.", "info")
     suffix = "device" if deleted_count == 1 else "devices"
     return flash_redirect(
-        "/admin/tray/devices",
+        "/admin/tray#devices",
         f"Deleted {deleted_count} revoked tray {suffix}.",
         "success",
     )
 
 
-@app.get("/admin/tray/install-tokens", response_class=HTMLResponse)
-async def admin_tray_install_tokens_page(
-    request: Request,
-    new_token: str | None = None,
-    show_revoked: bool = False,
-):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
+async def _tray_install_tokens_context(
+    request: Request, *, new_token: str | None = None, show_revoked: bool = False
+) -> dict[str, Any]:
     from app.repositories import tray as tray_repo
     from app.repositories import companies as companies_repo
     from app.services import tray as tray_service
@@ -8976,8 +9015,7 @@ async def admin_tray_install_tokens_page(
         if settings.portal_url
         else str(request.base_url.replace(scheme="https")).rstrip("/")
     )
-    extra = {
-        "title": "Tray install tokens",
+    return {
         "tokens": tokens,
         "show_revoked": show_revoked,
         "hidden_revoked_count": hidden_revoked_count,
@@ -8987,9 +9025,11 @@ async def admin_tray_install_tokens_page(
         "portal_url": portal_url,
         "trmm_token_field_name": tray_service.trmm_client_token_field_name(),
     }
-    return await _render_template(
-        "admin/tray/install_tokens.html", request, current_user, extra=extra
-    )
+
+
+@app.get("/admin/tray/install-tokens", response_class=HTMLResponse)
+async def admin_tray_install_tokens_page(request: Request):
+    return _tray_workspace_redirect(request, "install-tokens", {"show_revoked": "show_revoked_tokens"})
 
 
 @app.post("/admin/tray/install-tokens", response_class=HTMLResponse)
@@ -9016,19 +9056,13 @@ async def admin_tray_create_install_token(request: Request):
     # Redirect with the raw token in the query string so the admin sees it once.
     # The token cannot be reconstructed later — only the prefix is displayed.
     return RedirectResponse(
-        url=f"/admin/tray/install-tokens?new_token={raw_token}", status_code=303
+        url=f"/admin/tray?new_token={raw_token}#install-tokens", status_code=303
     )
 
 
-@app.get("/admin/tray/deployment-links", response_class=HTMLResponse)
-async def admin_tray_deployment_links_page(
-    request: Request,
-    show_revoked: bool = False,
-):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
+async def _tray_deployment_links_context(
+    request: Request, *, show_revoked: bool = False
+) -> dict[str, Any]:
     from app.repositories import tray as tray_repo
     from app.repositories import companies as companies_repo
     from app.services import tray_deployment as tray_deployment_service
@@ -9045,8 +9079,7 @@ async def admin_tray_deployment_links_page(
     for link in links:
         link["build"] = builds.get(link["id"])
     companies = await companies_repo.list_companies(include_archived=False)
-    extra = {
-        "title": "Tray deployment URLs",
+    return {
         "links": links,
         "companies": companies,
         "show_revoked": show_revoked,
@@ -9056,9 +9089,11 @@ async def admin_tray_deployment_links_page(
         "expiry_choices": tray_deployment_service.EXPIRY_CHOICES,
         "default_expiry": tray_deployment_service.DEFAULT_EXPIRY_DAYS,
     }
-    return await _render_template(
-        "admin/tray/deployment_links.html", request, current_user, extra=extra
-    )
+
+
+@app.get("/admin/tray/deployment-links", response_class=HTMLResponse)
+async def admin_tray_deployment_links_page(request: Request):
+    return _tray_workspace_redirect(request, "deployment-urls", {"show_revoked": "show_revoked_links"})
 
 
 @app.post("/admin/tray/deployment-links", response_class=HTMLResponse)
@@ -9070,7 +9105,7 @@ async def admin_tray_create_deployment_link(request: Request):
     company_raw = str(form.get("company_id", "")).strip()
     if not company_raw.isdigit():
         return flash_redirect(
-            "/admin/tray/deployment-links", "Choose a company for the deployment URL.", "error"
+            "/admin/tray#deployment-urls", "Choose a company for the deployment URL.", "error"
         )
     label = str(form.get("label", "")).strip()[:150] or None
     expiry_raw = str(form.get("expires_in_days", "")).strip()
@@ -9089,7 +9124,7 @@ async def admin_tray_create_deployment_link(request: Request):
             ),
         )
     except ValueError as exc:
-        return flash_redirect("/admin/tray/deployment-links", str(exc), "error")
+        return flash_redirect("/admin/tray#deployment-urls", str(exc), "error")
     await audit_service.log_action(
         action="tray.deployment_link.create",
         user_id=int(current_user["id"]),
@@ -9103,7 +9138,7 @@ async def admin_tray_create_deployment_link(request: Request):
         request=request,
     )
     return flash_redirect(
-        "/admin/tray/deployment-links",
+        "/admin/tray#deployment-urls",
         f"Deployment URL created for {record.get('label')}.",
         "success",
     )
@@ -9120,10 +9155,10 @@ async def admin_tray_rebuild_deployment_link(link_id: int, request: Request):
 
     link = await tray_repo.get_deployment_link(link_id)
     if not link or link.get("revoked_at"):
-        return flash_redirect("/admin/tray/deployment-links", "Deployment URL not found.", "error")
+        return flash_redirect("/admin/tray#deployment-urls", "Deployment URL not found.", "error")
     await tray_deployment_builds.queue_build(link_id)
     return flash_redirect(
-        "/admin/tray/deployment-links",
+        "/admin/tray#deployment-urls",
         "Windows installer build queued. The build server picks it up on its next check.",
         "success",
     )
@@ -9139,7 +9174,7 @@ async def admin_tray_revoke_deployment_link(link_id: int, request: Request):
     from app.services import tray_deployment_builds
 
     if not await tray_deployment_service.revoke_deployment_link(link_id):
-        return flash_redirect("/admin/tray/deployment-links", "Deployment URL not found.", "error")
+        return flash_redirect("/admin/tray#deployment-urls", "Deployment URL not found.", "error")
     await tray_deployment_builds.purge_link_artifacts(link_id)
     await audit_service.log_action(
         action="tray.deployment_link.revoke",
@@ -9149,7 +9184,7 @@ async def admin_tray_revoke_deployment_link(link_id: int, request: Request):
         request=request,
     )
     return flash_redirect(
-        "/admin/tray/deployment-links",
+        "/admin/tray#deployment-urls",
         "Deployment URL revoked. Devices already installed keep working.",
         "success",
     )
@@ -9163,7 +9198,7 @@ async def admin_tray_revoke_install_token(token_id: int, request: Request):
     from app.repositories import tray as tray_repo
 
     await tray_repo.revoke_install_token(token_id)
-    return RedirectResponse(url="/admin/tray/install-tokens", status_code=303)
+    return RedirectResponse(url="/admin/tray#install-tokens", status_code=303)
 
 
 @app.post("/admin/tray/install-tokens/bulk-purge-revoked", response_class=HTMLResponse)
@@ -9176,11 +9211,11 @@ async def admin_tray_bulk_purge_revoked_install_tokens(request: Request):
     deleted_count = await tray_repo.delete_revoked_install_tokens()
     if deleted_count <= 0:
         return flash_redirect(
-            "/admin/tray/install-tokens", "No revoked install tokens to purge.", "info"
+            "/admin/tray#install-tokens", "No revoked install tokens to purge.", "info"
         )
     suffix = "token" if deleted_count == 1 else "tokens"
     return flash_redirect(
-        "/admin/tray/install-tokens",
+        "/admin/tray#install-tokens",
         f"Purged {deleted_count} revoked install {suffix}.",
         "success",
     )
@@ -9199,7 +9234,7 @@ async def admin_tray_sync_install_tokens_to_tactical_rmm(request: Request):
         await modules_service.ensure_tacticalrmm_ready()
     except ValueError as exc:
         log_error("Unable to sync tray tokens to Tactical RMM", error=str(exc))
-        return flash_redirect("/admin/tray/install-tokens", str(exc), "error")
+        return flash_redirect("/admin/tray#install-tokens", str(exc), "error")
 
     task_id = uuid4().hex
 
@@ -9228,30 +9263,25 @@ async def admin_tray_sync_install_tokens_to_tactical_rmm(request: Request):
     )
 
     return flash_redirect(
-        "/admin/tray/install-tokens",
+        "/admin/tray#install-tokens",
         f"Tactical RMM tray token sync queued. Task ID: {task_id[:8]}",
         "success",
     )
 
 
-@app.get("/admin/tray/configurations", response_class=HTMLResponse)
-async def admin_tray_configurations_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
+async def _tray_configurations_context() -> dict[str, Any]:
     from app.repositories import tray as tray_repo
 
     configurations = await tray_repo.list_menu_configs()
     for cfg in configurations:
         ref = cfg.get("scope_ref_id")
         cfg["scope_target_label"] = f"#{ref}" if ref else None
-    extra = {
-        "title": "Tray menu configurations",
-        "configurations": configurations,
-    }
-    return await _render_template(
-        "admin/tray/configurations.html", request, current_user, extra=extra
-    )
+    return {"configurations": configurations}
+
+
+@app.get("/admin/tray/configurations", response_class=HTMLResponse)
+async def admin_tray_configurations_page(request: Request):
+    return _tray_workspace_redirect(request, "menu-configurations")
 
 
 async def _get_tray_trmm_scripts_for_form() -> tuple[list[dict], str | None]:
@@ -9340,7 +9370,7 @@ async def admin_tray_edit_configuration_page(config_id: int, request: Request):
 
     record = await tray_repo.get_menu_config(config_id)
     if not record:
-        return RedirectResponse(url="/admin/tray/configurations", status_code=303)
+        return RedirectResponse(url="/admin/tray#menu-configurations", status_code=303)
     trmm_scripts, trmm_scripts_error = await _get_tray_trmm_scripts_for_form()
     rmm_scripts_for_form = await _get_tray_rmm_scripts_for_form()
     companies = await _get_tray_companies_for_form()
@@ -9433,7 +9463,7 @@ async def admin_tray_create_configuration(request: Request):
         return redirect
     form = await request.form()
     await _save_tray_configuration_from_form(form, current_user, config_id=None)
-    return RedirectResponse(url="/admin/tray/configurations", status_code=303)
+    return RedirectResponse(url="/admin/tray#menu-configurations", status_code=303)
 
 
 @app.post("/admin/tray/configurations/{config_id}", response_class=HTMLResponse)
@@ -9443,7 +9473,7 @@ async def admin_tray_update_configuration(config_id: int, request: Request):
         return redirect
     form = await request.form()
     await _save_tray_configuration_from_form(form, current_user, config_id=config_id)
-    return RedirectResponse(url="/admin/tray/configurations", status_code=303)
+    return RedirectResponse(url="/admin/tray#menu-configurations", status_code=303)
 
 
 @app.post("/admin/tray/configurations/{config_id}/delete", response_class=HTMLResponse)
@@ -9454,7 +9484,7 @@ async def admin_tray_delete_configuration(config_id: int, request: Request):
     from app.repositories import tray as tray_repo
 
     await tray_repo.delete_menu_config(config_id)
-    return RedirectResponse(url="/admin/tray/configurations", status_code=303)
+    return RedirectResponse(url="/admin/tray#menu-configurations", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -9462,20 +9492,15 @@ async def admin_tray_delete_configuration(config_id: int, request: Request):
 # ---------------------------------------------------------------------------
 
 
-@app.get("/admin/tray/diagnostics", response_class=HTMLResponse)
-async def admin_tray_diagnostics_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
+async def _tray_diagnostics_context() -> dict[str, Any]:
     from app.repositories import tray as tray_repo
 
-    bundles = await tray_repo.list_diagnostics()
-    return await _render_template(
-        "admin/tray/diagnostics.html",
-        request,
-        current_user,
-        extra={"bundles": bundles},
-    )
+    return {"bundles": await tray_repo.list_diagnostics()}
+
+
+@app.get("/admin/tray/diagnostics", response_class=HTMLResponse)
+async def admin_tray_diagnostics_page(request: Request):
+    return _tray_workspace_redirect(request, "diagnostics")
 
 
 @app.get("/admin/tray/diagnostics/{diag_id}/download")
@@ -9505,25 +9530,20 @@ async def admin_tray_diagnostics_download(diag_id: int, request: Request):
 # ---------------------------------------------------------------------------
 
 
-@app.get("/admin/tray/versions", response_class=HTMLResponse)
-async def admin_tray_versions_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
+async def _tray_versions_context(request: Request) -> dict[str, Any]:
     from app.repositories import tray as tray_repo
-
     from app.services import tray_deployment, tray_installer
 
     versions = await tray_repo.list_tray_versions()
     server_installers = tray_installer.cached_server_installers(
         tray_deployment.resolve_portal_url(request)
     )
-    return await _render_template(
-        "admin/tray/versions.html",
-        request,
-        current_user,
-        extra={"versions": versions, "server_installers": server_installers},
-    )
+    return {"versions": versions, "server_installers": server_installers}
+
+
+@app.get("/admin/tray/versions", response_class=HTMLResponse)
+async def admin_tray_versions_page(request: Request):
+    return _tray_workspace_redirect(request, "versions")
 
 
 @app.post("/admin/tray/versions", response_class=HTMLResponse)
@@ -9556,7 +9576,7 @@ async def admin_tray_versions_publish(request: Request):
             # Devices check the installer against this digest before running it.
             sha256=tray_installer.cached_installer_sha256(download_url),
         )
-    return RedirectResponse(url="/admin/tray/versions", status_code=303)
+    return RedirectResponse(url="/admin/tray#versions", status_code=303)
 
 
 @app.post("/admin/tray/versions/{version_id}/rollout", response_class=HTMLResponse)
@@ -9572,7 +9592,7 @@ async def admin_tray_version_rollout_update(version_id: int, request: Request):
     except (TypeError, ValueError):
         rollout_percent = 100
     await tray_repo.update_tray_version_rollout(version_id, rollout_percent=rollout_percent)
-    return RedirectResponse(url="/admin/tray/versions", status_code=303)
+    return RedirectResponse(url="/admin/tray#versions", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -9633,24 +9653,17 @@ async def tray_icon_png_endpoint() -> Response:
     )
 
 
-@app.get("/admin/tray/branding", response_class=HTMLResponse)
-async def admin_tray_branding_page(
-    request: Request,
-):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    current_path = await site_settings_repo.get_tray_icon_path()
-    tooltip_name = await site_settings_repo.get_tray_icon_tooltip_name()
-    extra = {
-        "title": "Tray icon",
-        "current_path": current_path,
-        "tooltip_name": tooltip_name or "",
+async def _tray_branding_context() -> dict[str, Any]:
+    return {
+        "current_path": await site_settings_repo.get_tray_icon_path(),
+        "tooltip_name": await site_settings_repo.get_tray_icon_tooltip_name() or "",
         "default_tooltip_name": "MyPortal Helpdesk",
     }
-    return await _render_template(
-        "admin/tray/branding.html", request, current_user, extra=extra
-    )
+
+
+@app.get("/admin/tray/branding", response_class=HTMLResponse)
+async def admin_tray_branding_page(request: Request):
+    return _tray_workspace_redirect(request, "tray-icon")
 
 
 @app.post("/admin/tray/branding", response_class=HTMLResponse)
@@ -9668,7 +9681,7 @@ async def admin_tray_branding_upload(
     normalized_tooltip_name = re.sub(r"\s+", " ", str(tooltip_name or "").strip())
     if len(normalized_tooltip_name) > 100:
         return flash_redirect(
-            "/admin/tray/branding",
+            "/admin/tray#tray-icon",
             "Display name must be 100 characters or fewer",
             "error",
         )
@@ -9685,13 +9698,13 @@ async def admin_tray_branding_upload(
             metadata={"tooltip_name": normalized_tooltip_name or None},
             request=request,
         )
-        return flash_redirect("/admin/tray/branding", "Tray branding updated", "success")
+        return flash_redirect("/admin/tray#tray-icon", "Tray branding updated", "success")
 
     data = await icon.read(_TRAY_ICON_MAX_BYTES + 1)
     if len(data) > _TRAY_ICON_MAX_BYTES:
-        return flash_redirect("/admin/tray/branding", "File too large (max 1 MB)", "error")
+        return flash_redirect("/admin/tray#tray-icon", "File too large (max 1 MB)", "error")
     if not tray_icon_service.is_valid_ico(data):
-        return flash_redirect("/admin/tray/branding", "Not a valid .ico file", "error")
+        return flash_redirect("/admin/tray#tray-icon", "Not a valid .ico file", "error")
 
     uploads_root = _tray_icon_uploads_root()
     target = _TRAY_ICON_DIR / "tray-icon.ico"
@@ -9699,7 +9712,7 @@ async def admin_tray_branding_upload(
         target.write_bytes(data)
     except OSError as exc:
         log_error(f"Failed to write tray icon: {exc}")
-        return flash_redirect("/admin/tray/branding", "Failed to save icon", "error")
+        return flash_redirect("/admin/tray#tray-icon", "Failed to save icon", "error")
 
     relative_path = str(target.relative_to(uploads_root)).replace("\\", "/")
     await site_settings_repo.set_tray_icon_path(relative_path)
@@ -9719,7 +9732,7 @@ async def admin_tray_branding_upload(
         },
         request=request,
     )
-    return flash_redirect("/admin/tray/branding", "Tray branding updated", "success")
+    return flash_redirect("/admin/tray#tray-icon", "Tray branding updated", "success")
 
 
 @app.post("/admin/tray/branding/delete", response_class=HTMLResponse)
@@ -9752,7 +9765,7 @@ async def admin_tray_branding_delete(request: Request):
         metadata={},
         request=request,
     )
-    return flash_redirect("/admin/tray/branding", "Tray icon reset to default", "success")
+    return flash_redirect("/admin/tray#tray-icon", "Tray icon reset to default", "success")
 
 
 # ---------------------------------------------------------------------------
@@ -9760,37 +9773,29 @@ async def admin_tray_branding_delete(request: Request):
 # ---------------------------------------------------------------------------
 
 
-@app.get("/admin/tray/ticket-questions", response_class=HTMLResponse)
-async def admin_tray_ticket_questions_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
+async def _tray_ticket_questions_context(request: Request) -> dict[str, Any]:
+    from app.repositories import companies as companies_repo
     from app.repositories import tray_ticket_questions as tq_repo
 
     questions = await tq_repo.list_questions()
-    all_ids = [int(q["id"]) for q in questions]
-    from app.repositories import tray_ticket_questions as _tq
-    cond_rows = await _tq.list_conditions_for_questions(all_ids)
+    cond_rows = await tq_repo.list_conditions_for_questions([int(q["id"]) for q in questions])
     cond_index: dict = {}
     for c in cond_rows:
         cond_index.setdefault(int(c["question_id"]), []).append(dict(c))
     for q in questions:
         q["conditions"] = cond_index.get(int(q["id"]), [])
-
-    from app.repositories import companies as companies_repo
-
-    companies = await companies_repo.list_companies()
     params = request.query_params
-    extra = {
-        "title": "Ticket intake questions",
+    return {
         "questions": questions,
-        "companies": companies,
+        "companies": await companies_repo.list_companies(),
         "success_message": params.get("success"),
         "error_message": params.get("error"),
     }
-    return await _render_template(
-        "admin/tray/ticket_questions.html", request, current_user, extra=extra
-    )
+
+
+@app.get("/admin/tray/ticket-questions", response_class=HTMLResponse)
+async def admin_tray_ticket_questions_page(request: Request):
+    return _tray_workspace_redirect(request, "ticket-questions")
 
 
 @app.get("/admin/tray/ticket-questions/new", response_class=HTMLResponse)
@@ -9877,7 +9882,7 @@ async def admin_tray_create_ticket_question(request: Request):
 
     from urllib.parse import urlencode
     return RedirectResponse(
-        url="/admin/tray/ticket-questions?" + urlencode({"success": "Question created."}),
+        url="/admin/tray?" + urlencode({"success": "Question created."}) + "#ticket-questions",
         status_code=303,
     )
 
@@ -9892,7 +9897,7 @@ async def admin_tray_edit_ticket_question_page(question_id: int, request: Reques
 
     question = await tq_repo.get_question(question_id)
     if not question:
-        return RedirectResponse(url="/admin/tray/ticket-questions", status_code=303)
+        return RedirectResponse(url="/admin/tray#ticket-questions", status_code=303)
     question["conditions"] = await tq_repo.list_conditions_for_question(question_id)
     all_questions = await tq_repo.list_questions(active_only=False)
     companies = await companies_repo.list_companies()
@@ -9918,7 +9923,7 @@ async def admin_tray_update_ticket_question(question_id: int, request: Request):
 
     question = await tq_repo.get_question(question_id)
     if not question:
-        return RedirectResponse(url="/admin/tray/ticket-questions", status_code=303)
+        return RedirectResponse(url="/admin/tray#ticket-questions", status_code=303)
 
     form = await request.form()
     field_type = str(form.get("field_type") or "text").strip()
@@ -9968,7 +9973,7 @@ async def admin_tray_update_ticket_question(question_id: int, request: Request):
 
     from urllib.parse import urlencode
     return RedirectResponse(
-        url="/admin/tray/ticket-questions?" + urlencode({"success": "Question updated."}),
+        url="/admin/tray?" + urlencode({"success": "Question updated."}) + "#ticket-questions",
         status_code=303,
     )
 
@@ -9983,7 +9988,7 @@ async def admin_tray_delete_ticket_question(question_id: int, request: Request):
     await tq_repo.delete_question(question_id)
     from urllib.parse import urlencode
     return RedirectResponse(
-        url="/admin/tray/ticket-questions?" + urlencode({"success": "Question deleted."}),
+        url="/admin/tray?" + urlencode({"success": "Question deleted."}) + "#ticket-questions",
         status_code=303,
     )
 

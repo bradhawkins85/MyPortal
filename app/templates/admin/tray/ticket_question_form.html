@@ -9,7 +9,7 @@
 
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "All questions", "type": "link", "variant": "ghost", "href": "/admin/tray/ticket-questions"}
+    {"label": "All questions", "type": "link", "variant": "ghost", "href": "/admin/tray#ticket-questions"}
   ]) }}
 {% endblock %}
 
@@ -151,7 +151,7 @@
 
         <div class="form-actions">
           <button type="submit" class="button button--primary">{% if question %}Save changes{% else %}Create question{% endif %}</button>
-          <a href="/admin/tray/ticket-questions" class="button button--ghost">Cancel</a>
+          <a href="/admin/tray#ticket-questions" class="button button--ghost">Cancel</a>
         </div>
       </form>
     </div>

@@ -1,0 +1,121 @@
+{% set t = tray.tokens %}
+<section class="card card--panel ce-section" id="install-tokens" data-ae-section="install-tokens" aria-labelledby="tray-tokens-title">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="tray-tokens-title">Install tokens</h2>
+      <p class="card__subtitle">The tray installer (MSI or pkg) is given an install token when it is deployed. On first start each device swaps it for its own long-lived sign-in token.</p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    {% if t.new_token %}
+      <div class="callout callout--success" role="status">
+        <h3 class="callout__title">Token created</h3>
+        <p>Copy this token now. It will not be shown again.</p>
+        <pre class="code-block"><code>{{ t.new_token }}</code></pre>
+        <details>
+          <summary>Windows (PowerShell) install snippet</summary>
+          <pre class="code-block"><code>$url = '{{ t.portal_url }}'
+$token = '{{ t.new_token }}'
+Invoke-WebRequest -Uri "$url/static/tray/myportal-tray.msi" -OutFile $env:TEMP\myportal-tray.msi
+msiexec.exe /i $env:TEMP\myportal-tray.msi MYPORTAL_URL="$url" ENROL_TOKEN="$token" /qn</code></pre>
+        </details>
+        <details>
+          <summary>macOS (bash) install snippet</summary>
+          <pre class="code-block"><code>URL='{{ t.portal_url }}'
+TOKEN='{{ t.new_token }}'
+curl -fsSL "$URL/static/tray/myportal-tray.pkg" -o /tmp/myportal-tray.pkg
+sudo /bin/sh -c "echo MYPORTAL_URL=$URL > /Library/Preferences/io.myportal.tray.env; echo ENROL_TOKEN=$TOKEN >> /Library/Preferences/io.myportal.tray.env"
+sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
+        </details>
+      </div>
+    {% endif %}
+
+    <div class="ce-subsection" aria-labelledby="tray-token-new-title">
+      <h3 id="tray-token-new-title">New install token</h3>
+      <form method="post" action="/admin/tray/install-tokens" class="form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="ce-form-grid">
+          <div class="form-field">
+            <label class="form-label" for="token-label">Label</label>
+            <input class="form-input" id="token-label" name="label" required maxlength="150" placeholder="e.g. ACME laptop fleet" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="token-company">Company</label>
+            <select class="form-input" id="token-company" name="company_id">
+              <option value="">— Global (any company) —</option>
+              {% for company in t.companies %}
+                <option value="{{ company.id }}">{{ company.name }}</option>
+              {% endfor %}
+            </select>
+            <p class="form-help">A company token enrols devices straight into that company.</p>
+          </div>
+        </div>
+        <div class="form-actions"><button type="submit" class="button button--primary">Generate token</button></div>
+      </form>
+    </div>
+
+    <div class="ce-subsection" aria-labelledby="tray-token-trmm-title">
+      <h3 id="tray-token-trmm-title">Bulk Tactical RMM sync</h3>
+      <p class="form-help">Generate missing company tray install tokens and publish the new values to the Tactical RMM client custom field <code>{{ t.trmm_token_field_name }}</code>. Companies without a Tactical RMM client ID are skipped. Existing tokens are not re-sent because MyPortal only stores their hashes.</p>
+      <form method="post" action="/admin/tray/install-tokens/sync-tactical-rmm" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit" disabled class="button button--secondary" data-confirm="Generate missing tray install tokens and sync them to Tactical RMM?">Generate missing tokens and sync to Tactical RMM</button>
+      </form>
+    </div>
+
+    <div class="ce-subsection" aria-labelledby="tray-token-list-title">
+      <div class="ce-section__header">
+        <h3 id="tray-token-list-title">Existing tokens</h3>
+        {% set token_toggle_url = request.url.remove_query_params(['new_token', 'show_revoked_tokens']) %}
+        <a class="button button--ghost button--small" href="{{ token_toggle_url if t.show_revoked else token_toggle_url.include_query_params(show_revoked_tokens='true') }}#install-tokens" aria-pressed="{{ 'true' if t.show_revoked else 'false' }}">{{ 'Hide revoked' if t.show_revoked else 'Show revoked' }}</a>
+      </div>
+      {% if t.tokens %}
+        <div class="table-wrapper">
+        <table class="data-table">
+          <caption class="visually-hidden">Tray install tokens</caption>
+          <thead>
+            <tr>
+              <th scope="col">Label</th><th scope="col">Company</th><th scope="col">Prefix</th>
+              <th scope="col">Status</th><th scope="col">Uses</th><th scope="col">Last used</th>
+              <th scope="col">Created</th><th scope="col" class="data-table__col--actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for token in t.tokens %}
+              <tr>
+                <td>{{ token.label }}</td>
+                <td>{{ token.company_name or '—' }}</td>
+                <td><code>{{ token.token_prefix }}…</code></td>
+                <td>
+                  {% if token.revoked_at %}
+                    <span class="status status--danger">Revoked</span>
+                  {% elif token.expires_at and token.expires_at_iso < t.now_iso %}
+                    <span class="status status--warning">Expired</span>
+                  {% else %}
+                    <span class="status status--success">Active</span>
+                  {% endif %}
+                </td>
+                <td>{{ token.use_count }}</td>
+                <td>{% if token.last_used_at %}<span data-utc="{{ token.last_used_at }}">{{ token.last_used_at }}</span>{% else %}—{% endif %}</td>
+                <td><span data-utc="{{ token.created_at }}">{{ token.created_at }}</span></td>
+                <td class="data-table__col--actions">
+                  {% if not token.revoked_at %}
+                    <form method="post" action="/admin/tray/install-tokens/{{ token.id }}/revoke" class="inline-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small button--danger" data-confirm="Revoke this install token?">Revoke<span class="visually-hidden"> {{ token.label }}</span></button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      {% elif not t.show_revoked and t.hidden_revoked_count %}
+        <p class="text-muted">No active install tokens. Choose “Show revoked” to review {{ t.hidden_revoked_count }} revoked token{% if t.hidden_revoked_count != 1 %}s{% endif %}.</p>
+      {% else %}
+        <p class="text-muted">No install tokens yet. Generate one above.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>

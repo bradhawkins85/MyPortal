@@ -217,7 +217,7 @@ Follow these principles:
 - The active section follows the URL hash and is remembered per viewer;
   without JavaScript all sections render in one column. Below 1024 px the
   nav becomes a horizontal strip.
-- Reuse the `.ce-*` classes and the `asset_edit_sections.js` behaviour; do
+- Reuse the `.ce-*` classes and load `asset_edit_sections.js` (mark the page `data-ae-workspace`); do
   not stack many cards down one long page or invent a new tab strip.
 
 #### Show the thing, not the storage format

@@ -517,9 +517,30 @@ long page, and do not build ad-hoc tab strips for this.
 - Subtitles explain effect and provenance in plain English ("These details
   are maintained manually and are never overwritten by asset sync.").
 
-When building a new workspace, reuse the `.ce-*` classes as they are and
-copy `asset_edit_sections.js` with page-specific data attributes rather than
-creating a new layout or new CSS for the same pattern.
+**Building another workspace.** Reuse the `.ce-*` classes and load
+`asset_edit_sections.js` as it is; do not copy it or write new layout CSS.
+Mark the wrapper `class="settings-workspace … ce-workspace" data-ae-workspace`
+and give each section `data-ae-section="<key>"` matching its link's
+`data-ae-link`. Optional attributes on the wrapper:
+
+| Attribute | Use |
+|---|---|
+| `data-ae-storage-key` | `localStorage` key for the remembered section (`myportal:<page>:active-section`) |
+| `data-ae-default` | Section shown when nothing is remembered |
+| `data-ae-initial` | Section the server wants open, ahead of the remembered one (an editor opened by `?new=1` or after a failed save); a URL hash still wins |
+| `data-ae-form` | `id` of the shared settings form whose changes drive the dirty dots and save bar |
+
+Editors that keep their state in a hidden field (a menu builder writing
+JSON) should fire `input` on that field when it changes and redraw on the
+bubbling `ae:discarded` event the form receives after *Discard*.
+
+Pages built this way: the asset edit page (gold standard), Admin →
+Companies → Edit, **Tray settings** (`/admin/tray`, with the menu
+configuration editor), **Patch management** (`/rmm/patching`) and
+**Checks** (`/rmm/checks`). On list-and-editor pages such as Checks, the
+list is split into sections people look for (*Needs attention*, *All
+checks*, one per check type) and the add/edit form is its own section
+with the save bar.
 
 ### Responsive breakpoints
 

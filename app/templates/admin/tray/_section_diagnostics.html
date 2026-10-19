@@ -1,0 +1,42 @@
+{% set diag = tray.diagnostics %}
+<section class="card card--panel ce-section" id="diagnostics" data-ae-section="diagnostics" aria-labelledby="tray-diagnostics-title">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="tray-diagnostics-title">Diagnostics</h2>
+      <p class="card__subtitle">Log bundles that devices upload with the tray menu's "Send diagnostics" item.</p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    {% if diag.bundles %}
+      <div class="table-wrapper">
+      <table class="data-table">
+        <caption class="visually-hidden">Uploaded tray diagnostic bundles</caption>
+        <thead>
+          <tr>
+            <th scope="col">Device</th><th scope="col">Filename</th><th scope="col">Size</th>
+            <th scope="col">Uploaded</th><th scope="col" class="data-table__col--actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in diag.bundles %}
+            <tr>
+              <td><a href="/admin/tray?search={{ b.device_uid | urlencode }}#devices">{{ b.hostname or b.device_uid }}</a></td>
+              <td><code>{{ b.filename }}</code></td>
+              <td>{{ (b.size_bytes // 1024) }}KB</td>
+              <td><span data-utc="{{ b.uploaded_at }}">{{ b.uploaded_at }}</span></td>
+              <td class="data-table__col--actions">
+                <a href="/admin/tray/diagnostics/{{ b.id }}/download" class="button button--small">Download</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <h3 class="empty-state__title">No diagnostic bundles</h3>
+        <p>Use the tray menu's "Send diagnostics" item on a device to upload its logs here.</p>
+      </div>
+    {% endif %}
+  </div>
+</section>

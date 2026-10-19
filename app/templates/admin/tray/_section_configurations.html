@@ -1,0 +1,53 @@
+{% set cfgs = tray.configurations.configurations %}
+<section class="card card--panel ce-section" id="menu-configurations" data-ae-section="menu-configurations" aria-labelledby="tray-configurations-title">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="tray-configurations-title">Menu configurations</h2>
+      <p class="card__subtitle">Choose what the tray icon menu shows on each device. When several configurations apply, the most specific enabled one wins: <strong>device, then tag, then company, then global</strong>.</p>
+    </div>
+    <a class="button button--primary button--small" href="/admin/tray/configurations/new">New configuration</a>
+  </header>
+  <div class="ce-section__body">
+    {% if cfgs %}
+      <div class="table-wrapper">
+      <table class="data-table">
+        <caption class="visually-hidden">Tray menu configurations</caption>
+        <thead>
+          <tr>
+            <th scope="col">Name</th><th scope="col">Scope</th><th scope="col">Scope target</th>
+            <th scope="col">Status</th><th scope="col">Version</th><th scope="col">Updated</th>
+            <th scope="col" class="data-table__col--actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cfg in cfgs %}
+            <tr>
+              <td><a href="/admin/tray/configurations/{{ cfg.id }}/edit"><strong>{{ cfg.name }}</strong></a></td>
+              <td><span class="status status--info">{{ cfg.scope|capitalize }}</span></td>
+              <td>{{ cfg.scope_target_label or '—' }}</td>
+              <td>
+                {% if cfg.enabled %}<span class="status status--success">Enabled</span>{% else %}<span class="status status--neutral">Disabled</span>{% endif %}
+              </td>
+              <td>{{ cfg.version }}</td>
+              <td><span data-utc="{{ cfg.updated_at }}">{{ cfg.updated_at }}</span></td>
+              <td class="data-table__col--actions">
+                <a href="/admin/tray/configurations/{{ cfg.id }}/edit" class="button button--small">Edit<span class="visually-hidden"> {{ cfg.name }}</span></a>
+                <form method="post" action="/admin/tray/configurations/{{ cfg.id }}/delete" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button type="submit" class="button button--small button--danger" data-confirm="Delete this configuration?">Delete<span class="visually-hidden"> {{ cfg.name }}</span></button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <h3 class="empty-state__title">No configurations yet</h3>
+        <p>Tray devices use a default menu until you create one. A configuration sets the menu items, display text, branding and the environment variables the menu may read.</p>
+        <p><a class="button button--primary" href="/admin/tray/configurations/new">+ Create your first configuration</a></p>
+      </div>
+    {% endif %}
+  </div>
+</section>

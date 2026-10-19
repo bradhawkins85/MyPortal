@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import AnyHttpUrl
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
 
 from app import main
 
@@ -56,19 +55,11 @@ async def test_tray_install_tokens_hides_revoked_by_default(monkeypatch):
         companies_repo, "list_companies", AsyncMock(return_value=[])
     )
 
-    captured: dict[str, Any] = {}
+    extra = await main._tray_install_tokens_context(_make_request())
 
-    async def fake_render_template(template_name, request, user, *, extra):
-        captured["extra"] = extra
-        return HTMLResponse("ok")
-
-    monkeypatch.setattr(main, "_render_template", fake_render_template)
-
-    await main.admin_tray_install_tokens_page(_make_request())
-
-    assert [token["id"] for token in captured["extra"]["tokens"]] == [1]
-    assert captured["extra"]["show_revoked"] is False
-    assert captured["extra"]["hidden_revoked_count"] == 1
+    assert [token["id"] for token in extra["tokens"]] == [1]
+    assert extra["show_revoked"] is False
+    assert extra["hidden_revoked_count"] == 1
 
 
 @pytest.mark.anyio
@@ -93,19 +84,11 @@ async def test_tray_install_tokens_can_show_revoked(monkeypatch):
         companies_repo, "list_companies", AsyncMock(return_value=[])
     )
 
-    captured: dict[str, Any] = {}
+    extra = await main._tray_install_tokens_context(_make_request(), show_revoked=True)
 
-    async def fake_render_template(template_name, request, user, *, extra):
-        captured["extra"] = extra
-        return HTMLResponse("ok")
-
-    monkeypatch.setattr(main, "_render_template", fake_render_template)
-
-    await main.admin_tray_install_tokens_page(_make_request(), show_revoked=True)
-
-    assert [token["id"] for token in captured["extra"]["tokens"]] == [1, 2]
-    assert captured["extra"]["show_revoked"] is True
-    assert captured["extra"]["hidden_revoked_count"] == 0
+    assert [token["id"] for token in extra["tokens"]] == [1, 2]
+    assert extra["show_revoked"] is True
+    assert extra["hidden_revoked_count"] == 0
 
 
 @pytest.mark.anyio
@@ -133,17 +116,9 @@ async def test_tray_install_tokens_adds_expires_at_iso(monkeypatch):
     )
     monkeypatch.setattr(companies_repo, "list_companies", AsyncMock(return_value=[]))
 
-    captured: dict[str, Any] = {}
+    extra = await main._tray_install_tokens_context(_make_request())
 
-    async def fake_render_template(template_name, request, user, *, extra):
-        captured["extra"] = extra
-        return HTMLResponse("ok")
-
-    monkeypatch.setattr(main, "_render_template", fake_render_template)
-
-    await main.admin_tray_install_tokens_page(_make_request())
-
-    tokens = captured["extra"]["tokens"]
+    tokens = extra["tokens"]
     assert tokens[0]["expires_at_iso"] == "2026-09-18T00:00:00+00:00"
     assert tokens[1]["expires_at_iso"] is None
 
@@ -160,17 +135,9 @@ async def test_tray_install_tokens_snippet_uses_https_when_request_is_http(monke
     monkeypatch.setattr(companies_repo, "list_companies", AsyncMock(return_value=[]))
     monkeypatch.setattr(main.settings, "portal_url", None)
 
-    captured: dict[str, Any] = {}
+    extra = await main._tray_install_tokens_context(_make_request(), new_token="abc")
 
-    async def fake_render_template(template_name, request, user, *, extra):
-        captured["extra"] = extra
-        return HTMLResponse("ok")
-
-    monkeypatch.setattr(main, "_render_template", fake_render_template)
-
-    await main.admin_tray_install_tokens_page(_make_request(), new_token="abc")
-
-    assert captured["extra"]["portal_url"] == "https://testserver"
+    assert extra["portal_url"] == "https://testserver"
 
 
 @pytest.mark.anyio
@@ -187,17 +154,9 @@ async def test_tray_install_tokens_snippet_prefers_configured_portal_url(monkeyp
         main.settings, "portal_url", AnyHttpUrl("https://portal.example.com")
     )
 
-    captured: dict[str, Any] = {}
+    extra = await main._tray_install_tokens_context(_make_request(), new_token="abc")
 
-    async def fake_render_template(template_name, request, user, *, extra):
-        captured["extra"] = extra
-        return HTMLResponse("ok")
-
-    monkeypatch.setattr(main, "_render_template", fake_render_template)
-
-    await main.admin_tray_install_tokens_page(_make_request(), new_token="abc")
-
-    assert captured["extra"]["portal_url"] == "https://portal.example.com"
+    assert extra["portal_url"] == "https://portal.example.com"
 
 
 @pytest.mark.anyio
@@ -215,5 +174,5 @@ async def test_tray_bulk_purge_revoked_install_tokens_calls_repo(monkeypatch):
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/admin/tray/install-tokens"
+    assert response.headers["location"] == "/admin/tray#install-tokens"
     delete_mock.assert_awaited_once()

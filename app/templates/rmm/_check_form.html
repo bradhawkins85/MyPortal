@@ -56,12 +56,12 @@
   </header>
 {%- endmacro %}
 
-<section class="card card--panel rmm-check-editor" id="rmm-check-form" aria-labelledby="rmm-check-form-heading">
-  <header class="card__header card__header--stacked"><div>
+<section class="card card--panel ce-section rmm-check-editor" id="rmm-check-form" data-ae-section="editor" aria-labelledby="rmm-check-form-heading">
+  <header class="ce-section__header"><div class="ce-section__heading">
     <h2 class="card__title" id="rmm-check-form-heading">{{ "Edit " ~ e.name if e.id else "Add a check" }}</h2>
     <p class="card__subtitle">Choose what to watch, when it counts as failing, which devices it covers and what happens next.</p>
   </div></header>
-  <form method="post" action="/rmm/checks{% if e.id %}/{{ e.id }}{% endif %}" class="card__body form rmm-check-form" data-rmm-check-form>
+  <form method="post" action="/rmm/checks{% if e.id %}/{{ e.id }}{% endif %}" class="ce-section__body form rmm-check-form" id="rmm-check-settings-form" data-rmm-check-form>
     {% include "partials/csrf.html" %}
     {% if errors %}
     <div class="alert alert--error rmm-error-summary" role="alert" tabindex="-1" data-rmm-error-summary aria-labelledby="rmm-check-error-summary-title">
