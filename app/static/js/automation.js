@@ -1439,11 +1439,22 @@
         updateTaskRowData(row, { last_status: 'running', last_error: null });
 
         try {
+          // The task runs in the background; refresh once its run is recorded.
+          const latest = async () => {
+            try {
+              const runs = await requestJson(`/scheduler/tasks/${task.id}/runs?limit=1`);
+              return runs && runs.length ? runs[0].id : 0;
+            } catch (error) {
+              return 0;
+            }
+          };
+          const before = await latest();
           await requestJson(`/scheduler/tasks/${task.id}/run`, { method: 'POST' });
-          window.setTimeout(() => {
-            saveTaskFilter();
-            window.location.reload();
-          }, 250);
+          for (let attempt = 0; (await latest()) <= before; attempt += 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, attempt < 24 ? 5000 : 30000));
+          }
+          saveTaskFilter();
+          window.location.reload();
         } catch (error) {
           restoreButton();
           restoreStatus();

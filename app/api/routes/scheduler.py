@@ -28,6 +28,7 @@ from app.schemas.scheduler import (
     WebhookDeletionRuleResponse,
     WebhookRetentionInput,
 )
+from app.services import background as background_tasks
 from app.services import cron_calendar, scheduled_task_preview, webhook_monitor
 from app.services import webhook_deletion_rules as deletion_rules_service
 from app.services import system_update_history
@@ -297,7 +298,13 @@ async def run_task_now(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
         )
-    await scheduler_service.run_now(task_id)
+    # Long tasks (such as the Chocolatey app list refresh) outlast the reverse
+    # proxy's timeout, so start the run and answer at once; its result is
+    # recorded in the task's run history when it finishes.
+    background_tasks.queue_background_task(
+        lambda: scheduler_service.run_now(task_id),
+        description=f"scheduled-task-run-{task_id}",
+    )
     return RunTaskResponse()
 
 
