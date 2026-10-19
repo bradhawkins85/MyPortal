@@ -1,0 +1,7 @@
+{
+  "guid": "0a20e347-6361-44be-a16d-5dab85996fa3",
+  "occurred_at": "2026-10-19T03:38Z",
+  "change_type": "Improvement",
+  "summary": "Design guidelines: make the edit asset page the gold standard for pages with multiple settings or sections, documenting its grouped section navigation, focused sections and save bar",
+  "content_hash": "13aa074e1bbebc8b2e6ca5c5e8066d83e4e9e0579ebee91665bdc33d8d24c63d"
+}
