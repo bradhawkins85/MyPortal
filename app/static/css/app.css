@@ -19756,7 +19756,7 @@ a.shop-product-card {
 }
 
 .ce-section[hidden],
-.ce-workspace.is-enhanced .ce-section:not(.is-active) {
+.ce-workspace.is-enhanced:not([data-ae-link-nav]) .ce-section:not(.is-active) {
   display: none;
 }
 

@@ -103,6 +103,7 @@
     const search = nav.querySelector('[data-ae-search]');
     const emptyMessage = nav.querySelector('[data-ae-search-empty]');
     const groups = Array.from(nav.querySelectorAll('[data-ae-nav-group]'));
+    const pageLinks = Array.from(nav.querySelectorAll('.ce-nav__link:not([data-ae-link])'));
     const searchIndex = new Map(sections.map((section) => [
       sectionKey(section),
       normalise(Array.from(section.querySelectorAll('.card__title, .card__subtitle, h3, legend, label'))
@@ -174,8 +175,16 @@
           matches += 1;
         }
       });
+      // Nav entries that open other pages (no data-ae-link) are matched on their text.
+      pageLinks.forEach((link) => {
+        const visible = !query || normalise(link.textContent).includes(query);
+        link.hidden = !visible;
+        if (visible) {
+          matches += 1;
+        }
+      });
       groups.forEach((group) => {
-        group.hidden = !group.querySelector('[data-ae-link]:not([hidden])');
+        group.hidden = !group.querySelector('.ce-nav__link:not([hidden])');
       });
       if (emptyMessage) {
         emptyMessage.hidden = matches > 0;
@@ -220,8 +229,11 @@
         if (event.key === 'Enter') {
           event.preventDefault();
           const first = links.find((link) => !link.hidden);
+          const firstPage = pageLinks.find((link) => !link.hidden);
           if (first) {
             activate(first.dataset.aeLink, { focus: true });
+          } else if (firstPage) {
+            window.location.assign(firstPage.href);
           }
         } else if (event.key === 'Escape' && search.value) {
           search.value = '';

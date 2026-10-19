@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_marketing_workspace.html" import marketing_workspace with context %}
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Email campaigns{% endblock %}
@@ -11,11 +12,12 @@
 {% endblock %}
 
 {% block content %}
+{% call marketing_workspace("campaigns", "Email campaigns", [("campaigns", "marketing-campaigns", "Campaigns", (campaigns or []) | length, true), ("opt-outs", "marketing-opt-outs", "Unsubscribed contacts", (opt_outs or []) | length, true)]) %}
 <div class="admin-grid">
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Campaigns</h2>
+  <section class="card card--panel ce-section" id="marketing-campaigns" data-ae-section="campaigns" aria-labelledby="marketing-campaigns-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="marketing-campaigns-title">Campaigns</h2>
         <p class="card__subtitle">Emails to customer contacts about their products and upcoming changes. Emails send only during business hours.</p>
       </div>
     </header>
@@ -55,10 +57,10 @@
     </div>
   </section>
 
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Unsubscribed from sales emails</h2>
+  <section class="card card--panel ce-section" id="marketing-opt-outs" data-ae-section="opt-outs" aria-labelledby="marketing-opt-outs-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="marketing-opt-outs-title">Unsubscribed from sales emails</h2>
         <p class="card__subtitle">These contacts still receive Updates campaigns.</p>
       </div>
       <form method="post" action="/admin/marketing/opt-outs/add" class="inline-form">
@@ -99,4 +101,5 @@
     </div>
   </section>
 </div>
+{% endcall %}
 {% endblock %}
