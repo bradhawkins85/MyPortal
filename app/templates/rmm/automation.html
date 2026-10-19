@@ -28,8 +28,13 @@
     <li class="rmm-step" data-rmm-step="{{ step.id }}">
       <span class="rmm-step__number" aria-hidden="true">{{ loop.index }}</span>
       <div class="rmm-step__main">
+        {%- if step.kind == 'chocolatey' %}
+        <span class="rmm-script__name">Install Chocolatey packages</span>
+        <span class="rmm-script__path">{{ step.package_ids | join(', ') }}</span>
+        {%- else %}
         <span class="rmm-script__name">{{ step.script_name }}</span>
         <span class="rmm-script__path">{{ step.script_path }}</span>
+        {%- endif %}
         <ul class="rmm-chips" aria-label="Step details">
           {% if step.target_mode == 'rules' %}
           <li class="rmm-chip">Device rules</li>
@@ -38,17 +43,18 @@
           {% else %}
           {% for name in step.tag_names %}<li class="rmm-chip rmm-chip--env">{{ name }}</li>{% else %}<li class="rmm-chip rmm-chip--warning">No tags: skipped on every device</li>{% endfor %}
           {% endif %}
-          {% if not step.script_active %}<li class="rmm-chip rmm-chip--warning">Script removed from Gitea</li>{% endif %}
-          {% if step.inputs %}<li class="rmm-chip">{{ step.inputs | length }} value{{ '' if step.inputs | length == 1 else 's' }} set</li>{% endif %}
+          {% if step.kind == 'chocolatey' %}<li class="rmm-chip">Windows devices only</li>
+          {% elif not step.script_active %}<li class="rmm-chip rmm-chip--warning">Script removed from Gitea</li>{% endif %}
+          {% if step.inputs and step.kind != 'chocolatey' %}<li class="rmm-chip">{{ step.inputs | length }} value{{ '' if step.inputs | length == 1 else 's' }} set</li>{% endif %}
           <li class="rmm-chip">{{ 'Carries on if it fails' if step.continue_on_failure else 'Stops the sequence if it fails' }}</li>
         </ul>
       </div>
       {% if writable %}
       <div class="rmm-step__actions">
-        <button type="button" class="button button--ghost button--small" data-rmm-step-move="-1" {% if loop.first %}disabled{% endif %}>Up<span class="visually-hidden"> {{ step.script_name }}</span></button>
-        <button type="button" class="button button--ghost button--small" data-rmm-step-move="1" {% if loop.last %}disabled{% endif %}>Down<span class="visually-hidden"> {{ step.script_name }}</span></button>
-        <button type="button" class="button button--small" data-rmm-step-edit="{{ step.id }}" aria-haspopup="dialog" aria-controls="rmm-run-modal">Edit<span class="visually-hidden"> {{ step.script_name }}</span></button>
-        <button type="button" class="button button--ghost button--small" data-rmm-step-delete="{{ step.id }}">Remove<span class="visually-hidden"> {{ step.script_name }}</span></button>
+        <button type="button" class="button button--ghost button--small" data-rmm-step-move="-1" {% if loop.first %}disabled{% endif %}>Up<span class="visually-hidden"> {{ step.name or step.script_name }}</span></button>
+        <button type="button" class="button button--ghost button--small" data-rmm-step-move="1" {% if loop.last %}disabled{% endif %}>Down<span class="visually-hidden"> {{ step.name or step.script_name }}</span></button>
+        <button type="button" class="button button--small" data-rmm-step-edit="{{ step.id }}" aria-haspopup="dialog" aria-controls="rmm-run-modal">Edit<span class="visually-hidden"> {{ step.name or step.script_name }}</span></button>
+        <button type="button" class="button button--ghost button--small" data-rmm-step-delete="{{ step.id }}">Remove<span class="visually-hidden"> {{ step.name or step.script_name }}</span></button>
       </div>
       {% endif %}
     </li>
@@ -191,7 +197,10 @@
         <h2 class="card__title" id="rmm-onboarding-heading">Onboarding scripts</h2>
         <p class="card__subtitle">{{ company.name if company else "This company" }}'s steps run once, one at a time and in this order, when the RMM agent is first installed on one of its devices. Each step runs only on devices with any of its tags and is skipped on the rest. A failed step stops the steps after it unless it is set to carry on.</p>
       </div>
-      {% if can_run %}<button type="button" class="button button--small" data-rmm-step-new aria-haspopup="dialog" aria-controls="rmm-run-modal">Add step</button>{% endif %}
+      {% if can_run %}<div class="rmm-asset-actions">
+        <button type="button" class="button button--small" data-rmm-step-new aria-haspopup="dialog" aria-controls="rmm-run-modal">Add step</button>
+        <button type="button" class="button button--small button--secondary" data-rmm-choco-step-new aria-haspopup="dialog" aria-controls="rmm-choco-step-modal">Add Chocolatey packages</button>
+      </div>{% endif %}
     </header>
     <div class="card__body">
       {{ step_list(steps, can_run) }}
@@ -249,6 +258,53 @@
   </section>
 </section>
 {% include "rmm/_run_modal.html" %}
+{% if can_run %}
+<div class="modal rmm-modal" id="rmm-choco-step-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-choco-step-title" hidden data-rmm-choco-step-modal>
+  <form class="modal__panel modal__panel--wide" data-rmm-choco-step-form novalidate>
+    <header class="modal__header">
+      <div>
+        <p class="rmm-editor__eyebrow">Onboarding</p>
+        <h2 class="modal__title" id="rmm-choco-step-title" data-rmm-choco-step-title>Add Chocolatey packages</h2>
+        <p class="rmm-editor__subtitle">Install these apps with the company's enabled Chocolatey sources when a Windows device is onboarded. Apps already installed are updated. Other devices skip the step.</p>
+      </div>
+      <button type="button" class="modal__close" data-rmm-choco-step-close aria-label="Close Chocolatey step"></button>
+    </header>
+    <div class="modal__body rmm-app-push">
+      <fieldset class="form-field">
+        <legend class="form-label">Applications</legend>
+        <div class="form-field__group">
+          <label class="visually-hidden" for="rmm-choco-step-search">Find an application</label>
+          <input type="search" id="rmm-choco-step-search" class="form-input" maxlength="255" placeholder="Search the downloaded app list…" data-rmm-choco-step-search>
+          <button type="button" class="button button--secondary" data-rmm-choco-step-search-button>Search</button>
+        </div>
+        <p class="form-help" role="status" data-rmm-choco-step-status></p>
+        <div class="rmm-app-push__results" data-rmm-choco-step-results></div>
+        <label class="form-label" for="rmm-choco-step-extra">Other package IDs</label>
+        <input type="text" id="rmm-choco-step-extra" class="form-input" maxlength="1000" placeholder="Optional, comma separated, such as googlechrome, 7zip" data-rmm-choco-step-extra>
+        <p class="form-help">Up to 20 applications, installed one after another.</p>
+      </fieldset>
+      <fieldset class="form-field">
+        <legend class="form-label">Devices</legend>
+        <label><input type="radio" name="rmm-choco-step-target" value="all" checked data-rmm-choco-step-target> Every Windows device</label>
+        <label><input type="radio" name="rmm-choco-step-target" value="tags" data-rmm-choco-step-target> Windows devices with any of these tags</label>
+        <div data-rmm-choco-step-tags-field hidden>
+          <label class="form-label" for="rmm-choco-step-tags">Tags</label>
+          <select id="rmm-choco-step-tags" class="form-input" multiple size="6" data-rmm-choco-step-tags>
+            {% for tag in tags %}<option value="{{ tag.id }}">{{ tag.name }}</option>{% endfor %}
+          </select>
+        </div>
+      </fieldset>
+      <label><input type="checkbox" data-rmm-choco-step-continue> Carry on with the next steps if this one fails</label>
+      <p class="alert alert--warning" role="alert" data-rmm-choco-step-error hidden></p>
+    </div>
+    <footer class="modal__footer">
+      <span class="rmm-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-rmm-choco-step-close>Cancel</button>
+      <button type="submit" class="button button--primary" data-rmm-choco-step-submit>Save step</button>
+    </footer>
+  </form>
+</div>
+{% endif %}
 
 <div class="modal rmm-modal" id="rmm-onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-onboarding-title" hidden data-rmm-onboarding-modal>
   <div class="modal__panel modal__panel--wide">
@@ -276,5 +332,7 @@
 <script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_automation.js') }}" defer></script>
+<script src="{{ static_url('/static/js/rmm_choco_picker.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_app_push.js') }}" defer></script>
+<script src="{{ static_url('/static/js/rmm_onboarding_choco.js') }}" defer></script>
 {% endblock %}

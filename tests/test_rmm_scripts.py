@@ -309,6 +309,14 @@ async def sqlite_db(monkeypatch):
                  "499_rmm_windows_update_blocks.sql", "500_rmm_check_auto_close.sql",
                  "504_chocolatey_software_matches.sql", "505_chocolatey_catalog_lookups.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
+    # Mirrors migration 506 (Chocolatey onboarding steps), whose MODIFY SQLite cannot run.
+    cursor = await conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'rmm_onboarding_steps'")
+    steps_sql = (await cursor.fetchone())[0]
+    assert "script_id INT NOT NULL" in steps_sql
+    await conn.executescript(
+        "DROP TABLE rmm_onboarding_steps;\n" + steps_sql.replace("script_id INT NOT NULL", "script_id INT NULL") + ";\n"
+        "ALTER TABLE rmm_onboarding_steps ADD COLUMN package_ids_json TEXT;"
+    )
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
           (1, 'BitLocker', 'text'), (2, 'Encrypted', 'checkbox'), (3, 'Checked', 'date'), (4, 'Photo', 'image');

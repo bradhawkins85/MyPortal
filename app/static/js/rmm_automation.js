@@ -103,6 +103,10 @@
         return;
       }
     }
+    if (item && item.kind === 'chocolatey' && window.MyPortalOnboardingChoco) {
+      window.MyPortalOnboardingChoco.open(item);
+      return;
+    }
     rmm.openEditor(item ? String(item.script_id) : '', { mode: 'onboarding', item: item });
   }
 
