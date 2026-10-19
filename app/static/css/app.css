@@ -19906,6 +19906,10 @@ a.shop-product-card {
   gap: var(--space-gap-base);
 }
 
+.ce-subsection[hidden] {
+  display: none;
+}
+
 .ce-subsection + .ce-subsection {
   padding-top: calc(var(--space-gap-roomy) * 1.25);
   border-top: 1px solid var(--hf-line-soft);

@@ -3,8 +3,8 @@
 
   // Shared by every multi-section settings workspace. A workspace is marked
   // with data-asset-edit (the asset page) or data-ae-workspace, and may set
-  // data-ae-storage-key, data-ae-form (the shared settings form id) and
-  // data-ae-default (the section shown first). Sections carry data-ae-section
+  // data-ae-storage-key, data-ae-form (the shared settings form id),
+  // data-ae-default (the section shown first) and data-ae-initial. Sections carry data-ae-section
   // (or data-asset-edit-section) matching their nav link's data-ae-link.
   const STORAGE_KEY = 'myportal:asset-edit:active-section';
   const SECTION_SELECTOR = '.ce-section[data-ae-section], .ce-section[data-asset-edit-section]';
@@ -192,7 +192,10 @@
 
     const hashTarget = elementForHash(window.location.hash);
     workspace.classList.add('is-enhanced');
-    activate(keyForElement(hashTarget) || readStoredSection(storageKey) || defaultKey(), { updateHash: false });
+    // data-ae-initial opens a section the server asked for (an open editor),
+    // ahead of the remembered one; a link to a section still wins.
+    activate(keyForElement(hashTarget) || workspace.dataset.aeInitial || readStoredSection(storageKey) || defaultKey(),
+      { updateHash: false });
     applySearch();
     if (hashTarget && keyForElement(hashTarget)) {
       window.requestAnimationFrame(() => hashTarget.scrollIntoView({ block: 'nearest', behavior: 'auto' }));

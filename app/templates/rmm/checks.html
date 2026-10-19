@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
 {% import "rmm/_macros.html" as rmm_ui %}
 {% block title %}Checks{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
@@ -8,59 +9,165 @@
   {{ page_header_actions(([{"label": "Add check", "type": "link", "variant": "primary", "href": "/rmm/checks?new=1#rmm-check-form"}] if can_edit else []) + [{"label": "Scripts", "type": "link", "href": "/rmm/scripts"}], menu_id="rmm-check-actions") }}
 {% endblock %}
 {% block content %}
-<section class="rmm-page" data-rmm-checks>
-  {% if editing %}{% include "rmm/_check_form.html" %}{% endif %}
-
-  <section class="card card--panel" aria-labelledby="rmm-checks-heading">
-    <header class="card__header card__header--stacked"><div>
-      <h2 class="card__title" id="rmm-checks-heading">Checks</h2>
-      <p class="card__subtitle">Checks watch each device's disk space, ping targets, CPU, memory, services, network throughput, script results and check-ins. A problem must last the check's duration before the check fails. When it fails the check can run a script on the device or raise a ticket for it; the ticket gets an update when the check passes again. For the same drive, ping target, service, interface or script, a device's own check replaces its company's, which replaces a check for every company. Open a device to see its results and stats.</p>
-    </div></header>
-    <div class="card__body">
-      {% if checks %}
-      <div class="table-wrapper rmm-rule-table">
-        <table class="table" data-table data-table-id="rmm-checks">
-          <caption class="visually-hidden">Checks</caption>
-          <thead><tr>
-            <th scope="col" data-column-key="name">Check</th>
-            <th scope="col" data-column-key="scope">Applies to</th>
-            <th scope="col" data-column-key="when">Fails when</th>
-            <th scope="col" data-column-key="action">Then</th>
-            <th scope="col" data-column-key="results" data-mobile-hidden="true">Devices</th>
-            <th scope="col" data-column-key="status">Status</th>
-            <th scope="col" data-column-key="actions"><span class="visually-hidden">Actions</span></th>
-          </tr></thead>
-          <tbody>
-            {% for check in checks %}
-            <tr data-rmm-check="{{ check.id }}">
-              <td data-label="Check" data-column-key="name"><strong>{{ check.name }}</strong><br><span class="text-muted">{{ check.type_label }}</span></td>
-              <td data-label="Applies to" data-column-key="scope">{{ check.scope_label }}{% if check.target_rules %}<br><span class="rmm-chip">Advanced rules</span>{% endif %}{% if check.replaced %}<br><span class="text-muted">Some devices have their own</span>{% endif %}</td>
-              <td data-label="Fails when" data-column-key="when">{{ check.description }}</td>
-              <td data-label="Then" data-column-key="action">{{ check.action_label }}{% if check.action == "run_script" %} <span class="text-muted">({{ "again every " ~ check.cooldown_minutes ~ " min while failing" if check.cooldown_minutes else "once per failure" }})</span>{% endif %}{% if check.action == "create_ticket" %} <span class="text-muted">(one open ticket per device)</span>{% endif %}</td>
-              <td data-label="Devices" data-column-key="results" data-mobile-hidden="true">
-                {% set failing = check.counts.get("failing", 0) %}{% set passing = check.counts.get("passing", 0) %}{% set warning = check.counts.get("warning", 0) %}
-                {% if failing %}<span class="status status--error">{{ failing }} failing</span> {% endif %}{% if warning %}<span class="status status--warning">{{ warning }} with a problem</span> {% endif %}{% if passing %}<span class="status status--success">{{ passing }} passing</span>{% endif %}{% if not failing and not passing and not warning %}<span class="text-muted">No results yet</span>{% endif %}
-                {% if check.last_summary %}<br><span class="text-muted">{{ check.last_summary }}</span>{% endif %}
-              </td>
-              <td data-label="Status" data-column-key="status"><span class="status status--{{ 'success' if check.is_enabled else 'neutral' }}">{{ "On" if check.is_enabled else "Off" }}</span></td>
-              <td class="table__actions" data-column-key="actions">{% if check.can_edit %}{{ rmm_ui.check_menu(check, csrf_token) }}{% endif %}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+{% macro check_table(rows, caption, table_id) -%}
+<div class="table-wrapper rmm-rule-table">
+  <table class="table" data-table data-table-id="{{ table_id }}">
+    <caption class="visually-hidden">{{ caption }}</caption>
+    <thead><tr>
+      <th scope="col" data-column-key="name">Check</th>
+      <th scope="col" data-column-key="scope">Applies to</th>
+      <th scope="col" data-column-key="when">Fails when</th>
+      <th scope="col" data-column-key="action">Then</th>
+      <th scope="col" data-column-key="results" data-mobile-hidden="true">Devices</th>
+      <th scope="col" data-column-key="status">Status</th>
+      <th scope="col" data-column-key="actions"><span class="visually-hidden">Actions</span></th>
+    </tr></thead>
+    <tbody>
+      {% for check in rows %}
+      <tr data-rmm-check="{{ check.id }}">
+        <td data-label="Check" data-column-key="name"><strong>{{ check.name }}</strong><br><span class="text-muted">{{ check.type_label }}</span></td>
+        <td data-label="Applies to" data-column-key="scope">{{ check.scope_label }}{% if check.target_rules %}<br><span class="rmm-chip">Advanced rules</span>{% endif %}{% if check.replaced %}<br><span class="text-muted">Some devices have their own</span>{% endif %}</td>
+        <td data-label="Fails when" data-column-key="when">{{ check.description }}</td>
+        <td data-label="Then" data-column-key="action">{{ check.action_label }}{% if check.action == "run_script" %} <span class="text-muted">({{ "again every " ~ check.cooldown_minutes ~ " min while failing" if check.cooldown_minutes else "once per failure" }})</span>{% endif %}{% if check.action == "create_ticket" %} <span class="text-muted">(one open ticket per device)</span>{% endif %}</td>
+        <td data-label="Devices" data-column-key="results" data-mobile-hidden="true">
+          {% set failing = check.counts.get("failing", 0) %}{% set passing = check.counts.get("passing", 0) %}{% set warning = check.counts.get("warning", 0) %}
+          {% if failing %}<span class="status status--error">{{ failing }} failing</span> {% endif %}{% if warning %}<span class="status status--warning">{{ warning }} with a problem</span> {% endif %}{% if passing %}<span class="status status--success">{{ passing }} passing</span>{% endif %}{% if not failing and not passing and not warning %}<span class="text-muted">No results yet</span>{% endif %}
+          {% if check.last_summary %}<br><span class="text-muted">{{ check.last_summary }}</span>{% endif %}
+        </td>
+        <td data-label="Status" data-column-key="status"><span class="status status--{{ 'success' if check.is_enabled else 'neutral' }}">{{ "On" if check.is_enabled else "Off" }}</span></td>
+        <td class="table__actions" data-column-key="actions">{% if check.can_edit %}{{ rmm_ui.check_menu(check, csrf_token) }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{%- endmacro %}
+{% set checks = checks or [] %}
+{% set attention = [] %}
+{% set totals = namespace(failing=0, warning=0, passing=0) %}
+{% for check in checks %}
+  {% set totals.failing = totals.failing + check.counts.get("failing", 0) %}
+  {% set totals.warning = totals.warning + check.counts.get("warning", 0) %}
+  {% set totals.passing = totals.passing + check.counts.get("passing", 0) %}
+  {% if check.counts.get("failing", 0) or check.counts.get("warning", 0) %}{% set _ = attention.append(check) %}{% endif %}
+{% endfor %}
+{% set type_rows = [] %}
+{% for key, label in (check_types or {}).items() %}
+  {% set rows = checks | selectattr("check_type", "equalto", key) | list %}
+  {% if rows %}{% set _ = type_rows.append((key, label, rows)) %}{% endif %}
+{% endfor %}
+<div class="settings-workspace rmm-page ce-workspace" data-rmm-checks data-ae-workspace data-ae-storage-key="myportal:rmm-checks:active-section" data-ae-default="{{ 'attention' if attention else 'all' }}"{% if editing %} data-ae-initial="editor" data-ae-form="rmm-check-settings-form"{% endif %}>
+  <section class="ce-overview" aria-label="Checks at a glance">
+    <div class="ce-overview__identity">
+      <div class="ce-overview__summary">
+        <ul class="scf-item__chips ce-overview__chips" aria-label="Checks summary">
+          {% if company and company.name %}<li class="scf-chip">{{ company.name }}</li>{% endif %}
+          <li class="scf-chip">{{ checks | selectattr("is_enabled") | list | length }} of {{ checks | length }} check{{ 's' if checks | length != 1 }} on</li>
+          <li class="scf-chip{% if not attention %} scf-chip--muted{% endif %}">{{ attention | length }} need{{ 's' if attention | length == 1 }} attention</li>
+        </ul>
       </div>
-      {% else %}
-      <div class="empty-state">
-        <h3 class="empty-state__title">No checks</h3>
-        <p class="empty-state__subtitle">Nothing is being watched on this company's devices.{% if can_edit %} <a href="/rmm/checks?new=1#rmm-check-form">Add a check</a>.{% endif %}</p>
-      </div>
-      {% endif %}
     </div>
+    {{ counter_strip([
+      {"label": "Checks", "value": checks | length, "variant": "neutral", "href": "#rmm-checks-all"},
+      {"label": "Failing devices", "value": totals.failing, "variant": "danger" if totals.failing else "neutral", "href": "#rmm-checks-attention"},
+      {"label": "Devices with a problem", "value": totals.warning, "variant": "warning" if totals.warning else "neutral", "href": "#rmm-checks-attention"},
+      {"label": "Passing devices", "value": totals.passing, "variant": "success", "href": "#rmm-checks-all"},
+    ], class="ce-overview__stats") }}
   </section>
 
-</section>
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Check sections" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="rmm-checks-nav-search">Find a check section</label>
+        <input type="search" id="rmm-checks-nav-search" class="form-input" placeholder="Find a check…" autocomplete="off" data-ae-search>
+      </div>
+      {% set type_items = [] %}
+      {% for key, label, rows in type_rows %}{% set _ = type_items.append(("type-" ~ key, "rmm-checks-type-" ~ key, label, rows | length, true)) %}{% endfor %}
+      {% set check_groups = [
+        ("Overview", [
+          ("attention", "rmm-checks-attention", "Needs attention", attention | length, true),
+          ("all", "rmm-checks-all", "All checks", checks | length, true),
+          ("editor", "rmm-check-form", ("Edit check" if editing and editing.id else "New check"), "", editing),
+        ]),
+        ("By type", type_items),
+      ] %}
+      {% for group_label, items in check_groups %}
+        {% set visible_items = items | selectattr(4) | list %}
+        {% if visible_items %}
+          <div class="ce-nav__group" data-ae-nav-group>
+            <p class="ce-nav__group-title" id="rmm-checks-nav-group-{{ loop.index }}">{{ group_label }}</p>
+            <ul class="ce-nav__list" aria-labelledby="rmm-checks-nav-group-{{ loop.index }}">
+              {% for key, target, label, count, _visible in visible_items %}
+                <li><a class="ce-nav__link" href="#{{ target }}" data-ae-link="{{ key }}">
+                  <span class="ce-nav__label">{{ label }}</span>
+                  <span class="ce-nav__dirty" data-ae-dirty-dot hidden><span class="visually-hidden">Unsaved changes</span></span>
+                  {% if count != "" %}<span class="ce-nav__count">{{ count }}</span>{% endif %}
+                </a></li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      {% endfor %}
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No checks match your search.</p>
+    </nav>
+
+    <div class="ce-panels">
+      <section class="card card--panel ce-section" id="rmm-checks-attention" data-ae-section="attention" aria-labelledby="rmm-checks-attention-heading">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="rmm-checks-attention-heading">Needs attention</h2>
+          <p class="card__subtitle">Checks that are failing or seeing a problem on at least one device. Open a device to see its results and stats.</p>
+        </div></header>
+        <div class="ce-section__body">
+          {% if attention %}{{ check_table(attention, "Checks that need attention", "rmm-checks-attention") }}
+          {% else %}<p class="text-muted">Every check is passing or has no results yet.</p>{% endif %}
+        </div>
+      </section>
+
+      <section class="card card--panel ce-section" id="rmm-checks-all" data-ae-section="all" aria-labelledby="rmm-checks-heading">
+        <header class="ce-section__header">
+          <div class="ce-section__heading">
+            <h2 class="card__title" id="rmm-checks-heading">All checks</h2>
+            <p class="card__subtitle">Checks watch each device's disk space, ping targets, CPU, memory, services, network throughput, script results and check-ins. A problem must last the check's duration before the check fails. When it fails the check can run a script on the device or raise a ticket for it; the ticket gets an update when the check passes again. For the same drive, ping target, service, interface or script, a device's own check replaces its company's, which replaces a check for every company. Open a device to see its results and stats.</p>
+          </div>
+          {% if can_edit %}<a class="button button--primary button--small" href="/rmm/checks?new=1#rmm-check-form">Add check</a>{% endif %}
+        </header>
+        <div class="ce-section__body">
+          {% if checks %}{{ check_table(checks, "Checks", "rmm-checks") }}
+          {% else %}
+          <div class="empty-state">
+            <h3 class="empty-state__title">No checks</h3>
+            <p class="empty-state__subtitle">Nothing is being watched on this company's devices.{% if can_edit %} <a href="/rmm/checks?new=1#rmm-check-form">Add a check</a>.{% endif %}</p>
+          </div>
+          {% endif %}
+        </div>
+      </section>
+
+      {% if editing %}{% include "rmm/_check_form.html" %}{% endif %}
+
+      {% for key, label, rows in type_rows %}
+      <section class="card card--panel ce-section" id="rmm-checks-type-{{ key }}" data-ae-section="type-{{ key }}" aria-labelledby="rmm-checks-type-{{ key }}-heading">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="rmm-checks-type-{{ key }}-heading">{{ label }}</h2>
+          <p class="card__subtitle">{{ rows | length }} {{ label | lower }} check{{ 's' if rows | length != 1 }} for this company's devices.</p>
+        </div></header>
+        <div class="ce-section__body">{{ check_table(rows, label ~ " checks", "rmm-checks-" ~ key) }}</div>
+      </section>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if editing %}
+  <div class="ce-savebar" data-ae-savebar role="region" aria-label="Unsaved check changes" hidden>
+    <p class="ce-savebar__text" aria-live="polite"><strong data-ae-savebar-count>Unsaved changes</strong> <span class="text-muted">in <span data-ae-savebar-sections></span></span></p>
+    <span class="ae-savebar__spacer" aria-hidden="true"></span>
+    <button type="button" class="button button--ghost" data-ae-discard>Discard</button>
+    <button type="submit" class="button button--primary" form="rmm-check-settings-form">{{ "Save changes" if editing.id else "Add check" }}</button>
+  </div>
+  {% endif %}
+</div>
 {% endblock %}
 {% block scripts %}
+<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_checks.js') }}" defer></script>
 {% endblock %}

@@ -169,13 +169,13 @@ Example TRMM script node visible only for company IDs `12` and `34`:
 }
 ```
 
-The **Admin → Tray → Configurations** menu-node editor exposes these as
+The **Tray Settings → Menu configurations** (`/admin/tray#menu-configurations`) menu-node editor exposes these as
 **Show only for companies** and **Hide for companies** dropdown fields on
 every row. Empty submenus are removed after their children are filtered out.
 
 ### 4.1a Running a MyPortal RMM script from the tray
 
-Choose the `rmm_script` node type in **Admin → Tray → Configurations**, pick
+Choose the `rmm_script` node type in **Tray Settings → Menu configurations** (`/admin/tray#menu-configurations`), pick
 a script synced from Gitea and fill in its parameters and environment
 variables. Values can use MyPortal variables such as `{{asset.name}}`,
 `{{asset.custom.Name}}` or `{{company.variables.Name}}`, resolved for each
@@ -227,7 +227,7 @@ The variable name is **case-insensitive** — `username` and `USERNAME` are trea
 
 The tray client will only read variables that are explicitly listed in the resolved configuration's allowlist. Values are read on the client device and are **never** sent to the server.
 
-1. Go to **Admin → Tray → Configurations** and open (or create) the configuration you want to edit.
+1. Go to **Tray Settings → Menu configurations** (`/admin/tray#menu-configurations`) and open (or create) the configuration you want to edit.
 2. In the **Environment variable allowlist** field, enter the variable names as a comma-separated list, for example:
 
    ```
@@ -308,7 +308,7 @@ If you need advanced nesting, you can still use the **Advanced JSON** toggle to 
 
 ### Deployment URLs
 
-**Admin → Tray → Deployment URLs** (`/admin/tray/deployment-links`) creates a
+**Tray Settings → Deployment URLs** (`/admin/tray#deployment-urls`) creates a
 private magic link for one company. Whoever opens it gets a page with
 *Download for Windows* and *Download for macOS* buttons, so no token needs to
 be typed or pasted. The company-specific packages are only ever served by

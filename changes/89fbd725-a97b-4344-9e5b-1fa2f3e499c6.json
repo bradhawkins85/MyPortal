@@ -1,0 +1,7 @@
+{
+  "guid": "89fbd725-a97b-4344-9e5b-1fa2f3e499c6",
+  "occurred_at": "2026-10-19T04:37Z",
+  "change_type": "Improvement",
+  "summary": "RMM: lay out Patch management and Checks as settings workspaces with grouped section navigation, a summary strip, checks split into Needs attention, All checks and one section per check type, and a save bar on the policy and check editors",
+  "content_hash": "932c0a4c699934ec6c9d8687ff9daa9dac6f12d99d6494dc0b7bd27aa8239897"
+}
