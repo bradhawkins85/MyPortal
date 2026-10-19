@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}Marketing Assistant — {{ marketing_page.title }}{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Edit page", "type": "link", "href": "/admin/marketing/pages/" ~ marketing_page.id ~ "/edit"},
+    {"label": "View page", "type": "link", "href": "/marketing/" ~ marketing_page.slug, "attrs": {"target": "_blank", "rel": "noopener noreferrer"}},
+    {"label": "Back to pages", "type": "link", "href": "/admin/marketing", "variant": "ghost"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Source websites</h2>
+        <p class="card__subtitle">
+          The assistant only uses information from these websites. Every statement it writes must be confirmed by
+          {% if assistant_min_sources_per_claim > 1 %}at least {{ assistant_min_sources_per_claim }} of them{% else %}at least one of them{% endif %},
+          and images are only taken from these pages. Up to {{ assistant_max_sources }} websites are read per run.
+        </p>
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Website</th>
+            <th>Last read</th>
+            <th class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for source in assistant_sources %}
+            <tr>
+              <td data-label="Website">
+                <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer nofollow">{{ source.url }}</a>
+              </td>
+              <td data-label="Last read">
+                {% if source.last_status == 'read' %}
+                  <span class="status status--success">Read</span>
+                {% elif source.last_status == 'failed' %}
+                  <span class="status status--error" title="{{ source.last_error or '' }}">Failed</span>
+                  {% if source.last_error %}<div class="text-muted">{{ source.last_error }}</div>{% endif %}
+                {% else %}
+                  <span class="status status--neutral">Not read yet</span>
+                {% endif %}
+                {% if source.last_fetched_at %}<div><span data-utc="{{ source.last_fetched_at }}">{{ source.last_fetched_at }}</span></div>{% endif %}
+              </td>
+              <td class="table__actions">
+                <form action="/admin/marketing/assistant/sources/{{ source.id }}/delete" method="post" class="inline-form">
+                  {% include "partials/csrf.html" %}
+                  <button type="submit" class="button button--danger button--small">Remove</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="3" class="table__empty">No source websites yet. Add the pages the article should be built from.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <form action="/admin/marketing/pages/{{ marketing_page.id }}/assistant/sources" method="post" class="form-grid">
+      {% include "partials/csrf.html" %}
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="assistant-urls">Add websites</label>
+        <textarea id="assistant-urls" class="form-input" name="urls" rows="4" required
+                  placeholder="https://vendor.example.com/product&#10;https://vendor.example.com/datasheet"></textarea>
+        <p class="form-help">One address per line. Only public http:// and https:// pages can be used.</p>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Add websites</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Run the assistant</h2>
+        <p class="card__subtitle">
+          Writes the page's sections with a mix of text and images from the source websites. Sections you wrote
+          yourself are kept; sections the assistant wrote before are replaced. Each run can be undone below.
+          {% if assistant_model %}Model: <code>{{ assistant_model }}</code>.{% endif %}
+        </p>
+      </div>
+    </header>
+    {% if assistant_running %}
+      <div class="alert alert--info" role="status" data-assistant-running data-status-url="/admin/marketing/pages/{{ marketing_page.id }}/assistant/status">
+        The assistant is reading the source websites and checking what it writes. This page refreshes when it finishes.
+      </div>
+    {% endif %}
+    <form action="/admin/marketing/pages/{{ marketing_page.id }}/assistant/run" method="post" class="form-grid">
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label" for="assistant-mode">Action</label>
+        <select id="assistant-mode" class="form-input" name="mode">
+          <option value="generate" {% if not assistant_has_generated %}selected{% endif %}>Write the article</option>
+          <option value="refresh" {% if assistant_has_generated %}selected{% endif %}>Refresh with new information</option>
+        </select>
+        <p class="form-help">Refresh keeps the current structure and updates it with what the websites say now.</p>
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="assistant-instructions">Brief (optional)</label>
+        <textarea id="assistant-instructions" class="form-input" name="instructions" rows="3" maxlength="2000"
+                  placeholder="Audience, tone and what to focus on, e.g. small accounting firms; focus on backup and recovery."></textarea>
+        <p class="form-help">The brief guides tone and focus only. Facts always come from the source websites.</p>
+      </div>
+      <div class="form-field">
+        <label class="checkbox">
+          <input type="checkbox" name="update_intro" value="1" checked />
+          <span>Also write the subtitle and intro text</span>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button" {% if assistant_running or not assistant_sources %}disabled{% endif %}>Run assistant</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Runs</h2>
+        <p class="card__subtitle">What each run read, wrote and left out because it could not be verified.</p>
+      </div>
+    </header>
+    {% for run in assistant_runs %}
+      <article class="marketing-assistant-run">
+        <header class="marketing-assistant-run__header">
+          <div>
+            <strong>{{ 'Refresh' if run.mode == 'refresh' else 'Write article' }}</strong>
+            · <span data-utc="{{ run.started_at }}">{{ run.started_at }}</span>
+            {% if run.status == 'succeeded' %}
+              <span class="status status--success">Finished</span>
+            {% elif run.status == 'running' %}
+              <span class="status status--info">Running</span>
+            {% else %}
+              <span class="status status--error">Failed</span>
+            {% endif %}
+            {% if run.restored_at %}<span class="status status--neutral">Undone</span>{% endif %}
+          </div>
+          {% if run.status == 'succeeded' and not run.restored_at %}
+            <form action="/admin/marketing/assistant/runs/{{ run.id }}/restore" method="post" class="inline-form"
+                  data-confirm="Put the assistant's sections back as they were before this run?">
+              {% include "partials/csrf.html" %}
+              <button type="submit" class="button button--ghost button--small">Undo this run</button>
+            </form>
+          {% endif %}
+        </header>
+        {% if run.error %}<p class="text-danger">{{ run.error }}</p>{% endif %}
+        {% if run.status == 'succeeded' %}
+          <p class="text-muted">
+            Read {{ run.sources_read }} website(s); wrote {{ run.sections_written }} section(s) with
+            {{ run.images_used }} image(s) from {{ run.claims_verified }} verified statement(s);
+            left out {{ run.claims_rejected }} item(s) that could not be verified.
+          </p>
+        {% endif %}
+        {% if run.instructions %}<p class="text-muted">Brief: {{ run.instructions }}</p>{% endif %}
+        {% set report = run.report or {} %}
+        {% if report.warnings %}
+          <ul>{% for warning in report.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+        {% endif %}
+        {% if report.sources %}
+          <details>
+            <summary>Websites read ({{ report.sources | length }})</summary>
+            <ul>
+              {% for source in report.sources %}
+                <li>
+                  {{ source.id }} — <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer nofollow">{{ source.title or source.url }}</a>
+                  {% if source.status != 'read' %}<span class="text-danger">({{ source.error or 'not read' }})</span>{% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          </details>
+        {% endif %}
+        {% if report.rejected %}
+          <details>
+            <summary>Left out — could not be verified ({{ report.rejected | length }})</summary>
+            <ul>
+              {% for item in report.rejected %}
+                <li><strong>{{ item.location }}:</strong> {{ item.text }} <span class="text-muted">— {{ item.reason }}</span></li>
+              {% endfor %}
+            </ul>
+          </details>
+        {% endif %}
+      </article>
+    {% else %}
+      <p class="table__empty">The assistant has not been run for this page yet.</p>
+    {% endfor %}
+  </section>
+</div>
+{% endblock %}
+
+{% block styles %}
+<style>
+  .marketing-assistant-run { border-top: 1px solid var(--border-color); padding: .85rem 0; }
+  .marketing-assistant-run:first-of-type { border-top: 0; }
+  .marketing-assistant-run__header { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: space-between; align-items: center; }
+  .marketing-assistant-run details { margin-top: .5rem; }
+  .marketing-assistant-run ul { margin: .35rem 0 0 1.1rem; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+  (() => {
+    const banner = document.querySelector('[data-assistant-running]');
+    if (!banner) return;
+    const url = banner.getAttribute('data-status-url');
+    const poll = async () => {
+      try {
+        const response = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        if (response.ok) {
+          const data = await response.json();
+          if (!data.running) {
+            window.location.reload();
+            return;
+          }
+        }
+      } catch (error) {
+        // Keep polling; a brief network error should not stop the refresh.
+      }
+      window.setTimeout(poll, 5000);
+    };
+    window.setTimeout(poll, 5000);
+  })();
+</script>
+{% endblock %}

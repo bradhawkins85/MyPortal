@@ -379,7 +379,7 @@ async def admin_marketing_create_page(request: Request):
         subtitle = str(form.get("subtitle") or "").strip() or None
         intro_text = str(form.get("intro_text") or "").strip() or None
         is_published = _form_bool(form, "is_published")
-        await marketing_repo.create_page(
+        created = await marketing_repo.create_page(
             slug=slug,
             title=title,
             subtitle=subtitle,
@@ -398,6 +398,19 @@ async def admin_marketing_create_page(request: Request):
             request,
             current_user,
             extra=extra,
+        )
+    source_urls = str(form.get("source_urls") or "").strip()
+    if source_urls and _main()._feature_pack_available("marketing_assistant"):
+        from app.features.marketing_assistant.routes import add_sources
+
+        _, source_errors = await add_sources(int(created["id"]), source_urls)
+        message = "Marketing page created. Run the Marketing Assistant to write it from the source websites."
+        if source_errors:
+            message = "Marketing page created. " + " ".join(source_errors)
+        return flash_redirect(
+            f"/admin/marketing/pages/{created['id']}/assistant",
+            message[:900],
+            "warning" if source_errors else "success",
         )
     return flash_redirect("/admin/marketing", "Marketing page created.", "success")
 

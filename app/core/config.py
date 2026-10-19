@@ -1043,6 +1043,27 @@ class Settings(BaseSettings):
     findings_llm_api_key: str | None = Field(
         default=None, validation_alias="FINDINGS_LLM_API_KEY"
     )
+    # Marketing Assistant: writes marketing page sections from websites an
+    # admin lists for the page. Dedicated LLM settings; when none are set the
+    # troubleshooter's LLM (build_troubleshoot_llm_config) is used.
+    marketing_assistant_llm_base_url: str | None = Field(
+        default=None, validation_alias="MARKETING_ASSISTANT_LLM_BASE_URL"
+    )
+    marketing_assistant_llm_model: str | None = Field(
+        default=None, validation_alias="MARKETING_ASSISTANT_LLM_MODEL"
+    )
+    marketing_assistant_llm_api_key: str | None = Field(
+        default=None, validation_alias="MARKETING_ASSISTANT_LLM_API_KEY"
+    )
+    marketing_assistant_max_sources: int = Field(
+        default=10, ge=1, le=25, validation_alias="MARKETING_ASSISTANT_MAX_SOURCES"
+    )
+    marketing_assistant_max_images: int = Field(
+        default=6, ge=0, le=12, validation_alias="MARKETING_ASSISTANT_MAX_IMAGES"
+    )
+    marketing_assistant_min_sources_per_claim: int = Field(
+        default=1, ge=1, le=5, validation_alias="MARKETING_ASSISTANT_MIN_SOURCES_PER_CLAIM"
+    )
     # Optional public web search for the multi-stage troubleshooter. Off by
     # default: when enabled, generic (LLM-written, no customer details) search
     # terms are sent to the configured search provider and the top public
