@@ -1,0 +1,42 @@
+{# Install or update one Chocolatey package on this device without a script, opened from the
+   asset page's RMM menu. rmm_choco_install.js searches the downloaded app list; the form posts
+   to the same endpoint as the Software section's install form. #}
+<div class="modal rmm-modal" id="choco-install-modal" role="dialog" aria-modal="true" aria-labelledby="choco-install-title" hidden data-choco-modal>
+  <form class="modal__panel" method="post" action="/rmm/assets/{{ asset.id }}/software/install" data-choco-modal-form>
+    {% include "partials/csrf.html" %}
+    <input type="hidden" name="package_id" data-choco-modal-package>
+    <header class="modal__header">
+      <div>
+        <p class="rmm-editor__eyebrow">Chocolatey</p>
+        <h2 class="modal__title" id="choco-install-title">Install Choco Package</h2>
+        <p class="rmm-editor__subtitle">Install an app on {{ asset_display_name }} with the company's enabled Chocolatey sources. An app that is already installed is updated to the latest version. The device is not restarted.</p>
+      </div>
+      <button type="button" class="modal__close" data-choco-modal-close aria-label="Close Chocolatey install"></button>
+    </header>
+    <div class="modal__body">
+      <div class="form-field">
+        <label class="form-label" for="choco-modal-search">Find an app in the downloaded list</label>
+        <div class="form-field__group">
+          <input type="search" class="form-input" id="choco-modal-search" maxlength="255" placeholder="Search apps…" autocomplete="off" data-choco-modal-search>
+          <button type="button" class="button button--secondary" data-choco-modal-search-button>Search</button>
+        </div>
+        <p class="form-help" role="status" aria-live="polite" data-choco-modal-status></p>
+      </div>
+      <fieldset class="form-field">
+        <legend class="form-label">Application</legend>
+        <div class="rmm-app-push__results" data-choco-modal-results></div>
+      </fieldset>
+      <div class="form-field">
+        <label class="form-label" for="choco-modal-other">Or enter a package ID</label>
+        <input type="text" class="form-input" id="choco-modal-other" maxlength="128" placeholder="Such as googlechrome" autocomplete="off" aria-describedby="choco-modal-other-help" data-choco-modal-other>
+        <p class="form-help" id="choco-modal-other-help">For packages in the company's own sources that are not in the downloaded list.</p>
+      </div>
+      <p class="alert alert--warning" role="alert" data-choco-modal-error hidden></p>
+    </div>
+    <footer class="modal__footer">
+      <span class="rmm-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-choco-modal-close>Cancel</button>
+      <button type="submit" class="button button--primary">Push install</button>
+    </footer>
+  </form>
+</div>
