@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_shop_workspace.html" import shop_admin_workspace %}
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}
@@ -28,6 +29,7 @@
 {% endblock %}
 
 {% block content %}
+{% call shop_admin_workspace("packages") %}
 <div class="admin-grid">
   <details class="card card--panel card-collapsible admin-grid__full" data-create-package-panel>
     <summary class="card__header card__header--collapsible card__header--stacked">
@@ -165,4 +167,5 @@
     });
   }
 </script>
+{% endcall %}
 {% endblock %}

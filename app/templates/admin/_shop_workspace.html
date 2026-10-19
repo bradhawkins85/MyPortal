@@ -1,0 +1,59 @@
+{#- Shop admin pages share one settings workspace. Each area is its own page, so
+    the section nav holds real links (data-ae-link-nav) and the page's own
+    content renders in the panel:
+
+      {% from "admin/_shop_workspace.html" import shop_admin_workspace %}
+      {% call shop_admin_workspace("catalogue", summary) %} … {% endcall %}
+
+    summary is an optional list of {"label": …, "muted": bool} chips. -#}
+{% macro shop_admin_workspace(active, summary=none) -%}
+{% set shop_admin_groups = [
+  ("Catalogue", [
+    ("catalogue", "/admin/shop", "Products and subscriptions"),
+    ("packages", "/admin/shop/packages", "Packages"),
+    ("accessories", "/admin/shop/optional-accessories", "Optional accessories"),
+  ]),
+  ("Organisation", [
+    ("categories", "/admin/shop/categories", "Product categories"),
+    ("subscription-categories", "/admin/shop/subscription-categories", "Subscription categories"),
+  ]),
+  ("Delivery", [
+    ("freight", "/admin/shop/freight-rules", "Freight rules"),
+  ]),
+  ("Storefront", [
+    ("storefront", "/shop", "View the shop"),
+  ]),
+] %}
+<div class="settings-workspace shop-admin-workspace ce-workspace" data-ae-workspace data-ae-link-nav>
+  {% if summary %}
+  <section class="ce-overview" aria-label="Shop at a glance">
+    <ul class="scf-item__chips ce-overview__chips" aria-label="Shop summary">
+      {% for chip in summary %}<li class="scf-chip{% if chip.muted %} scf-chip--muted{% endif %}">{{ chip.label }}</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Shop admin areas" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="shop-admin-nav-search">Find a shop admin area</label>
+        <input type="search" id="shop-admin-nav-search" class="form-input" placeholder="Find an area…" autocomplete="off" data-ae-search>
+      </div>
+      {% for group_label, items in shop_admin_groups %}
+        <div class="ce-nav__group" data-ae-nav-group>
+          <p class="ce-nav__group-title" id="shop-admin-nav-group-{{ loop.index }}">{{ group_label }}</p>
+          <ul class="ce-nav__list" aria-labelledby="shop-admin-nav-group-{{ loop.index }}">
+            {% for key, href, label in items %}
+              <li><a class="ce-nav__link" href="{{ href }}"{% if key == active %} aria-current="page"{% endif %}><span class="ce-nav__label">{{ label }}</span></a></li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endfor %}
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No areas match your search.</p>
+    </nav>
+    <div class="ce-panels">
+      {{ caller() }}
+    </div>
+  </div>
+</div>
+<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
+{%- endmacro %}

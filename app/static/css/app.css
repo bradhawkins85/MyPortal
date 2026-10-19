@@ -19823,7 +19823,8 @@ a.shop-product-card {
   outline-offset: 1px;
 }
 
-.ce-nav__link[aria-current="true"] {
+.ce-nav__link[aria-current="true"],
+.ce-nav__link[aria-current="page"] {
   background: var(--hf-accent-soft);
   box-shadow: inset 2px 0 0 var(--hf-accent);
   color: var(--hf-accent-strong);
@@ -20444,7 +20445,8 @@ a.shop-product-card {
     font-size: 0.85rem;
   }
 
-  .ce-workspace.is-enhanced .ce-nav__link[aria-current="true"] {
+  .ce-workspace.is-enhanced .ce-nav__link[aria-current="true"],
+  .ce-workspace.is-enhanced .ce-nav__link[aria-current="page"] {
     box-shadow: none;
     border-color: var(--hf-accent);
   }
@@ -22847,4 +22849,15 @@ a.sch-item__company:focus-visible {
   .llmu-chart {
     height: 8rem;
   }
+}
+
+/* Shop admin workspace: wide catalogue tables scroll inside their panel. */
+.shop-admin-workspace .ce-panels > *,
+.shop-admin-workspace .card {
+  min-width: 0;
+}
+
+.shop-admin-workspace .table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
 }

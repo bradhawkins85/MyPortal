@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_shop_workspace.html" import shop_admin_workspace %}
 
 {% block header_title %}
   <div class="page-header-bar">
@@ -33,6 +34,7 @@
 {% endblock %}
 
 {% block content %}
+{% call shop_admin_workspace("accessories") %}
   {% set col_count = 9 if not show_dismissed else 8 %}
   <div class="admin-grid">
     <section class="card card--panel admin-grid__full" aria-labelledby="optional-accessories-heading">
@@ -200,6 +202,7 @@
       </div>
     </div>
   </div>
+{% endcall %}
 {% endblock %}
 
 {% block scripts %}

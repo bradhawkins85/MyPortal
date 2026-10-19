@@ -97,7 +97,42 @@
   {%- if ns.params -%}?{{ ns.params | join('&') }}{%- endif -%}
 {%- endmacro %}
 
-<div class="shop-layout">
+{% set top_categories = categories or [] %}
+{% set active_key = (current_category | string) if current_category is not none else ('search' if search_term else 'all') %}
+{% set shop_groups = [
+  ("Shop", [("all", request.url_for('shop_page') | string, "All categories"), ("featured", request.url_for('shop_page') ~ shop_query('featured'), "Featured"), ("packages", request.url_for('shop_page') ~ shop_query('packages'), "Packages")] + ([("subscriptions", request.url_for('shop_page') ~ '?category=subscriptions', "Subscriptions")] if subscription_categories else [])),
+] %}
+{% set category_items = [] %}
+{% for category in top_categories %}{% set _ = category_items.append(((category.id | string), request.url_for('shop_page') ~ shop_query(category.id), category.name or 'Category')) %}{% endfor %}
+{% if category_items %}{% set _ = shop_groups.append(("Categories", category_items)) %}{% endif %}
+<div class="settings-workspace shop-workspace ce-workspace" data-ae-workspace data-ae-link-nav>
+  <section class="ce-overview" aria-label="Shop at a glance">
+    <ul class="scf-item__chips ce-overview__chips" aria-label="Shop summary">
+      {% if not showing_category_cards %}<li class="scf-chip">{{ total_count or (products | length) }} item{{ '' if (total_count or (products | length)) == 1 else 's' }} shown</li>{% endif %}
+      {% if search_term %}<li class="scf-chip scf-chip--logic">Search: {{ search_term }}</li>{% endif %}
+      {% if show_out_of_stock %}<li class="scf-chip scf-chip--muted">Including out of stock</li>{% endif %}
+      {% if cart_allowed %}<li class="scf-chip{% if not cart_summary.total_quantity %} scf-chip--muted{% endif %}">{{ cart_summary.total_quantity or 0 }} in your cart</li>{% endif %}
+    </ul>
+  </section>
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Shop categories" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="shop-nav-search">Find a category</label>
+        <input type="search" id="shop-nav-search" class="form-input" placeholder="Find a category…" autocomplete="off" data-ae-search>
+      </div>
+      {% for group_label, items in shop_groups %}
+        <div class="ce-nav__group" data-ae-nav-group>
+          <p class="ce-nav__group-title" id="shop-nav-group-{{ loop.index }}">{{ group_label }}</p>
+          <ul class="ce-nav__list" aria-labelledby="shop-nav-group-{{ loop.index }}">
+            {% for key, href, label in items %}
+              <li><a class="ce-nav__link" href="{{ href }}"{% if key == active_key %} aria-current="page"{% endif %}><span class="ce-nav__label">{{ label }}</span></a></li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endfor %}
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No categories match your search.</p>
+    </nav>
+<div class="shop-layout ce-panels">
   <section class="card card--panel shop-layout__content">
     <header class="card__header shop-card-header">
       <div class="shop-card-header__title">
@@ -236,6 +271,8 @@
     {% endif %}
   </section>
 </div>
+  </div>
+</div>
 
 
 <div class="modal" id="product-details-modal" role="dialog" aria-modal="true" data-cart-allowed="{{ 'true' if cart_allowed else 'false' }}" hidden>
@@ -289,6 +326,7 @@
 {% endblock %}
 
 {% block scripts %}
+  <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/shop.js') }}" defer></script>
