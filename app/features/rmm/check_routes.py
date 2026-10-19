@@ -9,6 +9,9 @@ write access, and checks for every company need a super admin):
   own, which replaces it on that device
 * ``POST /rmm/checks`` and ``/rmm/checks/{id}`` save a check
 * ``POST /rmm/checks/{id}/enabled`` and ``/delete``
+* ``GET /api/rmm/checks/{id}/devices?status=failing`` the company's devices a
+  check is failing (or ``warning``) on, with their latest values, for the
+  checks page's device list
 * each asset page's Checks and Machine stats sections (:func:`asset_checks_context`)
 
 Agent side (``Authorization: Bearer`` token):
@@ -208,7 +211,7 @@ async def _render(
 ):
     is_super_admin = bool(user.get("is_super_admin"))
     checks = await checks_repo.list_checks_for_company(company_id)
-    counts = await checks_repo.count_states(int(check["id"]) for check in checks)
+    counts = await checks_repo.count_states((int(check["id"]) for check in checks), company_id=company_id)
     rows = []
     for check in checks:
         summary = check_summary(check, counts=counts.get(int(check["id"])))
@@ -284,6 +287,45 @@ async def _editable_check(check_id: int, user: dict[str, Any], company_id: int) 
     if not rmm_checks.can_edit(check, company_id=company_id, is_super_admin=bool(user.get("is_super_admin"))):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only super admins can change checks for every company")
     return check
+
+
+DEVICE_STATUSES = ("failing", "warning")
+
+
+@router.get("/api/rmm/checks/{check_id}/devices", summary="Devices a check is failing or seeing a problem on")
+async def check_devices(request: Request, check_id: int, status_filter: str | None = Query(default=None, alias="status")):
+    _user, _company, company_id, _can_edit = await _context(request, api=True)
+    check = await checks_repo.get_check(check_id)
+    if not check or (check.get("company_id") is not None and int(check["company_id"]) != int(company_id)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Check not found")
+    if status_filter is not None and status_filter not in DEVICE_STATUSES:
+        raise HTTPException(status_code=422, detail="Choose failing or warning devices")
+    states = await checks_repo.list_check_devices(
+        check_id, company_id, [status_filter] if status_filter else DEVICE_STATUSES
+    )
+    devices = []
+    for state in states:
+        row = _serialise(state) or {}
+        devices.append({
+            "agent_id": row.get("agent_id"),
+            "asset_id": row.get("asset_id"),
+            "name": row.get("asset_name") or row.get("hostname") or f"Agent {row.get('agent_id')}",
+            "hostname": row.get("hostname"),
+            "status": row.get("status"),
+            "status_label": rmm_checks.STATUSES.get(row.get("status"), row.get("status")),
+            "value_text": row.get("value_text"),
+            "problem_since": row.get("problem_since"),
+            "checked_at": row.get("checked_at"),
+            "ticket_id": row.get("ticket_id"),
+            "scheduled_at": row.get("scheduled_at"),
+        })
+    summary = check_summary(check)
+    return {
+        "check": {"id": check["id"], "name": check.get("name"), "type_label": summary["type_label"],
+                  "description": summary["description"]},
+        "status": status_filter,
+        "devices": devices,
+    }
 
 
 class TargetingPreviewRequest(BaseModel):

@@ -1,0 +1,35 @@
+{# The devices a check is failing or seeing a problem on, opened from a count in the checks
+   page's Devices column. rmm_check_devices.js fills it from /api/rmm/checks/{id}/devices. #}
+<div class="modal rmm-modal" id="rmm-check-devices-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-check-devices-title" aria-hidden="true" hidden data-rmm-check-devices-modal>
+  <div class="modal__panel modal__panel--wide">
+    <header class="modal__header">
+      <div>
+        <p class="rmm-editor__eyebrow" data-rmm-check-devices-eyebrow>Check</p>
+        <h2 class="modal__title" id="rmm-check-devices-title" data-rmm-check-devices-title>Devices</h2>
+        <p class="rmm-editor__subtitle" data-rmm-check-devices-subtitle></p>
+      </div>
+      <button type="button" class="modal__close" data-rmm-check-devices-close aria-label="Close device list"></button>
+    </header>
+    <div class="modal__body">
+      <p class="text-muted" role="status" aria-live="polite" data-rmm-check-devices-status>Loading devices…</p>
+      <p class="alert alert--warning" role="alert" data-rmm-check-devices-error hidden></p>
+      <div class="table-wrapper rmm-rule-table" data-rmm-check-devices-table hidden>
+        <table class="table">
+          <caption class="visually-hidden">Devices for this check</caption>
+          <thead><tr>
+            <th scope="col">Device</th>
+            <th scope="col">Result</th>
+            <th scope="col">Value</th>
+            <th scope="col">Since</th>
+            <th scope="col">Last checked</th>
+          </tr></thead>
+          <tbody data-rmm-check-devices-rows></tbody>
+        </table>
+      </div>
+    </div>
+    <footer class="modal__footer">
+      <span class="rmm-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-rmm-check-devices-close>Close</button>
+    </footer>
+  </div>
+</div>

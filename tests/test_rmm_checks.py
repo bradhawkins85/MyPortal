@@ -438,6 +438,45 @@ async def test_asset_context_and_charts(sqlite_db, stats_db, monkeypatch):
     assert check_routes.form_values(await checks_repo.get_check(company))["cpu_threshold"] == "80"
 
 
+@pytest.mark.anyio
+async def test_check_devices_lists_only_the_companys_failing_devices(sqlite_db, monkeypatch):
+    from fastapi import HTTPException
+
+    from app.features.rmm import check_routes
+
+    _result, agent = await _enrol(sqlite_db)
+    _result, other = await _enrol(sqlite_db, tray_id=6, asset_id=20, uid="agent-uid-0002")
+    await sqlite_db.execute("UPDATE rmm_agents SET company_id = 2 WHERE id = %s", (other["id"],))
+    check_id = await _save({"name": "Disk", "scope": "global", "check_type": "disk", "disk_threshold": "10"}, super_admin=True)
+    since = datetime(2026, 10, 15, 12)
+    for agent_id in (agent["id"], other["id"]):
+        await checks_repo.save_state(check_id, agent_id, {"status": "failing", "value_text": "C: 4% free",
+                                                          "problem_since": since, "checked_at": since})
+
+    assert await checks_repo.count_states([check_id]) == {check_id: {"failing": 2}}
+    assert await checks_repo.count_states([check_id], company_id=1) == {check_id: {"failing": 1}}
+    devices = await checks_repo.list_check_devices(check_id, 1, ["failing"])
+    assert [(row["asset_name"], row["value_text"]) for row in devices] == [("PC-01", "C: 4% free")]
+    assert devices[0]["problem_since"] == since
+    assert await checks_repo.list_check_devices(check_id, 1, ["warning"]) == []
+
+    async def context(request, *, write=False, api=False):
+        return {"id": 9}, {"name": "Contoso"}, 1, True
+
+    monkeypatch.setattr(check_routes, "_context", context)
+    payload = await check_routes.check_devices(None, check_id, status_filter="failing")
+    assert payload["check"]["name"] == "Disk"
+    assert [(row["name"], row["asset_id"], row["status_label"]) for row in payload["devices"]] == [
+        ("PC-01", 10, checks.STATUSES["failing"])]
+    with pytest.raises(HTTPException) as bad_status:
+        await check_routes.check_devices(None, check_id, status_filter="passing")
+    assert bad_status.value.status_code == 422
+    own = await _save({"name": "Other disk", "scope": "company", "check_type": "disk", "disk_threshold": "10"}, company_id=2)
+    with pytest.raises(HTTPException) as hidden:
+        await check_routes.check_devices(None, own, status_filter="failing")
+    assert hidden.value.status_code == 404
+
+
 def test_checks_page_and_asset_sections_render():
     env = _environment()
     env.globals["static_url"] = lambda path: path
@@ -462,7 +501,9 @@ def test_checks_page_and_asset_sections_render():
     )
     assert "&lt;b&gt;Disk&lt;/b&gt;" in html and "<b>Disk</b>" not in html
     assert "[Add check][Scripts]" in html and "Enter the service&#39;s name." in html
-    assert "2 failing" in html and "once per failure" in html and "Some devices have their own" in html
+    assert "2 failing" in html and "once per failure" in html
+    assert 'data-rmm-check-devices-open="3" data-rmm-check-devices-status="failing"' in html
+    assert 'id="rmm-check-devices-modal"' in html and "/static/js/rmm_check_devices.js" in html and "Some devices have their own" in html
     assert 'id="rmm-check-type-service" name="check_type" value="service" data-rmm-check-type checked' in html
     assert 'value="global"' not in html and 'id="rmm-check-target-all" name="target_mode" value="all" data-rmm-check-target-mode checked' in html
     assert 'name="schedule_mode"' in html and 'name="action" value="schedule_script" data-rmm-check-action >' in html
