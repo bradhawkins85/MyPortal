@@ -1074,22 +1074,16 @@
                         data-tactical-id="{{ asset.tactical_asset_id or '' }}"
                       >
                         <input type="hidden" name="assetIds" value="{{ asset.asset_id }}" form="ticket-details-form" />
-                        {% if tactical_link %}
-                          <a
-                            href="{{ tactical_link }}"
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            class="ticket-assets-linked__name"
-                            data-linked-asset-name
-                            title="{{ tooltip_label }}"
-                          >
-                            {{ display_name }}
-                          </a>
-                        {% else %}
-                          <span class="ticket-assets-linked__name" data-linked-asset-name title="{{ tooltip_label }}">
-                            {{ display_name }}
-                          </span>
-                        {% endif %}
+                        <a
+                          href="/assets/{{ asset.asset_id }}"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="ticket-assets-linked__name"
+                          data-linked-asset-name
+                          title="{{ tooltip_label }}"
+                        >
+                          {{ display_name }}
+                        </a>
                         {% set agent_state = (ticket_rmm_agent_states or {}).get(asset.asset_id | string) %}
                         {% if remote_control_providers %}{{ rmm_ui.agent_indicator(agent_state or 'missing') }}{% endif %}
                         {% if meta_parts %}
