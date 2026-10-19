@@ -295,6 +295,9 @@ async def asset_inventory_context(agent: Mapping[str, Any] | None, *, can_refres
         "software_apps": sorted(apps.values(), key=lambda item: item["name"].casefold()),
         "refresh_pending": requested is not None and (received is None or requested > received),
         "can_refresh": can_refresh,
+        # Chocolatey installs run through patch jobs, which need an active Windows agent.
+        "can_install_apps": can_refresh and agent.get("status") == "active"
+        and str(agent.get("os") or "").lower() == "windows",
         "format_bytes": format_bytes,
     }
 

@@ -307,7 +307,7 @@ async def sqlite_db(monkeypatch):
                  "493_rmm_script_parallel.sql", "494_rmm_chocolatey_sources.sql", "495_rmm_script_run_anyway.sql",
                  "496_rmm_chocolatey_catalog.sql", "498_rmm_windows_updates.sql",
                  "499_rmm_windows_update_blocks.sql", "500_rmm_check_auto_close.sql",
-                 "504_chocolatey_software_matches.sql"):
+                 "504_chocolatey_software_matches.sql", "505_chocolatey_catalog_lookups.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES

@@ -30,6 +30,10 @@ RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 # '&') with 406 InvalidQueryParameters. Such a rejection only affects that name.
 REJECTED_STATUS = {400, 406}
 REJECTED_NAMES_REPORTED = 20
+# Save progress regularly so a long refresh survives restarts.
+SAVE_EVERY = 25
+# Stop (keeping progress) when the feed looks down rather than failing slowly.
+MAX_CONSECUTIVE_FAILURES = 5
 
 
 class CatalogUnavailable(Exception):
@@ -146,30 +150,72 @@ def _lookup_error(response: httpx.Response, name: str) -> str:
             pass
     detail = f': {reason}' if reason else ''
     return (f'Chocolatey software lookup failed with HTTP {response.status_code} for {name!r}{detail}; '
-            'the stored app list was kept.')
+            'the stored match was kept.')
+
+
+def _lookup_order(names: list[str], checked: dict[str, datetime]) -> list[str]:
+    """Never-checked names first, then those checked longest ago."""
+    # ISO-style text sorts chronologically for both MySQL datetimes and SQLite text.
+    return sorted(names, key=lambda name: (name.casefold() in checked,
+                                            str(checked.get(name.casefold()) or '')))
 
 
 async def refresh() -> dict:
     """Refresh verified Chocolatey matches for current Windows Software inventory.
 
-    Application names are deduplicated across devices and versions. Transport,
-    server and parse failures abort before replacing the stored matches.
-    Missing and ambiguous names are skipped rather than guessed. A name whose
-    search Chocolatey rejects keeps its previously stored match; the refresh
-    only fails when every lookup is rejected.
+    Application names are deduplicated across devices and versions. Results are
+    saved every ``SAVE_EVERY`` names, starting with the names checked longest
+    ago, so a run cut short by a restart or the feed's rate limit keeps its work
+    and the next run carries on. Missing and ambiguous names are skipped rather
+    than guessed. A name whose lookup is rejected or keeps failing keeps its
+    previously stored match. The refresh stops early (keeping saved progress)
+    after ``MAX_CONSECUTIVE_FAILURES`` failed lookups in a row or a permanent
+    feed error; it fails when every lookup is rejected. Names no longer in the
+    inventory are only forgotten after a complete pass.
     """
     names = list({name.strip().casefold(): name.strip()
                   for name in await inventory_repo.list_catalog_software_names()
                   if name.strip()}.values())
+    names = _lookup_order(names, await catalog_repo.lookup_times())
     packages: dict[str, dict] = {}
     software_matches: list[dict] = []
-    unmatched = ambiguous = matched = 0
+    cleared: list[str] = []
+    checked: list[str] = []
+    unmatched = ambiguous = matched = stored = 0
     rejected: list[str] = []
+    failed: list[str] = []
     first_rejection = ''
+    consecutive_failures = 0
+
+    async def save() -> None:
+        nonlocal stored, packages, software_matches, cleared, checked
+        if not (packages or software_matches or cleared or checked):
+            return
+        stored += await catalog_repo.save_progress(
+            list(packages.values()), software_matches, cleared=cleared, checked=checked,
+            checked_at=datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0))
+        packages, software_matches, cleared, checked = {}, [], [], []
+
+    def summary(**extra) -> dict:
+        return {'source': COMMUNITY, 'applications': len(names), 'matched': matched,
+                'unmatched': unmatched, 'ambiguous': ambiguous, 'rejected': len(rejected),
+                'rejected_names': rejected[:REJECTED_NAMES_REPORTED], 'failed': len(failed),
+                'failed_names': failed[:REJECTED_NAMES_REPORTED], 'stored': stored, **extra}
+
+    async def stop(reason: str) -> CatalogUnavailable:
+        await save()
+        done = matched + unmatched + ambiguous + len(rejected)
+        log_warning('Chocolatey app list refresh stopped early; progress was saved',
+                    reason=reason, **summary())
+        return CatalogUnavailable(f'{reason} Saved {done} of {len(names)} application lookups; '
+                                  'the next run continues with the rest.')
+
     async with monitored_client(httpx.AsyncClient, timeout=60, follow_redirects=False) as client:
         for index, name in enumerate(names):
             if index:
                 await asyncio.sleep(PAGE_DELAY)
+                if index % SAVE_EVERY == 0:
+                    await save()
             escaped = _application_name(name).replace("'", "''")
             params = {'$filter': 'IsLatestVersion', '$orderby': 'Id',
                       'searchTerm': f"'{escaped}'", 'targetFramework': "''",
@@ -179,37 +225,52 @@ async def refresh() -> dict:
                 _, rows = _parse(await _request_packages(client, params))
             except httpx.HTTPStatusError as exc:
                 error = _lookup_error(exc.response, name)
-                if exc.response.status_code not in REJECTED_STATUS:
-                    raise CatalogUnavailable(error) from None
-                log_warning('Chocolatey rejected a software lookup; keeping its stored match',
-                            application=name, status=exc.response.status_code)
-                first_rejection = first_rejection or error
-                rejected.append(name)
-                previous = await catalog_repo.find_exact(name, RESULT_LIMIT)
-                if len(previous) == 1:
-                    row = previous[0]
-                    packages.setdefault(row['package_id'], dict(row))
-                    software_matches.append({'name': name, 'package_id': row['package_id']})
+                status = exc.response.status_code
+                if status in REJECTED_STATUS:
+                    # Only this name's search is unusable; keep its stored match.
+                    log_warning('Chocolatey rejected a software lookup; keeping its stored match',
+                                application=name, status=status)
+                    first_rejection = first_rejection or error
+                    rejected.append(name)
+                    checked.append(name)
+                    consecutive_failures = 0
+                    continue
+                if status not in RETRYABLE_STATUS:
+                    raise await stop(error) from None
+                failed.append(name)
+                consecutive_failures += 1
+                log_warning('Chocolatey software lookup kept failing; keeping its stored match',
+                            application=name, status=status)
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    raise await stop(error) from None
                 continue
             except Exception as exc:
-                raise CatalogUnavailable(f'Chocolatey software lookup failed ({type(exc).__name__}); '
-                                         'the stored app list was kept.') from None
+                failed.append(name)
+                consecutive_failures += 1
+                log_warning('Chocolatey software lookup failed; keeping its stored match',
+                            application=name, error=type(exc).__name__)
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    raise await stop(f'Chocolatey software lookup failed ({type(exc).__name__}).') from None
+                continue
+            consecutive_failures = 0
+            checked.append(name)
             matches = _package_matches(name, rows)
             if len(matches) == 1:
                 packages.setdefault(matches[0]['package_id'], matches[0])
                 software_matches.append({'name': name, 'package_id': matches[0]['package_id']})
                 matched += 1
-            elif matches:
-                ambiguous += 1
             else:
-                unmatched += 1
+                cleared.append(name)
+                if matches:
+                    ambiguous += 1
+                else:
+                    unmatched += 1
     if names and len(rejected) == len(names):
+        await save()
         raise CatalogUnavailable(first_rejection)
-    refreshed_at = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
-    summary = await catalog_repo.replace_all(list(packages.values()), refreshed_at, matches=software_matches)
-    return {'source': COMMUNITY, 'applications': len(names), 'matched': matched,
-            'unmatched': unmatched, 'ambiguous': ambiguous, 'rejected': len(rejected),
-            'rejected_names': rejected[:REJECTED_NAMES_REPORTED], **summary}
+    await save()
+    removed = await catalog_repo.prune(names)
+    return summary(removed=removed)
 
 
 async def last_updated() -> str | None:

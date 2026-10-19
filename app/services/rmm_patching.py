@@ -195,6 +195,9 @@ async def job_is_current(agent: Mapping[str, Any], job: Mapping[str, Any]) -> bo
         config = json.loads(job["env"]["MYPORTAL_PATCH_PLAN"])
         if "manual_windows" in config:
             return chosen_updates_current(agent, config)
+        if "manual_apps" in config:
+            from app.services import rmm_software_updates
+            return rmm_software_updates.apps_current(dict(agent), config)
         if "manual_upgrade" in config:
             from app.services import rmm_software_updates
             from app.services.chocolatey_catalog import CatalogUnavailable

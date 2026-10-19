@@ -259,7 +259,7 @@ async def test_refresh_looks_up_only_current_software_and_replaces_stored_list(s
     assert set(calls) == {"'Google Chrome'", "'VLC'", "'No Match'"} and len(calls) == 3
     assert result == {'source': catalog.COMMUNITY, 'applications': 3, 'matched': 2,
                       'unmatched': 1, 'ambiguous': 0, 'rejected': 0, 'rejected_names': [],
-                      'stored': 2, 'removed': 1}
+                      'failed': 0, 'failed_names': [], 'stored': 2, 'removed': 1}
     assert [p['package_id'] for p in await _stored(sqlite_db)] == ['googlechrome', 'vlc']
     assert await catalog.last_updated()
     mock_feed(monkeypatch, _no_network)
@@ -321,9 +321,10 @@ async def test_decorated_registry_names_reach_patch_picker_and_software_upgrade(
 
 
 @pytest.mark.anyio
-async def test_failed_inventory_refresh_keeps_previous_list(sqlite_db, monkeypatch):
+async def test_failed_lookup_keeps_that_apps_match_and_saves_the_rest(sqlite_db, monkeypatch):
     monkeypatch.setattr(catalog_repo, 'db', sqlite_db)
     await sqlite_db.execute("INSERT INTO rmm_chocolatey_packages (package_id, title, version) VALUES ('vlc', 'VLC', '3')")
+    await sqlite_db.execute("INSERT INTO rmm_chocolatey_software_matches (name, package_id) VALUES ('VLC', 'vlc')")
     monkeypatch.setattr(inventory_repo, 'list_catalog_software_names', AsyncMock(return_value=['Chrome', 'VLC']))
     monkeypatch.setattr(catalog.asyncio, 'sleep', AsyncMock())
     def request(req):
@@ -331,9 +332,11 @@ async def test_failed_inventory_refresh_keeps_previous_list(sqlite_db, monkeypat
             return httpx.Response(200, text=feed([('googlechrome', 'Chrome', '150.0')]))
         return httpx.Response(429)
     mock_feed(monkeypatch, request)
-    with pytest.raises(catalog.CatalogUnavailable, match='HTTP 429'):
-        await catalog.refresh()
-    assert [p['package_id'] for p in await _stored(sqlite_db)] == ['vlc']
+    result = await catalog.refresh()
+    assert result['failed_names'] == ['VLC'] and result['matched'] == 1
+    assert [p['package_id'] for p in await _stored(sqlite_db)] == ['googlechrome', 'vlc']
+    mock_feed(monkeypatch, _no_network)
+    assert (await catalog.match('VLC'))['package_id'] == 'vlc'
 
 
 @pytest.mark.anyio
@@ -405,3 +408,101 @@ async def test_admins_can_create_chocolatey_catalog_task(monkeypatch):
     await main.admin_scheduled_tasks(SimpleNamespace(), show_inactive=False)
     assert {'value': 'update_chocolatey_catalog', 'label': 'Update Chocolatey app list',
             'group': 'Staff and assets'} in captured['command_options']
+
+
+@pytest.mark.anyio
+async def test_pushed_install_uses_inventory_names_and_revalidates_at_dispatch(sqlite_db, monkeypatch):
+    monkeypatch.setattr(catalog_repo, 'db', sqlite_db)
+    _, agent = await _enrol(sqlite_db)
+    await sqlite_db.execute("INSERT INTO rmm_chocolatey_packages (package_id, title, version) VALUES "
+                            "('googlechrome', 'Google Chrome', '150.0'), ('7zip', '7-Zip', '25.01')")
+    await sqlite_db.execute("INSERT INTO rmm_chocolatey_software_matches (name, package_id) VALUES "
+                            "('Google Chrome', 'googlechrome')")
+    monkeypatch.setattr(inventory_repo, 'list_software', AsyncMock(return_value=[
+        {'name': 'Google Chrome', 'version': '149.0', 'source': 'machine'}]))
+    ids = updates.package_ids([' GoogleChrome ', '7zip', 'vlc', 'googlechrome'])
+    assert ids == ['googlechrome', '7zip', 'vlc']
+    run_id = await updates.queue_apps(agent, ids, 'install', 9)
+    row = (await rmm_repo.next_jobs_for_agent(agent['id']))[0]
+    job = rmm_scripts._job_payload(row)
+    config = json.loads(job['env']['MYPORTAL_PATCH_PLAN'])
+    # Installed apps keep the device's exact name so current versions are skipped.
+    assert config['apps'] == [
+        {'package_id': 'googlechrome', 'display_name': 'Google Chrome', 'install_missing': True},
+        {'package_id': '7zip', 'display_name': '7-Zip', 'install_missing': True},
+        {'package_id': 'vlc', 'display_name': 'vlc', 'install_missing': True}]
+    assert config['windows'] is None and config['reboot'] == {'reboot_mode': 'never'}
+    assert await patch.job_is_current(agent, job)
+    assert not await patch.job_is_current({**agent, 'os': 'linux'}, job)
+    tampered = {**config, 'apps': config['apps'] + [{'package_id': 'other', 'display_name': 'Other'}]}
+    assert not await patch.job_is_current(agent, {'env': {'MYPORTAL_PATCH_PLAN': json.dumps(tampered)}})
+    with pytest.raises(rmm_scripts.RunRequestError, match='already waiting'):
+        await updates.queue_apps(agent, ['7zip'], 'install', 9)
+    assert (await rmm_repo.get_run(run_id))['status'] == 'queued'
+
+
+@pytest.mark.anyio
+async def test_update_only_skips_apps_the_device_does_not_have(sqlite_db, monkeypatch):
+    monkeypatch.setattr(catalog_repo, 'db', sqlite_db)
+    _, agent = await _enrol(sqlite_db)
+    monkeypatch.setattr(inventory_repo, 'list_software', AsyncMock(return_value=[]))
+    assert await updates.queue_apps(agent, ['7zip'], 'upgrade', 9) is None
+    assert await rmm_repo.next_jobs_for_agent(agent['id']) == []
+    with pytest.raises(rmm_scripts.RunRequestError):
+        updates.package_ids(['bad id;'])
+    with pytest.raises(rmm_scripts.RunRequestError):
+        updates.package_ids([f'app{n}' for n in range(updates.MAX_PUSH_PACKAGES + 1)])
+    with pytest.raises(rmm_scripts.RunRequestError, match='Windows'):
+        await updates.queue_apps({**agent, 'os': 'linux'}, ['7zip'], 'install', 9)
+
+
+@pytest.mark.anyio
+async def test_push_api_targets_only_this_companys_windows_devices(monkeypatch):
+    monkeypatch.setattr(patch_routes, '_context', AsyncMock(return_value=({'id': 9}, {}, 1, True)))
+    agents = [{'id': 1, 'os': 'windows', 'hostname': 'PC1'}, {'id': 2, 'os': 'linux', 'hostname': 'L1'},
+              {'id': 3, 'os': 'Windows', 'hostname': 'PC3'}, {'id': 4, 'os': 'windows', 'hostname': 'PC4'}]
+    listed = AsyncMock(return_value=agents)
+    monkeypatch.setattr(patch_routes.agents_repo, 'list_active_agents', listed)
+    queued = []
+    async def queue_apps(agent, ids, mode, user_id):
+        queued.append((agent['id'], ids, mode))
+        if agent['id'] == 3:
+            raise rmm_scripts.RunRequestError({'device': 'A patch job is already waiting or running on this device.'})
+        return None if agent['id'] == 4 else 100 + agent['id']
+    monkeypatch.setattr(updates, 'queue_apps', queue_apps)
+    monkeypatch.setattr(patch_routes.audit, 'record', AsyncMock())
+    result = await patch_routes.push_apps(SimpleNamespace(), patch_routes.AppPushRequest(
+        package_ids=['7zip'], mode='upgrade', all_devices=True))
+    listed.assert_awaited_once_with(company_id=1)
+    assert [q[0] for q in queued] == [1, 3, 4]
+    assert result['queued'] == 1 and result['not_needed'] == 1 and result['problems'][0]['hostname'] == 'PC3'
+    queued.clear()
+    await patch_routes.push_apps(SimpleNamespace(), patch_routes.AppPushRequest(
+        package_ids=['7zip'], agent_ids=[2, 4, 99]))
+    assert queued == [(4, ['7zip'], 'install')]
+    response = await patch_routes.push_apps(SimpleNamespace(), patch_routes.AppPushRequest(
+        package_ids=['7zip'], agent_ids=[2]))
+    assert response.status_code == 400
+    response = await patch_routes.push_apps(SimpleNamespace(), patch_routes.AppPushRequest(package_ids=['bad id']))
+    assert response.status_code == 400
+
+
+def test_asset_install_form_only_for_windows_agents_with_run_access():
+    env = Environment(loader=FileSystemLoader(ROOT / 'app/templates'))
+    template = env.get_template('rmm/_asset_software.html')
+    inventory = {'inventory': None, 'software_apps': [], 'software': []}
+    html = template.render(asset={'id': 10}, csrf_token='token', rmm={'inventory': {**inventory, 'can_install_apps': True}})
+    assert 'action="/rmm/assets/10/software/install"' in html and 'name="package_id"' in html
+    html = template.render(asset={'id': 10}, csrf_token='token', rmm={'inventory': inventory})
+    assert 'software/install' not in html
+
+
+@pytest.mark.anyio
+async def test_inventory_context_allows_installs_only_on_active_windows_agents(monkeypatch):
+    from app.services import rmm_inventory
+    monkeypatch.setattr(rmm_inventory.repo, 'get_for_agent', AsyncMock(return_value=None))
+    windows = {'id': 1, 'status': 'active', 'os': 'Windows'}
+    assert (await rmm_inventory.asset_inventory_context(windows, can_refresh=True))['can_install_apps']
+    assert not (await rmm_inventory.asset_inventory_context(windows, can_refresh=False))['can_install_apps']
+    linux = {**windows, 'os': 'linux'}
+    assert not (await rmm_inventory.asset_inventory_context(linux, can_refresh=True))['can_install_apps']

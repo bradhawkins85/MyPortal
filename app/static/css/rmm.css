@@ -846,6 +846,11 @@ body.navigation--top .rmm-library {
 }
 
 .rmm-inventory__filter { max-width: 24rem; }
+.rmm-inventory__install { max-width: 40rem; }
+.rmm-app-push { display: grid; gap: 1rem; max-width: 48rem; }
+.rmm-app-push__results { max-height: 16rem; overflow-y: auto; }
+.rmm-app-push__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
+.rmm-app-push__list label, .rmm-app-push fieldset > label { display: flex; gap: 0.5rem; align-items: baseline; }
 
 /* Long software lists scroll inside the section. */
 .rmm-inventory__software {

@@ -64,10 +64,16 @@ download the full Chocolatey catalog.
 
 Super admins can run the task now, change its schedule, disable or delete it
 under **Admin → Scheduled tasks**, and recreate it with the **Update Chocolatey
-app list** command. A failed lookup keeps the previous list. A successful refresh
-removes matches for software no longer in the current inventory. Portal searches
+app list** command. The refresh saves its results every 25 applications and
+starts with the names checked longest ago, so a run interrupted by a restart,
+deployment or the community feed's rate limit keeps what it found and the next run
+(including the task's automatic retries) carries on with the rest. A lookup that
+Chocolatey rejects or that keeps failing keeps that application's previous match.
+After five failed lookups in a row the run stops, keeps its progress and reports
+how many lookups were saved (apply migration **505**). A complete pass removes
+matches for software no longer in the current inventory. Portal searches
 use only this stored list; before the first refresh, no applications are listed.
-The task result reports checked, matched, unmatched and ambiguous applications.
+The task result reports checked, matched, unmatched, ambiguous, rejected and failed applications.
 The original installed name is stored with each verified package match and is
 used by both Software upgrade checks and the patch policy application picker.
 After updating MyPortal, run **Update Chocolatey app list** again to populate
@@ -92,6 +98,27 @@ Network/catalog/package errors are failures, never a signal that the app is abse
 Installer exit codes 1641 and 3010 indicate a required reboot; other nonzero
 installation codes fail. Review packages before deployment: package scripts and
 vendor installers can have their own restart behavior.
+
+## Installing and updating apps without a script
+
+Technicians with write access to `menu.rmm_scripts` can push Chocolatey packages
+without writing a script. Both actions run the built-in patch job (shown in
+**Scripts → Run history**) with the company's enabled Chocolatey sources, need an
+active Windows agent, and never restart the device.
+
+- **Asset page → Software → Install an app with Chocolatey**: enter an exact
+  package ID (suggestions come from the downloaded app list; any package in the
+  company's enabled sources works). An installed app is updated to the latest
+  version instead.
+- **Script automation → Chocolatey apps**: tick up to 20 apps from the downloaded
+  app list (or add package IDs), choose **Install, or update where already
+  installed** or **Update only where already installed**, and push to every
+  Windows device of the company or chosen devices. Devices already running a patch
+  job are listed and skipped.
+
+Apps that Software shows as installed are matched by their exact inventory name,
+so current versions are skipped as described above. To keep apps updated on a
+schedule, use a Chocolatey patch policy.
 
 ## Device Windows updates
 

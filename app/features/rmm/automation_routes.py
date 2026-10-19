@@ -9,6 +9,8 @@ admins.
 * ``/api/rmm/schedules`` create, edit, enable, run now and delete schedules
 * ``/api/rmm/onboarding/steps`` add, edit, reorder and remove onboarding steps
 * ``/api/rmm/onboarding/runs`` start, view and cancel onboarding on a device
+* the Chocolatey apps panel pushes installs and updates through
+  ``POST /api/rmm/chocolatey/push`` (:mod:`app.features.rmm.patch_routes`)
 """
 
 from __future__ import annotations
@@ -98,6 +100,7 @@ async def automation_page(request: Request):
             ],
             "onboarding_runs": [_serialise(run) for run in await automation_repo.list_onboarding_runs(company_id=company_id)],
             "agents": [_serialise(agent) for agent in agents],
+            "windows_agents": [_serialise(agent) for agent in agents if str(agent.get("os") or "").lower() == "windows"],
             "tags": [{"id": tag_id, "name": name} for tag_id, name in names.items()],
             "can_run": can_run,
             "is_super_admin": bool(user.get("is_super_admin")),
