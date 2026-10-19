@@ -1,0 +1,27 @@
+<li class="menu__item menu__item--expandable menu__item--expanded" data-menu-key="/admin/shop/categories-filter">
+  <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="true" aria-controls="admin-shop-categories">
+    <span class="menu__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M3 3h7v7H3zm11 0h7v7h-7zM3 14h7v7H3zm11 0h7v7h-7z"/></svg>
+    </span>
+    <span class="menu__label">Product categories</span>
+    <span class="menu__expand-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M6 9l6 6 6-6"/></svg>
+    </span>
+  </button>
+  <ul class="menu__submenu menu__submenu--expanded" id="admin-shop-categories">
+    <li class="menu__subitem">
+      <a href="{{ all_categories_url }}" {% if current_category is none %}aria-current="page"{% endif %}>
+        <span class="menu__label">All products</span>
+        <span class="menu__badge" title="{{ catalogue_count }} products">{{ catalogue_count }}</span>
+      </a>
+    </li>
+    {% for category in filter_categories %}
+      <li class="menu__subitem">
+        <a href="{{ category.url }}" {% if current_category == category.id %}aria-current="page"{% endif %}>
+          <span class="menu__label">{% for level in range(category.depth) %}<span aria-hidden="true">└─ </span>{% endfor %}{{ category.name }}</span>
+          <span class="menu__badge" title="{{ category.product_count }} product{{ 's' if category.product_count != 1 else '' }}">{{ category.product_count }}</span>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+</li>

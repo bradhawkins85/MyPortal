@@ -1377,10 +1377,40 @@ async def admin_remove_package_item(
     )
 
 
+def _admin_category_menu(
+    categories: Sequence[Mapping[str, Any]], products: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Count the displayed catalogue, including descendants, and omit empty branches."""
+    by_id = {category["id"]: category for category in categories}
+    ancestors: dict[int, list[int]] = {}
+    counts = dict.fromkeys(by_id, 0)
+    for category_id, category in by_id.items():
+        chain = [category_id]
+        parent_id = category.get("parent_id")
+        while parent_id in by_id and parent_id not in chain:
+            chain.append(parent_id)
+            parent_id = by_id[parent_id].get("parent_id")
+        ancestors[category_id] = chain
+    for product in products:
+        for category_id in ancestors.get(product.get("category_id"), []):
+            counts[category_id] += 1
+    return [
+        {
+            **category,
+            "product_count": counts[category["id"]],
+            "ancestor_ids": ancestors[category["id"]],
+            "depth": len(ancestors[category["id"]]) - 1,
+        }
+        for category in categories
+        if counts[category["id"]] > 0
+    ]
+
+
 async def admin_shop_page(
     request: Request,
     show_archived: bool = Query(False, alias="showArchived"),
     search: str = Query("", alias="search"),
+    category: int | None = None,
 ):
     from app.repositories import companies as company_repo
     from app.repositories import license_sku_friendly_names as sku_friendly_repo
@@ -1394,7 +1424,6 @@ async def admin_shop_page(
     if redirect:
         return redirect
     categories_task = asyncio.create_task(shop_repo.list_all_categories_flat())
-    filter_categories_task = asyncio.create_task(shop_repo.list_categories_with_products())
     search_term = search.strip()
     filters = shop_repo.ProductFilters(
         include_archived=show_archived,
@@ -1409,14 +1438,30 @@ async def admin_shop_page(
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
     microsoft_sku_mappings_task = asyncio.create_task(sku_friendly_repo.list_mappings())
 
-    categories, filter_categories, products, companies, subscription_categories, microsoft_sku_mappings = await asyncio.gather(
+    categories, products, companies, subscription_categories, microsoft_sku_mappings = await asyncio.gather(
         categories_task,
-        filter_categories_task,
         products_task,
         companies_task,
         subscription_categories_task,
         microsoft_sku_mappings_task,
     )
+    catalogue_count = len(products)
+    filter_categories = _admin_category_menu(categories, products)
+    menu_params = {}
+    if show_archived:
+        menu_params["showArchived"] = "1"
+    if search_term:
+        menu_params["search"] = search_term
+    all_categories_url = "/admin/shop"
+    if menu_params:
+        all_categories_url += "?" + urlencode(menu_params)
+    for entry in filter_categories:
+        entry["url"] = "/admin/shop?" + urlencode({**menu_params, "category": entry["id"]})
+    if category is not None:
+        category_ids = {
+            entry["id"] for entry in filter_categories if category in entry["ancestor_ids"]
+        }
+        products = [product for product in products if product.get("category_id") in category_ids]
     total_count = len(products)
 
     for product in products:
@@ -1448,6 +1493,9 @@ async def admin_shop_page(
         "title": "Shop admin",
         "categories": categories,
         "filter_categories": filter_categories,
+        "current_category": category,
+        "all_categories_url": all_categories_url,
+        "catalogue_count": catalogue_count,
         "products": products,
         "all_companies": companies,
         "show_archived": show_archived,
@@ -2839,6 +2887,8 @@ async def admin_update_shop_product(
         qp = request.query_params
         if qp.get("showArchived"):
             redirect_params["showArchived"] = "1"
+        if qp.get("category", "").isdigit():
+            redirect_params["category"] = qp["category"]
         page_str = qp.get("page", "")
         if page_str.isdigit() and int(page_str) > 1:
             redirect_params["page"] = page_str

@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 
+{% block sidebar_menu %}
+  {% include "admin/partials/shop_category_menu.html" %}
+  {{ super() }}
+{% endblock %}
+
 {% block extra_head %}
   {{ super() }}
   <link rel="stylesheet" href="{{ static_url('/static/css/suneditor.min.css') }}" />
