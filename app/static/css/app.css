@@ -10415,6 +10415,25 @@ body:has(.stf-modal.is-visible) {
   gap: var(--spacing-lg, 24px);
 }
 
+.notification-event-editor {
+  display: grid;
+  grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-gap-roomy);
+}
+
+.notification-event-editor__events .menu {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (max-width: 900px) {
+  .notification-event-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .notification-preference__description {
   font-size: 0.9rem;
   color: var(--text-muted, #6b7280);

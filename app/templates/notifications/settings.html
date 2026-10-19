@@ -10,15 +10,242 @@
 {% endblock %}
 
 {% block content %}
-<div class="notification-settings">
-  <aside class="card card--panel notification-settings__sidebar">
-    <header class="card__header">
-      <div>
-        <h2 class="card__title">Notification events</h2>
-        <p class="card__subtitle">Choose an event to review orchestration rules.</p>
+{% set event_count = event_menu | length %}
+{% set user_visible_count = event_menu | selectattr("is_user_visible") | list | length %}
+{% set exclusion_count = exclusion_rules | length if exclusion_rules else 0 %}
+<div class="settings-workspace notification-settings-workspace ce-workspace" data-ae-workspace data-ae-storage-key="myportal:notification-settings:active-section" data-ae-default="preferences">
+  <section class="ce-overview" aria-label="Notifications at a glance">
+    <div class="ce-overview__identity">
+      <span class="ce-overview__avatar" aria-hidden="true">🔔</span>
+      <div class="ce-overview__summary">
+        <ul class="scf-item__chips ce-overview__chips" aria-label="Notification summary">
+          <li class="scf-chip">{{ preferences | length }} event{{ 's' if preferences | length != 1 }} you can manage</li>
+          <li class="scf-chip{% if not exclusion_count %} scf-chip--muted{% endif %}">{{ exclusion_count }} exclusion{{ 's' if exclusion_count != 1 }}</li>
+          {% if is_super_admin %}<li class="scf-chip scf-chip--muted">{{ event_count }} event{{ 's' if event_count != 1 }} configured · {{ user_visible_count }} shown to users</li>{% endif %}
+        </ul>
       </div>
-    </header>
-    <nav class="notification-settings__menu">
+    </div>
+  </section>
+
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Notification settings sections" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="notification-nav-search">Find a notification setting</label>
+        <input type="search" id="notification-nav-search" class="form-input" placeholder="Find a setting…" autocomplete="off" data-ae-search>
+      </div>
+      {% set notification_groups = [
+        ("Your notifications", [
+          ("preferences", "Delivery preferences", preferences | length, true),
+          ("exclusions", "Excluded notifications", exclusion_count, true),
+        ]),
+        ("Administration", [
+          ("events", "Event configuration", event_count, is_super_admin),
+        ]),
+      ] %}
+      {% for group_label, items in notification_groups %}
+        {% set visible_items = items | selectattr(3) | list %}
+        {% if visible_items %}
+          <div class="ce-nav__group" data-ae-nav-group>
+            <p class="ce-nav__group-title" id="notification-nav-group-{{ loop.index }}">{{ group_label }}</p>
+            <ul class="ce-nav__list" aria-labelledby="notification-nav-group-{{ loop.index }}">
+              {% for key, label, count, _visible in visible_items %}
+                <li><a class="ce-nav__link" href="#notifications-{{ key }}" data-ae-link="{{ key }}">
+                  <span class="ce-nav__label">{{ label }}</span>
+                  <span class="ce-nav__count">{{ count }}</span>
+                </a></li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      {% endfor %}
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No settings match your search.</p>
+    </nav>
+
+    <div class="ce-panels">
+      <section class="card card--panel ce-section notification-settings__preferences" id="notifications-preferences" data-ae-section="preferences" aria-labelledby="notifications-preferences-title">
+        <header class="ce-section__header">
+          <div class="ce-section__heading">
+            <h2 class="card__title" id="notifications-preferences-title">Delivery preferences</h2>
+            <p class="card__subtitle">Choose which channels deliver each notification to you. The starting choices come from your super administrators.</p>
+          </div>
+          <div class="ce-section__meta">
+            <label class="visually-hidden" for="notification-preferences-filter">Filter events</label>
+            <input
+              id="notification-preferences-filter"
+              type="search"
+              class="form-input"
+              placeholder="Filter event types"
+              aria-label="Filter notification preferences"
+              data-table-filter="notification-preferences-table"
+            />
+          </div>
+        </header>
+        <div class="ce-section__body">
+        <form
+          class="form"
+          data-notification-preferences-form
+          data-endpoint="{{ preferences_endpoint }}"
+        >
+          <div class="table-wrapper">
+            <table class="table" id="notification-preferences-table" data-table data-table-id="notification-preferences">
+              <thead>
+                <tr>
+                  <th scope="col" data-sort="string">Event</th>
+                  <th scope="col" data-sort="string">In-app</th>
+                  <th scope="col" data-sort="string">Email</th>
+                  <th scope="col" data-sort="string">SMS</th>
+                </tr>
+              </thead>
+              <tbody data-preferences-body data-defaults='{{ default_event_types | list | tojson }}'>
+                {% for preference in preferences %}
+                  <tr
+                    data-event-type="{{ preference.event_type }}"
+                    data-allow-in-app="{{ 1 if preference.allow_channel_in_app else 0 }}"
+                    data-allow-email="{{ 1 if preference.allow_channel_email else 0 }}"
+                    data-allow-sms="{{ 1 if preference.allow_channel_sms else 0 }}"
+                    data-default-in-app="{{ 1 if preference.default_channel_in_app else 0 }}"
+                    data-default-email="{{ 1 if preference.default_channel_email else 0 }}"
+                    data-default-sms="{{ 1 if preference.default_channel_sms else 0 }}"
+                  >
+                    <td data-label="Event">
+                      <div class="notification-preference__event">
+                        <span class="notification-preference__name">{{ preference.display_name }}</span>
+                        {% if preference.description %}
+                          <span class="notification-preference__description">{{ preference.description }}</span>
+                        {% endif %}
+                        <input type="hidden" value="{{ preference.event_type }}" data-preference-event />
+                      </div>
+                    </td>
+                    <td data-label="In-app">
+                      <div class="notification-preference__channel" data-channel-wrapper="channel_in_app">
+                        <label class="toggle" data-channel-toggle {% if not preference.allow_channel_in_app %}hidden{% endif %}>
+                          <input
+                            type="checkbox"
+                            data-channel="channel_in_app"
+                            {% if preference.channel_in_app %}checked{% endif %}
+                          />
+                          <span>Enabled</span>
+                        </label>
+                        <span class="text-muted" data-channel-disabled {% if preference.allow_channel_in_app %}hidden{% endif %}>Disabled</span>
+                      </div>
+                      <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_in_app }}</div>
+                    </td>
+                    <td data-label="Email">
+                      <div class="notification-preference__channel" data-channel-wrapper="channel_email">
+                        <label class="toggle" data-channel-toggle {% if not preference.allow_channel_email %}hidden{% endif %}>
+                          <input
+                            type="checkbox"
+                            data-channel="channel_email"
+                            {% if preference.channel_email %}checked{% endif %}
+                          />
+                          <span>Enabled</span>
+                        </label>
+                        <span class="text-muted" data-channel-disabled {% if preference.allow_channel_email %}hidden{% endif %}>Disabled</span>
+                      </div>
+                      <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_email }}</div>
+                    </td>
+                    <td data-label="SMS">
+                      <div class="notification-preference__channel" data-channel-wrapper="channel_sms">
+                        <label class="toggle" data-channel-toggle {% if not preference.allow_channel_sms %}hidden{% endif %}>
+                          <input
+                            type="checkbox"
+                            data-channel="channel_sms"
+                            {% if preference.channel_sms %}checked{% endif %}
+                          />
+                          <span>Enabled</span>
+                        </label>
+                        <span class="text-muted" data-channel-disabled {% if preference.allow_channel_sms %}hidden{% endif %}>Disabled</span>
+                      </div>
+                      <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_sms }}</div>
+                    </td>
+                  </tr>
+                {% else %}
+                  <tr>
+                    <td colspan="4" class="table__empty">No notification events are available yet.</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <footer class="form__actions">
+            <button type="submit" class="button button--primary">Save preferences</button>
+            <button type="reset" class="button button--ghost" data-preferences-reset>Reset changes</button>
+          </footer>
+        </form>
+        </div>
+      </section>
+
+      <section class="card card--panel ce-section" id="notifications-exclusions" data-ae-section="exclusions" data-exclusions-panel aria-labelledby="notifications-exclusions-title">
+        <header class="ce-section__header">
+          <div class="ce-section__heading">
+            <h2 class="card__title" id="notifications-exclusions-title">Excluded notifications</h2>
+            <p class="card__subtitle">Messages and event types that will not be shown in your notification feed. Remove an exclusion to start receiving those notifications again.</p>
+          </div>
+        </header>
+        <div class="ce-section__body">
+          {% if exclusion_rules %}
+          <div class="table-wrapper">
+            <table class="table table--exclusions" id="exclusions-table">
+              <thead>
+                <tr>
+                  <th scope="col">Event type</th>
+                  <th scope="col">Excluded message / pattern</th>
+                  <th scope="col">Excluded at</th>
+                  <th scope="col" class="table__actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for rule in exclusion_rules %}
+                <tr data-exclusion-row="{{ rule.id }}">
+                  <td data-label="Event type">{{ rule.event_type }}</td>
+                  <td data-label="Excluded message / pattern">
+                    {% if rule.message_pattern %}
+                      {{ rule.message_pattern }}
+                    {% else %}
+                      <span class="text-muted">All messages of this event type</span>
+                    {% endif %}
+                  </td>
+                  <td data-label="Excluded at">
+                    {% if rule.excluded_at %}
+                      <span data-utc="{{ rule.excluded_at.isoformat() }}">{{ rule.excluded_at.isoformat() }}</span>
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td class="table__actions">
+                    <button
+                      type="button"
+                      class="button button--ghost button--small button--danger"
+                      data-remove-exclusion="{{ rule.id }}"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="text-muted" data-exclusions-empty>No notification exclusions configured. Use the <strong>Exclude</strong> button on individual notifications to hide specific messages from your feed.</p>
+          {% endif %}
+        </div>
+      </section>
+
+      {% if is_super_admin %}
+        <section class="card card--panel ce-section notification-settings__admin" id="notifications-events" data-ae-section="events" data-notification-admin aria-labelledby="notifications-events-title">
+          <header class="ce-section__header">
+            <div class="ce-section__heading">
+              <h2 class="card__title" id="notifications-events-title">Event configuration</h2>
+              <p class="card__subtitle">Pick an event, then set its message, the channels it may use and their defaults, whether users can manage it, and the module actions it triggers.</p>
+            </div>
+            <div class="ce-section__meta">
+              <button type="button" class="button button--ghost" data-event-settings-reset>Reset</button>
+              <button type="button" class="button button--primary" data-event-settings-save>Save configuration</button>
+            </div>
+          </header>
+          <div class="ce-section__body notification-event-editor">
+            <nav class="notification-settings__menu notification-event-editor__events" aria-label="Notification events">
       <ul class="menu" data-notification-event-menu>
         {% for event in event_menu %}
           <li class="menu__item">
@@ -37,40 +264,8 @@
           <li class="menu__item menu__item--empty">No events configured yet.</li>
         {% endfor %}
       </ul>
-    </nav>
-  </aside>
-  <div class="notification-settings__main">
-    <header class="notification-settings__header">
-      <div>
-        <h1 class="page-title">Delivery orchestration</h1>
-        <p class="page-subtitle">Fine-tune delivery channels and automation actions for every event.</p>
-      </div>
-      <div class="notification-settings__filters">
-        <label class="sr-only" for="notification-preferences-filter">Filter events</label>
-        <input
-          id="notification-preferences-filter"
-          type="search"
-          class="input"
-          placeholder="Filter event types"
-          aria-label="Filter notification preferences"
-          data-table-filter="notification-preferences-table"
-        />
-      </div>
-    </header>
-    <div class="notification-settings__content">
-      {% if is_super_admin %}
-        <section class="card card--panel notification-settings__admin" data-notification-admin>
-          <header class="card__header card__header--actions">
-            <div>
-              <h2 class="card__title">Super admin configuration</h2>
-              <p class="card__subtitle">Configure channel defaults, end-user visibility, and automation actions.</p>
-            </div>
-            <div class="card__controls">
-              <button type="button" class="button button--ghost" data-event-settings-reset>Reset</button>
-              <button type="button" class="button button--primary" data-event-settings-save>Save configuration</button>
-            </div>
-          </header>
-          <div class="card__body">
+            </nav>
+            <div class="notification-event-editor__form">
             <form
               class="form notification-event-form"
               data-event-settings-form
@@ -165,167 +360,10 @@
                 <p class="form-help" data-event-action-error hidden></p>
               </div>
             </form>
+            </div>
           </div>
         </section>
       {% endif %}
-      <section class="card card--panel notification-settings__preferences">
-        <header class="card__header">
-          <div>
-            <h2 class="card__title">Delivery preferences</h2>
-            <p class="card__subtitle">
-              Control which channels deliver each notification using the defaults supplied by your super administrators.
-            </p>
-          </div>
-        </header>
-        <form
-          class="form"
-          data-notification-preferences-form
-          data-endpoint="{{ preferences_endpoint }}"
-        >
-          <div class="table-wrapper">
-            <table class="table" id="notification-preferences-table" data-table data-table-id="notification-preferences">
-              <thead>
-                <tr>
-                  <th scope="col" data-sort="string">Event</th>
-                  <th scope="col" data-sort="string">In-app</th>
-                  <th scope="col" data-sort="string">Email</th>
-                  <th scope="col" data-sort="string">SMS</th>
-                </tr>
-              </thead>
-              <tbody data-preferences-body data-defaults='{{ default_event_types | list | tojson }}'>
-                {% for preference in preferences %}
-                  <tr
-                    data-event-type="{{ preference.event_type }}"
-                    data-allow-in-app="{{ 1 if preference.allow_channel_in_app else 0 }}"
-                    data-allow-email="{{ 1 if preference.allow_channel_email else 0 }}"
-                    data-allow-sms="{{ 1 if preference.allow_channel_sms else 0 }}"
-                    data-default-in-app="{{ 1 if preference.default_channel_in_app else 0 }}"
-                    data-default-email="{{ 1 if preference.default_channel_email else 0 }}"
-                    data-default-sms="{{ 1 if preference.default_channel_sms else 0 }}"
-                  >
-                    <td data-label="Event">
-                      <div class="notification-preference__event">
-                        <span class="notification-preference__name">{{ preference.display_name }}</span>
-                        {% if preference.description %}
-                          <span class="notification-preference__description">{{ preference.description }}</span>
-                        {% endif %}
-                        <input type="hidden" value="{{ preference.event_type }}" data-preference-event />
-                      </div>
-                    </td>
-                    <td data-label="In-app">
-                      <div class="notification-preference__channel" data-channel-wrapper="channel_in_app">
-                        <label class="toggle" data-channel-toggle {% if not preference.allow_channel_in_app %}hidden{% endif %}>
-                          <input
-                            type="checkbox"
-                            data-channel="channel_in_app"
-                            {% if preference.channel_in_app %}checked{% endif %}
-                          />
-                          <span>Enabled</span>
-                        </label>
-                        <span class="text-muted" data-channel-disabled {% if preference.allow_channel_in_app %}hidden{% endif %}>Disabled</span>
-                      </div>
-                      <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_in_app }}</div>
-                    </td>
-                    <td data-label="Email">
-                      <div class="notification-preference__channel" data-channel-wrapper="channel_email">
-                        <label class="toggle" data-channel-toggle {% if not preference.allow_channel_email %}hidden{% endif %}>
-                          <input
-                            type="checkbox"
-                            data-channel="channel_email"
-                            {% if preference.channel_email %}checked{% endif %}
-                          />
-                          <span>Enabled</span>
-                        </label>
-                        <span class="text-muted" data-channel-disabled {% if preference.allow_channel_email %}hidden{% endif %}>Disabled</span>
-                      </div>
-                      <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_email }}</div>
-                    </td>
-                    <td data-label="SMS">
-                      <div class="notification-preference__channel" data-channel-wrapper="channel_sms">
-                        <label class="toggle" data-channel-toggle {% if not preference.allow_channel_sms %}hidden{% endif %}>
-                          <input
-                            type="checkbox"
-                            data-channel="channel_sms"
-                            {% if preference.channel_sms %}checked{% endif %}
-                          />
-                          <span>Enabled</span>
-                        </label>
-                        <span class="text-muted" data-channel-disabled {% if preference.allow_channel_sms %}hidden{% endif %}>Disabled</span>
-                      </div>
-                      <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_sms }}</div>
-                    </td>
-                  </tr>
-                {% else %}
-                  <tr>
-                    <td colspan="4" class="table__empty">No notification events are available yet.</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          <footer class="form__actions">
-            <button type="submit" class="button button--primary">Save preferences</button>
-            <button type="reset" class="button button--ghost" data-preferences-reset>Reset changes</button>
-          </footer>
-        </form>
-      </section>
-
-      <section class="card card--panel" data-exclusions-panel>
-        <header class="card__header">
-          <div>
-            <h2 class="card__title">Excluded notifications</h2>
-            <p class="card__subtitle">Messages and event types that will not be shown in your notification feed. Remove an exclusion to start receiving those notifications again.</p>
-          </div>
-        </header>
-        <div class="card__body">
-          {% if exclusion_rules %}
-          <div class="table-wrapper">
-            <table class="table table--exclusions" id="exclusions-table">
-              <thead>
-                <tr>
-                  <th scope="col">Event type</th>
-                  <th scope="col">Excluded message / pattern</th>
-                  <th scope="col">Excluded at</th>
-                  <th scope="col" class="table__actions">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for rule in exclusion_rules %}
-                <tr data-exclusion-row="{{ rule.id }}">
-                  <td data-label="Event type">{{ rule.event_type }}</td>
-                  <td data-label="Excluded message / pattern">
-                    {% if rule.message_pattern %}
-                      {{ rule.message_pattern }}
-                    {% else %}
-                      <span class="text-muted">All messages of this event type</span>
-                    {% endif %}
-                  </td>
-                  <td data-label="Excluded at">
-                    {% if rule.excluded_at %}
-                      <span data-utc="{{ rule.excluded_at.isoformat() }}">{{ rule.excluded_at.isoformat() }}</span>
-                    {% else %}
-                      <span class="text-muted">—</span>
-                    {% endif %}
-                  </td>
-                  <td class="table__actions">
-                    <button
-                      type="button"
-                      class="button button--ghost button--small button--danger"
-                      data-remove-exclusion="{{ rule.id }}"
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          {% else %}
-          <p class="text-muted" data-exclusions-empty>No notification exclusions configured. Use the <strong>Exclude</strong> button on individual notifications to hide specific messages from your feed.</p>
-          {% endif %}
-        </div>
-      </section>
     </div>
   </div>
 </div>
@@ -404,6 +442,7 @@
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/notification-preferences.js') }}" defer></script>
   <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>

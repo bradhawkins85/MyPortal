@@ -13,12 +13,12 @@ def test_m365_configuration_template_compiles() -> None:
     environment.get_template("m365/index.html")
 
 
-def test_m365_configuration_uses_compact_responsive_workspace() -> None:
+def test_m365_configuration_uses_the_settings_workspace() -> None:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
 
-    assert 'class="m365-grid"' in source
-    assert 'class="m365-stack"' in source
-    assert "@media (max-width: 900px)" in source
+    assert "data-ae-workspace" in source and "asset_edit_sections.js" in source
+    for key in ("overview", "setup", "credentials", "provisioning", "permissions", "sync", "signatures"):
+        assert f'data-ae-section="{key}"' in source, key
     assert "Connection overview" in source
     assert "Guided tenant setup" in source
     assert "Advanced provisioning credentials" in source

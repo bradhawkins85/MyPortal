@@ -104,6 +104,9 @@ def test_workspace_renders_every_section_with_a_nav_link():
     assert 'href="/admin/tray/devices"' not in html
     assert 'href="/admin/tray/install-tokens"' not in html
     assert "Question created." in html
+    # layout.js confirms forms, so destructive buttons rely on their form's data-confirm.
+    assert not re.search(r"<button[^>]*data-confirm", html)
+    assert 'action="/admin/tray/devices/bulk-delete-revoked" class="form" data-confirm=' in html
 
 
 def test_workspace_toggles_keep_the_section_and_drop_one_time_tokens():

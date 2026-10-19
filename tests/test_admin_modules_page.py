@@ -256,11 +256,11 @@ def test_modules_page_renders_operations_center(super_admin_context, monkeypatch
     assert "95.0% / 99%" in html
     assert "Access token expires in 2 day(s)" in html
     assert 'id="modules-actions-menu"' in html
-    assert 'data-operations-modal-open="integration-health-modal"' in html
-    assert 'data-operations-modal-open="credential-expiry-modal"' in html
-    assert 'data-operations-modal-open="integration-setup-modal"' in html
-    assert 'data-operations-modal-open="dependency-graph-modal"' in html
-    assert html.index('id="integration-health-modal"') > html.index('id="modules-table"')
+    # The operations views are sections of the settings workspace, after the module list.
+    for key in ("modules", "health", "credentials", "setup", "dependencies"):
+        assert f'data-ae-section="{key}"' in html and f'data-ae-link="{key}"' in html, key
+    assert "data-operations-modal-open" not in html
+    assert html.index('id="modules-health"') > html.index('id="modules-table"')
 
 
 def test_modules_page_shows_env_disable_name(super_admin_context, monkeypatch):
