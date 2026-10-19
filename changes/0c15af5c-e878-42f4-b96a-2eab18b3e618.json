@@ -1,0 +1,7 @@
+{
+  "guid": "0c15af5c-e878-42f4-b96a-2eab18b3e618",
+  "occurred_at": "2026-10-19T12:45:42+00:00",
+  "change_type": "fix",
+  "summary": "Fix Marketing Assistant image saves by constraining PyMySQL to the 1.1 series compatible with aiomysql binary escaping.",
+  "content_hash": "bb0332a0e8d92a9ff518fa8ca9429191a24f6def78d3bcd66c612faf0218ae20"
+}
