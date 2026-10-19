@@ -113,7 +113,7 @@
 <div class="rmm-asset-actions">
   {%- if "rustdesk" in providers and not rustdesk_in_menu %}
   <div class="rmm-split">
-    <button type="button" class="button button--ghost button--small rmm-split__main" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}" title="Start a RustDesk remote session">RustDesk</button>
+    <button type="button" class="button button--ghost button--small rmm-split__main" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}" title="Start a RustDesk remote session" aria-label="Start a RustDesk remote session for {{ asset_name }}"><img class="rmm-split__icon" src="/static/images/rustdesk.svg" alt="" width="16" height="16"></button>
     <details class="rmm-menu rmm-split__more" data-rmm-menu>
       <summary class="button button--ghost button--small rmm-menu__toggle" aria-label="More RustDesk sessions for {{ asset_name }}"><span aria-hidden="true">▾</span></summary>
       <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RustDesk sessions for {{ asset_name }}">
