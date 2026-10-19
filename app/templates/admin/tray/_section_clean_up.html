@@ -1,0 +1,26 @@
+<section class="card card--panel ce-section" id="clean-up" data-ae-section="clean-up" aria-labelledby="tray-clean-up-title">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="tray-clean-up-title">Clean up</h2>
+      <p class="card__subtitle">Permanently remove records that are no longer in use. These actions cannot be undone.</p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    <div class="ce-subsection" aria-labelledby="tray-clean-devices-title">
+      <h3 id="tray-clean-devices-title">Revoked devices</h3>
+      <form method="post" action="/admin/tray/devices/bulk-delete-revoked" class="form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <p class="form-help">Deletes every revoked tray device. A deleted computer has to enrol again to reconnect.</p>
+        <div class="form-actions"><button type="submit" class="button button--danger" data-confirm="Delete all revoked tray devices? This cannot be undone.">Delete revoked devices</button></div>
+      </form>
+    </div>
+    <div class="ce-subsection" aria-labelledby="tray-clean-tokens-title">
+      <h3 id="tray-clean-tokens-title">Revoked install tokens</h3>
+      <form method="post" action="/admin/tray/install-tokens/bulk-purge-revoked" class="form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <p class="form-help">Deletes every revoked install token, including its audit history.</p>
+        <div class="form-actions"><button type="submit" class="button button--danger" data-confirm="Purge all revoked tray install tokens? This permanently deletes token audit rows and cannot be undone.">Purge revoked tokens</button></div>
+      </form>
+    </div>
+  </div>
+</section>

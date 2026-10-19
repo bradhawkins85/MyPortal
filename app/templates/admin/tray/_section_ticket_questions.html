@@ -1,0 +1,19 @@
+{% set tq = tray.questions %}
+<section class="card card--panel ce-section" id="ticket-questions" data-ae-section="ticket-questions" aria-labelledby="tq-card-title">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="tq-card-title">Ticket questions</h2>
+      <p class="card__subtitle">Asked in the tray's Submit Ticket dialog. Questions for every company come first, then the company's own, each in sort order. Answers are added to the ticket.</p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    {% if tq.success_message %}<div class="alert alert--success" role="status">{{ tq.success_message }}</div>{% endif %}
+    {% if tq.error_message %}<div class="alert alert--error" role="alert">{{ tq.error_message }}</div>{% endif %}
+    {% set tq_questions = tq.questions %}
+    {% set tq_parents = tq.questions %}
+    {% set tq_base_url = "/admin/tray/ticket-questions" %}
+    {% set tq_companies = tq.companies %}
+    {% set tq_company = none %}
+    {% include "admin/tray/_ticket_question_editor.html" %}
+  </div>
+</section>

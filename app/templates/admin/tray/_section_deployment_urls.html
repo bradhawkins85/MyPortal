@@ -1,39 +1,25 @@
-{% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
-
-{% block header_title %}<span class="header__title-text">Tray deployment URLs</span>{% endblock %}
-
-{% block header_actions %}
-  {{ page_header_actions([
-    {"label": "Configurations", "type": "link", "variant": "ghost", "href": "/admin/tray/configurations"},
-    {"label": "Devices", "type": "link", "variant": "ghost", "href": "/admin/tray/devices"},
-    {"label": "Install tokens", "type": "link", "variant": "ghost", "href": "/admin/tray/install-tokens"}
-  ]) }}
-{% endblock %}
-
-{% block content %}
-<div class="admin-grid admin-grid--columns">
-  <section class="card card--panel admin-grid__full" aria-labelledby="deploy-create-title">
-    <header class="card__header">
-      <h2 id="deploy-create-title">New deployment URL</h2>
-      <p class="card__lede">A deployment URL is a private magic link to a ready-made tray installer for one company. Send it to the person installing; they open it, download the Windows installer or the macOS package and run it, and the device enrols into that company with no token to type. The installers are only served from this portal through the link, and they stop working when the link expires or is revoked.</p>
-    </header>
-    <div class="card__body">
-      {% if not release_tag %}
-        <div class="callout callout--warning">
-          <p>No tray release is cached on this server yet, so Windows installers cannot be built and the macOS package is missing. Fetch the latest tray release from the <a href="/admin/tray/devices">Devices</a> page first.</p>
-        </div>
-      {% endif %}
-      <p class="form-help">Windows installers (EXE and MSI) are built and signed for each company by your Windows build server. They are rebuilt automatically when a new tray release is cached{% if release_tag %} (currently <code>{{ release_tag }}</code>){% endif %}. See <em>Tray Build Server</em> in the wiki to set one up.</p>
-      <p class="form-help">Use <code>{{ "{{ tray.deploymentUrl }}" }}</code> in automations, ticket replies, canned responses, message templates and email signatures to insert the company's deployment URL. When a company has more than one active URL, the one that stays valid longest is used.</p>
-      <form method="post" action="/admin/tray/deployment-links" class="form-stack">
+{% set dl = tray.links %}
+<section class="card card--panel ce-section" id="deployment-urls" data-ae-section="deployment-urls" aria-labelledby="tray-deploy-title">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="tray-deploy-title">Deployment URLs</h2>
+      <p class="card__subtitle">A private link to a ready-made tray installer for one company. The person installing opens it, downloads the Windows installer or macOS package and runs it, and the computer enrols into that company with no token to type. Installers stop working when the link expires or is revoked.</p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    {% if not dl.release_tag %}
+      <div class="alert alert--warning" role="status">No tray release is cached on this server yet, so Windows installers cannot be built and the macOS package is missing. Load a tray release on the server first; the <a href="#devices">Enrolled devices</a> section shows what is loaded.</div>
+    {% endif %}
+    <div class="ce-subsection" aria-labelledby="tray-deploy-new-title">
+      <h3 id="tray-deploy-new-title">New deployment URL</h3>
+      <form method="post" action="/admin/tray/deployment-links" class="form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <div class="form-row">
+        <div class="ce-form-grid">
           <div class="form-field">
             <label class="form-label" for="deploy-company">Company</label>
             <select class="form-input" id="deploy-company" name="company_id" required>
               <option value="">Choose a company</option>
-              {% for company in companies %}
+              {% for company in dl.companies %}
                 <option value="{{ company.id }}">{{ company.name }}</option>
               {% endfor %}
             </select>
@@ -46,30 +32,30 @@
           <div class="form-field">
             <label class="form-label" for="deploy-expiry">Link works for</label>
             <select class="form-input" id="deploy-expiry" name="expires_in_days">
-              {% for days, choice_label in expiry_choices %}
-                <option value="{{ days }}" {% if days == default_expiry %}selected{% endif %}>{{ choice_label }}</option>
+              {% for days, choice_label in dl.expiry_choices %}
+                <option value="{{ days }}" {% if days == dl.default_expiry %}selected{% endif %}>{{ choice_label }}</option>
               {% endfor %}
             </select>
             <p class="form-help">After this, the link and every package downloaded from it stop enrolling new devices. You can revoke any link early, including links with no expiry.</p>
           </div>
-          <div class="form-field form-field--actions">
-            <button type="submit" class="button button--primary">Create URL</button>
-          </div>
         </div>
+        <div class="form-actions"><button type="submit" class="button button--primary">Create URL</button></div>
       </form>
+      <p class="form-help">Your Windows build server builds and signs the EXE and MSI installers for each company, and rebuilds them when a new tray release is cached{% if dl.release_tag %} (currently <code>{{ dl.release_tag }}</code>){% endif %}. See <em>Tray Build Server</em> in the wiki to set one up.</p>
+      <p class="form-help">Use <code>{{ "{{ tray.deploymentUrl }}" }}</code> in automations, ticket replies, canned responses, message templates and email signatures to insert the company's deployment URL. When a company has more than one active URL, the one that stays valid longest is used.</p>
     </div>
-  </section>
 
-  <section class="card card--panel admin-grid__full" aria-labelledby="deploy-list-title">
-    <header class="card__header">
-      <h2 id="deploy-list-title">Deployment URLs</h2>
-      <div class="card__controls card__controls--right">
-        <input class="form-input" type="search" placeholder="Search" aria-label="Search deployment URLs" data-deploy-search />
-        <a class="button button--ghost button--small" href="/admin/tray/deployment-links{% if not show_revoked %}?show_revoked=true{% endif %}" aria-pressed="{{ 'true' if show_revoked else 'false' }}">{{ "Hide expired and revoked" if show_revoked else "Show expired and revoked" }}</a>
+    <div class="ce-subsection" aria-labelledby="tray-deploy-list-title">
+      <div class="ce-section__header">
+        <h3 id="tray-deploy-list-title">Existing URLs</h3>
+        <div class="ce-section__meta">
+          <input class="form-input" type="search" placeholder="Search" aria-label="Search deployment URLs" data-deploy-search />
+          {% set link_toggle_url = request.url.remove_query_params(['new_token', 'show_revoked_links']) %}
+          <a class="button button--ghost button--small" href="{{ link_toggle_url if dl.show_revoked else link_toggle_url.include_query_params(show_revoked_links='true') }}#deployment-urls" aria-pressed="{{ 'true' if dl.show_revoked else 'false' }}">{{ "Hide expired and revoked" if dl.show_revoked else "Show expired and revoked" }}</a>
+        </div>
       </div>
-    </header>
-    <div class="card__body card__body--table">
-      {% if links %}
+      {% if dl.links %}
+        <div class="table-wrapper">
         <table class="data-table" data-deploy-table>
           <caption class="visually-hidden">Tray deployment URLs</caption>
           <thead>
@@ -80,7 +66,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for link in links %}
+            {% for link in dl.links %}
               <tr data-deploy-row>
                 <td>{{ link.company_name or '—' }}</td>
                 <td>{{ link.label }}</td>
@@ -146,21 +132,17 @@
             {% endfor %}
           </tbody>
         </table>
+        </div>
         <p class="empty-state" data-deploy-no-results hidden>No deployment URLs match your search.</p>
       {% else %}
-        <div class="empty-state">
-          {% if not show_revoked and hidden_revoked_count %}
-            <p>No active deployment URLs. Choose “Show expired and revoked” to review {{ hidden_revoked_count }} older URL{% if hidden_revoked_count != 1 %}s{% endif %}.</p>
+        <div>
+          {% if not dl.show_revoked and dl.hidden_revoked_count %}
+            <p class="text-muted">No active deployment URLs. Choose “Show expired and revoked” to review {{ dl.hidden_revoked_count }} older URL{% if dl.hidden_revoked_count != 1 %}s{% endif %}.</p>
           {% else %}
-            <p>No deployment URLs yet. Create one above to give a company a ready-made tray installer.</p>
+            <p class="text-muted">No deployment URLs yet. Create one above to give a company a ready-made tray installer.</p>
           {% endif %}
         </div>
       {% endif %}
     </div>
-  </section>
-</div>
-{% endblock %}
-
-{% block scripts %}
-<script src="{{ static_url('/static/js/tray_deployment_links.js') }}" defer></script>
-{% endblock %}
+  </div>
+</section>

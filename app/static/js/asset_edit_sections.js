@@ -1,23 +1,33 @@
 (function () {
   'use strict';
 
+  // Shared by every multi-section settings workspace. A workspace is marked
+  // with data-asset-edit (the asset page) or data-ae-workspace, and may set
+  // data-ae-storage-key, data-ae-form (the shared settings form id) and
+  // data-ae-default (the section shown first). Sections carry data-ae-section
+  // (or data-asset-edit-section) matching their nav link's data-ae-link.
   const STORAGE_KEY = 'myportal:asset-edit:active-section';
+  const SECTION_SELECTOR = '.ce-section[data-ae-section], .ce-section[data-asset-edit-section]';
 
   function normalise(value) {
     return (value || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
   }
 
-  function readStoredSection() {
+  function sectionKey(section) {
+    return section.dataset.aeSection || section.dataset.assetEditSection;
+  }
+
+  function readStoredSection(storageKey) {
     try {
-      return window.localStorage.getItem(STORAGE_KEY);
+      return window.localStorage.getItem(storageKey);
     } catch (_) {
       return null;
     }
   }
 
-  function storeSection(key) {
+  function storeSection(storageKey, key) {
     try {
-      window.localStorage.setItem(STORAGE_KEY, key);
+      window.localStorage.setItem(storageKey, key);
     } catch (_) {
       // The workspace also works when browser storage is unavailable.
     }
@@ -33,19 +43,20 @@
 
   function initWorkspace(workspace) {
     const nav = workspace.querySelector('[data-ae-nav]');
-    const sections = Array.from(workspace.querySelectorAll('.ce-section[data-asset-edit-section]'));
+    const sections = Array.from(workspace.querySelectorAll(SECTION_SELECTOR));
     const links = Array.from(workspace.querySelectorAll('[data-ae-link]'));
     if (!nav || !sections.length || !links.length) {
       return null;
     }
 
-    const sectionsByKey = new Map(sections.map((section) => [section.dataset.assetEditSection, section]));
+    const storageKey = workspace.dataset.aeStorageKey || STORAGE_KEY;
+    const sectionsByKey = new Map(sections.map((section) => [sectionKey(section), section]));
     const linksByKey = new Map(links.map((link) => [link.dataset.aeLink, link]));
     const search = nav.querySelector('[data-ae-search]');
     const emptyMessage = nav.querySelector('[data-ae-search-empty]');
     const groups = Array.from(nav.querySelectorAll('[data-ae-nav-group]'));
     const searchIndex = new Map(sections.map((section) => [
-      section.dataset.assetEditSection,
+      sectionKey(section),
       normalise(Array.from(section.querySelectorAll('.card__title, .card__subtitle, h3, legend, label'))
         .map((element) => element.textContent).join(' ')),
     ]));
@@ -57,12 +68,12 @@
     }
 
     function defaultKey() {
-      return ['profile', 'inventory', ...sectionsByKey.keys()].find(isAvailable);
+      return [workspace.dataset.aeDefault, 'profile', 'inventory', ...sectionsByKey.keys()].find(isAvailable);
     }
 
     function keyForElement(element) {
-      const section = element && element.closest('.ce-section[data-asset-edit-section]');
-      return section && workspace.contains(section) ? section.dataset.assetEditSection : null;
+      const section = element && element.closest(SECTION_SELECTOR);
+      return section && workspace.contains(section) ? sectionKey(section) : null;
     }
 
     function activate(key, options) {
@@ -84,7 +95,7 @@
           link.removeAttribute('aria-current');
         }
       });
-      storeSection(key);
+      storeSection(storageKey, key);
       if (settings.updateHash !== false && window.history && window.history.replaceState) {
         window.history.replaceState(null, '', `#${section.id}`);
       }
@@ -181,7 +192,7 @@
 
     const hashTarget = elementForHash(window.location.hash);
     workspace.classList.add('is-enhanced');
-    activate(keyForElement(hashTarget) || readStoredSection() || defaultKey(), { updateHash: false });
+    activate(keyForElement(hashTarget) || readStoredSection(storageKey) || defaultKey(), { updateHash: false });
     applySearch();
     if (hashTarget && keyForElement(hashTarget)) {
       window.requestAnimationFrame(() => hashTarget.scrollIntoView({ block: 'nearest', behavior: 'auto' }));
@@ -190,7 +201,7 @@
   }
 
   function initSettingsForm(workspace, api) {
-    const form = document.getElementById('asset-settings-form');
+    const form = document.getElementById(workspace.dataset.aeForm || 'asset-settings-form');
     if (!form) {
       return;
     }
@@ -321,6 +332,8 @@
           element.dispatchEvent(new Event('input', { bubbles: true }));
           element.dispatchEvent(new Event('change', { bubbles: true }));
         });
+        // Lets editors that render from a hidden field (menu builders) redraw.
+        form.dispatchEvent(new CustomEvent('ae:discarded', { bubbles: true }));
         refresh();
       });
     }
@@ -335,9 +348,8 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    const workspace = document.querySelector('[data-asset-edit]');
-    if (workspace) {
+    document.querySelectorAll('[data-asset-edit], [data-ae-workspace]').forEach((workspace) => {
       initSettingsForm(workspace, initWorkspace(workspace));
-    }
+    });
   });
 })();

@@ -1,0 +1,7 @@
+{
+  "guid": "406478bf-485b-482c-a278-c1eeec2f8073",
+  "occurred_at": "2026-10-19T04:21Z",
+  "change_type": "Improvement",
+  "summary": "Tray settings: combine devices, deployment URLs, install tokens, versions, diagnostics, menu configurations, ticket questions and the tray icon into one /admin/tray workspace with grouped section navigation, and split the menu configuration editor into sections with a save bar",
+  "content_hash": "2feaf21c0a894598197b0c9da60ffc8515e02c84167ca283d8aec3e1193b2677"
+}

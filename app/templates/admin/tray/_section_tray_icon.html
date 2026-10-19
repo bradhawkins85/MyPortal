@@ -1,0 +1,47 @@
+{% set brand = tray.branding %}
+<section class="card card--panel ce-section" id="tray-icon" data-ae-section="tray-icon" aria-labelledby="tray-icon-title">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="tray-icon-title">Tray icon</h2>
+      <p class="card__subtitle">The icon and hover name the tray app shows in the system tray on every enrolled device. By default it uses an icon made from the website favicon and the name <strong>{{ brand.default_tooltip_name }}</strong>.</p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    <div class="tray-icon-preview">
+      <img class="tray-icon-preview__image" src="/tray/icon.ico" alt="Current tray icon" width="32" height="32" />
+      <dl class="definition-list">
+        <dt>Hover name</dt>
+        <dd>{% if brand.tooltip_name %}{{ brand.tooltip_name }}{% else %}{{ brand.default_tooltip_name }} (default){% endif %}</dd>
+        <dt>Icon</dt>
+        <dd>{% if brand.current_path %}Custom upload (<code>{{ brand.current_path }}</code>){% else %}Default, made from the website favicon{% endif %}</dd>
+      </dl>
+    </div>
+
+    <form method="post" action="/admin/tray/branding" enctype="multipart/form-data" class="form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="ce-form-grid">
+        <div class="form-field">
+          <label class="form-label" for="tray-tooltip-name">Hover name <span class="form-label__optional">optional</span></label>
+          <input class="form-input" id="tray-tooltip-name" type="text" name="tooltip_name" value="{{ brand.tooltip_name }}" maxlength="100" placeholder="{{ brand.default_tooltip_name }}" />
+          <p class="form-help">Leave blank to use the default. The tray app adds its version after this name.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="tray-icon-file">New icon <span class="form-label__optional">optional</span></label>
+          <input class="form-input" id="tray-icon-file" type="file" name="icon" accept=".ico,image/x-icon,image/vnd.microsoft.icon" />
+          <p class="form-help">An .ico file up to 1&nbsp;MB. Leave empty to change only the hover name.</p>
+        </div>
+      </div>
+      <div class="form-actions"><button type="submit" class="button button--primary">Save tray icon</button></div>
+    </form>
+
+    {% if brand.current_path %}
+      <form method="post" action="/admin/tray/branding/delete" class="form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="form-actions">
+          <button type="submit" class="button button--ghost" data-confirm="Reset the tray icon to the default?">Reset to the default icon</button>
+          <span class="form-help">Removes the uploaded icon. The hover name is kept.</span>
+        </div>
+      </form>
+    {% endif %}
+  </div>
+</section>

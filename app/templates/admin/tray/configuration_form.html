@@ -5,112 +5,187 @@
 
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "Back to configurations", "type": "link", "variant": "ghost", "href": "/admin/tray/configurations"}
-  ]) }}
+    {"label": "Save configuration", "type": "submit", "variant": "primary", "form": "tray-config-form"},
+    {"label": "Back to tray settings", "type": "link", "variant": "ghost", "href": "/admin/tray#menu-configurations"}
+  ], menu_id="tray-config-actions") }}
 {% endblock %}
 
 {% block content %}
-<div class="admin-grid">
-  <section class="card card--panel">
-    <header class="card__header">
-      <p class="card__lede">Build the menu tree using the form below. Add rows and use Move up/Move down to reorder them, or use the JSON view as a fallback for advanced edits.</p>
-    </header>
-    <div class="card__body">
-      <form method="post" action="{{ form_action }}" class="form-stack" id="tray-config-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+<div class="settings-workspace tray-config-workspace ce-workspace" data-ae-workspace data-ae-form="tray-config-form" data-ae-storage-key="myportal:tray-config:active-section" data-ae-default="general">
+  <section class="ce-overview" aria-label="Configuration at a glance">
+    <div class="ce-overview__identity">
+      <span class="ce-overview__avatar" aria-hidden="true"><img src="/tray/icon.ico" alt="" width="28" height="28"></span>
+      <div class="ce-overview__summary">
+        <ul class="scf-item__chips ce-overview__chips" aria-label="Configuration summary">
+          <li class="scf-chip">{{ config.name or 'New configuration' }}</li>
+          <li class="scf-chip">{{ (config.scope or 'global') | capitalize }} scope{% if config.scope_ref_id %} · #{{ config.scope_ref_id }}{% endif %}</li>
+          <li class="scf-chip{% if not config.enabled %} scf-chip--muted{% endif %}">{{ 'Enabled' if config.enabled else 'Disabled' }}</li>
+          {% if config.version %}<li class="scf-chip scf-chip--muted">Version {{ config.version }}</li>{% endif %}
+        </ul>
+      </div>
+    </div>
+  </section>
 
-        <div class="form-row">
+  <form method="post" action="{{ form_action }}" class="form" id="tray-config-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  </form>
+
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Configuration sections" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="tray-config-nav-search">Find a configuration setting</label>
+        <input type="search" id="tray-config-nav-search" class="form-input" placeholder="Find a setting…" autocomplete="off" data-ae-search>
+      </div>
+      {% set config_groups = [
+        ("Configuration", [("general", "Name and scope"), ("menu-items", "Menu items")]),
+        ("Menu content", [("display-text", "Display text"), ("environment", "Environment variables"), ("branding", "Branding")]),
+      ] %}
+      {% for group_label, items in config_groups %}
+        <div class="ce-nav__group" data-ae-nav-group>
+          <p class="ce-nav__group-title" id="tray-config-nav-group-{{ loop.index }}">{{ group_label }}</p>
+          <ul class="ce-nav__list" aria-labelledby="tray-config-nav-group-{{ loop.index }}">
+            {% for key, label in items %}
+              <li><a class="ce-nav__link" href="#{{ key }}" data-ae-link="{{ key }}">
+                <span class="ce-nav__label">{{ label }}</span>
+                <span class="ce-nav__dirty" data-ae-dirty-dot hidden><span class="visually-hidden">Unsaved changes</span></span>
+              </a></li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endfor %}
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No settings match your search.</p>
+    </nav>
+
+    <div class="ce-panels">
+      <section class="card card--panel ce-section" id="general" data-ae-section="general" aria-labelledby="tray-config-general-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="tray-config-general-title">Name and scope</h2>
+          <p class="card__subtitle">Which devices use this menu. The most specific enabled configuration wins: device, then tag, then company, then global.</p>
+        </div></header>
+        <div class="ce-section__body ce-form-grid">
           <div class="form-field">
             <label class="form-label" for="config-name">Name</label>
-            <input class="form-input" id="config-name" name="name" required maxlength="150" value="{{ config.name or '' }}" />
+            <input class="form-input" id="config-name" name="name" form="tray-config-form" required maxlength="150" value="{{ config.name or '' }}" />
           </div>
           <div class="form-field">
             <label class="form-label" for="config-scope">Scope</label>
-            <select class="form-input" id="config-scope" name="scope">
+            <select class="form-input" id="config-scope" name="scope" form="tray-config-form">
               {% for scope in ['global', 'company', 'tag', 'device'] %}
                 <option value="{{ scope }}" {% if config.scope == scope %}selected{% endif %}>{{ scope|capitalize }}</option>
               {% endfor %}
             </select>
           </div>
           <div class="form-field">
-            <label class="form-label" for="config-scope-ref">Scope target ID</label>
-            <input class="form-input" id="config-scope-ref" name="scope_ref_id" type="number" value="{{ config.scope_ref_id or '' }}" placeholder="Company / Asset / Tag ID" />
+            <label class="form-label" for="config-scope-ref">Scope target ID <span class="form-label__optional">optional</span></label>
+            <input class="form-input" id="config-scope-ref" name="scope_ref_id" form="tray-config-form" type="number" value="{{ config.scope_ref_id or '' }}" placeholder="Company / Asset / Tag ID" />
+            <p class="form-help">The company, asset or tag ID for that scope. Leave blank for global.</p>
           </div>
-          <div class="form-field form-field--checkbox">
-            <label>
-              <input type="checkbox" name="enabled" {% if config.enabled %}checked{% endif %} value="1" />
-              Enabled
-            </label>
+          <div class="form-field">
+            <label class="checkbox"><input type="checkbox" name="enabled" form="tray-config-form" {% if config.enabled %}checked{% endif %} value="1" /><span>Enabled</span></label>
+            <p class="form-help">Disabled configurations are kept but never sent to devices.</p>
           </div>
         </div>
+      </section>
 
-        <div class="form-field">
-          <label class="form-label" for="config-display-text">Display text (rich)</label>
-          <textarea class="form-input" id="config-display-text" name="display_text" rows="4">{{ config.display_text or '' }}</textarea>
-          <p class="form-help">Shown when a "Display text" menu node is clicked. HTML is sanitised server-side.</p>
-        </div>
-
-        <div class="form-field">
-          <label class="form-label" for="config-env-allowlist">Environment variable allowlist (comma separated)</label>
-          <input class="form-input" id="config-env-allowlist" name="env_allowlist" value="{{ config.env_allowlist_csv or '' }}" placeholder="e.g. USERDOMAIN,USERNAME,COMPUTERNAME" />
-          <p class="form-help">Only variables listed here may be requested by an "Env var" menu node. Values are read by the tray client and never persisted on the server.</p>
-        </div>
-
-        <div class="form-field">
-          <label class="form-label" for="config-branding">Branding icon URL</label>
-          <input class="form-input" id="config-branding" name="branding_icon_url" type="url" value="{{ config.branding_icon_url or '' }}" placeholder="https://…" />
-        </div>
-
-        <div class="form-field" data-menu-node-builder>
-          <label class="form-label">Menu nodes</label>
+      <section class="card card--panel ce-section" id="menu-items" data-ae-section="menu-items" aria-labelledby="tray-config-menu-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="tray-config-menu-title">Menu items</h2>
+          <p class="card__subtitle">Build the tray menu row by row. Use Move up and Move down to reorder, and Level to place an item under the submenu above it. The JSON view is there for advanced edits.</p>
+        </div></header>
+        <div class="ce-section__body" data-menu-node-builder>
           <div class="form-stack" id="menu-node-list" aria-live="polite"></div>
-          <div class="form-actions" style="justify-content:flex-start; gap:0.5rem; margin-top:0.5rem;">
-            <button type="button" class="button button--ghost" id="menu-node-add" aria-label="Add menu node">Add node</button>
-            <button type="button" class="button button--ghost" id="menu-node-toggle-json" aria-label="Toggle advanced JSON editor" aria-expanded="false">Advanced JSON</button>
+          <div class="form-actions">
+            <button type="button" class="button button--ghost" id="menu-node-add" aria-label="Add menu node">Add item</button>
+            <button type="button" class="button button--ghost" id="menu-node-toggle-json" aria-label="Toggle advanced JSON editor" aria-expanded="false" aria-controls="menu-node-json-panel">Advanced JSON</button>
           </div>
-          <div id="menu-node-json-panel" hidden style="margin-top:0.5rem;">
-            <label class="form-label" for="config-payload">Menu nodes (JSON)</label>
-            <textarea class="form-input form-input--code" id="config-payload" name="payload_json" rows="14" required>{{ config.payload_json or '[]' }}</textarea>
-            <div class="form-actions" style="justify-content:flex-start; gap:0.5rem; margin-top:0.5rem;">
+          <div id="menu-node-json-panel" hidden>
+            <label class="form-label" for="config-payload">Menu items (JSON)</label>
+            <textarea class="form-input form-input--code" id="config-payload" name="payload_json" form="tray-config-form" rows="14" required>{{ config.payload_json or '[]' }}</textarea>
+            <div class="form-actions">
               <button type="button" class="button button--ghost" id="menu-node-apply-json">Apply JSON to list</button>
             </div>
           </div>
-          <p class="form-help" id="menu-node-error" hidden></p>
-          {% if trmm_scripts_error %}
-            <p class="form-help">Tactical RMM scripts could not be loaded: {{ trmm_scripts_error }}</p>
-          {% elif trmm_scripts %}
-            <p class="form-help">Tactical RMM scripts are loaded from the configured TRMM API and can be selected with the <code>TRMM_Script</code> node type.</p>
-          {% else %}
-            <p class="form-help">No Tactical RMM scripts were returned by the configured TRMM API.</p>
-          {% endif %}
-          {% if rmm_scripts %}
-            <p class="form-help">Use the <code>rmm_script</code> node type to let the person at the computer run a MyPortal RMM script from Gitea on that computer. Set the script's values here; they can use MyPortal variables such as <code>{% raw %}{{asset.name}}{% endraw %}</code> or <code>{% raw %}{{company.variables.Name}}{% endraw %}</code>, stay on the server and are never sent to the tray. Runs show in RMM run history as started from the tray menu. A company's own scripts only run on that company's computers, so pair them with <strong>Show only for companies</strong>.</p>
-          {% else %}
-            <p class="form-help">No MyPortal RMM scripts are available yet. Sync scripts from Gitea under RMM to add <code>rmm_script</code> menu items.</p>
-          {% endif %}
-          <p class="form-help">
-            Configure each row with the fields you need. <code>Service Status</code> opens the published status page for the tray device's company using the existing link action, so no tray agent upgrade is required. Types: <code>label</code>, <code>app_version</code>, <code>link</code>, <code>Service Status</code>, <code>submenu</code>,
-            <code>display_text</code>, <code>env_var</code>, <code>open_chat</code>, <code>submit_ticket</code>, <code>submit_syncro_ticket</code>,
-            <code>TRMM_Script</code>, <code>rmm_script</code>, <code>scan_network</code>, <code>refresh_config</code>, <code>separator</code>, <code>quit</code>.
-            Use <code>Level</code> to place nodes under the nearest preceding submenu. Add company visibility conditions to show a node only for selected company IDs or hide it from selected company IDs.
-          </p>
-          <p class="form-help">
-            See <a href="/docs/tray_app">docs/tray_app</a> for the schema.
-          </p>
+          <p class="form-help" id="menu-node-error" role="alert" hidden></p>
+          <details>
+            <summary>About menu item types</summary>
+            {% if trmm_scripts_error %}
+              <p class="form-help">Tactical RMM scripts could not be loaded: {{ trmm_scripts_error }}</p>
+            {% elif trmm_scripts %}
+              <p class="form-help">Tactical RMM scripts are loaded from the configured TRMM API and can be selected with the <code>TRMM_Script</code> node type.</p>
+            {% else %}
+              <p class="form-help">No Tactical RMM scripts were returned by the configured TRMM API.</p>
+            {% endif %}
+            {% if rmm_scripts %}
+              <p class="form-help">Use the <code>rmm_script</code> node type to let the person at the computer run a MyPortal RMM script from Gitea on that computer. Set the script's values here; they can use MyPortal variables such as <code>{% raw %}{{asset.name}}{% endraw %}</code> or <code>{% raw %}{{company.variables.Name}}{% endraw %}</code>, stay on the server and are never sent to the tray. Runs show in RMM run history as started from the tray menu. A company's own scripts only run on that company's computers, so pair them with <strong>Show only for companies</strong>.</p>
+            {% else %}
+              <p class="form-help">No MyPortal RMM scripts are available yet. Sync scripts from Gitea under RMM to add <code>rmm_script</code> menu items.</p>
+            {% endif %}
+            <p class="form-help">
+              Configure each row with the fields you need. <code>Service Status</code> opens the published status page for the tray device's company using the existing link action, so no tray agent upgrade is required. Types: <code>label</code>, <code>app_version</code>, <code>link</code>, <code>Service Status</code>, <code>submenu</code>,
+              <code>display_text</code>, <code>env_var</code>, <code>open_chat</code>, <code>submit_ticket</code>, <code>submit_syncro_ticket</code>,
+              <code>TRMM_Script</code>, <code>rmm_script</code>, <code>scan_network</code>, <code>refresh_config</code>, <code>separator</code>, <code>quit</code>.
+              Add company visibility conditions to show an item only for selected company IDs or hide it from selected company IDs.
+            </p>
+            <p class="form-help">See <a href="/docs/tray_app">docs/tray_app</a> for the schema.</p>
+          </details>
         </div>
+      </section>
 
-        <div class="form-actions">
-          <button type="submit" class="button button--primary">Save configuration</button>
-          <a href="/admin/tray/configurations" class="button button--ghost">Cancel</a>
+      <section class="card card--panel ce-section" id="display-text" data-ae-section="display-text" aria-labelledby="tray-config-text-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="tray-config-text-title">Display text</h2>
+          <p class="card__subtitle">Shown when someone clicks a "Display text" menu item.</p>
+        </div></header>
+        <div class="ce-section__body">
+          <div class="form-field">
+            <label class="form-label" for="config-display-text">Display text <span class="form-label__optional">optional</span></label>
+            <textarea class="form-textarea" id="config-display-text" name="display_text" form="tray-config-form" rows="6">{{ config.display_text or '' }}</textarea>
+            <p class="form-help">Basic HTML is allowed and is cleaned on the server.</p>
+          </div>
         </div>
-      </form>
+      </section>
+
+      <section class="card card--panel ce-section" id="environment" data-ae-section="environment" aria-labelledby="tray-config-env-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="tray-config-env-title">Environment variables</h2>
+          <p class="card__subtitle">The only environment variables an "Env var" menu item may show. The tray app reads them on the computer; they are never stored on the server.</p>
+        </div></header>
+        <div class="ce-section__body">
+          <div class="form-field">
+            <label class="form-label" for="config-env-allowlist">Allowed variables <span class="form-label__optional">optional</span></label>
+            <input class="form-input" id="config-env-allowlist" name="env_allowlist" form="tray-config-form" value="{{ config.env_allowlist_csv or '' }}" placeholder="e.g. USERDOMAIN,USERNAME,COMPUTERNAME" />
+            <p class="form-help">Separate names with commas.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card card--panel ce-section" id="branding" data-ae-section="branding" aria-labelledby="tray-config-branding-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="tray-config-branding-title">Branding</h2>
+          <p class="card__subtitle">An icon for devices using this configuration. Leave blank to use the <a href="/admin/tray#tray-icon">tray icon</a> set for every device.</p>
+        </div></header>
+        <div class="ce-section__body">
+          <div class="form-field">
+            <label class="form-label" for="config-branding">Branding icon URL <span class="form-label__optional">optional</span></label>
+            <input class="form-input" id="config-branding" name="branding_icon_url" form="tray-config-form" type="url" value="{{ config.branding_icon_url or '' }}" placeholder="https://…" />
+          </div>
+        </div>
+      </section>
     </div>
-  </section>
+  </div>
+
+  <div class="ce-savebar" data-ae-savebar role="region" aria-label="Unsaved configuration changes" hidden>
+    <p class="ce-savebar__text" aria-live="polite"><strong data-ae-savebar-count>Unsaved changes</strong> <span class="text-muted">in <span data-ae-savebar-sections></span></span></p>
+    <span class="ae-savebar__spacer" aria-hidden="true"></span>
+    <button type="button" class="button button--ghost" data-ae-discard>Discard</button>
+    <button type="submit" class="button button--primary" form="tray-config-form">Save configuration</button>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
   <script>
     (function () {
       const builder = document.querySelector('[data-menu-node-builder]');
@@ -745,7 +820,12 @@
       function syncJsonFromRows() {
         showError('');
         const payload = buildNodesFromRows(readRows());
-        jsonInput.value = JSON.stringify(payload, null, 2);
+        const next = JSON.stringify(payload, null, 2);
+        if (jsonInput.value !== next) {
+          jsonInput.value = next;
+          // Lets the settings workspace track unsaved menu changes.
+          jsonInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
       }
 
       function loadJsonIntoRows(rawJson) {
@@ -787,6 +867,10 @@
       applyJsonBtn.addEventListener('click', () => {
         loadJsonIntoRows(jsonInput.value);
       });
+
+      if (jsonInput.form) {
+        jsonInput.form.addEventListener('ae:discarded', () => loadJsonIntoRows(jsonInput.value));
+      }
 
       if (!loadJsonIntoRows(jsonInput.value)) {
         appendDefaultRow();

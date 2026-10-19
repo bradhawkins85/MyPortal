@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+
+{% set is_super_admin = current_user.is_super_admin %}
+{% set d = tray.devices %}
+{% set release = d.tray_release or {} %}
+
+{% block header_title %}<span class="header__title-text">Tray settings</span>{% endblock %}
+
+{% block header_actions %}
+  {% if is_super_admin %}
+    {{ page_header_actions([
+      {"label": "New menu configuration", "type": "link", "variant": "primary", "href": "/admin/tray/configurations/new"},
+      {"label": "Tray app documentation", "type": "link", "href": "/docs/tray_app"}
+    ], menu_id="tray-workspace-actions") }}
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="settings-workspace tray-workspace ce-workspace" data-ae-workspace data-ae-storage-key="myportal:tray-settings:active-section" data-ae-default="devices">
+  {% set active_devices = d.devices | selectattr("status", "equalto", "active") | list | length %}
+  {% set pending_devices = d.devices | selectattr("status", "equalto", "pending") | list | length %}
+  <section class="ce-overview" aria-label="Tray at a glance">
+    <div class="ce-overview__identity">
+      <span class="ce-overview__avatar" aria-hidden="true"><img src="/tray/icon.ico" alt="" width="28" height="28"></span>
+      <div class="ce-overview__summary">
+        <ul class="scf-item__chips ce-overview__chips" aria-label="Tray summary">
+          <li class="scf-chip">{{ 'Tray release ' ~ release.version if release.version else 'No tray release loaded' }}</li>
+          <li class="scf-chip{% if not d.outdated_device_count %} scf-chip--muted{% endif %}">{{ d.outdated_device_count }} outdated agent{{ 's' if d.outdated_device_count != 1 }}</li>
+          <li class="scf-chip{% if not d.matrix_enabled %} scf-chip--muted{% endif %}">{{ 'Tray chat available' if d.matrix_enabled else 'Tray chat off' }}</li>
+          {% if is_super_admin %}
+            <li class="scf-chip{% if not tray.branding.current_path %} scf-chip--muted{% endif %}">{{ 'Custom tray icon' if tray.branding.current_path else 'Default tray icon' }}</li>
+          {% endif %}
+          {% if d.filters.search or d.filters.status %}<li class="scf-chip scf-chip--logic">Device list filtered</li>{% endif %}
+        </ul>
+      </div>
+    </div>
+    {% set tray_counters = [
+      {"label": "Active devices", "value": active_devices, "variant": "success", "href": "#devices"},
+      {"label": "Pending devices", "value": pending_devices, "variant": "warning" if pending_devices else "neutral", "href": "#devices"},
+      {"label": "Outdated agents", "value": d.outdated_device_count, "variant": "warning" if d.outdated_device_count else "neutral", "href": "#devices"},
+    ] %}
+    {% if is_super_admin %}
+      {% set _ = tray_counters.append({"label": "Deployment URLs", "value": tray.links.links | length, "variant": "info", "href": "#deployment-urls"}) %}
+      {% set _ = tray_counters.append({"label": "Menu configurations", "value": tray.configurations.configurations | length, "variant": "neutral", "href": "#menu-configurations"}) %}
+    {% endif %}
+    {{ counter_strip(tray_counters, class="ce-overview__stats") }}
+  </section>
+
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Tray settings sections" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="tray-nav-search">Find a tray setting</label>
+        <input type="search" id="tray-nav-search" class="form-input" placeholder="Find a setting…" autocomplete="off" data-ae-search>
+      </div>
+      {% set tray_groups = [
+        ("Devices", [
+          ("devices", "Enrolled devices", d.devices | length, true),
+          ("diagnostics", "Diagnostics", tray.diagnostics.bundles | length if is_super_admin else "", is_super_admin),
+        ]),
+        ("Deployment", [
+          ("deployment-urls", "Deployment URLs", tray.links.links | length if is_super_admin else "", is_super_admin),
+          ("install-tokens", "Install tokens", tray.tokens.tokens | length if is_super_admin else "", is_super_admin),
+          ("versions", "Installer versions", tray.versions.versions | length if is_super_admin else "", is_super_admin),
+        ]),
+        ("Tray app", [
+          ("menu-configurations", "Menu configurations", tray.configurations.configurations | length if is_super_admin else "", is_super_admin),
+          ("ticket-questions", "Ticket questions", tray.questions.questions | length if is_super_admin else "", is_super_admin),
+          ("tray-icon", "Tray icon", "", is_super_admin),
+        ]),
+        ("Maintenance", [
+          ("clean-up", "Clean up", "", is_super_admin),
+        ]),
+      ] %}
+      {% for group_label, items in tray_groups %}
+        {% set visible_items = items | selectattr(3) | list %}
+        {% if visible_items %}
+          <div class="ce-nav__group" data-ae-nav-group>
+            <p class="ce-nav__group-title" id="tray-nav-group-{{ loop.index }}">{{ group_label }}</p>
+            <ul class="ce-nav__list" aria-labelledby="tray-nav-group-{{ loop.index }}">
+              {% for key, label, count, _visible in visible_items %}
+                <li><a class="ce-nav__link" href="#{{ key }}" data-ae-link="{{ key }}">
+                  <span class="ce-nav__label">{{ label }}</span>
+                  {% if count != "" %}<span class="ce-nav__count">{{ count }}</span>{% endif %}
+                </a></li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      {% endfor %}
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No settings match your search.</p>
+    </nav>
+
+    <div class="ce-panels">
+      {% include "admin/tray/_section_devices.html" %}
+      {% if is_super_admin %}
+        {% include "admin/tray/_section_diagnostics.html" %}
+        {% include "admin/tray/_section_deployment_urls.html" %}
+        {% include "admin/tray/_section_install_tokens.html" %}
+        {% include "admin/tray/_section_versions.html" %}
+        {% include "admin/tray/_section_configurations.html" %}
+        {% include "admin/tray/_section_ticket_questions.html" %}
+        {% include "admin/tray/_section_tray_icon.html" %}
+        {% include "admin/tray/_section_clean_up.html" %}
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  {% if is_super_admin %}
+    <script src="{{ static_url('/static/js/tray_deployment_links.js') }}" defer></script>
+    <script src="{{ static_url('/static/js/tray_ticket_questions_admin.js') }}" defer></script>
+  {% endif %}
+{% endblock %}

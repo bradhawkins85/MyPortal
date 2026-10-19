@@ -1,0 +1,123 @@
+{% set ver = tray.versions %}
+<section class="card card--panel ce-section" id="versions" data-ae-section="versions" aria-labelledby="tray-versions-title">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="tray-versions-title">Installer versions</h2>
+      <p class="card__subtitle">Versions offered to tray apps by the auto-update check (<code>GET /api/tray/version</code>). The newest enabled entry wins for each platform. Use <strong>Rollout %</strong> to stage a release: each device is placed in a fixed group from its device UID, and only devices inside the percentage update until you widen it.</p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    <div class="ce-subsection" aria-labelledby="tray-version-new-title">
+      <h3 id="tray-version-new-title">Publish a version</h3>
+      <form method="post" action="/admin/tray/versions" class="form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="ce-form-grid">
+          <div class="form-field">
+            <label class="form-label" for="ver-version">Version</label>
+            <input class="form-input" id="ver-version" name="version" required maxlength="32" placeholder="0.1.0" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="ver-platform">Platform</label>
+            <select class="form-input" id="ver-platform" name="platform">
+              <option value="all">All</option>
+              <option value="windows">Windows</option>
+              <option value="darwin">macOS</option>
+            </select>
+          </div>
+          <div class="form-field ce-form-grid__full">
+            <label class="form-label" for="ver-url">Download URL</label>
+            <input class="form-input" id="ver-url" name="download_url" type="url" required maxlength="500" placeholder="https://…/myportal-tray.msi" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="ver-rollout">Rollout %</label>
+            <input class="form-input" id="ver-rollout" name="rollout_percent" type="number" min="1" max="100" value="100" />
+            <p class="form-help">Share of devices offered this version.</p>
+          </div>
+          <div class="form-field">
+            <label class="checkbox"><input type="checkbox" name="required" value="1" /><span>Force update</span></label>
+            <p class="form-help">Devices install it without waiting for the user.</p>
+          </div>
+        </div>
+        <div class="form-actions"><button type="submit" class="button button--primary">Publish</button></div>
+      </form>
+    </div>
+
+    {% if ver.server_installers %}
+    <div class="ce-subsection" aria-labelledby="tray-version-server-title">
+      <h3 id="tray-version-server-title">Installers on this server</h3>
+      <p class="form-help">Downloaded from GitHub Releases and served by MyPortal. Publish one so tray apps update themselves from this server; its SHA-256 is published with it and checked on each device before it runs.</p>
+      <div class="table-wrapper">
+      <table class="data-table">
+        <caption class="visually-hidden">Tray installers cached on this server</caption>
+        <thead>
+          <tr><th scope="col">Installer</th><th scope="col">Version</th><th scope="col">Platform</th><th scope="col" class="data-table__col--actions">Actions</th></tr>
+        </thead>
+        <tbody>
+          {% for inst in ver.server_installers %}
+            <tr>
+              <td><code>{{ inst.name }}</code></td>
+              <td><strong>{{ inst.version }}</strong></td>
+              <td>{{ inst.platform }}</td>
+              <td class="data-table__col--actions">
+                <form method="post" action="/admin/tray/versions" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input type="hidden" name="version" value="{{ inst.version }}" />
+                  <input type="hidden" name="platform" value="{{ inst.platform }}" />
+                  <input type="hidden" name="download_url" value="{{ inst.download_url }}" />
+                  <input type="hidden" name="rollout_percent" value="100" />
+                  <button type="submit" class="button button--ghost button--small">Publish<span class="visually-hidden"> {{ inst.name }}</span></button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="ce-subsection" aria-labelledby="tray-version-list-title">
+      <h3 id="tray-version-list-title">Published versions</h3>
+      {% if ver.versions %}
+        <div class="table-wrapper">
+        <table class="data-table">
+          <caption class="visually-hidden">Published tray versions</caption>
+          <thead>
+            <tr>
+              <th scope="col">Version</th><th scope="col">Platform</th><th scope="col">Download URL</th>
+              <th scope="col">Required</th><th scope="col">Rollout</th><th scope="col">Published</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in ver.versions %}
+              <tr>
+                <td><strong>{{ v.version }}</strong></td>
+                <td>{{ v.platform }}</td>
+                <td><a href="{{ v.download_url }}" target="_blank" rel="noopener">{{ v.download_url | truncate(60) }}</a></td>
+                <td>{% if v.required %}<span class="status status--warning">Yes</span>{% else %}—{% endif %}</td>
+                <td>
+                  {% set rp = v.rollout_percent | default(100) | int %}
+                  {% set total = v.total_devices | default(0) | int %}
+                  {% set on_ver = v.devices_on_version | default(0) | int %}
+                  <span class="rollout-info"><strong>{{ rp }}%</strong> eligible{% if total > 0 %} · {{ on_ver }}/{{ total }} updated{% endif %}</span>
+                  {% if rp < 100 %}
+                  <form method="post" action="/admin/tray/versions/{{ v.id }}/rollout" class="inline-form tray-rollout-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <label class="visually-hidden" for="rollout-{{ v.id }}">Rollout percentage for {{ v.version }}</label>
+                    <input id="rollout-{{ v.id }}" type="number" name="rollout_percent" value="{{ rp }}" min="1" max="100" class="form-input form-input--sm" />
+                    <button type="submit" class="button button--ghost button--small">Update</button>
+                  </form>
+                  {% endif %}
+                </td>
+                <td><span data-utc="{{ v.published_at }}">{{ v.published_at }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      {% else %}
+        <p class="text-muted">No versions published yet. Publish one above, or publish an installer cached on this server.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>

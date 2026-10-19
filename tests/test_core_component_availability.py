@@ -135,7 +135,7 @@ SIDEBAR_LINKS = (
     "/admin/rag",
     "/admin/ai-quality",
     "/admin/chat/ai-tag-synonyms",
-    "/admin/tray/configurations",
+    "/admin/tray",
 )
 
 

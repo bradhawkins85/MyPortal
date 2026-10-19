@@ -49,7 +49,7 @@ async def test_tray_device_delete_requires_revoked_status(monkeypatch):
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/admin/tray/devices"
+    assert response.headers["location"] == "/admin/tray#devices"
     delete_mock.assert_not_called()
 
 
@@ -71,7 +71,7 @@ async def test_tray_device_delete_allows_revoked_status(monkeypatch):
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/admin/tray/devices"
+    assert response.headers["location"] == "/admin/tray#devices"
     delete_mock.assert_awaited_once_with(15)
 
 
@@ -90,7 +90,7 @@ async def test_tray_bulk_delete_revoked_devices_calls_repo(monkeypatch):
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/admin/tray/devices"
+    assert response.headers["location"] == "/admin/tray#devices"
     delete_mock.assert_awaited_once()
 
 
@@ -399,7 +399,7 @@ async def test_tray_bulk_update_outdated_devices_runs_for_outdated_linked_assets
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/admin/tray/devices"
+    assert response.headers["location"] == "/admin/tray#devices"
     tray_repo.list_devices.assert_awaited_once_with()
     assert run_mock.await_count == 2
     run_mock.assert_any_await("agent-10", 99)
@@ -434,5 +434,5 @@ async def test_tray_bulk_update_outdated_devices_requires_loaded_release(monkeyp
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/admin/tray/devices"
+    assert response.headers["location"] == "/admin/tray#devices"
     list_mock.assert_not_called()

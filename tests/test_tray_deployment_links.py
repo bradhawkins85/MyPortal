@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
 
 from app import main
 from app.api.routes import tray_deployment as deploy_routes
@@ -482,18 +481,10 @@ async def test_admin_page_hides_revoked_links(monkeypatch):
         "list_deployment_builds",
         AsyncMock(return_value=[{"id": 3, "deployment_link_id": 7, "status": "ready", "release_tag": "v1.2.3"}]),
     )
-    captured: dict[str, Any] = {}
+    extra = await main._tray_deployment_links_context(_request("/admin/tray/deployment-links"))
 
-    async def fake_render(template_name, request, user, *, extra):
-        captured["extra"] = extra
-        return HTMLResponse("ok")
-
-    monkeypatch.setattr(main, "_render_template", fake_render)
-
-    await main.admin_tray_deployment_links_page(_request("/admin/tray/deployment-links"))
-
-    links = captured["extra"]["links"]
+    links = extra["links"]
     assert [link["id"] for link in links] == [7]
     assert links[0]["url"] == f"{PORTAL}/deploy/{SLUG}"
-    assert captured["extra"]["hidden_revoked_count"] == 1
+    assert extra["hidden_revoked_count"] == 1
     assert links[0]["build"]["release_tag"] == "v1.2.3"

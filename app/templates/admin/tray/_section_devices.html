@@ -1,0 +1,159 @@
+<section class="card card--panel ce-section" id="devices" data-ae-section="devices" aria-labelledby="tray-devices-title">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="tray-devices-title">Enrolled devices</h2>
+      <p class="card__subtitle">Computers that have enrolled with the MyPortal tray service. Create a deployment URL or an install token to add more.</p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    <dl class="definition-list">
+      <dt>Server tray release</dt>
+      <dd>
+        {{ release.version or 'Not loaded' }}
+        {% if release.release_tag and release.release_tag != release.version %}<span class="text-muted">· GitHub tag {{ release.release_tag }}</span>{% endif %}
+      </dd>
+      <dt>Loaded installers</dt>
+      <dd>
+        {% if release.loaded_assets %}
+          {{ release.loaded_assets | map(attribute='name') | join(', ') }}
+        {% else %}
+          No GitHub release assets are cached on this server yet.
+        {% endif %}
+      </dd>
+    </dl>
+
+    {% if is_super_admin %}
+    <div class="ce-subsection" aria-labelledby="tray-agent-updates-title">
+      <h3 id="tray-agent-updates-title">Agent updates</h3>
+      <form method="post" action="/admin/tray/update-script" class="form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="ce-form-grid">
+          <div class="form-field">
+            <label class="form-label" for="tray-update-script">Tactical RMM update script</label>
+            <select class="form-input" id="tray-update-script" name="script_id">
+              <option value="">Select a script before using Update</option>
+              {% for script in d.trmm_scripts %}
+                <option value="{{ script.id }}" {% if d.selected_update_script_id == script.id %}selected{% endif %}>
+                  {{ script.name }}{% if script.script_type %} ({{ script.script_type }}){% endif %}
+                </option>
+              {% endfor %}
+            </select>
+            <p class="form-help">The Update button runs this Tactical RMM script on the device's linked asset. The script you pick is saved for later updates.</p>
+            {% if d.trmm_scripts_error %}<p class="form-help"><span class="status status--warning">Scripts could not be loaded: {{ d.trmm_scripts_error }}</span></p>{% endif %}
+          </div>
+        </div>
+        <div class="form-actions"><button type="submit" class="button button--primary">Save update script</button></div>
+      </form>
+      <form method="post" action="/admin/tray/devices/bulk-update-outdated" class="form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="form-actions">
+          <button
+            type="submit"
+            class="button button--secondary"
+            {% if not d.selected_update_script_id or not d.outdated_device_count %}disabled{% endif %}
+            data-confirm="Queue the selected Tactical RMM update script for all non-revoked tray devices with an older agent version than the server tray app release?"
+          >Update all outdated agents</button>
+          <span class="form-help">{{ d.outdated_device_count }} linked tray {{ 'device is' if d.outdated_device_count == 1 else 'devices are' }} older than {{ release.version or 'the loaded release' }}.</span>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+
+    <div class="ce-subsection" aria-labelledby="tray-device-list-title">
+      <h3 id="tray-device-list-title">Devices</h3>
+      <form method="get" action="/admin/tray#devices" class="filter-grid" id="tray-device-filter">
+        <div class="form-field">
+          <label class="form-label" for="filter-search">Search</label>
+          <input class="form-input" id="filter-search" name="search" value="{{ d.filters.search or '' }}" placeholder="Hostname, console user, or device UID" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="filter-status">Status</label>
+          <select class="form-input" id="filter-status" name="status">
+            <option value="">Any</option>
+            <option value="active" {% if d.filters.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="pending" {% if d.filters.status == 'pending' %}selected{% endif %}>Pending</option>
+            <option value="revoked" {% if d.filters.status == 'revoked' %}selected{% endif %}>Revoked</option>
+          </select>
+        </div>
+        <div class="form-field form-field--actions">
+          <button type="submit" class="button button--primary">Apply filters</button>
+          <a href="/admin/tray#devices" class="button button--ghost">Reset</a>
+        </div>
+      </form>
+      {% if d.devices %}
+        <div class="table-wrapper">
+        <table class="data-table" data-table data-table-id="tray-devices">
+          <caption class="visually-hidden">Enrolled tray devices</caption>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">Hostname</th>
+              <th scope="col" data-sort="string">Status</th>
+              <th scope="col" data-sort="string">OS</th>
+              <th scope="col" data-sort="string">Console user</th>
+              <th scope="col" data-sort="date">Last seen</th>
+              <th scope="col" data-sort="string">Agent</th>
+              <th scope="col" class="data-table__col--actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for device in d.devices %}
+              <tr>
+                <td data-value="{{ (device.hostname or device.device_uid or '')|lower }}">
+                  <strong>{{ device.hostname or device.device_uid }}</strong>
+                  <div class="data-table__sub">{{ device.device_uid }}</div>
+                </td>
+                <td data-value="{{ device.status or '' }}">
+                  {% if device.status == 'active' %}
+                    <span class="status status--success">Active</span>
+                  {% elif device.status == 'pending' %}
+                    <span class="status status--warning">Pending</span>
+                  {% else %}
+                    <span class="status status--danger">Revoked</span>
+                  {% endif %}
+                </td>
+                <td data-value="{{ ((device.os or '') ~ ' ' ~ (device.os_version or ''))|trim|lower }}">{{ device.os or '—' }} {{ device.os_version or '' }}</td>
+                <td data-value="{{ (device.console_user or '')|lower }}">{{ device.console_user or '—' }}</td>
+                <td data-value="{{ device.last_seen_utc or '' }}">
+                  {% if device.last_seen_utc %}<span data-utc="{{ device.last_seen_utc }}">{{ device.last_seen_utc }}</span>{% else %}—{% endif %}
+                </td>
+                <td data-value="{{ (device.agent_version or '')|lower }}">{{ device.agent_version or '—' }}</td>
+                <td class="data-table__col--actions">
+                  {% if not is_super_admin %}
+                    —
+                  {% elif device.status != 'revoked' %}
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/update" class="inline-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small button--primary" data-confirm="Run the selected Tactical RMM update script on this device's linked asset?">Update</button>
+                    </form>
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/revoke" class="inline-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small button--danger" data-confirm="Revoke this tray device? It will need to re-enrol to reconnect.">Revoke</button>
+                    </form>
+                  {% else %}
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/reactivate" class="inline-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small button--primary" data-confirm="Reactivate this tray device?">Reactivate</button>
+                    </form>
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/delete" class="inline-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small button--danger" data-confirm="Delete this revoked tray device? The endpoint will need to enrol again to reconnect.">Delete</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      {% elif d.filters.search or d.filters.status %}
+        <p class="text-muted">No tray devices match these filters. <a href="/admin/tray#devices">Reset the filters</a> to see every device.</p>
+      {% else %}
+        <div class="empty-state">
+          <h3 class="empty-state__title">No tray devices yet</h3>
+          <p>Create a deployment URL or an install token, then run the installer on a computer. New devices appear here as soon as they enrol.</p>
+          {% if is_super_admin %}<p><a class="button button--primary" href="#deployment-urls">Create a deployment URL</a></p>{% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</section>
