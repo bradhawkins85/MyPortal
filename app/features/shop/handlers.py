@@ -1393,12 +1393,43 @@ async def _shop_admin_nav_categories() -> list[dict[str, Any]]:
 
 def _admin_shop_category_param(value: str | None) -> str | int | None:
     """Parse the admin catalogue category filter: an ID, "featured" or "subscriptions"."""
+    if isinstance(value, int):
+        return value if value > 0 else None
     key = (value or "").strip().lower()
     if key in {"featured", "subscriptions"}:
         return key
     if key.isdigit() and int(key) > 0:
         return int(key)
     return None
+
+
+def _admin_category_menu(
+    categories: Sequence[Mapping[str, Any]], products: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Count the displayed catalogue, including descendants, and omit empty branches."""
+    by_id = {category["id"]: category for category in categories}
+    ancestors: dict[int, list[int]] = {}
+    counts = dict.fromkeys(by_id, 0)
+    for category_id, category in by_id.items():
+        chain = [category_id]
+        parent_id = category.get("parent_id")
+        while parent_id in by_id and parent_id not in chain:
+            chain.append(parent_id)
+            parent_id = by_id[parent_id].get("parent_id")
+        ancestors[category_id] = chain
+    for product in products:
+        for category_id in ancestors.get(product.get("category_id"), []):
+            counts[category_id] += 1
+    return [
+        {
+            **category,
+            "product_count": counts[category["id"]],
+            "ancestor_ids": ancestors[category["id"]],
+            "depth": len(ancestors[category["id"]]) - 1,
+        }
+        for category in categories
+        if counts[category["id"]] > 0
+    ]
 
 
 async def admin_shop_page(
@@ -1419,7 +1450,6 @@ async def admin_shop_page(
     if redirect:
         return redirect
     categories_task = asyncio.create_task(shop_repo.list_all_categories_flat())
-    filter_categories_task = asyncio.create_task(shop_repo.list_categories_with_products())
     search_term = search.strip()
     current_category = _admin_shop_category_param(category)
     filters = shop_repo.ProductFilters(
@@ -1440,14 +1470,30 @@ async def admin_shop_page(
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
     microsoft_sku_mappings_task = asyncio.create_task(sku_friendly_repo.list_mappings())
 
-    categories, filter_categories, products, companies, subscription_categories, microsoft_sku_mappings = await asyncio.gather(
+    categories, products, companies, subscription_categories, microsoft_sku_mappings = await asyncio.gather(
         categories_task,
-        filter_categories_task,
         products_task,
         companies_task,
         subscription_categories_task,
         microsoft_sku_mappings_task,
     )
+    catalogue_count = len(products)
+    filter_categories = _admin_category_menu(categories, products)
+    menu_params = {}
+    if show_archived:
+        menu_params["showArchived"] = "1"
+    if search_term:
+        menu_params["search"] = search_term
+    all_categories_url = "/admin/shop"
+    if menu_params:
+        all_categories_url += "?" + urlencode(menu_params)
+    for entry in filter_categories:
+        entry["url"] = "/admin/shop?" + urlencode({**menu_params, "category": entry["id"]})
+    if isinstance(current_category, int):
+        category_ids = {
+            entry["id"] for entry in filter_categories if current_category in entry["ancestor_ids"]
+        }
+        products = [product for product in products if product.get("category_id") in category_ids]
     if current_category == "subscriptions":
         products = [product for product in products if product.get("subscription_category_id") is not None]
     elif current_category == "featured":
@@ -1484,6 +1530,9 @@ async def admin_shop_page(
         "title": "Shop admin",
         "categories": categories,
         "filter_categories": filter_categories,
+        "current_category": current_category,
+        "all_categories_url": all_categories_url,
+        "catalogue_count": catalogue_count,
         "products": products,
         "all_companies": companies,
         "show_archived": show_archived,
