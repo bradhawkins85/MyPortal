@@ -563,3 +563,16 @@ async def test_repair_route_checks_tenant_write_access_and_audits(sqlite_db, sto
     with pytest.raises(HTTPException) as exc:
         await routes.repair_agent(20, request)
     assert exc.value.status_code == 404 and len(audits) == 1
+
+
+def test_asset_page_offers_push_only_without_an_agent():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    detail = (root / "app/templates/assets/detail.html").read_text(encoding="utf-8")
+    push_line = next(line for line in detail.splitlines() if '"Push RMM agent"' in line)
+    assert "rmm.can_push_agent and not rmm.agent" in push_line and '"data-rmm-agent-install": asset.id' in push_line
+    # Repair stays available whether or not the agent is installed.
+    assert '"label": "Repair RMM agent"' in detail
+    script = (root / "app/static/js/rmm_agent_deploy.js").read_text(encoding="utf-8")
+    assert "data.status === 'installed'" in script

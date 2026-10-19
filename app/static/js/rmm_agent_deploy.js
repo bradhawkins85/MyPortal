@@ -44,6 +44,11 @@
       if (!response.ok) {
         throw new Error(typeof data.detail === 'string' ? data.detail : 'Request failed (' + response.status + ').');
       }
+      if (data.status === 'installed') {
+        button.textContent = 'Already installed';
+        notify(data.message || 'The RMM agent is already installed on this device.', 'info');
+        return;
+      }
       button.textContent = repair ? 'Repair queued' : 'Install queued';
       notify(data.message || (repair ? 'The RMM agent repair was queued.' : 'The RMM agent install was queued.'), 'success');
     } catch (error) {
