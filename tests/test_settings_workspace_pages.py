@@ -253,6 +253,9 @@ def test_shop_admin_pages_share_the_workspace_nav():
     for href, label in (("featured", "Featured"), ("subscriptions", "Subscriptions"), ("4", "Laptops"), ("5", "Monitors")):
         assert f'href="/admin/shop?category={href}"><span class="ce-nav__label">{label}<' in html, label
     assert "View the shop" not in html and "Storefront" not in html and 'href="/shop"' not in html
+    # Categories come last so a long list never hides the other areas.
+    titles = re.findall(r'class="ce-nav__group-title"[^>]*>([^<]+)<', html)
+    assert titles == ["Catalogue", "Organisation", "Delivery", "Categories"]
 
     all_products = render("catalogue", shop_nav_categories=categories)
     assert 'href="/admin/shop" aria-current="page"' in all_products

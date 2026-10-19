@@ -30,7 +30,8 @@
   ("subscriptions", "/admin/shop?category=subscriptions", "Subscriptions"),
 ] %}
 {% for category in shop_nav_categories | default([]) %}{% set _ = category_items.append((category.id, "/admin/shop?category=" ~ category.id, category.name)) %}{% endfor %}
-{% set _ = shop_admin_groups.insert(1, ("Categories", category_items)) %}
+{# Last, so a long category list never pushes the other areas out of view. #}
+{% set _ = shop_admin_groups.append(("Categories", category_items)) %}
 {% if nav_category is not none and active == "catalogue" %}{% set active = "category" %}{% endif %}
 <div class="settings-workspace shop-admin-workspace ce-workspace" data-ae-workspace data-ae-link-nav>
   {% if summary %}

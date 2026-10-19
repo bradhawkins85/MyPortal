@@ -550,7 +550,7 @@ modules** (`/admin/modules`), **Notification settings**
 **Business continuity plan overview** (`/bcp`), the **Shop** (`/shop`, one
 nav entry per category) and **Shop admin** (`/admin/shop` and its tool
 pages, which share the `shop_admin_workspace` macro in
-`admin/_shop_workspace.html`; its *Categories* group mirrors the shop's
+`admin/_shop_workspace.html`; its *Categories* group, listed last so it never hides the other areas, mirrors the shop's
 Featured, Subscriptions and top-level categories and filters the catalogue
 with `?category=`).
 Views that used to open as modals from an Actions menu (the integration
