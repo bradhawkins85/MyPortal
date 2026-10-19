@@ -129,7 +129,11 @@ is needed on endpoints; Windows PowerShell and .NET Framework 4.7.2 or later
 (4.8.1 on ARM64) are required. Sensor availability varies with hardware, drivers and Windows security
 settings. Low-level CPU and motherboard sensors use PawnIO. Windows builds also
 embed its upstream 2.1.0 installer, pinned by SHA-256, along with its license and
-corresponding sources. At service startup the agent checks the installed version
+corresponding sources. At service startup the agent checks the hardware manufacturer
+and model and skips PawnIO setup on virtual machines, which do not expose thermal
+sensors. Physical hosts running Hyper-V remain eligible. If hardware identification
+fails, setup is skipped and the error is logged; check-in continues normally.
+On physical machines the agent checks the installed version
 and runs `PawnIO_setup.exe -install -silent` if 2.1.0 or newer is absent. It keeps
 newer installations and verifies the registered version after setup. Setup runs
 in the background with a two-minute limit; failures are logged, leave check-in

@@ -72,7 +72,9 @@ func TestWindowsPawnIOInstallation(t *testing.T) {
 	t.Setenv("MYPORTAL_RMM_STATE_DIR", t.TempDir())
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	if err := Prepare(ctx); err != nil {
+	// Hosted CI runners are commonly VMs. Exercise the installer explicitly;
+	// production Prepare must skip driver installation on these machines.
+	if err := installPhysicalPawnIO(ctx); err != nil {
 		t.Fatal(err)
 	}
 	version, err := installedPawnIOVersion()
@@ -81,7 +83,7 @@ func TestWindowsPawnIOInstallation(t *testing.T) {
 	}
 	// A repeat must preserve the installation; the policy unit tests assert
 	// that the installer is not invoked for compatible versions.
-	if err := Prepare(ctx); err != nil {
+	if err := installPhysicalPawnIO(ctx); err != nil {
 		t.Fatalf("repeated preparation: %v", err)
 	}
 }

@@ -10,9 +10,43 @@ import (
 
 const PawnIOVersion = "2.1.0"
 
-// Prepare installs hardware access dependencies on Windows. Call once at
-// startup in the background so a failed installation never blocks check-in.
+// Prepare installs hardware access dependencies on physical Windows machines.
+// Call once at startup in the background so a failed installation never blocks check-in.
 func Prepare(ctx context.Context) error { return preparePlatform(ctx) }
+
+// Match guest hardware identifiers, not HypervisorPresent: physical hosts with
+// Hyper-V or virtualization-based security still have real thermal sensors.
+func isVirtualMachine(manufacturer, model string) bool {
+	identity := strings.ToLower(manufacturer + " " + model)
+	for _, marker := range []string{
+		"virtual machine", "vmware", "virtualbox", "innotek", "kvm", "qemu",
+		"xen", "hvm domu", "parallels", "bhyve", "bochs", "openstack", "nutanix",
+		"google compute engine", "alibaba cloud",
+	} {
+		if strings.Contains(identity, marker) {
+			return true
+		}
+	}
+	// EC2 bare-metal instances expose physical hardware and can have sensors.
+	return strings.Contains(identity, "amazon ec2") && !strings.Contains(strings.ToLower(model), ".metal")
+}
+
+func preparePhysicalMachine(ctx context.Context, identify func() (string, string, error), prepare func(context.Context) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	manufacturer, model, err := identify()
+	if err != nil {
+		return fmt.Errorf("identifying hardware before PawnIO setup: %w", err)
+	}
+	if isVirtualMachine(manufacturer, model) {
+		return nil
+	}
+	if strings.TrimSpace(manufacturer) == "" || strings.TrimSpace(model) == "" {
+		return fmt.Errorf("identifying hardware before PawnIO setup: missing manufacturer or model")
+	}
+	return prepare(ctx)
+}
 
 func compatiblePawnIO(version string) bool {
 	parts := strings.Split(version, ".")
