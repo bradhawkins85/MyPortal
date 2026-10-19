@@ -116,3 +116,20 @@ def test_ai_query_builder_js_includes_csrf_fallback_and_detail_errors():
     assert "groupedTables" in source
     assert "toggleTable" in source
     assert "expandedTables.add(table.name)" in source
+
+
+def test_visual_builder_sql_round_trip_node_suite():
+    """Run the Visual/AI/SQL mode-sync parser tests in Node.js."""
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed to run the query builder SQL tests")
+    suite = Path(__file__).parent / "test_report_query_sql.js"
+    result = subprocess.run(
+        [node, "--test", str(suite)], capture_output=True, text=True, timeout=60
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
