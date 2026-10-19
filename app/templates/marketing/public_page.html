@@ -16,6 +16,21 @@
     .marketing-menu__card:hover { border-color: var(--accent-color); transform: translateY(-1px); }
     .marketing-section { border: 1px solid var(--border-color); border-radius: 12px; padding: 1.1rem; background: var(--surface-primary); margin-top: 1rem; }
     .marketing-section h2 { margin-top: 0; }
+    .marketing-section__body { display: grid; gap: 1.25rem; align-items: start; }
+    .marketing-section--with-image .marketing-section__body { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+    .marketing-section--image-first .marketing-section__figure { order: -1; }
+    .marketing-section__text p { margin: 0 0 .85rem; line-height: 1.6; }
+    .marketing-section__text p:last-child { margin-bottom: 0; }
+    .marketing-section__figure { margin: 0; }
+    .marketing-section__figure img { display: block; width: 100%; height: auto; border-radius: 10px; }
+    .marketing-section__figure figcaption { margin-top: .35rem; font-size: .8rem; color: var(--muted-foreground); }
+    .marketing-sources { margin-top: 1.5rem; font-size: .85rem; color: var(--muted-foreground); }
+    .marketing-sources ul { margin: .35rem 0 0 1.1rem; padding: 0; }
+    .marketing-sources a { color: inherit; word-break: break-all; }
+    @media (max-width: 720px) {
+      .marketing-section--with-image .marketing-section__body { grid-template-columns: minmax(0, 1fr); }
+      .marketing-section__figure { order: -1; }
+    }
     .marketing-form { margin-top: 2rem; }
     .marketing-form .form-grid { gap: .9rem; }
     .marketing-form .form-actions { margin-top: .5rem; }
@@ -49,12 +64,39 @@
         {% endfor %}
       </nav>
 
+      {% set source_links = [] %}
       {% for section in marketing_page.sections %}
-        <section id="{{ section.anchor_slug }}" class="marketing-section">
+        {% set has_image = section.image_id is not none %}
+        <section id="{{ section.anchor_slug }}" class="marketing-section{% if has_image %} marketing-section--with-image{% if loop.index is even %} marketing-section--image-first{% endif %}{% endif %}">
           <h2>{{ section.title }}</h2>
-          <p>{{ section.content_text }}</p>
+          <div class="marketing-section__body">
+            <div class="marketing-section__text">
+              {% for paragraph in section.content_text.split('\n\n') if paragraph.strip() %}
+                <p>{{ paragraph.strip() }}</p>
+              {% endfor %}
+            </div>
+            {% if has_image %}
+              <figure class="marketing-section__figure">
+                <img src="/marketing/assistant-images/{{ section.image_id }}" alt="{{ section.image_alt or section.title }}" loading="lazy" />
+                {% if section.image_caption %}<figcaption>{{ section.image_caption }}</figcaption>{% endif %}
+              </figure>
+            {% endif %}
+          </div>
         </section>
+        {% for url in section.source_urls or [] %}
+          {% if url not in source_links %}{% set _ = source_links.append(url) %}{% endif %}
+        {% endfor %}
       {% endfor %}
+      {% if source_links %}
+        <aside class="marketing-sources" aria-label="Sources">
+          <strong>Sources</strong>
+          <ul>
+            {% for url in source_links %}
+              <li><a href="{{ url }}" target="_blank" rel="noopener noreferrer nofollow">{{ url }}</a></li>
+            {% endfor %}
+          </ul>
+        </aside>
+      {% endif %}
     {% endif %}
 
     <section class="marketing-section marketing-form" id="contact">

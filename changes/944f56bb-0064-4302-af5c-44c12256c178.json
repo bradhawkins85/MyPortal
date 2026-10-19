@@ -1,0 +1,7 @@
+{
+  "guid": "944f56bb-0064-4302-af5c-44c12256c178",
+  "occurred_at": "2026-10-19T10:58Z",
+  "change_type": "Improvement",
+  "summary": "Microsoft 365, integration modules, notification settings and SMTP2Go: lay out as settings workspaces with grouped section navigation, turn the integration health, credential expiry, setup wizard and task dependency modals into sections, and make tray workspace delete and revoke buttons ask for confirmation again",
+  "content_hash": "b41218f2d48afdf7a470a2dfeee3bd5c437c2883326891e2323afd51054aad0c"
+}

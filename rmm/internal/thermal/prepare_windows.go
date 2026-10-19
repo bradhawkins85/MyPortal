@@ -41,7 +41,26 @@ func installedPawnIOVersion() (string, error) {
 	return installed, nil
 }
 
+func windowsMachineIdentity() (string, string, error) {
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE,
+		`HARDWARE\DESCRIPTION\System\BIOS`, registry.QUERY_VALUE)
+	if err != nil {
+		return "", "", err
+	}
+	defer key.Close()
+	manufacturer, _, err := key.GetStringValue("SystemManufacturer")
+	if err != nil {
+		return "", "", err
+	}
+	model, _, err := key.GetStringValue("SystemProductName")
+	return manufacturer, model, err
+}
+
 func preparePlatform(ctx context.Context) error {
+	return preparePhysicalMachine(ctx, windowsMachineIdentity, installPhysicalPawnIO)
+}
+
+func installPhysicalPawnIO(ctx context.Context) error {
 	return preparePawnIO(ctx, installedPawnIOVersion, func(ctx context.Context) error {
 		// Verify all extracted files against the embedded bundle immediately
 		// before executing the pinned installer. No endpoint download is needed.

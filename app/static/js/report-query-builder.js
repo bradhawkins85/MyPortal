@@ -5,11 +5,13 @@
   const sql = document.getElementById('report-sql');
   const tablesEl = document.getElementById('schema-tables');
   const selectedEl = document.getElementById('selected-tables');
-  const selected = new Map();
+  const sqlTools = window.ReportQuerySql;
+  let state = {distinct: false, tables: [], items: [], tail: ''};
+  let unsupportedReason = null;
+  let lastSyncedSql = null;
   const manualJoins = [];
   const expandedTables = new Set();
   const expandedGroups = new Set();
-  const quote = value => '`' + String(value).replaceAll('`', '``') + '`';
   const key = (table, column) => `${table}.${column}`;
 
   function formatGroupName(groupName) {
@@ -44,7 +46,7 @@
       if (!visibleTables.length) return;
       const group = document.createElement('details');
       group.className = 'query-schema__group';
-      group.open = Boolean(needle) || expandedGroups.has(groupName) || visibleTables.some(table => selected.has(table.name) || expandedTables.has(table.name));
+      group.open = Boolean(needle) || expandedGroups.has(groupName) || visibleTables.some(table => tableInQuery(table.name) || expandedTables.has(table.name));
       const groupSummary = document.createElement('summary');
       groupSummary.className = 'query-schema__group-summary';
       const groupLabel = document.createElement('span');
@@ -56,13 +58,13 @@
       visibleTables.forEach(table => {
         const tableDetails = document.createElement('details');
         tableDetails.className = 'query-schema__table';
-        tableDetails.open = Boolean(needle) || selected.has(table.name) || expandedTables.has(table.name);
+        tableDetails.open = Boolean(needle) || Boolean(tableInQuery(table.name)) || expandedTables.has(table.name);
         const summary = document.createElement('summary');
         summary.className = 'query-schema__table-summary';
         const tableToggle = document.createElement('input');
         tableToggle.type = 'checkbox';
         tableToggle.className = 'query-schema__table-toggle';
-        const tableColumns = selected.get(table.name) || new Set();
+        const tableColumns = columnsFor(table.name);
         const totalColumns = table.columns.length || 0;
         tableToggle.checked = totalColumns > 0 && tableColumns.size === totalColumns;
         tableToggle.indeterminate = totalColumns > 0 && tableColumns.size > 0 && tableColumns.size < totalColumns;
@@ -77,7 +79,7 @@
           labelRow.className = 'query-schema__column';
           const input = document.createElement('input');
           input.type = 'checkbox';
-          input.checked = selected.get(table.name)?.has(column.name) || false;
+          input.checked = tableColumns.has(column.name);
           input.addEventListener('change', () => toggleColumn(table.name, column.name, input.checked));
           const name = document.createElement('span');
           name.textContent = column.name;
@@ -107,68 +109,210 @@
     });
   }
 
+  function tableInQuery(name) {
+    return state.tables.find(table => table.name === name) || null;
+  }
+
+  function columnsFor(name) {
+    return new Set(state.items.filter(item => item.table === name).map(item => item.column));
+  }
+
+  // A table stays in the query while a kept expression, clause or join still refers to it.
+  function tableStillUsed(table) {
+    if (state.items.some(item => item.table === table.name)) return true;
+    if (state.items.some(item => item.expr && sqlTools.references(item.expr, table))) return true;
+    if (sqlTools.references(state.tail, table)) return true;
+    return state.tables.some(other => other !== table && other.join && sqlTools.references(other.join.condition, table));
+  }
+
+  function pruneTables() {
+    let removed = true;
+    while (removed) {
+      removed = false;
+      state.tables = state.tables.filter(table => {
+        if (tableStillUsed(table)) return true;
+        removed = true;
+        return false;
+      });
+    }
+    // The first table is written without a join clause.
+    if (state.tables[0]?.join) state.tables[0] = {...state.tables[0], join: null};
+  }
+
+  // Changing fields when the SQL can't be shown visually replaces it with a new query.
+  function confirmReplaceUnsupported() {
+    if (!unsupportedReason) return true;
+    if (!window.confirm('The current SQL query can\'t be edited in the visual builder. Start a new visual query and replace it?')) return false;
+    unsupportedReason = null;
+    state = {distinct: false, tables: [], items: [], tail: ''};
+    return true;
+  }
+
+  function addTable(name) {
+    if (!tableInQuery(name)) state.tables.push({name, alias: null, join: null});
+  }
+
   function toggleTable(table, enabled) {
+    if (!confirmReplaceUnsupported()) { renderSelected(); return; }
     if (enabled) {
       const tableMeta = schema.tables.find(item => item.name === table);
-      if (tableMeta) selected.set(table, new Set(tableMeta.columns.map(column => column.name)));
+      if (tableMeta) {
+        addTable(table);
+        const existing = columnsFor(table);
+        tableMeta.columns.forEach(column => { if (!existing.has(column.name)) state.items.push({table, column: column.name}); });
+      }
       expandedTables.add(table);
     } else {
-      selected.delete(table);
-      expandedTables.delete(table);
+      state.items = state.items.filter(item => item.table !== table);
+      pruneTables();
+      if (!tableInQuery(table)) expandedTables.delete(table);
     }
     renderSelected();
     buildSql();
   }
 
   function toggleColumn(table, column, enabled) {
-    if (!selected.has(table)) selected.set(table, new Set());
-    enabled ? selected.get(table).add(column) : selected.get(table).delete(column);
-    if (!selected.get(table).size) selected.delete(table);
+    if (!confirmReplaceUnsupported()) { renderSelected(); return; }
+    if (enabled) {
+      addTable(table);
+      if (!columnsFor(table).has(column)) state.items.push({table, column});
+    } else {
+      state.items = state.items.filter(item => !(item.table === table && item.column === column));
+      pruneTables();
+    }
     expandedTables.add(table);
     renderSelected(); buildSql();
   }
+
+  function removeExpression(index) {
+    state.items.splice(index, 1);
+    pruneTables();
+    renderSelected(); buildSql();
+  }
+
   function fieldOptions(select) {
     select.innerHTML = '<option value="">Select a field…</option>';
     schema.tables.forEach(table => table.columns.forEach(column => {
       const option = document.createElement('option'); option.value = key(table.name, column.name); option.textContent = option.value; select.append(option);
     }));
   }
-  function joinsFor(tables) {
-    const joined = new Set([tables[0]]), joins = [];
-    while (joined.size < tables.length) {
-      const relation = schema.relations.find(rel => tables.includes(rel.from_table) && tables.includes(rel.to_table) && (joined.has(rel.from_table) !== joined.has(rel.to_table)));
-      if (!relation) break;
-      const next = joined.has(relation.from_table) ? relation.to_table : relation.from_table;
-      joins.push({...relation, next_table: next}); joined.add(next);
-    }
-    manualJoins.forEach(join => { if (tables.includes(join.from_table) && tables.includes(join.to_table)) joins.push({...join, next_table: joined.has(join.from_table) ? join.to_table : join.from_table}); });
-    return {joined, joins};
-  }
+
   function buildSql() {
-    const tables = [...selected.keys()]; if (!tables.length) { sql.value = ''; return; }
-    const fields = [...selected].flatMap(([table, columns]) => [...columns].map(column => `${quote(table)}.${quote(column)}`));
-    const result = joinsFor(tables); let query = `SELECT\n  ${fields.join(',\n  ')}\nFROM ${quote(tables[0])}`;
-    result.joins.forEach(rel => { query += `\nLEFT JOIN ${quote(rel.next_table)} ON ${quote(rel.from_table)}.${quote(rel.from_column)} = ${quote(rel.to_table)}.${quote(rel.to_column)}`; });
-    tables.filter(table => table !== tables[0] && !result.joins.some(rel => rel.from_table === table || rel.to_table === table)).forEach(table => { query += `\nCROSS JOIN ${quote(table)}`; });
-    sql.value = query; sql.dispatchEvent(new Event('input'));
+    sql.value = sqlTools.build(state, schema, manualJoins);
+    lastSyncedSql = sql.value;
+    sql.dispatchEvent(new Event('input'));
   }
+
+  // Load whatever is in the SQL box (typed by hand, written by the AI assistant
+  // or saved with the report) into the visual builder.
+  function syncFromSql() {
+    if (sql.value === lastSyncedSql) return;
+    lastSyncedSql = sql.value;
+    const result = sqlTools.parse(sql.value, schema);
+    if (result.ok) {
+      state = result.state;
+      unsupportedReason = null;
+      state.tables.forEach(table => expandedTables.add(table.name));
+    } else {
+      state = {distinct: false, tables: [], items: [], tail: ''};
+      unsupportedReason = result.reason;
+    }
+    renderSelected();
+  }
+
+  function element(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
   function renderSelected() {
     selectedEl.innerHTML = '';
-    if (!selected.size) selectedEl.innerHTML = '<p class="query-empty">Select a field from the schema to begin.</p>';
-    selected.forEach((columns, table) => { const card = document.createElement('article'); card.className = 'query-table-card'; card.innerHTML = `<strong>${table}</strong><ul>${[...columns].map(col => `<li>${col}</li>`).join('')}</ul>`; selectedEl.append(card); });
+    if (unsupportedReason) {
+      const notice = element('div', 'query-notice');
+      notice.append(
+        element('strong', null, 'This query can’t be shown in the visual builder'),
+        element('p', null, `The SQL below is kept as it is because ${unsupportedReason}. Edit it in the SQL or AI assistant modes, or choose fields here to start a new visual query.`),
+      );
+      selectedEl.append(notice);
+    } else if (!state.tables.length) {
+      selectedEl.append(element('p', 'query-empty', 'Select a field from the schema to begin.'));
+    }
+    state.tables.forEach(table => {
+      const card = element('article', 'query-table-card');
+      const heading = element('strong', null, table.name);
+      if (table.alias) heading.append(element('small', 'query-table-card__alias', ` as ${table.alias}`));
+      card.append(heading);
+      const columns = [...columnsFor(table.name)];
+      if (columns.length) {
+        const list = element('ul');
+        columns.forEach(column => list.append(element('li', null, column)));
+        card.append(list);
+      } else {
+        card.append(element('p', 'query-table-card__note', 'Used by calculated fields, joins or filters.'));
+      }
+      if (table.join) card.append(element('code', 'query-table-card__join', `${table.join.type}${table.join.condition ? ` ${table.join.condition}` : ''}`));
+      selectedEl.append(card);
+    });
+    const expressions = state.items.map((item, index) => ({item, index})).filter(({item}) => item.expr);
+    if (expressions.length || state.tail || state.distinct) {
+      const card = element('article', 'query-table-card query-table-card--extras');
+      card.append(element('strong', null, 'Calculated fields & clauses'));
+      if (expressions.length) {
+        const list = element('ul', 'query-expressions');
+        expressions.forEach(({item, index}) => {
+          const row = element('li');
+          row.append(element('code', null, item.expr));
+          const remove = element('button', 'button button--ghost button--small', '×');
+          remove.type = 'button';
+          remove.title = 'Remove this calculated field';
+          remove.setAttribute('aria-label', `Remove calculated field ${item.expr}`);
+          remove.addEventListener('click', () => removeExpression(index));
+          row.append(remove);
+          list.append(row);
+        });
+        card.append(list);
+      }
+      if (state.distinct) card.append(element('p', 'query-table-card__note', 'Returns distinct rows only.'));
+      if (state.tail) card.append(element('pre', 'query-table-card__tail', state.tail));
+      card.append(element('p', 'form-hint', 'Kept from the SQL query. Edit these in the SQL or AI assistant modes.'));
+      selectedEl.append(card);
+    }
     renderSchema(document.getElementById('schema-search').value); updateJoinList();
   }
   function updateJoinList() { document.getElementById('join-list').textContent = manualJoins.length ? manualJoins.map(j => `${j.from_table}.${j.from_column} = ${j.to_table}.${j.to_column}`).join(' · ') : 'Automatic links use declared foreign keys.'; }
 
+  function updateAiButton() {
+    const button = document.getElementById('ai-query-send');
+    if (!button.disabled) button.textContent = sql.value.trim() ? 'Refine query' : 'Generate query';
+  }
+
   root.querySelectorAll('[data-designer-tab]').forEach(button => button.addEventListener('click', () => {
-    root.querySelectorAll('[data-designer-panel]').forEach(panel => panel.hidden = panel.dataset.designerPanel !== button.dataset.designerTab);
-    root.querySelectorAll('[data-designer-tab]').forEach(tab => { tab.classList.toggle('button--primary', tab === button); tab.classList.toggle('button--ghost', tab !== button); });
-    document.querySelector('.query-sql-field').hidden = button.dataset.designerTab !== 'sql' && button.dataset.designerTab !== 'visual';
+    const mode = button.dataset.designerTab;
+    if (mode === 'visual') syncFromSql();
+    if (mode === 'ai') updateAiButton();
+    root.querySelectorAll('[data-designer-panel]').forEach(panel => panel.hidden = panel.dataset.designerPanel !== mode);
+    root.querySelectorAll('[data-designer-tab]').forEach(tab => {
+      tab.classList.toggle('button--primary', tab === button);
+      tab.classList.toggle('button--ghost', tab !== button);
+      tab.setAttribute('aria-selected', String(tab === button));
+    });
+    document.querySelector('.query-sql-field').hidden = mode !== 'sql' && mode !== 'visual';
   }));
+  let syncTimer = null;
+  sql.addEventListener('input', () => {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(syncFromSql, 400);
+  });
   document.getElementById('schema-search').addEventListener('input', event => renderSchema(event.target.value));
-  document.getElementById('clear-query').addEventListener('click', () => { selected.clear(); manualJoins.length = 0; expandedTables.clear(); renderSelected(); buildSql(); });
+  document.getElementById('clear-query').addEventListener('click', () => {
+    state = {distinct: false, tables: [], items: [], tail: ''};
+    unsupportedReason = null;
+    manualJoins.length = 0; expandedTables.clear(); renderSelected(); buildSql();
+  });
   const left = document.getElementById('join-left'), right = document.getElementById('join-right'); fieldOptions(left); fieldOptions(right);
-  document.getElementById('add-join').addEventListener('click', () => { if (!left.value || !right.value || left.value === right.value) return; const [from_table, from_column] = left.value.split('.'), [to_table, to_column] = right.value.split('.'); manualJoins.push({from_table, from_column, to_table, to_column}); updateJoinList(); buildSql(); });
+  document.getElementById('add-join').addEventListener('click', () => { if (!left.value || !right.value || left.value === right.value) return; const [from_table, from_column] = left.value.split('.'), [to_table, to_column] = right.value.split('.'); manualJoins.push({from_table, from_column, to_table, to_column}); updateJoinList(); if (!unsupportedReason && state.tables.length) buildSql(); });
   const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name="_csrf"]')?.value || '';
   const errorMessage = (data) => {
     if (data?.error) return data.error;
@@ -188,9 +332,9 @@
     if (token) body.set('_csrf', token);
     const headers = {'Content-Type': 'application/x-www-form-urlencoded'};
     if (token) headers['X-CSRF-Token'] = token;
-    try { const response = await fetch('/admin/reporting/query-assistant', {method: 'POST', headers, body: body.toString()}); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(errorMessage(data)); if (typeof data?.sql !== 'string' || !data.sql.trim()) throw new Error('Server returned no SQL query.'); sql.value = data.sql; messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--assistant"></div>'); messages.lastElementChild.textContent = data.summary || 'I updated the SQL query. Ask for another change if needed.'; button.textContent = 'Refine query'; }
+    try { const response = await fetch('/admin/reporting/query-assistant', {method: 'POST', headers, body: body.toString()}); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(errorMessage(data)); if (typeof data?.sql !== 'string' || !data.sql.trim()) throw new Error('Server returned no SQL query.'); sql.value = data.sql; sql.dispatchEvent(new Event('input')); messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--assistant"></div>'); messages.lastElementChild.textContent = data.summary || 'I updated the SQL query. Ask for another change if needed.'; button.textContent = 'Refine query'; }
     catch (error) { messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--error"></div>'); messages.lastElementChild.textContent = error.message; }
     finally { button.disabled = false; if (button.textContent === 'Thinking…') button.textContent = 'Try again'; messages.scrollTop = messages.scrollHeight; }
   });
-  renderSchema(); updateJoinList();
+  syncFromSql(); updateAiButton();
 })();

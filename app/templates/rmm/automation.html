@@ -65,17 +65,73 @@
   {%- endif %}
 {%- endmacro %}
 {% block content %}
-<section class="rmm-page" data-rmm-page data-rmm-automation-page>
+{% from "macros/counters.html" import counter_strip %}
+{% set schedules = schedules or [] %}
+{% set steps = steps or [] %}
+{% set onboarding_runs = onboarding_runs or [] %}
+{% set enabled_schedules = schedules | selectattr("is_enabled") | list | length %}
+{% set running_onboarding = onboarding_runs | selectattr("status", "equalto", "running") | list | length %}
+{% set stopped_onboarding = onboarding_runs | selectattr("status", "equalto", "failed") | list | length %}
+<div class="settings-workspace rmm-page ce-workspace" data-rmm-page data-rmm-automation-page data-ae-workspace data-ae-storage-key="myportal:rmm-automation:active-section" data-ae-default="schedules">
   <script type="application/json" id="rmm-config">{{ {"can_run": can_run, "asset_id": None, "is_super_admin": is_super_admin, "tags": tags, "default_timezone": default_timezone} | tojson }}</script>
+  <section class="ce-overview" aria-label="Automation at a glance">
+    <div class="ce-overview__identity">
+      <div class="ce-overview__summary">
+        <ul class="scf-item__chips ce-overview__chips" aria-label="Automation summary">
+          {% if company and company.name %}<li class="scf-chip">{{ company.name }}</li>{% endif %}
+          <li class="scf-chip{% if not enabled_schedules %} scf-chip--muted{% endif %}">{{ enabled_schedules }} of {{ schedules | length }} schedule{{ 's' if schedules | length != 1 }} on</li>
+          <li class="scf-chip{% if not steps %} scf-chip--muted{% endif %}">{{ steps | length }} onboarding step{{ 's' if steps | length != 1 }}</li>
+        </ul>
+      </div>
+    </div>
+    {{ counter_strip([
+      {"label": "Schedules", "value": schedules | length, "variant": "neutral", "href": "#rmm-automation-schedules"},
+      {"label": "Turned on", "value": enabled_schedules, "variant": "success" if enabled_schedules else "neutral", "href": "#rmm-automation-schedules"},
+      {"label": "Onboarding steps", "value": steps | length, "variant": "info", "href": "#rmm-automation-onboarding"},
+      {"label": "Onboarding running", "value": running_onboarding, "variant": "warning" if running_onboarding else "neutral", "href": "#rmm-automation-history"},
+      {"label": "Onboarding stopped", "value": stopped_onboarding, "variant": "danger" if stopped_onboarding else "neutral", "href": "#rmm-automation-history"},
+    ], class="ce-overview__stats") }}
+  </section>
 
-  <section class="card card--panel" aria-labelledby="rmm-schedules-heading">
-    <header class="card__header">
-      <div>
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Automation sections" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="rmm-automation-nav-search">Find an automation setting</label>
+        <input type="search" id="rmm-automation-nav-search" class="form-input" placeholder="Find a setting…" autocomplete="off" data-ae-search>
+      </div>
+      {% set automation_groups = [
+        ("Run scripts", [("schedules", "Schedules", schedules | length, true), ("apps", "Chocolatey apps", "", can_run)]),
+        ("New devices", [("onboarding", "Onboarding scripts", steps | length, true), ("history", "Onboarding history", onboarding_runs | length, true)]),
+      ] %}
+      {% for group_label, items in automation_groups %}
+        {% set visible_items = items | selectattr(3) | list %}
+        {% if visible_items %}
+          <div class="ce-nav__group" data-ae-nav-group>
+            <p class="ce-nav__group-title" id="rmm-automation-nav-group-{{ loop.index }}">{{ group_label }}</p>
+            <ul class="ce-nav__list" aria-labelledby="rmm-automation-nav-group-{{ loop.index }}">
+              {% for key, label, count, _visible in visible_items %}
+                <li><a class="ce-nav__link" href="#rmm-automation-{{ key }}" data-ae-link="{{ key }}">
+                  <span class="ce-nav__label">{{ label }}</span>
+                  {% if count != "" %}<span class="ce-nav__count">{{ count }}</span>{% endif %}
+                </a></li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      {% endfor %}
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No settings match your search.</p>
+    </nav>
+
+    <div class="ce-panels">
+
+  <section class="card card--panel ce-section" id="rmm-automation-schedules" data-ae-section="schedules" aria-labelledby="rmm-schedules-heading">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
         <h2 class="card__title" id="rmm-schedules-heading">Schedules</h2>
         <p class="card__subtitle">Scripts that run on a schedule. A device still busy with the last run is skipped until it finishes.</p>
       </div>
     </header>
-    <div class="card__body">
+    <div class="ce-section__body">
       {% if schedules %}
       <div class="table-wrapper">
         <table class="table" id="rmm-schedules-table" data-table data-table-id="rmm-schedules">
@@ -140,14 +196,14 @@
   </section>
 
   {% if can_run %}
-  <section class="card card--panel" aria-labelledby="rmm-apps-heading" data-rmm-app-push>
-    <header class="card__header">
-      <div>
+  <section class="card card--panel ce-section" id="rmm-automation-apps" data-ae-section="apps" aria-labelledby="rmm-apps-heading" data-rmm-app-push>
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
         <h2 class="card__title" id="rmm-apps-heading">Chocolatey apps</h2>
         <p class="card__subtitle">Install or update applications now on {{ company.name if company else "this company" }}'s Windows devices using its enabled Chocolatey sources, without writing a script. To keep an app updated on a schedule, add a policy in <a href="/rmm/patching">Patch management</a>.</p>
       </div>
     </header>
-    <div class="card__body">
+    <div class="ce-section__body">
       {% if windows_agents %}
       <form class="rmm-app-push" data-rmm-app-push-form novalidate>
         <fieldset class="form-field">
@@ -191,9 +247,9 @@
   </section>
   {% endif %}
 
-  <section class="card card--panel" aria-labelledby="rmm-onboarding-heading">
-    <header class="card__header">
-      <div>
+  <section class="card card--panel ce-section" id="rmm-automation-onboarding" data-ae-section="onboarding" aria-labelledby="rmm-onboarding-heading">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
         <h2 class="card__title" id="rmm-onboarding-heading">Onboarding scripts</h2>
         <p class="card__subtitle">{{ company.name if company else "This company" }}'s steps run once, one at a time and in this order, when the RMM agent is first installed on one of its devices. Each step runs only on devices with any of its tags and is skipped on the rest. A failed step stops the steps after it unless it is set to carry on.</p>
       </div>
@@ -202,14 +258,14 @@
         <button type="button" class="button button--small button--secondary" data-rmm-choco-step-new aria-haspopup="dialog" aria-controls="rmm-choco-step-modal">Add Chocolatey packages</button>
       </div>{% endif %}
     </header>
-    <div class="card__body">
+    <div class="ce-section__body">
       {{ step_list(steps, can_run) }}
     </div>
   </section>
 
-  <section class="card card--panel" aria-labelledby="rmm-onboarding-runs-heading">
-    <header class="card__header">
-      <div>
+  <section class="card card--panel ce-section" id="rmm-automation-history" data-ae-section="history" aria-labelledby="rmm-onboarding-runs-heading">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
         <h2 class="card__title" id="rmm-onboarding-runs-heading">Onboarding history</h2>
         <p class="card__subtitle">Each device's progress through the onboarding scripts.</p>
       </div>
@@ -224,7 +280,7 @@
       </form>
       {% endif %}
     </header>
-    <div class="card__body">
+    <div class="ce-section__body">
       {% if onboarding_runs %}
       <div class="table-wrapper">
         <table class="table" id="rmm-onboarding-table" data-table data-table-id="rmm-onboarding">
@@ -256,7 +312,9 @@
       {% endif %}
     </div>
   </section>
-</section>
+    </div>
+  </div>
+</div>
 {% include "rmm/_run_modal.html" %}
 {% if can_run %}
 <div class="modal rmm-modal" id="rmm-choco-step-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-choco-step-title" hidden data-rmm-choco-step-modal>
@@ -329,6 +387,7 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_automation.js') }}" defer></script>

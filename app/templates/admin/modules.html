@@ -5,11 +5,8 @@
 
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "Show disabled modules", "type": "button", "variant": "ghost", "attrs": {"id": "show-disabled-modules", "aria-pressed": "false"}},
-    {"label": "Integration health center", "type": "button", "attrs": {"data-operations-modal-open": "integration-health-modal"}},
-    {"label": "Credential expiry warnings", "type": "button", "attrs": {"data-operations-modal-open": "credential-expiry-modal"}},
-    {"label": "Integration setup wizard", "type": "button", "attrs": {"data-operations-modal-open": "integration-setup-modal"}},
-    {"label": "Scheduled task dependency graph", "type": "button", "attrs": {"data-operations-modal-open": "dependency-graph-modal"}}
+    {"label": "Webhook delivery log", "type": "link", "href": "/admin/webhooks"},
+    {"label": "Scheduled tasks", "type": "link", "href": "/admin/scheduled-tasks"}
   ], menu_id='modules-actions-menu') }}
 {% endblock %}
 
@@ -17,12 +14,60 @@
   {% set ops = operations_center or {} %}
   {% set ops_summary = ops.summary or {} %}
   {% set dependency_graph = ops.dependency_graph or {} %}
-  <div class="management management--single" data-layout>
-    <section class="management__content">
-      <header class="management__header">
-      </header>
+  {% set module_rows = modules | rejectattr("slug", "in", ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai', 'm365-admin']) | list %}
+  {% set enabled_count = module_rows | selectattr("enabled") | list | length %}
+  {% set conflict_count = (dependency_graph.conflicts or []) | length %}
+  <div class="settings-workspace modules-workspace ce-workspace" data-ae-workspace data-ae-storage-key="myportal:modules:active-section" data-ae-default="modules">
+    <section class="ce-overview" aria-label="Integrations at a glance">
+      {% from "macros/counters.html" import counter_strip %}
+      {{ counter_strip([
+        {"label": "Enabled", "value": ops_summary.enabled_modules or enabled_count, "variant": "info", "href": "#modules-modules"},
+        {"label": "Healthy", "value": ops_summary.healthy_modules or 0, "variant": "success", "href": "#modules-health"},
+        {"label": "Warnings", "value": ops_summary.warning_modules or 0, "variant": "warning" if ops_summary.warning_modules else "neutral", "href": "#modules-health"},
+        {"label": "Setup required", "value": ops_summary.setup_modules or 0, "variant": "warning" if ops_summary.setup_modules else "neutral", "href": "#modules-setup"},
+        {"label": "Degraded", "value": ops_summary.degraded_modules or 0, "variant": "danger" if ops_summary.degraded_modules else "neutral", "href": "#modules-health"},
+        {"label": "Failed webhooks", "value": ops_summary.failed_webhooks or 0, "variant": "danger" if ops_summary.failed_webhooks else "neutral", "href": "#modules-health"},
+        {"label": "Task conflicts", "value": ops_summary.task_conflicts or 0, "variant": "warning" if ops_summary.task_conflicts else "neutral", "href": "#modules-dependencies"},
+      ], class="ce-overview__stats") }}
+    </section>
 
-      <section class="card card--panel">
+    <div class="ce-layout">
+      <nav class="ce-nav" aria-label="Integration sections" data-ae-nav>
+        <div class="ce-nav__search">
+          <label class="visually-hidden" for="modules-nav-search">Find an integration setting</label>
+          <input type="search" id="modules-nav-search" class="form-input" placeholder="Find a setting…" autocomplete="off" data-ae-search>
+        </div>
+        {% set modules_groups = [
+          ("Modules", [("modules", "Integration modules", enabled_count ~ "/" ~ (module_rows | length))]),
+          ("Health", [("health", "Health center", ops_summary.warning_modules or ""), ("credentials", "Credential expiry", (ops.credential_alerts or []) | length)]),
+          ("Setup", [("setup", "Setup wizard", (ops.setup_steps or []) | length), ("dependencies", "Task dependencies", conflict_count or "")]),
+        ] %}
+        {% for group_label, items in modules_groups %}
+          <div class="ce-nav__group" data-ae-nav-group>
+            <p class="ce-nav__group-title" id="modules-nav-group-{{ loop.index }}">{{ group_label }}</p>
+            <ul class="ce-nav__list" aria-labelledby="modules-nav-group-{{ loop.index }}">
+              {% for key, label, count in items %}
+                <li><a class="ce-nav__link" href="#modules-{{ key }}" data-ae-link="{{ key }}">
+                  <span class="ce-nav__label">{{ label }}</span>
+                  {% if count != "" %}<span class="ce-nav__count">{{ count }}</span>{% endif %}
+                </a></li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endfor %}
+        <p class="ce-nav__empty" data-ae-search-empty hidden>No settings match your search.</p>
+      </nav>
+
+      <div class="ce-panels">
+      <section class="card card--panel ce-section" id="modules-modules" data-ae-section="modules" aria-labelledby="modules-modules-title">
+        <header class="ce-section__header">
+          <div class="ce-section__heading">
+            <h2 class="card__title" id="modules-modules-title">Integration modules</h2>
+            <p class="card__subtitle">Turn integrations on or off and open their settings. The .env module name disables a module from the server's environment file.</p>
+          </div>
+          <button type="button" class="button button--ghost button--small" id="show-disabled-modules" aria-pressed="false">Show disabled modules</button>
+        </header>
+        <div class="ce-section__body">
         <div class="table-wrapper">
           <table class="table" id="modules-table" data-table data-table-id="modules">
             <thead>
@@ -163,50 +208,14 @@
           </div>
           <p class="table-pagination__status" data-page-info aria-live="polite"></p>
         </div>
+        </div>
       </section>
-    </section>
-  </div>
-
-  <div class="modal" id="integration-health-modal" hidden aria-hidden="true">
-    <div class="modal__content modal__content--large" role="dialog" aria-modal="true" aria-labelledby="integration-health-modal-title" tabindex="-1">
-      <button type="button" class="modal__close" data-operations-modal-close aria-label="Close Integration health center">&times;</button>
-      <h2 class="visually-hidden" id="integration-health-modal-title">Integration health center</h2>
-        <header class="card__header card__header--stacked">
-          <div>
-            <h2 class="card__title">Integration health center</h2>
-            <p class="card__subtitle">Review enabled-module health, error budget pressure, dead-letter queue load, and first-run setup gaps from one place.</p>
-          </div>
-          <div class="stats-grid">
-            <div class="stat">
-              <span class="stat__label">Enabled</span>
-              <span class="stat__value">{{ ops_summary.enabled_modules or 0 }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat__label">Healthy</span>
-              <span class="stat__value">{{ ops_summary.healthy_modules or 0 }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat__label">Warnings</span>
-              <span class="stat__value">{{ ops_summary.warning_modules or 0 }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat__label">Setup required</span>
-              <span class="stat__value">{{ ops_summary.setup_modules or 0 }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat__label">Degraded</span>
-              <span class="stat__value">{{ ops_summary.degraded_modules or 0 }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat__label">Failed webhooks</span>
-              <span class="stat__value">{{ ops_summary.failed_webhooks or 0 }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat__label">Task conflicts</span>
-              <span class="stat__value">{{ ops_summary.task_conflicts or 0 }}</span>
-            </div>
-          </div>
-        </header>
+      <section class="card card--panel ce-section" id="modules-health" data-ae-section="health" aria-labelledby="modules-health-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="modules-health-title">Integration health center</h2>
+          <p class="card__subtitle">Review enabled-module health, error budget pressure, dead-letter queue load, and first-run setup gaps from one place.</p>
+        </div></header>
+        <div class="ce-section__body">
         <div class="card__controls">
           <a class="button button--ghost" href="/admin/webhooks?status=failed&event_limit=200">Open dead-letter queue</a>
           <a class="button button--ghost" href="/admin/scheduled-tasks">Review scheduled tasks</a>
@@ -267,21 +276,14 @@
             </tbody>
           </table>
         </div>
-
-      <div class="modal__footer"><button type="button" class="button button--ghost" data-operations-modal-close>Close</button></div>
-    </div>
-  </div>
-
-  <div class="modal" id="credential-expiry-modal" hidden aria-hidden="true">
-    <div class="modal__content modal__content--large" role="dialog" aria-modal="true" aria-labelledby="credential-expiry-modal-title" tabindex="-1">
-      <button type="button" class="modal__close" data-operations-modal-close aria-label="Close Credential expiry warnings">&times;</button>
-      <h2 class="visually-hidden" id="credential-expiry-modal-title">Credential expiry warnings</h2>
-          <header class="card__header">
-            <div>
-              <h2 class="card__title">Credential expiry warnings</h2>
-              <p class="card__subtitle">Surface expiring OAuth tokens and client secrets before integrations fail.</p>
-            </div>
-          </header>
+        </div>
+      </section>
+      <section class="card card--panel ce-section" id="modules-credentials" data-ae-section="credentials" aria-labelledby="modules-credentials-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="modules-credentials-title">Credential expiry warnings</h2>
+          <p class="card__subtitle">Surface expiring OAuth tokens and client secrets before integrations fail.</p>
+        </div></header>
+        <div class="ce-section__body">
           <ul class="list">
             {% for warning in ops.credential_alerts or [] %}
               <li>
@@ -295,21 +297,14 @@
               <li class="text-muted">No credential renewal warnings are currently queued.</li>
             {% endfor %}
           </ul>
-
-      <div class="modal__footer"><button type="button" class="button button--ghost" data-operations-modal-close>Close</button></div>
-    </div>
-  </div>
-
-  <div class="modal" id="integration-setup-modal" hidden aria-hidden="true">
-    <div class="modal__content modal__content--large" role="dialog" aria-modal="true" aria-labelledby="integration-setup-modal-title" tabindex="-1">
-      <button type="button" class="modal__close" data-operations-modal-close aria-label="Close Integration setup wizard">&times;</button>
-      <h2 class="visually-hidden" id="integration-setup-modal-title">Integration setup wizard</h2>
-          <header class="card__header">
-            <div>
-              <h2 class="card__title">Integration setup wizard</h2>
-              <p class="card__subtitle">Work through the next missing configuration step for each module before enabling production traffic.</p>
-            </div>
-          </header>
+        </div>
+      </section>
+      <section class="card card--panel ce-section" id="modules-setup" data-ae-section="setup" aria-labelledby="modules-setup-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="modules-setup-title">Integration setup wizard</h2>
+          <p class="card__subtitle">Work through the next missing configuration step for each module before enabling production traffic.</p>
+        </div></header>
+        <div class="ce-section__body">
           <ol class="list">
             {% for step in ops.setup_steps or [] %}
               <li>
@@ -323,21 +318,14 @@
               <li class="text-muted">Every tracked integration has the expected baseline setup.</li>
             {% endfor %}
           </ol>
-
-      <div class="modal__footer"><button type="button" class="button button--ghost" data-operations-modal-close>Close</button></div>
-    </div>
-  </div>
-
-  <div class="modal" id="dependency-graph-modal" hidden aria-hidden="true">
-    <div class="modal__content modal__content--large" role="dialog" aria-modal="true" aria-labelledby="dependency-graph-modal-title" tabindex="-1">
-      <button type="button" class="modal__close" data-operations-modal-close aria-label="Close Scheduled task dependency graph">&times;</button>
-      <h2 class="visually-hidden" id="dependency-graph-modal-title">Scheduled task dependency graph</h2>
-        <header class="card__header">
-          <div>
-            <h2 class="card__title">Scheduled task dependency graph</h2>
-            <p class="card__subtitle">Shared module ownership highlights risky overlaps, duplicate schedules, and commands that may compete for the same integration window.</p>
-          </div>
-        </header>
+        </div>
+      </section>
+      <section class="card card--panel ce-section" id="modules-dependencies" data-ae-section="dependencies" aria-labelledby="modules-dependencies-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="modules-dependencies-title">Scheduled task dependency graph</h2>
+          <p class="card__subtitle">Shared module ownership highlights risky overlaps, duplicate schedules, and commands that may compete for the same integration window.</p>
+        </div></header>
+        <div class="ce-section__body">
         <ul class="list">
           {% for conflict in dependency_graph.conflicts or [] %}
             <li>
@@ -396,10 +384,15 @@
             </tbody>
           </table>
         </div>
-
-      <div class="modal__footer"><button type="button" class="button button--ghost" data-operations-modal-close>Close</button></div>
+        </div>
+      </section>
+      </div>
     </div>
   </div>
+
+
+
+
 
   <div class="modal" id="webhook-url-modal" hidden aria-hidden="true">
     <div class="modal__content modal__content--compact" role="dialog" aria-modal="true" aria-labelledby="webhook-url-modal-title">
@@ -420,6 +413,7 @@
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script>
     // Allow row-level action dropdowns to overflow the table wrapper.
@@ -448,32 +442,6 @@
       });
     })();
 
-    (function () {
-      var previousActive = null;
-      function closeModal(modal) {
-        if (!modal) return;
-        modal.hidden = true;
-        modal.setAttribute('aria-hidden', 'true');
-        if (previousActive && typeof previousActive.focus === 'function') previousActive.focus();
-        previousActive = null;
-      }
-      document.querySelectorAll('[data-operations-modal-open]').forEach(function (trigger) {
-        var modal = document.getElementById(trigger.getAttribute('data-operations-modal-open'));
-        if (!modal) return;
-        trigger.addEventListener('click', function () {
-          previousActive = trigger;
-          modal.hidden = false;
-          modal.setAttribute('aria-hidden', 'false');
-          var dialog = modal.querySelector('[role="dialog"]');
-          if (dialog) dialog.focus();
-        });
-        modal.addEventListener('click', function (event) { if (event.target === modal) closeModal(modal); });
-        modal.addEventListener('keydown', function (event) { if (event.key === 'Escape') closeModal(modal); });
-      });
-      document.querySelectorAll('[data-operations-modal-close]').forEach(function (button) {
-        button.addEventListener('click', function () { closeModal(button.closest('.modal')); });
-      });
-    })();
 
     (function () {
       var modal = document.getElementById('webhook-url-modal');

@@ -1,0 +1,7 @@
+{
+  "guid": "e1b9a8cd-0894-490d-9096-571dd75b7957",
+  "occurred_at": "2026-10-19T11:07Z",
+  "change_type": "Fix",
+  "summary": "Skip automatic PawnIO installation on virtual machines that do not expose thermal sensors.",
+  "content_hash": "0d79b5226df507a1db1872d0ab3a1dbd2cf98678fbf4ed75a2adb9e68791d396"
+}

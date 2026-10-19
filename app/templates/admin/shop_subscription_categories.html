@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_shop_workspace.html" import shop_admin_workspace with context %}
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}
@@ -17,6 +18,7 @@
 {% endblock %}
 
 {% block content %}
+{% call shop_admin_workspace("subscription-categories") %}
   <div class="admin-grid admin-grid--columns">
     <section class="card card--panel admin-grid__full" aria-labelledby="subscription-categories-heading">
       <header class="card__header">
@@ -106,6 +108,7 @@
       </div>
     </section>
   </div>
+{% endcall %}
 {% endblock %}
 
 {% block scripts %}

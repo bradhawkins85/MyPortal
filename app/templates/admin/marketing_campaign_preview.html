@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_marketing_workspace.html" import marketing_workspace with context %}
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}
@@ -25,15 +26,17 @@
 {% endblock %}
 
 {% block content %}
+{% call marketing_workspace("campaigns", "Preview", []) %}
 <div class="admin-grid">
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">{{ rendered_email.subject }}</h2>
+  <section class="card card--panel ce-section" id="marketing-preview" data-ae-section="preview" aria-labelledby="marketing-preview-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="marketing-preview-title">{{ rendered_email.subject }}</h2>
         <p class="card__subtitle">As {{ preview_recipient.name or preview_recipient.email }}{% if preview_recipient.company_name %} at {{ preview_recipient.company_name }}{% endif %} will see it.</p>
       </div>
     </header>
     <iframe title="Email preview" sandbox="" style="width:100%;min-height:640px;border:1px solid var(--border-color);border-radius:8px;background:#fff;" srcdoc="{{ rendered_email.html }}"></iframe>
   </section>
 </div>
+{% endcall %}
 {% endblock %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_shop_workspace.html" import shop_admin_workspace with context %}
 {% from "macros/header.html" import page_header_overflow %}
 
 {% macro render_condition_row(idx, cond_type, cond_operator, cond_value) %}
@@ -37,6 +38,7 @@
 {% endblock %}
 
 {% block content %}
+{% call shop_admin_workspace("freight") %}
 {% set is_editing = editing_rule is not none %}
 {% set form_action = '/admin/shop/freight-rules' %}
 {% if is_editing %}
@@ -522,4 +524,5 @@
   }
 })();
 </script>
+{% endcall %}
 {% endblock %}

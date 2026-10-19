@@ -14,36 +14,55 @@
   {% set rates = smtp2go_analytics.rates or {} %}
   {% set queue_summary = (smtp2go_analytics.queue or {}).summary or {} %}
 
-  <div class="admin-grid">
-    <section class="card card--panel">
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Deliverability dashboard</h2>
-          <p class="card__subtitle">Recent SMTP2Go volume, engagement, and deliverability signals.</p>
+  {% from "macros/counters.html" import counter_strip %}
+  {% set campaign_count = (smtp2go_settings.get('ab_campaigns', []) or []) | length %}
+  <div class="settings-workspace smtp2go-workspace ce-workspace" data-ae-workspace data-ae-storage-key="myportal:smtp2go:active-section" data-ae-default="deliverability" data-ae-form="smtp2go-settings-form">
+    <section class="ce-overview" aria-label="SMTP2Go at a glance">
+      {{ counter_strip([
+        {"label": "Processed", "value": totals.get("processed", 0), "variant": "neutral", "href": "#smtp2go-deliverability"},
+        {"label": "Delivered", "value": totals.get("delivered", 0), "variant": "success", "href": "#smtp2go-deliverability"},
+        {"label": "Opened", "value": totals.get("open", 0) ~ " (" ~ rates.get("open_rate", 0) ~ "%)", "variant": "info", "href": "#smtp2go-deliverability"},
+        {"label": "Clicked", "value": totals.get("click", 0) ~ " (" ~ rates.get("click_rate", 0) ~ "%)", "variant": "info", "href": "#smtp2go-deliverability"},
+        {"label": "Bounced", "value": totals.get("bounce", 0) ~ " (" ~ rates.get("bounce_rate", 0) ~ "%)", "variant": "warning" if totals.get("bounce", 0) else "neutral", "href": "#smtp2go-deliverability"},
+        {"label": "Retry waits", "value": queue_summary.get("retry_wait", 0), "variant": "warning" if queue_summary.get("retry_wait", 0) else "neutral", "href": "#smtp2go-queue"},
+      ], class="ce-overview__stats") }}
+    </section>
+
+    <div class="ce-layout">
+      <nav class="ce-nav" aria-label="SMTP2Go sections" data-ae-nav>
+        <div class="ce-nav__search">
+          <label class="visually-hidden" for="smtp2go-nav-search">Find an SMTP2Go setting</label>
+          <input type="search" id="smtp2go-nav-search" class="form-input" placeholder="Find a setting…" autocomplete="off" data-ae-search>
         </div>
-      </header>
-      <div class="stats-grid">
-        <article class="card">
-          <h3 class="card__title">Processed</h3>
-          <p>{{ totals.get("processed", 0) }}</p>
-        </article>
-        <article class="card">
-          <h3 class="card__title">Delivered</h3>
-          <p>{{ totals.get("delivered", 0) }}</p>
-        </article>
-        <article class="card">
-          <h3 class="card__title">Opened</h3>
-          <p>{{ totals.get("open", 0) }} <span class="text-muted">({{ rates.get("open_rate", 0) }}%)</span></p>
-        </article>
-        <article class="card">
-          <h3 class="card__title">Clicked</h3>
-          <p>{{ totals.get("click", 0) }} <span class="text-muted">({{ rates.get("click_rate", 0) }}%)</span></p>
-        </article>
-        <article class="card">
-          <h3 class="card__title">Bounced</h3>
-          <p>{{ totals.get("bounce", 0) }} <span class="text-muted">({{ rates.get("bounce_rate", 0) }}%)</span></p>
-        </article>
-      </div>
+        {% set smtp2go_groups = [
+          ("Reporting", [("deliverability", "Deliverability", ""), ("breakdown", "Geo, device and client", "")]),
+          ("Settings", [("queue", "Queue and retries", "")]),
+          ("Campaigns", [("campaigns", "A/B campaigns", campaign_count), ("automation", "Triggers and winners", (smtp2go_campaigns or []) | length)]),
+        ] %}
+        {% for group_label, items in smtp2go_groups %}
+          <div class="ce-nav__group" data-ae-nav-group>
+            <p class="ce-nav__group-title" id="smtp2go-nav-group-{{ loop.index }}">{{ group_label }}</p>
+            <ul class="ce-nav__list" aria-labelledby="smtp2go-nav-group-{{ loop.index }}">
+              {% for key, label, count in items %}
+                <li><a class="ce-nav__link" href="#smtp2go-{{ key }}" data-ae-link="{{ key }}">
+                  <span class="ce-nav__label">{{ label }}</span>
+                  <span class="ce-nav__dirty" data-ae-dirty-dot hidden><span class="visually-hidden">Unsaved changes</span></span>
+                  {% if count != "" %}<span class="ce-nav__count">{{ count }}</span>{% endif %}
+                </a></li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endfor %}
+        <p class="ce-nav__empty" data-ae-search-empty hidden>No settings match your search.</p>
+      </nav>
+
+      <div class="ce-panels">
+      <section class="card card--panel ce-section" id="smtp2go-deliverability" data-ae-section="deliverability" aria-labelledby="smtp2go-deliverability-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="smtp2go-deliverability-title">Deliverability dashboard</h2>
+          <p class="card__subtitle">Recent SMTP2Go volume, engagement, and deliverability signals by day.</p>
+        </div></header>
+        <div class="ce-section__body">
       <div class="table-wrapper">
         <table class="table">
           <thead>
@@ -72,119 +91,14 @@
           </tbody>
         </table>
       </div>
-    </section>
-
-    <section class="card card--panel">
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Queue, retry, and campaign settings</h2>
-          <p class="card__subtitle">Tune rate-limit retries, delayed non-engagement checks, and A/B winner selection inputs.</p>
         </div>
-      </header>
-      <form action="/admin/modules/smtp2go/settings" method="post" class="form-grid" data-abc-form>
-        {% include "partials/csrf.html" %}
-        <div class="form-field">
-          <label class="form-label" for="smtp2go-rate-limit-max-retries">Rate-limit max retries</label>
-          <input id="smtp2go-rate-limit-max-retries" class="form-input" type="number" min="0" name="rateLimitMaxRetries" value="{{ smtp2go_settings.get('rate_limit_max_retries', 3) }}" />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="smtp2go-retry-backoff">Retry backoff (seconds)</label>
-          <input id="smtp2go-retry-backoff" class="form-input" type="number" min="1" name="retryBackoffSeconds" value="{{ smtp2go_settings.get('retry_backoff_seconds', 60) }}" />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="smtp2go-not-engaged-delay">Not engaged delay (seconds)</label>
-          <input id="smtp2go-not-engaged-delay" class="form-input" type="number" min="0" name="notEngagedDelaySeconds" value="{{ smtp2go_settings.get('not_engaged_delay_seconds', 86400) }}" />
-        </div>
-        <div class="form-field form-field--wide abc" data-ab-campaigns>
-          <div class="abc__head">
-            <div>
-              <span class="form-label" id="abc-title">A/B campaigns</span>
-              <p class="form-help">Compare email variants and pick a winner automatically once each has enough sends.</p>
-            </div>
-            <button type="button" class="button button--ghost button--small" data-abc-create hidden aria-haspopup="dialog" aria-controls="abc-modal">+ Add campaign</button>
-          </div>
-          <ul class="scf-list abc__list" data-abc-list aria-labelledby="abc-title" hidden></ul>
-          <div class="scf-empty" data-abc-empty hidden>
-            <p class="scf-empty__title">No A/B campaigns yet</p>
-            <p class="text-muted">Add a campaign with two or more variants to see which subject line or template gets more opens or clicks.</p>
-            <button type="button" class="button" data-abc-create aria-haspopup="dialog" aria-controls="abc-modal">+ Add your first campaign</button>
-          </div>
-          <p class="sif-status text-muted" role="status" aria-live="polite" data-abc-status></p>
-          <details class="stp__advanced" data-abc-advanced open>
-            <summary>Advanced: edit as JSON</summary>
-            <label class="visually-hidden" for="smtp2go-ab-campaigns">A/B campaigns JSON</label>
-            <textarea id="smtp2go-ab-campaigns" class="form-input form-input--textarea stp__json" name="abCampaignsRaw" rows="10" spellcheck="false">{{ smtp2go_settings.get('ab_campaigns', []) | tojson(indent=2) }}</textarea>
-            <p class="form-help">A list of campaigns, each with <code>name</code>, <code>winner_metric</code>, <code>minimum_sample_size</code> and <code>variants</code> holding sent/delivered/opened/clicked/bounced counts.</p>
-          </details>
-          <p class="scf-error" data-abc-error hidden></p>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="button">Save settings</button>
-        </div>
-      </form>
-      <div class="stats-grid">
-        <article class="card">
-          <h3 class="card__title">Recent sends</h3>
-          <p>{{ queue_summary.get("recent_total", 0) }}</p>
-        </article>
-        <article class="card">
-          <h3 class="card__title">Retry waits</h3>
-          <p>{{ queue_summary.get("retry_wait", 0) }}</p>
-        </article>
-        <article class="card">
-          <h3 class="card__title">Queued non-engaged checks</h3>
-          <p>{{ queue_summary.get("queued_not_engaged_checks", 0) }}</p>
-        </article>
-      </div>
-    </section>
-
-    <section class="card card--panel">
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Automation triggers and A/B winners</h2>
-          <p class="card__subtitle">Engagement events can drive existing automation actions immediately.</p>
-        </div>
-      </header>
-      <ul>
-        {% for option in smtp2go_trigger_options %}
-          <li><code>{{ option.value }}</code> — {{ option.label }}</li>
-        {% else %}
-          <li>No SMTP2Go engagement triggers are registered.</li>
-        {% endfor %}
-      </ul>
-      <div class="table-wrapper">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>Campaign</th>
-              <th>Status</th>
-              <th>Winner</th>
-              <th>Metric</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for campaign in smtp2go_campaigns %}
-              <tr>
-                <td data-label="Campaign">{{ campaign.campaign_name or 'Untitled campaign' }}</td>
-                <td data-label="Status">{{ campaign.status|replace('_', ' ')|title }}</td>
-                <td data-label="Winner">{{ campaign.winner.name if campaign.winner else 'Collecting data' }}</td>
-                <td data-label="Metric">{{ campaign.winner_metric }}</td>
-              </tr>
-            {% else %}
-              <tr><td colspan="4" class="table__empty">No A/B campaigns configured yet.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="card card--panel">
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Geo / device / email client reporting</h2>
+      </section>
+      <section class="card card--panel ce-section" id="smtp2go-breakdown" data-ae-section="breakdown" aria-labelledby="smtp2go-breakdown-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="smtp2go-breakdown-title">Geo / device / email client reporting</h2>
           <p class="card__subtitle">Breakdowns are populated from SMTP2Go webhook metadata where it is available.</p>
-        </div>
-      </header>
+        </div></header>
+        <div class="ce-section__body">
       <div class="table-wrapper">
         <table class="table">
           <thead>
@@ -217,7 +131,124 @@
           </tbody>
         </table>
       </div>
-    </section>
+        </div>
+      </section>
+      <section class="card card--panel ce-section" id="smtp2go-queue" data-ae-section="queue" aria-labelledby="smtp2go-queue-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="smtp2go-queue-title">Queue and retry settings</h2>
+          <p class="card__subtitle">How MyPortal retries rate-limited sends and how long it waits before checking whether a recipient engaged.</p>
+        </div></header>
+        <div class="ce-section__body">
+          <form action="/admin/modules/smtp2go/settings" method="post" class="form" id="smtp2go-settings-form" data-abc-form>
+            {% include "partials/csrf.html" %}
+            <div class="ce-form-grid">
+        <div class="form-field">
+          <label class="form-label" for="smtp2go-rate-limit-max-retries">Rate-limit max retries</label>
+          <input id="smtp2go-rate-limit-max-retries" class="form-input" type="number" min="0" name="rateLimitMaxRetries" value="{{ smtp2go_settings.get('rate_limit_max_retries', 3) }}" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="smtp2go-retry-backoff">Retry backoff (seconds)</label>
+          <input id="smtp2go-retry-backoff" class="form-input" type="number" min="1" name="retryBackoffSeconds" value="{{ smtp2go_settings.get('retry_backoff_seconds', 60) }}" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="smtp2go-not-engaged-delay">Not engaged delay (seconds)</label>
+          <input id="smtp2go-not-engaged-delay" class="form-input" type="number" min="0" name="notEngagedDelaySeconds" value="{{ smtp2go_settings.get('not_engaged_delay_seconds', 86400) }}" />
+        </div>
+            </div>
+            <div class="form-actions"><button type="submit" class="button button--primary">Save settings</button></div>
+          </form>
+          <dl class="definition-list">
+            <dt>Recent sends</dt><dd>{{ queue_summary.get("recent_total", 0) }}</dd>
+            <dt>Retry waits</dt><dd>{{ queue_summary.get("retry_wait", 0) }}</dd>
+            <dt>Queued non-engaged checks</dt><dd>{{ queue_summary.get("queued_not_engaged_checks", 0) }}</dd>
+          </dl>
+        </div>
+      </section>
+      <section class="card card--panel ce-section" id="smtp2go-campaigns" data-ae-section="campaigns" aria-labelledby="smtp2go-campaigns-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="smtp2go-campaigns-title">A/B campaigns</h2>
+          <p class="card__subtitle">Compare email variants and pick a winner automatically once each has enough sends. Campaigns save with the queue settings.</p>
+        </div></header>
+        <div class="ce-section__body">
+        <div class="abc" data-ab-campaigns>
+          <div class="abc__head">
+            <div>
+              <span class="form-label" id="abc-title">A/B campaigns</span>
+              <p class="form-help">Compare email variants and pick a winner automatically once each has enough sends.</p>
+            </div>
+            <button type="button" class="button button--ghost button--small" data-abc-create hidden aria-haspopup="dialog" aria-controls="abc-modal">+ Add campaign</button>
+          </div>
+          <ul class="scf-list abc__list" data-abc-list aria-labelledby="abc-title" hidden></ul>
+          <div class="scf-empty" data-abc-empty hidden>
+            <p class="scf-empty__title">No A/B campaigns yet</p>
+            <p class="text-muted">Add a campaign with two or more variants to see which subject line or template gets more opens or clicks.</p>
+            <button type="button" class="button" data-abc-create aria-haspopup="dialog" aria-controls="abc-modal">+ Add your first campaign</button>
+          </div>
+          <p class="sif-status text-muted" role="status" aria-live="polite" data-abc-status></p>
+          <details class="stp__advanced" data-abc-advanced open>
+            <summary>Advanced: edit as JSON</summary>
+            <label class="visually-hidden" for="smtp2go-ab-campaigns">A/B campaigns JSON</label>
+            <textarea id="smtp2go-ab-campaigns" class="form-input form-input--textarea stp__json" name="abCampaignsRaw" form="smtp2go-settings-form" rows="10" spellcheck="false">{{ smtp2go_settings.get('ab_campaigns', []) | tojson(indent=2) }}</textarea>
+            <p class="form-help">A list of campaigns, each with <code>name</code>, <code>winner_metric</code>, <code>minimum_sample_size</code> and <code>variants</code> holding sent/delivered/opened/clicked/bounced counts.</p>
+          </details>
+          <p class="scf-error" data-abc-error hidden></p>
+        </div>
+        </div>
+      </section>
+      <section class="card card--panel ce-section" id="smtp2go-automation" data-ae-section="automation" aria-labelledby="smtp2go-automation-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="smtp2go-automation-title">Automation triggers and A/B winners</h2>
+          <p class="card__subtitle">Engagement events can drive existing automation actions immediately.</p>
+        </div></header>
+        <div class="ce-section__body">
+          <div class="ce-subsection" aria-labelledby="smtp2go-triggers-title">
+            <h3 id="smtp2go-triggers-title">Engagement triggers</h3>
+      <ul>
+        {% for option in smtp2go_trigger_options %}
+          <li><code>{{ option.value }}</code> — {{ option.label }}</li>
+        {% else %}
+          <li>No SMTP2Go engagement triggers are registered.</li>
+        {% endfor %}
+      </ul>
+          </div>
+          <div class="ce-subsection" aria-labelledby="smtp2go-winners-title">
+            <h3 id="smtp2go-winners-title">Campaign winners</h3>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Campaign</th>
+              <th>Status</th>
+              <th>Winner</th>
+              <th>Metric</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for campaign in smtp2go_campaigns %}
+              <tr>
+                <td data-label="Campaign">{{ campaign.campaign_name or 'Untitled campaign' }}</td>
+                <td data-label="Status">{{ campaign.status|replace('_', ' ')|title }}</td>
+                <td data-label="Winner">{{ campaign.winner.name if campaign.winner else 'Collecting data' }}</td>
+                <td data-label="Metric">{{ campaign.winner_metric }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="4" class="table__empty">No A/B campaigns configured yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+          </div>
+        </div>
+      </section>
+      </div>
+    </div>
+
+    <div class="ce-savebar" data-ae-savebar role="region" aria-label="Unsaved SMTP2Go settings" hidden>
+      <p class="ce-savebar__text" aria-live="polite"><strong data-ae-savebar-count>Unsaved changes</strong> <span class="text-muted">in <span data-ae-savebar-sections></span></span></p>
+      <span class="ae-savebar__spacer" aria-hidden="true"></span>
+      <button type="button" class="button button--ghost" data-ae-discard>Discard</button>
+      <button type="submit" class="button button--primary" form="smtp2go-settings-form">Save settings</button>
+    </div>
   </div>
   <div class="modal scf-modal" id="abc-modal" role="dialog" aria-modal="true" aria-labelledby="abc-modal-title" hidden>
     <form class="modal__panel modal__panel--wide scf-editor abc-editor" data-abc-editor novalidate>
@@ -289,5 +320,6 @@
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
   <script src="{{ static_url('/static/js/smtp2go_campaigns.js') }}" defer></script>
 {% endblock %}

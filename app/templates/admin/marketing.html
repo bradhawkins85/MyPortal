@@ -1,27 +1,27 @@
 {% extends "base.html" %}
+{% from "admin/_marketing_workspace.html" import marketing_workspace with context %}
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Marketing pages{% endblock %}
 
 {% block header_actions %}
-  {% set help_link_actions = [{"label": "Email campaigns", "type": "link", "href": "/admin/marketing/campaigns", "variant": "primary"}] %}
-  {% if is_super_admin %}
-    {% if feature_pack_available('smb1001') %}
-      {% set _ = help_link_actions.append({"label": "SMB1001 help links", "type": "link", "href": "/admin/marketing/smb1001-help-links", "variant": "ghost"}) %}
-    {% endif %}
-    {% if feature_pack_available('essential8') %}
-      {% set _ = help_link_actions.append({"label": "Essential 8 help links", "type": "link", "href": "/admin/marketing/essential8-help-links", "variant": "ghost"}) %}
-    {% endif %}
-  {% endif %}
-  {{ page_header_actions(help_link_actions) }}
+  {{ page_header_actions([{"label": "New page", "type": "link", "href": "#marketing-new-page", "variant": "primary"}]) }}
 {% endblock %}
 
 {% block content %}
+{% set marketing_pages = marketing_pages or [] %}
+{% set marketing_leads = marketing_leads or [] %}
+{% set published_pages = marketing_pages | selectattr("is_published") | list | length %}
+{% set marketing_summary = [
+  {"label": published_pages ~ " of " ~ (marketing_pages | length) ~ " page" ~ ("" if marketing_pages | length == 1 else "s") ~ " published", "muted": not published_pages},
+  {"label": (marketing_leads | length) ~ " recent contact" ~ ("" if marketing_leads | length == 1 else "s"), "muted": not marketing_leads},
+] %}
+{% call marketing_workspace("pages", "Marketing pages", [("pages", "marketing-pages", "Pages", marketing_pages | length, true), ("new-page", "marketing-new-page", "New page", "", true), ("contacts", "marketing-contacts", "Collected contacts", marketing_leads | length, true)], summary=marketing_summary) %}
 <div class="admin-grid">
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Create marketing page</h2>
+  <section class="card card--panel ce-section" id="marketing-new-page" data-ae-section="new-page" aria-labelledby="marketing-new-page-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="marketing-new-page-title">Create marketing page</h2>
         <p class="card__subtitle">Publish a public page under <code>/marketing/&lt;slug&gt;</code>.</p>
       </div>
     </header>
@@ -43,6 +43,14 @@
         <label class="form-label" for="marketing-page-intro">Intro text</label>
         <textarea id="marketing-page-intro" class="form-input" name="intro_text" rows="3"></textarea>
       </div>
+      {% if feature_pack_available('marketing_assistant') %}
+        <div class="form-field form-field--wide">
+          <label class="form-label" for="marketing-page-sources">Source websites for the Marketing Assistant (optional)</label>
+          <textarea id="marketing-page-sources" class="form-input" name="source_urls" rows="3"
+                    placeholder="https://vendor.example.com/product&#10;https://vendor.example.com/datasheet"></textarea>
+          <p class="form-help">One address per line. When given, the Marketing Assistant opens next so it can write the page from these websites.</p>
+        </div>
+      {% endif %}
       <div class="form-field">
         <label class="checkbox">
           <input type="checkbox" name="is_published" value="1" />
@@ -56,10 +64,10 @@
     </form>
   </section>
 
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Pages</h2>
+  <section class="card card--panel ce-section" id="marketing-pages" data-ae-section="pages" aria-labelledby="marketing-pages-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="marketing-pages-title">Pages</h2>
         <p class="card__subtitle">Manage your marketing pages and their sections.</p>
       </div>
     </header>
@@ -91,6 +99,9 @@
               <td data-label="Leads">{{ page.lead_count }}</td>
               <td class="table__actions">
                 <a href="/admin/marketing/pages/{{ page.id }}/edit" class="button button--ghost button--small">Edit</a>
+                {% if feature_pack_available('marketing_assistant') %}
+                  <a href="/admin/marketing/pages/{{ page.id }}/assistant" class="button button--ghost button--small">Assistant</a>
+                {% endif %}
               </td>
             </tr>
           {% else %}
@@ -103,10 +114,10 @@
     </div>
   </section>
 
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Collected contacts</h2>
+  <section class="card card--panel ce-section" id="marketing-contacts" data-ae-section="contacts" aria-labelledby="marketing-contacts-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="marketing-contacts-title">Collected contacts</h2>
         <p class="card__subtitle">Recent marketing contacts for follow-up and campaigns.</p>
       </div>
     </header>
@@ -158,4 +169,5 @@
     </div>
   </section>
 </div>
+{% endcall %}
 {% endblock %}

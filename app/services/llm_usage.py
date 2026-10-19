@@ -60,6 +60,11 @@ FEATURES: tuple[LLMFeature, ...] = (
         callers=(("app.services.rmm_findings", "_chat"),),
     ),
     LLMFeature(
+        "marketing_assistant", "Marketing Assistant",
+        "Writes and fact-checks marketing page sections from the source websites an admin lists.",
+        callers=(("app.services.marketing_assistant", "_chat"),),
+    ),
+    LLMFeature(
         "ticket_ai_summary", "Ticket AI summary",
         "Summarises the ticket conversation on the ticket page.",
         callers=(("app.services.tickets", "refresh_ticket_ai_summary"),),

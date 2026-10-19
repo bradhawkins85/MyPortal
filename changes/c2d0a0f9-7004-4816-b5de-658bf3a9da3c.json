@@ -1,0 +1,7 @@
+{
+  "guid": "c2d0a0f9-7004-4816-b5de-658bf3a9da3c",
+  "occurred_at": "2026-10-19T11:06Z",
+  "change_type": "Improvement",
+  "summary": "Script automation, event log rules and Windows Defender: lay out as settings workspaces with grouped section navigation, and turn Defender's protection policy, ticket actions, exclusions and exclusion lists modals into sections",
+  "content_hash": "7dd407cde8c1769ed6101ecead2b555eb5e126f98b566e52da78308c3cfdeb47"
+}

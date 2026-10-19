@@ -122,9 +122,9 @@
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <button type="submit" class="button button--small button--ghost">Rebuild</button>
                     </form>
-                    <form method="post" action="/admin/tray/deployment-links/{{ link.id }}/revoke" class="inline-form">
+                    <form method="post" action="/admin/tray/deployment-links/{{ link.id }}/revoke" class="inline-form" data-confirm="Revoke this deployment URL? Its install token stops working too. Devices already installed keep working.">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                      <button type="submit" class="button button--small button--danger" data-confirm="Revoke this deployment URL? Its install token stops working too. Devices already installed keep working.">Revoke</button>
+                      <button type="submit" class="button button--small button--danger">Revoke</button>
                     </form>
                   {% endif %}
                 </td>

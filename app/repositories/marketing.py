@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Any
@@ -36,7 +37,22 @@ def _normalise_section(row: dict[str, Any]) -> dict[str, Any]:
         "anchor_slug": str(row.get("anchor_slug") or "").strip(),
         "content_text": str(row.get("content_text") or "").strip(),
         "sort_order": int(row.get("sort_order") or 0),
+        "image_id": int(row["image_id"]) if row.get("image_id") is not None else None,
+        "image_alt": str(row.get("image_alt") or "").strip() or None,
+        "image_caption": str(row.get("image_caption") or "").strip() or None,
+        "source_urls": _decode_urls(row.get("source_urls_json")),
+        "assistant_generated": bool(int(row.get("assistant_generated") or 0)),
     }
+
+
+def _decode_urls(value: Any) -> list[str]:
+    if not value:
+        return []
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    return [str(url) for url in decoded if isinstance(url, str) and url] if isinstance(decoded, list) else []
 
 
 async def list_pages() -> list[dict[str, Any]]:
@@ -149,13 +165,32 @@ async def create_section(
     anchor_slug: str,
     content_text: str,
     sort_order: int = 0,
+    image_id: int | None = None,
+    image_alt: str | None = None,
+    image_caption: str | None = None,
+    source_urls: list[str] | None = None,
+    assistant_generated: bool = False,
 ) -> dict[str, Any]:
     await db.execute(
         """
-        INSERT INTO marketing_page_sections (page_id, title, anchor_slug, content_text, sort_order)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO marketing_page_sections (
+            page_id, title, anchor_slug, content_text, sort_order,
+            image_id, image_alt, image_caption, source_urls_json, assistant_generated
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
-        (page_id, title, anchor_slug, content_text, sort_order),
+        (
+            page_id,
+            title,
+            anchor_slug,
+            content_text,
+            sort_order,
+            image_id,
+            image_alt,
+            image_caption,
+            json.dumps(source_urls) if source_urls else None,
+            1 if assistant_generated else 0,
+        ),
     )
     row = await db.fetch_one(
         """
@@ -169,6 +204,26 @@ async def create_section(
     if not row:
         raise RuntimeError("Failed to create marketing section")
     return _normalise_section(row)
+
+
+async def delete_assistant_sections(page_id: int) -> None:
+    """Remove the sections the Marketing Assistant wrote for a page."""
+
+    await db.execute(
+        "DELETE FROM marketing_page_sections WHERE page_id = %s AND assistant_generated = 1",
+        (page_id,),
+    )
+
+
+async def delete_all_sections(page_id: int) -> None:
+    await db.execute("DELETE FROM marketing_page_sections WHERE page_id = %s", (page_id,))
+
+
+async def update_page_text(page_id: int, *, subtitle: str | None, intro_text: str | None) -> None:
+    await db.execute(
+        "UPDATE marketing_pages SET subtitle = %s, intro_text = %s, updated_at = %s WHERE id = %s",
+        (subtitle, intro_text, datetime.utcnow(), page_id),
+    )
 
 
 async def delete_section(section_id: int) -> None:

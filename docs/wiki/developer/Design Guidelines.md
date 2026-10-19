@@ -517,6 +517,10 @@ long page, and do not build ad-hoc tab strips for this.
 - Subtitles explain effect and provenance in plain English ("These details
   are maintained manually and are never overwritten by asset sync.").
 
+**Confirming destructive actions.** Put `data-confirm` on the `<form>`, not
+the button: the site-wide handler in `layout.js` confirms form submits, and
+only pages that load `admin.js` also honour it on buttons.
+
 **Building another workspace.** Reuse the `.ce-*` classes and load
 `asset_edit_sections.js` as it is; do not copy it or write new layout CSS.
 Mark the wrapper `class="settings-workspace … ce-workspace" data-ae-workspace`
@@ -529,6 +533,7 @@ and give each section `data-ae-section="<key>"` matching its link's
 | `data-ae-default` | Section shown when nothing is remembered |
 | `data-ae-initial` | Section the server wants open, ahead of the remembered one (an editor opened by `?new=1` or after a failed save); a URL hash still wins |
 | `data-ae-form` | `id` of the shared settings form whose changes drive the dirty dots and save bar |
+| `data-ae-link-nav` | The nav links are separate pages (`aria-current="page"` on the current one), not in-page sections; the script only filters the list. Used by the shop and shop admin pages, whose areas are server-rendered views |
 
 Editors that keep their state in a hidden field (a menu builder writing
 JSON) should fire `input` on that field when it changes and redraw on the
@@ -536,8 +541,33 @@ bubbling `ae:discarded` event the form receives after *Discard*.
 
 Pages built this way: the asset edit page (gold standard), Admin →
 Companies → Edit, **Tray settings** (`/admin/tray`, with the menu
-configuration editor), **Patch management** (`/rmm/patching`) and
-**Checks** (`/rmm/checks`). On list-and-editor pages such as Checks, the
+configuration editor), **Patch management** (`/rmm/patching`),
+**Checks** (`/rmm/checks`), **Microsoft 365** (`/m365`), **Integration
+modules** (`/admin/modules`), **Notification settings**
+(`/notifications/settings`), **SMTP2Go** (`/admin/modules/smtp2go`),
+**Script automation** (`/rmm/automation`), **Event log rules**
+(`/rmm/event-logs/rules`), **Windows Defender** (`/defender`), the
+**Business continuity plan overview** (`/bcp`), the **Shop** (`/shop`, one
+nav entry per category) and **Shop admin** (`/admin/shop` and its tool
+pages, which share the `shop_admin_workspace` macro in
+`admin/_shop_workspace.html`; its *Categories* group, listed last so it never hides the other areas, mirrors the shop's
+Featured, Subscriptions and top-level categories and filters the catalogue
+with `?category=`). The **Marketing** admin pages (`/admin/marketing`, email campaigns, a
+campaign's detail, form and preview, the page editor and the SMB1001 and
+Essential 8 help links) share the `marketing_workspace` macro in
+`admin/_marketing_workspace.html`: the current page's sections come first in
+the nav and links to the other marketing areas follow. A nav may mix
+in-page sections (`data-ae-link`) with links to other pages; the search
+filters both.
+Views that used to open as modals from an Actions menu (the integration
+health center, credential expiry, setup wizard and task dependency graph,
+and Defender's protection policy, ticket actions and exclusions) are
+sections instead; script that used to open such a modal sets the
+section's hash (`location.hash = 'defender-exclusions'`); keep modals for short, focused tasks such as copying a
+webhook URL or editing one record. A searchable list whose records open in a focused editor modal (Scheduled
+tasks, the shop admin catalogue) keeps that modal editor; do not turn such
+an editor into page sections. Shop admin puts the workspace around the list
+and its sibling tool pages instead. On list-and-editor pages such as Checks, the
 list is split into sections people look for (*Needs attention*, *All
 checks*, one per check type) and the add/edit form is its own section
 with the save bar.

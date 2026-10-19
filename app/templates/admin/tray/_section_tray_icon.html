@@ -35,10 +35,10 @@
     </form>
 
     {% if brand.current_path %}
-      <form method="post" action="/admin/tray/branding/delete" class="form">
+      <form method="post" action="/admin/tray/branding/delete" class="form" data-confirm="Reset the tray icon to the default?">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <div class="form-actions">
-          <button type="submit" class="button button--ghost" data-confirm="Reset the tray icon to the default?">Reset to the default icon</button>
+          <button type="submit" class="button button--ghost">Reset to the default icon</button>
           <span class="form-help">Removes the uploaded icon. The hover name is kept.</span>
         </div>
       </form>

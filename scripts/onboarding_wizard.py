@@ -320,6 +320,31 @@ FEATURES: tuple[Feature, ...] = (
     ),
     Feature("cart", "Cart", "Shopping cart and checkout.", packs=("cart",), parent="shop"),
     Feature("marketing", "Marketing", "Marketing pages and campaigns.", packs=("marketing",)),
+    Feature(
+        "marketing_assistant",
+        "Marketing Assistant",
+        "Writes and refreshes marketing pages, with images, from websites you list; every statement is checked against them.",
+        packs=("marketing_assistant",),
+        parent="marketing",
+        settings=(
+            S(
+                "MARKETING_ASSISTANT_LLM_BASE_URL",
+                "Marketing Assistant LLM base URL",
+                "url",
+                help="OpenAI-compatible endpoint. Leave the three LLM settings empty to reuse the troubleshooter's LLM.",
+            ),
+            S("MARKETING_ASSISTANT_LLM_MODEL", "Marketing Assistant LLM model"),
+            S("MARKETING_ASSISTANT_LLM_API_KEY", "Marketing Assistant LLM API key", "secret"),
+            S("MARKETING_ASSISTANT_MAX_SOURCES", "Most websites read per run (1-25)", "int", default="10"),
+            S("MARKETING_ASSISTANT_MAX_IMAGES", "Most images placed on a page (0-12)", "int", default="6"),
+            S(
+                "MARKETING_ASSISTANT_MIN_SOURCES_PER_CLAIM",
+                "Websites that must confirm each statement (1-5)",
+                "int",
+                default="1",
+            ),
+        ),
+    ),
     Feature("compliance", "Compliance", "Compliance checks and assignments.", packs=("compliance",)),
     Feature(
         "essential8",

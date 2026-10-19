@@ -971,6 +971,7 @@ def _render_campaign_form(**context) -> str:
         ),
         autoescape=True,
     )
+    env.globals["static_url"] = lambda path: path
     defaults = {
         "campaign": None,
         "campaign_values": {},

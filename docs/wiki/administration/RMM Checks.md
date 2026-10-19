@@ -127,7 +127,9 @@ startup and every detailed check-in (approximately 15 minutes), independently of
 Each sensor has its own graph in Celsius, using the same ranges and retention settings. Missing
 readings are never stored as zero-temperature samples; extended interruptions produce gaps. Windows agents bundle
 LibreHardwareMonitor and silently install bundled PawnIO 2.1.0 at service startup
-if 2.1.0 or newer is absent. Setup failures are logged and do not stop check-in.
+if 2.1.0 or newer is absent. Virtual machines are excluded from PawnIO setup because
+they do not expose thermal sensors. Physical Hyper-V hosts remain eligible. Hardware
+identification and setup failures are logged and do not stop check-in.
 Linux uses sysfs sensors; macOS temperature collection is currently unsupported.
 
 Use **Stat type** to focus on CPU, memory, disk, network, ping or temperature charts.

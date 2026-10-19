@@ -41,8 +41,56 @@
     }
   }
 
+  // A workspace whose nav links go to other pages (data-ae-link-nav) keeps
+  // every link a real navigation; the search only filters the list.
+  function initLinkNav(nav) {
+    const search = nav.querySelector('[data-ae-search]');
+    const links = Array.from(nav.querySelectorAll('.ce-nav__link'));
+    const groups = Array.from(nav.querySelectorAll('[data-ae-nav-group]'));
+    const emptyMessage = nav.querySelector('[data-ae-search-empty]');
+    if (!search || !links.length) {
+      return;
+    }
+    function apply() {
+      const query = normalise(search.value);
+      let matches = 0;
+      links.forEach((link) => {
+        const visible = !query || normalise(link.textContent).includes(query);
+        link.hidden = !visible;
+        if (visible) {
+          matches += 1;
+        }
+      });
+      groups.forEach((group) => {
+        group.hidden = !group.querySelector('.ce-nav__link:not([hidden])');
+      });
+      if (emptyMessage) {
+        emptyMessage.hidden = matches > 0;
+      }
+    }
+    search.addEventListener('input', apply);
+    search.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const first = links.find((link) => !link.hidden);
+        if (first) {
+          window.location.assign(first.href);
+        }
+      } else if (event.key === 'Escape' && search.value) {
+        search.value = '';
+        apply();
+      }
+    });
+  }
+
   function initWorkspace(workspace) {
     const nav = workspace.querySelector('[data-ae-nav]');
+    if (nav && workspace.hasAttribute('data-ae-link-nav')) {
+      // No sections to hide here; the class turns on the compact phone nav.
+      workspace.classList.add('is-enhanced');
+      initLinkNav(nav);
+      return null;
+    }
     const sections = Array.from(workspace.querySelectorAll(SECTION_SELECTOR));
     const links = Array.from(workspace.querySelectorAll('[data-ae-link]'));
     if (!nav || !sections.length || !links.length) {
@@ -55,6 +103,7 @@
     const search = nav.querySelector('[data-ae-search]');
     const emptyMessage = nav.querySelector('[data-ae-search-empty]');
     const groups = Array.from(nav.querySelectorAll('[data-ae-nav-group]'));
+    const pageLinks = Array.from(nav.querySelectorAll('.ce-nav__link:not([data-ae-link])'));
     const searchIndex = new Map(sections.map((section) => [
       sectionKey(section),
       normalise(Array.from(section.querySelectorAll('.card__title, .card__subtitle, h3, legend, label'))
@@ -126,8 +175,16 @@
           matches += 1;
         }
       });
+      // Nav entries that open other pages (no data-ae-link) are matched on their text.
+      pageLinks.forEach((link) => {
+        const visible = !query || normalise(link.textContent).includes(query);
+        link.hidden = !visible;
+        if (visible) {
+          matches += 1;
+        }
+      });
       groups.forEach((group) => {
-        group.hidden = !group.querySelector('[data-ae-link]:not([hidden])');
+        group.hidden = !group.querySelector('.ce-nav__link:not([hidden])');
       });
       if (emptyMessage) {
         emptyMessage.hidden = matches > 0;
@@ -172,8 +229,11 @@
         if (event.key === 'Enter') {
           event.preventDefault();
           const first = links.find((link) => !link.hidden);
+          const firstPage = pageLinks.find((link) => !link.hidden);
           if (first) {
             activate(first.dataset.aeLink, { focus: true });
+          } else if (firstPage) {
+            window.location.assign(firstPage.href);
           }
         } else if (event.key === 'Escape' && search.value) {
           search.value = '';

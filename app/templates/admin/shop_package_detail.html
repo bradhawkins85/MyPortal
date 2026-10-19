@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_shop_workspace.html" import shop_admin_workspace with context %}
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_title_content %}
@@ -15,6 +16,7 @@
 {% endblock %}
 
 {% block content %}
+{% call shop_admin_workspace("packages") %}
 <div class="admin-grid admin-grid--columns">
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
@@ -263,4 +265,5 @@
     </div>
   </form>
 </section>
+{% endcall %}
 {% endblock %}

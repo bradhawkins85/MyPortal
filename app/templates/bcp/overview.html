@@ -4,167 +4,208 @@
 
 {% block header_title %}BCP — Overview{% endblock %}
 {% block bcp_content %}
-<div class="bcp-page page-container">
-  <!-- Success/Error Messages -->
-  <!-- Plan Overview Section -->
-  <section class="card">
-    <div class="card-header">
-      <h2 class="card-title">Plan Overview</h2>
-      {% if can_edit %}
-      <button type="button" class="btn btn-primary" onclick="document.getElementById('editPlanModal').showModal()">
-        Edit Plan Details
-      </button>
-      {% endif %}
-    </div>
-    <div class="card-body">
-      <div class="form-group">
-        <label class="form-label">Title</label>
-        <p class="form-value">{{ plan.title }}</p>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Executive Summary</label>
-        <p class="form-value">{{ plan.executive_summary or 'No executive summary provided yet.' }}</p>
-      </div>
-
-      <div class="grid grid-cols-3 gap-4">
-        <div class="form-group">
-          <label class="form-label">Version</label>
-          <p class="form-value">{{ plan.version }}</p>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Last Reviewed</label>
-          <p class="form-value">{{ plan.last_reviewed.strftime('%Y-%m-%d') if plan.last_reviewed else 'Not reviewed yet' }}</p>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Next Review</label>
-          <p class="form-value">{{ plan.next_review.strftime('%Y-%m-%d') if plan.next_review else 'Not scheduled' }}</p>
-        </div>
+{% set objectives = objectives or [] %}
+{% set distribution_list = distribution_list or [] %}
+<div class="settings-workspace bcp-page bcp-overview-workspace ce-workspace" data-ae-workspace data-ae-storage-key="myportal:bcp-overview:active-section" data-ae-default="plan"{% if can_edit %} data-ae-form="bcp-plan-form"{% endif %}>
+  <section class="ce-overview" aria-label="Plan at a glance">
+    <div class="ce-overview__identity">
+      <div class="ce-overview__summary">
+        <ul class="scf-item__chips ce-overview__chips" aria-label="Plan summary">
+          <li class="scf-chip">{{ plan.title }}</li>
+          <li class="scf-chip scf-chip--muted">Version {{ plan.version }}</li>
+          <li class="scf-chip{% if not plan.last_reviewed %} scf-chip--muted{% endif %}">{{ 'Reviewed ' ~ plan.last_reviewed.strftime('%Y-%m-%d') if plan.last_reviewed else 'Not reviewed yet' }}</li>
+          <li class="scf-chip{% if not plan.next_review %} scf-chip--muted{% endif %}">{{ 'Next review ' ~ plan.next_review.strftime('%Y-%m-%d') if plan.next_review else 'Next review not scheduled' }}</li>
+        </ul>
       </div>
     </div>
-  </section>
-  <section class="card">
-    <div class="card-header">
-      <h2 class="card-title">Readiness Dashboard</h2>
-      <p class="text-muted text-sm">Operational KPIs for continuity readiness, cadence, and coverage.</p>
-    </div>
-    <div class="card-body">
-      {{ counter_strip(kpi_items) }}
-    </div>
+    {{ counter_strip(kpi_items, class="ce-overview__stats") }}
   </section>
   {% if has_bcp_planning_gaps and bcp_compliance_help_url %}
-  <section class="card card--panel">
-    <div class="card__body">
-      <h2 class="card__title">Need help strengthening BCP compliance?</h2>
-      <p class="card__subtitle">Access our business continuity services to close planning gaps and improve readiness.</p>
-      <a href="{{ bcp_compliance_help_url }}" class="button button--primary">Get BCP compliance help</a>
-    </div>
-  </section>
+  <div class="alert alert--info" role="status">
+    <strong>Need help strengthening BCP compliance?</strong> Access our business continuity services to close planning gaps and improve readiness.
+    <a href="{{ bcp_compliance_help_url }}" class="button button--primary button--small">Get BCP compliance help</a>
+  </div>
   {% endif %}
 
-  <!-- Objectives Section -->
-  <section class="card">
-    <div class="card-header">
-      <h2 class="card-title">Plan Objectives</h2>
-      {% if can_edit %}
-      <button type="button" class="btn btn-primary" onclick="document.getElementById('addObjectiveModal').showModal()">
-        Add Objective
-      </button>
-      {% endif %}
-    </div>
-    <div class="card-body">
-      {% if objectives %}
-      <ul class="list-disc list-inside space-y-2">
-        {% for objective in objectives %}
-        <li class="flex items-center justify-between">
-          <span>{{ objective.objective_text }}</span>
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Plan sections" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="bcp-overview-nav-search">Find a plan section</label>
+        <input type="search" id="bcp-overview-nav-search" class="form-input" placeholder="Find a section…" autocomplete="off" data-ae-search>
+      </div>
+      {% set bcp_groups = [
+        ("Plan", [("plan", "Plan details", ""), ("objectives", "Objectives", objectives | length), ("distribution", "Distribution list", distribution_list | length)]),
+        ("Governance", [("reviews", "Reviews and dependencies", approved_review_count), ("history", "Version history", (recent_plan_changes or []) | length)]),
+        ("Plan areas", [("framework", "PPRR framework", "")]),
+      ] %}
+      {% for group_label, items in bcp_groups %}
+        <div class="ce-nav__group" data-ae-nav-group>
+          <p class="ce-nav__group-title" id="bcp-overview-nav-group-{{ loop.index }}">{{ group_label }}</p>
+          <ul class="ce-nav__list" aria-labelledby="bcp-overview-nav-group-{{ loop.index }}">
+            {% for key, label, count in items %}
+              <li><a class="ce-nav__link" href="#bcp-{{ key }}" data-ae-link="{{ key }}">
+                <span class="ce-nav__label">{{ label }}</span>
+                <span class="ce-nav__dirty" data-ae-dirty-dot hidden><span class="visually-hidden">Unsaved changes</span></span>
+                {% if count != "" %}<span class="ce-nav__count">{{ count }}</span>{% endif %}
+              </a></li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endfor %}
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No sections match your search.</p>
+    </nav>
+
+    <div class="ce-panels">
+      <section class="card card--panel ce-section" id="bcp-plan" data-ae-section="plan" aria-labelledby="bcp-plan-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="bcp-plan-title">Plan details</h2>
+          <p class="card__subtitle">The plan's title, executive summary and version. Review dates come from <a href="/bcp/schedules">review schedules</a>.</p>
+        </div></header>
+        <div class="ce-section__body">
           {% if can_edit %}
-          <form method="post" action="/bcp/objectives/{{ objective.id }}/delete" class="inline">
+          <form method="post" action="/bcp/update" class="form" id="bcp-plan-form">
             <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this objective?')">
-              Delete
-            </button>
+            <div class="ce-form-grid">
+              <div class="form-field ce-form-grid__full">
+                <label for="title" class="form-label">Title</label>
+                <input type="text" id="title" name="title" class="form-input" value="{{ plan.title }}" required>
+              </div>
+              <div class="form-field ce-form-grid__full">
+                <label for="executive_summary" class="form-label">Executive summary <span class="form-label__optional">optional</span></label>
+                <textarea id="executive_summary" name="executive_summary" class="form-textarea" rows="5">{{ plan.executive_summary or '' }}</textarea>
+                <p class="form-help">A short description of the plan's purpose and scope for the people who read it.</p>
+              </div>
+              <div class="form-field">
+                <label for="version" class="form-label">Version</label>
+                <input type="text" id="version" name="version" class="form-input" value="{{ plan.version }}">
+              </div>
+            </div>
+            <div class="form-actions"><button type="submit" class="button button--primary">Save plan details</button></div>
+          </form>
+          {% else %}
+          <dl class="definition-list">
+            <dt>Title</dt><dd>{{ plan.title }}</dd>
+            <dt>Executive summary</dt><dd>{{ plan.executive_summary or 'No executive summary provided yet.' }}</dd>
+            <dt>Version</dt><dd>{{ plan.version }}</dd>
+          </dl>
+          {% endif %}
+          <dl class="definition-list">
+            <dt>Last reviewed</dt><dd>{{ plan.last_reviewed.strftime('%Y-%m-%d') if plan.last_reviewed else 'Not reviewed yet' }}</dd>
+            <dt>Next review</dt><dd>{{ plan.next_review.strftime('%Y-%m-%d') if plan.next_review else 'Not scheduled' }}</dd>
+          </dl>
+        </div>
+      </section>
+
+      <section class="card card--panel ce-section" id="bcp-objectives" data-ae-section="objectives" aria-labelledby="bcp-objectives-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="bcp-objectives-title">Plan objectives</h2>
+          <p class="card__subtitle">What the plan sets out to protect or achieve during a disruption.</p>
+        </div></header>
+        <div class="ce-section__body">
+          {% if objectives %}
+          <ul class="bcp-overview__list">
+            {% for objective in objectives %}
+            <li>
+              <span>{{ objective.objective_text }}</span>
+              {% if can_edit %}
+              <form method="post" action="/bcp/objectives/{{ objective.id }}/delete" class="inline-form" data-confirm="Delete this objective?">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button type="submit" class="button button--ghost button--small">Delete<span class="visually-hidden"> objective</span></button>
+              </form>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="text-muted">No objectives defined yet.</p>
+          {% endif %}
+          {% if can_edit %}
+          <form method="post" action="/bcp/objectives" class="form ce-subsection" aria-labelledby="bcp-objective-add-title">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <h3 id="bcp-objective-add-title">Add an objective</h3>
+            <div class="form-field">
+              <label for="objective_text" class="form-label">Objective</label>
+              <textarea id="objective_text" name="objective_text" class="form-textarea" rows="3" required></textarea>
+            </div>
+            <div class="form-actions"><button type="submit" class="button button--secondary">Add objective</button></div>
           </form>
           {% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-      {% else %}
-      <p class="text-muted">No objectives defined yet.</p>
-      {% endif %}
-    </div>
-  </section>
-
-  <!-- Distribution List Section -->
-  <section class="card">
-    <div class="card-header">
-      <h2 class="card-title">Distribution List</h2>
-      {% if can_edit %}
-      <button type="button" class="btn btn-primary" onclick="document.getElementById('addDistributionModal').showModal()">
-        Add Entry
-      </button>
-      {% endif %}
-    </div>
-    <div class="card-body">
-      {% if distribution_list %}
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Copy #</th>
-            <th>Name</th>
-            <th>Location</th>
-            {% if can_edit %}
-            <th>Actions</th>
-            {% endif %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for entry in distribution_list %}
-          <tr>
-            <td>{{ entry.copy_number }}</td>
-            <td>{{ entry.name }}</td>
-            <td>{{ entry.location or '-' }}</td>
-            {% if can_edit %}
-            <td>
-              <form method="post" action="/bcp/distribution/{{ entry.id }}/delete" class="inline">
-                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this entry?')">
-                  Delete
-                </button>
-              </form>
-            </td>
-            {% endif %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <p class="text-muted">No distribution list entries yet.</p>
-      {% endif %}
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="card-header">
-      <h2 class="card-title">Approval Snapshots & Dependencies</h2>
-      <div class="page-actions">
-        <a href="/bcp/schedules" class="btn btn-secondary btn-sm">Manage Reviews</a>
-        <a href="/bcp/bia" class="btn btn-secondary btn-sm">Manage Dependencies</a>
-      </div>
-    </div>
-    <div class="card-body">
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <p class="form-label">Approved snapshots</p>
-          <p class="form-value">{{ approved_review_count }}</p>
         </div>
-        <div>
-          <p class="form-label">Mapped dependencies</p>
-          <p class="form-value">{{ dependency_count }}</p>
+      </section>
+
+      <section class="card card--panel ce-section" id="bcp-distribution" data-ae-section="distribution" aria-labelledby="bcp-distribution-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="bcp-distribution-title">Distribution list</h2>
+          <p class="card__subtitle">Who holds a copy of the plan and where it is kept.</p>
+        </div></header>
+        <div class="ce-section__body">
+          {% if distribution_list %}
+          <div class="table-wrapper">
+          <table class="table">
+            <caption class="visually-hidden">Plan distribution list</caption>
+            <thead>
+              <tr>
+                <th scope="col">Copy #</th>
+                <th scope="col">Name</th>
+                <th scope="col">Location</th>
+                {% if can_edit %}<th scope="col"><span class="visually-hidden">Actions</span></th>{% endif %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for entry in distribution_list %}
+              <tr>
+                <td>{{ entry.copy_number }}</td>
+                <td>{{ entry.name }}</td>
+                <td>{{ entry.location or '-' }}</td>
+                {% if can_edit %}
+                <td class="table__actions">
+                  <form method="post" action="/bcp/distribution/{{ entry.id }}/delete" class="inline-form" data-confirm="Delete this entry?">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <button type="submit" class="button button--ghost button--small">Delete<span class="visually-hidden"> {{ entry.name }}</span></button>
+                  </form>
+                </td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          </div>
+          {% else %}
+          <p class="text-muted">No distribution list entries yet.</p>
+          {% endif %}
+          {% if can_edit %}
+          <form method="post" action="/bcp/distribution" class="form ce-subsection" aria-labelledby="bcp-distribution-add-title">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <h3 id="bcp-distribution-add-title">Add a copy</h3>
+            <div class="ce-form-grid">
+              <div class="form-field"><label for="copy_number" class="form-label">Copy #</label><input type="text" id="copy_number" name="copy_number" class="form-input" required></div>
+              <div class="form-field"><label for="name" class="form-label">Name</label><input type="text" id="name" name="name" class="form-input" required></div>
+              <div class="form-field"><label for="location" class="form-label">Location <span class="form-label__optional">optional</span></label><input type="text" id="location" name="location" class="form-input"></div>
+            </div>
+            <div class="form-actions"><button type="submit" class="button button--secondary">Add entry</button></div>
+          </form>
+          {% endif %}
         </div>
-      </div>
+      </section>
+
+      <section class="card card--panel ce-section" id="bcp-reviews" data-ae-section="reviews" aria-labelledby="bcp-reviews-title">
+        <header class="ce-section__header">
+          <div class="ce-section__heading">
+            <h2 class="card__title" id="bcp-reviews-title">Approval snapshots and dependencies</h2>
+            <p class="card__subtitle">Approved plan reviews and the dependencies mapped in the business impact analysis.</p>
+          </div>
+          <div class="ce-section__meta">
+            <a href="/bcp/schedules" class="button button--ghost button--small">Manage reviews</a>
+            <a href="/bcp/bia" class="button button--ghost button--small">Manage dependencies</a>
+          </div>
+        </header>
+        <div class="ce-section__body">
+          <dl class="definition-list">
+            <dt>Approved snapshots</dt><dd>{{ approved_review_count }}</dd>
+            <dt>Mapped dependencies</dt><dd>{{ dependency_count }}</dd>
+          </dl>
       {% if recent_reviews %}
-      <div class="table-responsive">
+      <div class="table-wrapper">
         <table class="table">
           <thead>
             <tr>
@@ -189,19 +230,19 @@
       {% else %}
       <p class="text-muted">No approval snapshots captured yet.</p>
       {% endif %}
-    </div>
-  </section>
+        </div>
+      </section>
 
-  <section class="card">
-    <div class="card-header">
-      <h2 class="card-title">Version Diff View</h2>
-      <p class="text-muted text-sm">Recent plan revisions captured from the audit trail.</p>
-    </div>
-    <div class="card-body">
+      <section class="card card--panel ce-section" id="bcp-history" data-ae-section="history" aria-labelledby="bcp-history-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="bcp-history-title">Version history</h2>
+          <p class="card__subtitle">Recent plan revisions captured from the audit trail.</p>
+        </div></header>
+        <div class="ce-section__body">
       {% if recent_plan_changes %}
       {% for change in recent_plan_changes %}
-      <div class="card card--panel">
-        <div class="card-body">
+      <div class="ce-subsection">
+        <div>
           <strong>{{ change.changed_at.strftime('%Y-%m-%d %H:%M') if change.changed_at else 'Unknown time' }}</strong>
           <span class="text-muted">by {{ change.changed_by }}</span>
           <ul class="list-disc list-inside space-y-1">
@@ -218,15 +259,15 @@
       {% else %}
       <p class="text-muted">Update the plan overview to generate a version diff snapshot.</p>
       {% endif %}
-    </div>
-  </section>
+        </div>
+      </section>
 
-  <!-- PPRR Cards -->
-  <section class="card">
-    <div class="card-header">
-      <h2 class="card-title">Business Continuity Framework (PPRR)</h2>
-    </div>
-    <div class="card-body">
+      <section class="card card--panel ce-section" id="bcp-framework" data-ae-section="framework" aria-labelledby="bcp-framework-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="bcp-framework-title">Business continuity framework (PPRR)</h2>
+          <p class="card__subtitle">Prevention, preparedness, response and recovery, plus the rest of the plan.</p>
+        </div></header>
+        <div class="ce-section__body">
       <div class="grid grid-cols-2 gap-4">
         <!-- Prevention -->
         <a href="/bcp/risks" class="pprr-card">
@@ -318,101 +359,20 @@
         </a>
       </div>
 
-      <div class="mt-4 text-center">
-        <a href="/bcp/glossary" class="btn btn-secondary">View Glossary</a>
-      </div>
+          <p><a href="/bcp/glossary" class="button button--ghost">View glossary</a></p>
+        </div>
+      </section>
     </div>
-  </section>
+  </div>
+
+  {% if can_edit %}
+  <div class="ce-savebar" data-ae-savebar role="region" aria-label="Unsaved plan details" hidden>
+    <p class="ce-savebar__text" aria-live="polite"><strong data-ae-savebar-count>Unsaved changes</strong> <span class="text-muted">in <span data-ae-savebar-sections></span></span></p>
+    <span class="ae-savebar__spacer" aria-hidden="true"></span>
+    <button type="button" class="button button--ghost" data-ae-discard>Discard</button>
+    <button type="submit" class="button button--primary" form="bcp-plan-form">Save plan details</button>
+  </div>
+  {% endif %}
 </div>
-
-<!-- Edit Plan Modal -->
-{% if can_edit %}
-<dialog id="editPlanModal" class="modal">
-  <div class="modal-content">
-    <div class="modal-header">
-      <h3>Edit Plan Details</h3>
-      <button type="button" onclick="document.getElementById('editPlanModal').close()">×</button>
-    </div>
-    <form method="post" action="/bcp/update">
-      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="title" class="form-label required">Title</label>
-          <input type="text" id="title" name="title" class="form-input" value="{{ plan.title }}" required>
-        </div>
-
-        <div class="form-group">
-          <label for="executive_summary" class="form-label">Executive Summary</label>
-          <textarea id="executive_summary" name="executive_summary" class="form-input" rows="4">{{ plan.executive_summary or '' }}</textarea>
-        </div>
-
-        <div class="form-group">
-          <label for="version" class="form-label">Version</label>
-          <input type="text" id="version" name="version" class="form-input" value="{{ plan.version }}">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" onclick="document.getElementById('editPlanModal').close()">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save Changes</button>
-      </div>
-    </form>
-  </div>
-</dialog>
-
-<!-- Add Objective Modal -->
-<dialog id="addObjectiveModal" class="modal">
-  <div class="modal-content">
-    <div class="modal-header">
-      <h3>Add Objective</h3>
-      <button type="button" onclick="document.getElementById('addObjectiveModal').close()">×</button>
-    </div>
-    <form method="post" action="/bcp/objectives">
-      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="objective_text" class="form-label required">Objective</label>
-          <textarea id="objective_text" name="objective_text" class="form-input" rows="3" required></textarea>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" onclick="document.getElementById('addObjectiveModal').close()">Cancel</button>
-        <button type="submit" class="btn btn-primary">Add Objective</button>
-      </div>
-    </form>
-  </div>
-</dialog>
-
-<!-- Add Distribution Entry Modal -->
-<dialog id="addDistributionModal" class="modal">
-  <div class="modal-content">
-    <div class="modal-header">
-      <h3>Add Distribution Entry</h3>
-      <button type="button" onclick="document.getElementById('addDistributionModal').close()">×</button>
-    </div>
-    <form method="post" action="/bcp/distribution">
-      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="copy_number" class="form-label required">Copy #</label>
-          <input type="text" id="copy_number" name="copy_number" class="form-input" required>
-        </div>
-
-        <div class="form-group">
-          <label for="name" class="form-label required">Name</label>
-          <input type="text" id="name" name="name" class="form-input" required>
-        </div>
-
-        <div class="form-group">
-          <label for="location" class="form-label">Location</label>
-          <input type="text" id="location" name="location" class="form-input">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" onclick="document.getElementById('addDistributionModal').close()">Cancel</button>
-        <button type="submit" class="btn btn-primary">Add Entry</button>
-      </div>
-    </form>
-  </div>
-</dialog>
-{% endif %}
+<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
 {% endblock %}
