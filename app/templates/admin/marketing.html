@@ -43,6 +43,14 @@
         <label class="form-label" for="marketing-page-intro">Intro text</label>
         <textarea id="marketing-page-intro" class="form-input" name="intro_text" rows="3"></textarea>
       </div>
+      {% if feature_pack_available('marketing_assistant') %}
+        <div class="form-field form-field--wide">
+          <label class="form-label" for="marketing-page-sources">Source websites for the Marketing Assistant (optional)</label>
+          <textarea id="marketing-page-sources" class="form-input" name="source_urls" rows="3"
+                    placeholder="https://vendor.example.com/product&#10;https://vendor.example.com/datasheet"></textarea>
+          <p class="form-help">One address per line. When given, the Marketing Assistant opens next so it can write the page from these websites.</p>
+        </div>
+      {% endif %}
       <div class="form-field">
         <label class="checkbox">
           <input type="checkbox" name="is_published" value="1" />
@@ -91,6 +99,9 @@
               <td data-label="Leads">{{ page.lead_count }}</td>
               <td class="table__actions">
                 <a href="/admin/marketing/pages/{{ page.id }}/edit" class="button button--ghost button--small">Edit</a>
+                {% if feature_pack_available('marketing_assistant') %}
+                  <a href="/admin/marketing/pages/{{ page.id }}/assistant" class="button button--ghost button--small">Assistant</a>
+                {% endif %}
               </td>
             </tr>
           {% else %}

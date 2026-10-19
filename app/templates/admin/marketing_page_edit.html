@@ -8,6 +8,14 @@
   {% set edit_actions = [
     {"label": "Back to pages", "type": "link", "href": "/admin/marketing"}
   ] %}
+  {% if feature_pack_available('marketing_assistant') %}
+    {% set _ = edit_actions.append({
+      "label": "Marketing Assistant",
+      "type": "link",
+      "href": "/admin/marketing/pages/" ~ marketing_page.id ~ "/assistant",
+      "variant": "primary"
+    }) %}
+  {% endif %}
   {% if marketing_page.slug %}
     {% set _ = edit_actions.append({
       "label": "View page",
@@ -84,7 +92,11 @@
         <tbody>
           {% for section in marketing_page.sections %}
             <tr>
-              <td data-label="Section">{{ section.title }}</td>
+              <td data-label="Section">
+                {{ section.title }}
+                {% if section.assistant_generated %}<span class="status status--info" title="Written by the Marketing Assistant">Assistant</span>{% endif %}
+                {% if section.image_id is not none %}<span class="status status--neutral">Image</span>{% endif %}
+              </td>
               <td data-label="Anchor">#{{ section.anchor_slug }}</td>
               <td data-label="Order">{{ section.sort_order }}</td>
               <td class="table__actions">
