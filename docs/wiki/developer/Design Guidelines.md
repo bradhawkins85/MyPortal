@@ -400,6 +400,127 @@ header:
   controls), nest that block inside a `.page-header-bar` before the
   `.page-header-toolbar`.
 
+### Multi-section settings workspace
+
+**Gold standard:** the asset edit page (`/assets/{id}`) —
+`app/templates/assets/detail.html`, `app/static/js/asset_edit_sections.js`
+and the `.ce-*` rules in `app/static/css/app.css` (the *Company settings
+workspace* block, shared with Admin → Companies → Edit).
+
+Use this layout for any page with several groups of settings or several
+distinct sections about one record: a record edit page, an admin settings
+page, or a detail page that mixes editable profile fields with read-only
+inventory, links and lifecycle actions. Do not stack many cards down one
+long page, and do not build ad-hoc tab strips for this.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ Edit asset · PC-0042                      [Save changes] [Actions ▾]│
+├──────────────────────────────────────────────────────────────────┤
+│ [alerts: archived / documentation incomplete]                    │
+│ ce-overview: [icon] [chip][chip][chip]…   [stat][stat][stat]     │
+├────────────────┬─────────────────────────────────────────────────┤
+│ ce-nav         │ ce-panels                                       │
+│ [Find a set…]  │ ┌ ce-section (one shown at a time) ──────────┐  │
+│ ASSET          │ │ Title                         [section CTA]│  │
+│ ▌Profile    •  │ │ One-line plain-English subtitle            │  │
+│  Inventory     │ ├────────────────────────────────────────────┤  │
+│  Custom fields3│ │ ce-section__body / ce-form-grid            │  │
+│ CONNECTIONS    │ └────────────────────────────────────────────┘  │
+│  Relationships2│                                                 │
+│ ACCESS & LIFE… │ ┌ ce-savebar (sticky, only when dirty) ──────┐  │
+│  Archive       │ │ 2 unsaved changes in Profile  [Discard][Save]│ │
+└────────────────┴─────────────────────────────────────────────────┘
+```
+
+**Structure**
+
+1. Wrap the content in `<div class="<page>-page ce-workspace" data-…-edit>`.
+2. **Overview** (`section.ce-overview`, `aria-label="… at a glance"`): an
+   avatar/icon, a row of summary chips (`.scf-item__chips` / `.scf-chip`
+   with `--muted`, `--logic`, `--visibility` variants) giving the record's
+   state at a glance, and an optional `counter_strip` whose tiles link to
+   their section (`"href": "#asset-photos"`). Page-wide alerts (archived,
+   incomplete documentation, customer view) sit above the overview.
+3. **Section navigation** (`nav.ce-nav`, `aria-label="… sections"`):
+   - A *Find a setting…* search box with a visually hidden label and a
+     `ce-nav__empty` "No settings match your search." message. The search
+     matches nav labels **and** each section's titles, subtitles, legends
+     and field labels.
+   - Links grouped under short uppercase group titles
+     (`ce-nav__group-title`, referenced by `aria-labelledby` on the list).
+     Group by what the user is trying to do — the asset page uses
+     *Asset*, *Connections*, *Documentation*, *Integrations*,
+     *Access & lifecycle* — and keep destructive/lifecycle sections last.
+   - Each link holds a `ce-nav__label`, a `ce-nav__dirty` dot (hidden, with
+     visually hidden "Unsaved changes" text) and an optional
+     `ce-nav__count` (items in that section, or the number needing
+     attention such as failing checks or missing updates).
+   - Define the groups once as a Jinja list of
+     `(key, target_id, label, count, visible)` tuples and render it with a
+     loop; hide a link, and an empty group, when its section is not
+     rendered for this user (permissions, customer view, missing data).
+4. **Sections** (`section.card.card--panel.ce-section`) inside
+   `div.ce-panels`, each with a unique `id`, a
+   `data-…-edit-section="<key>"` matching its nav link and
+   `aria-labelledby` pointing at its `h2.card__title`. Every section has:
+   - `header.ce-section__header` → `div.ce-section__heading` (title plus a
+     one-line `card__subtitle` saying what the section is for and where its
+     data comes from) and, on the right, at most one section-level action
+     or status pill (*Add a check for this device*, *Published*).
+   - `div.ce-section__body`, using `.ce-form-grid` (two columns,
+     `.ce-form-grid__full` to span) for fields and `definition-list` for
+     read-only facts.
+   - A short empty-state line when the section has nothing to show yet.
+5. **One shared settings form.** Fields that save together live in one
+   `<form id="…-settings-form" method="post">` placed in the main section;
+   fields in other sections join it with the `form="…-settings-form"`
+   attribute. The header *Save changes* action, any in-section save
+   buttons and the save bar all submit that form. Independent operations
+   (publish, archive, add relationship, upload a photo) keep their own small
+   forms inside their section.
+6. **Save bar** (`div.ce-savebar`, `role="region"`, `hidden` until
+   something changes): "*N* unsaved changes in *Section, Section*" with
+   `aria-live="polite"`, then *Discard* and the primary *Save changes*.
+
+**Behaviour** (see `asset_edit_sections.js`)
+
+- Without JavaScript every section renders in one column and the nav links
+  are ordinary anchors. The script adds `.is-enhanced` to the workspace
+  and from then on shows only the active section (`.is-active`).
+- The active section follows the URL hash, so `#scripts`, counter tiles,
+  chips and links elsewhere in the page open the right section; any
+  in-page `href="#…"` that points inside a section activates that section
+  and scrolls to the element. The active link gets `aria-current="true"`
+  and focus moves to the section heading.
+- Remember the last section per viewer in `localStorage`
+  (`myportal:<page>-edit:active-section`) wrapped in `try/catch`; a hash in
+  the URL always wins.
+- Track dirty fields against their initial values and show the nav dot,
+  the save bar count and section names; *Discard* restores the initial
+  values and fires `input`/`change` so dependent widgets update; warn on
+  `beforeunload` while changes are unsaved, but not after a successful
+  submit.
+- When validation fails in a hidden section, switch to that section before
+  the browser reports the invalid field.
+- Enter in the search box opens the first match; Escape clears it.
+- Dispatch a bubbling `ae:section-shown` event when a section becomes
+  visible so lazy widgets (maps, charts, tables) can measure or load.
+- Below 1024 px the nav becomes a horizontal, scrollable strip above the
+  sections and the save bar spans the full width; below 640 px the search
+  takes its own row.
+
+**Copy**
+
+- Section titles are nouns the user recognises (*Profile*, *Warranty*,
+  *Customer visibility*, *Archive & restore*), not storage names.
+- Subtitles explain effect and provenance in plain English ("These details
+  are maintained manually and are never overwritten by asset sync.").
+
+When building a new workspace, reuse the `.ce-*` classes as they are and
+copy `asset_edit_sections.js` with page-specific data attributes rather than
+creating a new layout or new CSS for the same pattern.
+
 ### Responsive breakpoints
 
 | Name    | Breakpoint   | Behaviour                              |
@@ -636,6 +757,9 @@ Rules:
   with Back and external links directly left of the Actions menu.
 - ✅ Use `.card.card--panel` as the content container; let the sidebar and header
   handle navigation and identity.
+- ✅ Lay out pages with several settings groups or record sections as a
+  multi-section settings workspace modelled on the asset edit page (see
+  **Multi-section settings workspace** above).
 - ✅ Use `<span data-utc="…">` for all displayed timestamps.
 - ✅ Render status with `.status.status--<variant>` pills.
 - ✅ Use the `data_table` / `table_toolbar` macros for every data table.
@@ -648,6 +772,9 @@ Rules:
 
 - ❌ Don't repeat the page title inside the first card — it already lives in the
   header.
+- ❌ Don't stack many settings cards down one long page or invent a new tab
+  strip for them; use the `.ce-*` section navigation and one focused section
+  at a time.
 - ❌ Don't give destructive or one-off record operations (Delete, Bill Now)
   their own card or button in the content area; put them in the Actions menu
   with a confirmation.

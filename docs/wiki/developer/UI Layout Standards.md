@@ -173,6 +173,18 @@ Each column in the `columns` list passed to `data_table` / `table_column_picker`
     out, `data-searchable-threshold="N"` changes the option threshold and
     `data-searchable-placeholder="…"` sets the search prompt.
 
+### 7.1 Pages with multiple settings or sections
+
+When a page holds several groups of settings or several distinct sections
+about one record, divide it into a settings workspace modelled on the
+**asset edit page** (`app/templates/assets/detail.html`,
+`app/static/js/asset_edit_sections.js`): an overview of summary chips and
+linked counters, a sticky left nav that groups sections by purpose with a
+*Find a setting…* search, counts and unsaved-change dots, one `.ce-section`
+card shown at a time, and a sticky save bar for the shared settings form.
+The full rules are under *Multi-section settings workspace* in the
+[Design Guidelines](Design%20Guidelines.md).
+
 ## 8. Mobile
 
 - Pages must not exceed the viewport width. Tables use the responsive

@@ -180,7 +180,7 @@ reference and must stay consistent with it.
 
 ### Gold-Standard Reference Pages
 
-Two pages set the design bar for all new UI work and for any redesign of an
+Three pages set the design bar for all new UI work and for any redesign of an
 existing page. Study them before building a page, and match their principles
 rather than older inline-edit tables or raw form dumps elsewhere in the app:
 
@@ -191,9 +191,34 @@ rather than older inline-edit tables or raw form dumps elsewhere in the app:
   the list and `#staff-custom-field-modal` editor in
   `app/templates/admin/company_edit.html`, the `.scf-*` rules in
   `app/static/css/app.css`, and `app/static/js/staff_custom_fields_admin.js`
+- **Asset edit page** (`/assets/{id}`) — the standard for any page with
+  multiple settings or sections that need dividing into logical groups:
+  `app/templates/assets/detail.html`, `app/static/js/asset_edit_sections.js`
+  and the `.ce-*` workspace rules in `app/static/css/app.css`
 
-When a request says "make it look like the racks page" or "like the custom
-fields editor", these are the files meant. Follow these principles:
+When a request says "make it look like the racks page", "like the custom
+fields editor" or "like the edit asset page", these are the files meant.
+Follow these principles:
+
+#### Divide multi-section pages into a settings workspace
+
+- When a page has several groups of settings or several distinct sections
+  about one record, lay it out like the asset edit page (full rules under
+  *Multi-section settings workspace* in the Design Guidelines): an overview
+  of summary chips and linked counters, a sticky left nav of sections
+  grouped by purpose with a *Find a setting…* search, counts and unsaved
+  dots, and one `.ce-section` card shown at a time.
+- Every section has a title, a one-line plain-English subtitle and a body;
+  keep lifecycle and destructive sections (visibility, archive) in the last
+  group.
+- Fields that save together share one form (other sections join it with
+  `form="…"`); a sticky save bar lists unsaved changes with *Discard* and
+  *Save changes*, and leaving with unsaved changes is guarded.
+- The active section follows the URL hash and is remembered per viewer;
+  without JavaScript all sections render in one column. Below 1024 px the
+  nav becomes a horizontal strip.
+- Reuse the `.ce-*` classes and the `asset_edit_sections.js` behaviour; do
+  not stack many cards down one long page or invent a new tab strip.
 
 #### Show the thing, not the storage format
 

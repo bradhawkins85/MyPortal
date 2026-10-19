@@ -19656,9 +19656,10 @@ a.shop-product-card {
 }
 
 /* ==========================================================================
- * Company settings workspace (Admin → Companies → Edit)
+ * Settings workspace (Asset edit — the gold standard — and Admin →
+ * Companies → Edit)
  * Overview strip, grouped section navigation with search, one focused
- * section at a time and a save bar for the shared company settings form.
+ * section at a time and a save bar for the shared settings form.
  * Without JavaScript every section is shown in a single column.
  * ========================================================================== */
 
