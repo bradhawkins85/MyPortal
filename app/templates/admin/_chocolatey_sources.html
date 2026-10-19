@@ -4,10 +4,10 @@
 <form method="post" action="/admin/companies/{{ company.id }}/chocolatey-sources" class="form">
   {% include "partials/csrf.html" %}
   <fieldset><legend>Available sources</legend>
-  {% for source in chocolatey_sources %}<label class="form-label"><input type="checkbox" name="sources" value="{{ source.key }}" {% if source.enabled %}checked{% endif %}> {{ source.name }} <span class="text-muted">({{ 'Default' if source.key == 'DEFAULT' else 'Custom' }})</span></label>
+  {% for source in chocolatey_sources %}<label class="form-label"><input type="checkbox" name="sources" value="{{ source.key }}" {% if source.enabled %}checked{% endif %}{% if source.key == 'DEFAULT' %} disabled{% endif %}> {{ source.name }} <span class="text-muted">({{ 'Default' if source.key == 'DEFAULT' else 'Custom' }})</span></label>
   {% else %}<p>No sources are configured in the environment.</p>{% endfor %}
   </fieldset>
-  <p class="form-help">Custom sources start disabled. Enabled numbered sources are tried in order (Custom1, Custom2, …), then unnumbered Custom, then Default as the last fallback. Repository URLs and credentials are configured in the server ENV file.</p>
+  <p class="form-help">The default source is always enabled as the lowest-priority fallback. Custom sources start disabled. Enabled numbered sources are tried in order (Custom1, Custom2, …), then unnumbered Custom, then Default as the last fallback. Repository URLs and credentials are configured in the server ENV file.</p>
   <button class="button button--primary" type="submit">Save sources</button>
 </form>
 {% endif %}

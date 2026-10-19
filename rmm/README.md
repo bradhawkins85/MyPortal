@@ -197,8 +197,9 @@ Default is used only when no preferred source contains the package; a repository
 error stops the job instead of silently changing feeds.
 
 `CUSTOM` and any positive numbered suffix are supported, including gaps. Source
-names (`-n`) must be unique. Each company starts with Default enabled and every
-Custom source disabled. Company administrators can manage their toggles at
+names (`-n`) must be unique. Default is always enabled for every company as the
+lowest-priority fallback; each Custom source is disabled until enabled for that
+company. Company administrators can manage the Custom toggles at
 `/admin/companies/{company_id}/chocolatey-sources`; super admins also see them in
 the company edit settings. Names are displayed, and URLs/passwords stay out of
 those settings and audit records. Store real credentials only in the deployment

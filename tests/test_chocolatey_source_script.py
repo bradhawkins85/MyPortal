@@ -31,7 +31,7 @@ foreach ($arg in $args) {
 }
 if ($env:TEST_FAIL -eq 'priority') { $priority = 0 }
 switch ($args[1]) {
-    'list' { foreach ($s in $state) { "$($s.name)|$($s.url)|$($s.disabled.ToString().ToLower())|||false|$($s.priority)" }; return }
+    'list' { foreach ($s in $state) { "$($s.name)|$($s.url)|$($s.disabled.ToString())|||$($s.priority)|False|False|False" }; return }
     'disable' { foreach ($s in $state) { if ($s.name -eq $name) { $s.disabled = $true } } }
     'enable' { foreach ($s in $state) { if ($s.name -eq $name) { $s.disabled = $false } } }
     'remove' { $state = @($state | Where-Object { $_.name -ne $name }) }

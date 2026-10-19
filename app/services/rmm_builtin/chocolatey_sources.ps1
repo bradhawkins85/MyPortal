@@ -1,5 +1,9 @@
 # Data is JSON; source definitions are never evaluated as PowerShell.
 function Sync-ChocolateySources($sources) {
+    # Windows PowerShell 5.1 emits a JSON array from ConvertFrom-Json as one
+    # object, so @(... | ConvertFrom-Json) is a single nested array. Flatten it
+    # or source names collapse into one string and every source is disabled.
+    $sources = @($sources | ForEach-Object { $_ })
     $command = Get-Command choco.exe -ErrorAction SilentlyContinue
     if ($command) { $script:choco = $command.Source }
     else {
@@ -43,9 +47,10 @@ function Sync-ChocolateySources($sources) {
     $enabledNames = @()
     foreach ($row in $actual) {
         $parts = ([string]$row).Split('|')
-        if ($parts.Count -lt 7) { throw 'Cannot parse Chocolatey source state.' }
+        # name|url|disabled|user|certificate|priority|bypassProxy|selfService|adminOnly
+        if ($parts.Count -lt 6) { throw 'Cannot parse Chocolatey source state.' }
         if ($parts[2] -ieq 'false') {
-            $expected = @($sources | Where-Object { $_.enabled -and $_.name -ieq $parts[0] -and $_.url -eq $parts[1] -and [int]$_.priority -eq [int]$parts[6] })
+            $expected = @($sources | Where-Object { $_.enabled -and $_.name -ieq $parts[0] -and $_.url -eq $parts[1] -and [int]$_.priority -eq [int]$parts[5] })
             if ($expected.Count -ne 1) { throw 'Unexpected enabled Chocolatey source.' }
             $enabledNames += $parts[0]
         }

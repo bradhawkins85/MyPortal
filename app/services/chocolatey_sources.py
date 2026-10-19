@@ -81,7 +81,9 @@ async def for_company(company_id: int, *, secrets: bool = False) -> list[dict]:
         raise ValueError('Company Chocolatey source settings are invalid.') from None
     result = []
     for source in sources:
-        item = {**source, 'enabled': enabled.get(source['key'], source['key'] == 'DEFAULT') is True}
+        # The default source is always enabled as the lowest-priority fallback;
+        # only custom sources are opt-in per company.
+        item = {**source, 'enabled': source['key'] == 'DEFAULT' or enabled.get(source['key']) is True}
         if not secrets:
             item = {k: item[k] for k in ('key', 'name', 'enabled')}
         result.append(item)
@@ -92,7 +94,7 @@ async def save(company_id: int, keys: list[str]) -> None:
     sources = definitions()
     if set(keys) - {source['key'] for source in sources}:
         raise ValueError('A selected Chocolatey source is no longer configured. Reload this page.')
-    values = json.dumps({source['key']: source['key'] in keys for source in sources})
+    values = json.dumps({source['key']: source['key'] == 'DEFAULT' or source['key'] in keys for source in sources})
     if db.is_sqlite():
         suffix = 'ON CONFLICT(company_id) DO UPDATE SET enabled_json = excluded.enabled_json'
     else:
