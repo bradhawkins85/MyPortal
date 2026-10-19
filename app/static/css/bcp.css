@@ -1208,3 +1208,22 @@
     max-height: 92vh;
   }
 }
+
+/* Plan overview workspace (/bcp) */
+.bcp-overview__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base, 0.5rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bcp-overview__list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-base, 0.5rem);
+  padding-bottom: var(--space-gap-base, 0.5rem);
+  border-bottom: 1px solid var(--hf-line-soft, rgba(148, 163, 184, 0.12));
+}

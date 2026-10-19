@@ -1,0 +1,7 @@
+{
+  "guid": "f805c0d1-e4a8-4b7b-b51f-64ef09de4228",
+  "occurred_at": "2026-10-19T11:10Z",
+  "change_type": "Improvement",
+  "summary": "Business continuity plan overview: lay out as a settings workspace with grouped section navigation, and edit plan details, objectives and the distribution list in their sections instead of pop-up dialogs",
+  "content_hash": "2a54b946252150214b187b20f4c743ccdd5900826ee42dd1117154c36d4bd909"
+}
