@@ -1,5 +1,6 @@
 """Targeted inventory lookups, retry behavior, and safe refresh failures."""
 from unittest.mock import AsyncMock
+from xml.sax.saxutils import escape
 
 import httpx
 import pytest
@@ -19,6 +20,71 @@ def feed(entries=()):
             ''.join(f'<entry><m:properties><d:Id>{package}</d:Id><d:Title>{title}</d:Title>'
                     '<d:Version>2.0</d:Version><d:IsPrerelease>false</d:IsPrerelease>'
                     '</m:properties></entry>' for package, title in entries) + '</feed>')
+
+
+def atom_feed(entries):
+    """NuGet syndication puts the package Id in Atom title, not d:Id."""
+    return ('<feed xmlns="http://www.w3.org/2005/Atom" '
+            'xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata" '
+            'xmlns:d="http://schemas.microsoft.com/ado/2007/08/dataservices">' +
+            ''.join(f'<entry><title type="text">{escape(package)}</title>'
+                    '<content type="application/zip" src="https://example.com/package"/>'
+                    f'<m:properties><d:Title>{escape(title)}</d:Title>'
+                    '<d:Version>2.0</d:Version><d:IsPrerelease>false</d:IsPrerelease>'
+                    '</m:properties></entry>' for package, title in entries) + '</feed>')
+
+
+@pytest.mark.parametrize('make_feed', [feed, atom_feed])
+def test_parse_package_id_from_properties_or_atom_title(make_feed):
+    count, rows = catalog._parse(make_feed([
+        ('GoogleChrome', 'Google Chrome'), ('bad;id', 'Invalid'),
+    ]).encode())
+    assert count == 2
+    assert rows == [{'package_id': 'googlechrome', 'title': 'Google Chrome',
+                     'version': '2.0', 'download_count': 0}]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('status', [400, 406])
+async def test_atom_ids_and_ampersand_fallback_match_original_inventory(monkeypatch, mocks, status):
+    _, store, names = mocks
+    names.return_value = ['Google Chrome', 'Veeam Backup & Replication']
+    terms = []
+
+    def handle(request):
+        term = request.url.params['searchTerm']
+        terms.append(term)
+        if '&' in term:
+            return httpx.Response(status)
+        entries = [('GoogleChrome', 'Google Chrome')] if 'Google' in term else [
+            ('veeam', 'Veeam Backup & Replication'),
+            ('unrelated', 'Veeam Backup Tools'),
+        ]
+        return httpx.Response(200, text=atom_feed(entries))
+
+    transport(monkeypatch, handle)
+    result = await catalog.refresh()
+    assert terms == ["'Google Chrome'", "'Veeam Backup & Replication'", "'Veeam Backup Replication'"]
+    assert result['matched'] == result['stored'] == 2
+    assert result['unmatched'] == result['rejected'] == 0
+    assert store.matches == [{'name': names.return_value[0], 'package_id': 'googlechrome'},
+                             {'name': names.return_value[1], 'package_id': 'veeam'}]
+
+
+@pytest.mark.anyio
+async def test_simpler_search_does_not_authorize_simpler_name_match(monkeypatch, mocks):
+    _, store, names = mocks
+    names.return_value = ['Backup & Replication']
+
+    def handle(request):
+        if '&' in request.url.params['searchTerm']:
+            return httpx.Response(406)
+        return httpx.Response(200, text=atom_feed([('different', 'Backup Replication')]))
+
+    transport(monkeypatch, handle)
+    result = await catalog.refresh()
+    assert result['matched'] == 0 and result['unmatched'] == 1
+    assert store.matches == []
 
 
 class Store:
@@ -125,14 +191,14 @@ async def test_rejected_name_is_skipped_and_keeps_its_stored_match(monkeypatch, 
     def handle(request):
         term = request.url.params['searchTerm']
         calls.append(term)
-        if '&' in term:
+        if 'WinCT-Moisture' in term:
             return httpx.Response(status)
         name = term.strip("'")
         return httpx.Response(200, text=feed([(name.lower(), name)]))
     transport(monkeypatch, handle)
     result = await catalog.refresh()
-    # Rejections are not retried, and later names are still looked up.
-    assert calls == ["'Alpha'", "'A&D WinCT-Moisture'", "'Beta'"]
+    # Only one simplified search is attempted, and later names are still looked up.
+    assert calls == ["'Alpha'", "'A&D WinCT-Moisture'", "'A D WinCT-Moisture'", "'Beta'"]
     # The rejected name's stored match is neither replaced nor cleared.
     assert replace.packages == ['alpha', 'beta']
     assert 'A&D WinCT-Moisture' not in replace.cleared
@@ -404,7 +470,7 @@ async def test_inventory_selection_and_catalog_replacement_sql(monkeypatch):
     calls = []
     def handle(request):
         calls.append(request.url.params['searchTerm'])
-        return httpx.Response(200, text=feed([('alpha', 'Alpha')]))
+        return httpx.Response(200, text=atom_feed([('alpha', 'Alpha')]))
     transport(monkeypatch, handle)
     try:
         assert await catalog.inventory_repo.list_catalog_software_names() == ['Alpha']

@@ -27,7 +27,8 @@ RETRY_DELAY = 2.0
 MAX_RETRY_DELAY = 60.0
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 # The community feed rejects some search terms (for example names containing
-# '&') with 406 InvalidQueryParameters. Such a rejection only affects that name.
+# '&') with 406 InvalidQueryParameters. Try simpler discovery text before
+# treating that name as rejected and preserving its stored match.
 REJECTED_STATUS = {400, 406}
 REJECTED_NAMES_REPORTED = 20
 # Save progress regularly so a long refresh survives restarts.
@@ -57,7 +58,10 @@ def _parse(content: bytes) -> tuple[int, list[dict]]:
             continue
         def value(name):
             return props.findtext('d:' + name, default='', namespaces=NS).strip()
-        package, version = value('Id').lower(), value('Version')
+        # NuGet's Atom syndication mapping can put Id only in a:title,
+        # leaving it out of m:properties. d:Title is the product's display name.
+        package = (value('Id') or entry.findtext('a:title', default='', namespaces=NS)).strip().lower()
+        version = value('Version')
         title = value('Title') or package
         if (re.fullmatch(r'[a-z0-9][a-z0-9._-]{0,127}', package) and version and len(version) <= 64
                 and len(title) <= 255 and value('IsPrerelease').lower() != 'true'):
@@ -222,7 +226,19 @@ async def refresh() -> dict:
                       'includePrerelease': 'false', '$skip': '0', '$top': str(RESULT_LIMIT),
                       'semVerLevel': '2.0.0'}
             try:
-                _, rows = _parse(await _request_packages(client, params))
+                try:
+                    content = await _request_packages(client, params)
+                except httpx.HTTPStatusError as exc:
+                    # The community endpoint rejects '&' even when URL encoded.
+                    # Broaden only discovery; matching still uses the original
+                    # application name, so unrelated search hits cannot match.
+                    fallback = ' '.join(_application_name(name).replace('&', ' ').split())
+                    if exc.response.status_code not in REJECTED_STATUS or '&' not in name or not fallback:
+                        raise
+                    await asyncio.sleep(PAGE_DELAY)
+                    params['searchTerm'] = "'" + fallback.replace("'", "''") + "'"
+                    content = await _request_packages(client, params)
+                _, rows = _parse(content)
             except httpx.HTTPStatusError as exc:
                 error = _lookup_error(exc.response, name)
                 status = exc.response.status_code
