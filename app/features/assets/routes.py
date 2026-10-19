@@ -163,7 +163,18 @@ def _main():
     return main_module
 
 
-async def _load_asset_context(request: Request, permission_key: str = "menu.assets"):
+async def _load_asset_context(
+    request: Request, permission_key: str = "menu.assets", *, asset_id: int | None = None
+):
+    """Resolve the user, membership and company for an assets page.
+
+    Pages for a single asset pass ``asset_id``.  Technicians and admins often
+    keep assets from several companies open at once, so when the asset belongs
+    to a company other than the one selected in the switcher the context is
+    resolved against the asset's own company instead, provided the user may
+    manage assets there.  Everyone else stays scoped to the active company,
+    where the callers' ownership checks keep returning "not found".
+    """
     main_module = _main()
     user, redirect = await main_module._require_authenticated_user(request)
     if redirect:
@@ -186,6 +197,17 @@ async def _load_asset_context(request: Request, permission_key: str = "menu.asse
     membership = await main_module._get_effective_company_membership(
         request, user["id"], company_id
     )
+    if asset_id is not None:
+        record = await asset_repo.get_asset_by_id(asset_id)
+        asset_company_id = int(record.get("company_id") or 0) if record else 0
+        if asset_company_id and asset_company_id != company_id:
+            asset_membership = await main_module._get_effective_company_membership(
+                request, user["id"], asset_company_id
+            )
+            if (main_module._membership_menu_can(user, asset_membership, permission_key)
+                    and main_module._membership_menu_can(
+                        user, asset_membership, "menu.assets", write=True)):
+                company_id, membership = asset_company_id, asset_membership
     can_view_assets = main_module._membership_menu_can(user, membership, permission_key)
     if not (is_super_admin or can_view_assets):
         return (
@@ -499,9 +521,11 @@ async def assets_page(request: Request):
     )
 
 
-async def _asset_write_context(request: Request):
+async def _asset_write_context(request: Request, asset_id: int | None = None):
     main_module = _main()
-    user, membership, company, company_id, redirect = await _load_asset_context(request)
+    user, membership, company, company_id, redirect = await _load_asset_context(
+        request, asset_id=asset_id
+    )
     if redirect:
         return user, company, company_id, redirect
     if not (user.get("is_super_admin") or main_module._membership_menu_can(
@@ -1831,7 +1855,9 @@ async def asset_detail_page(
     request: Request, asset_id: int, customer_preview: bool = Query(False)
 ):
     main_module = _main()
-    user, membership, company, company_id, redirect = await _load_asset_context(request)
+    user, membership, company, company_id, redirect = await _load_asset_context(
+        request, asset_id=asset_id
+    )
     if redirect:
         return redirect
 
@@ -2042,7 +2068,9 @@ async def asset_detail_page(
 
 
 async def _photo_context(request: Request, asset_id: int, *, write: bool = False):
-    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    user, membership, _company, company_id, redirect = await _load_asset_context(
+        request, asset_id=asset_id
+    )
     if redirect:
         raise HTTPException(status_code=403, detail="Asset access denied")
     main_module = _main()
@@ -2390,7 +2418,7 @@ async def export_assets(request: Request) -> Response:
 
 @router.post("/assets/{asset_id}/publish")
 async def publish_asset(request: Request, asset_id: int):
-    user, _membership, _, company_id, redirect = await _load_asset_context(request)
+    user, _membership, _, company_id, redirect = await _load_asset_context(request, asset_id=asset_id)
     if redirect or not user.get("is_super_admin"):
         raise HTTPException(status_code=403, detail="Super admin privileges required")
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2414,7 +2442,7 @@ async def publish_asset(request: Request, asset_id: int):
 @router.post("/assets/{asset_id}/relationships")
 async def create_asset_relationship(request: Request, asset_id: int):
     main_module = _main()
-    user, membership, _, company_id, redirect = await _load_asset_context(request)
+    user, membership, _, company_id, redirect = await _load_asset_context(request, asset_id=asset_id)
     if redirect:
         return redirect
     if not (user.get("is_super_admin") or main_module._membership_menu_can(
@@ -2495,7 +2523,7 @@ async def create_asset_relationship(request: Request, asset_id: int):
 @router.post("/assets/{asset_id}/relationships/{relationship_id}/delete")
 async def delete_asset_relationship(request: Request, asset_id: int, relationship_id: int):
     main_module = _main()
-    user, membership, _, company_id, redirect = await _load_asset_context(request)
+    user, membership, _, company_id, redirect = await _load_asset_context(request, asset_id=asset_id)
     if redirect:
         return redirect
     if not (user.get("is_super_admin") or main_module._membership_menu_can(
@@ -2518,7 +2546,7 @@ async def delete_asset_relationship(request: Request, asset_id: int, relationshi
 @router.post("/assets/{asset_id}")
 async def update_asset_documentation(request: Request, asset_id: int):
     main_module = _main()
-    user, membership, _, company_id, redirect = await _load_asset_context(request)
+    user, membership, _, company_id, redirect = await _load_asset_context(request, asset_id=asset_id)
     if redirect:
         return redirect
     if not (user.get("is_super_admin") or main_module._membership_menu_can(
@@ -2568,7 +2596,7 @@ async def update_asset_documentation(request: Request, asset_id: int):
 
 @router.post("/assets/{asset_id}/asset-type", summary="Override or reset a synced asset's type")
 async def update_asset_type(request: Request, asset_id: int):
-    user, _company, company_id, redirect = await _asset_write_context(request)
+    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2634,7 +2662,7 @@ def _form_date(value: Any) -> date | None:
 async def lookup_asset_warranty(request: Request, asset_id: int):
     from app.services import warranty_lookup
 
-    user, _company, company_id, redirect = await _asset_write_context(request)
+    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2657,7 +2685,7 @@ async def lookup_asset_warranty(request: Request, asset_id: int):
 
 @router.post("/assets/{asset_id}/warranty", summary="Record or clear an asset's warranty dates manually")
 async def save_manual_asset_warranty(request: Request, asset_id: int):
-    user, _company, company_id, redirect = await _asset_write_context(request)
+    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2692,7 +2720,7 @@ async def save_manual_asset_warranty(request: Request, asset_id: int):
 
 @router.post("/assets/{asset_id}/reconciliation/{source_record_id}/approve")
 async def approve_asset_reconciliation(request: Request, asset_id: int, source_record_id: int):
-    user, _company, company_id, redirect = await _asset_write_context(request)
+    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2713,7 +2741,7 @@ async def approve_asset_reconciliation(request: Request, asset_id: int, source_r
 @router.post("/assets/{asset_id}/archive")
 async def archive_asset(request: Request, asset_id: int):
     main_module = _main()
-    user, membership, _, company_id, redirect = await _load_asset_context(request)
+    user, membership, _, company_id, redirect = await _load_asset_context(request, asset_id=asset_id)
     if redirect:
         return redirect
     if not (user.get("is_super_admin") or main_module._membership_menu_can(
@@ -2736,7 +2764,7 @@ async def archive_asset(request: Request, asset_id: int):
 
 @router.delete("/assets/{asset_id}", response_class=JSONResponse)
 async def delete_asset(request: Request, asset_id: int):
-    user, _membership, _, company_id, redirect = await _load_asset_context(request)
+    user, _membership, _, company_id, redirect = await _load_asset_context(request, asset_id=asset_id)
     if redirect:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
