@@ -506,3 +506,26 @@ async def test_inventory_context_allows_installs_only_on_active_windows_agents(m
     assert not (await rmm_inventory.asset_inventory_context(windows, can_refresh=False))['can_install_apps']
     linux = {**windows, 'os': 'linux'}
     assert not (await rmm_inventory.asset_inventory_context(linux, can_refresh=True))['can_install_apps']
+
+
+def test_asset_rmm_menu_offers_install_choco_package_with_modal():
+    env = Environment(loader=FileSystemLoader(ROOT / 'app/templates'))
+    menu = env.from_string('{% import "rmm/_macros.html" as rmm_ui %}'
+                           '{{ rmm_ui.asset_menu(7, "PC", [], run_script=True, choco_install=choco) }}')
+    html = menu.render(choco=True)
+    assert 'Install Choco Package' in html and 'aria-controls="choco-install-modal"' in html
+    assert 'Install Choco Package' not in menu.render(choco=False)
+    # The menu still appears for the Chocolatey action alone.
+    alone = env.from_string('{% import "rmm/_macros.html" as rmm_ui %}{{ rmm_ui.asset_menu(7, "PC", [], choco_install=True) }}')
+    assert 'data-choco-modal-open' in alone.render()
+    modal = env.get_template('rmm/_choco_install_modal.html').render(
+        asset={'id': 10}, asset_display_name='PC', csrf_token='token')
+    assert 'id="choco-install-modal"' in modal and 'action="/rmm/assets/10/software/install"' in modal
+    assert 'name="package_id"' in modal and 'name="_csrf"' in modal
+
+
+def test_asset_page_shows_choco_install_only_for_windows_agents_with_run_access():
+    source = (ROOT / 'app/templates/assets/detail.html').read_text()
+    assert "choco_install=choco_install" in source
+    assert source.count("rmm.can_run and rmm.agent and (rmm.agent.os or '') | lower == 'windows'") == 2
+    assert 'rmm_choco_install.js' in source

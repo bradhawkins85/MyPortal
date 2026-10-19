@@ -106,6 +106,9 @@ without writing a script. Both actions run the built-in patch job (shown in
 **Scripts → Run history**) with the company's enabled Chocolatey sources, need an
 active Windows agent, and never restart the device.
 
+- **Asset page → Scripts → RMM → Install Choco Package**: opens a window to
+  search the downloaded app list, choose an app (or enter a package ID) and push
+  the install. Shown for Windows devices with the RMM agent.
 - **Asset page → Software → Install an app with Chocolatey**: enter an exact
   package ID (suggestions come from the downloaded app list; any package in the
   company's enabled sources works). An installed app is updated to the latest
