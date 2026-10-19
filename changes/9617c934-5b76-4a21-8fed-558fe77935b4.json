@@ -1,0 +1,7 @@
+{
+  "guid": "9617c934-5b76-4a21-8fed-558fe77935b4",
+  "occurred_at": "2026-10-19T09:00Z",
+  "change_type": "Feature",
+  "summary": "Marketing: new Marketing Assistant - list the websites a marketing page should be built from and it writes or refreshes the page with text and images from them, cross-checking every statement against those websites and leaving out (and reporting) anything it cannot verify; each run can be undone (MARKETING_ASSISTANT_*, feature pack marketing_assistant)",
+  "content_hash": "5c2c36406c84ff6bc290dbc956fcd4953c2def7be2e5610f08898ed711a3557c"
+}
