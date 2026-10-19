@@ -102,27 +102,18 @@
 {%- endmacro %}
 
 {# RMM actions for one asset (asset page Scripts card, ticket asset list):
-   a RustDesk button with a menu beside it for remote desktop, file transfer
-   and terminal sessions, then one "RMM" menu with every other RMM action.
+   a RustDesk icon button that starts a remote desktop session, then one
+   "RMM" menu with every other RMM action.
    rmm_remote_control.js starts the sessions; ticket_detail.js builds the same
    markup when it redraws the list (window.MyPortalRmm.assetActions).
-   The asset detail page uses rustdesk_in_menu to group all sessions under RMM. #}
+   The asset detail page uses rustdesk_in_menu to offer every RustDesk session
+   (remote desktop, file transfer, terminal) under RMM instead. #}
 {% set REMOTE_MODES = [("remote", "Remote desktop"), ("file_transfer", "File transfer"), ("terminal", "Terminal")] %}
 {% macro asset_menu(asset_id, asset_name, remote_control, run_script=false, rustdesk_in_menu=false) -%}
 {%- set providers = remote_control | map(attribute="provider") | list -%}
 <div class="rmm-asset-actions">
   {%- if "rustdesk" in providers and not rustdesk_in_menu %}
-  <div class="rmm-split">
-    <button type="button" class="button button--ghost button--small rmm-split__main" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}" title="Start a RustDesk remote session" aria-label="Start a RustDesk remote session for {{ asset_name }}"><img class="rmm-split__icon" src="/static/images/rustdesk.svg" alt="" width="16" height="16"></button>
-    <details class="rmm-menu rmm-split__more" data-rmm-menu>
-      <summary class="button button--ghost button--small rmm-menu__toggle" aria-label="More RustDesk sessions for {{ asset_name }}"><span aria-hidden="true">▾</span></summary>
-      <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RustDesk sessions for {{ asset_name }}">
-        {%- for mode, label in REMOTE_MODES %}
-        <button type="button" class="dropdown__item" role="menuitem" data-rmm-remote="rustdesk" data-rmm-remote-mode="{{ mode }}" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}">{{ label }}</button>
-        {%- endfor %}
-      </div>
-    </details>
-  </div>
+  <button type="button" class="button button--ghost button--icon rmm-rustdesk" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}" title="Start a RustDesk remote session" aria-label="Start a RustDesk remote session for {{ asset_name }}"><img class="rmm-rustdesk__icon" src="/static/images/rustdesk.svg" alt="" width="16" height="16"></button>
   {%- endif %}
   {%- if "meshcentral" in providers or run_script or (rustdesk_in_menu and "rustdesk" in providers) %}
   <details class="rmm-menu" data-rmm-menu>

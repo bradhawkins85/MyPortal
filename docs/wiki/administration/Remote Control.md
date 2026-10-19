@@ -69,13 +69,13 @@ MeshCentral also needs:
 
 ## Connecting
 
-Beside each asset (on its **Scripts** card, and in a ticket's asset list):
+In a ticket's asset list, the **RustDesk** icon beside each asset starts a remote desktop
+session straight away.
 
-- **RustDesk** starts a remote desktop session. The **▾** beside it offers **Remote desktop**,
-  **File transfer** and **Terminal** sessions (terminal needs RustDesk 1.4.1 or later on the
-  technician's computer).
-- The **RMM** menu holds MeshCentral (desktop, files or terminal), **Run script** on the asset
-  page, and future RMM actions.
+On an asset's **Scripts** card, the **RMM** menu holds RustDesk and MeshCentral **Remote
+desktop**, **File transfer** and **Terminal** sessions (RustDesk terminal needs RustDesk 1.4.1 or
+later on the technician's computer), **Run script**, and future RMM actions. In a ticket, the
+**RMM** menu holds the MeshCentral sessions.
 
 MyPortal shows the activation script's progress, then opens the session as soon as the device
 reports back: RustDesk through a `rustdesk://` link carrying the ID and password (the browser may

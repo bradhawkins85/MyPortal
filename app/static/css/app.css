@@ -12671,7 +12671,7 @@ a.service-card__ai-icon:hover {
 }
 
 /* RMM actions beside each asset (rmm/_macros.html asset_menu): a RustDesk
-   split button and an "RMM" menu, both <details> dropdowns. */
+   icon button and an "RMM" <details> dropdown. */
 .rmm-asset-actions {
   display: inline-flex;
   flex-wrap: wrap;
@@ -12679,27 +12679,10 @@ a.service-card__ai-icon:hover {
   gap: var(--space-gap-tight, 0.35rem);
 }
 
-.rmm-split {
-  display: inline-flex;
-  align-items: stretch;
-}
-
-.rmm-split > .rmm-split__main {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.rmm-split__icon {
+.rmm-rustdesk__icon {
   display: block;
-  width: 1rem;
-  height: 1rem;
-}
-
-.rmm-split__more > summary {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-left: 1px solid rgba(148, 163, 184, 0.25);
-  padding-inline: 0.45rem;
+  width: 1.1rem;
+  height: 1.1rem;
 }
 
 .rmm-menu {

@@ -1,0 +1,7 @@
+{
+  "guid": "58450785-c7a4-453c-9973-e2c5537bab13",
+  "occurred_at": "2026-10-19T03:00Z",
+  "change_type": "Improvement",
+  "summary": "RMM: tickets show a RustDesk icon button that starts a remote desktop session directly, without the session menu",
+  "content_hash": "853aa954d73fa19beba68fdc910038fb3d1efae93014c1df18eef26e4356ff5f"
+}
