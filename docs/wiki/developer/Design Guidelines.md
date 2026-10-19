@@ -552,7 +552,13 @@ nav entry per category) and **Shop admin** (`/admin/shop` and its tool
 pages, which share the `shop_admin_workspace` macro in
 `admin/_shop_workspace.html`; its *Categories* group, listed last so it never hides the other areas, mirrors the shop's
 Featured, Subscriptions and top-level categories and filters the catalogue
-with `?category=`).
+with `?category=`). The **Marketing** admin pages (`/admin/marketing`, email campaigns, a
+campaign's detail, form and preview, the page editor and the SMB1001 and
+Essential 8 help links) share the `marketing_workspace` macro in
+`admin/_marketing_workspace.html`: the current page's sections come first in
+the nav and links to the other marketing areas follow. A nav may mix
+in-page sections (`data-ae-link`) with links to other pages; the search
+filters both.
 Views that used to open as modals from an Actions menu (the integration
 health center, credential expiry, setup wizard and task dependency graph,
 and Defender's protection policy, ticket actions and exclusions) are

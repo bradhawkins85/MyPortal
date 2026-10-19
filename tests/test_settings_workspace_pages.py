@@ -334,3 +334,76 @@ def test_admin_shop_page_filters_by_category(monkeypatch):
     everything = run(None)
     assert everything["shop_nav_category"] is None and len(everything["products"]) == 2
     assert list_products.await_args.args[0].category_ids is None
+
+
+def _marketing(template: str, **context) -> str:
+    env = _env()
+    env.globals["feature_pack_available"] = lambda name: True
+    return env.get_template(f"admin/{template}.html").render(csrf_token="tok", is_super_admin=True, **context)
+
+
+def _nav_titles(html: str) -> list[str]:
+    return re.findall(r'class="ce-nav__group-title"[^>]*>([^<]+)<', html)
+
+
+def test_marketing_pages_share_the_marketing_nav():
+    html = _marketing(
+        "marketing",
+        marketing_pages=[{"id": 1, "title": "Security", "slug": "security", "is_published": True, "lead_count": 2}],
+        marketing_leads=[],
+    )
+    _assert_workspace(html, ["new-page", "pages", "contacts"])
+    assert 'data-ae-default="pages"' in html and "1 of 1 page published" in html
+    # The page's own sections come first, then the other marketing areas.
+    assert _nav_titles(html) == ["Marketing pages", "Marketing"]
+    assert 'href="/admin/marketing" aria-current="page"' in html
+    for href in ("/admin/marketing/campaigns", "/admin/marketing/smb1001-help-links", "/admin/marketing/essential8-help-links"):
+        assert f'href="{href}"' in html, href
+
+    campaigns = _marketing("marketing_campaigns", campaigns=[], opt_outs=[])
+    _assert_workspace(campaigns, ["campaigns", "opt-outs"])
+    assert 'href="/admin/marketing/campaigns" aria-current="page"' in campaigns
+
+    technician = _env()
+    technician.globals["feature_pack_available"] = lambda name: True
+    limited = technician.get_template("admin/marketing_campaigns.html").render(
+        csrf_token="tok", is_super_admin=False, campaigns=[], opt_outs=[]
+    )
+    assert "help-links" not in limited
+
+
+def test_marketing_help_links_are_sections_of_one_form():
+    controls = [
+        {"id": 3, "control_order": 1, "name": "Application control", "description": "", "requirements": []},
+        {"id": 4, "control_order": 2, "name": "Patch applications", "description": "", "requirements": []},
+    ]
+    html = _marketing("marketing_essential8_help_links", essential8_help_controls=controls, marketing_pages=[])
+    _assert_workspace(html, ["item-3", "item-4"])
+    assert 'data-ae-form="e8-help-form"' in html and 'id="e8-help-form"' in html and "data-ae-savebar" in html
+    assert html.index('id="e8-help-form"') < html.index('data-ae-section="item-3"')
+    assert 'href="/admin/marketing/essential8-help-links" aria-current="page"' in html
+
+    tiers = [{"tier_level": 1, "name": "Essentials", "description": "", "controls": []}]
+    smb = _marketing("marketing_smb1001_help_links", smb1001_help_tiers=tiers, marketing_pages=[])
+    _assert_workspace(smb, ["item-1"])
+    assert 'data-ae-form="smb1001-help-form"' in smb
+
+
+def test_marketing_campaign_detail_sections_follow_status():
+    base = dict(audience_recipient_count=3, audience_company_count=1, preview_limit=50, audience_recipients=[],
+                audience_excluded=[], campaign_stats={}, recipients=[])
+    draft = _marketing("marketing_campaign_detail", campaign={"id": 7, "name": "Spring", "status": "draft"}, **base)
+    assert _sections(draft) == ["summary", "audience"]
+    sent = _marketing("marketing_campaign_detail", campaign={"id": 7, "name": "Spring", "status": "completed"}, **base)
+    assert _sections(sent) == ["summary", "results", "recipients"]
+    assert 'href="/admin/marketing/campaigns" aria-current="page"' in sent
+
+
+def test_marketing_campaign_preview_keeps_its_content_visible():
+    html = _marketing(
+        "marketing_campaign_preview", campaign={"id": 7, "name": "Spring", "status": "draft"},
+        rendered_email={"subject": "Hello", "html": "<p>Hi</p>", "text": "Hi"}, preview_recipients=[],
+        preview_recipient={"name": "Sam", "email": "sam@example.test", "company_name": "Contoso"},
+    )
+    # No sections, so the nav only links areas and nothing is hidden.
+    assert "data-ae-link-nav" in html and _nav_titles(html) == ["Marketing"]
