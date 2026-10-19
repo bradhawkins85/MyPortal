@@ -110,10 +110,14 @@ async def prune(names: list[str]) -> int:
     """After a complete pass, forget names no longer in the Software inventory
     and remove packages no remaining name matches. Returns packages removed."""
     current = {name.casefold() for name in names}
-    for table in ('rmm_chocolatey_software_matches', 'rmm_chocolatey_lookups'):
-        stale = [(row['name'],) for row in await db.fetch_all(f'SELECT name FROM {table}')
+    for select, delete in (
+        ('SELECT name FROM rmm_chocolatey_software_matches',
+         'DELETE FROM rmm_chocolatey_software_matches WHERE name = %s'),
+        ('SELECT name FROM rmm_chocolatey_lookups', 'DELETE FROM rmm_chocolatey_lookups WHERE name = %s'),
+    ):
+        stale = [(row['name'],) for row in await db.fetch_all(select)
                  if str(row['name']).casefold() not in current]
-        await _execute_batches(f'DELETE FROM {table} WHERE name = %s', stale)
+        await _execute_batches(delete, stale)
     stale_packages = [(row['package_id'],) for row in await db.fetch_all(
         'SELECT p.package_id FROM rmm_chocolatey_packages p '
         'LEFT JOIN rmm_chocolatey_software_matches m ON m.package_id = p.package_id '
