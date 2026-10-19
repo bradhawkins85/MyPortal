@@ -79,6 +79,10 @@ used by both Software upgrade checks and the patch policy application picker.
 After updating MyPortal, run **Update Chocolatey app list** again to populate
 these mappings for existing inventory.
 
+**Run now** starts the refresh in the background and returns straight away; a full refresh
+can take much longer than a web request is allowed to wait. The Scheduled tasks page shows
+**Running in the background…** and refreshes when the run is recorded in the task's history.
+
 Each policy specifies an exact package ID and exact installed application display
 name. The agent reads Chocolatey's local package list and machine-wide 32/64-bit
 Windows uninstall registry inventory, then queries the latest stable version from

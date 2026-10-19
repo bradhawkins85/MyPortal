@@ -706,6 +706,25 @@
       });
     }
 
+    async function latestRunId(taskId) {
+      try {
+        const runs = await requestJson(`/scheduler/tasks/${taskId}/runs?limit=1`);
+        return runs && runs.length ? runs[0].id : 0;
+      } catch (error) {
+        return 0;
+      }
+    }
+
+    async function waitForRun(taskId, before) {
+      // Poll every 5 seconds, backing off to 30 seconds for long runs.
+      for (let attempt = 0; ; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, attempt < 24 ? 5000 : 30000));
+        if ((await latestRunId(taskId)) > before) {
+          return;
+        }
+      }
+    }
+
     async function runTask(task, button) {
       if (button.disabled) {
         return;
@@ -719,8 +738,16 @@
         chip.textContent = 'Running…';
       }
       try {
+        // The task runs in the background (some take longer than a web request
+        // may), so wait for its run to be recorded before refreshing the page.
+        const before = await latestRunId(task.id);
         await requestJson(`/scheduler/tasks/${task.id}/run`, { method: 'POST' });
-        window.setTimeout(reloadPage, 250);
+        if (chip) {
+          chip.textContent = 'Running in the background…';
+          chip.title = 'This page refreshes when the run finishes. You can leave it and check back later.';
+        }
+        await waitForRun(task.id, before);
+        reloadPage();
       } catch (error) {
         button.disabled = false;
         button.removeAttribute('aria-busy');
