@@ -216,7 +216,8 @@ def test_hidden_expandable_sidebar_items_are_not_displayed():
 
 
 def test_sidebar_custom_groups_have_profile_controls_and_nested_styles():
-    base_template = Path("app/templates/base.html").read_text()
+    # The shared layout script ships as app/static/js/layout.js.
+    base_template = Path("app/templates/base.html").read_text() + Path("app/static/js/layout.js").read_text()
     profile_template = Path("app/templates/admin/profile.html").read_text()
     profile_script = Path("app/static/js/profile.js").read_text()
     stylesheet = Path("app/static/css/app.css").read_text()
@@ -233,7 +234,8 @@ def test_sidebar_custom_groups_have_profile_controls_and_nested_styles():
 
 
 def test_sidebar_applies_grouped_defaults_and_delegates_toggles():
-    base_template = Path("app/templates/base.html").read_text()
+    # The shared layout script ships as app/static/js/layout.js.
+    base_template = Path("app/templates/base.html").read_text() + Path("app/static/js/layout.js").read_text()
 
     # First visits render the grouped default rather than a flat list.
     assert "sidebar_default_preferences()" in base_template
@@ -244,7 +246,8 @@ def test_sidebar_applies_grouped_defaults_and_delegates_toggles():
 
 
 def test_top_navigation_dropdowns_are_exclusive_and_aligned():
-    base_template = Path("app/templates/base.html").read_text()
+    # The shared layout script ships as app/static/js/layout.js.
+    base_template = Path("app/templates/base.html").read_text() + Path("app/static/js/layout.js").read_text()
     stylesheet = Path("app/static/css/app.css").read_text()
 
     assert "if (item !== menuItem && !item.contains(menuItem)) setMenuItemExpanded(item, false);" in base_template

@@ -1,0 +1,7 @@
+{
+  "guid": "3a1e7df1-0452-4bf1-9bbe-1ceaca7d18f3",
+  "occurred_at": "2026-10-19T00:04Z",
+  "change_type": "Improvement",
+  "summary": "Performance: faster page loads and lighter requests \u2014 compressed static assets, cached asset fingerprints, a cheaper release check, fewer session writes, a leaner middleware stack and a cached layout script",
+  "content_hash": "ed461ed072ecb2ddd810b2d528e03c9bb83e5c7c750078ac7db5cf68cc6cf6de"
+}

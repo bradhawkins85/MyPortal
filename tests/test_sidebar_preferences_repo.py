@@ -134,7 +134,8 @@ def test_profile_reset_button_resets_immediately():
 
     profile_template = Path("app/templates/admin/profile.html").read_text()
     profile_script = Path("app/static/js/profile.js").read_text()
-    base_template = Path("app/templates/base.html").read_text()
+    # The shared layout script ships as app/static/js/layout.js.
+    base_template = Path("app/templates/base.html").read_text() + Path("app/static/js/layout.js").read_text()
     users_routes = Path("app/api/routes/users.py").read_text()
 
     assert "data-sidebar-reset" in profile_template
@@ -170,7 +171,8 @@ def test_profile_offers_always_show_top_menu_labels():
 
     profile_template = Path("app/templates/admin/profile.html").read_text()
     profile_script = Path("app/static/js/profile.js").read_text()
-    base_template = Path("app/templates/base.html").read_text()
+    # The shared layout script ships as app/static/js/layout.js.
+    base_template = Path("app/templates/base.html").read_text() + Path("app/static/js/layout.js").read_text()
 
     assert 'name="top-menu-labels"' in profile_template
     assert "Always show menu labels" in profile_template
@@ -201,7 +203,8 @@ def test_profile_menu_offers_role_switcher_modes_to_super_admins_only():
     for mode in ("full", "icon", "hidden"):
         assert f'name="role-switcher-display" value="{mode}"' in template
 
-    base = Path("app/templates/base.html").read_text()
+    # The shared layout script ships as app/static/js/layout.js.
+    base = Path("app/templates/base.html").read_text() + Path("app/static/js/layout.js").read_text()
     assert "data-role-switcher-container" in base
     assert "data-role-switcher-toggle" in base
     assert "data-role-switcher-popover" in base

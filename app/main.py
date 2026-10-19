@@ -52,7 +52,9 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from itsdangerous import BadSignature, URLSafeSerializer
-from starlette.datastructures import FormData, URL
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import FormData, MutableHeaders, URL
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from http import HTTPStatus
 
 from app.api.routes import (
@@ -117,6 +119,7 @@ from app.core.config import get_settings, get_templates_config
 from app.core.database import db
 from app.core.event_log_database import event_log_db
 from app.core.stats_database import stats_db
+from app.core.static_assets import CompressedStaticFiles, content_hash, content_hash_for, release_files
 from app.core.features import init_registry
 from app.core.legal import LEGAL_POLICIES, LEGAL_POLICIES_CHANGE_SUMMARY, LEGAL_POLICIES_UPDATED
 from app.core.plugin_loader import get_plugin_loader, init_plugin_loader
@@ -372,6 +375,10 @@ _RELEASE_HASH_ROOTS = (
     templates_config.static_path,
     Path(__file__).resolve().parent / "templates",
 )
+# User uploads and cached tray installers live under static/ but are not part
+# of a release; hashing them on every manifest poll read the installers in
+# full and changed the release digest whenever an installer was refreshed.
+_RELEASE_EXCLUDED_STATIC_DIRS = frozenset({"uploads", "tray"})
 _PWA_ICON_SOURCES = [
     {
         "src": "/static/logo.svg",
@@ -934,10 +941,7 @@ def _static_url(path: str) -> str:
 def _content_hash(path: Path) -> str:
     """Return a short content revision without relying on process version state."""
 
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
-    except OSError:
-        return ""
+    return content_hash(path)
 
 
 def _release_manifest() -> dict[str, Any]:
@@ -958,10 +962,11 @@ def _release_manifest() -> dict[str, Any]:
     for root in _RELEASE_HASH_ROOTS:
         if not root.is_dir():
             continue
-        prefix = "/static/" if root == templates_config.static_path else "template:"
-        for file_path in sorted(path for path in root.rglob("*") if path.is_file()):
-            relative = file_path.relative_to(root).as_posix()
-            files[prefix + relative] = _content_hash(file_path)
+        is_static_root = root == templates_config.static_path
+        prefix = "/static/" if is_static_root else "template:"
+        skip_dirs = _RELEASE_EXCLUDED_STATIC_DIRS if is_static_root else frozenset()
+        for relative, file_path, signature in release_files(root, skip_dirs=skip_dirs):
+            files[prefix + relative] = content_hash_for(file_path, signature)
     identity = {"content": files, "policy": policy}
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:20]
     precache_paths = [
@@ -1104,7 +1109,7 @@ async def release_manifest() -> JSONResponse:
     """Publish content revisions and the browser compatibility policy."""
 
     return JSONResponse(
-        _release_manifest(),
+        await run_in_threadpool(_release_manifest),
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
 
@@ -1116,7 +1121,8 @@ async def pwa_service_worker() -> Response:
     if not _PWA_SERVICE_WORKER_PATH.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     source = _PWA_SERVICE_WORKER_PATH.read_text(encoding="utf-8")
-    source = source.replace("__RELEASE_REVISION__", _release_manifest()["release"])
+    manifest = await run_in_threadpool(_release_manifest)
+    source = source.replace("__RELEASE_REVISION__", manifest["release"])
     response = PlainTextResponse(source, media_type="application/javascript")
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -1167,32 +1173,57 @@ app.mount(
     StaticFiles(directory=str(templates_config.static_path / "tray"), check_dir=False),
     name="static-tray",
 )
-app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
+app.mount("/static", CompressedStaticFiles(directory=str(templates_config.static_path)), name="static")
 
 
-@app.middleware("http")
-async def core_component_availability_guard(request: Request, call_next: Any) -> Response:
+class _CoreComponentAvailabilityGuard:
     """Return 404 for routes owned by a deployment-disabled core component."""
 
-    if not get_component_availability().path_available(request.url.path):
-        return JSONResponse({"detail": "Not Found"}, status_code=status.HTTP_404_NOT_FOUND)
-    return await call_next(request)
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and not get_component_availability().path_available(
+            Request(scope).url.path
+        ):
+            response = JSONResponse({"detail": "Not Found"}, status_code=status.HTTP_404_NOT_FOUND)
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
-@app.middleware("http")
-async def release_cache_headers(request: Request, call_next: Any) -> Response:
+class _ReleaseCacheHeaders:
     """Keep documents/release metadata fresh and fingerprinted assets immutable."""
 
-    response = await call_next(request)
-    path = request.url.path
-    if path.startswith("/static/"):
-        if request.query_params.get("v"):
-            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        else:
-            response.headers.setdefault("Cache-Control", "public, max-age=300, must-revalidate")
-    elif response.headers.get("content-type", "").startswith("text/html"):
-        response.headers["Cache-Control"] = "no-cache, must-revalidate"
-    return response
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
+        path = request.url.path
+
+        async def send_with_cache_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                if path.startswith("/static/"):
+                    if request.query_params.get("v"):
+                        headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                    else:
+                        headers.setdefault("Cache-Control", "public, max-age=300, must-revalidate")
+                elif headers.get("content-type", "").startswith("text/html"):
+                    headers["Cache-Control"] = "no-cache, must-revalidate"
+            await send(message)
+
+        await self.app(scope, receive, send_with_cache_headers)
+
+
+# Pure ASGI middleware (not ``@app.middleware``): each BaseHTTPMiddleware
+# layer added a task group and memory streams to every request.
+app.add_middleware(_CoreComponentAvailabilityGuard)
+app.add_middleware(_ReleaseCacheHeaders)
 
 
 @app.websocket("/ws/refresh")
