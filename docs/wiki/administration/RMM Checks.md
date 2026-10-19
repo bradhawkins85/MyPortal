@@ -3,7 +3,9 @@
 Checks watch devices with the [RMM agent](RMM%20Scripts.md) and act when something goes wrong.
 Manage them from **Checks** in the main menu (`/rmm/checks`); each asset's page shows the checks
 that reach it under **Checks**, with their latest results, and charts of the device's stats under
-**Machine stats**.
+**Machine stats**. On the Checks page, select a check's **failing** or **with a problem** count to
+see which of the company's devices it is on, with each device's latest value, when the problem
+started and when it was last checked.
 
 ## Types of check
 

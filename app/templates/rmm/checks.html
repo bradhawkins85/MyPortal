@@ -31,7 +31,7 @@
         <td data-label="Then" data-column-key="action">{{ check.action_label }}{% if check.action == "run_script" %} <span class="text-muted">({{ "again every " ~ check.cooldown_minutes ~ " min while failing" if check.cooldown_minutes else "once per failure" }})</span>{% endif %}{% if check.action == "create_ticket" %} <span class="text-muted">(one open ticket per device)</span>{% endif %}</td>
         <td data-label="Devices" data-column-key="results" data-mobile-hidden="true">
           {% set failing = check.counts.get("failing", 0) %}{% set passing = check.counts.get("passing", 0) %}{% set warning = check.counts.get("warning", 0) %}
-          {% if failing %}<span class="status status--error">{{ failing }} failing</span> {% endif %}{% if warning %}<span class="status status--warning">{{ warning }} with a problem</span> {% endif %}{% if passing %}<span class="status status--success">{{ passing }} passing</span>{% endif %}{% if not failing and not passing and not warning %}<span class="text-muted">No results yet</span>{% endif %}
+          {% if failing %}<button type="button" class="status status--error rmm-check-devices__open" data-rmm-check-devices-open="{{ check.id }}" data-rmm-check-devices-status="failing" data-rmm-check-devices-name="{{ check.name }}" aria-haspopup="dialog" aria-controls="rmm-check-devices-modal" title="Show the failing devices">{{ failing }} failing</button> {% endif %}{% if warning %}<button type="button" class="status status--warning rmm-check-devices__open" data-rmm-check-devices-open="{{ check.id }}" data-rmm-check-devices-status="warning" data-rmm-check-devices-name="{{ check.name }}" aria-haspopup="dialog" aria-controls="rmm-check-devices-modal" title="Show the devices with a problem">{{ warning }} with a problem</button> {% endif %}{% if passing %}<span class="status status--success">{{ passing }} passing</span>{% endif %}{% if not failing and not passing and not warning %}<span class="text-muted">No results yet</span>{% endif %}
           {% if check.last_summary %}<br><span class="text-muted">{{ check.last_summary }}</span>{% endif %}
         </td>
         <td data-label="Status" data-column-key="status"><span class="status status--{{ 'success' if check.is_enabled else 'neutral' }}">{{ "On" if check.is_enabled else "Off" }}</span></td>
@@ -115,7 +115,7 @@
       <section class="card card--panel ce-section" id="rmm-checks-attention" data-ae-section="attention" aria-labelledby="rmm-checks-attention-heading">
         <header class="ce-section__header"><div class="ce-section__heading">
           <h2 class="card__title" id="rmm-checks-attention-heading">Needs attention</h2>
-          <p class="card__subtitle">Checks that are failing or seeing a problem on at least one device. Open a device to see its results and stats.</p>
+          <p class="card__subtitle">Checks that are failing or seeing a problem on at least one device. Select a failing or problem count to see those devices and their values, or open a device to see its results and stats.</p>
         </div></header>
         <div class="ce-section__body">
           {% if attention %}{{ check_table(attention, "Checks that need attention", "rmm-checks-attention") }}
@@ -165,9 +165,11 @@
   </div>
   {% endif %}
 </div>
+{% include "rmm/_check_devices_modal.html" %}
 {% endblock %}
 {% block scripts %}
 <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_checks.js') }}" defer></script>
+<script src="{{ static_url('/static/js/rmm_check_devices.js') }}" defer></script>
 {% endblock %}

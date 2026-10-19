@@ -233,23 +233,49 @@ async def list_states_for_run(run_id: int) -> list[dict[str, Any]]:
     return [_state_row(row) for row in rows or []]
 
 
-async def count_states(check_ids: Iterable[int]) -> dict[int, dict[str, int]]:
-    """How many devices each check is passing and failing on."""
+async def count_states(check_ids: Iterable[int], *, company_id: int | None = None) -> dict[int, dict[str, int]]:
+    """How many devices each check is passing and failing on, optionally only the company's devices."""
 
     ids = [int(check_id) for check_id in check_ids]
     if not ids:
         return {}
     placeholders = ", ".join(["%s"] * len(ids))
-    # Only "%s" placeholders are interpolated; the ids are bound parameters.
+    params: list[Any] = list(ids)
+    company_clause = ""
+    if company_id is not None:
+        company_clause = " AND g.company_id = %s"
+        params.append(company_id)
+    # Only "%s" placeholders and the fixed company clause are interpolated; the values are bound parameters.
     rows = await db.fetch_all(
-        f"SELECT check_id, status, COUNT(*) AS total FROM rmm_check_states WHERE check_id IN ({placeholders}) "  # nosec B608
-        "GROUP BY check_id, status",
-        tuple(ids),
+        "SELECT s.check_id, s.status, COUNT(*) AS total FROM rmm_check_states s "  # nosec B608
+        f"JOIN rmm_agents g ON g.id = s.agent_id WHERE s.check_id IN ({placeholders}){company_clause} "
+        "GROUP BY s.check_id, s.status",
+        tuple(params),
     )
     counts: dict[int, dict[str, int]] = {}
     for row in rows or []:
         counts.setdefault(int(row["check_id"]), {})[str(row["status"])] = int(row["total"])
     return counts
+
+
+async def list_check_devices(check_id: int, company_id: int, statuses: Iterable[str]) -> list[dict[str, Any]]:
+    """The company's devices with one of these results for a check, with their latest values."""
+
+    wanted = [str(value) for value in statuses]
+    if not wanted:
+        return []
+    placeholders = ", ".join(["%s"] * len(wanted))
+    # Only "%s" placeholders are interpolated; the statuses are bound parameters.
+    rows = await db.fetch_all(
+        "SELECT s.check_id, s.agent_id, s.status, s.value_text, s.problem_since, s.checked_at, s.changed_at, "  # nosec B608
+        "s.last_action_at, s.ticket_id, s.run_id, s.next_run_at, s.scheduled_at, "
+        "g.asset_id, g.hostname, a.name AS asset_name "
+        "FROM rmm_check_states s JOIN rmm_agents g ON g.id = s.agent_id LEFT JOIN assets a ON a.id = g.asset_id "
+        f"WHERE s.check_id = %s AND g.company_id = %s AND s.status IN ({placeholders}) "
+        "ORDER BY s.status, COALESCE(a.name, g.hostname), s.agent_id",
+        (check_id, company_id, *wanted),
+    )
+    return [_state_row(row) for row in rows or []]
 
 
 async def save_state(check_id: int, agent_id: int, state: dict[str, Any]) -> None:
