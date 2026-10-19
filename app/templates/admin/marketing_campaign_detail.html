@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_marketing_workspace.html" import marketing_workspace with context %}
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}{{ campaign.name }}{% endblock %}
@@ -21,11 +22,12 @@
 {% endblock %}
 
 {% block content %}
+{% call marketing_workspace("campaigns", campaign.name, [("summary", "marketing-summary", "Summary", "", true), ("audience", "marketing-audience", "Recipients", audience_recipient_count, campaign.status == "draft"), ("excluded", "marketing-excluded", "Left out", (audience_excluded or []) | length, campaign.status == "draft" and audience_excluded), ("results", "marketing-results", "Results", "", campaign.status != "draft"), ("recipients", "marketing-recipients", "Recipients", "", campaign.status != "draft")]) %}
 <div class="admin-grid">
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Summary</h2>
+  <section class="card card--panel ce-section" id="marketing-summary" data-ae-section="summary" aria-labelledby="marketing-summary-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="marketing-summary-title">Summary</h2>
         <p class="card__subtitle">{% include "admin/partials/marketing_campaign_status.html" %}</p>
       </div>
     </header>
@@ -76,10 +78,10 @@
   </section>
 
   {% if campaign.status == 'draft' %}
-    <section class="card card--panel">
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Recipients ({{ audience_recipient_count }})</h2>
+    <section class="card card--panel ce-section" id="marketing-audience" data-ae-section="audience" aria-labelledby="marketing-audience-title">
+      <header class="ce-section__header">
+        <div class="ce-section__heading">
+          <h2 class="card__title" id="marketing-audience-title">Recipients ({{ audience_recipient_count }})</h2>
           <p class="card__subtitle">{{ audience_recipient_count }} contacts at {{ audience_company_count }} companies will receive this email.{% if audience_recipient_count > preview_limit %} Showing the first {{ preview_limit }}.{% endif %}</p>
         </div>
       </header>
@@ -114,10 +116,10 @@
     </section>
 
     {% if audience_excluded %}
-      <section class="card card--panel">
-        <header class="card__header card__header--stacked">
-          <div>
-            <h2 class="card__title">Left out ({{ audience_excluded | length }})</h2>
+      <section class="card card--panel ce-section" id="marketing-excluded" data-ae-section="excluded" aria-labelledby="marketing-excluded-title">
+        <header class="ce-section__header">
+          <div class="ce-section__heading">
+            <h2 class="card__title" id="marketing-excluded-title">Left out ({{ audience_excluded | length }})</h2>
             <p class="card__subtitle">These contacts match the filters but will not be emailed.</p>
           </div>
         </header>
@@ -138,10 +140,10 @@
       </section>
     {% endif %}
   {% else %}
-    <section class="card card--panel">
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Results</h2>
+    <section class="card card--panel ce-section" id="marketing-results" data-ae-section="results" aria-labelledby="marketing-results-title">
+      <header class="ce-section__header">
+        <div class="ce-section__heading">
+          <h2 class="card__title" id="marketing-results-title">Results</h2>
           <p class="card__subtitle">Delivery, opens and clicks come from SMTP2Go webhooks when SMTP2Go is enabled.</p>
         </div>
       </header>
@@ -166,10 +168,10 @@
       </div>
     </section>
 
-    <section class="card card--panel">
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Recipients</h2>
+    <section class="card card--panel ce-section" id="marketing-recipients" data-ae-section="recipients" aria-labelledby="marketing-recipients-title">
+      <header class="ce-section__header">
+        <div class="ce-section__heading">
+          <h2 class="card__title" id="marketing-recipients-title">Recipients</h2>
         </div>
       </header>
       <div class="table-wrapper">
@@ -224,4 +226,5 @@
     </section>
   {% endif %}
 </div>
+{% endcall %}
 {% endblock %}

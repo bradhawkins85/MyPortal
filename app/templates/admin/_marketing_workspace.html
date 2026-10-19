@@ -1,0 +1,72 @@
+{#- Marketing admin pages share one settings workspace. The nav lists the
+    current page's sections first, then links to the other marketing areas:
+
+      {% from "admin/_marketing_workspace.html" import marketing_workspace with context %}
+      {% call marketing_workspace("pages", "Marketing pages", sections) %} … {% endcall %}
+
+    sections is a list of (key, target id, label, count, visible) tuples for
+    the page's ce-section cards; a page without sections passes [] and the nav
+    holds only the area links. form names a shared settings form, which adds
+    the save bar; initial opens that section first (an editor with errors).
+    summary is an optional list of {"label": …, "muted": bool} chips. -#}
+{% macro marketing_workspace(area, page_label, sections, form=none, initial=none, summary=none) -%}
+{% set marketing_areas = [
+  ("pages", "/admin/marketing", "Marketing pages", true),
+  ("campaigns", "/admin/marketing/campaigns", "Email campaigns", true),
+  ("smb1001", "/admin/marketing/smb1001-help-links", "SMB1001 help links", is_super_admin and feature_pack_available('smb1001')),
+  ("essential8", "/admin/marketing/essential8-help-links", "Essential 8 help links", is_super_admin and feature_pack_available('essential8')),
+] %}
+{% set visible_sections = sections | selectattr(4) | list %}
+<div class="settings-workspace marketing-workspace ce-workspace" data-ae-workspace data-ae-storage-key="myportal:marketing-{{ area }}:active-section"{% if not visible_sections %} data-ae-link-nav{% endif %}{% if visible_sections %} data-ae-default="{{ visible_sections[0][0] }}"{% endif %}{% if form %} data-ae-form="{{ form }}"{% endif %}{% if initial %} data-ae-initial="{{ initial }}"{% endif %}>
+  {% if summary %}
+  <section class="ce-overview" aria-label="At a glance">
+    <ul class="scf-item__chips ce-overview__chips" aria-label="Summary">
+      {% for chip in summary %}<li class="scf-chip{% if chip.muted %} scf-chip--muted{% endif %}">{{ chip.label }}</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Marketing sections" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="marketing-nav-search">Find a marketing section</label>
+        <input type="search" id="marketing-nav-search" class="form-input" placeholder="Find a section…" autocomplete="off" data-ae-search>
+      </div>
+      {% if visible_sections %}
+      <div class="ce-nav__group" data-ae-nav-group>
+        <p class="ce-nav__group-title" id="marketing-nav-group-page">{{ page_label }}</p>
+        <ul class="ce-nav__list" aria-labelledby="marketing-nav-group-page">
+          {% for key, target, label, count, _visible in visible_sections %}
+            <li><a class="ce-nav__link" href="#{{ target }}" data-ae-link="{{ key }}">
+              <span class="ce-nav__label">{{ label }}</span>
+              {% if form %}<span class="ce-nav__dirty" data-ae-dirty-dot hidden><span class="visually-hidden">Unsaved changes</span></span>{% endif %}
+              {% if count != "" %}<span class="ce-nav__count">{{ count }}</span>{% endif %}
+            </a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+      <div class="ce-nav__group" data-ae-nav-group>
+        <p class="ce-nav__group-title" id="marketing-nav-group-areas">Marketing</p>
+        <ul class="ce-nav__list" aria-labelledby="marketing-nav-group-areas">
+          {% for key, href, label, visible in marketing_areas if visible %}
+            <li><a class="ce-nav__link" href="{{ href }}"{% if key == area %} aria-current="page"{% endif %}><span class="ce-nav__label">{{ label }}</span></a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No sections match your search.</p>
+    </nav>
+    <div class="ce-panels">
+      {{ caller() }}
+    </div>
+  </div>
+  {% if form %}
+  <div class="ce-savebar" data-ae-savebar role="region" aria-label="Unsaved changes" hidden>
+    <p class="ce-savebar__text" aria-live="polite"><strong data-ae-savebar-count>Unsaved changes</strong> <span class="text-muted">in <span data-ae-savebar-sections></span></span></p>
+    <span class="ae-savebar__spacer" aria-hidden="true"></span>
+    <button type="button" class="button button--ghost" data-ae-discard>Discard</button>
+    <button type="submit" class="button button--primary" form="{{ form }}">Save changes</button>
+  </div>
+  {% endif %}
+</div>
+<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
+{%- endmacro %}

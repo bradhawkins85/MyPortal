@@ -1,0 +1,7 @@
+{
+  "guid": "ffb02ee6-f5a9-479c-a664-67ae50826f39",
+  "occurred_at": "2026-10-19T11:35Z",
+  "change_type": "Improvement",
+  "summary": "Shop admin: list Featured, Subscriptions and the shop's top-level categories in the left menu to filter the product catalogue, and remove the View the shop link",
+  "content_hash": "5446aa2af00393f8b2a86afec4a8dc42a958f9ec7f7bf60da054238edd4974c2"
+}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_marketing_workspace.html" import marketing_workspace with context %}
 {% from "macros/header.html" import page_header_actions %}
 
 {% set values = campaign_values or {} %}
@@ -28,6 +29,7 @@
 {% endblock %}
 
 {% block content %}
+{% call marketing_workspace("campaigns", campaign.name if campaign else "New campaign", [("email", "marketing-email", "Email", "", true), ("audience", "marketing-audience", "Audience", "", true)], form="campaign-form") %}
 {% if error_message %}
   <div class="alert alert--error" role="alert">{{ error_message }}</div>
 {% endif %}
@@ -35,9 +37,9 @@
   {% include "partials/csrf.html" %}
   <input type="hidden" name="tz_offset" value="0" data-tz-offset />
 
-  <section class="card card--panel">
-    <header class="card__header">
-      <h2 class="card__title">Email</h2>
+  <section class="card card--panel ce-section" id="marketing-email" data-ae-section="email" aria-labelledby="marketing-email-title">
+    <header class="ce-section__header">
+      <h2 class="card__title" id="marketing-email-title">Email</h2>
     </header>
     <div class="form-grid">
       <div class="form-field form-field--wide">
@@ -117,10 +119,10 @@
     </div>
   </section>
 
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Audience</h2>
+  <section class="card card--panel ce-section" id="marketing-audience" data-ae-section="audience" aria-labelledby="marketing-audience-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="marketing-audience-title">Audience</h2>
         <p class="card__subtitle">Contacts must match every filter you set. You can preview everyone before sending.</p>
       </div>
     </header>
@@ -233,4 +235,5 @@
   });
 })();
 </script>
+{% endcall %}
 {% endblock %}

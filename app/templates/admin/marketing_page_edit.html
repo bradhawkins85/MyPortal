@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_marketing_workspace.html" import marketing_workspace with context %}
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Edit — {{ marketing_page.title }}{% endblock %}
@@ -27,11 +28,12 @@
 {% endblock %}
 
 {% block content %}
+{% call marketing_workspace("pages", marketing_page.title, [("details", "marketing-details", "Page details", "", true), ("sections", "marketing-sections", "Sections", (marketing_page.sections or []) | length, true)]) %}
 <div class="admin-grid">
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Page details</h2>
+  <section class="card card--panel ce-section" id="marketing-details" data-ae-section="details" aria-labelledby="marketing-details-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="marketing-details-title">Page details</h2>
         <p class="card__subtitle">Update the page title, slug, and content.</p>
       </div>
     </header>
@@ -70,10 +72,10 @@
     </form>
   </section>
 
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Sections</h2>
+  <section class="card card--panel ce-section" id="marketing-sections" data-ae-section="sections" aria-labelledby="marketing-sections-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="marketing-sections-title">Sections</h2>
         <p class="card__subtitle">Add and manage the content sections for this page.</p>
       </div>
     </header>
@@ -137,4 +139,5 @@
     </form>
   </section>
 </div>
+{% endcall %}
 {% endblock %}
