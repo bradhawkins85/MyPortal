@@ -161,3 +161,28 @@ def test_defender_settings_are_sections():
         assert hook in html, hook
     context["is_super_admin"] = False
     assert "lists" not in _sections(_env().get_template("defender/index.html").render(**context))
+def _bcp(can_edit: bool) -> str:
+    from datetime import datetime
+
+    plan = {"title": "Contoso BCP", "executive_summary": "Keep trading.", "version": "1.2",
+            "last_reviewed": datetime(2026, 9, 1), "next_review": None}
+    return _env().get_template("bcp/overview.html").render(
+        plan=plan, objectives=[{"id": 1, "objective_text": "Restore email in 4 hours"}],
+        distribution_list=[{"id": 2, "copy_number": "1", "name": "CEO", "location": "Safe"}],
+        kpi_items=[{"label": "RTO coverage", "value": "50%", "variant": "info"}], recent_reviews=[],
+        recent_plan_changes=[], dependency_count=3, approved_review_count=1, has_bcp_planning_gaps=True,
+        bcp_compliance_help_url="https://example.test/bcp", can_edit=can_edit, csrf_token="tok",
+    )
+
+
+def test_bcp_overview_sections_replace_dialogs():
+    html = _bcp(can_edit=True)
+    _assert_workspace(html, ["plan", "objectives", "distribution", "reviews", "history", "framework"])
+    assert "<dialog" not in html and "onclick=" not in html
+    assert 'id="bcp-plan-form"' in html and 'data-ae-form="bcp-plan-form"' in html and "data-ae-savebar" in html
+    assert 'action="/bcp/objectives"' in html and 'action="/bcp/distribution"' in html
+    assert 'action="/bcp/objectives/1/delete" class="inline-form" data-confirm="Delete this objective?"' in html
+
+    read_only = _bcp(can_edit=False)
+    assert 'action="/bcp/update"' not in read_only and "data-ae-savebar" not in read_only
+    assert "Keep trading." in read_only
