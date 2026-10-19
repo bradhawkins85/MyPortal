@@ -44,14 +44,13 @@
         </div>
         <div class="form-actions"><button type="submit" class="button button--primary">Save update script</button></div>
       </form>
-      <form method="post" action="/admin/tray/devices/bulk-update-outdated" class="form">
+      <form method="post" action="/admin/tray/devices/bulk-update-outdated" class="form" data-confirm="Queue the selected Tactical RMM update script for all non-revoked tray devices with an older agent version than the server tray app release?">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <div class="form-actions">
           <button
             type="submit"
             class="button button--secondary"
             {% if not d.selected_update_script_id or not d.outdated_device_count %}disabled{% endif %}
-            data-confirm="Queue the selected Tactical RMM update script for all non-revoked tray devices with an older agent version than the server tray app release?"
           >Update all outdated agents</button>
           <span class="form-help">{{ d.outdated_device_count }} linked tray {{ 'device is' if d.outdated_device_count == 1 else 'devices are' }} older than {{ release.version or 'the loaded release' }}.</span>
         </div>
@@ -121,22 +120,22 @@
                   {% if not is_super_admin %}
                     —
                   {% elif device.status != 'revoked' %}
-                    <form method="post" action="/admin/tray/devices/{{ device.id }}/update" class="inline-form">
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/update" class="inline-form" data-confirm="Run the selected Tactical RMM update script on this device's linked asset?">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                      <button type="submit" class="button button--small button--primary" data-confirm="Run the selected Tactical RMM update script on this device's linked asset?">Update</button>
+                      <button type="submit" class="button button--small button--primary">Update</button>
                     </form>
-                    <form method="post" action="/admin/tray/devices/{{ device.id }}/revoke" class="inline-form">
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/revoke" class="inline-form" data-confirm="Revoke this tray device? It will need to re-enrol to reconnect.">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                      <button type="submit" class="button button--small button--danger" data-confirm="Revoke this tray device? It will need to re-enrol to reconnect.">Revoke</button>
+                      <button type="submit" class="button button--small button--danger">Revoke</button>
                     </form>
                   {% else %}
-                    <form method="post" action="/admin/tray/devices/{{ device.id }}/reactivate" class="inline-form">
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/reactivate" class="inline-form" data-confirm="Reactivate this tray device?">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                      <button type="submit" class="button button--small button--primary" data-confirm="Reactivate this tray device?">Reactivate</button>
+                      <button type="submit" class="button button--small button--primary">Reactivate</button>
                     </form>
-                    <form method="post" action="/admin/tray/devices/{{ device.id }}/delete" class="inline-form">
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/delete" class="inline-form" data-confirm="Delete this revoked tray device? The endpoint will need to enrol again to reconnect.">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                      <button type="submit" class="button button--small button--danger" data-confirm="Delete this revoked tray device? The endpoint will need to enrol again to reconnect.">Delete</button>
+                      <button type="submit" class="button button--small button--danger">Delete</button>
                     </form>
                   {% endif %}
                 </td>

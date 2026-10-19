@@ -32,9 +32,9 @@
               <td><span data-utc="{{ cfg.updated_at }}">{{ cfg.updated_at }}</span></td>
               <td class="data-table__col--actions">
                 <a href="/admin/tray/configurations/{{ cfg.id }}/edit" class="button button--small">Edit<span class="visually-hidden"> {{ cfg.name }}</span></a>
-                <form method="post" action="/admin/tray/configurations/{{ cfg.id }}/delete" class="inline-form">
+                <form method="post" action="/admin/tray/configurations/{{ cfg.id }}/delete" class="inline-form" data-confirm="Delete this configuration?">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                  <button type="submit" class="button button--small button--danger" data-confirm="Delete this configuration?">Delete<span class="visually-hidden"> {{ cfg.name }}</span></button>
+                  <button type="submit" class="button button--small button--danger">Delete<span class="visually-hidden"> {{ cfg.name }}</span></button>
                 </form>
               </td>
             </tr>

@@ -517,6 +517,10 @@ long page, and do not build ad-hoc tab strips for this.
 - Subtitles explain effect and provenance in plain English ("These details
   are maintained manually and are never overwritten by asset sync.").
 
+**Confirming destructive actions.** Put `data-confirm` on the `<form>`, not
+the button: the site-wide handler in `layout.js` confirms form submits, and
+only pages that load `admin.js` also honour it on buttons.
+
 **Building another workspace.** Reuse the `.ce-*` classes and load
 `asset_edit_sections.js` as it is; do not copy it or write new layout CSS.
 Mark the wrapper `class="settings-workspace … ce-workspace" data-ae-workspace`
@@ -536,8 +540,14 @@ bubbling `ae:discarded` event the form receives after *Discard*.
 
 Pages built this way: the asset edit page (gold standard), Admin →
 Companies → Edit, **Tray settings** (`/admin/tray`, with the menu
-configuration editor), **Patch management** (`/rmm/patching`) and
-**Checks** (`/rmm/checks`). On list-and-editor pages such as Checks, the
+configuration editor), **Patch management** (`/rmm/patching`),
+**Checks** (`/rmm/checks`), **Microsoft 365** (`/m365`), **Integration
+modules** (`/admin/modules`), **Notification settings**
+(`/notifications/settings`) and **SMTP2Go** (`/admin/modules/smtp2go`).
+Views that used to open as modals from an Actions menu (the integration
+health center, credential expiry, setup wizard and task dependency graph)
+are sections instead; keep modals for short, focused tasks such as copying a
+webhook URL or editing one record. On list-and-editor pages such as Checks, the
 list is split into sections people look for (*Needs attention*, *All
 checks*, one per check type) and the add/edit form is its own section
 with the save bar.

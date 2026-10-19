@@ -101,8 +101,9 @@
     if (!root || !modal) {
       return;
     }
-    const pageForm = root.closest('form');
     const textarea = root.querySelector('textarea[name="abCampaignsRaw"]');
+    // The campaigns list may sit outside the settings form and join it with form="…".
+    const pageForm = root.closest('form') || (textarea && textarea.form);
     const advanced = root.querySelector('[data-abc-advanced]');
     const list = root.querySelector('[data-abc-list]');
     const empty = root.querySelector('[data-abc-empty]');
