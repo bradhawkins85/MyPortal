@@ -1033,6 +1033,15 @@ async def list_product_featured_companies_for_product(
     ]
 
 
+async def list_featured_product_ids() -> set[int]:
+    """Return the IDs of products featured for at least one company."""
+
+    rows = await db.fetch_all(
+        "SELECT DISTINCT product_id FROM shop_product_featured_companies"
+    )
+    return {int(row["product_id"]) for row in rows}
+
+
 async def list_featured_products_for_company(
     company_id: int,
     *,

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "admin/_shop_workspace.html" import shop_admin_workspace %}
+{% from "admin/_shop_workspace.html" import shop_admin_workspace with context %}
 {% from "macros/header.html" import page_header_overflow %}
 
 {% macro render_condition_row(idx, cond_type, cond_operator, cond_value) %}

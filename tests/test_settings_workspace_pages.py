@@ -236,14 +236,34 @@ def test_shop_admin_pages_share_the_workspace_nav():
         env.parse(source)  # compiles
         assert f'call shop_admin_workspace("{key}"' in source, template
 
-    nav = env.get_template("admin/_shop_workspace.html").module
-    html = env.from_string(
-        '{% from "admin/_shop_workspace.html" import shop_admin_workspace %}'
-        '{% call shop_admin_workspace("freight", [{"label": "3 products"}]) %}<p>Body</p>{% endcall %}'
-    ).render()
-    assert nav is not None and "data-ae-link-nav" in html and "<p>Body</p>" in html
+        assert "import shop_admin_workspace with context" in source, template
+
+    def render(active: str, **context) -> str:
+        return env.from_string(
+            '{% from "admin/_shop_workspace.html" import shop_admin_workspace with context %}'
+            '{% call shop_admin_workspace(active, [{"label": "3 products"}]) %}<p>Body</p>{% endcall %}'
+        ).render(active=active, **context)
+
+    categories = [{"id": 4, "name": "Laptops"}, {"id": 5, "name": "Monitors"}]
+    html = render("freight", shop_nav_categories=categories)
+    assert "data-ae-link-nav" in html and "<p>Body</p>" in html and "3 products" in html
     assert 'href="/admin/shop/freight-rules" aria-current="page"' in html
-    assert html.count('aria-current="page"') == 1 and "3 products" in html
+    assert html.count('aria-current="page"') == 1
+    # The same category choices as /shop, without the storefront link.
+    for href, label in (("featured", "Featured"), ("subscriptions", "Subscriptions"), ("4", "Laptops"), ("5", "Monitors")):
+        assert f'href="/admin/shop?category={href}"><span class="ce-nav__label">{label}<' in html, label
+    assert "View the shop" not in html and "Storefront" not in html and 'href="/shop"' not in html
+    # Categories come last so a long list never hides the other areas.
+    titles = re.findall(r'class="ce-nav__group-title"[^>]*>([^<]+)<', html)
+    assert titles == ["Catalogue", "Organisation", "Delivery", "Categories"]
+
+    all_products = render("catalogue", shop_nav_categories=categories)
+    assert 'href="/admin/shop" aria-current="page"' in all_products
+    laptops = render("catalogue", shop_nav_categories=categories, shop_nav_category=4)
+    assert 'href="/admin/shop?category=4" aria-current="page"' in laptops
+    assert laptops.count('aria-current="page"') == 1
+    featured = render("catalogue", shop_nav_category="featured")
+    assert 'href="/admin/shop?category=featured" aria-current="page"' in featured
 
 
 def test_shop_categories_page_renders_inside_the_workspace():
@@ -252,3 +272,65 @@ def test_shop_categories_page_renders_inside_the_workspace():
     )
     assert 'href="/admin/shop/categories" aria-current="page"' in html
     assert html.index("ce-panels") < html.index("product-categories-heading")
+
+
+def test_admin_shop_category_filter_parsing():
+    from app.features.shop import handlers
+
+    assert handlers._admin_shop_category_param("12") == 12
+    assert handlers._admin_shop_category_param(" Featured ") == "featured"
+    assert handlers._admin_shop_category_param("subscriptions") == "subscriptions"
+    for value in (None, "", "0", "-3", "packages", "1;DROP"):
+        assert handlers._admin_shop_category_param(value) is None, value
+
+
+def test_admin_shop_page_filters_by_category(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from starlette.requests import Request
+    from starlette.responses import HTMLResponse
+
+    from app import main
+    from app.features.shop import handlers
+    from app.repositories import companies, license_sku_friendly_names, shop, stock_feed, subscription_categories
+
+    products = [
+        {"id": 1, "name": "ThinkPad", "sku": "TP", "vendor_sku": None, "subscription_category_id": None},
+        {"id": 2, "name": "M365", "sku": "M365", "vendor_sku": None, "subscription_category_id": 3},
+    ]
+    list_products = AsyncMock(return_value=products)
+    monkeypatch.setattr(main, "_require_super_admin_page", AsyncMock(return_value=({"id": 1}, None)))
+    monkeypatch.setattr(shop, "list_all_categories_flat", AsyncMock(return_value=[]))
+    monkeypatch.setattr(shop, "list_categories_with_products", AsyncMock(return_value=[]))
+    monkeypatch.setattr(shop, "list_categories", AsyncMock(return_value=[{"id": 4, "name": "Laptops"}]))
+    monkeypatch.setattr(shop, "list_products_summary", list_products)
+    monkeypatch.setattr(shop, "get_category_descendants", AsyncMock(return_value=[4, 7]))
+    monkeypatch.setattr(shop, "list_featured_product_ids", AsyncMock(return_value={1}))
+    monkeypatch.setattr(companies, "list_companies", AsyncMock(return_value=[]))
+    monkeypatch.setattr(subscription_categories, "list_categories", AsyncMock(return_value=[]))
+    monkeypatch.setattr(license_sku_friendly_names, "list_mappings", AsyncMock(return_value=[]))
+    monkeypatch.setattr(stock_feed, "get_recent_dbp_trends", AsyncMock(return_value={}))
+    captured: dict = {}
+
+    async def fake_render(template, request, user, *, extra):
+        captured.update(extra)
+        return HTMLResponse("ok")
+
+    monkeypatch.setattr(main, "_render_template", fake_render)
+    request = Request({"type": "http", "method": "GET", "path": "/admin/shop", "query_string": b"", "headers": []})
+
+    def run(category):
+        captured.clear()
+        asyncio.run(handlers.admin_shop_page(request, show_archived=False, search="", category=category))
+        return captured
+
+    extra = run("4")
+    assert list_products.await_args.args[0].category_ids == [4, 7]
+    assert extra["shop_nav_category"] == 4
+    assert extra["shop_nav_categories"] == [{"id": 4, "name": "Laptops"}]
+    assert [p["id"] for p in run("subscriptions")["products"]] == [2]
+    assert [p["id"] for p in run("featured")["products"]] == [1]
+    everything = run(None)
+    assert everything["shop_nav_category"] is None and len(everything["products"]) == 2
+    assert list_products.await_args.args[0].category_ids is None

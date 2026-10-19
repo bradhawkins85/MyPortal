@@ -902,6 +902,7 @@ async def admin_shop_packages_page(
         "packages": packages,
         "show_archived": show_archived,
     }
+    extra["shop_nav_categories"] = await _shop_admin_nav_categories()
     return await _main()._render_template("admin/shop_packages.html", request, current_user, extra=extra)
 
 
@@ -924,6 +925,7 @@ async def admin_shop_package_detail(request: Request, package_id: int):
         "package": package,
         "products": products,
     }
+    extra["shop_nav_categories"] = await _shop_admin_nav_categories()
     return await _main()._render_template("admin/shop_package_detail.html", request, current_user, extra=extra)
 
 
@@ -1377,10 +1379,33 @@ async def admin_remove_package_item(
     )
 
 
+async def _shop_admin_nav_categories() -> list[dict[str, Any]]:
+    """Top-level shop categories for the shop admin workspace nav."""
+    from app.repositories import shop as shop_repo
+
+    try:
+        categories = await shop_repo.list_categories()
+    except Exception as exc:  # The nav must not stop a shop admin page rendering.
+        _main().log_warning("Shop admin nav categories could not be loaded", error=str(exc))
+        return []
+    return [{"id": int(category["id"]), "name": category.get("name") or "Category"} for category in categories]
+
+
+def _admin_shop_category_param(value: str | None) -> str | int | None:
+    """Parse the admin catalogue category filter: an ID, "featured" or "subscriptions"."""
+    key = (value or "").strip().lower()
+    if key in {"featured", "subscriptions"}:
+        return key
+    if key.isdigit() and int(key) > 0:
+        return int(key)
+    return None
+
+
 async def admin_shop_page(
     request: Request,
     show_archived: bool = Query(False, alias="showArchived"),
     search: str = Query("", alias="search"),
+    category: str | None = Query(None),
 ):
     from app.repositories import companies as company_repo
     from app.repositories import license_sku_friendly_names as sku_friendly_repo
@@ -1396,11 +1421,17 @@ async def admin_shop_page(
     categories_task = asyncio.create_task(shop_repo.list_all_categories_flat())
     filter_categories_task = asyncio.create_task(shop_repo.list_categories_with_products())
     search_term = search.strip()
+    current_category = _admin_shop_category_param(category)
     filters = shop_repo.ProductFilters(
         include_archived=show_archived,
         search_term=search_term or None,
         include_out_of_stock=True,
         sort="name_asc",
+        category_ids=(
+            await shop_repo.get_category_descendants(current_category)
+            if isinstance(current_category, int)
+            else None
+        ),
     )
     products_task = asyncio.create_task(
         shop_repo.list_products_summary(filters)
@@ -1417,6 +1448,11 @@ async def admin_shop_page(
         subscription_categories_task,
         microsoft_sku_mappings_task,
     )
+    if current_category == "subscriptions":
+        products = [product for product in products if product.get("subscription_category_id") is not None]
+    elif current_category == "featured":
+        featured_ids = await shop_repo.list_featured_product_ids()
+        products = [product for product in products if int(product.get("id") or 0) in featured_ids]
     total_count = len(products)
 
     for product in products:
@@ -1452,11 +1488,13 @@ async def admin_shop_page(
         "all_companies": companies,
         "show_archived": show_archived,
         "search_term": search_term,
+        "shop_nav_category": current_category,
         "subscription_categories": subscription_categories,
         "microsoft_sku_mappings": microsoft_sku_mappings,
         "total_count": total_count,
         "freight_item_size_options": freight_rules_service.ITEM_SIZE_OPTIONS,
     }
+    extra["shop_nav_categories"] = await _shop_admin_nav_categories()
     return await _main()._render_template("admin/shop.html", request, current_user, extra=extra)
 
 
@@ -1480,6 +1518,7 @@ async def admin_shop_freight_rules_page(
         "rules": rules,
         "editing_rule": editing_rule,
     }
+    extra["shop_nav_categories"] = await _shop_admin_nav_categories()
     return await _main()._render_template(
         "admin/shop_freight_rules.html",
         request,
@@ -1645,6 +1684,7 @@ async def admin_shop_optional_accessories_page(
         "accessories": accessories,
         "show_dismissed": show_dismissed,
     }
+    extra["shop_nav_categories"] = await _shop_admin_nav_categories()
     return await _main()._render_template(
         "admin/shop_optional_accessories.html", request, current_user, extra=extra
     )
@@ -1800,6 +1840,7 @@ async def admin_shop_categories_page(request: Request):
         "title": "Product categories",
         "categories": categories,
     }
+    extra["shop_nav_categories"] = await _shop_admin_nav_categories()
     return await _main()._render_template("admin/shop_categories.html", request, current_user, extra=extra)
 
 
@@ -1828,6 +1869,7 @@ async def admin_shop_product_create_page(request: Request):
         "subscription_categories": subscription_categories,
         "product_restrictions": [],
     }
+    extra["shop_nav_categories"] = await _shop_admin_nav_categories()
     return await _main()._render_template(
         "admin/shop_product_create.html", request, current_user, extra=extra
     )
@@ -2028,6 +2070,7 @@ async def admin_shop_subscription_categories_page(request: Request):
         "title": "Subscription categories",
         "categories": categories,
     }
+    extra["shop_nav_categories"] = await _shop_admin_nav_categories()
     return await _main()._render_template("admin/shop_subscription_categories.html", request, current_user, extra=extra)
 
 
@@ -2839,6 +2882,9 @@ async def admin_update_shop_product(
         qp = request.query_params
         if qp.get("showArchived"):
             redirect_params["showArchived"] = "1"
+        category_filter = _admin_shop_category_param(qp.get("category"))
+        if category_filter is not None:
+            redirect_params["category"] = str(category_filter)
         page_str = qp.get("page", "")
         if page_str.isdigit() and int(page_str) > 1:
             redirect_params["page"] = page_str

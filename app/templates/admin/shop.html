@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "admin/_shop_workspace.html" import shop_admin_workspace %}
+{% from "admin/_shop_workspace.html" import shop_admin_workspace with context %}
 
 {% block extra_head %}
   {{ super() }}
@@ -126,6 +126,12 @@
   {"label": shop_counts.subscriptions ~ " subscription" ~ ("" if shop_counts.subscriptions == 1 else "s"), "muted": not shop_counts.subscriptions},
   {"label": shop_counts.out_of_stock ~ " out of stock", "muted": not shop_counts.out_of_stock},
 ] %}
+{% set nav_category = shop_nav_category | default(none) %}
+{% if nav_category is not none %}
+  {% set found = namespace(label={"featured": "Featured products", "subscriptions": "Subscriptions"}.get(nav_category)) %}
+  {% if found.label is none %}{% for category in categories or [] %}{% if category.id == nav_category %}{% set found.label = category.name %}{% endif %}{% endfor %}{% endif %}
+  {% set _ = shop_summary.insert(0, {"label": "Showing: " ~ (found.label or "Category #" ~ nav_category)}) %}
+{% endif %}
 {% call shop_admin_workspace("catalogue", shop_summary) %}
 <div class="admin-grid">
   <section class="card card--panel">
