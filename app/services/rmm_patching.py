@@ -167,6 +167,22 @@ def chosen_updates_current(agent: Mapping[str, Any], config: Mapping[str, Any]) 
             and not config.get("apps") and config.get("windows") is None)
 
 
+def manual_apps_current(agent: Mapping[str, Any], config: Mapping[str, Any]) -> bool:
+    """A job installing or updating apps a technician chose still applies at
+    dispatch: the device is an active Windows agent and the plan holds only
+    the packages that were chosen (see app.services.rmm_software_updates)."""
+
+    manual = config["manual_apps"]
+    ids = manual.get("package_ids") or []
+    apps = config.get("apps") or []
+    return bool(agent.get("status") == "active" and str(agent.get("os") or "").lower() == "windows"
+                and manual.get("mode") in {"install", "upgrade"} and apps
+                and all(PACKAGE.fullmatch(str(i)) for i in ids)
+                and all(a.get("package_id") in ids and a.get("display_name")
+                        and (manual["mode"] == "install" or not a.get("install_missing")) for a in apps)
+                and config.get("windows") is None and config.get("reboot") == {"reboot_mode": "never"})
+
+
 async def queue(agent: Mapping[str, Any], policies: list[dict[str, Any]], selected: set[int],
                 expires_at: datetime, user_id: int | None = None) -> int | None:
     config = plan(policies, selected)
@@ -196,8 +212,7 @@ async def job_is_current(agent: Mapping[str, Any], job: Mapping[str, Any]) -> bo
         if "manual_windows" in config:
             return chosen_updates_current(agent, config)
         if "manual_apps" in config:
-            from app.services import rmm_software_updates
-            return rmm_software_updates.apps_current(dict(agent), config)
+            return manual_apps_current(agent, config)
         if "manual_upgrade" in config:
             from app.services import rmm_software_updates
             from app.services.chocolatey_catalog import CatalogUnavailable

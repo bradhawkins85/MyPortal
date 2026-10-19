@@ -141,15 +141,3 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int) -> in
     rmm_scripts.notify_agent(int(agent['id']))
     return run_id
 
-
-def apps_current(agent: dict, config: dict) -> bool:
-    """A pushed install/update job still applies at dispatch: the device is an
-    active Windows agent and the plan holds only the packages that were chosen."""
-    manual = config['manual_apps']
-    ids = manual.get('package_ids') or []
-    apps = config.get('apps') or []
-    return bool(_windows(agent) and manual.get('mode') in MODES and apps
-                and all(patch.PACKAGE.fullmatch(str(i)) for i in ids)
-                and all(a.get('package_id') in ids and a.get('display_name')
-                        and (manual['mode'] == 'install' or not a.get('install_missing')) for a in apps)
-                and config.get('windows') is None and config.get('reboot') == {'reboot_mode': 'never'})
