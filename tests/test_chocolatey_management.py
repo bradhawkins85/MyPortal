@@ -64,14 +64,14 @@ async def test_company_source_defaults_isolation_and_no_secret_views(sqlite_db, 
         {'key': 'DEFAULT', 'name': 'chocolatey', 'enabled': True},
         {'key': 'CUSTOM1', 'name': 'nexus', 'enabled': False}]
     await sources.save(1, ['CUSTOM1'])
-    assert [s['enabled'] for s in await sources.for_company(1)] == [False, True]
+    assert [s['enabled'] for s in await sources.for_company(1)] == [True, True]
     assert [s['enabled'] for s in await sources.for_company(2)] == [True, False]
     assert (await sources.for_company(1, secrets=True))[1]['password'] == 'secret-value'
     assert 'secret-value' not in json.dumps(await sources.for_company(1))
     with pytest.raises(ValueError):
         await sources.save(1, ['MISSING'])
     await sources.save(1, [])
-    assert not any(s['enabled'] for s in await sources.for_company(1))
+    assert [s['enabled'] for s in await sources.for_company(1)] == [True, False]
 
 
 def feed(entries):
@@ -187,7 +187,7 @@ async def test_agent_source_response_is_private_and_contains_reconciler(sqlite_d
     response = await patch_routes.agent_sources({'company_id': 2, 'os': 'windows'})
     assert response.headers['cache-control'] == 'no-store'
     config = json.loads(response.body)
-    assert [s['enabled'] for s in config['sources']] == [False, True]
+    assert [s['enabled'] for s in config['sources']] == [True, True]
     assert config['sources'][1]['password'] == 'secret-value'
     assert 'Sync-ChocolateySources' in config['script'] and 'MyPortalPatchManagement' in config['script']
     assert 'secret-value' not in config['script']
@@ -205,7 +205,8 @@ async def test_all_sources_disabled_cancels_queued_app_job(sqlite_db, monkeypatc
     policy = await patch.repo.get_policy(policy_id)
     from datetime import timedelta
     run_id = await patch.queue(agent, [policy], {policy_id}, patch.utcnow() + timedelta(minutes=15))
-    await sources.save(1, [])
+    # Companies cannot disable the default source; only removing it from the ENV leaves none enabled.
+    monkeypatch.setenv('CHOCO_SOURCE_DEFAULT', '')
     assert await rmm_scripts.claim_jobs(agent) == []
     assert (await rmm_repo.get_run(run_id))['status'] == 'cancelled'
 

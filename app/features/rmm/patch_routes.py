@@ -221,7 +221,7 @@ async def agent_sources(agent: dict = Depends(get_current_rmm_agent)):
 $ErrorActionPreference = 'Stop'
 $mutex = New-Object Threading.Mutex($false, 'Global\\MyPortalPatchManagement')
 if (-not $mutex.WaitOne(0)) { throw 'A patch operation is running; retry source reconciliation later.' }
-try { Sync-ChocolateySources @($env:MYPORTAL_CHOCO_SOURCES | ConvertFrom-Json) }
+try { $sources = $env:MYPORTAL_CHOCO_SOURCES | ConvertFrom-Json; Sync-ChocolateySources @($sources) }
 finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
 '''
     return JSONResponse({'script': script, 'sources': config}, headers={'Cache-Control': 'no-store'})
