@@ -15,7 +15,9 @@ and are resolved per device each time a run is queued.
   failed step stops the sequence unless that step is set to continue on
   failure. :func:`advance_onboarding` moves a sequence on when a result arrives,
   and the loop re-checks running sequences so a run that expires or is
-  cancelled still moves its sequence on.
+  cancelled still moves its sequence on. A step can install Chocolatey
+  packages instead of running a script; those steps run on Windows devices
+  only, through the built-in patch job (see :func:`register_package_steps`).
 """
 
 from __future__ import annotations
@@ -378,6 +380,56 @@ async def run_due_schedules(now: datetime | None = None) -> int:
 # Onboarding steps
 # --------------------------------------------------------------------------- #
 
+# Chocolatey steps are validated and queued by app.services.rmm_software_updates,
+# registered by the feature pack so this module need not import it (it imports
+# this one through rmm_patching).
+PackageValidator = Callable[[Iterable[Any]], list[str]]
+PackageQueuer = Callable[..., Awaitable[int | None]]
+_PACKAGE_STEPS: dict[str, Any] = {}
+
+
+def register_package_steps(*, validate: PackageValidator, queue: PackageQueuer) -> None:
+    _PACKAGE_STEPS.update(validate=validate, queue=queue)
+
+
+def _target(payload: Mapping[str, Any], errors: dict[str, str], tag_ids: list[int]) -> tuple[str, Any, list[int]]:
+    target_mode = str(payload.get("target_mode") or "tags")
+    target_rules = rmm_device_targeting.parse_rules(payload, errors)
+    if target_mode not in {"all", "tags", "rules"}:
+        errors["target_mode"] = "Choose all devices, tags or device rules."
+    if target_mode == "tags" and not tag_ids:
+        errors["tags"] = "Choose at least one tag, such as Server or Workstation."
+    return target_mode, target_rules, tag_ids if target_mode == "tags" else []
+
+
+async def _save_package_step(*, step_id: int | None, company_id: int, payload: Mapping[str, Any],
+                             user_id: int | None) -> int:
+    errors: dict[str, str] = {}
+    if "validate" not in _PACKAGE_STEPS:
+        raise RunRequestError({"package_ids": "Chocolatey steps are unavailable."})
+    try:
+        package_ids = _PACKAGE_STEPS["validate"](payload.get("package_ids") or [])
+    except RunRequestError as exc:
+        errors.update(exc.errors)
+        package_ids = []
+    tag_ids = await tags_repo.existing_tag_ids(
+        _int_list(payload.get("tag_ids"), MAX_SCHEDULE_TAGS, "tags", "tags")
+    )
+    target_mode, target_rules, tag_ids = _target(payload, errors, tag_ids)
+    if errors:
+        raise RunRequestError(errors)
+    values = {
+        "company_id": int(company_id), "target_mode": target_mode, "target_rules": target_rules,
+        "script_id": None, "tag_ids": tag_ids, "entries_encrypted": None,
+        "inputs": [{"key": "applications", "label": "Applications", "value": ", ".join(package_ids)}],
+        "timeout_seconds": 7200, "continue_on_failure": bool(payload.get("continue_on_failure")),
+        "package_ids": package_ids, "created_by_user_id": user_id,
+    }
+    if step_id is None:
+        return await automation_repo.create_step(values)
+    await automation_repo.update_step(step_id, values)
+    return step_id
+
 
 async def save_step(
     *,
@@ -386,25 +438,21 @@ async def save_step(
     payload: Mapping[str, Any],
     user_id: int | None,
 ) -> int:
-    """Create or update an onboarding step with all, tag or rule targeting."""
+    """Create or update an onboarding step with all, tag or rule targeting.
+    A payload with ``kind`` ``chocolatey`` installs ``package_ids`` instead."""
 
+    if payload.get("kind") == "chocolatey":
+        return await _save_package_step(step_id=step_id, company_id=company_id, payload=payload, user_id=user_id)
     errors: dict[str, str] = {}
     script = await _scoped_script(payload.get("script_id"), int(company_id))
     tag_ids = await tags_repo.existing_tag_ids(
         _int_list(payload.get("tag_ids"), MAX_SCHEDULE_TAGS, "tags", "tags")
     )
-    target_mode = str(payload.get("target_mode") or "tags")
-    target_rules = rmm_device_targeting.parse_rules(payload, errors)
-    if target_mode not in {"all", "tags", "rules"}:
-        errors["target_mode"] = "Choose all devices, tags or device rules."
-    if target_mode == "tags" and not tag_ids:
-        errors["tags"] = "Choose at least one tag, such as Server or Workstation."
-    if target_mode != "tags":
-        tag_ids = []
+    target_mode, target_rules, tag_ids = _target(payload, errors, tag_ids)
     previous: dict[str, str] = {}
     if step_id is not None:
         existing = await automation_repo.get_step(step_id, with_secrets=True)
-        if existing and int(existing["script_id"]) == int(script["id"]):
+        if existing and existing.get("script_id") is not None and int(existing["script_id"]) == int(script["id"]):
             previous = decrypt_entries(existing.get("entries_encrypted"))
     try:
         entries = _merge_entries(script, payload.get("values") or {}, previous)
@@ -418,6 +466,7 @@ async def save_step(
         "target_mode": target_mode,
         "target_rules": target_rules,
         "script_id": int(script["id"]),
+        "package_ids": [],
         "tag_ids": tag_ids,
         "entries_encrypted": encrypt_secret(json.dumps(entries)),
         "inputs": rmm_scripts.stored_inputs(script, entries),
@@ -448,6 +497,12 @@ async def tag_names() -> dict[int, str]:
     return {int(tag["id"]): str(tag["name"]) for tag in await tags_repo.list_tags()}
 
 
+def step_name(step: Mapping[str, Any]) -> str:
+    if step.get("kind") == "chocolatey":
+        return "Install " + ", ".join(step.get("package_ids") or []) + " (Chocolatey)"
+    return step.get("script_name") or "Script"
+
+
 async def build_plan(company_id: int) -> list[dict[str, Any]]:
     """The company's steps, in order, as a fresh onboarding plan."""
 
@@ -455,8 +510,8 @@ async def build_plan(company_id: int) -> list[dict[str, Any]]:
     return [
         {
             "step_id": int(step["id"]),
-            "script_id": int(step["script_id"]),
-            "script_name": step.get("script_name") or "Script",
+            "script_id": int(step["script_id"]) if step.get("script_id") is not None else None,
+            "script_name": step_name(step),
             "tags": [names[tag_id] for tag_id in step.get("tag_ids") or [] if tag_id in names],
             "continue_on_failure": bool(step.get("continue_on_failure")),
             "status": "pending",
@@ -543,6 +598,18 @@ async def _queue_step(onboarding: Mapping[str, Any], entry: Mapping[str, Any]) -
             raise _StepSkipped("The device has none of this step's tags.")
     elif mode != "all":
         raise _StepSkipped("The step's device selection is invalid.")
+    if step.get("kind") == "chocolatey":
+        if str(agent.get("os") or "").lower() != "windows":
+            raise _StepSkipped("Chocolatey packages install on Windows devices only.")
+        if "queue" not in _PACKAGE_STEPS:
+            raise RunRequestError({"package_ids": "Chocolatey steps are unavailable."})
+        run_id = await _PACKAGE_STEPS["queue"](
+            {**agent, "company_id": int(onboarding["company_id"])}, step.get("package_ids") or [], "install",
+            onboarding.get("started_by_user_id"), onboarding_run_id=int(onboarding["id"]),
+        )
+        if run_id is None:
+            raise _StepSkipped("No packages to install.")
+        return run_id
     script = await rmm_repo.get_script(int(step["script_id"]), with_content=True)
     if not rmm_repo.script_available_to(script, int(onboarding["company_id"])):
         raise RunRequestError({"script": "The script is no longer available to this company."})

@@ -421,3 +421,78 @@ def test_rmm_pack_runs_the_automation_loop():
     assert automation.automation_loop in PACK.background_jobs
     paths = {route.path for router in PACK.routers for route in router.routes}
     assert {"/rmm/automation", "/api/rmm/schedules", "/api/rmm/onboarding/steps", "/api/rmm/onboarding/runs"} <= paths
+
+
+@pytest.mark.anyio
+async def test_onboarding_installs_chocolatey_packages_on_windows_devices(sqlite_db, monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    from app.repositories import rmm_inventory as inventory_repo
+    from app.services import chocolatey_sources, rmm_patching, rmm_software_updates
+
+    monkeypatch.setattr(chocolatey_sources, "ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(inventory_repo, "list_software", AsyncMock(return_value=[]))
+    automation.register_package_steps(validate=rmm_software_updates.package_ids, queue=rmm_software_updates.queue_apps)
+    scripts = await _scripts(monkeypatch)
+    workstation, server = await _tags(sqlite_db)
+    with pytest.raises(RunRequestError) as exc:
+        await automation.save_step(step_id=None, company_id=1, user_id=9, payload={
+            "kind": "chocolatey", "package_ids": ["bad id"], "target_mode": "all"})
+    assert "package_id" in exc.value.errors
+    step_id = await automation.save_step(step_id=None, company_id=1, user_id=9, payload={
+        "kind": "chocolatey", "package_ids": ["GoogleChrome", "7zip"], "target_mode": "all"})
+    await automation.save_step(step_id=None, company_id=1, user_id=9, payload={
+        "script_id": scripts["Second"]["id"], "target_mode": "all"})
+    await automation.save_step(step_id=None, company_id=1, user_id=9, payload={
+        "kind": "chocolatey", "package_ids": ["vlc"], "tag_ids": [server]})
+    steps = await automation_repo.list_steps(company_id=1)
+    assert [step["kind"] for step in steps] == ["chocolatey", "script", "chocolatey"]
+    assert steps[0]["package_ids"] == ["googlechrome", "7zip"] and steps[0]["script_id"] is None
+    assert automation.step_name(steps[0]) == "Install googlechrome, 7zip (Chocolatey)"
+
+    _r, agent = await _enrol(sqlite_db)
+    onboarding_id = await automation.start_onboarding(agent, started_by_user_id=9)
+    jobs = await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
+    assert len(jobs) == 1 and jobs[0]["name"] == "Install googlechrome, 7zip"
+    plan = json.loads(jobs[0]["env"]["MYPORTAL_PATCH_PLAN"])
+    assert [app["package_id"] for app in plan["apps"]] == ["googlechrome", "7zip"]
+    assert all(app["install_missing"] for app in plan["apps"]) and plan["sources"][0]["enabled"]
+    run = await rmm_repo.get_run(jobs[0]["id"])
+    assert run["run_source"] == "patch" and run["onboarding_run_id"] == onboarding_id
+    await rmm_scripts.record_result(agent, jobs[0]["id"], {"exit_code": 0})
+    await automation.run_finished(jobs[0]["id"])
+    second = await _finish_current(agent)
+    assert second["name"] == "Second"
+    onboarding = await automation_repo.get_onboarding_run(onboarding_id)
+    # The last step is for servers only.
+    assert onboarding["status"] == "completed"
+    assert [entry["status"] for entry in onboarding["plan"]] == ["completed", "completed", "skipped"]
+    assert onboarding["plan"][0]["script_name"] == "Install googlechrome, 7zip (Chocolatey)"
+
+    # Editing keeps the step a Chocolatey step; non-Windows devices skip it.
+    await automation.save_step(step_id=step_id, company_id=1, user_id=9, payload={
+        "kind": "chocolatey", "package_ids": ["firefox"], "target_mode": "all", "continue_on_failure": True})
+    assert (await automation_repo.get_step(step_id))["package_ids"] == ["firefox"]
+    _r, mac = await _enrol(sqlite_db, tray_id=8, asset_id=11, uid="agent-uid-mac", os_name="darwin")
+    mac_onboarding = await automation.start_onboarding(mac)
+    entry = (await automation_repo.get_onboarding_run(mac_onboarding))["plan"][0]
+    assert entry["status"] == "skipped" and "Windows" in entry["message"]
+    assert rmm_patching.manual_apps_current(agent, plan)
+
+
+def test_automation_page_shows_chocolatey_steps_and_editor():
+    from tests.test_rmm_scripts import _environment
+
+    env = _environment()
+    env.globals["static_url"] = lambda path: path
+    html = env.get_template("rmm/automation.html").render(
+        company={"name": "Contoso"}, schedules=[], onboarding_runs=[], agents=[], windows_agents=[],
+        steps=[{"id": 5, "kind": "chocolatey", "name": "Install googlechrome (Chocolatey)", "script_name": None,
+                "script_active": None, "package_ids": ["googlechrome", "7zip"], "inputs": [{"key": "applications"}],
+                "target_mode": "all", "continue_on_failure": False, "tag_names": []}],
+        tags=[{"id": 1, "name": "Server"}], can_run=True, is_super_admin=False, default_timezone="UTC",
+    )
+    assert "Install Chocolatey packages" in html and "googlechrome, 7zip" in html
+    assert "Script removed from Gitea" not in html and "Windows devices only" in html
+    assert 'data-rmm-step-edit="5"' in html and "data-rmm-choco-step-new" in html
+    assert 'id="rmm-choco-step-modal"' in html and '<option value="1">Server</option>' in html
+    assert html.index("rmm_choco_picker.js") < html.index("rmm_onboarding_choco.js")

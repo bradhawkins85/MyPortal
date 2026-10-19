@@ -108,8 +108,13 @@ async def plan_apps(agent: dict, ids: list[str], mode: str) -> list[dict]:
     return apps
 
 
-async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int) -> int | None:
-    """Queue one patch job installing or updating ``ids``; ``None`` when nothing applies."""
+async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None, *,
+                     onboarding_run_id: int | None = None) -> int | None:
+    """Queue one patch job installing or updating ``ids``; ``None`` when nothing applies.
+
+    An onboarding step's job waits as long as a script step would and lets the
+    onboarding sequence notify the device once it has moved on.
+    """
     if mode not in MODES:
         raise RunRequestError({'mode': 'Choose install or update.'})
     if not _windows(agent):
@@ -137,6 +142,8 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int) -> in
         inputs=[{'key': 'applications', 'label': 'Applications', 'value': label},
                 {'key': 'mode', 'label': 'Action', 'value': 'Install or update' if mode == 'install' else 'Update only'}],
         payload_encrypted=encrypt_secret(json.dumps({'env': {'MYPORTAL_PATCH_PLAN': json.dumps(config)}})),
-        timeout_seconds=7200, expires_at=patch.utcnow() + timedelta(minutes=15), run_source='patch')
-    rmm_scripts.notify_agent(int(agent['id']))
+        timeout_seconds=7200, run_source='patch', onboarding_run_id=onboarding_run_id,
+        expires_at=patch.utcnow() + (rmm_scripts.QUEUE_LIFETIME if onboarding_run_id else timedelta(minutes=15)))
+    if onboarding_run_id is None:
+        rmm_scripts.notify_agent(int(agent['id']))
     return run_id

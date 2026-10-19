@@ -48,6 +48,9 @@ def _step_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     raw_rules = step.pop("target_rules_json", None)
     step["target_rules"] = None if raw_rules is None else (_decode_json(raw_rules, {}) or {})
     step["continue_on_failure"] = bool(step.get("continue_on_failure"))
+    # A Chocolatey step installs these packages instead of running a script.
+    step["package_ids"] = [str(item) for item in _decode_json(step.pop("package_ids_json", None), [])]
+    step["kind"] = "chocolatey" if step.get("script_id") is None else "script"
     return step
 
 
@@ -194,17 +197,21 @@ async def list_active_agents(*, company_id: int | None) -> list[dict[str, Any]]:
 
 _STEP_COLUMNS = (
     "o.id, o.company_id, o.position, o.script_id, o.tag_ids_json, o.target_rules_json, o.target_mode, o.inputs_json, o.timeout_seconds, "
-    "o.continue_on_failure, "
+    "o.continue_on_failure, o.package_ids_json, "
     "o.created_by_user_id, o.created_at, o.updated_at, sc.name AS script_name, sc.path AS script_path, "
     "sc.language AS script_language, sc.is_active AS script_active"
 )
+
+
+def _package_ids_json(values: dict[str, Any]) -> str | None:
+    return json.dumps(values["package_ids"]) if values.get("package_ids") else None
 
 
 async def list_steps(*, company_id: int) -> list[dict[str, Any]]:
     """A company's onboarding steps, in order."""
 
     rows = await db.fetch_all(
-        f"SELECT {_STEP_COLUMNS} FROM rmm_onboarding_steps o JOIN rmm_scripts sc ON sc.id = o.script_id "  # nosec B608 - fixed columns
+        f"SELECT {_STEP_COLUMNS} FROM rmm_onboarding_steps o LEFT JOIN rmm_scripts sc ON sc.id = o.script_id "  # nosec B608 - fixed columns
         "WHERE o.company_id = %s ORDER BY o.position, o.id",
         (company_id,),
     )
@@ -215,7 +222,7 @@ async def get_step(step_id: int, *, with_secrets: bool = False) -> dict[str, Any
     extra = ", o.entries_encrypted" if with_secrets else ""
     row = await db.fetch_one(
         f"SELECT {_STEP_COLUMNS}{extra} FROM rmm_onboarding_steps o "  # nosec B608 - fixed columns
-        "JOIN rmm_scripts sc ON sc.id = o.script_id WHERE o.id = %s",
+        "LEFT JOIN rmm_scripts sc ON sc.id = o.script_id WHERE o.id = %s",
         (step_id,),
     )
     return _step_row(row)
@@ -230,15 +237,15 @@ async def create_step(values: dict[str, Any]) -> int:
     position = int((row or {}).get("top") or 0) + 1
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_onboarding_steps (company_id, position, script_id, tag_ids_json, target_rules_json, target_mode, entries_encrypted, "
-        "inputs_json, timeout_seconds, continue_on_failure, created_by_user_id, created_at, updated_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "inputs_json, timeout_seconds, continue_on_failure, package_ids_json, created_by_user_id, created_at, updated_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             company_id, position, values["script_id"], json.dumps(values["tag_ids"]),
             json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
             values.get("target_mode", "tags"), values["entries_encrypted"],
             json.dumps(values["inputs"]),
             values["timeout_seconds"], 1 if values["continue_on_failure"] else 0,
-            values.get("created_by_user_id"), now, now,
+            _package_ids_json(values), values.get("created_by_user_id"), now, now,
         ),
     )
 
@@ -246,12 +253,14 @@ async def create_step(values: dict[str, Any]) -> int:
 async def update_step(step_id: int, values: dict[str, Any]) -> None:
     await db.execute(
         "UPDATE rmm_onboarding_steps SET script_id = %s, tag_ids_json = %s, target_rules_json = %s, target_mode = %s, entries_encrypted = %s, "
-        "inputs_json = %s, timeout_seconds = %s, continue_on_failure = %s, updated_at = %s WHERE id = %s",
+        "inputs_json = %s, timeout_seconds = %s, continue_on_failure = %s, package_ids_json = %s, updated_at = %s "
+        "WHERE id = %s",
         (
             values["script_id"], json.dumps(values["tag_ids"]),
             json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
             values.get("target_mode", "tags"), values["entries_encrypted"], json.dumps(values["inputs"]),
-            values["timeout_seconds"], 1 if values["continue_on_failure"] else 0, _utcnow(), step_id,
+            values["timeout_seconds"], 1 if values["continue_on_failure"] else 0, _package_ids_json(values),
+            _utcnow(), step_id,
         ),
     )
 

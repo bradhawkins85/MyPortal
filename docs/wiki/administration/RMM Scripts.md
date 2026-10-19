@@ -421,6 +421,14 @@ onboarding is marked **Stopped**, unless that step is set to **Carry on with the
 this one fails**. A step whose script has been removed from Gitea fails the same way, and a
 step deleted while a device is part-way through is skipped.
 
+**Add Chocolatey packages** adds a step that installs apps instead of running a script:
+tick apps from the downloaded Chocolatey app list (or enter package IDs, up to 20) and
+choose every device or devices with any of the chosen tags. The step runs the built-in patch
+job with the company's enabled Chocolatey sources, updates apps that are already installed,
+never restarts the device and shows in Scripts run history. Only Windows devices run it;
+others skip it. Apply migration **506** first. See
+[RMM Patch Management](RMM%20Patch%20Management.md) for how packages are installed.
+
 **Onboarding history** shows each device's progress; choose **View** to see every step and
 open its run. **Run onboarding** runs the current steps on a device again, for example after
 adding a step, and **Stop onboarding** cancels the rest of a running sequence.

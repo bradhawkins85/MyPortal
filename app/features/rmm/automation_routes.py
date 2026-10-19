@@ -70,6 +70,8 @@ def _step_public(step: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _editable(item: dict[str, Any]) -> dict[str, str]:
+    if item.get("script_id") is None:
+        return {}
     script = await rmm_repo.get_script(int(item["script_id"]))
     if not script:
         return {}
@@ -95,7 +97,7 @@ async def automation_page(request: Request):
             "company": company,
             "schedules": [_schedule_public(item) for item in schedules],
             "steps": [
-                {**_step_public(step), "tag_names": [names[tag_id] for tag_id in step.get("tag_ids") or [] if tag_id in names]}
+                {**_step_public(step), "name": automation.step_name(step), "tag_names": [names[tag_id] for tag_id in step.get("tag_ids") or [] if tag_id in names]}
                 for step in await automation_repo.list_steps(company_id=company_id)
             ],
             "onboarding_runs": [_serialise(run) for run in await automation_repo.list_onboarding_runs(company_id=company_id)],
@@ -232,9 +234,11 @@ async def delete_schedule_api(schedule_id: int, request: Request):
 
 
 class StepRequest(BaseModel):
+    kind: Literal["script", "chocolatey"] = "script"
     target_mode: str = Field(default="tags", max_length=16)
     target_rules: dict[str, Any] | None = None
-    script_id: int
+    script_id: int | None = None
+    package_ids: list[str] = Field(default_factory=list, max_length=50)
     tag_ids: list[int] = Field(default_factory=list, max_length=automation.MAX_SCHEDULE_TAGS)
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
@@ -265,7 +269,8 @@ async def _save_step(request: Request, payload: StepRequest, step_id: int | None
     await audit_service.record(
         action="rmm.onboarding.step.create" if step_id is None else "rmm.onboarding.step.update",
         request=request, user_id=user.get("id"), entity_type="rmm_onboarding_step", entity_id=saved_id,
-        metadata={"script_id": payload.script_id, "company_id": company_id, "tag_ids": payload.tag_ids},
+        metadata={"script_id": payload.script_id, "package_ids": payload.package_ids, "company_id": company_id,
+                  "tag_ids": payload.tag_ids},
     )
     return {"step": _step_public(await automation_repo.get_step(saved_id) or {})}
 
@@ -287,7 +292,7 @@ async def delete_step_api(step_id: int, request: Request):
     await automation_repo.delete_step(step_id)
     await audit_service.record(
         action="rmm.onboarding.step.delete", request=request, user_id=user.get("id"),
-        entity_type="rmm_onboarding_step", entity_id=step_id, metadata={"script": step.get("script_name")},
+        entity_type="rmm_onboarding_step", entity_id=step_id, metadata={"script": automation.step_name(step)},
     )
     return {"ok": True}
 
