@@ -198,7 +198,7 @@
   }
 
   function buildSql() {
-    sql.value = sqlTools.build(state, schema, manualJoins);
+    sql.value = sqlTools.format(sqlTools.build(state, schema, manualJoins));
     lastSyncedSql = sql.value;
     sql.dispatchEvent(new Event('input'));
   }
@@ -332,9 +332,11 @@
     if (token) body.set('_csrf', token);
     const headers = {'Content-Type': 'application/x-www-form-urlencoded'};
     if (token) headers['X-CSRF-Token'] = token;
-    try { const response = await fetch('/admin/reporting/query-assistant', {method: 'POST', headers, body: body.toString()}); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(errorMessage(data)); if (typeof data?.sql !== 'string' || !data.sql.trim()) throw new Error('Server returned no SQL query.'); sql.value = data.sql; sql.dispatchEvent(new Event('input')); messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--assistant"></div>'); messages.lastElementChild.textContent = data.summary || 'I updated the SQL query. Ask for another change if needed.'; button.textContent = 'Refine query'; }
+    try { const response = await fetch('/admin/reporting/query-assistant', {method: 'POST', headers, body: body.toString()}); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(errorMessage(data)); if (typeof data?.sql !== 'string' || !data.sql.trim()) throw new Error('Server returned no SQL query.'); sql.value = sqlTools.format(data.sql); sql.dispatchEvent(new Event('input')); messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--assistant"></div>'); messages.lastElementChild.textContent = data.summary || 'I updated the SQL query. Ask for another change if needed.'; button.textContent = 'Refine query'; }
     catch (error) { messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--error"></div>'); messages.lastElementChild.textContent = error.message; }
     finally { button.disabled = false; if (button.textContent === 'Thinking…') button.textContent = 'Try again'; messages.scrollTop = messages.scrollHeight; }
   });
+  // Always show the saved query laid out one clause per line.
+  sql.value = sqlTools.format(sql.value);
   syncFromSql(); updateAiButton();
 })();

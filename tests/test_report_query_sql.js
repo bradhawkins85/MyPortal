@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {parse, build} = require('../app/static/js/report-query-sql.js');
+const {parse, build, format} = require('../app/static/js/report-query-sql.js');
 
 const schema = {
   tables: [
@@ -91,4 +91,55 @@ test('empty SQL gives an empty builder', () => {
   assert.ok(parsed.ok);
   assert.deepEqual(parsed.state.tables, []);
   assert.equal(build(parsed.state, schema, []), '');
+});
+
+const squash = sql => sql.replace(/\s+/g, '').toLowerCase();
+const samples = [
+  "SELECT COALESCE(NULLIF(TRIM(a.type), ''), '(unspecified)') AS asset_type, COUNT(*) AS asset_count FROM assets a GROUP BY COALESCE(NULLIF(TRIM(a.type), ''), '(unspecified)') ORDER BY asset_count DESC, asset_type ASC",
+  "select distinct t.id,c.name from tickets t left outer join companies c on c.id=t.company_id and c.active = 1 where t.status in ('open','pending') and t.created_at between '2024-01-01' and '2024-12-31' order by t.id limit 10",
+  "with x as (select id from assets where status = 'a') select * from x where id in (select id from tickets) union all select 1",
+  "SELECT CASE WHEN a = 1 AND b = 2 THEN 'x' ELSE 'y' END AS z, t.`order`, t.left FROM t WHERE a.`select from` = 'it''s and where'",
+];
+
+test('format lays out one clause per line', () => {
+  assert.equal(format(samples[1]), [
+    'SELECT DISTINCT',
+    '  t.id,',
+    '  c.name',
+    'FROM tickets t',
+    'LEFT OUTER JOIN companies c ON c.id = t.company_id',
+    '  AND c.active = 1',
+    "WHERE t.status IN ('open', 'pending')",
+    "  AND t.created_at BETWEEN '2024-01-01' AND '2024-12-31'",
+    'ORDER BY t.id',
+    'LIMIT 10',
+  ].join('\n'));
+});
+
+test('format indents subqueries and keeps CASE conditions inline', () => {
+  assert.match(format(samples[2]), /^WITH x AS \(\n  SELECT\n    id\n  FROM assets\n  WHERE status = 'a'\n\)\nSELECT/);
+  assert.match(format(samples[2]), /WHERE id IN \(\n  SELECT\n    id\n  FROM tickets\n\)\nUNION ALL\nSELECT\n  1$/);
+  assert.match(format(samples[3]), /^SELECT\n  CASE WHEN a = 1 AND b = 2 THEN 'x' ELSE 'y' END AS z,/);
+});
+
+test('format only changes whitespace and keyword case, and is stable', () => {
+  for (const sql of samples) {
+    const pretty = format(sql);
+    assert.equal(squash(pretty), squash(sql), sql);
+    assert.equal(format(pretty), pretty, sql);
+  }
+  // Text inside strings and quoted identifiers is never touched.
+  assert.match(format(samples[3]), /t\.`order`, *\n  t\.left/);
+  assert.match(format(samples[3]), /a\.`select from` = 'it''s and where'$/);
+});
+
+test('formatted SQL still loads into the visual builder, and builder SQL is already pretty', () => {
+  const parsed = parse(format(samples[0]), schema);
+  assert.ok(parsed.ok);
+  assert.deepEqual(parsed.state.tables.map(table => table.alias), ['a']);
+  assert.match(parsed.state.tail, /^GROUP BY .*\nORDER BY asset_count DESC, asset_type ASC$/);
+  const state = {distinct: false, tables: [{name: 'assets', alias: null, join: null}, {name: 'companies', alias: null, join: null}],
+    items: [{table: 'assets', column: 'type'}, {table: 'companies', column: 'name'}], tail: ''};
+  const built = build(state, schema, []);
+  assert.equal(format(built), built);
 });
