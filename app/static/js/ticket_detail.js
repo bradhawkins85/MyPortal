@@ -1247,17 +1247,13 @@
         const label = formatAssetLabel(record);
         const displayName = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : label;
         const tacticalUrl = buildTacticalUrl(displayName);
-        const nameElement = tacticalUrl ? document.createElement('a') : document.createElement('span');
+        const nameElement = document.createElement('a');
         nameElement.className = 'ticket-assets-linked__name';
         nameElement.textContent = displayName;
         nameElement.setAttribute('data-linked-asset-name', '');
+        nameElement.href = `/assets/${encodeURIComponent(assetIdValue)}`;
         if (label && label !== displayName) {
           nameElement.title = label;
-        }
-        if (tacticalUrl && nameElement instanceof HTMLAnchorElement) {
-          nameElement.href = tacticalUrl;
-          nameElement.target = '_blank';
-          nameElement.rel = 'noreferrer noopener';
         }
         item.appendChild(nameElement);
         const agentState = Object.prototype.hasOwnProperty.call(rmmAgents, assetIdValue) ? rmmAgents[assetIdValue] : null;
