@@ -7,18 +7,17 @@ to specific IP addresses or CIDR ranges.
 from __future__ import annotations
 
 from ipaddress import AddressValueError, IPv4Address, IPv6Address, ip_address, ip_network
-from typing import Callable, Iterable
+from typing import Iterable
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import get_settings
 
 
-class IPWhitelistMiddleware(BaseHTTPMiddleware):
+class IPWhitelistMiddleware:
     """Restrict access to specific endpoints based on client IP address.
     
     This middleware checks the client's IP address against a whitelist of
@@ -33,7 +32,7 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         *,
         whitelist: Iterable[str] | None = None,
         protected_paths: Iterable[str] | None = None,
@@ -49,7 +48,7 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
             exempt_paths: List of path prefixes to exempt from IP checking
             enabled: Whether IP whitelisting is enabled
         """
-        super().__init__(app)
+        self.app = app
         self._settings = get_settings()
         self._enabled = enabled
         self._protected_paths = tuple(protected_paths or [])
@@ -139,25 +138,20 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
         # No protected paths specified = check all paths
         return True
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """Process the request and apply IP whitelisting.
-        
-        Args:
-            request: The incoming request
-            call_next: The next middleware or endpoint handler
-            
-        Returns:
-            The response from the next handler or a 403 Forbidden response
-        """
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Apply IP whitelisting, answering 403 for requests from other addresses."""
         # Skip if disabled
-        if not self._enabled:
-            return await call_next(request)
-        
+        if scope["type"] != "http" or not self._enabled:
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
         path = request.url.path
-        
+
         # Check if this path should be protected
         if not self._should_check_ip(path):
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
         
         # Extract client IP
         client_ip = self._get_client_ip(request)
@@ -167,10 +161,12 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
                 path=path,
                 method=request.method,
             )
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={"detail": "Access denied - IP verification failed"},
             )
+            await response(scope, receive, send)
+            return
         
         # Check whitelist
         if not self._is_ip_allowed(client_ip):
@@ -180,10 +176,12 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
                 path=path,
                 method=request.method,
             )
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={"detail": "Access denied - IP address not authorized"},
             )
-        
+            await response(scope, receive, send)
+            return
+
         # IP is allowed, continue to next handler
-        return await call_next(request)
+        await self.app(scope, receive, send)

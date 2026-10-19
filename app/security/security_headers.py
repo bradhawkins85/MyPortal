@@ -11,13 +11,13 @@ from typing import Awaitable, Callable, Iterable
 from urllib.parse import urlparse
 
 from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import get_settings
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+class SecurityHeadersMiddleware:
     """Add security headers to all HTTP responses.
     
     Headers added:
@@ -31,27 +31,39 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         *,
         exempt_paths: Iterable[str] | None = None,
         get_extra_script_sources: Callable[[], Awaitable[list[str]]] | None = None,
         get_extra_connect_sources: Callable[[], Awaitable[list[str]]] | None = None,
     ) -> None:
-        super().__init__(app)
+        self.app = app
         self.exempt_paths = tuple(exempt_paths or ())
         self._settings = get_settings()
         self._get_extra_script_sources = get_extra_script_sources
         self._get_extra_connect_sources = get_extra_connect_sources
 
-    async def dispatch(self, request: Request, call_next):
-        response: Response = await call_next(request)
-        
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         # Skip security headers for exempted paths (e.g., static files)
+        if scope["type"] != "http" or any(
+            scope.get("path", "").startswith(prefix) for prefix in self.exempt_paths
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                await self._apply_headers(request, MutableHeaders(scope=message))
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+    async def _apply_headers(self, request: Request, headers: MutableHeaders) -> None:
         path = request.url.path
         # Only custom form pages need microphone access and local audio previews.
         is_custom_form = bool(re.fullmatch(r"/(?:public/)?forms/[^/]+/?", path))
-        if any(path.startswith(prefix) for prefix in self.exempt_paths):
-            return response
 
         # Get validated portal URL once for reuse in multiple CSP directives
         validated_portal_url = None
@@ -125,18 +137,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "base-uri 'self'",
             f"form-action {' '.join(form_action_sources)}",
         ]
-        response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
+        csp = "; ".join(csp_directives)
         if is_custom_form:
-            response.headers["Content-Security-Policy"] += "; media-src 'self' blob:"
+            csp += "; media-src 'self' blob:"
+        headers["Content-Security-Policy"] = csp
 
         # X-Frame-Options: Prevent the page from being embedded in iframes
-        response.headers["X-Frame-Options"] = "DENY"
+        headers["X-Frame-Options"] = "DENY"
 
         # X-Content-Type-Options: Prevent MIME-sniffing
-        response.headers["X-Content-Type-Options"] = "nosniff"
+        headers["X-Content-Type-Options"] = "nosniff"
 
         # Referrer-Policy: Control referrer information sent with requests
-        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
 
         # Permissions-Policy: Disable sensitive browser features
         permissions = [
@@ -149,7 +162,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "gyroscope=()",
             "accelerometer=()",
         ]
-        response.headers["Permissions-Policy"] = ", ".join(permissions)
+        headers["Permissions-Policy"] = ", ".join(permissions)
 
         # Strict-Transport-Security: Enforce HTTPS.
         # Sends HSTS when either ``ENABLE_HSTS=true`` is configured OR the
@@ -167,13 +180,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             hsts_value = "max-age=31536000; includeSubDomains"
             if self._settings.is_production():
                 hsts_value += "; preload"
-            response.headers["Strict-Transport-Security"] = hsts_value
+            headers["Strict-Transport-Security"] = hsts_value
 
         # X-XSS-Protection: Legacy header for older browsers
         # Modern browsers use CSP instead, but this provides defense in depth
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-
-        return response
+        headers["X-XSS-Protection"] = "1; mode=block"
 
     def _is_request_https(self, request: Request) -> bool:
         """Return True when the incoming request is (or was proxied as) HTTPS.

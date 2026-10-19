@@ -10,8 +10,8 @@ from typing import Awaitable, Callable, Deque, Dict, Iterable
 from fastapi import Request
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.logging import log_warning
 from app.security.client_ip import get_client_ip
@@ -129,16 +129,16 @@ class EndpointRateLimiter:
         return True, None, None
 
 
-class RateLimiterMiddleware(BaseHTTPMiddleware):
+class RateLimiterMiddleware:
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         *,
         rate_limiter: SimpleRateLimiter,
         exempt_paths: Iterable[str] | None = None,
         key_func: Callable[[Request], str | Awaitable[str]] | None = None,
     ) -> None:
-        super().__init__(app)
+        self.app = app
         self.rate_limiter = rate_limiter
         self.exempt_paths = tuple(exempt_paths or ())
         self.key_func = key_func or self._default_key_func
@@ -148,10 +148,15 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         client_ip = get_client_ip(request, default="anonymous")
         return f"ip:{client_ip or 'anonymous'}"
 
-    async def dispatch(self, request: Request, call_next):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
         path = request.url.path
         if any(path.startswith(prefix) for prefix in self.exempt_paths):
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         client_ip = get_client_ip(request, default="anonymous")
         key = self.key_func(request)
@@ -166,36 +171,42 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
                 path=path,
                 retry_after=retry_after,
             )
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded", "retry_after": retry_after},
                 headers={
                     "Retry-After": f"{int(retry_after or self.rate_limiter.window_seconds)}",
                 },
             )
+            await response(scope, receive, send)
+            return
 
-        response = await call_next(request)
-        return response
+        await self.app(scope, receive, send)
 
 
-class EndpointRateLimiterMiddleware(BaseHTTPMiddleware):
+class EndpointRateLimiterMiddleware:
     """Middleware for endpoint-specific rate limiting."""
 
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         *,
         endpoint_limiter: EndpointRateLimiter,
         exempt_paths: Iterable[str] | None = None,
     ) -> None:
-        super().__init__(app)
+        self.app = app
         self.endpoint_limiter = endpoint_limiter
         self.exempt_paths = tuple(exempt_paths or ())
 
-    async def dispatch(self, request: Request, call_next):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
         path = request.url.path
         if any(path.startswith(prefix) for prefix in self.exempt_paths):
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         allowed, retry_after, reason = await self.endpoint_limiter.check(request)
         if not allowed:
@@ -207,7 +218,7 @@ class EndpointRateLimiterMiddleware(BaseHTTPMiddleware):
                 endpoint=reason,
                 retry_after=retry_after,
             )
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=429,
                 content={
                     "detail": f"Rate limit exceeded for {reason}",
@@ -217,6 +228,7 @@ class EndpointRateLimiterMiddleware(BaseHTTPMiddleware):
                     "Retry-After": f"{int(retry_after or 60)}",
                 },
             )
+            await response(scope, receive, send)
+            return
 
-        response = await call_next(request)
-        return response
+        await self.app(scope, receive, send)

@@ -6,8 +6,8 @@ from urllib.parse import quote, urlsplit
 
 from fastapi import Request
 from starlette.datastructures import FormData
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import get_settings
 from app.core.logging import log_warning
@@ -94,22 +94,47 @@ async def parse_csrf_form(request: Request) -> FormData:
         return await request.form()
 
 
-class CSRFMiddleware(BaseHTTPMiddleware):
+def _replay_body(body: bytes, receive: Receive) -> Receive:
+    """Return a receive callable that yields an already-read body first."""
+
+    replayed = False
+
+    async def replay() -> Message:
+        nonlocal replayed
+        if not replayed:
+            replayed = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return await receive()
+
+    return replay
+
+
+class CSRFMiddleware:
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         *,
         manager: SessionManager | None = None,
         exempt_paths: Iterable[str] | None = None,
     ) -> None:
-        super().__init__(app)
+        self.app = app
         self._session_manager = manager or session_manager
         self._exempt_paths = tuple(exempt_paths or ())
         self._settings = get_settings()
 
-    async def dispatch(self, request: Request, call_next):
-        if not self._settings.enable_csrf:
-            return await call_next(request)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not self._settings.enable_csrf:
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope, receive)
+        response, receive = await self._check(request, receive)
+        if response is not None:
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    async def _check(self, request: Request, receive: Receive) -> tuple[Response | None, Receive]:
+        """Return a rejection response (or None) and the receive to pass downstream."""
 
         # API clients that authenticate with bearer tokens or API keys are not
         # vulnerable to CSRF because browsers will not automatically attach
@@ -127,14 +152,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             or bool(request.headers.get("x-api-key"))
         )
         if has_token_auth and not has_session_cookie:
-            return await call_next(request)
+            return None, receive
 
         if request.method.upper() in SAFE_METHODS:
-            return await call_next(request)
+            return None, receive
 
         path = request.url.path
         if any(path.startswith(prefix) for prefix in (*DEFAULT_EXEMPT_PREFIXES, *self._exempt_paths)):
-            return await call_next(request)
+            return None, receive
 
         header_token = (
             request.headers.get("X-CSRF-Token")
@@ -149,19 +174,22 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             )
             if should_check_form:
                 try:
-                    # BaseHTTPMiddleware consumes the request stream the first time it is read.
-                    # Populate the cached body so downstream handlers still receive the payload.
-                    await request.body()
+                    # Reading the form consumes the request stream, so the
+                    # handler is given a receive that replays the same body.
+                    body = await request.body()
+                    receive = _replay_body(body, receive)
                     form = await parse_csrf_form(request)
                 except Exception:  # pragma: no cover - fall back to header validation on parse errors
                     form = None
-                if form and "_csrf" in form:
+                if form and isinstance(form.get("_csrf"), str):
                     header_token = form.get("_csrf")
+                if form is not None:
+                    await form.close()
 
         session = await self._session_manager.load_session(request, allow_inactive=False)
         if not session:
             log_warning("CSRF validation failed - no session", path=path, method=request.method)
-            return session_expired_response(request)
+            return session_expired_response(request), receive
 
         if not header_token:
             log_warning(
@@ -170,7 +198,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 method=request.method,
                 user_id=session.user_id if session else None,
             )
-            return JSONResponse(status_code=403, content={"detail": "CSRF token missing"})
+            return JSONResponse(status_code=403, content={"detail": "CSRF token missing"}), receive
 
         if not secrets.compare_digest(header_token, session.csrf_token):
             log_warning(
@@ -179,6 +207,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 method=request.method,
                 user_id=session.user_id if session else None,
             )
-            return JSONResponse(status_code=403, content={"detail": "CSRF token mismatch"})
+            return JSONResponse(status_code=403, content={"detail": "CSRF token mismatch"}), receive
 
-        return await call_next(request)
+        return None, receive

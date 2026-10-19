@@ -13,6 +13,13 @@ from app.security.client_ip import get_client_ip
 from app.security.encryption import decrypt_secret, encrypt_secret
 
 
+# Pages fire several requests each (the page, htmx fragments, polls), and
+# writing last_seen_at/expires_at on every one cost a database write per
+# request. Within this window the stored values are kept, so last_seen_at can
+# trail real activity, and the sliding idle expiry shorten, by at most this.
+SESSION_TOUCH_INTERVAL = timedelta(seconds=60)
+
+
 @dataclass
 class SessionData:
     id: int
@@ -43,6 +50,33 @@ class SessionManager:
         self.session_absolute_ttl = timedelta(
             hours=int(getattr(self._settings, "session_absolute_ttl_hours", 168) or 168)
         )
+        self.session_touch_interval = SESSION_TOUCH_INTERVAL
+
+    def _recently_touched(
+        self,
+        record: dict[str, Any],
+        *,
+        now: datetime,
+        new_expires_at: datetime,
+    ) -> bool:
+        """Return whether the stored session was refreshed recently enough to skip a write."""
+
+        last_seen_at = record.get("last_seen_at")
+        expires_at = record.get("expires_at")
+        if not last_seen_at or not expires_at:
+            return False
+        last_seen_at = ensure_datetime(last_seen_at)
+        expires_at = ensure_datetime(expires_at)
+        if last_seen_at.tzinfo is not None or expires_at.tzinfo is not None:
+            return False
+        # DATETIME columns drop or round fractional seconds, so allow a second
+        # of skew either way.
+        skew = timedelta(seconds=1)
+        if not -skew <= now - last_seen_at < self.session_touch_interval:
+            return False
+        # The stored expiry must already be the slid value (not past the
+        # absolute cap, and no more than the window behind it).
+        return -skew <= new_expires_at - expires_at < self.session_touch_interval
 
     def _is_secure(self) -> bool:
         return self._settings.environment.lower() == "production"
@@ -129,13 +163,14 @@ class SessionManager:
         new_expires_at = now + self.session_ttl
         if absolute_expiry is not None and absolute_expiry < new_expires_at:
             new_expires_at = absolute_expiry
-        await auth_repo.update_session(
-            session.id,
-            last_seen_at=now,
-            expires_at=new_expires_at,
-        )
-        session.expires_at = new_expires_at
-        session.last_seen_at = now
+        if not self._recently_touched(record, now=now, new_expires_at=new_expires_at):
+            await auth_repo.update_session(
+                session.id,
+                last_seen_at=now,
+                expires_at=new_expires_at,
+            )
+            session.expires_at = new_expires_at
+            session.last_seen_at = now
         request.state.session = session
         request.state.active_company_id = session.active_company_id
         if session.impersonator_user_id is not None:

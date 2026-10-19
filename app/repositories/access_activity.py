@@ -11,6 +11,7 @@ from app.core.database import db
 from app.core.logging import log_warning
 from app.repositories import audit_logs as audit_repo
 from app.repositories import auth as auth_repo
+from app.security.session import SESSION_TOUCH_INTERVAL
 
 
 def _to_utc(value: Any) -> datetime | None:
@@ -229,6 +230,10 @@ async def list_session_audit_activity(
         return []
     created_at = session.get("created_at")
     last_seen_at = session.get("last_seen_at") or session.get("expires_at")
+    if isinstance(last_seen_at, datetime):
+        # last_seen_at is only rewritten once per touch interval, so the
+        # session's latest activity can be up to that much newer.
+        last_seen_at = last_seen_at + SESSION_TOUCH_INTERVAL
     kwargs: dict[str, Any] = {
         "user_id": int(session["user_id"]) if session.get("user_id") is not None else None,
         "since": created_at,

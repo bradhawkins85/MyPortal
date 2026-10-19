@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.repositories import access_activity
+from app.security.session import SESSION_TOUCH_INTERVAL
 
 
 @pytest.mark.asyncio
@@ -36,4 +37,5 @@ async def test_list_session_audit_activity_filters_by_session_window(monkeypatch
     assert captured["user_id"] == 14
     assert captured["ip_address"] == "203.0.113.9"
     assert captured["since"] == session_row["created_at"]
-    assert captured["until"] == session_row["last_seen_at"]
+    # last_seen_at is written at most once per touch interval.
+    assert captured["until"] == session_row["last_seen_at"] + SESSION_TOUCH_INTERVAL
