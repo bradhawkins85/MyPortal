@@ -1514,7 +1514,7 @@
         try {
           const actionUrl = new URL(editForm.action, window.location.href);
           const current = new URL(window.location.href);
-          ['showArchived', 'search'].forEach((param) => {
+          ['showArchived', 'search', 'category'].forEach((param) => {
             const value = current.searchParams.get(param);
             if (value !== null) {
               actionUrl.searchParams.set(param, value);

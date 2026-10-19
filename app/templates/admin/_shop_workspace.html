@@ -5,7 +5,10 @@
       {% from "admin/_shop_workspace.html" import shop_admin_workspace %}
       {% call shop_admin_workspace("catalogue", summary) %} … {% endcall %}
 
-    summary is an optional list of {"label": …, "muted": bool} chips. -#}
+    summary is an optional list of {"label": …, "muted": bool} chips. Import it
+    with context so the nav can list shop_nav_categories (top-level categories)
+    and mark shop_nav_category (an ID, "featured" or "subscriptions") as current,
+    matching the categories on /shop. -#}
 {% macro shop_admin_workspace(active, summary=none) -%}
 {% set shop_admin_groups = [
   ("Catalogue", [
@@ -20,10 +23,15 @@
   ("Delivery", [
     ("freight", "/admin/shop/freight-rules", "Freight rules"),
   ]),
-  ("Storefront", [
-    ("storefront", "/shop", "View the shop"),
-  ]),
 ] %}
+{% set nav_category = shop_nav_category | default(none) %}
+{% set category_items = [
+  ("featured", "/admin/shop?category=featured", "Featured"),
+  ("subscriptions", "/admin/shop?category=subscriptions", "Subscriptions"),
+] %}
+{% for category in shop_nav_categories | default([]) %}{% set _ = category_items.append((category.id, "/admin/shop?category=" ~ category.id, category.name)) %}{% endfor %}
+{% set _ = shop_admin_groups.insert(1, ("Categories", category_items)) %}
+{% if nav_category is not none and active == "catalogue" %}{% set active = "category" %}{% endif %}
 <div class="settings-workspace shop-admin-workspace ce-workspace" data-ae-workspace data-ae-link-nav>
   {% if summary %}
   <section class="ce-overview" aria-label="Shop at a glance">
@@ -43,7 +51,8 @@
           <p class="ce-nav__group-title" id="shop-admin-nav-group-{{ loop.index }}">{{ group_label }}</p>
           <ul class="ce-nav__list" aria-labelledby="shop-admin-nav-group-{{ loop.index }}">
             {% for key, href, label in items %}
-              <li><a class="ce-nav__link" href="{{ href }}"{% if key == active %} aria-current="page"{% endif %}><span class="ce-nav__label">{{ label }}</span></a></li>
+              {% set is_current = (key == active) or (active == "category" and key == nav_category) %}
+              <li><a class="ce-nav__link" href="{{ href }}"{% if is_current %} aria-current="page"{% endif %}><span class="ce-nav__label">{{ label }}</span></a></li>
             {% endfor %}
           </ul>
         </div>
