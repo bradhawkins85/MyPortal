@@ -1252,6 +1252,8 @@
         nameElement.textContent = displayName;
         nameElement.setAttribute('data-linked-asset-name', '');
         nameElement.href = `/assets/${encodeURIComponent(assetIdValue)}`;
+        nameElement.target = '_blank';
+        nameElement.rel = 'noopener noreferrer';
         if (label && label !== displayName) {
           nameElement.title = label;
         }
@@ -1713,40 +1715,7 @@
         }
         const assetId = parent.getAttribute('data-asset-id');
         removeLinkedAssetById(assetId);
-        return;
       }
-
-      const assetElement = target.closest('[data-linked-asset]');
-      if (!assetElement) {
-        return;
-      }
-      const nameEl = assetElement.querySelector('[data-linked-asset-name]');
-      const assetName = nameEl ? nameEl.textContent.trim() : '';
-      const tacticalUrl = buildTacticalUrl(assetName);
-      if (!tacticalUrl) {
-        return;
-      }
-      if (
-        event.defaultPrevented ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      ) {
-        return;
-      }
-      // Action buttons and menus (RustDesk, RMM, chat, ...) do their own thing.
-      if (
-        target.closest(
-          'a[href], button, summary, details, input, select, textarea, .ticket-assets-linked__actions',
-        )
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      window.open(tacticalUrl, '_blank', 'noreferrer');
     });
 
     companySelect.addEventListener('change', () => {
