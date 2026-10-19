@@ -227,7 +227,153 @@
     });
   }
 
-  const api = { parse, build, references, unquote };
+  const KEYWORDS = new Set(['SELECT', 'DISTINCT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'IS', 'NULL', 'AS', 'ON', 'USING',
+    'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'NATURAL', 'STRAIGHT_JOIN', 'GROUP', 'BY', 'ORDER', 'HAVING',
+    'LIMIT', 'OFFSET', 'UNION', 'INTERSECT', 'EXCEPT', 'ALL', 'WITH', 'RECURSIVE', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
+    'ASC', 'DESC', 'LIKE', 'BETWEEN', 'EXISTS', 'WINDOW', 'OVER', 'PARTITION', 'ROLLUP']);
+  const JOIN_STARTERS = new Set(['LEFT', 'RIGHT', 'INNER', 'CROSS', 'FULL', 'NATURAL']);
+  const LIST_CLAUSES = new Set(['SELECT']);
+  const CONDITION_CLAUSES = new Set(['WHERE', 'HAVING', 'ON']);
+  const SPACED_OPERATORS = new Set(['=', '<', '>', '<=', '>=', '<>', '!=', '<=>']);
+
+  function tokenize(sql) {
+    const tokens = [];
+    let i = 0, space = false;
+    while (i < sql.length) {
+      const ch = sql[i], next = sql[i + 1];
+      if (/\s/.test(ch)) { space = true; i += 1; continue; }
+      let end = i + 1, type = 'punct';
+      if (ch === "'" || ch === '"' || ch === '`') {
+        type = ch === '`' ? 'ident' : 'string';
+        while (end < sql.length) {
+          if (sql[end] === '\\' && ch !== '`') { end += 2; continue; }
+          if (sql[end] === ch) { if (sql[end + 1] === ch) { end += 2; continue; } end += 1; break; }
+          end += 1;
+        }
+      } else if ((ch === '-' && next === '-' && /\s/.test(sql[i + 2] || ' ')) || ch === '#') {
+        type = 'line-comment';
+        while (end < sql.length && sql[end] !== '\n') end += 1;
+      } else if (ch === '/' && next === '*') {
+        type = 'block-comment';
+        end = sql.indexOf('*/', i + 2);
+        end = end === -1 ? sql.length : end + 2;
+      } else if (/[=<>!:]/.test(ch)) {
+        type = 'operator';
+        while (end < sql.length && /[=<>!:]/.test(sql[end])) end += 1;
+      } else if (/[A-Za-z0-9_$]/.test(ch)) {
+        type = 'word';
+        while (end < sql.length && /[A-Za-z0-9_$]/.test(sql[end])) end += 1;
+      }
+      tokens.push({ type, text: sql.slice(i, end), space });
+      space = false;
+      i = end;
+    }
+    return tokens;
+  }
+
+  /** Lay SQL out one clause per line. Only whitespace and keyword case change. */
+  function format(sqlText) {
+    const tokens = tokenize(String(sqlText || ''));
+    const significant = index => {
+      for (let j = index; j < tokens.length; j += 1) if (!tokens[j].type.endsWith('comment')) return tokens[j];
+      return null;
+    };
+    const upper = index => {
+      const token = significant(index);
+      return token && token.type === 'word' ? token.text.toUpperCase() : '';
+    };
+    let out = '';
+    const stack = [{ kind: 'root', base: 0, clause: null, caseDepth: 0, between: false, breakNext: false }];
+    let forceBreak = false, joinPhrase = false, prev = null;
+
+    const lineIndent = () => {
+      const line = out.slice(out.lastIndexOf('\n') + 1);
+      return line.length - line.trimStart().length;
+    };
+    const newline = indent => {
+      out = out.replace(/[ \t]+$/, '');
+      if (out) out += '\n' + ' '.repeat(indent);
+    };
+
+    tokens.forEach((token, index) => {
+      const ctx = stack[stack.length - 1];
+      const clauseLevel = ctx.kind !== 'expr';
+      let text = token.text;
+      const word = token.type === 'word' ? text.toUpperCase() : '';
+      const dotted = (prev && prev.text === '.' && !token.space) || (tokens[index + 1]?.text === '.' && !tokens[index + 1].space);
+      const keyword = word && KEYWORDS.has(word) && !dotted ? word : '';
+      if (keyword) text = keyword;
+      let broke = false;
+      const lineBreak = indent => { newline(indent); broke = true; };
+
+      if (forceBreak) { lineBreak(lineIndent()); forceBreak = false; }
+
+      if (clauseLevel && keyword) {
+        const startsJoin = JOIN_STARTERS.has(keyword) && ['JOIN', 'OUTER'].includes(upper(index + 1));
+        if (startsJoin || keyword === 'STRAIGHT_JOIN' || (keyword === 'JOIN' && !joinPhrase)) {
+          lineBreak(ctx.base); ctx.clause = 'JOIN';
+          joinPhrase = startsJoin;
+        } else if (keyword === 'JOIN') {
+          joinPhrase = false;
+        } else if (['SELECT', 'FROM', 'WHERE', 'HAVING', 'LIMIT', 'WINDOW', 'UNION', 'INTERSECT', 'EXCEPT', 'WITH'].includes(keyword)
+          || (['GROUP', 'ORDER'].includes(keyword) && upper(index + 1) === 'BY')) {
+          lineBreak(ctx.base);
+          ctx.clause = keyword;
+          ctx.breakNext = LIST_CLAUSES.has(keyword);
+          ctx.between = false;
+        } else if (keyword === 'ON') {
+          ctx.clause = 'ON';
+        } else if (keyword === 'CASE') {
+          ctx.caseDepth += 1;
+        } else if (keyword === 'END' && ctx.caseDepth) {
+          ctx.caseDepth -= 1;
+        } else if (keyword === 'BETWEEN') {
+          ctx.between = true;
+        } else if ((keyword === 'AND' || keyword === 'OR') && CONDITION_CLAUSES.has(ctx.clause) && !ctx.caseDepth) {
+          if (keyword === 'AND' && ctx.between) ctx.between = false;
+          else lineBreak(ctx.base + 2);
+        }
+      }
+
+      if (clauseLevel && ctx.breakNext && !broke && !(keyword === 'SELECT' || keyword === 'DISTINCT' || keyword === 'ALL') && !token.type.endsWith('comment')) {
+        lineBreak(ctx.base + 2);
+        ctx.breakNext = false;
+      }
+
+      if (!broke && out && !/\n *$/.test(out)) {
+        const tight = text === ',' || text === ')' || text === ';' || prev?.text === '(';
+        const spaced = SPACED_OPERATORS.has(text) || SPACED_OPERATORS.has(prev?.text);
+        if (!tight && (token.space || spaced || prev?.text === ',' || token.type.endsWith('comment'))) out += ' ';
+      }
+      out += text;
+
+      if (text === '(') {
+        const opensQuery = ['SELECT', 'WITH'].includes(upper(index + 1));
+        stack.push(opensQuery
+          ? { kind: 'sub', base: lineIndent() + 2, openIndent: lineIndent(), clause: null, caseDepth: 0, between: false, breakNext: false }
+          : { kind: 'expr' });
+      } else if (text === ')' && stack.length > 1) {
+        const closed = stack.pop();
+        if (closed.kind === 'sub') {
+          out = out.slice(0, -1);
+          newline(closed.openIndent);
+          out += ')';
+        }
+      } else if (text === ',' && clauseLevel) {
+        if (ctx.clause === 'SELECT') lineBreak(ctx.base + 2);
+        else if (ctx.clause === 'WITH') lineBreak(ctx.base);
+      } else if (text === ';') {
+        stack.length = 1;
+        forceBreak = true;
+      } else if (token.type === 'line-comment') {
+        forceBreak = true;
+      }
+      prev = token;
+    });
+    return out.trim();
+  }
+
+  const api = { parse, build, format, references, unquote };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ReportQuerySql = api;
 })(typeof window !== 'undefined' ? window : globalThis);
