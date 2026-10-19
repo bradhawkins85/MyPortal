@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "admin/_shop_workspace.html" import shop_admin_workspace %}
 
 {% block extra_head %}
   {{ super() }}
@@ -80,21 +81,6 @@
       </summary>
       <ul class="header-title-menu__list" role="menu">
         <li class="header-title-menu__item" role="none">
-          <a href="/admin/shop/optional-accessories" class="header-title-menu__link" role="menuitem">Optional accessories</a>
-        </li>
-        <li class="header-title-menu__item" role="none">
-          <a href="/admin/shop/categories" class="header-title-menu__link" role="menuitem">Product categories</a>
-        </li>
-        <li class="header-title-menu__item" role="none">
-          <a href="/admin/shop/subscription-categories" class="header-title-menu__link" role="menuitem">Subscription categories</a>
-        </li>
-        <li class="header-title-menu__item" role="none">
-          <a href="/admin/shop/freight-rules" class="header-title-menu__link" role="menuitem">Freight rules</a>
-        </li>
-        <li class="header-title-menu__item" role="none">
-          <a href="/admin/shop/packages" class="header-title-menu__link" role="menuitem">Package admin</a>
-        </li>
-        <li class="header-title-menu__item" role="none">
           <button type="button" class="header-title-menu__link" role="menuitem" data-create-product-modal-open>Add product</button>
         </li>
         <li class="header-title-menu__item" role="none">
@@ -130,6 +116,17 @@
 {% endblock %}
 
 {% block content %}
+{% set shop_counts = namespace(subscriptions=0, products=0, out_of_stock=0) %}
+{% for product in products or [] %}
+  {% if product.subscription_category_id is not none and product.subscription_category_id is defined %}{% set shop_counts.subscriptions = shop_counts.subscriptions + 1 %}
+  {% else %}{% set shop_counts.products = shop_counts.products + 1 %}{% if (product.stock or 0) <= 0 %}{% set shop_counts.out_of_stock = shop_counts.out_of_stock + 1 %}{% endif %}{% endif %}
+{% endfor %}
+{% set shop_summary = [
+  {"label": shop_counts.products ~ " product" ~ ("" if shop_counts.products == 1 else "s") ~ (" (archived shown)" if show_archived else "")},
+  {"label": shop_counts.subscriptions ~ " subscription" ~ ("" if shop_counts.subscriptions == 1 else "s"), "muted": not shop_counts.subscriptions},
+  {"label": shop_counts.out_of_stock ~ " out of stock", "muted": not shop_counts.out_of_stock},
+] %}
+{% call shop_admin_workspace("catalogue", shop_summary) %}
 <div class="admin-grid">
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
@@ -624,7 +621,7 @@
     </div>
   </div>
 </div>
-
+{% endcall %}
 {% endblock %}
 
 {% block scripts %}

@@ -186,3 +186,69 @@ def test_bcp_overview_sections_replace_dialogs():
     read_only = _bcp(can_edit=False)
     assert 'action="/bcp/update"' not in read_only and "data-ae-savebar" not in read_only
     assert "Keep trading." in read_only
+
+
+class _Url(str):
+    @property
+    def path(self) -> str:
+        return str(self)
+
+
+def _shop(**overrides) -> str:
+    context = dict(
+        request=SimpleNamespace(url_for=lambda name: _Url("/shop"), query_params={}),
+        categories=[{"id": 4, "name": "Laptops", "children": []}], products=[], current_category=None,
+        show_packages=False, show_featured=False, show_subscriptions=False, subscription_type=None, current_user=None,
+        subscription_categories=[{"id": 1, "name": "Licences"}], showing_category_cards=True,
+        category_cards=[], show_out_of_stock=False, search_term="", active_membership=None,
+        cart_summary={"total_quantity": 2}, total_count=0, csrf_token="tok", can_access_cart=True, is_super_admin=False,
+        shop_product_name_min_visible_chars=20, low_stock_threshold=5,
+        active_subscription_product_ids=[],
+    )
+    context.update(overrides)
+    return _env().get_template("shop/index.html").render(**context)
+
+
+def test_shop_nav_links_categories_and_marks_the_current_one():
+    html = _shop()
+    assert "data-ae-workspace data-ae-link-nav" in html and "asset_edit_sections.js" in html
+    assert re.search(r'href="/shop" aria-current="page"><span class="ce-nav__label">All categories', html)
+    assert 'href="/shop?category=4"><span class="ce-nav__label">Laptops' in html
+    assert 'href="/shop?category=subscriptions"' in html and "2 in your cart" in html
+
+    in_category = _shop(current_category=4, showing_category_cards=False)
+    assert re.search(r'href="/shop\?category=4" aria-current="page"', in_category)
+
+
+ADMIN_SHOP_PAGES = {
+    "admin/shop.html": "catalogue", "admin/shop_product_create.html": "catalogue",
+    "admin/shop_packages.html": "packages", "admin/shop_package_detail.html": "packages",
+    "admin/shop_optional_accessories.html": "accessories", "admin/shop_categories.html": "categories",
+    "admin/shop_subscription_categories.html": "subscription-categories",
+    "admin/shop_freight_rules.html": "freight",
+}
+
+
+def test_shop_admin_pages_share_the_workspace_nav():
+    env = _env()
+    for template, key in ADMIN_SHOP_PAGES.items():
+        source = (TEMPLATES / template).read_text()
+        env.parse(source)  # compiles
+        assert f'call shop_admin_workspace("{key}"' in source, template
+
+    nav = env.get_template("admin/_shop_workspace.html").module
+    html = env.from_string(
+        '{% from "admin/_shop_workspace.html" import shop_admin_workspace %}'
+        '{% call shop_admin_workspace("freight", [{"label": "3 products"}]) %}<p>Body</p>{% endcall %}'
+    ).render()
+    assert nav is not None and "data-ae-link-nav" in html and "<p>Body</p>" in html
+    assert 'href="/admin/shop/freight-rules" aria-current="page"' in html
+    assert html.count('aria-current="page"') == 1 and "3 products" in html
+
+
+def test_shop_categories_page_renders_inside_the_workspace():
+    html = _env().get_template("admin/shop_categories.html").render(
+        categories=[], flat_categories=[], csrf_token="tok", request=SimpleNamespace(query_params={}),
+    )
+    assert 'href="/admin/shop/categories" aria-current="page"' in html
+    assert html.index("ce-panels") < html.index("product-categories-heading")

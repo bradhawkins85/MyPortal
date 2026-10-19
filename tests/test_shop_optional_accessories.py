@@ -442,13 +442,14 @@ def test_optional_accessories_template_exists():
     assert template.exists(), "Template file is missing"
 
 
-def test_shop_tools_menu_contains_optional_accessories_link():
-    """The Shop Tools dropdown in admin/shop.html must link to optional accessories."""
+def test_shop_admin_nav_contains_optional_accessories_link():
+    """The shop admin workspace nav, used by admin/shop.html, links to optional accessories."""
     from pathlib import Path
 
     template = Path("app/templates/admin/shop.html").read_text()
-    assert "/admin/shop/optional-accessories" in template
-    assert "Optional accessories" in template
+    nav = Path("app/templates/admin/_shop_workspace.html").read_text()
+    assert 'call shop_admin_workspace("catalogue"' in template
+    assert '"/admin/shop/optional-accessories", "Optional accessories"' in nav
 
 
 def test_template_contains_bulk_dismiss_form():

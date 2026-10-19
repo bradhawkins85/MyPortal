@@ -1,0 +1,7 @@
+{
+  "guid": "feaa80fe-7772-401f-815c-f6b60f2e387e",
+  "occurred_at": "2026-10-19T11:18Z",
+  "change_type": "Improvement",
+  "summary": "Shop and shop admin: lay out as settings workspaces with a summary strip and a grouped, searchable navigation of shop categories and of the shop admin areas (catalogue, packages, optional accessories, categories, freight rules)",
+  "content_hash": "a8c84aba5a3a4570fd692f8e4e2375763375fccfd3066eb831491df466086150"
+}
