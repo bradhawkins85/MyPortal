@@ -543,10 +543,14 @@ Companies → Edit, **Tray settings** (`/admin/tray`, with the menu
 configuration editor), **Patch management** (`/rmm/patching`),
 **Checks** (`/rmm/checks`), **Microsoft 365** (`/m365`), **Integration
 modules** (`/admin/modules`), **Notification settings**
-(`/notifications/settings`) and **SMTP2Go** (`/admin/modules/smtp2go`).
+(`/notifications/settings`), **SMTP2Go** (`/admin/modules/smtp2go`),
+**Script automation** (`/rmm/automation`), **Event log rules**
+(`/rmm/event-logs/rules`) and **Windows Defender** (`/defender`).
 Views that used to open as modals from an Actions menu (the integration
-health center, credential expiry, setup wizard and task dependency graph)
-are sections instead; keep modals for short, focused tasks such as copying a
+health center, credential expiry, setup wizard and task dependency graph,
+and Defender's protection policy, ticket actions and exclusions) are
+sections instead; script that used to open such a modal sets the
+section's hash (`location.hash = 'defender-exclusions'`); keep modals for short, focused tasks such as copying a
 webhook URL or editing one record. On list-and-editor pages such as Checks, the
 list is split into sections people look for (*Needs attention*, *All
 checks*, one per check type) and the add/edit form is its own section

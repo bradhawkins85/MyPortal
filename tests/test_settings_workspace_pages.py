@@ -112,3 +112,52 @@ def test_modules_operations_views_are_sections():
     _assert_workspace(html, ["modules", "health", "credentials", "setup", "dependencies"])
     assert 'id="show-disabled-modules"' in html and 'id="webhook-url-modal"' in html
     assert ">1/1<" in html  # Internal modules are not counted.
+
+
+def test_rmm_automation_sections():
+    html = _env().get_template("rmm/automation.html").render(
+        can_run=True, is_super_admin=False, tags=[], default_timezone="UTC", schedules=[], steps=[],
+        onboarding_runs=[], windows_agents=[], agents=[], company={"name": "Contoso"}, csrf_token="tok",
+    )
+    _assert_workspace(html, ["schedules", "apps", "onboarding", "history"])
+    # rmm_scripts.js reads its config from the [data-rmm-page] wrapper.
+    assert re.search(r'<div class="[^"]*" data-rmm-page data-rmm-automation-page data-ae-workspace', html)
+    # Modals stay outside the sections so they open from any section.
+    assert html.index('id="rmm-choco-step-modal"') > html.index("ce-panels")
+    without_run = _env().get_template("rmm/automation.html").render(
+        can_run=False, is_super_admin=False, tags=[], default_timezone="UTC", schedules=[], steps=[],
+        onboarding_runs=[], windows_agents=[], agents=[], company=None, csrf_token="tok",
+    )
+    assert _sections(without_run) == ["schedules", "onboarding", "history"]
+
+
+def test_event_log_rules_open_the_editor_or_run_now():
+    from app.services import rmm_event_log_rules as rules
+
+    base = dict(company={"name": "Contoso"}, rules=[], can_edit=True, is_super_admin=False, errors={}, conditions=[],
+                fields=rules.FIELDS, operators=rules.OPERATORS, field_operators=rules.FIELD_OPERATORS,
+                actions=rules.ACTIONS, schedule_modes=rules.SCHEDULE_MODES, devices=[], scripts=[], script=None,
+                script_fields=[], variables=[], csrf_token="tok")
+    listing = _env().get_template("rmm/event_log_rules.html").render(**base, editing=None, run_now=None)
+    _assert_workspace(listing, ["rules"])
+    editing = {"id": None, "name": "", "scope": "company", "asset_id": None, "action": "drop", "target_mode": "all",
+               "target_rules": None, "is_enabled": True, "cooldown_minutes": 60, "schedule_mode": "delay",
+               "delay_minutes": 60, "run_time": "02:00", "timezone": "UTC", "script_id": None, "inputs": {}}
+    html = _env().get_template("rmm/event_log_rules.html").render(**base, editing=editing, run_now=None)
+    assert _sections(html) == ["rules", "editor"]
+    assert 'data-ae-initial="editor" data-ae-form="rmm-event-rule-settings-form"' in html
+    assert 'id="rmm-event-rule-settings-form" data-rmm-event-rule-form' in html and "data-ae-savebar" in html
+
+
+def test_defender_settings_are_sections():
+    context = dict(defender_enabled=True, is_super_admin=True, defender_can_write=True, defender_devices=[],
+                   defender_detections=[], defender_commands=[], defender_exclusions=[], defender_exclusion_lists=[],
+                   defender_companies=[], defender_settings={}, defender_tamper_locked_devices=[], csrf_token="tok")
+    html = _env().get_template("defender/index.html").render(**context)
+    _assert_workspace(html, ["endpoints", "detections", "actions", "policy", "tickets", "exclusions", "lists"])
+    assert "data-defender-modal" not in html
+    for hook in ("data-defender-settings-form", 'id="defender-exclusion-form"', "data-exclusion-list-form",
+                 'data-table-filter="defender-devices-table"'):
+        assert hook in html, hook
+    context["is_super_admin"] = False
+    assert "lists" not in _sections(_env().get_template("defender/index.html").render(**context))
