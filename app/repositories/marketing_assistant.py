@@ -13,9 +13,10 @@ from typing import Any
 
 from app.core.database import db
 
-_RUN_COLUMNS = (
-    "id, page_id, mode, status, instructions, requested_by_user_id, model, started_at, finished_at, error, "
-    "sources_read, sections_written, images_used, claims_verified, claims_rejected, report_json, restored_at"
+_SELECT_RUNS = (
+    "SELECT id, page_id, mode, status, instructions, requested_by_user_id, model, started_at, finished_at, "
+    "error, sources_read, sections_written, images_used, claims_verified, claims_rejected, report_json, "
+    "restored_at FROM marketing_assistant_runs "
 )
 
 
@@ -159,8 +160,7 @@ async def finish_run(
 
 async def list_runs(page_id: int, limit: int = 10) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        f"SELECT {_RUN_COLUMNS} FROM marketing_assistant_runs WHERE page_id = %s "
-        "ORDER BY started_at DESC, id DESC LIMIT %s",
+        _SELECT_RUNS + "WHERE page_id = %s ORDER BY started_at DESC, id DESC LIMIT %s",
         (int(page_id), max(1, int(limit))),
     )
     return [run for run in (_run_row(row) for row in rows) if run]
@@ -168,7 +168,7 @@ async def list_runs(page_id: int, limit: int = 10) -> list[dict[str, Any]]:
 
 async def get_run(run_id: int) -> dict[str, Any] | None:
     return _run_row(await db.fetch_one(
-        f"SELECT {_RUN_COLUMNS} FROM marketing_assistant_runs WHERE id = %s", (int(run_id),)
+        _SELECT_RUNS + "WHERE id = %s", (int(run_id),)
     ))
 
 
