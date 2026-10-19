@@ -133,6 +133,58 @@
     </div>
   </section>
 
+  {% if can_run %}
+  <section class="card card--panel" aria-labelledby="rmm-apps-heading" data-rmm-app-push>
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="rmm-apps-heading">Chocolatey apps</h2>
+        <p class="card__subtitle">Install or update applications now on {{ company.name if company else "this company" }}'s Windows devices using its enabled Chocolatey sources, without writing a script. To keep an app updated on a schedule, add a policy in <a href="/rmm/patching">Patch management</a>.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      {% if windows_agents %}
+      <form class="rmm-app-push" data-rmm-app-push-form novalidate>
+        <fieldset class="form-field">
+          <legend class="form-label">Applications</legend>
+          <div class="form-field__group">
+            <label class="visually-hidden" for="rmm-app-search">Find an application</label>
+            <input type="search" id="rmm-app-search" class="form-input" maxlength="255" placeholder="Search the downloaded app list…" data-rmm-app-search>
+            <button type="button" class="button button--secondary" data-rmm-app-search-button>Search</button>
+          </div>
+          <p class="form-help" role="status" data-rmm-app-status></p>
+          <div class="rmm-app-push__results" data-rmm-app-results></div>
+          <label class="form-label" for="rmm-app-extra">Other package IDs</label>
+          <input type="text" id="rmm-app-extra" class="form-input" maxlength="1000" placeholder="Optional, comma separated, such as googlechrome, 7zip" aria-describedby="rmm-app-extra-help" data-rmm-app-extra>
+          <p class="form-help" id="rmm-app-extra-help">For packages in the company's own sources that are not in the downloaded list. Up to 20 applications at a time.</p>
+        </fieldset>
+        <div class="form-field">
+          <label class="form-label" for="rmm-app-mode">Action</label>
+          <select id="rmm-app-mode" class="form-input" data-rmm-app-mode>
+            <option value="install">Install, or update where already installed</option>
+            <option value="upgrade">Update only where already installed</option>
+          </select>
+        </div>
+        <fieldset class="form-field">
+          <legend class="form-label">Devices</legend>
+          <label><input type="radio" name="rmm-app-target" value="all" checked data-rmm-app-target> All {{ windows_agents | length }} Windows device{{ '' if windows_agents | length == 1 else 's' }}</label>
+          <label><input type="radio" name="rmm-app-target" value="chosen" data-rmm-app-target> Chosen devices</label>
+          <div data-rmm-app-agents-field hidden>
+            <label class="form-label" for="rmm-app-agents">Windows devices</label>
+            <select id="rmm-app-agents" class="form-input" multiple size="6" data-rmm-app-agents>
+              {% for agent in windows_agents %}<option value="{{ agent.id }}">{{ agent.asset_name or agent.hostname or agent.agent_uid }}</option>{% endfor %}
+            </select>
+          </div>
+        </fieldset>
+        <button type="submit" class="button button--primary" data-rmm-app-submit>Push now</button>
+        <p class="alert alert--info" data-rmm-app-message role="status" aria-live="polite" hidden></p>
+      </form>
+      {% else %}
+        <p class="text-muted">No Windows devices have the RMM agent yet.</p>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
   <section class="card card--panel" aria-labelledby="rmm-onboarding-heading">
     <header class="card__header">
       <div>
@@ -224,4 +276,5 @@
 <script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_automation.js') }}" defer></script>
+<script src="{{ static_url('/static/js/rmm_app_push.js') }}" defer></script>
 {% endblock %}

@@ -78,4 +78,29 @@
     observer.observe(form.closest('[data-rmm-software-row]'));
     form.querySelector('[data-choco-retry]').addEventListener('click', () => { queue.push(form); drain(); });
   });
+
+  // Suggest packages from the downloaded Chocolatey app list while typing.
+  document.querySelectorAll('[data-choco-install]').forEach((form) => {
+    const input = form.querySelector('[data-choco-install-input]');
+    const options = form.querySelector('[data-choco-install-options]');
+    let timer = null;
+    let sequence = 0;
+    async function suggest() {
+      const current = ++sequence;
+      try {
+        const response = await fetch('/api/rmm/chocolatey/packages?q=' + encodeURIComponent(input.value.trim()), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        if (!response.ok || current !== sequence) return;
+        const data = await response.json();
+        const seen = new Set();
+        options.replaceChildren(...data.packages.filter((app) => !seen.has(app.package_id) && seen.add(app.package_id)).map((app) => {
+          const option = document.createElement('option');
+          option.value = app.package_id;
+          option.label = (app.display_name || app.title) + ' — ' + app.version;
+          return option;
+        }));
+      } catch (error) { /* Suggestions are optional; an exact package ID still works. */ }
+    }
+    input.addEventListener('focus', () => { if (!options.children.length) suggest(); }, { once: true });
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(suggest, 250); });
+  });
 })();

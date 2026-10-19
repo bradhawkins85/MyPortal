@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from pydantic import BaseModel, Field
 from app.repositories import rmm_automation as agents_repo, rmm_patching as repo
 from app.services import audit, rmm_patching as patching, rmm_automation, rmm_targeting
 from app.repositories import rmm_targeting as targeting_repo
@@ -205,6 +207,69 @@ async def software_upgrade(asset_id: int, request: Request):
     await audit.record(action='rmm.software.upgrade', request=request, user_id=user['id'], entity_type='asset',
                        entity_id=asset_id, metadata={'name': name, 'run_id': run_id})
     return flash_redirect(f'/assets/{asset_id}#software', 'Upgrade queued. View results in Scripts run history.', 'success')
+
+
+@router.post('/rmm/assets/{asset_id:int}/software/install')
+async def software_install(asset_id: int, request: Request):
+    """Install or update one Chocolatey package on this device without a script."""
+    context = await _context(request, write=True)
+    if isinstance(context, RedirectResponse):
+        return context
+    user, _, company_id, _ = context
+    from .inventory_routes import _company_agent
+    from app.services import rmm_software_updates
+    agent = await _company_agent(company_id, asset_id)
+    form = await request.form()
+    try:
+        ids = rmm_software_updates.package_ids([form.get('package_id')])
+        run_id = await rmm_software_updates.queue_apps(agent, ids, 'install', user['id'])
+    except RunRequestError as exc:
+        return flash_redirect(f'/assets/{asset_id}#software', ' '.join(exc.errors.values()), 'error')
+    await audit.record(action='rmm.software.install', request=request, user_id=user['id'], entity_type='asset',
+                       entity_id=asset_id, metadata={'package_ids': ids, 'run_id': run_id})
+    return flash_redirect(f'/assets/{asset_id}#software',
+                          f'Installing {ids[0]}. View results in Scripts run history.', 'success')
+
+
+class AppPushRequest(BaseModel):
+    package_ids: list[str] = Field(min_length=1, max_length=20)
+    mode: Literal['install', 'upgrade'] = 'install'
+    all_devices: bool = False
+    agent_ids: list[int] = Field(default_factory=list, max_length=1000)
+
+
+@router.post('/api/rmm/chocolatey/push')
+async def push_apps(request: Request, payload: AppPushRequest):
+    """Install or update Chocolatey packages now on chosen Windows devices of this company."""
+    user, _, company_id, _ = await _context(request, write=True, api=True)
+    from app.services import rmm_software_updates
+    try:
+        ids = rmm_software_updates.package_ids(payload.package_ids)
+    except RunRequestError as exc:
+        return JSONResponse({'detail': ' '.join(exc.errors.values()), 'errors': exc.errors}, status_code=400)
+    agents = [a for a in await agents_repo.list_active_agents(company_id=company_id)
+              if str(a.get('os') or '').lower() == 'windows']
+    if not payload.all_devices:
+        chosen = set(payload.agent_ids)
+        agents = [a for a in agents if int(a['id']) in chosen]
+    if not agents:
+        return JSONResponse({'detail': 'Choose at least one Windows device.',
+                             'errors': {'agent_ids': 'Choose at least one Windows device.'}}, status_code=400)
+    run_ids, not_needed, problems = [], 0, []
+    for agent in agents:
+        try:
+            run_id = await rmm_software_updates.queue_apps(agent, ids, payload.mode, user['id'])
+        except RunRequestError as exc:
+            problems.append({'agent_id': agent['id'], 'hostname': agent.get('hostname') or agent.get('agent_uid'),
+                             'detail': ' '.join(exc.errors.values())})
+            continue
+        if run_id:
+            run_ids.append(run_id)
+        else:
+            not_needed += 1
+    await audit.record(action='rmm.software.push', request=request, user_id=user['id'], entity_type='company',
+                       entity_id=company_id, metadata={'package_ids': ids, 'mode': payload.mode, 'run_ids': run_ids})
+    return {'queued': len(run_ids), 'run_ids': run_ids, 'not_needed': not_needed, 'problems': problems}
 
 
 @router.get('/api/rmm/agent/chocolatey/sources')

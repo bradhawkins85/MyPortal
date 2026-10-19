@@ -21,16 +21,34 @@ def feed(entries=()):
                     '</m:properties></entry>' for package, title in entries) + '</feed>')
 
 
+class Store:
+    """Records saved batches; ``packages`` lists every package saved, in order."""
+
+    def __init__(self):
+        self.packages, self.matches, self.cleared, self.checked = [], [], [], []
+        self.save_progress = AsyncMock(side_effect=self._save)
+        self.prune = AsyncMock(return_value=0)
+
+    async def _save(self, packages, matches, *, cleared, checked, checked_at):
+        self.packages += [p['package_id'] for p in packages]
+        self.matches += [dict(m) for m in matches]
+        self.cleared += list(cleared)
+        self.checked += list(checked)
+        return len(packages)
+
+
 @pytest.fixture
 def mocks(monkeypatch):
     sleep = AsyncMock()
-    replace = AsyncMock(return_value={'stored': 2, 'removed': 0})
+    store = Store()
     names = AsyncMock(return_value=['Alpha', 'Beta'])
     monkeypatch.setattr(catalog.asyncio, 'sleep', sleep)
     monkeypatch.setattr(catalog.catalog_repo, 'find_exact', AsyncMock(return_value=[]))
-    monkeypatch.setattr(catalog.catalog_repo, 'replace_all', replace)
+    monkeypatch.setattr(catalog.catalog_repo, 'lookup_times', AsyncMock(return_value={}))
+    monkeypatch.setattr(catalog.catalog_repo, 'save_progress', store.save_progress)
+    monkeypatch.setattr(catalog.catalog_repo, 'prune', store.prune)
     monkeypatch.setattr(catalog.inventory_repo, 'list_catalog_software_names', names)
-    return sleep, replace, names
+    return sleep, store, names
 
 
 def transport(monkeypatch, handler):
@@ -67,7 +85,8 @@ async def test_normalized_matching_still_rejects_ambiguity_editions_and_substrin
     transport(monkeypatch, lambda req: httpx.Response(200, text=feed(responses[req.url.params['searchTerm']])))
     summary = await catalog.refresh()
     assert summary['ambiguous'] == 1 and summary['unmatched'] == 3
-    assert replace.await_args.args[0] == [] and replace.await_args.kwargs['matches'] == []
+    assert replace.packages == [] and replace.matches == []
+    assert sorted(replace.cleared) == sorted(names.return_value)
 
 
 @pytest.mark.anyio
@@ -102,9 +121,6 @@ async def test_search_matches_chocolatey_nuget_wire_format(monkeypatch, mocks, n
 async def test_rejected_name_is_skipped_and_keeps_its_stored_match(monkeypatch, mocks, status):
     sleep, replace, names = mocks
     names.return_value = ['Alpha', 'A&D WinCT-Moisture', 'Beta']
-    previous = {'package_id': 'ad-winct', 'title': 'A&D WinCT-Moisture', 'version': '1.0', 'download_count': 5}
-    find_exact = AsyncMock(return_value=[previous])
-    monkeypatch.setattr(catalog.catalog_repo, 'find_exact', find_exact)
     calls = []
     def handle(request):
         term = request.url.params['searchTerm']
@@ -117,8 +133,10 @@ async def test_rejected_name_is_skipped_and_keeps_its_stored_match(monkeypatch, 
     result = await catalog.refresh()
     # Rejections are not retried, and later names are still looked up.
     assert calls == ["'Alpha'", "'A&D WinCT-Moisture'", "'Beta'"]
-    find_exact.assert_awaited_once_with('A&D WinCT-Moisture', catalog.RESULT_LIMIT)
-    assert [p['package_id'] for p in replace.await_args.args[0]] == ['alpha', 'ad-winct', 'beta']
+    # The rejected name's stored match is neither replaced nor cleared.
+    assert replace.packages == ['alpha', 'beta']
+    assert 'A&D WinCT-Moisture' not in replace.cleared
+    assert 'A&D WinCT-Moisture' in replace.checked
     assert result['matched'] == 2 and result['unmatched'] == result['ambiguous'] == 0
     assert result['rejected'] == 1 and result['rejected_names'] == ['A&D WinCT-Moisture']
 
@@ -135,7 +153,7 @@ async def test_all_rejected_does_not_replace(monkeypatch, mocks, status):
     with pytest.raises(catalog.CatalogUnavailable, match=f"HTTP {status} for 'Alpha'"):
         await catalog.refresh()
     assert len(calls) == 2
-    replace.assert_not_awaited()
+    replace.prune.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -152,17 +170,17 @@ async def test_406_reports_application_and_odata_error_without_replacing_list(mo
     message = str(exc.value)
     assert "HTTP 406 for 'Google Chrome'" in message
     assert 'Invalid Reason: InvalidQueryParameters.' in message
-    assert 'stored app list was kept' in message
+    assert 'stored match was kept' in message
     assert '\n' not in message
     sleep.assert_not_awaited()
-    replace.assert_not_awaited()
+    replace.prune.assert_not_awaited()
 
 
 @pytest.mark.parametrize('content', ['<html>untrusted error page</html>', '<broken', 'x' * 20_000])
 def test_error_does_not_echo_non_odata_responses(content):
     response = httpx.Response(406, text=content)
     assert catalog._lookup_error(response, 'App') == (
-        "Chocolatey software lookup failed with HTTP 406 for 'App'; the stored app list was kept.")
+        "Chocolatey software lookup failed with HTTP 406 for 'App'; the stored match was kept.")
 
 
 @pytest.mark.anyio
@@ -190,32 +208,68 @@ async def test_refresh_retries_same_application(monkeypatch, mocks, failure):
     transport(monkeypatch, handle)
     result = await catalog.refresh()
     assert terms == ["'Alpha'", "'Beta'", "'Beta'"]
-    assert [p['package_id'] for p in replace.await_args.args[0]] == ['alpha', 'beta']
+    assert replace.packages == ['alpha', 'beta']
     assert result == {'source': catalog.COMMUNITY, 'applications': 2, 'matched': 2,
                       'unmatched': 0, 'ambiguous': 0, 'rejected': 0, 'rejected_names': [],
-                      'stored': 2, 'removed': 0}
+                      'failed': 0, 'failed_names': [], 'stored': 2, 'removed': 0}
     assert [c.args[0] for c in sleep.await_args_list] == [catalog.PAGE_DELAY, 2]
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize('failure', [504, 'timeout'])
-async def test_exhausted_retries_do_not_save_partial_matches(monkeypatch, mocks, failure):
+async def test_exhausted_retries_skip_only_that_application(monkeypatch, mocks, failure):
     sleep, replace, names = mocks
+    names.return_value = ['Alpha', 'Beta', 'Gamma']
     terms = []
     def handle(request):
         term = request.url.params['searchTerm']
         terms.append(term)
-        if term == "'Alpha'":
-            return httpx.Response(200, text=feed([('alpha', 'Alpha')]))
-        if failure == 'timeout':
-            raise httpx.ReadTimeout('upstream timeout', request=request)
-        return httpx.Response(failure)
+        if term == "'Beta'":
+            if failure == 'timeout':
+                raise httpx.ReadTimeout('upstream timeout', request=request)
+            return httpx.Response(failure)
+        name = term.strip("'")
+        return httpx.Response(200, text=feed([(name.lower(), name)]))
     transport(monkeypatch, handle)
-    with pytest.raises(catalog.CatalogUnavailable, match='stored app list was kept'):
+    result = await catalog.refresh()
+    assert terms == ["'Alpha'"] + ["'Beta'"] * 4 + ["'Gamma'"]
+    # Beta keeps its stored match and is not marked checked, so it is retried first next time.
+    assert replace.packages == ['alpha', 'gamma'] and 'Beta' not in replace.cleared + replace.checked
+    assert result['failed'] == 1 and result['failed_names'] == ['Beta'] and result['matched'] == 2
+    replace.prune.assert_awaited_once_with(['Alpha', 'Beta', 'Gamma'])
+
+
+@pytest.mark.anyio
+async def test_feed_outage_stops_early_but_keeps_progress(monkeypatch, mocks):
+    sleep, replace, names = mocks
+    names.return_value = ['Alpha'] + [f'App {n}' for n in range(10)]
+    def handle(request):
+        if request.url.params['searchTerm'] == "'Alpha'":
+            return httpx.Response(200, text=feed([('alpha', 'Alpha')]))
+        return httpx.Response(503)
+    transport(monkeypatch, handle)
+    with pytest.raises(catalog.CatalogUnavailable, match='Saved 1 of 11 application lookups'):
         await catalog.refresh()
-    assert terms == ["'Alpha'"] + ["'Beta'"] * 4
-    assert [c.args[0] for c in sleep.await_args_list] == [catalog.PAGE_DELAY, 2, 4, 8]
-    replace.assert_not_awaited()
+    assert replace.packages == ['alpha'] and replace.checked == ['Alpha']
+    replace.prune.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_progress_is_saved_in_batches_and_oldest_lookups_run_first(monkeypatch, mocks):
+    from datetime import datetime
+    sleep, replace, names = mocks
+    names.return_value = [f'App {n:02}' for n in range(30)]
+    monkeypatch.setattr(catalog.catalog_repo, 'lookup_times', AsyncMock(return_value={
+        'app 00': datetime(2026, 10, 2), 'app 01': datetime(2026, 10, 1)}))
+    terms = []
+    def handle(request):
+        terms.append(request.url.params['searchTerm'].strip("'"))
+        return httpx.Response(200, text=feed())
+    transport(monkeypatch, handle)
+    await catalog.refresh()
+    assert terms[:2] == ['App 02', 'App 03'] and terms[-2:] == ['App 01', 'App 00']
+    assert replace.save_progress.await_count == 2
+    assert len(replace.save_progress.await_args_list[0].kwargs['checked']) == catalog.SAVE_EVERY
 
 
 @pytest.mark.anyio
@@ -231,7 +285,7 @@ async def test_permanent_errors_are_not_retried(monkeypatch, mocks, status):
         await catalog.refresh()
     assert len(calls) == 1
     sleep.assert_not_awaited()
-    replace.assert_not_awaited()
+    replace.prune.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -248,7 +302,7 @@ async def test_retry_after_is_bounded(monkeypatch, mocks, retry_after, expected)
     transport(monkeypatch, handle)
     await catalog.refresh()
     assert sleep.await_args_list[0].args == (expected,)
-    replace.assert_awaited_once()
+    assert replace.packages == ['alpha']
 
 
 @pytest.mark.anyio
@@ -273,7 +327,7 @@ async def test_only_inventory_names_are_queried_and_exact_matches_saved(monkeypa
     assert calls == list(responses)
     assert result['applications'] == 5 and result['matched'] == 3
     assert result['unmatched'] == result['ambiguous'] == 1
-    assert [p['package_id'] for p in replace.await_args.args[0]] == ['alpha', 'vendor']
+    assert replace.packages == ['alpha', 'vendor']
 
 
 @pytest.mark.anyio
@@ -283,8 +337,8 @@ async def test_empty_or_unmatched_inventory_clears_old_full_catalog(monkeypatch,
     names.return_value = names_value
     transport(monkeypatch, lambda request: httpx.Response(200, text=feed()))
     result = await catalog.refresh()
-    replace.assert_awaited_once()
-    assert replace.await_args.args[0] == []
+    replace.prune.assert_awaited_once_with(names_value)
+    assert replace.packages == []
     assert result['matched'] == 0
 
 
@@ -293,10 +347,9 @@ async def test_empty_or_unmatched_inventory_clears_old_full_catalog(monkeypatch,
 async def test_malformed_response_does_not_replace(monkeypatch, mocks, content):
     sleep, replace, names = mocks
     transport(monkeypatch, lambda request: httpx.Response(200, text=content))
-    with pytest.raises(catalog.CatalogUnavailable, match='stored app list was kept'):
-        await catalog.refresh()
-    sleep.assert_not_awaited()
-    replace.assert_not_awaited()
+    result = await catalog.refresh()
+    # A malformed response only skips that application.
+    assert result['failed'] == 2 and replace.packages == []
 
 
 @pytest.mark.anyio
@@ -323,6 +376,8 @@ async def test_inventory_selection_and_catalog_replacement_sql(monkeypatch):
         CREATE TABLE rmm_chocolatey_packages (package_id TEXT PRIMARY KEY, title TEXT,
             version TEXT, download_count INTEGER, updated_at TEXT);
         CREATE TABLE rmm_chocolatey_software_matches (name TEXT PRIMARY KEY, package_id TEXT);
+        CREATE TABLE rmm_chocolatey_lookups (name TEXT PRIMARY KEY, checked_at TEXT);
+        INSERT INTO rmm_chocolatey_lookups VALUES ('Removed App', '2026-10-01 00:00:00');
         INSERT INTO rmm_agents VALUES (1, 'active', 'windows'), (2, 'revoked', 'windows'),
             (3, 'active', 'linux'), (4, 'active', 'Windows');
         INSERT INTO rmm_device_software VALUES (1, 'Alpha', '1'), (1, 'Alpha', '2'),
@@ -359,5 +414,6 @@ async def test_inventory_selection_and_catalog_replacement_sql(monkeypatch):
         assert await catalog.query('') == [{'package_id': 'alpha', 'title': 'Alpha', 'version': '2.0',
                                            'display_name': 'Alpha'}]
         assert await catalog.query('uninstalled') == []
+        assert [row['name'] for row in connection.execute('SELECT name FROM rmm_chocolatey_lookups')] == ['Alpha']
     finally:
         connection.close()
