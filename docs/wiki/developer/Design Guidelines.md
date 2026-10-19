@@ -545,13 +545,16 @@ configuration editor), **Patch management** (`/rmm/patching`),
 modules** (`/admin/modules`), **Notification settings**
 (`/notifications/settings`), **SMTP2Go** (`/admin/modules/smtp2go`),
 **Script automation** (`/rmm/automation`), **Event log rules**
-(`/rmm/event-logs/rules`) and **Windows Defender** (`/defender`).
+(`/rmm/event-logs/rules`), **Windows Defender** (`/defender`) and the
+**Business continuity plan overview** (`/bcp`).
 Views that used to open as modals from an Actions menu (the integration
 health center, credential expiry, setup wizard and task dependency graph,
 and Defender's protection policy, ticket actions and exclusions) are
 sections instead; script that used to open such a modal sets the
 section's hash (`location.hash = 'defender-exclusions'`); keep modals for short, focused tasks such as copying a
-webhook URL or editing one record. On list-and-editor pages such as Checks, the
+webhook URL or editing one record. A searchable list whose records open in a focused editor modal (Scheduled
+tasks, Shop admin) follows the list-and-modal standard instead; do not turn
+such an editor into page sections. On list-and-editor pages such as Checks, the
 list is split into sections people look for (*Needs attention*, *All
 checks*, one per check type) and the add/edit form is its own section
 with the save bar.
