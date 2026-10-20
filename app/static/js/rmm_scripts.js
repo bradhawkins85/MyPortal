@@ -126,6 +126,7 @@
   const noFields = runModal.querySelector('[data-rmm-no-fields]');
   const timeoutSection = runModal.querySelector('[data-rmm-timeout-section]');
   const timeoutInput = runModal.querySelector('[data-rmm-timeout]');
+  const queueTimeoutInput = runModal.querySelector('[data-rmm-queue-timeout]');
   const runAsSection = runModal.querySelector('[data-rmm-run-as-section]');
   const runAsSelect = runModal.querySelector('[data-rmm-run-as]');
   const previewSection = runModal.querySelector('[data-rmm-preview-section]');
@@ -527,9 +528,12 @@
     noFields.hidden = detail.fields.length > 0;
     const timeout = saved ? saved.timeout_seconds : detail.script.default_timeout_seconds;
     const retry = saved && saved.retry;
-    timeoutInput.min = '0';
+    timeoutInput.min = retry ? String(10 / 60) : '1';
     timeoutInput.step = retry ? 'any' : '1';
-    timeoutInput.value = timeout === 0 ? 0 : Math.max(1, (timeout ?? 600) / 60);
+    timeoutInput.value = retry ? (timeout || 600) / 60 : Math.max(1, Math.round((timeout || 600) / 60));
+    queueTimeoutInput.value = saved && saved.queue_timeout_seconds != null ? saved.queue_timeout_seconds / 60 : '';
+    const queueDefault = detail.script.default_queue_timeout_seconds || 0;
+    queueTimeoutInput.placeholder = queueDefault ? 'Script default: ' + queueDefault / 60 + ' minutes' : 'Script default: Forever';
     runAsSelect.value = saved && saved.run_as === 'user' ? 'user' : 'system';
     if (saved) {
       Object.entries(saved.values || {}).forEach(([key, value]) => {
@@ -716,7 +720,7 @@
       }
     }
     submitButton.disabled = true;
-    const minutes = Number(timeoutInput.value);
+    const minutes = Number(timeoutInput.value) || 10;
     if (state.mode !== 'run') {
       await saveAutomation(Math.round(minutes * 60));
       return;
@@ -725,7 +729,7 @@
       const result = await api('/api/rmm/scripts/' + state.detail.script.id + '/runs', {
         method: 'POST',
         body: {
-          asset_ids: selectedAssets(), values: collectValues(), timeout_seconds: Math.round(minutes * 60), run_as: runAsSelect.value,
+          asset_ids: selectedAssets(), values: collectValues(), timeout_seconds: Math.round(minutes * 60), queue_timeout_seconds: queueTimeoutInput.value === '' ? null : Math.round(Number(queueTimeoutInput.value) * 60), run_as: runAsSelect.value,
         },
       });
       const queued = result.queued || [];
@@ -772,6 +776,7 @@
       script_id: state.detail.script.id,
       values: collectValues(),
       timeout_seconds: timeoutSeconds,
+      queue_timeout_seconds: queueTimeoutInput.value === '' ? null : Math.round(Number(queueTimeoutInput.value) * 60),
       run_as: runAsSelect.value,
       target_mode: targetMode.value,
       target_rules: targetMode.value === 'rules' ? targeting.getRules() : null,
@@ -983,7 +988,7 @@
       closeModal(resultModal);
       await openRunEditor(run.script_id, { item: {
         retry: true, script_id: run.script_id, asset_ids: [run.asset_id],
-        values: values, timeout_seconds: run.timeout_seconds, run_as: run.run_as, secret_keys: secretKeys,
+        values: values, timeout_seconds: run.timeout_seconds, queue_timeout_seconds: run.queue_timeout_seconds, run_as: run.run_as, secret_keys: secretKeys,
       } });
     } catch (error) {
       actionError(button, error.message);

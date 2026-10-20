@@ -224,7 +224,7 @@ async def run_for_ticket(
                 entries=entries,
                 inputs=rmm_scripts.stored_inputs(chosen, entries),
                 timeout_seconds=rmm_scripts.clamp_timeout(
-                    timeout_seconds, int(chosen.get("default_timeout_seconds", 600))
+                    timeout_seconds, int(chosen.get("default_timeout_seconds") or 600)
                 ),
                 requested_by_user_id=None,
                 run_source=RUN_SOURCE,

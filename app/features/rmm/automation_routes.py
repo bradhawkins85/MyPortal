@@ -25,6 +25,7 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_automation as automation_repo
 from app.services import audit as audit_service
 from app.services import rmm_automation as automation
+from app.services import rmm_scripts
 from app.services.rmm_scripts import RunRequestError
 
 from .routes import _assets_routes, _context, _serialise
@@ -128,6 +129,7 @@ class ScheduleRequest(BaseModel):
     tag_ids: list[int] = Field(default_factory=list, max_length=automation.MAX_SCHEDULE_TAGS)
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
+    queue_timeout_seconds: int | None = Field(default=None, ge=0, le=rmm_scripts.MAX_QUEUE_TIMEOUT_SECONDS)
     run_as: Literal["system", "user"] = "system"
     enabled: bool = True
 
@@ -244,6 +246,7 @@ class StepRequest(BaseModel):
     tag_ids: list[int] = Field(default_factory=list, max_length=automation.MAX_SCHEDULE_TAGS)
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
+    queue_timeout_seconds: int | None = Field(default=None, ge=0, le=rmm_scripts.MAX_QUEUE_TIMEOUT_SECONDS)
     run_as: Literal["system", "user"] = "system"
     continue_on_failure: bool = False
 

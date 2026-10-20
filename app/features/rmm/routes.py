@@ -104,7 +104,8 @@ def _script_summary(script: dict[str, Any]) -> dict[str, Any]:
         "description": script.get("description") or "",
         "parameter_count": len(script.get("parameters") or []),
         "env_count": len(script.get("env_vars") or []),
-        "default_timeout_seconds": script.get("default_timeout_seconds", 600),
+        "default_timeout_seconds": script.get("default_timeout_seconds") or 600,
+        "default_queue_timeout_seconds": script.get("default_queue_timeout_seconds") or 0,
         "platforms": script.get("platforms", rmm_repo.default_script_platforms(script.get("language"))),
         "platform_labels": [rmm_scripts.SCRIPT_PLATFORMS.get(item, item) for item in script.get("platforms", rmm_repo.default_script_platforms(script.get("language")))],
         "allow_parallel": bool(script.get("allow_parallel")),
@@ -244,7 +245,6 @@ async def scripts_page(request: Request, script: int | None = Query(default=None
         user,
         extra={
             "title": "Scripts",
-            "global_timeout_seconds": await rmm_repo.get_global_script_timeout(),
             "script_platforms": rmm_scripts.SCRIPT_PLATFORMS,
             "company": company,
             "script_groups": groups,
@@ -370,22 +370,26 @@ def _policy_timeout(raw: Any) -> int:
         minutes = int(str(raw))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Enter whole minutes, or 0 for forever") from None
-    if minutes < 0 or minutes > rmm_scripts.MAX_TIMEOUT_SECONDS // 60:
+    if minutes < 0 or minutes > rmm_scripts.MAX_QUEUE_TIMEOUT_SECONDS // 60:
         raise HTTPException(status_code=400, detail="Choose a valid timeout in minutes")
     return minutes * 60
 
 
-@router.post("/rmm/scripts/timeout", summary="Save the global script timeout")
-async def update_global_script_timeout(request: Request):
-    user, _company, _company_id, _can_run = await _context(request, api=True)
+@router.post("/rmm/scripts/{script_id:int}/queue-timeout", summary="Save a script's offline wait timeout")
+async def update_script_queue_timeout(script_id: int, request: Request):
+    user, _company, company_id, _can_run = await _context(request, api=True)
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=403, detail="Super admin privileges required")
+    script = await rmm_repo.get_script(script_id)
+    if not rmm_repo.script_available_to(script, company_id):
+        raise HTTPException(status_code=404, detail="Script not found")
     form = await request.form()
-    seconds = _policy_timeout(form.get("timeout_minutes"))
-    await rmm_repo.set_global_script_timeout(seconds)
-    await audit_service.record(action="rmm.script.timeout.update", request=request, user_id=user.get("id"),
-                               metadata={"timeout_seconds": seconds})
-    return flash_redirect("/rmm/scripts", "Global script timeout saved.", "success")
+    seconds = _policy_timeout(form.get("queue_timeout_minutes"))
+    await rmm_repo.set_script_queue_timeout(script_id, seconds)
+    await audit_service.record(action="rmm.script.queue_timeout.update", request=request, user_id=user.get("id"),
+                               entity_type="rmm_script", entity_id=script_id,
+                               metadata={"queue_timeout_seconds": seconds})
+    return flash_redirect(f"/rmm/scripts?script={script_id}", "Offline wait timeout saved.", "success")
 
 
 @router.post("/rmm/scripts/{script_id:int}/platforms", summary="Save a script's allowed platforms")
@@ -553,6 +557,7 @@ class RunRequest(BaseModel):
     asset_ids: list[int] = Field(default_factory=list, max_length=rmm_scripts.MAX_TARGETS_PER_RUN)
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
+    queue_timeout_seconds: int | None = Field(default=None, ge=0, le=rmm_scripts.MAX_QUEUE_TIMEOUT_SECONDS)
     run_as: Literal["system", "user"] = "system"
 
 
@@ -566,6 +571,7 @@ async def run_script_api(script_id: int, payload: RunRequest, request: Request):
             asset_ids=payload.asset_ids,
             submitted=payload.values,
             timeout_seconds=payload.timeout_seconds,
+            queue_timeout_seconds=payload.queue_timeout_seconds,
             requested_by_user_id=user.get("id"),
             run_as=payload.run_as,
         )

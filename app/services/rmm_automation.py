@@ -249,8 +249,9 @@ async def save_schedule(
         "entries_encrypted": encrypt_secret(json.dumps(entries)),
         "inputs": rmm_scripts.stored_inputs(script, entries),
         "timeout_seconds": rmm_scripts.clamp_timeout(
-            payload.get("timeout_seconds"), int(script.get("default_timeout_seconds", 600))
+            payload.get("timeout_seconds"), int(script.get("default_timeout_seconds") or 600)
         ),
+        "queue_timeout_seconds": rmm_scripts.queue_timeout_override(payload.get("queue_timeout_seconds")),
         "run_as": run_as,
         "is_enabled": enabled,
         "next_run_at": next_run_after(cron, tz_name) if enabled else None,
@@ -314,8 +315,9 @@ async def run_schedule(
     entries = decrypt_entries(schedule.get("entries_encrypted"))
     inputs = schedule.get("inputs") or []
     timeout = rmm_scripts.clamp_timeout(schedule.get("timeout_seconds"), 600)
-    # The chosen timeout also controls how long an offline device may wait.
-    expires_at = now + timedelta(seconds=timeout) if timeout else None
+    queue_wait = rmm_scripts.queue_timeout(schedule.get("queue_timeout_seconds"),
+                                           int(script.get("default_queue_timeout_seconds") or 0))
+    expires_at = now + timedelta(seconds=queue_wait) if queue_wait else None
 
     pending = await automation_repo.pending_schedule_agents(schedule_id)
     queued: list[dict[str, Any]] = []
@@ -329,7 +331,8 @@ async def run_schedule(
             run_id = await rmm_scripts.queue_for_agent(
                 script=script, agent=agent, entries=entries, inputs=inputs, timeout_seconds=timeout,
                 requested_by_user_id=requested_by_user_id, run_source="schedule", schedule_id=schedule_id,
-                expires_at=expires_at, run_as=schedule.get("run_as") or "system",
+                expires_at=expires_at, queue_timeout_seconds=queue_wait,
+                run_as=schedule.get("run_as") or "system",
             )
         except RunRequestError as exc:
             problems.append({
@@ -471,8 +474,9 @@ async def save_step(
         "entries_encrypted": encrypt_secret(json.dumps(entries)),
         "inputs": rmm_scripts.stored_inputs(script, entries),
         "timeout_seconds": rmm_scripts.clamp_timeout(
-            payload.get("timeout_seconds"), int(script.get("default_timeout_seconds", 600))
+            payload.get("timeout_seconds"), int(script.get("default_timeout_seconds") or 600)
         ),
+        "queue_timeout_seconds": rmm_scripts.queue_timeout_override(payload.get("queue_timeout_seconds")),
         "continue_on_failure": bool(payload.get("continue_on_failure")),
         "run_as": run_as,
         "created_by_user_id": user_id,
@@ -623,6 +627,7 @@ async def _queue_step(onboarding: Mapping[str, Any], entry: Mapping[str, Any]) -
         entries=entries,
         inputs=rmm_scripts.stored_inputs(script, entries),  # type: ignore[arg-type]
         timeout_seconds=rmm_scripts.clamp_timeout(step.get("timeout_seconds"), 600),
+        queue_timeout_seconds=step.get("queue_timeout_seconds"),
         requested_by_user_id=onboarding.get("started_by_user_id"),
         run_source="onboarding",
         onboarding_run_id=int(onboarding["id"]),

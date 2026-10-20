@@ -322,17 +322,23 @@ runs and the devices with the RMM agent. Choose a script to see, on the right:
 
 ## Timeouts and platforms
 
-Super administrators can set the **Global script timeout** on `/rmm/scripts` to
-any whole number of minutes (at least 1), or **0 for Forever**. New manual runs,
-schedules and onboarding steps start with this default. Technicians can override
-it in **Stop the script after** when running a script or creating/editing an
-automation. Existing schedules and steps retain their saved timeout.
+Each script has its own **Offline wait timeout** on `/rmm/scripts`. Super
+administrators can choose at least one minute, or **0 for Forever** (the default).
+This controls how long a queued script waits for an offline agent to collect it:
+300 minutes allows five hours; 2880 minutes allows two days. Once that window
+expires, the script will not run when the device returns.
 
-An offline device may wait up to the selected timeout to collect a run; Forever
-keeps it queued until collected or cancelled. Once collected, the execution timeout
-starts, with five extra minutes for the agent to report the result. Agent check-ins
-do not shorten these deadlines. Forever runs have no execution or result deadline.
-Deploy the updated RMM agent to use Forever; older agents interpret zero as ten minutes.
+Technicians can override **Offline wait timeout** when running a script or saving
+a schedule or onboarding step. Leave it blank to inherit the script's current
+setting; enter 0 to wait forever even if the script has a finite default. These
+settings survive Gitea sync. Existing queued runs retain the wait selected when
+queued. A schedule does not queue another copy while its previous run is pending.
+
+**Execution timeout** is separate and keeps its existing behavior. It starts when
+the agent collects the script, regardless of how long the script waited offline.
+For example, a script can wait two days and still have a ten-minute execution
+limit. MyPortal allows five extra minutes for the agent to report the result.
+Forever applies only to the offline wait and needs no agent update.
 
 Open each script to set its **Allowed platforms**: Windows, Mac, Linux or BSD.
 PowerShell scripts default to Windows; Bash and zsh scripts default to Mac and Linux.
@@ -462,7 +468,7 @@ RMM schedules are separate from MyPortal's scheduled tasks. Each schedule has:
 
 MyPortal checks for due schedules every 30 seconds. A device that is still working on (or has
 not yet collected) the previous run from the same schedule is skipped rather than given a
-second one. Offline devices wait for the configured timeout (or indefinitely with Forever). If
+second one. Offline devices wait for the script’s offline wait timeout or its schedule override (indefinitely with Forever). If
 MyPortal was down when a schedule was due, it runs once when MyPortal is back, not once per
 missed time. **Run now** runs a schedule straight away, **Turn off** pauses it, and the
 **Last run** column shows how many devices it reached and why any were skipped. Runs started

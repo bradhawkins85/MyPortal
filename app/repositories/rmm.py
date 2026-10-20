@@ -84,13 +84,11 @@ def default_script_platforms(language: str | None) -> list[str]:
     return ["windows"] if language in {"powershell", "cmd"} else ["darwin", "linux"]
 
 
-async def get_global_script_timeout() -> int:
-    row = await db.fetch_one("SELECT timeout_seconds FROM rmm_script_settings WHERE id = 1")
-    return int(row["timeout_seconds"]) if row else 600
-
-
-async def set_global_script_timeout(timeout_seconds: int) -> None:
-    await db.execute("UPDATE rmm_script_settings SET timeout_seconds = %s WHERE id = 1", (timeout_seconds,))
+async def set_script_queue_timeout(script_id: int, timeout_seconds: int) -> None:
+    await db.execute(
+        "UPDATE rmm_scripts SET default_queue_timeout_seconds = %s, updated_at = %s WHERE id = %s",
+        (timeout_seconds, _utcnow(), script_id),
+    )
 
 
 async def set_script_platforms(script_id: int, platforms: list[str]) -> None:
@@ -107,19 +105,18 @@ async def list_scripts(*, company_id: int | None = None) -> list[dict[str, Any]]
     if company_id is None:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
             "created_at, updated_at, platforms_json, files_json FROM rmm_scripts WHERE is_active = 1 ORDER BY folder, name"
         )
     else:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
             "created_at, updated_at, platforms_json, files_json FROM rmm_scripts WHERE is_active = 1 "
             "AND (company_id IS NULL OR company_id = %s) ORDER BY folder, name",
             (company_id,),
         )
-    timeout = await get_global_script_timeout()
-    return [{**_script_row(row), "default_timeout_seconds": timeout} for row in rows or []]
+    return [_script_row(row) for row in rows or []]
 
 
 def script_available_to(script: dict[str, Any] | None, company_id: int) -> bool:
@@ -135,7 +132,7 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
     if with_content:
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
             "created_at, updated_at, platforms_json, files_json, content, ai_summary_json, ai_summary_sha256, ai_summary_model, "
             "ai_summary_updated_at FROM rmm_scripts WHERE id = %s",
             (script_id,),
@@ -143,14 +140,11 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
     else:
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
             "created_at, updated_at, platforms_json, files_json FROM rmm_scripts WHERE id = %s",
             (script_id,),
         )
-    script = _script_row(row)
-    if script:
-        script["default_timeout_seconds"] = await get_global_script_timeout()
-    return script
+    return _script_row(row)
 
 
 async def script_source_index() -> dict[str, dict[str, Any]]:
@@ -418,18 +412,19 @@ async def create_run(
     inputs: list[dict[str, Any]],
     payload_encrypted: str,
     timeout_seconds: int,
-    expires_at: datetime,
+    expires_at: datetime | None,
     run_source: str = "manual",
     schedule_id: int | None = None,
     onboarding_run_id: int | None = None,
     run_as: str = "system",
+    queue_timeout_seconds: int | None = None,
 ) -> int:
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_script_runs (script_id, script_name, script_path, language, script_content, "
         "content_sha256, agent_id, company_id, asset_id, requested_by_user_id, status, inputs_json, "
         "payload_encrypted, timeout_seconds, queued_at, expires_at, run_source, schedule_id, "
-        "onboarding_run_id, allow_parallel, run_anyway, run_as) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "onboarding_run_id, allow_parallel, run_anyway, run_as, queue_timeout_seconds) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             script["id"], script["name"], script["path"], script["language"], content,
             script["content_sha256"], agent_id, company_id, asset_id, requested_by_user_id,
@@ -437,7 +432,7 @@ async def create_run(
             run_source, schedule_id, onboarding_run_id,
             script_execution_mode(script) == "parallel" and run_source != "onboarding",
             script_execution_mode(script) == "run_anyway" and run_source != "onboarding",
-            run_as,
+            run_as, queue_timeout_seconds,
         ),
     )
 
@@ -445,7 +440,7 @@ async def create_run(
 async def get_run(run_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
         "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "
-        "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, "
+        "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, r.queue_timeout_seconds, "
         "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
         "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email, "
         f"{_RUN_SOURCE_COLUMNS}, "  # nosec B608 - fixed column list
@@ -472,7 +467,7 @@ async def list_runs(
     if asset_id is None:
         rows = await db.fetch_all(
             "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "
-            "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, "
+            "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, r.queue_timeout_seconds, "
             "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
             "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email, "
             f"{_RUN_SOURCE_COLUMNS} FROM "  # nosec B608 - fixed column list
@@ -484,7 +479,7 @@ async def list_runs(
     else:
         rows = await db.fetch_all(
             "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "
-            "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, "
+            "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, r.queue_timeout_seconds, "
             "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
             "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email, "
             f"{_RUN_SOURCE_COLUMNS} FROM "  # nosec B608 - fixed column list
