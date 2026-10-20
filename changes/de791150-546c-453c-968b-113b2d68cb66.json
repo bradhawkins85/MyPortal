@@ -1,0 +1,7 @@
+{
+  "guid": "de791150-546c-453c-968b-113b2d68cb66",
+  "occurred_at": "2026-10-20T13:10Z",
+  "change_type": "Feature",
+  "summary": "Tray menus: give matching devices their own tray icon menu using advanced device rules (installed software, location, company tags, custom fields and more, as Checks use), with a priority and a matching-device preview; devices that match no rule-targeted menu keep their device, tag, company or global menu",
+  "content_hash": "c637854a8b58c18ba3befee18d1680fe70987eb6e6396331bd10731fc0f5f02d"
+}
