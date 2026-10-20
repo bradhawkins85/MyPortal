@@ -400,6 +400,22 @@ re-enter any secret values typed directly into the previous run; variable refere
 kept and resolved again. Retrying uses the current script and creates a new manual attempt,
 keeping the original result in history. Run and cancel actions require Scripts write access.
 
+### Execute a command
+
+To run something that is not a saved script, open the device's asset page and choose
+**RMM** > **Execute command**. Pick the shell (**PowerShell** or **Command Prompt** on
+Windows; **Bash**, **Zsh**, or **PowerShell** where `pwsh` is installed on macOS and
+Linux), type the command, and choose **Run as** **System** or **Logged in user** as for
+a script. Several lines run as one script, and the exit code of the last command is the
+run's exit code. The run opens in the result viewer with live output, appears in the
+device's script history as **Command**, and shows the command under **Values sent**.
+
+Commands need the same Scripts write access as running a script, and every command is
+recorded in the audit log (`rmm.command.run`) with the shell, run as setting and the
+command text. Command Prompt needs an updated RMM agent, which reports `cmd` among its
+shells; an older agent refuses with an update message. Commands have no parameters or
+associated files and cannot be retried; run them again instead.
+
 ## Schedules and onboarding
 
 Choose **Schedules and onboarding** on the Scripts page (`/rmm/automation`). Both use the same

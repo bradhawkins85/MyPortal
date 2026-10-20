@@ -854,6 +854,8 @@
       source = ' · Windows Update scan' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     } else if (run.run_source === 'tray') {
       source = ' · tray menu';
+    } else if (run.run_source === 'command') {
+      source = ' · command' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     }
     resultModal.querySelector('[data-rmm-result-subtitle]').textContent =
       (run.asset_name ? 'On ' + run.asset_name : 'Device removed') + source;
@@ -902,7 +904,10 @@
     inputList.replaceChildren();
     inputs.forEach((item) => {
       const row = el('div');
-      row.append(el('dt', null, (item.kind === 'env' ? '$env:' : '-') + item.name), el('dd', null, item.value));
+      const label = item.kind === 'command' ? item.name : (item.kind === 'env' ? '$env:' : '-') + item.name;
+      const value = el('dd', null, item.kind === 'command' ? null : item.value);
+      if (item.kind === 'command') value.append(el('pre', { className: 'rmm-output' }, item.value));
+      row.append(el('dt', null, label), value);
       inputList.append(row);
     });
     resultModal.querySelector('[data-rmm-result-inputs-section]').hidden = inputs.length === 0;
