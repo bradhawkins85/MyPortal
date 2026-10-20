@@ -327,6 +327,38 @@ async def test_windows_msi_without_build_is_503(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_windows_intunewin_served_from_ready_build(monkeypatch, tmp_path):
+    package = tmp_path / "myportal-tray.intunewin"
+    package.write_bytes(b"INTUNEWIN")
+    ready = AsyncMock(return_value=package)
+    monkeypatch.setattr(builds, "ready_intunewin", ready)
+    monkeypatch.setattr(
+        tray_deployment, "resolve_active_link", AsyncMock(return_value=(_link(), TOKEN))
+    )
+    mark = AsyncMock()
+    monkeypatch.setattr(tray_repo, "mark_deployment_link_downloaded", mark)
+
+    response = await deploy_routes.deployment_windows_intunewin(SLUG)
+
+    assert Path(response.path) == package
+    assert "MyPortal-Tray-Acme-Pty-Ltd-Setup.intunewin" in response.headers["content-disposition"]
+    assert response.headers["cache-control"] == "no-store"
+    ready.assert_awaited_once_with(7, "MyPortal-Tray-Acme-Pty-Ltd-Setup.msi")
+    mark.assert_awaited_once_with(7)
+
+
+@pytest.mark.anyio
+async def test_windows_intunewin_without_build_is_503(monkeypatch):
+    monkeypatch.setattr(
+        tray_deployment, "resolve_active_link", AsyncMock(return_value=(_link(), TOKEN))
+    )
+    monkeypatch.setattr(builds, "ready_intunewin", AsyncMock(return_value=None))
+    with pytest.raises(HTTPException) as excinfo:
+        await deploy_routes.deployment_windows_intunewin(SLUG)
+    assert excinfo.value.status_code == 503
+
+
+@pytest.mark.anyio
 async def test_download_for_unknown_slug_is_404(monkeypatch):
     monkeypatch.setattr(
         tray_deployment,
@@ -361,6 +393,7 @@ async def test_public_page_renders_for_active_link(monkeypatch, installers):
     assert response.status_code == 200
     assert f"{PORTAL}/deploy/{SLUG}/windows.exe" in body
     assert f"{PORTAL}/deploy/{SLUG}/windows.msi" in body
+    assert f"{PORTAL}/deploy/{SLUG}/windows.intunewin" in body
     assert f"{PORTAL}/deploy/{SLUG}/macos.zip" in body
     assert "Acme Pty Ltd" in body
     assert TOKEN not in body

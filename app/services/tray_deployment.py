@@ -287,6 +287,8 @@ def download_filename(company_name: str | None, kind: str) -> str:
         return stem + "Setup.exe"
     if kind == "msi":
         return stem + "Setup.msi"
+    if kind == "intunewin":
+        return stem + "Setup.intunewin"
     return stem + "macOS.zip"
 
 

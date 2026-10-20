@@ -1,0 +1,7 @@
+{
+  "guid": "2749c246-e007-4495-aaa1-e29247aaa7e3",
+  "occurred_at": "2026-10-20T07:41Z",
+  "change_type": "Feature",
+  "summary": "Tray deployment URLs: download the company installer as a Microsoft Intune Win32 package (.intunewin), built on the server from the signed MSI, ready to upload to Intune as a Windows app (Win32)",
+  "content_hash": "bfb6b6fe6d6bd1f3f2b633e92f12a8af758ed4e762c7a92b0aed902e4d4e4914"
+}
