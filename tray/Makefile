@@ -28,6 +28,11 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0
 # upgrade comparisons. Keep the app-facing VERSION unchanged, but normalize the
 # MSI ProductVersion so every tagged build produces a valid ARP/upgrade version.
 MSI_VERSION ?= $(shell printf '%s' '$(VERSION)' | sed -E 's/^v//; s/[^0-9.].*//; s/^$$/0.0.0/' | awk -F. '{printf "%d.%d.%d", $$1, ($$2==""?0:$$2), ($$3==""?0:$$3)}')
+# Oldest macOS the darwin binaries run on. Without it cgo builds (the menu-bar
+# UI) inherit the build host's SDK version as their minimum, so a UI built on
+# a current macos-latest runner refuses to start on every older Mac.
+MACOS_MIN_VERSION ?= 12.0
+export MACOSX_DEPLOYMENT_TARGET := $(MACOS_MIN_VERSION)
 LDFLAGS  := -X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVersion=$(VERSION)'
 DIST     := dist
 
@@ -64,6 +69,8 @@ build-darwin-amd64:
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-amd64/myportal-tray-service ./service
 	@echo "Building macOS amd64 native menu-bar UI..."
 	GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 \
+	  CGO_CFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" \
+	  CGO_LDFLAGS="-mmacosx-version-min=$(MACOS_MIN_VERSION)" \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-amd64/myportal-tray-ui ./ui
 
 # -----------------------------------------------------------------------
@@ -77,6 +84,8 @@ build-darwin-arm64:
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-arm64/myportal-tray-service ./service
 	@echo "Building macOS arm64 native menu-bar UI..."
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 \
+	  CGO_CFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" \
+	  CGO_LDFLAGS="-mmacosx-version-min=$(MACOS_MIN_VERSION)" \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-arm64/myportal-tray-ui ./ui
 
 # -----------------------------------------------------------------------
