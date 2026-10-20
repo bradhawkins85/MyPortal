@@ -126,6 +126,8 @@
   const noFields = runModal.querySelector('[data-rmm-no-fields]');
   const timeoutSection = runModal.querySelector('[data-rmm-timeout-section]');
   const timeoutInput = runModal.querySelector('[data-rmm-timeout]');
+  const runAsSection = runModal.querySelector('[data-rmm-run-as-section]');
+  const runAsSelect = runModal.querySelector('[data-rmm-run-as]');
   const previewSection = runModal.querySelector('[data-rmm-preview-section]');
   const submitButton = runModal.querySelector('[data-rmm-submit]');
   const formError = runModal.querySelector('[data-rmm-error="form"]');
@@ -486,7 +488,7 @@
     state.dirty = false;
     state.done = false;
     fieldsHost.replaceChildren();
-    [devicesSection, fieldsSection, timeoutSection, previewSection].forEach((section) => { section.hidden = true; });
+    [devicesSection, fieldsSection, timeoutSection, runAsSection, previewSection].forEach((section) => { section.hidden = true; });
     formError.hidden = true;
     assetsError.hidden = true;
     runModal.querySelector('[data-rmm-retry-help]').hidden = true;
@@ -528,6 +530,7 @@
     timeoutInput.min = retry ? String(10 / 60) : '1';
     timeoutInput.step = retry ? 'any' : '1';
     timeoutInput.value = retry ? (timeout || 600) / 60 : Math.max(1, Math.round((timeout || 600) / 60));
+    runAsSelect.value = saved && saved.run_as === 'user' ? 'user' : 'system';
     if (saved) {
       Object.entries(saved.values || {}).forEach(([key, value]) => {
         const control = fieldsHost.querySelector('[data-rmm-value="' + CSS.escape(key) + '"]');
@@ -552,7 +555,7 @@
     } else {
       link.hidden = true;
     }
-    [devicesSection, fieldsSection, timeoutSection, previewSection].forEach((section) => { section.hidden = false; });
+    [devicesSection, fieldsSection, timeoutSection, runAsSection, previewSection].forEach((section) => { section.hidden = false; });
     applyMode();
     updatePreview();
   }
@@ -719,7 +722,9 @@
     try {
       const result = await api('/api/rmm/scripts/' + state.detail.script.id + '/runs', {
         method: 'POST',
-        body: { asset_ids: selectedAssets(), values: collectValues(), timeout_seconds: Math.round(minutes * 60) },
+        body: {
+          asset_ids: selectedAssets(), values: collectValues(), timeout_seconds: Math.round(minutes * 60), run_as: runAsSelect.value,
+        },
       });
       const queued = result.queued || [];
       const problems = result.problems || [];
@@ -765,6 +770,7 @@
       script_id: state.detail.script.id,
       values: collectValues(),
       timeout_seconds: timeoutSeconds,
+      run_as: runAsSelect.value,
       target_mode: targetMode.value,
       target_rules: targetMode.value === 'rules' ? targeting.getRules() : null,
     };
@@ -855,6 +861,7 @@
     stats.replaceChildren(
       stat('Status', statusPill(run.status)),
       stat('Exit code', run.exit_code === null || run.exit_code === undefined ? '–' : String(run.exit_code)),
+      stat('Run as', run.run_as === 'user' ? 'Logged in user' : 'System'),
       stat('Queued', formatDate(run.queued_at)),
       stat('Finished', formatDate(run.completed_at)),
     );
@@ -958,7 +965,7 @@
       closeModal(resultModal);
       await openRunEditor(run.script_id, { item: {
         retry: true, script_id: run.script_id, asset_ids: [run.asset_id],
-        values: values, timeout_seconds: run.timeout_seconds, secret_keys: secretKeys,
+        values: values, timeout_seconds: run.timeout_seconds, run_as: run.run_as, secret_keys: secretKeys,
       } });
     } catch (error) {
       actionError(button, error.message);

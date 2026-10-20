@@ -501,6 +501,7 @@ class RunRequest(BaseModel):
     asset_ids: list[int] = Field(default_factory=list, max_length=rmm_scripts.MAX_TARGETS_PER_RUN)
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
+    run_as: Literal["system", "user"] = "system"
 
 
 @router.post("/api/rmm/scripts/{script_id:int}/runs", summary="Push a script to one or more devices")
@@ -514,6 +515,7 @@ async def run_script_api(script_id: int, payload: RunRequest, request: Request):
             submitted=payload.values,
             timeout_seconds=payload.timeout_seconds,
             requested_by_user_id=user.get("id"),
+            run_as=payload.run_as,
         )
     except rmm_scripts.RunRequestError as exc:
         return JSONResponse({"detail": "Check the highlighted fields.", "errors": exc.errors}, status_code=400)
@@ -529,6 +531,7 @@ async def run_script_api(script_id: int, payload: RunRequest, request: Request):
                 "company_id": company_id,
                 "runs": [item["run_id"] for item in result["queued"]],
                 "assets": [item["asset_id"] for item in result["queued"]],
+                "run_as": payload.run_as,
             },
         )
     return result
@@ -615,6 +618,7 @@ class AgentDetails(BaseModel):
     shells: list[str] = Field(default_factory=list, max_length=16)
     script_files_supported: bool | None = None
     run_anyway_supported: bool | None = None
+    run_as_user_supported: bool | None = None
     thermal: ThermalSnapshot | None = None
 
 

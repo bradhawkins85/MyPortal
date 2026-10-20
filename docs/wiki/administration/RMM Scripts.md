@@ -355,7 +355,33 @@ an asset's page. Then:
    such as `{{asset.custom.BitLocker}}`, `{{company.variables.Tenant ID}}`, `{{asset.name}}` or
    `{{company.name}}`. Variables are filled in separately for each device, so one run can give
    every device its own value. Leaving an optional field empty uses the script's default.
-3. Set how long the script may run before the device stops it, then run it.
+3. Set how long the script may run before the device stops it.
+4. Choose who it runs as under **Run as**, then run it.
+
+### Run as System or the logged in user
+
+Every manual run, schedule and onboarding step has a **Run as** setting:
+
+- **System** (the default) runs the script as the agent's own account: LocalSystem on
+  Windows, root on macOS and Linux. Use it for installs, services, machine-wide settings
+  and anything that needs administrator rights.
+- **Logged in user** runs the script as whoever is signed in to the device, with their
+  rights, profile, `HKEY_CURRENT_USER`, mapped drives and environment. On Windows the
+  agent uses the user at the console, or the first active Remote Desktop session when
+  nobody is at the console, and starts the script hidden on that user's desktop. On macOS
+  it uses the owner of the console; on Linux, the active graphical session on `seat0`.
+  If nobody is signed in, the run fails with *No user is logged in on this device* rather
+  than running as System. Associated files are still downloaded by the agent's own
+  account before the script starts, so put them where the user can read them.
+
+The choice is saved with schedules and onboarding steps, captured on each queued run,
+shown in the run's details, and kept when you **Retry** a run. Event log rules, the tray
+menu, remote control, patching and Windows Update jobs always run as System.
+
+Running as the logged-in user needs migration 508 and an updated RMM agent: agents report
+`run_as_user_supported: true` on check-in. Deploy MyPortal first, then update agents. An
+older agent fails a **Logged in user** run with an update message instead of running it as
+System. System runs work on every agent.
 
 The panel on the right shows what each device receives. Values are encrypted until the device
 collects them and are deleted when the run finishes.
@@ -369,7 +395,7 @@ Choose **View** on a run to see its output, errors, the values sent, and which c
 were updated.
 
 **Retry** is available for **Expired**, **Timed out**, and **Failed** runs. It opens the run
-editor with the original device, timeout, and saved inputs selected. Review the values and
+editor with the original device, timeout, run as setting and saved inputs selected. Review the values and
 re-enter any secret values typed directly into the previous run; variable references are
 kept and resolved again. Retrying uses the current script and creates a new manual attempt,
 keeping the original result in history. Run and cancel actions require Scripts write access.

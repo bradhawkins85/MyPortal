@@ -9,6 +9,10 @@
 //     left out; lists are joined with commas.
 //   - Environment variables, plus MYPORTAL_RUN_ID and MYPORTAL_RESULT_FILE.
 //
+// A job runs as the agent's own account unless its RunAs is RunAsUser, when
+// it runs as the user logged in to the device (see user_windows.go and
+// user_unix.go) and fails without starting if nobody is signed in.
+//
 // A script sends custom values back to MyPortal either by printing lines like
 //
 //	##myportal[asset.BitLocker Status]=On
@@ -148,7 +152,19 @@ func (r *Runner) RunStreaming(ctx context.Context, job client.Job, report func(c
 			return result
 		}
 	}
-	dir, err := os.MkdirTemp(r.WorkDir, fmt.Sprintf("run-%d-", job.ID))
+	var account *loggedInUser
+	workDir := r.WorkDir
+	if job.RunAs == RunAsUser {
+		var err error
+		account, err = r.findUser()
+		if err != nil {
+			result.Error = userError(err)
+			return result
+		}
+		defer account.Close()
+		workDir = account.workDir(r.WorkDir)
+	}
+	dir, err := os.MkdirTemp(workDir, fmt.Sprintf("run-%d-", job.ID))
 	if err != nil {
 		result.Error = "Could not create a working folder: " + err.Error()
 		return result
@@ -161,16 +177,17 @@ func (r *Runner) RunStreaming(ctx context.Context, job client.Job, report func(c
 		result.Error = err.Error()
 		return result
 	}
-
-	cmd := exec.CommandContext(runCtx, name, args...)
-	cmd.Dir = dir
-	cmd.Env = buildEnv(os.Environ(), job, resultFile)
+	base := os.Environ()
+	if account != nil {
+		if err := account.grant(dir); err != nil {
+			result.Error = "Could not give the logged-in user access to the working folder: " + err.Error()
+			return result
+		}
+		base = account.environ()
+	}
 	stdout := &limitedBuffer{limit: MaxOutputBytes}
 	stderr := &limitedBuffer{limit: MaxOutputBytes}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	prepareCommand(cmd)
-	cmd.WaitDelay = 10 * time.Second
+	spec := launch{name: name, args: args, dir: dir, env: buildEnv(base, job, resultFile), stdout: stdout, stderr: stderr}
 
 	done := make(chan struct{})
 	drained := make(chan struct{})
@@ -198,7 +215,13 @@ func (r *Runner) RunStreaming(ctx context.Context, job client.Job, report func(c
 	} else {
 		close(drained)
 	}
-	runErr := cmd.Run()
+	var code *int
+	var runErr error
+	if account != nil {
+		code, runErr = account.run(runCtx, spec)
+	} else {
+		code, runErr = runExec(exec.CommandContext(runCtx, name, args...), spec, nil)
+	}
 	close(done)
 	<-drained
 	result.Stdout += stdout.String()
@@ -206,15 +229,10 @@ func (r *Runner) RunStreaming(ctx context.Context, job client.Job, report func(c
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		result.TimedOut = true
 	}
-	var exitErr *exec.ExitError
 	switch {
-	case runErr == nil:
-		code := 0
-		result.ExitCode = &code
-	case errors.As(runErr, &exitErr) && exitErr.ExitCode() >= 0:
-		code := exitErr.ExitCode()
-		result.ExitCode = &code
-	case !result.TimedOut:
+	case code != nil:
+		result.ExitCode = code
+	case runErr != nil && !result.TimedOut:
 		result.Error = "Could not start the script: " + runErr.Error()
 	}
 
@@ -250,6 +268,42 @@ func buildEnv(base []string, job client.Job, resultFile string) []string {
 	}
 	env = append(env, "MYPORTAL_RUN_ID="+strconv.FormatInt(job.ID, 10), "MYPORTAL_RESULT_FILE="+resultFile)
 	return env
+}
+
+// launch is a prepared script command.
+type launch struct {
+	name           string
+	args           []string
+	dir            string
+	env            []string
+	stdout, stderr io.Writer
+}
+
+// runExec runs cmd as spec describes and returns the exit code, or nil and an
+// error when the script could not start. configure, if set, adjusts the
+// command after the platform's process settings are applied.
+func runExec(cmd *exec.Cmd, spec launch, configure func(*exec.Cmd)) (*int, error) {
+	cmd.Dir = spec.dir
+	cmd.Env = spec.env
+	cmd.Stdout = spec.stdout
+	cmd.Stderr = spec.stderr
+	prepareCommand(cmd)
+	if configure != nil {
+		configure(cmd)
+	}
+	cmd.WaitDelay = 10 * time.Second
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		code := 0
+		return &code, nil
+	case errors.As(err, &exitErr) && exitErr.ExitCode() >= 0:
+		code := exitErr.ExitCode()
+		return &code, nil
+	default:
+		return nil, err
+	}
 }
 
 func (r *Runner) command(job client.Job, dir string) (string, []string, error) {

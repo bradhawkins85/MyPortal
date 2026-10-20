@@ -231,6 +231,10 @@ async def save_schedule(
     except RunRequestError as exc:
         errors.update(exc.errors)
         entries = {}
+    try:
+        run_as = rmm_scripts.clean_run_as(payload.get("run_as"))
+    except RunRequestError as exc:
+        errors.update(exc.errors)
     if errors:
         raise RunRequestError(errors)
 
@@ -250,6 +254,7 @@ async def save_schedule(
         "timeout_seconds": rmm_scripts.clamp_timeout(
             payload.get("timeout_seconds"), int(script.get("default_timeout_seconds") or 600)
         ),
+        "run_as": run_as,
         "is_enabled": enabled,
         "next_run_at": next_run_after(cron, tz_name) if enabled else None,
         "created_by_user_id": user_id,
@@ -333,7 +338,7 @@ async def run_schedule(
             run_id = await rmm_scripts.queue_for_agent(
                 script=script, agent=agent, entries=entries, inputs=inputs, timeout_seconds=timeout,
                 requested_by_user_id=requested_by_user_id, run_source="schedule", schedule_id=schedule_id,
-                expires_at=expires_at,
+                expires_at=expires_at, run_as=schedule.get("run_as") or "system",
             )
         except RunRequestError as exc:
             problems.append({
@@ -459,6 +464,10 @@ async def save_step(
     except RunRequestError as exc:
         errors.update(exc.errors)
         entries = {}
+    try:
+        run_as = rmm_scripts.clean_run_as(payload.get("run_as"))
+    except RunRequestError as exc:
+        errors.update(exc.errors)
     if errors:
         raise RunRequestError(errors)
     values = {
@@ -474,6 +483,7 @@ async def save_step(
             payload.get("timeout_seconds"), int(script.get("default_timeout_seconds") or 600)
         ),
         "continue_on_failure": bool(payload.get("continue_on_failure")),
+        "run_as": run_as,
         "created_by_user_id": user_id,
     }
     if step_id is None:
@@ -624,6 +634,7 @@ async def _queue_step(onboarding: Mapping[str, Any], entry: Mapping[str, Any]) -
         run_source="onboarding",
         onboarding_run_id=int(onboarding["id"]),
         notify=False,
+        run_as=step.get("run_as") or "system",
     )
 
 

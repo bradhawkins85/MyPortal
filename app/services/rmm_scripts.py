@@ -67,6 +67,9 @@ AGENT_CONNECTED_WINDOW = timedelta(seconds=POLL_WAIT_SECONDS * 4)
 SENSITIVE_MASK = "••••••"
 # rmm_script_runs.run_source for a run started from a tray menu item.
 TRAY_RUN_SOURCE = "tray"
+# Who a script runs as on the device: the agent's own account (LocalSystem on
+# Windows, root elsewhere) or the user logged in to it.
+RUN_AS_OPTIONS = ("system", "user")
 CUSTOM_VALUE_SCOPES = ("asset", "company", "session")
 
 # Built-in jobs adjust their own runs through these hooks, registered by their
@@ -526,6 +529,16 @@ def clamp_timeout(value: Any, default: int) -> int:
     return max(MIN_TIMEOUT_SECONDS, min(MAX_TIMEOUT_SECONDS, seconds))
 
 
+def clean_run_as(value: Any) -> str:
+    """``system`` or ``user``; missing means ``system``, anything else is an error."""
+
+    if value is None or value == "":
+        return "system"
+    if value not in RUN_AS_OPTIONS:
+        raise RunRequestError({"run_as": "Choose System or Logged in user."})
+    return str(value)
+
+
 def notify_agent(agent_id: int) -> None:
     event = _agent_events.get(agent_id)
     if event is not None:
@@ -565,13 +578,16 @@ async def queue_for_agent(
     expires_at: datetime | None = None,
     notify: bool = True,
     extra_context: Mapping[str, Any] | None = None,
+    run_as: str = "system",
 ) -> int:
     """Resolve the values for one device and queue the run. Raises
     :class:`RunRequestError` with a ``device`` message when it cannot run there.
 
     ``extra_context`` adds variables for this run only, such as ``event`` for a
-    run started by an event log rule (``{{event.message}}``)."""
+    run started by an event log rule (``{{event.message}}``). ``run_as`` is
+    ``system`` or ``user`` (the user logged in to the device)."""
 
+    run_as = clean_run_as(run_as)
     problem = device_problem(script, agent)
     if problem:
         raise RunRequestError({"device": problem})
@@ -601,6 +617,7 @@ async def queue_for_agent(
         run_source=run_source,
         schedule_id=schedule_id,
         onboarding_run_id=onboarding_run_id,
+        run_as=run_as,
     )
     if notify:
         notify_agent(int(agent["id"]))
@@ -615,6 +632,7 @@ async def queue_runs(
     submitted: Mapping[str, Any],
     timeout_seconds: Any,
     requested_by_user_id: int | None,
+    run_as: Any = "system",
 ) -> dict[str, Any]:
     """Queue the script on each device. Returns the queued run ids and per-device problems."""
 
@@ -627,6 +645,7 @@ async def queue_runs(
     if len(targets) > MAX_TARGETS_PER_RUN:
         raise RunRequestError({"assets": f"Choose at most {MAX_TARGETS_PER_RUN} devices at a time."})
     entries = validate_entries(script, submitted)
+    run_as = clean_run_as(run_as)
     timeout = clamp_timeout(timeout_seconds, int(script.get("default_timeout_seconds") or 600))
     inputs = stored_inputs(script, entries)
 
@@ -649,6 +668,7 @@ async def queue_runs(
                 inputs=inputs,
                 timeout_seconds=timeout,
                 requested_by_user_id=requested_by_user_id,
+                run_as=run_as,
             )
         except RunRequestError as exc:
             problem: dict[str, Any] = {
@@ -732,6 +752,7 @@ def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[st
         "agent_version": text("agent_version", 32),
         "script_files_supported": bool(payload.get("script_files_supported")) if payload.get("agent_version") is not None else payload.get("script_files_supported"),
         "run_anyway_supported": bool(payload.get("run_anyway_supported")) if payload.get("agent_version") is not None else payload.get("run_anyway_supported"),
+        "run_as_user_supported": bool(payload.get("run_as_user_supported")) if payload.get("agent_version") is not None else payload.get("run_as_user_supported"),
         "shells": (str(shells).strip()[:255] or None) if shells else None,
         "last_ip": (client_ip or "")[:64] or None,
     }
@@ -809,6 +830,7 @@ def _job_payload(row: Mapping[str, Any]) -> dict[str, Any] | None:
         "sha256": row.get("content_sha256"),
         "timeout_seconds": int(row.get("timeout_seconds") or 600),
         "run_anyway": bool(row.get("run_anyway")) and row.get("run_source") != "onboarding",
+        "run_as": "user" if row.get("run_as") == "user" else "system",
         "parameters": values.get("parameters") or {},
         "parameter_order": values.get("parameter_order") or [],
         "env": values.get("env") or {},
@@ -860,6 +882,12 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
             await rmm_repo.finish_run(
                 int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],
                 error_message="Update the RMM agent before using Run Anyway execution mode.",
+            )
+            continue
+        if row.get("run_as") == "user" and not agent.get("run_as_user_supported"):
+            await rmm_repo.finish_run(
+                int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],
+                error_message="Update the RMM agent before running scripts as the logged-in user.",
             )
             continue
         job = _job_payload(row)
