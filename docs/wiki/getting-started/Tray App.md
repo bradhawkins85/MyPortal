@@ -624,6 +624,23 @@ Older tray agents ignore `mode` and upload their default log set (System,
 Application and Security), which the server still analyses. Each run is
 listed as "AI troubleshooter" on the LLM Usage page.
 
+**Run Troubleshooting Bot automation action.** A ticket automation can start
+the same troubleshooter without a technician, so a ticket raised by an
+[event log rule](../administration/RMM%20Event%20Logs.md) or RMM check
+already carries the research, steps and log analysis when someone opens it.
+Add the **Run Troubleshooting Bot** action to a *Ticket created* automation
+(filter on the ticket's module or subject to limit it to RMM tickets) with a
+payload such as `{"ticket_id": "{{ ticket.id }}"}`. Optional fields:
+`asset_id` (otherwise the first linked asset with an active tray agent, or
+else the first linked asset), `context` (notes passed to the bot) and
+`model` (LLM model override). Without an active tray agent the bot still
+researches and plans, and reads the event logs MyPortal stores for the
+asset; it cannot collect anything from the endpoint itself. The action is
+skipped when no asset is linked or the requester has opted out of AI
+processing, and fails when no troubleshooter LLM model is configured.
+Event log rule and RMM check tickets link the device's asset before the
+*Ticket created* event fires.
+
 ### Single-stage agent (API)
 
 When an endpoint is being troubleshot, a technician can ask the device to

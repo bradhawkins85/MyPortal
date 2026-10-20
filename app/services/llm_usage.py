@@ -53,6 +53,7 @@ FEATURES: tuple[LLMFeature, ...] = (
         "ai_troubleshooter", "AI troubleshooter",
         "Researches articles, recommends steps and analyses endpoint logs for a ticket asset.",
         callers=(("app.services.ai_troubleshooter", "_chat"),),
+        module_slugs=("run-troubleshooting-bot",),
     ),
     LLMFeature(
         "rmm_findings", "RMM findings",

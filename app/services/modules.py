@@ -1358,6 +1358,14 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "enabled": True,
     },
     {
+        "slug": "run-troubleshooting-bot",
+        "name": "Run Troubleshooting Bot",
+        "description": "Run the AI troubleshooting bot on the ticket's linked asset so research, recommended steps and log analysis are posted as internal notes before a technician picks up the ticket.",
+        "icon": "🩺",
+        "settings": {},
+        "enabled": True,
+    },
+    {
         "slug": "add-ticket-reply",
         "name": "Add Ticket Reply",
         "description": "Add a reply to an existing ticket. Supports public replies, internal notes, and optional time tracking with billable/non-billable hours.",
@@ -2740,6 +2748,31 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "run-troubleshooting-bot": {
+        "fields": [
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "placeholder": "{{ticket.id}}",
+            },
+            {
+                "name": "asset_id",
+                "label": "Asset ID (optional; defaults to the first linked asset with a tray agent)",
+                "type": "integer",
+            },
+            {
+                "name": "context",
+                "label": "Notes for the bot (optional)",
+                "type": "string",
+            },
+            {
+                "name": "model",
+                "label": "LLM model override (optional)",
+                "type": "string",
+            },
+        ],
+    },
     "reprocess-ai": {
         "fields": [
             {
@@ -3138,6 +3171,7 @@ async def trigger_module(
         "ai-classify-ticket": _invoke_ai_classify_ticket,
         "ai-link-related": _invoke_ai_link_related,
         "ai-request-missing-info": _invoke_ai_request_missing_info,
+        "run-troubleshooting-bot": _invoke_run_troubleshooting_bot,
         "reprocess-ai": _invoke_reprocess_ai,
         "add-ticket-reply": _invoke_add_ticket_reply,
         "smart-attachment-removal": _invoke_smart_attachment_removal,
@@ -6386,6 +6420,7 @@ _AI_TICKET_MODULE_SLUGS = frozenset(
         "ai-classify-ticket",
         "ai-link-related",
         "ai-request-missing-info",
+        "run-troubleshooting-bot",
         "reprocess-ai",
         "whisperx",
     }
@@ -6897,6 +6932,30 @@ async def _invoke_ai_classify_ticket(
         "previous_values": previous_values,
         "updated_fields": sorted(update_fields),
     }
+
+
+async def _invoke_run_troubleshooting_bot(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Start the AI troubleshooting bot on the ticket's linked asset.
+
+    The bot runs in the background and posts each stage as an internal note,
+    so a ticket raised by an event log rule already carries research, steps
+    and log analysis when a technician opens it.
+    """
+
+    _ticket_id, ticket = await _load_ai_action_ticket(payload)
+    asset_id = _parse_nullable_int(payload.get("asset_id"))
+    context = str(payload.get("context") or "").strip()[:2000] or None
+    return await import_module("app.services.ai_troubleshooter").start_automation_troubleshoot(
+        ticket=ticket,
+        asset_id=asset_id,
+        context=context,
+        model=str(payload.get("model") or "").strip() or None,
+    )
 
 
 async def _invoke_ai_request_missing_info(

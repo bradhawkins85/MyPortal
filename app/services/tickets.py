@@ -1758,8 +1758,13 @@ async def create_ticket(
     initial_reply_author_display_name: str | None = None,
     send_creation_notification: bool = True,
     record_initial_reply: bool = True,
+    asset_ids: Sequence[int] | None = None,
 ) -> TicketRecord:
-    """Create a ticket and emit the corresponding automation event."""
+    """Create a ticket and emit the corresponding automation event.
+
+    ``asset_ids`` are linked before the event fires so ticket automations
+    (such as Run Troubleshooting Bot) see the ticket's assets.
+    """
 
     _ = send_creation_notification
     status_slug = await resolve_status_or_default(status)
@@ -1787,6 +1792,8 @@ async def create_ticket(
     )
 
     ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
+    if asset_ids and isinstance(ticket_id, int):
+        await tickets_repo.replace_ticket_assets(ticket_id, list(asset_ids))
     author_id: int | None = None
     if initial_reply_author_id is not None:
         try:

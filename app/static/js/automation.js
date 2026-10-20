@@ -355,6 +355,21 @@
         }),
       },
     ],
+    'run-troubleshooting-bot': [
+      {
+        label: 'Troubleshoot the linked asset',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+        }),
+      },
+      {
+        label: 'Troubleshoot with notes for the bot',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          context: 'Raised by an event log rule; focus on the matched events.',
+        }),
+      },
+    ],
     'reprocess-ai': [
       {
         label: 'Refresh all ticket AI',
