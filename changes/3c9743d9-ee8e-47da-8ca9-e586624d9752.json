@@ -1,0 +1,7 @@
+{
+  "guid": "3c9743d9-ee8e-47da-8ca9-e586624d9752",
+  "occurred_at": "2026-10-20T12:45Z",
+  "change_type": "Fix",
+  "summary": "Install the macOS menu-bar UI as an app bundle (MyPortal Tray.app) so macOS shows its tray icon; as a bare executable it ran as a background-only process whose icon never appeared.",
+  "content_hash": "76536e1c14928905c4af14ef27c56cbaffe5001c1b92e5ec1e159b95b7050b71"
+}

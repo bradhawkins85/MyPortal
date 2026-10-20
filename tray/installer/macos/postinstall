@@ -5,6 +5,7 @@ set -u
 PKG_PATH_ARG="${1:-}"
 
 BIN_DIR="/Library/MyPortal/Tray"
+UI_APP="$BIN_DIR/MyPortal Tray.app"
 DAEMON_PLIST="/Library/LaunchDaemons/io.myportal.tray.service.plist"
 AGENT_PLIST="/Library/LaunchAgents/io.myportal.tray.agent.plist"
 LOG_DIR="/Library/Logs/MyPortal/tray"
@@ -135,7 +136,10 @@ ensure_configuration
 # Make payload executables runnable and launchd-loadable. launchd refuses
 # plists that are not root-owned or are group/world-writable, and a quarantine
 # flag inherited from a downloaded package can stop the binaries launching.
-chmod +x "$BIN_DIR/myportal-tray-service" "$BIN_DIR/myportal-tray-ui" "$BIN_DIR/uninstall.sh" 2>/dev/null || true
+chmod +x "$BIN_DIR/myportal-tray-service" "$UI_APP/Contents/MacOS/myportal-tray-ui" "$BIN_DIR/uninstall.sh" 2>/dev/null || true
+# Releases before the app bundle installed the UI as a bare executable. The
+# LaunchAgent no longer points at it; remove it so it cannot be started.
+rm -f "$BIN_DIR/myportal-tray-ui"
 chown root:wheel "$DAEMON_PLIST" "$AGENT_PLIST" 2>/dev/null || true
 chmod 644 "$DAEMON_PLIST" "$AGENT_PLIST" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$BIN_DIR" 2>/dev/null || true

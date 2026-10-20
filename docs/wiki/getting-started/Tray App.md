@@ -41,7 +41,11 @@ Every endpoint runs **two** cooperating components:
   active console session token (`WTSGetActiveConsoleSessionId` /
   `WTSQueryUserToken`) gives us a UI process in the user's session.
 * On macOS, `LaunchDaemons` cannot show UI; `LaunchAgents` can, and they
-  run per-user. The daemon signals the agent via a local socket. launchd
+  run per-user. The menu-bar agent is installed as an `LSUIElement` app
+  bundle (`/Library/MyPortal/Tray/MyPortal Tray.app`, bundle ID
+  `io.myportal.tray.ui`): macOS runs a bare executable as a background-only
+  process and does not show its menu-bar icon. The daemon signals the agent
+  via a local socket. launchd
   starts the agent at login; the daemon also checks every minute and loads
   or starts it for the console user if launchd has not (for example after
   an upgrade), so the menu-bar icon returns without a fresh login. An agent

@@ -14,8 +14,12 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Library/MyPortal/Tray/myportal-tray-ui</string>
+    <string>/Library/MyPortal/Tray/MyPortal Tray.app/Contents/MacOS/myportal-tray-ui</string>
   </array>
+
+  <!-- Shows the agent as MyPortal Tray in Login Items (macOS 13+). -->
+  <key>AssociatedBundleIdentifiers</key>
+  <string>io.myportal.tray.ui</string>
 
   <key>RunAtLoad</key>
   <true/>

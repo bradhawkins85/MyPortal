@@ -18,8 +18,32 @@ mkdir -p "$PAYLOAD_DIR/Library/LaunchAgents"
 
 # Binaries (cross-compiled by Makefile).
 cp ../../dist/darwin/myportal-tray-service "$PAYLOAD_DIR$INSTALL_LOCATION/"
-cp ../../dist/darwin/myportal-tray-ui     "$PAYLOAD_DIR$INSTALL_LOCATION/"
 cp uninstall.sh "$PAYLOAD_DIR$INSTALL_LOCATION/"
+
+# Menu-bar UI as an LSUIElement app bundle. macOS treats a bare executable as
+# a background-only process and does not reliably show its menu-bar icon.
+UI_APP="$PAYLOAD_DIR$INSTALL_LOCATION/MyPortal Tray.app"
+mkdir -p "$UI_APP/Contents/MacOS" "$UI_APP/Contents/Resources"
+cp ../../dist/darwin/myportal-tray-ui "$UI_APP/Contents/MacOS/"
+chmod +x "$UI_APP/Contents/MacOS/myportal-tray-ui"
+# Bundle versions must be numeric: v0.9.7-3-gabc becomes 0.9.7.
+SHORT_VERSION="$(printf '%s' "$VERSION" | sed -E 's/^v//; s/[^0-9.].*//; s/\.$//')"
+[ -n "$SHORT_VERSION" ] || SHORT_VERSION="0.0.0"
+sed "s/__SHORT_VERSION__/$SHORT_VERSION/g" io.myportal.tray.ui.Info.plist > "$UI_APP/Contents/Info.plist"
+# The chat shell build generates the shared app icon.
+if [ -f ../../chat-shell/build/icon.icns ]; then
+    cp ../../chat-shell/build/icon.icns "$UI_APP/Contents/Resources/AppIcon.icns"
+    /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$UI_APP/Contents/Info.plist"
+fi
+plutil -lint "$UI_APP/Contents/Info.plist"
+# Seal the bundle so macOS ties the executable to its Info.plist. Ad-hoc
+# unless a Developer ID Application identity is provided.
+if [[ -n "${DEVELOPER_ID_APPLICATION:-}" ]]; then
+    codesign --force --options runtime --timestamp --sign "$DEVELOPER_ID_APPLICATION" "$UI_APP"
+else
+    codesign --force --sign - "$UI_APP"
+fi
+codesign --verify --strict "$UI_APP"
 
 # Dedicated chat shell: an Electron .app bundle pre-built on a macOS runner.
 # The tray UI launches the binary inside this bundle directly for an isolated

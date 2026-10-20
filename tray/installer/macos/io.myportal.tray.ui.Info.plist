@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist for the menu-bar UI bundle, installed as
+  /Library/MyPortal/Tray/MyPortal Tray.app. A bare executable has no app
+  identity, so macOS runs it as a background-only process and does not
+  reliably show its menu-bar icon. LSUIElement makes it a menu-bar app with
+  no Dock icon. build-pkg.sh fills in the version placeholders.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>io.myportal.tray.ui</string>
+  <key>CFBundleName</key>
+  <string>MyPortal Tray</string>
+  <key>CFBundleDisplayName</key>
+  <string>MyPortal Tray</string>
+  <key>CFBundleExecutable</key>
+  <string>myportal-tray-ui</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleShortVersionString</key>
+  <string>__SHORT_VERSION__</string>
+  <key>CFBundleVersion</key>
+  <string>__SHORT_VERSION__</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>12.0</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+</dict>
+</plist>

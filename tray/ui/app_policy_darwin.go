@@ -15,10 +15,11 @@ static void setMenuBarActivationPolicy(void) {
 import "C"
 
 // prepareMenuBarApp makes the UI a menu-bar (accessory) app before systray
-// starts AppKit. The UI is a bare executable without an Info.plist, so AppKit
-// otherwise treats it as a background-only process, and macOS can hold back
-// or never show its status item when launchd starts it at login or after an
-// upgrade. It must run on the main thread, before systray.Run.
+// starts AppKit. The installed UI is an LSUIElement app bundle, which already
+// gets this policy; the call covers the bare executable in development runs.
+// macOS does not show the status item of a bare executable reliably even with
+// this policy, so installs must use the bundle. It must run on the main
+// thread, before systray.Run.
 func prepareMenuBarApp() {
 	C.setMenuBarActivationPolicy()
 }
