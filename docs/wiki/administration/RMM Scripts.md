@@ -570,6 +570,16 @@ The RMM agent (`myportal-rmm`) is a separate program from the tray app, built fo
 macOS and Linux by the **Build RMM agent** workflow. It enrols with the tray device's token so
 it joins the same company and asset, then waits for runs.
 
+### Removing PawnIO
+
+RMM agents released before the PawnIO fix installed the PawnIO driver, which caused
+`SYSTEM_THREAD_EXCEPTION_NOT_HANDLED` (0x7E) crashes. Updated agents remove it at startup. To
+remove it sooner, add `docs/examples/rmm/Remove-PawnIO.ps1` from the MyPortal repository to
+`Common/` in Gitea, sync, and run it as System on the affected Windows devices. It runs
+PawnIO's registered uninstaller silently and fails (exit code 1) if PawnIO is still registered
+afterwards. It also removes PawnIO that other software installed. An agent released before
+the fix reinstalls PawnIO when its service next starts, so update the agent as well.
+
 ### Repairing an asset's agent
 
 Choose **Repair RMM agent** from an asset's Actions menu or its Scripts card.
