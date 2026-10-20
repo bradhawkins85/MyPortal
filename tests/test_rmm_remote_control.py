@@ -327,11 +327,36 @@ async def test_builtin_rustdesk_applies_the_config_and_its_own_password(sqlite_d
 def test_builtin_scripts_ship_for_windows_and_unix():
     windows = remote.builtin_rustdesk_script({"os": "windows"})
     mac = remote.builtin_rustdesk_script({"os": "darwin"})
+    linux = remote.builtin_rustdesk_script({"os": "linux"})
     assert windows["language"] == "powershell" and windows["path"].endswith(".ps1")
     assert mac["language"] == "bash" and mac["content"].startswith("#!/bin/bash")
-    for script in (windows, mac):
+    assert mac["path"] == "builtin/rustdesk_activate_macos.sh" and "hdiutil attach" in mac["content"]
+    assert linux["path"] == "builtin/rustdesk_activate.sh"
+    for script in (windows, mac, linux):
         assert "RUSTDESK_CFG" in script["content"] and "MYPORTAL_RUSTDESK_PASSWORD" in script["content"]
         assert "##myportal[session.id]=" in script["content"]
+
+
+@pytest.mark.anyio
+async def test_builtin_rustdesk_sends_each_platform_its_own_installer(sqlite_db, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "rustdesk_cfg", "")
+    monkeypatch.setattr(get_settings(), "rustdesk_installer_url", "https://downloads.example.com/rustdesk.exe")
+    monkeypatch.setattr(get_settings(), "rustdesk_macos_installer_url", "https://downloads.example.com/rustdesk.dmg")
+    assert remote.rustdesk_environment() == {"cfg_set": False, "installer_set": True, "macos_installer_set": True}
+    await remote.save_settings("rustdesk", {"is_enabled": "1"}, user_id=9)
+    _r, agent = await _enrol(sqlite_db, os_name="darwin")
+
+    session = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9)
+    job = (await rmm_scripts.wait_for_jobs(agent, wait_seconds=0))[0]
+    assert job["language"] == "bash" and "hdiutil" in job["script"]
+    assert job["env"]["RUSTDESK_INSTALLER_URL"] == "https://downloads.example.com/rustdesk.dmg"
+    assert "RUSTDESK_CFG" not in job["env"]
+
+    await rmm_scripts.record_result(agent, session["run_id"], {"exit_code": 0, "stdout": "##myportal[session.id]=123456789\n"})
+    ready = await remote.session_status(session["id"], company_id=1, user_id=9, is_super_admin=False)
+    assert ready["launch_url"].startswith("rustdesk://connection/new/123456789?password=")
 
 
 def test_agent_state_follows_the_agents_last_poll():

@@ -1,0 +1,7 @@
+{
+  "guid": "60d3c968-38f0-49e5-a67e-843db05ee3df",
+  "occurred_at": "2026-10-20T00:00Z",
+  "change_type": "Feature",
+  "summary": "RMM: RustDesk sessions on Macs now download, install and configure the RustDesk client when it is missing, like Windows",
+  "content_hash": "2b131772da847c5ff0e64a7a376be0449ffee3641b8f58ab1c5243b4cdc6711b"
+}

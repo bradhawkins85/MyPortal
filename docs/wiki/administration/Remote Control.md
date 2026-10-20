@@ -19,26 +19,40 @@ server config to MyPortal's `.env` file:
 ```bash
 # RustDesk > Settings > Network > Export server config
 RUSTDESK_CFG=0nI9...
-# Optional override: leave blank to use the latest stable GitHub release
+# Optional overrides: leave blank to use the latest stable GitHub release
 RUSTDESK_INSTALLER_URL=https://downloads.example.com/rustdesk-x86_64.exe
+RUSTDESK_MACOS_INSTALLER_URL=https://downloads.example.com/rustdesk-aarch64.dmg
 ```
 
 When a technician starts a RustDesk session, the RMM agent:
 
-1. checks for an existing RustDesk installation; if missing on Windows, downloads the
-   latest stable release from `rustdesk/rustdesk` on GitHub for the device architecture
-   and installs it silently (`RUSTDESK_INSTALLER_URL` can override the download URL);
-2. applies `RUSTDESK_CFG` (`rustdesk --config`), so the device uses your RustDesk server;
-3. starts the RustDesk service;
-4. sets a new one-time password that MyPortal generated for this session;
-5. reports the RustDesk ID.
+1. checks for an existing RustDesk installation; if missing on Windows or macOS, downloads
+   the latest stable release from `rustdesk/rustdesk` on GitHub for the device architecture
+   (`x86_64`, `x86` or `aarch64` on Windows; Intel or Apple silicon on macOS) and installs it
+   silently (`RUSTDESK_INSTALLER_URL` overrides the Windows `.exe` download and
+   `RUSTDESK_MACOS_INSTALLER_URL` the macOS `.dmg`);
+2. installs the RustDesk service when it is missing (on macOS, the same launch daemon and
+   launch agent that RustDesk's own **Install** button creates);
+3. applies `RUSTDESK_CFG` (`rustdesk --config`), so the device uses your RustDesk server;
+4. starts the RustDesk service;
+5. sets a new one-time password that MyPortal generated for this session;
+6. reports the RustDesk ID.
 
 MyPortal then opens the session in the technician's RustDesk app. Every session sets a new
 password, so an earlier session's password stops working. The built-in script runs on Windows
 (PowerShell) and on macOS and Linux (Bash). Without `RUSTDESK_CFG` the device keeps its current
-RustDesk server settings. Windows downloads and client commands have time limits, so a
-failed installation or configuration returns an error instead of waiting indefinitely.
-macOS and Linux still require RustDesk to be installed beforehand.
+RustDesk server settings. Windows and macOS downloads and client commands have time limits,
+so a failed installation or configuration returns an error instead of waiting indefinitely.
+Linux still requires RustDesk to be installed beforehand.
+
+### macOS permissions
+
+macOS only lets RustDesk see and control the screen once **Screen Recording** and
+**Accessibility** are allowed for it, and no script can grant those. The first time, the
+signed-in user approves RustDesk under **System Settings → Privacy & Security**, or you
+pre-approve it with an MDM configuration profile (Privacy Preferences Policy Control) for
+the bundle ID `com.carriez.rustdesk`. Until then a session connects but shows a black or
+view-only screen.
 
 To do something different, choose your own activation script instead (see
 [Your own activation script](#your-own-activation-script)).
