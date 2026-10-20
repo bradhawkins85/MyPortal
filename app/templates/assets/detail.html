@@ -83,7 +83,7 @@
         ("Asset", [
           ("profile", "asset-profile", "Profile", "", not customer_safe),
           ("inventory", "asset-inventory", "Inventory", "", true),
-          ("custom-fields", "asset-custom-fields", "Custom fields", custom_fields | length, not customer_safe),
+          ("custom-fields", "asset-custom-fields", "Custom fields", custom_fields | selectattr("value") | list | length or "", not customer_safe),
           ("warranty", "asset-warranty", "Warranty", "", warranty is not none),
           ("tags", "tags", "Tags", "", asset_tags is not none),
           ("hardware", "hardware", "Hardware", "", rmm and rmm.inventory),
