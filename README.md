@@ -109,7 +109,7 @@ Each asset shows its agent's status, version and install history, and has a one-
 | | |
 |---|---|
 | <img src="docs/images/readme/rmm-scripts.png" alt="RMM scripts" /> | <img src="docs/images/readme/rmm-checks.png" alt="RMM checks" /> |
-| **Scripts:** a PowerShell, Bash and Zsh library kept in Gitea, with Common and per-company folders, parameters detected from each script, AI summaries, and live output. | **Checks:** disk, ping, CPU, memory, Windows service, network throughput, script result, and agent offline checks that run a script, schedule one, or raise a ticket. |
+| **Scripts:** a PowerShell, Bash and Zsh library kept in Gitea, with Common and per-company folders, parameters detected from each script, AI summaries, and live output. | **Checks:** disk, ping, CPU, memory, Windows service, network throughput, file or folder, process, script result, and agent offline checks that run a script, schedule one, or raise a ticket. |
 
 - **Scripts.** Run a script on one device or many, then retry or cancel it. Attach files that are downloaded and
   verified before the script starts. Each script runs sequentially, in parallel with others, or straight away

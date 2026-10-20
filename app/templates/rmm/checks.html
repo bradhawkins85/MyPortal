@@ -127,7 +127,7 @@
         <header class="ce-section__header">
           <div class="ce-section__heading">
             <h2 class="card__title" id="rmm-checks-heading">All checks</h2>
-            <p class="card__subtitle">Checks watch each device's disk space, ping targets, CPU, memory, services, network throughput, script results and check-ins. A problem must last the check's duration before the check fails. When it fails the check can run a script on the device or raise a ticket for it; the ticket gets an update when the check passes again. For the same drive, ping target, service, interface or script, a device's own check replaces its company's, which replaces a check for every company. Open a device to see its results and stats.</p>
+            <p class="card__subtitle">Checks watch each device's disk space, ping targets, CPU, memory, services, network throughput, files, processes, script results and check-ins. A problem must last the check's duration before the check fails. When it fails the check can run a script on the device or raise a ticket for it; the ticket gets an update when the check passes again. For the same drive, ping target, service, interface, path, process or script, a device's own check replaces its company's, which replaces a check for every company. Open a device to see its results and stats.</p>
           </div>
           {% if can_edit %}<a class="button button--primary button--small" href="/rmm/checks?new=1#rmm-check-form">Add check</a>{% endif %}
         </header>

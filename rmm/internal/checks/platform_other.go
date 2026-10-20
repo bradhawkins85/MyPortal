@@ -23,3 +23,4 @@ func serviceStatus(context.Context, string) (string, error) { return "unsupporte
 func startService(context.Context, string) error            { return errUnsupported }
 func restartService(context.Context, string) error          { return errUnsupported }
 func stopService(context.Context, string) error             { return errUnsupported }
+func processNames() ([][]string, error)                     { return nil, errUnsupported }

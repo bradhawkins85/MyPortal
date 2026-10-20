@@ -102,3 +102,11 @@ func serviceStatus(context.Context, string) (string, error) { return "unsupporte
 func startService(context.Context, string) error            { return nil }
 func restartService(context.Context, string) error          { return nil }
 func stopService(context.Context, string) error             { return nil }
+
+func processNames() ([][]string, error) {
+	output, err := command("ps", "-axo", "comm=")
+	if err != nil {
+		return nil, err
+	}
+	return parsePsComm(output), nil
+}

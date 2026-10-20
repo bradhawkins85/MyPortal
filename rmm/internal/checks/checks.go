@@ -1,7 +1,8 @@
 // Package checks measures what MyPortal's checks watch: CPU load, memory,
-// disk space, network throughput, ping targets and services. MyPortal says
-// what to measure (client.CheckConfig) and judges the results; a service
-// check may also have the agent start, restart or stop the service.
+// disk space, network throughput, ping targets, services, files and
+// processes. MyPortal says what to measure (client.CheckConfig) and judges the
+// results; a service check may also have the agent start, restart or stop the
+// service.
 package checks
 
 import (
@@ -74,6 +75,12 @@ func (c *Collector) Collect(ctx context.Context, cfg client.CheckConfig) client.
 	}
 	for _, svc := range cfg.Services {
 		report.Services = append(report.Services, CheckService(ctx, svc))
+	}
+	for _, path := range cfg.Files {
+		report.Files = append(report.Files, CheckFile(path))
+	}
+	if len(cfg.Processes) > 0 {
+		report.Processes = CheckProcesses(cfg.Processes)
 	}
 	wg.Wait()
 	return report
