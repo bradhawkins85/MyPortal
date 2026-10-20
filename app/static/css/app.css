@@ -22519,6 +22519,23 @@ a.sch-item__company:focus-visible {
 .backup-register__list li + li { margin-top: 0.25rem; }
 
 /* Admin > System updates */
+.system-updates__detail-stats {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  margin-top: 0;
+}
+
+.system-updates__detail-stats .stat-strip__stat {
+  min-width: 0;
+}
+
+.system-updates__detail-stats .stat-strip__stat-value {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  letter-spacing: normal;
+  overflow-wrap: anywhere;
+}
+
 .system-updates__filter-tile {
   cursor: pointer;
   border: none;
