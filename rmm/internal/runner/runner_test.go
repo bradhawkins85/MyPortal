@@ -195,7 +195,8 @@ func TestPowerShellUsesTextFileWrapper(t *testing.T) {
 		t.Fatalf("PowerShell args: %v", args)
 	}
 	wrapper, err := os.ReadFile(args[len(args)-1])
-	if err != nil || !strings.Contains(string(wrapper), "catch { Write-Error $_; exit 1 }") {
+	if err != nil || !strings.Contains(string(wrapper), "$e | Out-String") ||
+		!strings.Contains(string(wrapper), "ScriptStackTrace") || strings.Contains(string(wrapper), "Write-Error") {
 		t.Fatalf("wrapper: %s error: %v", wrapper, err)
 	}
 }
