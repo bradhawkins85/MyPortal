@@ -78,6 +78,8 @@
     Check
   {%- elif run.run_source == 'ticket' -%}
     Ticket automation
+  {%- elif run.run_source == 'tray_repair' -%}
+    Tray agent repair{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'command' -%}
     Command{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'onboarding' -%}
@@ -113,13 +115,13 @@
    The asset detail page uses rustdesk_in_menu to offer every RustDesk session
    (remote desktop, file transfer, terminal) under RMM instead. #}
 {% set REMOTE_MODES = [("remote", "Remote desktop"), ("file_transfer", "File transfer"), ("terminal", "Terminal")] %}
-{% macro asset_menu(asset_id, asset_name, remote_control, run_script=false, rustdesk_in_menu=false, choco_install=false, run_command=false) -%}
+{% macro asset_menu(asset_id, asset_name, remote_control, run_script=false, rustdesk_in_menu=false, choco_install=false, run_command=false, tray_repair=false) -%}
 {%- set providers = remote_control | map(attribute="provider") | list -%}
 <div class="rmm-asset-actions">
   {%- if "rustdesk" in providers and not rustdesk_in_menu %}
   <button type="button" class="button button--ghost button--icon rmm-rustdesk" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}" title="Start a RustDesk remote session" aria-label="Start a RustDesk remote session for {{ asset_name }}"><img class="rmm-rustdesk__icon" src="/static/images/rustdesk.svg" alt="" width="16" height="16"></button>
   {%- endif %}
-  {%- if "meshcentral" in providers or run_script or run_command or choco_install or (rustdesk_in_menu and "rustdesk" in providers) %}
+  {%- if "meshcentral" in providers or run_script or run_command or choco_install or tray_repair or (rustdesk_in_menu and "rustdesk" in providers) %}
   <details class="rmm-menu" data-rmm-menu>
     <summary class="button button--ghost button--small rmm-menu__toggle" title="RMM actions" aria-label="RMM actions for {{ asset_name }}">RMM <span aria-hidden="true">▾</span></summary>
     <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RMM actions for {{ asset_name }}">
@@ -141,6 +143,9 @@
       {%- endif %}
       {%- if choco_install %}
       <button type="button" class="dropdown__item" role="menuitem" data-choco-modal-open aria-haspopup="dialog" aria-controls="choco-install-modal">Install Choco Package</button>
+      {%- endif %}
+      {%- if tray_repair %}
+      <button type="button" class="dropdown__item" role="menuitem" data-rmm-tray-repair="{{ asset_id }}" data-rmm-tray-repair-name="{{ asset_name }}">Repair tray agent</button>
       {%- endif %}
     </div>
   </details>
