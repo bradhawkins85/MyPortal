@@ -1,0 +1,7 @@
+{
+  "guid": "c6b02d2e-acf8-477b-82e9-52c3046e221c",
+  "occurred_at": "2026-10-20T06:05Z",
+  "change_type": "Improvement",
+  "summary": "Tray devices: the Update action now sends the MyPortal Tray Agent's built-in update command (queued for offline devices) instead of running a Tactical RMM script, and the Tactical RMM update script setting is removed",
+  "content_hash": "512ad0814354d9b82eeca18b8759beb1d04063a5e63e2e22ecf74de850a232e5"
+}
