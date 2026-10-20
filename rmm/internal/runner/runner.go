@@ -70,7 +70,10 @@ func New(workDir string) *Runner {
 // AvailableShells lists the interpreters found on this device.
 func (r *Runner) AvailableShells() []string {
 	var shells []string
-	for _, name := range []string{"powershell", "pwsh", "bash", "zsh"} {
+	for _, name := range []string{"powershell", "pwsh", "cmd", "bash", "zsh"} {
+		if name == "cmd" && runtime.GOOS != "windows" {
+			continue
+		}
 		if _, err := r.Lookup(name); err == nil {
 			shells = append(shells, name)
 		}
@@ -310,6 +313,8 @@ func (r *Runner) command(job client.Job, dir string) (string, []string, error) {
 	switch job.Language {
 	case "powershell":
 		return r.powershellCommand(job, dir)
+	case "cmd":
+		return r.cmdCommand(job, dir)
 	case "bash", "zsh":
 		if runtime.GOOS == "windows" {
 			return "", nil, errors.New("shell scripts cannot run on Windows")
@@ -364,6 +369,24 @@ func ShellArgs(job client.Job) []string {
 		}
 	}
 	return args
+}
+
+// cmdCommand runs a Command Prompt batch file. Parameters are not passed; ad
+// hoc commands use environment variables only.
+func (r *Runner) cmdCommand(job client.Job, dir string) (string, []string, error) {
+	if runtime.GOOS != "windows" {
+		return "", nil, errors.New("Command Prompt commands run on Windows only")
+	}
+	interpreter, err := r.Lookup("cmd")
+	if err != nil {
+		return "", nil, errors.New("cmd is not installed on this device")
+	}
+	script := filepath.Join(dir, "script.cmd")
+	content := "@echo off\r\n" + strings.ReplaceAll(strings.ReplaceAll(job.Script, "\r\n", "\n"), "\n", "\r\n")
+	if err := os.WriteFile(script, []byte(content), 0o600); err != nil {
+		return "", nil, err
+	}
+	return interpreter, []string{"/D", "/Q", "/C", script}, nil
 }
 
 func psQuote(value string) string {

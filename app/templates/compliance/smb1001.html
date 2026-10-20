@@ -145,7 +145,7 @@
               </div>
               <div class="card__collapsible-meta">
                 {% if control.compliance_help_url %}
-                <a href="{{ control.compliance_help_url }}" class="requirement-item__help-btn" title="Get compliance help: {{ control.compliance_help_label }}" aria-label="Get compliance help" onclick="event.stopPropagation()" rel="noopener">?</a>
+                <a href="{{ control.compliance_help_url }}" class="requirement-item__help-btn" title="Get compliance help: {{ control.compliance_help_label }}" aria-label="Get compliance help" onclick="event.stopPropagation()" target="_blank" rel="noopener">?</a>
                 {% endif %}
                 <div class="requirement-item__status">
                   <span class="badge badge--status-{{ control.status }}" data-requirement-status>{{ status_label(control.status) }}</span>
@@ -235,7 +235,7 @@
                   <button type="button" class="button button--ghost button--small" data-upload-evidence="{{ control.id }}">Upload evidence</button>
                   {% endif %}
                   {% if control.compliance_help_url %}
-                  <a href="{{ control.compliance_help_url }}" class="button button--ghost button--small" rel="noopener" {% if control.compliance_help_url.startswith('http') %}target="_blank"{% endif %}>Get compliance help: {{ control.compliance_help_label }}</a>
+                  <a href="{{ control.compliance_help_url }}" class="button button--ghost button--small" target="_blank" rel="noopener">Get compliance help: {{ control.compliance_help_label }}</a>
                   {% endif %}
                   {% if control.show_help %}
                   <button type="submit" form="smb-ticket-form-{{ control.id }}" class="button button--ghost button--small">Request technician help</button>

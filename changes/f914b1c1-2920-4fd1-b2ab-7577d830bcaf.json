@@ -1,0 +1,7 @@
+{
+  "guid": "f914b1c1-2920-4fd1-b2ab-7577d830bcaf",
+  "occurred_at": "2026-10-20T01:30Z",
+  "change_type": "Feature",
+  "summary": "RMM: Execute command from an asset's RMM menu to run an ad hoc PowerShell, Command Prompt, Bash or Zsh command on the device as System or the logged-in user",
+  "content_hash": "7e4851846e1b2ba8d5e3d9dea1f4999103cc48823e1c91f4c0dd6223b066dfb4"
+}
