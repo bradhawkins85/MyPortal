@@ -10,6 +10,7 @@
   const tagsField = modal.querySelector('[data-rmm-choco-step-tags-field]');
   const tags = modal.querySelector('[data-rmm-choco-step-tags]');
   const carryOn = modal.querySelector('[data-rmm-choco-step-continue]');
+  const skipExisting = modal.querySelector('[data-rmm-choco-step-skip-existing]');
   const error = modal.querySelector('[data-rmm-choco-step-error]');
   const submit = modal.querySelector('[data-rmm-choco-step-submit]');
   const picker = window.MyPortalChocoPicker.create({
@@ -40,6 +41,7 @@
     const chosenTags = new Set((item && item.tag_ids) || []);
     Array.from(tags.options).forEach((option) => { option.selected = chosenTags.has(Number(option.value)); });
     carryOn.checked = Boolean(item && item.continue_on_failure);
+    skipExisting.checked = Boolean(item && item.skip_existing_assets);
     modal.hidden = false;
     modal.classList.add('is-visible');
     modal.setAttribute('aria-hidden', 'false');
@@ -75,7 +77,8 @@
         method: stepId ? 'PUT' : 'POST', credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrf ? csrf.content : '' },
         body: JSON.stringify({ kind: 'chocolatey', package_ids: ids, target_mode: target(),
-          tag_ids: target() === 'tags' ? tagIds : [], continue_on_failure: carryOn.checked }),
+          tag_ids: target() === 'tags' ? tagIds : [], continue_on_failure: carryOn.checked,
+          skip_existing_assets: skipExisting.checked }),
       });
       const data = await response.json();
       if (!response.ok) {

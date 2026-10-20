@@ -327,6 +327,50 @@ async def test_onboarding_steps_need_tags_and_company_tags_count(sqlite_db, monk
 
 
 @pytest.mark.anyio
+async def test_onboarding_steps_can_skip_existing_assets(sqlite_db, monkeypatch):
+    scripts = await _scripts(monkeypatch)
+    _r, existing = await _enrol(sqlite_db)
+    await sqlite_db.execute("UPDATE rmm_agents SET created_at = '2020-01-01 00:00:00' WHERE id = %s", (existing["id"],))
+    step_id = await automation.save_step(step_id=None, company_id=1, user_id=9, payload={
+        "script_id": scripts["Second"]["id"], "target_mode": "all", "skip_existing_assets": True,
+    })
+    await automation.save_step(step_id=None, company_id=1, user_id=9, payload={
+        "script_id": scripts["Third"]["id"], "target_mode": "all",
+    })
+    step = await automation_repo.get_step(step_id)
+    assert step["skip_existing_assets"] is True and step["skip_existing_before"] is not None
+    cutoff = step["skip_existing_before"]
+
+    # Editing the step keeps the original cutoff while the option stays on.
+    await automation.save_step(step_id=step_id, company_id=1, user_id=9, payload={
+        "script_id": scripts["Second"]["id"], "target_mode": "all", "skip_existing_assets": True,
+    })
+    assert (await automation_repo.get_step(step_id))["skip_existing_before"] == cutoff
+
+    # A device enrolled before the option was turned on skips the step.
+    onboarding_id = await automation.start_onboarding(existing)
+    assert (await _finish_current(existing))["name"] == "Third"
+    onboarding = await automation_repo.get_onboarding_run(onboarding_id)
+    assert [entry["status"] for entry in onboarding["plan"]] == ["skipped", "completed"]
+    assert "enrolled before" in onboarding["plan"][0]["message"]
+
+    # A newly enrolled device runs it.
+    _r, new = await _enrol(sqlite_db, tray_id=6, asset_id=11, uid="agent-uid-0002")
+    await sqlite_db.execute("UPDATE rmm_agents SET created_at = '2999-01-01 00:00:00' WHERE id = %s", (new["id"],))
+    await automation.start_onboarding(new)
+    assert (await _finish_current(new))["name"] == "Second"
+
+    # Turning the option off runs the step everywhere again.
+    await automation.save_step(step_id=step_id, company_id=1, user_id=9, payload={
+        "script_id": scripts["Second"]["id"], "target_mode": "all",
+    })
+    step = await automation_repo.get_step(step_id)
+    assert step["skip_existing_assets"] is False and step["skip_existing_before"] is None
+    await automation.start_onboarding(existing)
+    assert (await _finish_current(existing))["name"] == "Second"
+
+
+@pytest.mark.anyio
 async def test_no_onboarding_without_steps(sqlite_db, monkeypatch):
     await _scripts(monkeypatch)
     result, _agent = await _enrol(sqlite_db)

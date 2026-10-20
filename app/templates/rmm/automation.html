@@ -47,6 +47,7 @@
           {% elif not step.script_active %}<li class="rmm-chip rmm-chip--warning">Script removed from Gitea</li>{% endif %}
           {% if step.inputs and step.kind != 'chocolatey' %}<li class="rmm-chip">{{ step.inputs | length }} value{{ '' if step.inputs | length == 1 else 's' }} set</li>{% endif %}
           {% if step.run_as == 'user' and step.kind != 'chocolatey' %}<li class="rmm-chip">Runs as logged in user</li>{% endif %}
+          {% if step.skip_existing_assets %}<li class="rmm-chip">Skips existing assets</li>{% endif %}
           <li class="rmm-chip">{{ 'Carries on if it fails' if step.continue_on_failure else 'Stops the sequence if it fails' }}</li>
         </ul>
       </div>
@@ -355,6 +356,7 @@
         </div>
       </fieldset>
       <label><input type="checkbox" data-rmm-choco-step-continue> Carry on with the next steps if this one fails</label>
+      <label><input type="checkbox" data-rmm-choco-step-skip-existing> Skip existing assets (only devices enrolled from now on)</label>
       <p class="alert alert--warning" role="alert" data-rmm-choco-step-error hidden></p>
     </div>
     <footer class="modal__footer">

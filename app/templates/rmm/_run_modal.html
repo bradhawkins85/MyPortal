@@ -83,6 +83,8 @@
           <label class="rmm-check" data-rmm-mode-only="schedule"><input type="checkbox" data-rmm-enabled checked /> Schedule is on</label>
           <label class="rmm-check" data-rmm-mode-only="onboarding"><input type="checkbox" data-rmm-continue /> Carry on with the next step if this one fails</label>
           <p class="form-help" data-rmm-mode-only="onboarding">Otherwise a failed step stops the steps after it.</p>
+          <label class="rmm-check" data-rmm-mode-only="onboarding"><input type="checkbox" data-rmm-skip-existing /> Skip existing assets</label>
+          <p class="form-help" data-rmm-mode-only="onboarding">Only devices enrolled after this is turned on run the step, so it never runs on devices you already manage.</p>
         </fieldset>
 
         <fieldset class="rmm-fieldset" data-rmm-devices-section hidden>
