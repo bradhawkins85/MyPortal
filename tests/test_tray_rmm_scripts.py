@@ -112,13 +112,49 @@ async def test_menu_hides_scripts_not_enabled_for_the_devices_platform(monkeypat
         {"type": "link", "label": "Portal", "url": "/"},
     ]
 
-    mac = await tray_service._filter_rmm_scripts_for_platform(menu, "macos")
+    mac = await tray_service._filter_rmm_scripts_for_platform(menu, {"os": "macos"})
     assert [node["label"] for node in mac] == ["Mixed", "Portal"]
     assert [node["label"] for node in mac[0]["children"]] == ["Mac fix", "Both"]
 
-    windows = await tray_service._filter_rmm_scripts_for_platform(menu, "windows")
+    windows = await tray_service._filter_rmm_scripts_for_platform(menu, {"os": "windows"})
     assert [node["label"] for node in windows] == ["Windows fix", "Windows only", "Mixed", "Portal"]
     assert [node["label"] for node in windows[2]["children"]] == ["Both"]
 
-    # A device that has not reported its OS keeps the menu as configured.
-    assert await tray_service._filter_rmm_scripts_for_platform(menu, None) == menu
+    # A device whose OS cannot be determined keeps the menu as configured.
+    assert await tray_service._filter_rmm_scripts_for_platform(menu, {"os": None}) == menu
+
+    # Devices enrolled without an OS fall back to the asset's RMM agent, then
+    # the asset's OS name.
+    agents = {7: {"os": "darwin"}}
+    assets = {8: {"os_name": "Microsoft Windows 11 Pro"}}
+
+    async def get_asset_agent(asset_id):
+        return agents.get(asset_id)
+
+    async def get_asset_by_id(asset_id):
+        return assets.get(asset_id)
+
+    monkeypatch.setattr(rmm_repo, "get_asset_agent", get_asset_agent)
+    monkeypatch.setattr(tray_service.assets_repo, "get_asset_by_id", get_asset_by_id)
+    via_agent = await tray_service._filter_rmm_scripts_for_platform(menu, {"os": "", "asset_id": 7})
+    assert [node["label"] for node in via_agent] == ["Mixed", "Portal"]
+    via_asset = await tray_service._filter_rmm_scripts_for_platform(menu, {"os": None, "asset_id": 8})
+    assert [node["label"] for node in via_asset] == ["Windows fix", "Windows only", "Mixed", "Portal"]
+
+
+@pytest.mark.parametrize(
+    ("os_name", "expected"),
+    [
+        ("darwin", "darwin"),
+        ("macOS 14.5", "darwin"),
+        ("Mac OS X 10.15.7", "darwin"),
+        ("Microsoft Windows 11 Pro", "windows"),
+        ("Ubuntu 22.04", "linux"),
+        ("", ""),
+        ("Solaris", ""),
+    ],
+)
+def test_platform_from_os_name(os_name, expected):
+    from app.services import tray as tray_service
+
+    assert tray_service._platform_from_os_name(os_name) == expected

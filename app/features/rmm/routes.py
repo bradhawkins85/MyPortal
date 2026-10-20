@@ -50,6 +50,7 @@ from app.services import rmm_script_summary
 from app.services import rmm_script_files
 from app.services import rmm_scripts
 from app.services import rmm_tray_repair
+from app.services import tray as tray_service
 
 router = APIRouter(tags=["RMM scripts"])
 
@@ -408,6 +409,8 @@ async def update_script_platforms(script_id: int, request: Request):
     if any(item not in rmm_scripts.SCRIPT_PLATFORMS for item in platforms):
         raise HTTPException(status_code=400, detail="Choose valid platforms")
     await rmm_repo.set_script_platforms(script_id, platforms)
+    # Tray menus hide rmm_script items by platform; refresh devices' cached menus.
+    await tray_service.broadcast_config_changed()
     await audit_service.record(action="rmm.script.platforms.update", request=request, user_id=user.get("id"),
                                entity_type="rmm_script", entity_id=script_id, metadata={"platforms": platforms})
     return flash_redirect(f"/rmm/scripts?script={script_id}", "Script platforms saved.", "success")

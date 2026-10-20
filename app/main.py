@@ -1318,6 +1318,9 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
     await websocket.accept()
     tray_service.register_connection(device_uid, websocket)
     await tray_service.mark_websocket_alive(device)
+    # The device may hold a menu cached before a config change or a server
+    # update (e.g. new platform filtering); have it re-fetch on every connect.
+    await tray_service.send_to_device(device_uid, dict(tray_service.CONFIG_CHANGED_MESSAGE))
     if _feature_pack_available("rmm"):
         # Companies that deploy the RMM agent automatically get it queued
         # here; the drain below delivers it.
@@ -9297,6 +9300,7 @@ async def _save_tray_configuration_from_form(form, current_user, *, config_id: i
     import json as _json
     from app.repositories import tray as tray_repo
     from app.services import sanitization
+    from app.services import tray as tray_service
 
     name = (str(form.get("name", "")).strip() or "Untitled")[:150]
     scope = str(form.get("scope", "global")).strip().lower()
@@ -9349,6 +9353,7 @@ async def _save_tray_configuration_from_form(form, current_user, *, config_id: i
             enabled=enabled,
             updated_by_user_id=int(current_user["id"]),
         )
+    await tray_service.broadcast_config_changed()
 
 
 @app.post("/admin/tray/configurations", response_class=HTMLResponse)
@@ -9377,8 +9382,10 @@ async def admin_tray_delete_configuration(config_id: int, request: Request):
     if redirect:
         return redirect
     from app.repositories import tray as tray_repo
+    from app.services import tray as tray_service
 
     await tray_repo.delete_menu_config(config_id)
+    await tray_service.broadcast_config_changed()
     return RedirectResponse(url="/admin/tray#menu-configurations", status_code=303)
 
 
