@@ -249,6 +249,7 @@ class StepRequest(BaseModel):
     queue_timeout_seconds: int | None = Field(default=None, ge=0, le=rmm_scripts.MAX_QUEUE_TIMEOUT_SECONDS)
     run_as: Literal["system", "user"] = "system"
     continue_on_failure: bool = False
+    skip_existing_assets: bool = False
 
 
 class OrderRequest(BaseModel):
@@ -276,7 +277,8 @@ async def _save_step(request: Request, payload: StepRequest, step_id: int | None
         action="rmm.onboarding.step.create" if step_id is None else "rmm.onboarding.step.update",
         request=request, user_id=user.get("id"), entity_type="rmm_onboarding_step", entity_id=saved_id,
         metadata={"script_id": payload.script_id, "package_ids": payload.package_ids, "company_id": company_id,
-                  "tag_ids": payload.tag_ids, "run_as": payload.run_as},
+                  "tag_ids": payload.tag_ids, "run_as": payload.run_as,
+                  "skip_existing_assets": payload.skip_existing_assets},
     )
     return {"step": _step_public(await automation_repo.get_step(saved_id) or {})}
 

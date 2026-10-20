@@ -146,6 +146,7 @@
   const cronPreview = runModal.querySelector('[data-rmm-cron-preview]');
   const enabledBox = runModal.querySelector('[data-rmm-enabled]');
   const continueBox = runModal.querySelector('[data-rmm-continue]');
+  const skipExistingBox = runModal.querySelector('[data-rmm-skip-existing]');
 
   // mode: 'run' pushes the script now; 'schedule' and 'onboarding' save it
   // with its values for later (on /rmm/automation). item is the record being edited.
@@ -440,6 +441,7 @@
     timezoneInput.value = item.timezone || config.default_timezone || 'UTC';
     enabledBox.checked = item.is_enabled === undefined ? true : Boolean(item.is_enabled);
     continueBox.checked = Boolean(item.continue_on_failure);
+    skipExistingBox.checked = Boolean(item.skip_existing_assets);
     applyMode();
     refreshCronPreview();
   }
@@ -795,6 +797,7 @@
     } else {
       body.tag_ids = targetMode.value === 'tags' ? selectedTags() : [];
       body.continue_on_failure = continueBox.checked;
+      body.skip_existing_assets = skipExistingBox.checked;
     }
     try {
       await api(state.item ? base + '/' + state.item.id : base, { method: state.item ? 'PUT' : 'POST', body: body });

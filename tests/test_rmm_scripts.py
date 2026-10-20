@@ -331,7 +331,7 @@ async def sqlite_db(monkeypatch):
         -- Mirrors migration 235 (tray app), which also alters tables SQLite lacks here.
         CREATE TABLE tray_devices (
           id INTEGER PRIMARY KEY, company_id INT, asset_id INT, device_uid TEXT, os TEXT,
-          status TEXT DEFAULT 'active', last_seen_utc TEXT, agent_version TEXT);
+          status TEXT DEFAULT 'active', last_seen_utc TEXT, agent_version TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE tray_versions (
           id INTEGER PRIMARY KEY, version TEXT, platform TEXT DEFAULT 'all', download_url TEXT,
           enabled INT DEFAULT 1, rollout_percent INT DEFAULT 100, published_at TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -365,7 +365,7 @@ async def sqlite_db(monkeypatch):
         "DROP TABLE rmm_onboarding_steps;\n" + steps_sql.replace("script_id INT NOT NULL", "script_id INT NULL") + ";\n"
         "ALTER TABLE rmm_onboarding_steps ADD COLUMN package_ids_json TEXT;"
     )
-    for name in ("508_rmm_script_run_as.sql", "509_rmm_ticket_script_runs.sql"):
+    for name in ("508_rmm_script_run_as.sql", "509_rmm_ticket_script_runs.sql", "512_rmm_onboarding_skip_existing.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES

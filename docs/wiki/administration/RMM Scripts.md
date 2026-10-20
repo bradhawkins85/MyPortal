@@ -492,6 +492,14 @@ onboarding is marked **Stopped**, unless that step is set to **Carry on with the
 this one fails**. A step whose script has been removed from Gitea fails the same way, and a
 step deleted while a device is part-way through is skipped.
 
+Tick **Skip existing assets** on a step to run it only on devices enrolled after the option
+was turned on. Devices that were already enrolled, for example existing devices getting the
+RMM agent for the first time, skip the step, so setup scripts meant for new machines never
+run on devices you already manage. A device counts from when it first enrolled with the tray
+app (or, without one, when its RMM agent enrolled). Editing the step keeps the original
+cut-off; turning the option off runs the step on every device again. Apply migration **512**
+first.
+
 **Add Chocolatey packages** adds a step that installs apps instead of running a script:
 tick apps from the downloaded Chocolatey app list (or enter package IDs, up to 20) and
 choose every device or devices with any of the chosen tags. The step runs the built-in patch

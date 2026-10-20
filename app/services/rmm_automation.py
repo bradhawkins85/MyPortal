@@ -13,8 +13,9 @@ and are resolved per device each time a run is queued.
   or advanced device rules. Devices outside the selection skip the step. Steps run
   one at a time; the next is queued only once the previous one has finished. A
   failed step stops the sequence unless that step is set to continue on
-  failure. :func:`advance_onboarding` moves a sequence on when a result arrives,
-  and the loop re-checks running sequences so a run that expires or is
+  failure. A step set to skip existing assets runs only on devices enrolled
+  after that option was turned on. :func:`advance_onboarding` moves a sequence
+  on when a result arrives, and the loop re-checks running sequences so a run that expires or is
   cancelled still moves its sequence on. A step can install Chocolatey
   packages instead of running a script; those steps run on Windows devices
   only, through the built-in patch job (see :func:`register_package_steps`).
@@ -401,6 +402,18 @@ def _target(payload: Mapping[str, Any], errors: dict[str, str], tag_ids: list[in
     return target_mode, target_rules, tag_ids if target_mode == "tags" else []
 
 
+async def _skip_existing_before(payload: Mapping[str, Any], step_id: int | None) -> datetime | None:
+    """The cutoff for "skip existing assets": kept from the saved step while the
+    option stays on, so editing a step does not skip devices enrolled since."""
+
+    if not payload.get("skip_existing_assets"):
+        return None
+    existing = await automation_repo.get_step(step_id) if step_id is not None else None
+    if existing and existing.get("skip_existing_before") is not None:
+        return existing["skip_existing_before"]
+    return _utcnow().replace(microsecond=0)
+
+
 async def _save_package_step(*, step_id: int | None, company_id: int, payload: Mapping[str, Any],
                              user_id: int | None) -> int:
     errors: dict[str, str] = {}
@@ -423,6 +436,7 @@ async def _save_package_step(*, step_id: int | None, company_id: int, payload: M
         "inputs": [{"key": "applications", "label": "Applications", "value": ", ".join(package_ids)}],
         "timeout_seconds": 7200, "continue_on_failure": bool(payload.get("continue_on_failure")),
         "package_ids": package_ids, "created_by_user_id": user_id,
+        "skip_existing_before": await _skip_existing_before(payload, step_id),
     }
     if step_id is None:
         return await automation_repo.create_step(values)
@@ -479,6 +493,7 @@ async def save_step(
         "queue_timeout_seconds": rmm_scripts.queue_timeout_override(payload.get("queue_timeout_seconds")),
         "continue_on_failure": bool(payload.get("continue_on_failure")),
         "run_as": run_as,
+        "skip_existing_before": await _skip_existing_before(payload, step_id),
         "created_by_user_id": user_id,
     }
     if step_id is None:
@@ -587,6 +602,27 @@ async def device_matches_tags(agent: Mapping[str, Any], tag_ids: list[int]) -> b
     return int(asset_id) in matching
 
 
+def _naive_utc(value: Any) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+
+async def _existed_before(agent: Mapping[str, Any], cutoff: Any) -> bool:
+    """True when the step skips existing devices and ``agent``'s device enrolled before ``cutoff``."""
+
+    cutoff = _naive_utc(cutoff)
+    if cutoff is None:
+        return False
+    enrolled = _naive_utc(await automation_repo.device_enrolled_at(int(agent["id"])))
+    return enrolled is not None and enrolled < cutoff
+
+
 async def _queue_step(onboarding: Mapping[str, Any], entry: Mapping[str, Any]) -> int:
     agent = await rmm_repo.get_agent(int(onboarding["agent_id"])) if onboarding.get("agent_id") else None
     if not agent or agent.get("status") != "active":
@@ -594,6 +630,8 @@ async def _queue_step(onboarding: Mapping[str, Any], entry: Mapping[str, Any]) -
     step = await automation_repo.get_step(int(entry["step_id"]), with_secrets=True)
     if not step:
         raise _StepSkipped("Removed from the onboarding list.")
+    if await _existed_before(agent, step.get("skip_existing_before")):
+        raise _StepSkipped("The device was enrolled before this step was set to skip existing devices.")
     mode = step.get("target_mode") or "tags"
     if mode == "rules" or step.get("target_rules") is not None:
         if not await rmm_device_targeting.device_matches(agent, step.get("target_rules")):
