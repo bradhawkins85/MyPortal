@@ -1,0 +1,7 @@
+{
+  "guid": "4c2cbe82-407b-4ac5-bc68-0c74a827ad97",
+  "occurred_at": "2026-10-20T05:45Z",
+  "change_type": "Fix",
+  "summary": "Tray app: Macs enrolled by older versions now show the branded tray icon; the service adds the portal URL to its saved state on start so the menu-bar app can download the icon",
+  "content_hash": "3e096bb42dc4b6a57e7b639e7b5b94f239dec1638ef98abeb2c5fe819d0e9d6a"
+}
