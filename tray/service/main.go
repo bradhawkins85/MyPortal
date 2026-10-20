@@ -262,6 +262,7 @@ func (d *daemon) run() {
 	go d.defenderStatusLoop()
 	go d.defenderCommandLoop()
 	go d.networkScannerLoop()
+	go d.trayUIWatchdogLoop()
 
 	<-d.stopCh
 	cancelUpdate()

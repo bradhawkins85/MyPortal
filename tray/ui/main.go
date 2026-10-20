@@ -85,6 +85,7 @@ func main() {
 	go runOutlookSignatureWorker()
 
 	// systray.Run blocks until Quit is called.
+	prepareMenuBarApp()
 	systray.Run(onTrayReady, onTrayExit)
 }
 
