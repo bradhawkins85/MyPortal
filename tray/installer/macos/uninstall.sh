@@ -33,16 +33,18 @@ LOG_DIR="/Library/Logs/MyPortal/tray"
 
 # Stop currently running per-user agents first so they do not reconnect while
 # the daemon is being removed. Ignore all launchctl errors because labels may
-# not be loaded in every user session or on every macOS version.
+# not be loaded in every user session or on every macOS version. Never use
+# "unload -w": it writes a permanent disabled override, and launchd then
+# refuses to start a later reinstall at boot or login.
 for uid in $(/usr/bin/stat -f '%u' /dev/console 2>/dev/null; /bin/ps -axo uid= 2>/dev/null | /usr/bin/sort -u); do
     if [[ "$uid" =~ ^[0-9]+$ && "$uid" -ge 500 ]]; then
         /bin/launchctl bootout "gui/$uid" "$AGENT_PLIST" 2>/dev/null || true
-        /bin/launchctl asuser "$uid" /bin/launchctl unload -w "$AGENT_PLIST" 2>/dev/null || true
+        /bin/launchctl asuser "$uid" /bin/launchctl unload "$AGENT_PLIST" 2>/dev/null || true
     fi
 done
 
 /bin/launchctl bootout system "$DAEMON_PLIST" 2>/dev/null || true
-/bin/launchctl unload -w "$DAEMON_PLIST" 2>/dev/null || true
+/bin/launchctl unload "$DAEMON_PLIST" 2>/dev/null || true
 
 /bin/rm -f "$DAEMON_PLIST" "$AGENT_PLIST"
 /bin/rm -rf "$BIN_DIR"

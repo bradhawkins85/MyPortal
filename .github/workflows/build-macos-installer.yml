@@ -64,6 +64,23 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._/+-]{0,127}$ ]] || { echo "Invalid tag: $RELEASE_TAG" >&2; exit 1; }
           make build-dmg VERSION="$RELEASE_TAG"
 
+      - name: Check macOS binaries run on older macOS releases
+        run: |
+          # A cgo binary inherits the runner's SDK version as its minimum macOS
+          # unless the Makefile pins it; such a UI never starts on older Macs.
+          status=0
+          for bin in dist/darwin/myportal-tray-service dist/darwin/myportal-tray-ui; do
+            for arch in x86_64 arm64; do
+              minos="$(vtool -arch "$arch" -show-build "$bin" | awk '$1 == "minos" { print $2; exit }')"
+              echo "$bin ($arch): minos ${minos:-unknown}"
+              if [ -z "$minos" ] || [ "${minos%%.*}" -gt 12 ]; then
+                echo "::error file=tray/Makefile::$bin ($arch) requires macOS ${minos:-unknown}; expected 12.x"
+                status=1
+              fi
+            done
+          done
+          exit "$status"
+
       - name: Upload macOS installers to release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
