@@ -744,6 +744,24 @@ async def get_queued_commands_for_device(device_id: int, *, limit: int = 50) -> 
     return [dict(row) for row in rows]
 
 
+async def get_recent_delivered_command(
+    device_id: int, command: str, *, since: datetime
+) -> dict[str, Any] | None:
+    """Return the newest ``command`` delivered to a device at or after ``since``.
+
+    ``since`` is a naive UTC datetime, matching how ``delivered_at`` is stored.
+    """
+    placeholder = "?" if db.is_sqlite() else "%s"
+    row = await db.fetch_one(
+        f"SELECT * FROM tray_command_log "  # nosec B608
+        f"WHERE device_id = {placeholder} AND command = {placeholder} "
+        f"AND status = 'delivered' AND delivered_at >= {placeholder} "
+        f"ORDER BY id DESC LIMIT 1",
+        (device_id, command, since),
+    )
+    return dict(row) if row else None
+
+
 async def mark_command_delivered(command_id: int, *, error: str | None = None) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)

@@ -2356,6 +2356,55 @@ def _rollout_bucket(device_uid: str) -> int:
     return zlib.crc32(device_uid.encode("utf-8")) % 100
 
 
+# An update pushed from the portal is honoured by the version check the
+# device makes within this window of the command being delivered.
+_PUSHED_UPDATE_WINDOW = timedelta(minutes=30)
+
+_TRAY_VERSION_RE = re.compile(r"^[vV]?(\d+(?:\.\d+)*)")
+
+
+def _tray_version_key(value: Any) -> tuple[int, ...] | None:
+    match = _TRAY_VERSION_RE.match(str(value or "").strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def _is_newer_tray_version(candidate: Any, current: Any) -> bool:
+    candidate_key = _tray_version_key(candidate)
+    if candidate_key is None:
+        return False
+    current_key = _tray_version_key(current)
+    if current_key is None:
+        return True
+    width = max(len(candidate_key), len(current_key))
+    candidate_key += (0,) * (width - len(candidate_key))
+    current_key += (0,) * (width - len(current_key))
+    return candidate_key > current_key
+
+
+async def _device_from_auth_header(request: Request) -> dict[str, Any] | None:
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return None
+    raw_token = auth_header.split(" ", 1)[1].strip()
+    if not raw_token:
+        return None
+    return await tray_repo.get_device_by_auth_hash(tray_service.hash_token(raw_token))
+
+
+def _cached_installer_for(request: Request, agent_os: str) -> dict[str, Any] | None:
+    """Return the installer this server has cached for ``agent_os``, if any."""
+
+    from app.services import tray_deployment
+
+    portal_url = tray_deployment.resolve_portal_url(request)
+    for installer in tray_installer.cached_server_installers(portal_url):
+        if installer.get("platform") == agent_os:
+            return installer
+    return None
+
+
 @router.get(
     "/version",
     summary="Check the latest available tray installer version",
@@ -2373,35 +2422,28 @@ async def get_tray_version(request: Request) -> JSONResponse:
     rolled-out (``rollout_percent = 100``) version instead, spreading
     downloads across the fleet and avoiding a thundering-herd effect.
 
+    When an admin has just pushed an ``update`` command to the device, the
+    check also considers the tray release cached on this server, the same
+    release the portal compares devices against to mark them outdated. A
+    pushed update therefore installs that release even when it has not been
+    published as a version here, or the published version is older.
+
     Devices that are not authenticated (no Authorization header) are always
     served the latest version.
     """
     agent_os = request.headers.get("X-Tray-OS", "all").lower()
+    device = await _device_from_auth_header(request)
+
     row = await tray_repo.get_latest_tray_version(agent_os)
     if not row:
         row = await tray_repo.get_latest_tray_version("all")
-    if not row:
-        return JSONResponse(
-            {"version": "0.0.0", "download_url": None, "required": False}
-        )
 
-    rollout_percent = int(row.get("rollout_percent") or 100)
+    rollout_percent = int(row.get("rollout_percent") or 100) if row else 100
 
     # When the newest version is not fully rolled out, check whether this
     # device falls within the rollout cohort.
-    if rollout_percent < 100:
-        device_uid: str | None = None
-
-        # Attempt to identify the device from its auth token.
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.lower().startswith("bearer "):
-            raw_token = auth_header.split(" ", 1)[1].strip()
-            if raw_token:
-                token_hash = tray_service.hash_token(raw_token)
-                device = await tray_repo.get_device_by_auth_hash(token_hash)
-                if device:
-                    device_uid = str(device.get("device_uid", ""))
-
+    if row and rollout_percent < 100 and device:
+        device_uid = str(device.get("device_uid", ""))
         if device_uid and _rollout_bucket(device_uid) >= rollout_percent:
             # This device is outside the current rollout window — serve the
             # most recent fully-rolled-out version instead.
@@ -2410,6 +2452,31 @@ async def get_tray_version(request: Request) -> JSONResponse:
                 fallback = await tray_repo.get_stable_tray_version("all")
             if fallback:
                 row = fallback
+
+    if device:
+        since = datetime.now(timezone.utc).replace(tzinfo=None) - _PUSHED_UPDATE_WINDOW
+        pushed = await tray_repo.get_recent_delivered_command(
+            int(device["id"]), "update", since=since
+        )
+        if pushed:
+            installer = _cached_installer_for(request, agent_os)
+            if installer and (
+                not row or _is_newer_tray_version(installer["version"], row.get("version"))
+            ):
+                row = {**installer, "required": False}
+            await tray_repo.mark_command_completed(int(pushed["id"]))
+            log_info(
+                "Tray device checked for a pushed update",
+                device_uid=device.get("device_uid"),
+                command_id=pushed.get("id"),
+                current_version=device.get("agent_version"),
+                offered_version=row.get("version") if row else None,
+            )
+
+    if not row:
+        return JSONResponse(
+            {"version": "0.0.0", "download_url": None, "required": False}
+        )
 
     return JSONResponse(
         {
