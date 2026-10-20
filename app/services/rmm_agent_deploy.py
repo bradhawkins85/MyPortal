@@ -96,7 +96,7 @@ def _valid_platform(os_name: str, arch: str) -> bool:
 def release_version(value: str) -> str:
     """Validate a release selector before using it in paths or GitHub URLs."""
     value = value.strip().removeprefix("v")
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", value):
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2,3}", value):
         raise ValueError("Invalid RMM release version")
     return value
 

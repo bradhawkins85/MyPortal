@@ -14,7 +14,7 @@ func TestGitHubReleaseAssetsAndNoCredentials(t *testing.T) {
 	for _, platform := range []struct{ os, arch string }{
 		{"windows", "amd64"}, {"windows", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"}, {"linux", "amd64"}, {"linux", "arm64"},
 	} {
-		for _, tag := range []string{"v1.2.3", "1.2.3"} {
+		for _, tag := range []string{"v1.2.3", "1.2.3", "v0.9.5.3"} {
 			t.Run(platform.os+"/"+platform.arch+"/"+tag, func(t *testing.T) {
 				name := "myportal-rmm-" + platform.os + "-" + platform.arch
 				if platform.os == "windows" {
@@ -36,7 +36,8 @@ func TestGitHubReleaseAssetsAndNoCredentials(t *testing.T) {
 				}))
 				defer server.Close()
 				g := &githubSource{baseURL: server.URL + "/releases/download/", client: server.Client()}
-				pkg, err := g.GetRMMAgentPackage(context.Background(), platform.os, platform.arch, "v1.2.3")
+				want := strings.TrimPrefix(tag, "v")
+				pkg, err := g.GetRMMAgentPackage(context.Background(), platform.os, platform.arch, "v"+want)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -44,7 +45,7 @@ func TestGitHubReleaseAssetsAndNoCredentials(t *testing.T) {
 				if err := g.DownloadRMMAgent(context.Background(), pkg.DownloadPath, &out); err != nil {
 					t.Fatal(err)
 				}
-				if pkg.Version != "1.2.3" || pkg.Sha256 != digest(body) || out.String() != string(body) {
+				if pkg.Version != want || pkg.Sha256 != digest(body) || out.String() != string(body) {
 					t.Fatalf("package=%+v body=%q", pkg, out.String())
 				}
 			})
@@ -67,7 +68,7 @@ func TestGitHubRejectsUnusableChecksums(t *testing.T) {
 
 func TestGitHubRejectsInvalidVersionsAndPlatformsWithoutHTTP(t *testing.T) {
 	g := &githubSource{}
-	for _, version := range []string{"", "main", "../../1.2.3", "1.2.3?token=t", "1.2"} {
+	for _, version := range []string{"", "main", "../../1.2.3", "1.2.3?token=t", "1.2", "1.2.3.4.5", "1.2.3."} {
 		if _, err := g.GetRMMAgentPackage(context.Background(), "windows", "amd64", version); err == nil {
 			t.Fatalf("accepted %q", version)
 		}

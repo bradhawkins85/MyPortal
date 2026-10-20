@@ -17,7 +17,7 @@ import (
 const githubReleaseURL = "https://github.com/bradhawkins85/MyPortal/releases/download/"
 const maxAgentBytes = 256 << 20
 
-var releaseVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+var releaseVersion = regexp.MustCompile(`^[0-9]+(\.[0-9]+){2,3}$`)
 
 // githubSource uses public release assets, never the portal client or device token.
 type githubSource struct {

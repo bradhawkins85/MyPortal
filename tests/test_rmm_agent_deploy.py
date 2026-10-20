@@ -475,10 +475,15 @@ async def test_versioned_package_uses_requested_release_and_separate_cache(stora
     assert await deploy.ensure_package("windows", "amd64", version="1.2.4") is None
 
 
-@pytest.mark.parametrize("version", ["../secret", "", "1.2.3/../../secret", "dev", "1.2"])
+@pytest.mark.parametrize("version", ["../secret", "", "1.2.3/../../secret", "dev", "1.2", "1.2.3.4.5", "1.2.3."])
 def test_release_selector_rejects_invalid_paths(version):
     with pytest.raises(ValueError):
         deploy.release_version(version)
+
+
+@pytest.mark.parametrize(("version", "expected"), [("v1.2.3", "1.2.3"), ("v0.9.5.3", "0.9.5.3"), ("0.9.5.3", "0.9.5.3")])
+def test_release_selector_accepts_three_and_four_part_versions(version, expected):
+    assert deploy.release_version(version) == expected
 
 
 @pytest.mark.anyio
