@@ -8,6 +8,7 @@ Technician side (company scoped, ``menu.rmm_scripts``; write access runs scripts
 * ``POST /api/rmm/scripts/{id}/summary`` (re)generate a script's AI summary
 * ``GET/PUT /api/rmm/scripts/{id}/files`` list/set associated Gitea files
 * ``POST /api/rmm/scripts/{id}/runs`` push a script to devices
+* ``POST /api/rmm/assets/{id}/tray-repair`` repair the device's tray agent
 * ``GET /api/rmm/runs`` / ``/api/rmm/runs/{id}``, ``POST /api/rmm/runs/{id}/cancel``
 * ``POST /rmm/scripts/sync`` load scripts from Gitea (super admin)
 * ``GET /api/rmm/gitea/identity`` who to sign in to Gitea as (asked by nginx
@@ -48,6 +49,7 @@ from app.services import rmm_script_parser as parser
 from app.services import rmm_script_summary
 from app.services import rmm_script_files
 from app.services import rmm_scripts
+from app.services import rmm_tray_repair
 
 router = APIRouter(tags=["RMM scripts"])
 
@@ -170,6 +172,7 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
         # RustDesk and MeshCentral are switched on through the agent, so they need one.
         "remote_control": await rmm_remote_control.enabled_providers() if can_run and agent else [],
         "command_languages": rmm_commands.languages_for(agent) if can_run and agent else [],
+        "tray_repair": bool(can_run and rmm_tray_repair.supported(agent)),
     }
 
 
@@ -629,6 +632,30 @@ async def run_command_api(asset_id: int, payload: CommandRequest, request: Reque
             "company_id": company_id, "run_id": run_id, "language": payload.language, "run_as": payload.run_as,
             "command": payload.command[: rmm_commands.SHOWN_COMMAND_LENGTH],
         },
+    )
+    return {"run_id": run_id}
+
+
+@router.post("/api/rmm/assets/{asset_id:int}/tray-repair", summary="Repair the tray agent on a device through its RMM agent")
+async def tray_repair_api(asset_id: int, request: Request):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    agent = await rmm_repo.get_asset_agent(asset_id)
+    if not agent or int(agent.get("company_id") or 0) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No RMM agent is installed on this device.")
+    try:
+        run_id = await rmm_tray_repair.queue_repair(
+            agent={**agent, "company_id": int(company_id), "asset_id": asset_id},
+            requested_by_user_id=user.get("id"),
+        )
+    except rmm_scripts.RunRequestError as exc:
+        return JSONResponse({"detail": "; ".join(exc.errors.values()), "errors": exc.errors}, status_code=400)
+    await audit_service.record(
+        action="rmm.tray_repair.run",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="asset",
+        entity_id=asset_id,
+        metadata={"company_id": company_id, "run_id": run_id},
     )
     return {"run_id": run_id}
 

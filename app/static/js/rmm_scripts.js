@@ -868,6 +868,8 @@
       source = ' · ticket automation';
     } else if (run.run_source === 'command') {
       source = ' · command' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
+    } else if (run.run_source === 'tray_repair') {
+      source = ' · tray agent repair' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     }
     resultModal.querySelector('[data-rmm-result-subtitle]').textContent =
       (run.asset_name ? 'On ' + run.asset_name : 'Device removed') + source;
