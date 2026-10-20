@@ -1858,8 +1858,13 @@ async def menu_config_targeting_preview(
     try:
         matches = rmm_targeting.compile_rules(payload.rules)
     except ValueError as exc:
+        log_warning("Invalid tray targeting rules preview request: %s", str(exc))
         return JSONResponse(
-            {"detail": str(exc), "errors": {"target_rules": str(exc)}}, status_code=400
+            {
+                "detail": "Invalid target rules.",
+                "errors": {"target_rules": "Invalid target rules."},
+            },
+            status_code=400,
         )
     scope_cfg = {"scope": payload.scope, "scope_ref_id": payload.scope_ref_id}
     devices = [
