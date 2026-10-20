@@ -227,7 +227,7 @@ function Invoke-Build($Job) {
     $version = [string]$Job.product_version
     if ($url -notmatch '^https?://[A-Za-z0-9.\-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~\-/]*)?$') { throw 'Portal URL from the server is not valid.' }
     if ($token -notmatch '^[A-Za-z0-9_\-]{16,128}$') { throw 'Install token from the server is not valid.' }
-    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Product version $version is not valid." }
+    if ($version -notmatch '^\d+(\.\d+){2,3}$') { throw "Product version $version is not valid." }
 
     $payload = Get-Payload ([string]$Job.release_tag)
     $out = Join-Path $JobsDir ([string][int]$Job.id)

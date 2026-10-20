@@ -75,14 +75,14 @@ def intunewin_path(build_id: int) -> Path:
 
 
 def product_version(release_tag: str) -> str:
-    """Return the three-part MSI version for a release tag, as the CI build does."""
+    """Return the three- or four-part MSI version for a release tag, as the CI build does."""
 
     cleaned = re.sub(r"^v", "", release_tag or "")
     cleaned = re.sub(r"[^0-9.].*$", "", cleaned)
     parts = [int(p) if p.isdigit() else 0 for p in cleaned.split(".") if p != ""] if cleaned else []
     while len(parts) < 3:
         parts.append(0)
-    return ".".join(str(p) for p in parts[:3])
+    return ".".join(str(p) for p in parts[:4])
 
 
 def current_release_tag() -> str | None:

@@ -175,7 +175,9 @@ jobs:
           while ($versionParts.Count -lt 3) {
             $versionParts += 0
           }
-          $msiVersion = ($versionParts[0..2] -join '.')
+          # MSI versions take up to four parts; Windows Installer compares only the
+          # first three, and AllowSameVersionUpgrades covers fourth-part releases.
+          $msiVersion = ($versionParts[0..([Math]::Min(3, $versionParts.Count - 1))] -join '.')
 
           wix build -acceptEula wix7 installer\windows\myportal-tray.wxs `
             -arch x64 `

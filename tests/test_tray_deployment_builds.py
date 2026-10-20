@@ -89,7 +89,7 @@ async def _status(build_id: int) -> str:
 
 @pytest.mark.parametrize(
     "tag, expected",
-    [("v1.4.2", "1.4.2"), ("1.5", "1.5.0"), ("v2.0.1-beta.3", "2.0.1"), ("nightly", "0.0.0")],
+    [("v1.4.2", "1.4.2"), ("1.5", "1.5.0"), ("v2.0.1-beta.3", "2.0.1"), ("nightly", "0.0.0"), ("v0.9.5.3", "0.9.5.3"), ("v1.2.3.4.5", "1.2.3.4")],
 )
 def test_product_version_matches_ci(tag, expected):
     assert builds.product_version(tag) == expected
