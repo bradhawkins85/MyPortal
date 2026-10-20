@@ -32,6 +32,7 @@ type Details struct {
 	AgentVersion         string            `json:"agent_version,omitempty"`
 	Shells               []string          `json:"shells,omitempty"`
 	RunAnywaySupported   bool              `json:"run_anyway_supported"`
+	RunAsUserSupported   bool              `json:"run_as_user_supported"`
 	ScriptFilesSupported bool              `json:"script_files_supported"`
 }
 
@@ -44,14 +45,16 @@ type Enrolment struct {
 
 // Job is one script run to execute.
 type Job struct {
-	RunAnyway      bool                   `json:"run_anyway"`
-	ID             int64                  `json:"id"`
-	Name           string                 `json:"name"`
-	Path           string                 `json:"path"`
-	Language       string                 `json:"language"`
-	Script         string                 `json:"script"`
-	SHA256         string                 `json:"sha256"`
-	TimeoutSeconds int                    `json:"timeout_seconds"`
+	RunAnyway      bool   `json:"run_anyway"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Path           string `json:"path"`
+	Language       string `json:"language"`
+	Script         string `json:"script"`
+	SHA256         string `json:"sha256"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+	// RunAs is "system" (the default) or "user" for the logged-in user.
+	RunAs          string                 `json:"run_as"`
 	Parameters     map[string]interface{} `json:"parameters"`
 	ParameterOrder []string               `json:"parameter_order"`
 	Env            map[string]string      `json:"env"`

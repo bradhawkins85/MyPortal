@@ -317,6 +317,7 @@ async def sqlite_db(monkeypatch):
         "DROP TABLE rmm_onboarding_steps;\n" + steps_sql.replace("script_id INT NOT NULL", "script_id INT NULL") + ";\n"
         "ALTER TABLE rmm_onboarding_steps ADD COLUMN package_ids_json TEXT;"
     )
+    await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / "508_rmm_script_run_as.sql").read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
           (1, 'BitLocker', 'text'), (2, 'Encrypted', 'checkbox'), (3, 'Checked', 'date'), (4, 'Photo', 'image');

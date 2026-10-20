@@ -102,6 +102,7 @@ func details(r *runner.Runner) client.Details {
 		Shells:               r.AvailableShells(),
 		ScriptFilesSupported: true,
 		RunAnywaySupported:   true,
+		RunAsUserSupported:   true,
 	}
 }
 

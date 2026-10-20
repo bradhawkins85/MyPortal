@@ -128,6 +128,7 @@ class ScheduleRequest(BaseModel):
     tag_ids: list[int] = Field(default_factory=list, max_length=automation.MAX_SCHEDULE_TAGS)
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
+    run_as: Literal["system", "user"] = "system"
     enabled: bool = True
 
 
@@ -169,7 +170,8 @@ async def _save_schedule(request: Request, payload: ScheduleRequest, schedule_id
     await audit_service.record(
         action="rmm.schedule.create" if schedule_id is None else "rmm.schedule.update",
         request=request, user_id=user.get("id"), entity_type="rmm_schedule", entity_id=saved_id,
-        metadata={"name": payload.name, "script_id": payload.script_id, "cron": payload.cron, "company_id": scope_company},
+        metadata={"name": payload.name, "script_id": payload.script_id, "cron": payload.cron, "company_id": scope_company,
+                  "run_as": payload.run_as},
     )
     return {"schedule": _schedule_public(await automation_repo.get_schedule(saved_id) or {})}
 
@@ -242,6 +244,7 @@ class StepRequest(BaseModel):
     tag_ids: list[int] = Field(default_factory=list, max_length=automation.MAX_SCHEDULE_TAGS)
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
+    run_as: Literal["system", "user"] = "system"
     continue_on_failure: bool = False
 
 
@@ -270,7 +273,7 @@ async def _save_step(request: Request, payload: StepRequest, step_id: int | None
         action="rmm.onboarding.step.create" if step_id is None else "rmm.onboarding.step.update",
         request=request, user_id=user.get("id"), entity_type="rmm_onboarding_step", entity_id=saved_id,
         metadata={"script_id": payload.script_id, "package_ids": payload.package_ids, "company_id": company_id,
-                  "tag_ids": payload.tag_ids},
+                  "tag_ids": payload.tag_ids, "run_as": payload.run_as},
     )
     return {"step": _step_public(await automation_repo.get_step(saved_id) or {})}
 

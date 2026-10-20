@@ -17,7 +17,7 @@ _dispatch_locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
 FINISHED_RUN_STATUSES = ("completed", "failed", "timed_out", "cancelled", "expired")
 
 # Fixed SQL fragments naming what queued a run (manual, schedule or onboarding).
-_RUN_SOURCE_COLUMNS = "r.run_source, r.schedule_id, r.onboarding_run_id, s.name AS schedule_name"
+_RUN_SOURCE_COLUMNS = "r.run_source, r.schedule_id, r.onboarding_run_id, r.run_as, s.name AS schedule_name"
 _RUN_SOURCE_JOINS = (
     "LEFT JOIN users u ON u.id = r.requested_by_user_id LEFT JOIN rmm_schedules s ON s.id = r.schedule_id"
 )
@@ -268,13 +268,14 @@ async def create_agent(
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_agents (agent_uid, tray_device_id, company_id, asset_id, auth_token_hash, "
         "auth_token_prefix, hostname, os, os_version, arch, agent_version, shells, last_ip, last_seen_utc, "
-        "status, created_at, updated_at, script_files_supported, run_anyway_supported) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-        "'active', %s, %s, %s, %s)",
+        "status, created_at, updated_at, script_files_supported, run_anyway_supported, run_as_user_supported) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s, %s, %s)",
         (
             agent_uid, tray_device_id, company_id, asset_id, auth_token_hash, auth_token_prefix,
             details.get("hostname"), details.get("os"), details.get("os_version"), details.get("arch"),
             details.get("agent_version"), details.get("shells"), details.get("last_ip"), now, now, now,
             bool(details.get("script_files_supported")), bool(details.get("run_anyway_supported")),
+            bool(details.get("run_as_user_supported")),
         ),
     )
 
@@ -294,12 +295,13 @@ async def reenrol_agent(
         "UPDATE rmm_agents SET tray_device_id = %s, company_id = %s, asset_id = %s, auth_token_hash = %s, "
         "auth_token_prefix = %s, hostname = %s, os = %s, os_version = %s, arch = %s, agent_version = %s, "
         "shells = %s, last_ip = %s, last_seen_utc = %s, status = 'active', updated_at = %s, "
-        "script_files_supported = %s, run_anyway_supported = %s WHERE id = %s",
+        "script_files_supported = %s, run_anyway_supported = %s, run_as_user_supported = %s WHERE id = %s",
         (
             tray_device_id, company_id, asset_id, auth_token_hash, auth_token_prefix,
             details.get("hostname"), details.get("os"), details.get("os_version"), details.get("arch"),
             details.get("agent_version"), details.get("shells"), details.get("last_ip"), now, now,
-            bool(details.get("script_files_supported")), bool(details.get("run_anyway_supported")), agent_id,
+            bool(details.get("script_files_supported")), bool(details.get("run_anyway_supported")),
+            bool(details.get("run_as_user_supported")), agent_id,
         ),
     )
 
@@ -316,11 +318,13 @@ async def record_agent_checkin(agent_id: int, details: dict[str, Any]) -> None:
         "agent_version = COALESCE(%s, agent_version), shells = COALESCE(%s, shells), "
         "hostname = COALESCE(%s, hostname), os_version = COALESCE(%s, os_version), updated_at = %s, "
         "script_files_supported = COALESCE(%s, script_files_supported), "
-        "run_anyway_supported = COALESCE(%s, run_anyway_supported) "
+        "run_anyway_supported = COALESCE(%s, run_anyway_supported), "
+        "run_as_user_supported = COALESCE(%s, run_as_user_supported) "
         + thermal_sql + " WHERE id = %s",
         (
             now, details.get("last_ip"), details.get("agent_version"), details.get("shells"),
             details.get("hostname"), details.get("os_version"), now, details.get("script_files_supported"), details.get("run_anyway_supported"),
+            details.get("run_as_user_supported"),
         ) + thermal_params + (agent_id,),
     )
 
@@ -390,13 +394,14 @@ async def create_run(
     run_source: str = "manual",
     schedule_id: int | None = None,
     onboarding_run_id: int | None = None,
+    run_as: str = "system",
 ) -> int:
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_script_runs (script_id, script_name, script_path, language, script_content, "
         "content_sha256, agent_id, company_id, asset_id, requested_by_user_id, status, inputs_json, "
         "payload_encrypted, timeout_seconds, queued_at, expires_at, run_source, schedule_id, "
-        "onboarding_run_id, allow_parallel, run_anyway) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "onboarding_run_id, allow_parallel, run_anyway, run_as) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             script["id"], script["name"], script["path"], script["language"], content,
             script["content_sha256"], agent_id, company_id, asset_id, requested_by_user_id,
@@ -404,6 +409,7 @@ async def create_run(
             run_source, schedule_id, onboarding_run_id,
             script_execution_mode(script) == "parallel" and run_source != "onboarding",
             script_execution_mode(script) == "run_anyway" and run_source != "onboarding",
+            run_as,
         ),
     )
 
@@ -476,7 +482,8 @@ async def has_active_run(agent_id: int, script_id: int, *, run_source: str) -> b
 async def next_jobs_for_agent(agent_id: int, *, limit: int = 5) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         "SELECT id, script_name, script_path, language, script_content, content_sha256, payload_encrypted, "
-        "timeout_seconds, run_source, expires_at, allow_parallel, run_anyway FROM rmm_script_runs WHERE agent_id = %s AND status = 'queued' "
+        "timeout_seconds, run_source, expires_at, allow_parallel, run_anyway, run_as FROM rmm_script_runs "
+        "WHERE agent_id = %s AND status = 'queued' "
         "ORDER BY CASE WHEN run_anyway = 1 AND run_source <> 'onboarding' THEN 0 ELSE 1 END, "
         "queued_at, id LIMIT %s",
         (agent_id, limit),
