@@ -427,6 +427,7 @@ See `tray/README.md` for build instructions.
 | --- | --- | --- |
 | `/api/tray/enrol` returns 401 | Install token expired / revoked / typo | Generate a new token in admin UI |
 | Tray icon never appears after install | UI agent could not be launched in the active console session | Check service logs; ensure the user has logged in interactively at least once |
+| Tray shows the default icon instead of the branded one | The UI could not download or decode the icon | The tray uses the configuration's **Branding icon URL** (.ico or PNG), then the icon uploaded under **Admin > Tray**. Check the UI log for `Tray icon` lines naming each URL tried and why it failed |
 | "Chat with this device" button missing | Company has `tray_chat_enabled = 0`, or Matrix is disabled | Toggle on the company edit page; verify `MATRIX_ENABLED=true` |
 | `env_var` menu node returns "not allowed" | Variable not in the configuration's allowlist | Add it on the configuration editor |
 | Devices show as **Unlinked** | Hostname / serial didn't match an existing asset | Manually associate via the Devices admin page (coming in Phase 2.x) |

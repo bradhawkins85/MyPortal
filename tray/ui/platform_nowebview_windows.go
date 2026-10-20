@@ -17,7 +17,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
@@ -135,8 +134,8 @@ func openChatAppWindow(chatURL string, cfg *api.ConfigResponse) {
 				"--user-data-dir=" + filepath.Join(os.TempDir(), "MyPortal", "tray-chat-profile"),
 			}
 
-			if gPortalURL != "" {
-				iconURL := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
+			if iconURLs := trayIconURLs(gPortalURL, cfg); len(iconURLs) > 0 {
+				iconURL := iconURLs[0]
 				edgeArgs = append(edgeArgs,
 					"--app-name="+trayDisplayName(cfg)+" Chat",
 					"--app-icon-url="+iconURL,

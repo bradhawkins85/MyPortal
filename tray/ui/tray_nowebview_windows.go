@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -14,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -61,39 +61,41 @@ func onTrayReady() {
 	go fetchAndSetIcon()
 }
 
-// fetchAndSetIcon downloads the branded .ico from the portal and applies it
-// to the running tray icon.  It is safe to call from any goroutine.
+// fetchAndSetIcon downloads the device's branding icon, or failing that the
+// portal-wide .ico, and applies it to the running tray icon.  It is safe to
+// call from any goroutine.
 func fetchAndSetIcon() {
 	if gPortalURL == "" {
 		logger.Debug("fetchAndSetIcon: skipped — gPortalURL is empty (will retry on next config_changed)")
 		return
 	}
-	url := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
+	data, url, err := fetchFirstTrayIcon(trayIconURLs(gPortalURL, gConfig), downloadTrayIcon, trayIconICOBytes)
+	if err != nil {
+		logger.Warn("Tray icon fetch failed, keeping current icon: %v", err)
+		return
+	}
+	systray.SetIcon(data)
+	logger.Info("Tray icon updated from %s", url)
+}
+
+func downloadTrayIcon(url string) ([]byte, error) {
 	logger.Debug("fetchAndSetIcon: GET %s", url)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		logger.Warn("Tray icon fetch failed: %v", err)
-		return
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		logger.Warn("Tray icon fetch HTTP %d, falling back to default", resp.StatusCode)
-		return
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-	if readErr != nil {
-		logger.Warn("Tray icon read error: %v", readErr)
-		return
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if err != nil {
+		return nil, err
 	}
-	logger.Debug("fetchAndSetIcon: received %d bytes from %s (status=%d, content-type=%q)",
-		len(data), url, resp.StatusCode, resp.Header.Get("Content-Type"))
-	if len(data) < 4 || data[0] != 0x00 || data[1] != 0x00 || data[2] != 0x01 || data[3] != 0x00 {
-		logger.Warn("Tray icon fetch returned invalid ICO data, falling back to default")
-		return
-	}
-	systray.SetIcon(data)
-	logger.Info("Tray icon updated from portal")
+	logger.Debug("fetchAndSetIcon: received %d bytes from %s (content-type=%q)",
+		len(data), url, resp.Header.Get("Content-Type"))
+	return data, nil
 }
 
 // handleConfigChanged is called when the service broadcasts a config_changed

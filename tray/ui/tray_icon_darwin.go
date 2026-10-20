@@ -11,7 +11,6 @@ import (
 	"image/png"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -77,33 +76,33 @@ func runDarwinTrayIconWorker() {
 	}
 }
 
-// fetchAndSetDarwinIcon downloads the branded .ico served to the Windows agent
-// and shows it as a PNG, which the menu bar renders reliably.
+// fetchAndSetDarwinIcon downloads the device's branding icon (or the
+// portal-wide .ico served to the Windows agent) and shows it as a PNG, which
+// the menu bar renders reliably.
 func fetchAndSetDarwinIcon() error {
-	if strings.TrimSpace(gPortalURL) == "" {
-		return errors.New("portal URL not configured yet")
-	}
-	url := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: HTTP %d", url, resp.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-	if err != nil {
-		return err
-	}
-	icon, err := trayIconPNGFromICO(data, darwinTrayIconPixels)
+	urls := trayIconURLs(gPortalURL, gConfig)
+	icon, url, err := fetchFirstTrayIcon(urls, downloadTrayIcon, func(data []byte) ([]byte, error) {
+		return trayIconPNGFromICO(data, darwinTrayIconPixels)
+	})
 	if err != nil {
 		return err
 	}
 	systray.SetIcon(icon)
-	logger.Info("Tray icon updated from portal")
+	logger.Info("Tray icon updated from %s", url)
 	return nil
+}
+
+func downloadTrayIcon(url string) ([]byte, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 }
 
 func defaultDarwinIcon() []byte {
