@@ -1,0 +1,7 @@
+{
+  "guid": "01e3122e-093c-4e5e-ac77-bb34499e8dd3",
+  "occurred_at": "2026-10-20T12:00Z",
+  "change_type": "Fix",
+  "summary": "Show the macOS tray icon promptly after a reboot or upgrade: the menu-bar UI now runs as a menu-bar app, the tray service loads or starts it for the logged-in user when launchd has not, and the last portal icon is shown from cache while the network comes up.",
+  "content_hash": "89ccb00b35f2ce33982ec7a350b97ae073f8522182a8bf5366955b76a083b9b6"
+}

@@ -41,7 +41,11 @@ Every endpoint runs **two** cooperating components:
   active console session token (`WTSGetActiveConsoleSessionId` /
   `WTSQueryUserToken`) gives us a UI process in the user's session.
 * On macOS, `LaunchDaemons` cannot show UI; `LaunchAgents` can, and they
-  run per-user. The daemon signals the agent via a local socket.
+  run per-user. The daemon signals the agent via a local socket. launchd
+  starts the agent at login; the daemon also checks every minute and loads
+  or starts it for the console user if launchd has not (for example after
+  an upgrade), so the menu-bar icon returns without a fresh login. An agent
+  the user quit is left alone until a chat needs it.
 * This separation is also our defence against showing chat windows in
   background (RDP/SSH) sessions — chat is delivered **only** to the
   **active console session**.

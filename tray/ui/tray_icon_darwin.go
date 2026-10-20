@@ -26,11 +26,26 @@ const darwinTrayIconPixels = 32
 // requested while a fetch is in flight is kept rather than dropped.
 var trayIconRefreshCh = make(chan struct{}, 1)
 
-// configureTrayIcon displays a local fallback immediately, then replaces it
-// with the same portal-provided branded icon used by the Windows agent.
+// trayIconMaxRetryDelay caps the wait between failed icon downloads. After a
+// reboot the network often comes up a few seconds after login, so a long
+// backoff would leave the menu bar on the fallback icon for minutes.
+const trayIconMaxRetryDelay = time.Minute
+
+// configureTrayIcon displays the last portal icon (or a local fallback)
+// immediately, then replaces it with the same portal-provided branded icon
+// used by the Windows agent.
 func configureTrayIcon() {
 	systray.SetTitle("")
-	systray.SetIcon(defaultDarwinIcon())
+	if cached, err := loadCachedTrayIcon(trayIconCachePath()); err == nil {
+		systray.SetIcon(cached)
+		logger.Info("Tray icon shown from cache while the portal icon is refreshed")
+	} else {
+		// A template image is drawn in the menu bar's text colour, so the
+		// fallback stays visible on dark menu bars. A plain black image
+		// disappears there until the portal icon has downloaded.
+		fallback := defaultDarwinIcon()
+		systray.SetTemplateIcon(fallback, fallback)
+	}
 	go runDarwinTrayIconWorker()
 	requestTrayIconRefresh()
 }
@@ -69,8 +84,8 @@ func runDarwinTrayIconWorker() {
 			case <-time.After(delay):
 			case <-trayIconRefreshCh:
 			}
-			if delay *= 2; delay > 5*time.Minute {
-				delay = 5 * time.Minute
+			if delay *= 2; delay > trayIconMaxRetryDelay {
+				delay = trayIconMaxRetryDelay
 			}
 		}
 	}
@@ -94,6 +109,9 @@ func fetchAndSetDarwinIcon() error {
 	}
 	systray.SetIcon(icon)
 	logger.Info("Tray icon updated from %s", url)
+	if err := saveCachedTrayIcon(trayIconCachePath(), icon); err != nil {
+		logger.Debug("Tray icon cache not written: %v", err)
+	}
 	return nil
 }
 
