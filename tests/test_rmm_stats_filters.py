@@ -1,6 +1,7 @@
 """Machine stats filters against stored performance and temperature samples."""
 from datetime import datetime
 from html import unescape
+import json
 from pathlib import Path
 import re
 from urllib.parse import parse_qs, urlsplit
@@ -95,3 +96,21 @@ async def test_filter_form_links_escaping_and_empty_state(samples):
     empty = await rmm_stats.asset_stats_context(10, "7d", "temperature", "Missing SSD")
     html = template.render(stats=empty, asset={"id": 10}, request=request)
     assert "No stats match these filters" in html and ">Clear</a>" in html
+
+
+@pytest.mark.anyio
+async def test_last_hour_range_and_hover_points(samples):
+    context = await rmm_stats.asset_stats_context(10, "1h", "cpu")
+    assert context["range"] == "1h" and context["ranges"][0] == {"key": "1h", "label": "Last 1 hour"}
+    (cpu,) = context["charts"]
+    # The sample sits at "now", the right edge, with its UTC time and value for the hover readout.
+    assert cpu["series"][0]["points"] == [[600.0, 128.0, "2026-10-13T12:00:00", "20 %"]]
+    source = (Path(__file__).resolve().parents[1] / "app/templates/assets/detail.html").read_text()
+    section = source.split('{% set stats = chk.stats %}', 1)[1].split('</section>', 1)[0]
+    request = Request({"type": "http", "scheme": "https", "server": ("portal.test", 443),
+                       "path": "/assets/10", "query_string": b"stats=1h", "headers": []})
+    html = _environment().from_string(section).render(stats=context, asset={"id": 10}, request=request)
+    assert '>Last 1 hour</a>' in html
+    payload = re.search(r"data-rmm-stats-chart='([^']+)'", html).group(1)
+    assert json.loads(unescape(payload)) == {"width": 600, "series": [cpu["series"][0]["points"]]}
+    assert 'data-name="CPU"' in html
