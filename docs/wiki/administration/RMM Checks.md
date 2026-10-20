@@ -34,7 +34,8 @@ it sees the service in the wrong state. That minute still counts as a problem, s
 of 0 the check also raises its alert; with a longer duration a quick fix raises nothing.
 
 CPU, memory, disk and network are measured on Windows, Linux and macOS; ping, file and process
-checks on all three; service checks on Windows and Linux.
+checks on all three; service checks on Windows and Linux. On macOS, disk checks leave out mounted
+disk images (such as an opened `.dmg` installer) and other read-only volumes under `/Volumes`.
 
 The agent runs as System (root on Linux and macOS), so a file check's `%USERPROFILE%` is the system
 profile, not the signed-in user's; use a pattern such as `C:\Users\*\...` instead. A path the agent

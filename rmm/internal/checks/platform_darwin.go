@@ -50,7 +50,9 @@ func readMemory() (uint64, uint64, error) {
 	return total, available, err
 }
 
-// readDisks reports the startup disk's data volume and other local volumes.
+// readDisks reports the startup disk's data volume and other local volumes,
+// leaving out mounted disk images (.dmg and the like), which are often
+// read-only and full and would otherwise raise low disk space alerts.
 func readDisks() ([]client.DiskUsage, error) {
 	count, err := syscall.Getfsstat(nil, 1 /* MNT_WAIT */)
 	if err != nil {
@@ -59,6 +61,10 @@ func readDisks() ([]client.DiskUsage, error) {
 	stats := make([]syscall.Statfs_t, count)
 	if _, err := syscall.Getfsstat(stats, 1); err != nil {
 		return nil, err
+	}
+	images := map[string]bool{}
+	if output, err := command("hdiutil", "info"); err == nil {
+		images = parseHdiutilInfo(output)
 	}
 	var disks []client.DiskUsage
 	seen := map[string]bool{}
@@ -70,6 +76,10 @@ func readDisks() ([]client.DiskUsage, error) {
 			continue
 		}
 		if mount != "/" && mount != "/System/Volumes/Data" && !strings.HasPrefix(mount, "/Volumes/") {
+			continue
+		}
+		readOnly := stat.Flags&0x1 != 0 // MNT_RDONLY
+		if isDiskImage(images, device, mount) || (readOnly && strings.HasPrefix(mount, "/Volumes/")) {
 			continue
 		}
 		seen[device] = true
