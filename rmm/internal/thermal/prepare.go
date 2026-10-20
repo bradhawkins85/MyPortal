@@ -16,8 +16,8 @@ import (
 func Prepare(ctx context.Context) error { return preparePlatform(ctx) }
 
 // uninstallArgs returns the program and its arguments from a registered
-// uninstall command line, adding PawnIO's -uninstall and -silent switches
-// when the registered command does not already include them.
+// uninstall command line, such as `C:\Program Files\PawnIO\uninstall.exe`,
+// adding the -silent switch when the registered command does not include it.
 func uninstallArgs(command string) (string, string, error) {
 	command = strings.TrimSpace(command)
 	var program, args string
@@ -36,10 +36,8 @@ func uninstallArgs(command string) (string, string, error) {
 		return "", "", fmt.Errorf("unexpected uninstall command %q", command)
 	}
 	args = strings.TrimSpace(args)
-	for _, flag := range []string{"-uninstall", "-silent"} {
-		if !strings.Contains(strings.ToLower(args), flag) {
-			args = strings.TrimSpace(args + " " + flag)
-		}
+	if !strings.Contains(strings.ToLower(args), "-silent") {
+		args = strings.TrimSpace(args + " -silent")
 	}
 	return program, args, nil
 }

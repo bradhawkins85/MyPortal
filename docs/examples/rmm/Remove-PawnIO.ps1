@@ -38,8 +38,9 @@ function Get-PawnIOUninstallCommand {
     return $null
 }
 
-# Splits a registered command line into the program and its arguments, adding
-# PawnIO's -uninstall and -silent switches when they are missing.
+# Splits a registered command line, such as
+# c:\Program Files\PawnIO\uninstall.exe -silent, into the program and its
+# arguments, adding the -silent switch when it is missing.
 function Split-UninstallCommand([string] $Command) {
     if ($Command.StartsWith('"')) {
         $end = $Command.IndexOf('"', 1)
@@ -54,9 +55,7 @@ function Split-UninstallCommand([string] $Command) {
     }
     if (-not $program.ToLowerInvariant().EndsWith('.exe')) { throw "Unexpected uninstall command: $Command" }
     $arguments = $arguments.Trim()
-    foreach ($flag in '-uninstall', '-silent') {
-        if ($arguments.ToLowerInvariant() -notlike "*$flag*") { $arguments = "$arguments $flag".Trim() }
-    }
+    if ($arguments.ToLowerInvariant() -notlike '*-silent*') { $arguments = "$arguments -silent".Trim() }
     [pscustomobject]@{ Program = $program; Arguments = $arguments }
 }
 

@@ -9,11 +9,13 @@ import (
 
 func TestUninstallArgs(t *testing.T) {
 	for _, tc := range []struct{ command, program, args string }{
+		// PawnIO 2.1.0 registers this unquoted command.
+		{`c:\Program Files\PawnIO\uninstall.exe -silent`, `c:\Program Files\PawnIO\uninstall.exe`, "-silent"},
+		{`c:\Program Files\PawnIO\uninstall.exe`, `c:\Program Files\PawnIO\uninstall.exe`, "-silent"},
+		{`"C:\Program Files\PawnIO\uninstall.exe"`, `C:\Program Files\PawnIO\uninstall.exe`, "-silent"},
 		{`"C:\Program Files\PawnIO\PawnIO_setup.exe" -uninstall`, `C:\Program Files\PawnIO\PawnIO_setup.exe`, "-uninstall -silent"},
-		{`"C:\Program Files\PawnIO\PawnIO_setup.exe"`, `C:\Program Files\PawnIO\PawnIO_setup.exe`, "-uninstall -silent"},
-		{`"C:\Program Files\PawnIO\PawnIO_setup.exe" -uninstall -silent`, `C:\Program Files\PawnIO\PawnIO_setup.exe`, "-uninstall -silent"},
-		{`C:\PawnIO\PawnIO_setup.EXE -Uninstall`, `C:\PawnIO\PawnIO_setup.EXE`, "-Uninstall -silent"},
-		{`  C:\PawnIO\setup.exe  `, `C:\PawnIO\setup.exe`, "-uninstall -silent"},
+		{`C:\PawnIO\uninstall.EXE -Silent`, `C:\PawnIO\uninstall.EXE`, "-Silent"},
+		{`  C:\PawnIO\uninstall.exe  `, `C:\PawnIO\uninstall.exe`, "-silent"},
 	} {
 		program, args, err := uninstallArgs(tc.command)
 		if err != nil || program != tc.program || args != tc.args {
@@ -28,7 +30,7 @@ func TestUninstallArgs(t *testing.T) {
 }
 
 func TestRemovePawnIO(t *testing.T) {
-	const command = `"C:\Program Files\PawnIO\PawnIO_setup.exe" -uninstall`
+	const command = `c:\Program Files\PawnIO\uninstall.exe -silent`
 	t.Run("not installed", func(t *testing.T) {
 		err := removePawnIO(context.Background(), func() (string, error) { return "", nil },
 			func(context.Context, string, string) error {
@@ -49,7 +51,7 @@ func TestRemovePawnIO(t *testing.T) {
 				if !ok || time.Until(deadline) > 2*time.Minute {
 					t.Fatal("uninstaller is not bounded to two minutes")
 				}
-				if program != `C:\Program Files\PawnIO\PawnIO_setup.exe` || args != "-uninstall -silent" {
+				if program != `c:\Program Files\PawnIO\uninstall.exe` || args != "-silent" {
 					t.Fatalf("ran %q %q", program, args)
 				}
 				registered = ""

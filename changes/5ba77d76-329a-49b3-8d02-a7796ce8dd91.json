@@ -1,0 +1,7 @@
+{
+  "guid": "5ba77d76-329a-49b3-8d02-a7796ce8dd91",
+  "occurred_at": "2026-10-20T09:00Z",
+  "change_type": "Fix",
+  "summary": "Run PawnIO's registered uninstaller with only -silent added, so removal works with PawnIO 2.1.0's uninstall.exe.",
+  "content_hash": "e15840288dd571ee157989c7d50da50b1ebf4c1a339b5f4c920a154b0acd2d5d"
+}
