@@ -2,6 +2,8 @@ package checks
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -136,5 +138,62 @@ func TestCheckServiceRejectsOptions(t *testing.T) {
 	status := CheckService(context.Background(), client.CheckService{Name: "--now", Expected: "running", Fix: "start"})
 	if status.Error == "" || status.Action != "" {
 		t.Fatalf("got %+v", status)
+	}
+}
+
+func TestCheckFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.log")
+	if err := os.WriteFile(path, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := CheckFile(path)
+	if !result.Exists || result.Kind != "file" || result.SizeBytes == nil || *result.SizeBytes != 5 || result.ModifiedUTC == "" {
+		t.Fatalf("file: got %+v", result)
+	}
+	if result := CheckFile(dir); !result.Exists || result.Kind != "folder" || result.SizeBytes != nil {
+		t.Fatalf("folder: got %+v", result)
+	}
+	for _, missing := range []string{filepath.Join(dir, "gone.txt"), filepath.Join(path, "below-a-file")} {
+		if result := CheckFile(missing); result.Exists || result.Error != "" {
+			t.Fatalf("%s: got %+v", missing, result)
+		}
+	}
+	if result := CheckFile(filepath.Join(dir, "*.log")); !result.Exists || result.Found != path {
+		t.Fatalf("pattern: got %+v", result)
+	}
+	if result := CheckFile(filepath.Join(dir, "*.txt")); result.Exists || result.Error != "" {
+		t.Fatalf("pattern without matches: got %+v", result)
+	}
+	t.Setenv("MYPORTAL_TEST_DIR", dir)
+	if result := CheckFile("%MYPORTAL_TEST_DIR%" + string(filepath.Separator) + "app.log"); !result.Exists || result.Path[0] != '%' {
+		t.Fatalf("variable: got %+v", result)
+	}
+	if result := CheckFile(" "); result.Error == "" {
+		t.Fatalf("blank: got %+v", result)
+	}
+}
+
+func TestProcesses(t *testing.T) {
+	running := [][]string{{"System"}, {"notepad.exe"}, {"NOTEPAD.EXE"}, {"nginx", "nginx: master process"}, {"kworker/0:1"}}
+	for name, want := range map[string]int{"notepad": 2, "Notepad.exe": 2, "nginx": 1, "nginx.exe": 1, "sshd": 0, " ": 0} {
+		if got := countProcesses(running, name); got != want {
+			t.Fatalf("%q: got %d, want %d", name, got, want)
+		}
+	}
+	if got := parseCmdline("/usr/sbin/sshd\x00-D\x00"); got != "sshd" {
+		t.Fatalf("cmdline: got %q", got)
+	}
+	if got := parseCmdline(""); got != "" {
+		t.Fatalf("kernel thread: got %q", got)
+	}
+	got := parsePsComm("/sbin/launchd\n/Applications/Safari.app/Contents/MacOS/Safari\n\n  /usr/libexec/logd  \n")
+	if len(got) != 3 || got[1][0] != "Safari" || got[2][0] != "logd" {
+		t.Fatalf("ps: got %v", got)
+	}
+	// The agent's own process is always running.
+	statuses := CheckProcesses([]string{filepath.Base(os.Args[0])})
+	if len(statuses) != 1 || (statuses[0].Error == "" && statuses[0].Count < 1) {
+		t.Fatalf("self: got %+v", statuses)
 	}
 }

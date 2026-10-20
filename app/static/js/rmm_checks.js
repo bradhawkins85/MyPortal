@@ -85,6 +85,8 @@
       case 'cpu': return 'High CPU';
       case 'memory': return 'Low memory';
       case 'service': return value('service_name') ? value('service_name') + ' service' : 'Service';
+      case 'file': return value('file_path') ? (value('file_expected') === 'missing' ? 'No ' : '') + value('file_path') : 'File check';
+      case 'process': return value('process_name') ? value('process_name') + (value('process_expected') === 'not_running' ? ' not running' : ' process') : 'Process';
       case 'network': return 'Network throughput' + (value('network_interface') ? ' on ' + value('network_interface') : '');
       case 'script': return selectedText('check_script_id') || 'Script check';
       case 'offline': return 'Agent offline';
@@ -113,6 +115,14 @@
         let text = (value('service_name') || 'The service') + ' is not ' + (value('service_expected') || 'running') + lasting + '.';
         if (fix && fix !== 'none') text += ' The agent will ' + fix + ' it straight away.';
         return text;
+      }
+      case 'file': {
+        const state = value('file_expected') === 'missing' ? ' exists' : ' does not exist';
+        return (value('file_path') || 'The path') + state + lasting + '.';
+      }
+      case 'process': {
+        const state = value('process_expected') === 'not_running' ? ' is running' : ' is not running';
+        return (value('process_name') || 'The process') + state + lasting + '.';
       }
       case 'network': {
         const where = value('network_interface') || 'All interfaces together';

@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -105,3 +106,31 @@ func stopService(ctx context.Context, name string) error    { return controlUnit
 type commandError struct{ output string }
 
 func (e *commandError) Error() string { return lastLine(e.output) }
+
+// processNames lists each process's short name (comm, at most 15 characters)
+// and its program's name from the command line.
+func processNames() ([][]string, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, err
+	}
+	var running [][]string
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.Trim(entry.Name(), "0123456789") != "" {
+			continue
+		}
+		dir := filepath.Join("/proc", entry.Name())
+		comm, err := os.ReadFile(filepath.Join(dir, "comm"))
+		if err != nil {
+			continue // ended since the listing
+		}
+		names := []string{strings.TrimSpace(string(comm))}
+		if cmdline, err := os.ReadFile(filepath.Join(dir, "cmdline")); err == nil {
+			if name := parseCmdline(string(cmdline)); name != "" {
+				names = append(names, name)
+			}
+		}
+		running = append(running, names)
+	}
+	return running, nil
+}

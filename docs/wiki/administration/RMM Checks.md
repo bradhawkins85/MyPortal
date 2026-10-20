@@ -17,6 +17,8 @@ started and when it was last checked.
 | **Free memory** | Free memory is below a number of GB or a percentage. | Agent |
 | **Windows service** | A service is not running (or not stopped). On Linux the name is a systemd unit. | Agent |
 | **Network throughput** | Data received, sent or both, on one interface or all of them together, is above (or below) a number of Mbps. | Agent |
+| **File or folder** | A path does not exist (or exists when it should not). Use a full path such as `C:\Program Files\App\app.exe`, `\\server\share\file.txt` or `/etc/app.conf`. `*` and `?` match any name, for example `C:\Users\*\Desktop\App.lnk`, and `%NAME%` is an environment variable on the device, such as `%ProgramData%`. | Agent |
+| **Process** | No process with a name is running (or one is running when it should not be). Use the program's file name, such as `notepad.exe` or `nginx`; case and `.exe` do not matter. | Agent |
 | **Script result** | A Gitea script, run on the device every few minutes, does not return what you expect: an exit code, or output that contains, does not contain or exactly matches some text. | Server queues the script |
 | **Agent offline** | The agent has not checked in for a number of minutes, for example 30 for a server. | Server |
 
@@ -31,14 +33,21 @@ service that should be running, or stop one that should be stopped. The agent do
 it sees the service in the wrong state. That minute still counts as a problem, so with a duration
 of 0 the check also raises its alert; with a longer duration a quick fix raises nothing.
 
-CPU, memory, disk and network are measured on Windows, Linux and macOS; ping on all three; service
-checks on Windows and Linux.
+CPU, memory, disk and network are measured on Windows, Linux and macOS; ping, file and process
+checks on all three; service checks on Windows and Linux.
+
+The agent runs as System (root on Linux and macOS), so a file check's `%USERPROFILE%` is the system
+profile, not the signed-in user's; use a pattern such as `C:\Users\*\...` instead. A path the agent
+cannot read counts as a problem, with the reason as the result. A process check matches the name
+Windows shows in Task Manager's Details tab; on Linux it matches either the process's short name or
+its program's file name, and on macOS the program's file name.
 
 ## Who a check applies to
 
 Like [event log rules](RMM%20Event%20Logs.md#event-log-rules), a check applies to **every company**
 (super admins only), **every device in a company**, or **one device**. When checks at different
-levels watch the same thing (the same type and drive, ping target, service, interface or script),
+levels watch the same thing (the same type and drive, ping target, service, interface, path,
+process or script),
 the most specific level wins: a device's own check replaces its company's, which replaces one for
 every company. A device's own check that is **off** switches the thing off for that device. On an
 asset page, **Change for this device** on a company or every-company check copies it as the
@@ -173,7 +182,8 @@ the default of 5 minutes each device adds about 12 rows an hour for each value i
 ## Agent API
 
 * `GET /api/rmm/agent/checks/config` tells the agent what to measure: CPU, memory, disks and
-  network (true or false), the ping targets and the services with their expected state and fix.
+  network (true or false), the ping targets, the services with their expected state and fix, the
+  file paths and the process names.
 * `POST /api/rmm/agent/checks/report` sends one round of measurements.
 
 Both use the agent's bearer token, like the rest of the agent API.
