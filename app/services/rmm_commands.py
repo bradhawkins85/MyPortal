@@ -45,7 +45,7 @@ def _device_problem(language: str, agent: Mapping[str, Any]) -> str | None:
         if "cmd" not in str(agent.get("shells") or "").split(","):
             return "Update the RMM agent before running Command Prompt commands."
         return None
-    return rmm_scripts.device_problem({"language": language}, agent)
+    return rmm_scripts.device_problem({"language": language, "platforms": [rmm_scripts.normalise_platform(agent.get("os"))]}, agent)
 
 
 async def queue_command(

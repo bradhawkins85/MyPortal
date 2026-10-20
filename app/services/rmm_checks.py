@@ -591,7 +591,7 @@ async def save_check(
         "inputs": rmm_scripts.stored_inputs(script, entries) if script else [],
         "timeout_seconds": rmm_scripts.clamp_timeout(
             form.get("timeout_seconds"),
-            int(((check_script if check_type == "script" else script) or {}).get("default_timeout_seconds") or 600),
+            int(((check_script if check_type == "script" else script) or {}).get("default_timeout_seconds", 600)),
         ),
         "cooldown_minutes": _int(form.get("cooldown_minutes"), DEFAULT_COOLDOWN_MINUTES, 0, MAX_COOLDOWN_MINUTES),
         **schedule,

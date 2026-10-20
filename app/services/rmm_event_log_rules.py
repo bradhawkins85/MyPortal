@@ -337,7 +337,7 @@ async def save_rule(
         "entries_encrypted": encrypt_secret(json.dumps(entries)) if entries else None,
         "inputs": rmm_scripts.stored_inputs(script, entries) if script else [],
         "timeout_seconds": rmm_scripts.clamp_timeout(
-            form.get("timeout_seconds"), int((script or {}).get("default_timeout_seconds") or 600)
+            form.get("timeout_seconds"), int((script or {}).get("default_timeout_seconds", 600))
         ),
         "cooldown_minutes": _int(form.get("cooldown_minutes"), DEFAULT_COOLDOWN_MINUTES, 0, MAX_COOLDOWN_MINUTES),
         "is_enabled": str(form.get("is_enabled") or "").lower() in {"1", "on", "true", "yes"},

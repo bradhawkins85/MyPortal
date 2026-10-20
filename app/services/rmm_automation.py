@@ -47,9 +47,6 @@ TICK_SECONDS = 30
 TARGET_MODES = ("all", "tags", "assets", "rules")
 MAX_SCHEDULE_ASSETS = rmm_scripts.MAX_TARGETS_PER_RUN
 MAX_SCHEDULE_TAGS = 50
-# A scheduled run waits for an offline device until the schedule's next run,
-# but never less than this, nor longer than a manual run would.
-MIN_SCHEDULED_WAIT = timedelta(minutes=5)
 
 _FINISH_WORDS = {
     "failed": "failed",
@@ -252,7 +249,7 @@ async def save_schedule(
         "entries_encrypted": encrypt_secret(json.dumps(entries)),
         "inputs": rmm_scripts.stored_inputs(script, entries),
         "timeout_seconds": rmm_scripts.clamp_timeout(
-            payload.get("timeout_seconds"), int(script.get("default_timeout_seconds") or 600)
+            payload.get("timeout_seconds"), int(script.get("default_timeout_seconds", 600))
         ),
         "run_as": run_as,
         "is_enabled": enabled,
@@ -275,7 +272,8 @@ async def schedule_targets(schedule: Mapping[str, Any], script: Mapping[str, Any
 
     company_id = schedule.get("company_id")
     agents = await automation_repo.list_active_agents(company_id=int(company_id) if company_id is not None else None)
-    agents = [agent for agent in agents if rmm_repo.script_available_to(dict(script), int(agent["company_id"]))]
+    agents = [agent for agent in agents if rmm_repo.script_available_to(dict(script), int(agent["company_id"]))
+              and rmm_scripts.platform_allowed(script, agent)]
     mode = schedule.get("target_mode") or "all"
     if mode == "rules" or schedule.get("target_rules") is not None:
         return await rmm_device_targeting.filter_agents(agents, schedule.get("target_rules"))
@@ -316,15 +314,8 @@ async def run_schedule(
     entries = decrypt_entries(schedule.get("entries_encrypted"))
     inputs = schedule.get("inputs") or []
     timeout = rmm_scripts.clamp_timeout(schedule.get("timeout_seconds"), 600)
-    next_at = schedule.get("next_run_at") if schedule.get("is_enabled") else None
-    if isinstance(next_at, str):
-        try:
-            next_at = datetime.fromisoformat(next_at)
-        except ValueError:
-            next_at = None
-    expires_at = now + rmm_scripts.QUEUE_LIFETIME
-    if isinstance(next_at, datetime) and next_at > now:
-        expires_at = min(expires_at, max(next_at, now + MIN_SCHEDULED_WAIT))
+    # The chosen timeout also controls how long an offline device may wait.
+    expires_at = now + timedelta(seconds=timeout) if timeout else None
 
     pending = await automation_repo.pending_schedule_agents(schedule_id)
     queued: list[dict[str, Any]] = []
@@ -480,7 +471,7 @@ async def save_step(
         "entries_encrypted": encrypt_secret(json.dumps(entries)),
         "inputs": rmm_scripts.stored_inputs(script, entries),
         "timeout_seconds": rmm_scripts.clamp_timeout(
-            payload.get("timeout_seconds"), int(script.get("default_timeout_seconds") or 600)
+            payload.get("timeout_seconds"), int(script.get("default_timeout_seconds", 600))
         ),
         "continue_on_failure": bool(payload.get("continue_on_failure")),
         "run_as": run_as,
@@ -623,6 +614,8 @@ async def _queue_step(onboarding: Mapping[str, Any], entry: Mapping[str, Any]) -
     script = await rmm_repo.get_script(int(step["script_id"]), with_content=True)
     if not rmm_repo.script_available_to(script, int(onboarding["company_id"])):
         raise RunRequestError({"script": "The script is no longer available to this company."})
+    if not rmm_scripts.platform_allowed(script, agent):
+        raise _StepSkipped("The script is not enabled for the device's platform.")
     entries = rmm_scripts.validate_entries(script, decrypt_entries(step.get("entries_encrypted")))
     return await rmm_scripts.queue_for_agent(
         script=script,  # type: ignore[arg-type]

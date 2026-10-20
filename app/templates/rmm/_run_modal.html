@@ -107,10 +107,10 @@
         <div class="form-field rmm-timeout" data-rmm-timeout-section hidden>
           <label class="form-label" for="rmm-timeout">Stop the script after</label>
           <div class="rmm-timeout__row">
-            <input class="form-input" id="rmm-timeout" type="number" min="1" max="240" step="1" value="10" data-rmm-timeout />
+            <input class="form-input" id="rmm-timeout" type="number" min="0" max="35791394" step="1" required value="10" aria-describedby="rmm-timeout-help" data-rmm-timeout />
             <span>minutes</span>
           </div>
-          <p class="form-help">If it is still running then, the device stops it and reports a timeout.</p>
+          <p class="form-help" id="rmm-timeout-help">Enter 0 for Forever, or at least 1 minute. Overrides the global default for this run or saved automation. Also controls how long an offline device can wait to collect the script.</p>
         </div>
         <div class="form-field" data-rmm-run-as-section hidden>
           <label class="form-label" for="rmm-run-as">Run as</label>

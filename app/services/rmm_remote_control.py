@@ -407,7 +407,7 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
             ) from exc
         timeout = min(
             MAX_ACTIVATION_TIMEOUT_SECONDS,
-            rmm_scripts.clamp_timeout(script.get("default_timeout_seconds"), MAX_ACTIVATION_TIMEOUT_SECONDS),
+            rmm_scripts.clamp_timeout(script.get("default_timeout_seconds"), MAX_ACTIVATION_TIMEOUT_SECONDS) or MAX_ACTIVATION_TIMEOUT_SECONDS,
         )
         try:
             run_id = await rmm_scripts.queue_for_agent(

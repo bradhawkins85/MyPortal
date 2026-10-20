@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bradhawkins85/myportal-rmm/internal/client"
 )
@@ -234,5 +235,30 @@ func TestCmdWritesABatchFile(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(dir, "script.cmd"))
 	if string(data) != "@echo off\r\necho one\r\nexit /b 4" {
 		t.Fatalf("batch file = %q", data)
+	}
+}
+
+func TestForeverHasNoDeadlineAndStillHonorsCancellation(t *testing.T) {
+	parent, stop := context.WithCancel(context.Background())
+	defer stop()
+	ctx, cancel := scriptContext(parent, 0)
+	defer cancel()
+	if _, ok := ctx.Deadline(); ok {
+		t.Fatal("forever job has an execution deadline")
+	}
+	stop()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("forever job ignored parent cancellation")
+	}
+}
+
+func TestLongTimeoutIsNotCappedAtFourHours(t *testing.T) {
+	ctx, cancel := scriptContext(context.Background(), 86400)
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) < 23*time.Hour {
+		t.Fatal("24-hour job lost its configured deadline")
 	}
 }
