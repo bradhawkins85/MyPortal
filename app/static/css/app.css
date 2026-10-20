@@ -15686,6 +15686,7 @@ a.stat-strip__stat:focus-visible {
 .ai-query-message { max-width: 80%; padding: .7rem .85rem; border-radius: .7rem; background: rgba(99,102,241,.2); }
 .ai-query-message--user { align-self: flex-end; background: rgba(14,165,233,.22); }
 .ai-query-message--error { background: rgba(239,68,68,.18); color: #fecaca; }
+.ai-query-message--warning { background: rgba(245,158,11,.18); color: #fde68a; }
 .ai-query-chat__composer { display: flex; align-items: flex-end; gap: .75rem; }
 .ai-query-chat__composer textarea { flex: 1; }
 @media (max-width: 760px) {

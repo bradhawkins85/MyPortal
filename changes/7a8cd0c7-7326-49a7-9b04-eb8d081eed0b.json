@@ -1,0 +1,7 @@
+{
+  "guid": "7a8cd0c7-7326-49a7-9b04-eb8d081eed0b",
+  "occurred_at": "2026-10-19T12:30Z",
+  "change_type": "Fix",
+  "summary": "Reporting AI query builder: send the full instructions to Ollama with a larger context and a compact schema, check generated SQL against the schema and test-run it, and automatically ask the model to repair invented columns or database errors",
+  "content_hash": "23677c821f9da530559e54624f03a356de231d7f45530e319efc933869bb3b18"
+}

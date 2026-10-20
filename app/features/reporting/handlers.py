@@ -37,6 +37,15 @@ _AI_QUERY_CLIENT_MESSAGES = {
 }
 
 
+_AI_QUERY_REJECTED_WARNING = (
+    "The database rejected this query when it was test-run. Review and correct it before saving."
+)
+_AI_QUERY_UNVERIFIED_WARNING = (
+    "The query could not be test-run against the database. Use Test query before saving."
+)
+_DRY_RUN_UNAVAILABLE = object()
+
+
 class _ClientSafeAIQueryError(ValueError):
     """Identifies an approved, static message that may be returned to the UI."""
 
@@ -489,38 +498,55 @@ async def admin_reporting_ai_query(request: Request):
         messages = report_query_builder.build_ai_messages(
             schema, instruction[:4000], current_sql[:16000]
         )
-        model_override = report_query_builder.configured_ai_model()
-        module_payload: dict[str, Any] = {
-            "prompt": messages[-1]["content"],
-            "messages": messages,
-            "stage": "report_query_builder",
-            "format": "json",
-        }
-        if model_override:
-            module_payload["model"] = model_override
-        response = await modules_service.trigger_module(
-            "ollama",
-            module_payload,
-            background=False,
-        )
-        if not modules_service.module_result_succeeded(response):
-            reason = response.get("last_error") or response.get("reason")
-            if response.get("status") == "skipped" and reason is None:
-                raise _ClientSafeAIQueryError("module_no_query")
-            safe_reason = _approved_ai_query_module_reason(reason)
-            if safe_reason:
-                raise _ClientSafeAIQueryError(safe_reason)
-            log_error(
-                "Reporting AI query module failed",
-                status=str(response.get("status") or ""),
-                reason_type=type(reason).__name__,
-                reason_length=len(str(reason)) if reason is not None else 0,
+        # The newest query that passed the read-only safety checks, with the
+        # problems that remained when it was returned.
+        best: tuple[str, str, list[str]] | None = None
+        pending_error: Exception | None = None
+        for _attempt in range(report_query_builder.AI_MAX_ATTEMPTS):
+            try:
+                response = await _request_ai_query(
+                    modules_service, report_query_builder, messages
+                )
+            except (_ClientSafeAIQueryError, _AIQueryModuleFailure):
+                # A failed repair attempt should not discard a usable query.
+                if best is not None:
+                    break
+                raise
+            sql, summary = report_query_builder.extract_ai_sql(response)
+            if not sql:
+                pending_error = _ClientSafeAIQueryError("response_no_query")
+                messages = report_query_builder.build_ai_retry_messages(
+                    messages,
+                    "",
+                    ['The reply did not contain a SELECT query in the "sql" field.'],
+                )
+                continue
+            try:
+                sql = reporting_service.validate_select_query(sql)
+            except reporting_service.ReportingQueryError as exc:
+                pending_error = exc
+                messages = report_query_builder.build_ai_retry_messages(
+                    messages, sql, [str(exc)]
+                )
+                continue
+            problems = report_query_builder.check_query_against_schema(sql, schema)
+            warnings = list(problems)
+            if not problems:
+                database_error = await _dry_run_ai_query(report_query_builder, sql)
+                if database_error is _DRY_RUN_UNAVAILABLE:
+                    warnings = [_AI_QUERY_UNVERIFIED_WARNING]
+                elif database_error:
+                    problems = ["The database rejected it: " + database_error]
+                    warnings = [_AI_QUERY_REJECTED_WARNING]
+            best = (sql, summary, warnings)
+            pending_error = None
+            if not problems:
+                break
+            messages = report_query_builder.build_ai_retry_messages(
+                messages, sql, problems
             )
-            raise _AIQueryModuleFailure("module failure")
-        sql, summary = report_query_builder.extract_ai_sql(response)
-        if not sql:
-            raise _ClientSafeAIQueryError("response_no_query")
-        sql = reporting_service.validate_select_query(sql)
+        if best is None:
+            raise pending_error or _ClientSafeAIQueryError("response_no_query")
     except reporting_service.ReportingQueryError as exc:
         return JSONResponse(
             {"error": _reporting_query_client_message(exc)}, status_code=400
@@ -545,7 +571,60 @@ async def admin_reporting_ai_query(request: Request):
             },
             status_code=503,
         )
-    return JSONResponse({"sql": sql, "summary": summary})
+    sql, summary, warnings = best
+    payload: dict[str, Any] = {"sql": sql, "summary": summary}
+    if warnings:
+        payload["warnings"] = warnings
+    return JSONResponse(payload)
+
+
+async def _request_ai_query(modules_service, report_query_builder, messages):
+    """Send one query-generation conversation to the configured LLM module."""
+    module_payload: dict[str, Any] = {
+        # Completion-only providers (Ollama's generate endpoint) receive just
+        # the prompt, so it must carry the system rules too.
+        "prompt": report_query_builder.flatten_messages(messages),
+        "messages": messages,
+        "stage": "report_query_builder",
+        "format": "json",
+        "temperature": 0.1,
+        "num_ctx": report_query_builder.configured_ai_context_tokens(),
+    }
+    model_override = report_query_builder.configured_ai_model()
+    if model_override:
+        module_payload["model"] = model_override
+    response = await modules_service.trigger_module(
+        "ollama",
+        module_payload,
+        background=False,
+    )
+    if not modules_service.module_result_succeeded(response):
+        reason = response.get("last_error") or response.get("reason")
+        if response.get("status") == "skipped" and reason is None:
+            raise _ClientSafeAIQueryError("module_no_query")
+        safe_reason = _approved_ai_query_module_reason(reason)
+        if safe_reason:
+            raise _ClientSafeAIQueryError(safe_reason)
+        log_error(
+            "Reporting AI query module failed",
+            status=str(response.get("status") or ""),
+            reason_type=type(reason).__name__,
+            reason_length=len(str(reason)) if reason is not None else 0,
+        )
+        raise _AIQueryModuleFailure("module failure")
+    return response
+
+
+async def _dry_run_ai_query(report_query_builder, sql: str):
+    """Return the database error for ``sql``, ``None``, or ``_DRY_RUN_UNAVAILABLE``."""
+    try:
+        return await report_query_builder.dry_run_query(sql)
+    except Exception as exc:  # noqa: BLE001 - verification is best effort
+        log_error(
+            "Reporting AI query dry run unavailable",
+            error_type=type(exc).__name__,
+        )
+        return _DRY_RUN_UNAVAILABLE
 
 
 async def admin_reporting_edit(request: Request, report_id: int):

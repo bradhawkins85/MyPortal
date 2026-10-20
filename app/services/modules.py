@@ -3451,6 +3451,8 @@ async def _invoke_ollama(
             options["temperature"] = payload.get("temperature")
         if payload.get("max_tokens") is not None:
             options["num_predict"] = payload.get("max_tokens")
+        if payload.get("num_ctx") is not None:
+            options["num_ctx"] = payload.get("num_ctx")
         if options:
             body["options"] = options
     else:
