@@ -1239,6 +1239,8 @@ class Settings(BaseSettings):
     # Optional RustDesk installer (.exe for Windows) used when a device does not
     # have RustDesk yet. When blank, use the latest stable GitHub release.
     rustdesk_installer_url: str = Field(default="", validation_alias="RUSTDESK_INSTALLER_URL")
+    # The same for Macs (a .dmg holding RustDesk.app).
+    rustdesk_macos_installer_url: str = Field(default="", validation_alias="RUSTDESK_MACOS_INSTALLER_URL")
 
     @model_validator(mode="after")
     def _enforce_production_secret_strength(self) -> "Settings":
