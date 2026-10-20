@@ -355,6 +355,39 @@
         }),
       },
     ],
+    'run-troubleshooting-bot': [
+      {
+        label: 'Troubleshoot the linked asset',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+        }),
+      },
+      {
+        label: 'Troubleshoot with notes for the bot',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          context: 'Raised by an event log rule; focus on the matched events.',
+        }),
+      },
+    ],
+    'rmm-script': [
+      {
+        label: 'Run a cleanup script on the linked device',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          script: 'Cleanup-Disk',
+        }),
+      },
+      {
+        label: 'Run with values and resolve on success',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          script: 'Cleanup-Disk',
+          values: { Drive: 'C', Computer: '{{asset.name}}' },
+          success_status: 'resolved',
+        }),
+      },
+    ],
     'reprocess-ai': [
       {
         label: 'Refresh all ticket AI',

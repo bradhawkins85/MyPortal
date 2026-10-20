@@ -1,0 +1,7 @@
+{
+  "guid": "d0b7a7dd-58fa-4404-9867-2bf90cd32d65",
+  "occurred_at": "2026-10-20T02:00Z",
+  "change_type": "Feature",
+  "summary": "Ticket automations: Run Troubleshooting Bot action starts the AI troubleshooter on the ticket's linked asset so tickets raised by event log rules arrive with research, recommended steps and log analysis already posted",
+  "content_hash": "10c18584cade81799d1dcadae01b2c196bbcfb83a1fdc24deb9c733797bd450f"
+}

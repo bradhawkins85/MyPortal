@@ -1,0 +1,52 @@
+{# Run an ad hoc command on this device, opened from the asset page's RMM menu.
+   rmm_command.js posts it to /api/rmm/assets/{id}/commands and opens the run in the
+   shared result viewer (rmm/_run_modal.html). #}
+<div class="modal rmm-modal" id="rmm-command-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-command-title" hidden data-rmm-command-modal data-rmm-command-asset="{{ asset.id }}">
+  <form class="modal__panel modal__panel--wide" data-rmm-command-form novalidate>
+    <header class="modal__header">
+      <div>
+        <p class="rmm-editor__eyebrow">RMM</p>
+        <h2 class="modal__title" id="rmm-command-title">Execute command</h2>
+        <p class="rmm-editor__subtitle">Run a one-off command on {{ asset_display_name }}. Its output appears as it runs, and the run is kept in the device's script history.</p>
+      </div>
+      <button type="button" class="modal__close" data-rmm-command-close aria-label="Close command runner"></button>
+    </header>
+    <div class="modal__body">
+      <div class="form-field">
+        <label class="form-label" for="rmm-command-language">Shell</label>
+        <select class="form-input" id="rmm-command-language" data-rmm-command-language>
+          {% for language in rmm.command_languages %}<option value="{{ language.value }}">{{ language.label }}</option>{% endfor %}
+        </select>
+        <p class="form-help form-help--error" data-rmm-command-error="language" hidden></p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="rmm-command-text">Command</label>
+        <textarea class="form-input rmm-command__text" id="rmm-command-text" rows="8" maxlength="65535" spellcheck="false" autocomplete="off" data-rmm-command-text></textarea>
+        <p class="form-help">Several lines run as one script. The exit code of the last command is the run's exit code.</p>
+        <p class="form-help form-help--error" data-rmm-command-error="command" hidden></p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="rmm-command-run-as">Run as</label>
+        <select class="form-input" id="rmm-command-run-as" data-rmm-command-run-as>
+          <option value="system">System</option>
+          <option value="user">Logged in user</option>
+        </select>
+        <p class="form-help">System has full rights on the device. Logged in user runs as whoever is signed in; the run fails if nobody is.</p>
+        <p class="form-help form-help--error" data-rmm-command-error="run_as" hidden></p>
+      </div>
+      <div class="form-field rmm-timeout">
+        <label class="form-label" for="rmm-command-timeout">Stop the command after</label>
+        <div class="rmm-timeout__row">
+          <input class="form-input" id="rmm-command-timeout" type="number" min="1" max="240" step="1" value="5" data-rmm-command-timeout />
+          <span>minutes</span>
+        </div>
+      </div>
+      <p class="alert alert--warning" role="alert" data-rmm-command-error="form" hidden></p>
+    </div>
+    <footer class="modal__footer">
+      <span class="rmm-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-rmm-command-close>Cancel</button>
+      <button type="submit" class="button button--primary" data-rmm-command-submit>Run command</button>
+    </footer>
+  </form>
+</div>

@@ -102,6 +102,7 @@ func details(r *runner.Runner) client.Details {
 		Shells:               r.AvailableShells(),
 		ScriptFilesSupported: true,
 		RunAnywaySupported:   true,
+		RunAsUserSupported:   true,
 	}
 }
 
@@ -518,8 +519,8 @@ func eventLogLoop(ctx context.Context, api *client.Client) {
 }
 
 // checksLoop measures what MyPortal's checks need (disk space, CPU, memory,
-// network, pings and services) and reports it, once a minute while the
-// device has such checks. It asks again what to measure every few minutes.
+// network, pings, services, files and processes) and reports it, once a
+// minute while the device has such checks. It asks again what to measure every few minutes.
 func checksLoop(ctx context.Context, api *client.Client) {
 	collector := checks.NewCollector()
 	sleep(ctx, checksStartDelay)

@@ -378,7 +378,33 @@ an asset's page. Then:
    such as `{{asset.custom.BitLocker}}`, `{{company.variables.Tenant ID}}`, `{{asset.name}}` or
    `{{company.name}}`. Variables are filled in separately for each device, so one run can give
    every device its own value. Leaving an optional field empty uses the script's default.
-3. Set how long the script may run before the device stops it, then run it.
+3. Set how long the script may run before the device stops it.
+4. Choose who it runs as under **Run as**, then run it.
+
+### Run as System or the logged in user
+
+Every manual run, schedule and onboarding step has a **Run as** setting:
+
+- **System** (the default) runs the script as the agent's own account: LocalSystem on
+  Windows, root on macOS and Linux. Use it for installs, services, machine-wide settings
+  and anything that needs administrator rights.
+- **Logged in user** runs the script as whoever is signed in to the device, with their
+  rights, profile, `HKEY_CURRENT_USER`, mapped drives and environment. On Windows the
+  agent uses the user at the console, or the first active Remote Desktop session when
+  nobody is at the console, and starts the script hidden on that user's desktop. On macOS
+  it uses the owner of the console; on Linux, the active graphical session on `seat0`.
+  If nobody is signed in, the run fails with *No user is logged in on this device* rather
+  than running as System. Associated files are still downloaded by the agent's own
+  account before the script starts, so put them where the user can read them.
+
+The choice is saved with schedules and onboarding steps, captured on each queued run,
+shown in the run's details, and kept when you **Retry** a run. Event log rules, the tray
+menu, remote control, patching and Windows Update jobs always run as System.
+
+Running as the logged-in user needs migration 508 and an updated RMM agent: agents report
+`run_as_user_supported: true` on check-in. Deploy MyPortal first, then update agents. An
+older agent fails a **Logged in user** run with an update message instead of running it as
+System. System runs work on every agent.
 
 The panel on the right shows what each device receives. Values are encrypted until the device
 collects them and are deleted when the run finishes.
@@ -392,10 +418,26 @@ Choose **View** on a run to see its output, errors, the values sent, and which c
 were updated.
 
 **Retry** is available for **Expired**, **Timed out**, and **Failed** runs. It opens the run
-editor with the original device, timeout, and saved inputs selected. Review the values and
+editor with the original device, timeout, run as setting and saved inputs selected. Review the values and
 re-enter any secret values typed directly into the previous run; variable references are
 kept and resolved again. Retrying uses the current script and creates a new manual attempt,
 keeping the original result in history. Run and cancel actions require Scripts write access.
+
+### Execute a command
+
+To run something that is not a saved script, open the device's asset page and choose
+**RMM** > **Execute command**. Pick the shell (**PowerShell** or **Command Prompt** on
+Windows; **Bash**, **Zsh**, or **PowerShell** where `pwsh` is installed on macOS and
+Linux), type the command, and choose **Run as** **System** or **Logged in user** as for
+a script. Several lines run as one script, and the exit code of the last command is the
+run's exit code. The run opens in the result viewer with live output, appears in the
+device's script history as **Command**, and shows the command under **Values sent**.
+
+Commands need the same Scripts write access as running a script, and every command is
+recorded in the audit log (`rmm.command.run`) with the shell, run as setting and the
+command text. Command Prompt needs an updated RMM agent, which reports `cmd` among its
+shells; an older agent refuses with an update message. Commands have no parameters or
+associated files and cannot be retried; run them again instead.
 
 ## Schedules and onboarding
 
@@ -458,6 +500,47 @@ adding a step, and **Stop onboarding** cancels the rest of a running sequence.
 
 Schedules for every company can only use scripts in `Common/` and are added and changed only
 by super admins; everyone else sees them read-only.
+
+## Running scripts from ticket automations
+
+The **My Portal RMM Script** ticket automation action runs a script on the devices linked to a
+ticket, so an automation can try to fix a problem before a technician touches the machine. For
+example, a *Ticket created* automation filtered to low disk space tickets (such as those raised by
+a [disk space check](RMM%20Checks.md) or an [event log rule](RMM%20Event%20Logs.md)) can run your
+disk clean-up script and move the ticket to **Resolved** if it works.
+
+Add the action to an automation (**Automation → Ticket automations**) with a payload such as:
+
+```json
+{
+  "ticket_id": "{{ ticket.id }}",
+  "script": "Cleanup-Disk",
+  "values": {"Drive": "C"},
+  "success_status": "resolved"
+}
+```
+
+| Field | What it does |
+| --- | --- |
+| `script` | The script to run: its Gitea path (`rmm/Common/Cleanup-Disk.ps1`), its name (`Cleanup-Disk`) or its ID. A script in the company's own folder wins over one in `Common/` with the same name. The form lists every active script. |
+| `asset_id` | Run only on this linked asset. Without it the script runs on every linked device with the RMM agent (up to 20). |
+| `values` | The script's parameters and environment variables, keyed by name (`Drive`) or as in the run form (`param:Drive`, `env:SITE_URL`). Values may use `{{ticket.*}}`, `{{asset.*}}` and `{{company.variables.*}}`; they are filled in for each device like a schedule's. A blank field whose script default is a MyPortal variable is filled from that default. |
+| `timeout_seconds` | Defaults to the script's own timeout. |
+| `run_as` | `system` (default) or `user`, the user logged in to the device. |
+| `success_status` | Ticket status to set once the script completes successfully (exit code 0) on every device it was queued on. Leave it out to leave the status alone. |
+
+The script is queued as an ordinary RMM run and shows as **Ticket automation** in run history.
+When the device reports back, the outcome, exit code and the end of the output are added to the
+ticket as an internal note. A run that expires before the device collects it (24 hours), never
+reports back or is cancelled gets a note too. Notes and status changes made this way do not fire
+further ticket automations.
+
+The action is **skipped** when the ticket has no linked asset, no linked device has the RMM agent,
+the same script from a ticket automation is still queued or running on the device, or the script
+cannot run on the device's platform. It **fails** when the script cannot be found for the
+ticket's company, a value does not match a script field, a mandatory value is missing, or
+`success_status` is not a ticket status. The action is hidden when the RMM feature is disabled.
+Apply migration **509** first.
 
 ## Who can use it
 

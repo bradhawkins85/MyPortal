@@ -32,6 +32,7 @@ type Details struct {
 	AgentVersion         string            `json:"agent_version,omitempty"`
 	Shells               []string          `json:"shells,omitempty"`
 	RunAnywaySupported   bool              `json:"run_anyway_supported"`
+	RunAsUserSupported   bool              `json:"run_as_user_supported"`
 	ScriptFilesSupported bool              `json:"script_files_supported"`
 }
 
@@ -44,14 +45,16 @@ type Enrolment struct {
 
 // Job is one script run to execute.
 type Job struct {
-	RunAnyway      bool                   `json:"run_anyway"`
-	ID             int64                  `json:"id"`
-	Name           string                 `json:"name"`
-	Path           string                 `json:"path"`
-	Language       string                 `json:"language"`
-	Script         string                 `json:"script"`
-	SHA256         string                 `json:"sha256"`
-	TimeoutSeconds int                    `json:"timeout_seconds"`
+	RunAnyway      bool   `json:"run_anyway"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Path           string `json:"path"`
+	Language       string `json:"language"`
+	Script         string `json:"script"`
+	SHA256         string `json:"sha256"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+	// RunAs is "system" (the default) or "user" for the logged-in user.
+	RunAs          string                 `json:"run_as"`
 	Parameters     map[string]interface{} `json:"parameters"`
 	ParameterOrder []string               `json:"parameter_order"`
 	Env            map[string]string      `json:"env"`
@@ -277,6 +280,8 @@ type CheckConfig struct {
 	Network         bool           `json:"network"`
 	Pings           []string       `json:"pings"`
 	Services        []CheckService `json:"services"`
+	Files           []string       `json:"files"`
+	Processes       []string       `json:"processes"`
 }
 
 // DiskUsage is one fixed drive or mounted filesystem.
@@ -316,6 +321,25 @@ type ServiceStatus struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// FileStatus is whether a watched path exists. A path with * or ? matches
+// any file or folder; Found is the first match.
+type FileStatus struct {
+	Path        string `json:"path"`
+	Exists      bool   `json:"exists"`
+	Found       string `json:"found,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	SizeBytes   *int64 `json:"size_bytes,omitempty"`
+	ModifiedUTC string `json:"modified_utc,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+// ProcessStatus is how many processes with a watched name are running.
+type ProcessStatus struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+	Error string `json:"error,omitempty"`
+}
+
 // CheckReport is one round of measurements. A nil field was not measured.
 type CheckReport struct {
 	CPUPercent *float64        `json:"cpu_percent"`
@@ -324,6 +348,8 @@ type CheckReport struct {
 	Network    []InterfaceRate `json:"network"`
 	Pings      []PingResult    `json:"pings"`
 	Services   []ServiceStatus `json:"services"`
+	Files      []FileStatus    `json:"files"`
+	Processes  []ProcessStatus `json:"processes"`
 }
 
 // GetCheckConfig asks what to measure for checks.
@@ -340,6 +366,12 @@ func (c *Client) SendCheckReport(ctx context.Context, report CheckReport) error 
 	}
 	if report.Services == nil {
 		report.Services = []ServiceStatus{}
+	}
+	if report.Files == nil {
+		report.Files = []FileStatus{}
+	}
+	if report.Processes == nil {
+		report.Processes = []ProcessStatus{}
 	}
 	return c.do(ctx, http.MethodPost, "/api/rmm/agent/checks/report", report, nil)
 }

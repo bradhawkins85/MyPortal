@@ -204,3 +204,29 @@ func parseTopCPU(text string) (float64, bool) {
 	}
 	return value, found
 }
+
+// commandName is a program's name from its path: what follows the last "/".
+func commandName(path string) string {
+	path = strings.TrimSpace(path)
+	return path[strings.LastIndex(path, "/")+1:]
+}
+
+// parseCmdline reads the program name from Linux's /proc/<pid>/cmdline, whose
+// arguments are separated by NULs. Kernel threads have none.
+func parseCmdline(data string) string {
+	if i := strings.IndexByte(data, 0); i >= 0 {
+		data = data[:i]
+	}
+	return commandName(data)
+}
+
+// parsePsComm reads macOS's "ps -axo comm=": each process's program path.
+func parsePsComm(text string) [][]string {
+	var running [][]string
+	for _, line := range strings.Split(text, "\n") {
+		if name := commandName(line); name != "" {
+			running = append(running, []string{name})
+		}
+	}
+	return running
+}

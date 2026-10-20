@@ -1,0 +1,7 @@
+{
+  "guid": "74b1905c-745c-4823-80c1-618907b549c8",
+  "occurred_at": "2026-10-20T00:00Z",
+  "change_type": "Feature",
+  "summary": "RMM scripts: choose Run as System or Logged in user when running a script manually, on a schedule or as an onboarding step; the RMM agent runs user scripts in the signed-in user's session",
+  "content_hash": "6a1484ddecd21319f3c141b952965faf58c76c3922e16eaf1f9411f92b9ab192"
+}

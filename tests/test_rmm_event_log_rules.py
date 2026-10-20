@@ -320,6 +320,8 @@ async def test_create_ticket_rule_raises_one_ticket_per_device_until_closed(sqli
     async def create_ticket(**kwargs):
         ticket_id = len(tickets) + 100
         tickets[ticket_id] = {"id": ticket_id, "ticket_number": str(ticket_id), "status": "open", **kwargs}
+        if kwargs.get("asset_ids"):
+            links[ticket_id] = list(kwargs["asset_ids"])
         return tickets[ticket_id]
 
     async def get_ticket(ticket_id):

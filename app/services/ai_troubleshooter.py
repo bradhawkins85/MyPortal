@@ -48,6 +48,8 @@ from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_event_logs as rmm_event_logs_repo
+from app.repositories import tickets as tickets_repo
+from app.repositories import tray as tray_repo
 from app.services import ai_consent
 from app.services import ai_prompt_security
 from app.services import knowledge_base as knowledge_base_service
@@ -219,7 +221,7 @@ def _note_header() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _plain_text(value: Any, limit: int | None = None) -> str:
+def plain_text(value: Any, limit: int | None = None) -> str:
     text = _SPACE_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", str(value or "")))).strip()
     if limit is not None and len(text) > limit:
         return text[: limit - 1].rstrip() + "…"
@@ -227,7 +229,7 @@ def _plain_text(value: Any, limit: int | None = None) -> str:
 
 
 def _clean(value: Any, limit: int) -> str:
-    return _plain_text(value, limit)
+    return plain_text(value, limit)
 
 
 def endpoint_platform(device: Mapping[str, Any] | None, asset: Mapping[str, Any] | None) -> str:
@@ -686,7 +688,7 @@ async def _search_kb(ticket: Mapping[str, Any], terms: Sequence[str]) -> list[di
                     "slug": str(article.get("slug") or ""),
                     "title": _clean(article.get("title"), 200),
                     "summary": _clean(article.get("summary"), 600),
-                    "content": _plain_text(article.get("content"), _KB_CONTENT_CHARS),
+                    "content": plain_text(article.get("content"), _KB_CONTENT_CHARS),
                 }
         if len(found) >= MAX_KB_ARTICLES:
             break
@@ -1059,6 +1061,165 @@ async def read_stored_logs(stored: Mapping[str, Any] | None) -> str:
 # ---------------------------------------------------------------------------
 
 
+def build_asset_problem(
+    ticket: Mapping[str, Any],
+    asset: Mapping[str, Any],
+    extra_context: str | None,
+) -> str:
+    """Assemble the LLM "reported problem" from the ticket and asset data.
+
+    The troubleshooter LLM only sees this string plus the endpoint's own logs,
+    so the ticket's own data (subject, description, priority, category, status)
+    and the asset under investigation are folded in here. This is what makes
+    the agent's guidance specific to the reported problem rather than a
+    generic endpoint analysis. The description is reduced to bounded plain
+    text so a long customer-written description cannot blow the prompt budget.
+    """
+    header_bits: list[str] = []
+    ticket_number = str(ticket.get("ticket_number") or ticket.get("id") or "").strip()
+    if ticket_number:
+        header_bits.append(f"Ticket {ticket_number}")
+    subject = str(ticket.get("subject") or "").strip()
+    if subject:
+        header_bits.append(f"Subject: {subject}")
+    for field, label in (("priority", "Priority"), ("category", "Category"), ("status", "Status")):
+        value = str(ticket.get(field) or "").strip()
+        if value:
+            header_bits.append(f"{label}: {value}")
+
+    description = plain_text(ticket.get("description"), 2000)
+
+    lines: list[str] = [
+        (
+            "AI troubleshooting request from a support ticket. Use this ticket context "
+            "together with the endpoint logs below to diagnose the problem."
+        )
+    ]
+    if header_bits:
+        lines.append(" | ".join(header_bits))
+    if description:
+        lines.append("")
+        lines.append("Ticket description (reported problem):")
+        lines.append(description)
+
+    asset_bits: list[str] = []
+    asset_name = str(asset.get("name") or "").strip()
+    if asset_name:
+        asset_bits.append(asset_name)
+    for field, label in (
+        ("serial_number", "Serial"),
+        ("os_name", "OS"),
+        ("type", "Type"),
+        ("status", "Status"),
+    ):
+        value = str(asset.get(field) or "").strip()
+        if value:
+            asset_bits.append(f"{label}: {value}")
+    if asset_bits:
+        lines.append("")
+        lines.append("Asset under investigation: " + ", ".join(asset_bits))
+
+    extra = str(extra_context or "").strip()
+    if extra:
+        lines.append("")
+        lines.append(f"Technician notes: {extra}")
+
+    return "\n".join(lines)
+
+
+AUTOMATION_REQUESTER: dict[str, Any] = {"display_name": "ticket automation"}
+
+
+async def _automation_device(
+    asset: Mapping[str, Any], company_id: Any
+) -> dict[str, Any] | None:
+    """Return the asset's active tray device in the ticket's company, if any."""
+
+    device_uid = str(asset.get("tray_device_uid") or "").strip()
+    if not device_uid:
+        return None
+    device = await tray_repo.get_device_by_uid(device_uid)
+    if not device or device.get("status") != "active":
+        return None
+    if company_id is not None and int(device.get("company_id") or 0) != int(company_id):
+        return None
+    return dict(device)
+
+
+async def start_automation_troubleshoot(
+    *,
+    ticket: Mapping[str, Any],
+    asset_id: int | None = None,
+    context: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Start the troubleshooter from a ticket automation.
+
+    Picks the requested linked asset, or else the first linked asset with an
+    active tray agent, or else the first linked asset. Without a tray agent
+    the run still researches, plans and reads the event logs MyPortal stores
+    for the asset (as for event log rule tickets); it just cannot collect
+    anything from the endpoint itself. Consent is checked by the caller.
+    """
+
+    ticket_id = int(ticket["id"])
+    linked = await tickets_repo.list_ticket_assets(ticket_id)
+    if asset_id is not None:
+        linked = [asset for asset in linked if asset.get("asset_id") == asset_id]
+        if not linked:
+            return {
+                "status": "error",
+                "error": f"Asset {asset_id} is not linked to the ticket",
+                "ticket_id": ticket_id,
+            }
+    if not linked:
+        return {
+            "status": "skipped",
+            "reason": "No asset is linked to the ticket",
+            "ticket_id": ticket_id,
+        }
+
+    company_id = ticket.get("company_id")
+    asset, device = dict(linked[0]), None
+    for candidate in linked:
+        device = await _automation_device(candidate, company_id)
+        if device:
+            asset = dict(candidate)
+            break
+    llm = tray_service.build_troubleshoot_llm_config(str(model or "").strip() or None)
+    if not llm["model"]:
+        return {
+            "status": "error",
+            "error": "No LLM model is configured for the AI assistant",
+            "ticket_id": ticket_id,
+        }
+
+    await start_asset_troubleshoot(
+        ticket=ticket,
+        asset=asset,
+        # Without a tray agent only stored event logs can be read; the empty
+        # device keeps endpoint collection off.
+        device=device or {"company_id": company_id},
+        problem=build_asset_problem(ticket, asset, context),
+        llm=llm,
+        requested_by=AUTOMATION_REQUESTER,
+    )
+    log_info(
+        "AI troubleshooter started from ticket automation",
+        ticket_id=ticket_id,
+        asset_id=asset.get("asset_id"),
+        device_uid=(device or {}).get("device_uid"),
+    )
+    return {
+        "status": "succeeded",
+        "ticket_id": ticket_id,
+        "asset_id": asset.get("asset_id"),
+        "device_uid": (device or {}).get("device_uid"),
+        "endpoint_collection": device is not None,
+        "model": llm["model"],
+    }
+
+
 async def start_asset_troubleshoot(
     *,
     ticket: Mapping[str, Any],
@@ -1072,13 +1233,18 @@ async def start_asset_troubleshoot(
 
     ticket_id = int(ticket["id"])
     target = str(asset.get("name") or f"asset #{asset.get('asset_id')}")
-    device_label = str(device.get("hostname") or device.get("device_uid") or "device")
+    device_label = str(device.get("hostname") or device.get("device_uid") or "").strip()
+    endpoint = (
+        f"{html.escape(target)} ({html.escape(device_label)})"
+        if device_label
+        else f"{html.escape(target)} (no active tray agent; only event logs stored in MyPortal can be read)"
+    )
     await _note(
         ticket_id,
         _note_header()
         + "troubleshooter requested by "
         + html.escape(tray_service.troubleshoot_requester_label(dict(requested_by or {})))
-        + f" for {html.escape(target)} ({html.escape(device_label)}), model "
+        + f" for {endpoint}, model "
         + html.escape(str(llm.get("model") or "default"))
         + ".</p><p>It will research troubleshooting articles, post recommended steps, "
         "and collect and analyse endpoint logs if the steps call for them.</p>",

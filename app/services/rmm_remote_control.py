@@ -22,9 +22,10 @@ When a technician clicks Connect on an asset:
    from the server's login token key (``meshcentral --logintokenkey``).
 
 Without a chosen script, RustDesk uses MyPortal's built-in one
-(``rmm_builtin/rustdesk_activate.*``): it applies ``RUSTDESK_CFG`` from the
-.env file, starts the RustDesk service, sets a one-time password MyPortal
-generates and reports the ID. A device without the RMM agent falls back to an
+(``rmm_builtin/rustdesk_activate*``): on Windows and macOS it installs RustDesk
+when it is missing, then it applies ``RUSTDESK_CFG`` from the .env file,
+starts the RustDesk service, sets a one-time password MyPortal generates and
+reports the ID. A device without the RMM agent falls back to an
 asset custom field holding its ID. A MeshCentral session without a node ID
 opens MeshCentral signed in.
 
@@ -187,12 +188,13 @@ def _public_provider(row: Mapping[str, Any], script: Mapping[str, Any] | None = 
 
 
 def rustdesk_environment() -> dict[str, bool]:
-    """Whether RUSTDESK_CFG and RUSTDESK_INSTALLER_URL are set (never their values)."""
+    """Whether RUSTDESK_CFG and the installer URLs are set (never their values)."""
 
     settings = get_settings()
     return {
         "cfg_set": bool((settings.rustdesk_cfg or "").strip()),
         "installer_set": bool((settings.rustdesk_installer_url or "").strip()),
+        "macos_installer_set": bool((settings.rustdesk_macos_installer_url or "").strip()),
     }
 
 
@@ -301,8 +303,14 @@ def _builtin_content(name: str) -> str:
 def builtin_rustdesk_script(agent: Mapping[str, Any]) -> dict[str, Any]:
     """MyPortal's own RustDesk activation script for the agent's operating system."""
 
-    windows = str(agent.get("os") or "windows").lower() in {"windows", ""}
-    name = "rustdesk_activate.ps1" if windows else "rustdesk_activate.sh"
+    os_name = str(agent.get("os") or "windows").lower()
+    windows = os_name in {"windows", ""}
+    if windows:
+        name = "rustdesk_activate.ps1"
+    elif os_name in {"darwin", "macos"}:
+        name = "rustdesk_activate_macos.sh"
+    else:
+        name = "rustdesk_activate.sh"
     content = _builtin_content(name)
     return {
         "id": None,
@@ -323,8 +331,13 @@ async def _queue_builtin_rustdesk(agent: Mapping[str, Any], password: str, user_
     env = {"MYPORTAL_RUSTDESK_PASSWORD": password}
     if (config.rustdesk_cfg or "").strip():
         env["RUSTDESK_CFG"] = config.rustdesk_cfg.strip()
-    if (config.rustdesk_installer_url or "").strip():
-        env["RUSTDESK_INSTALLER_URL"] = config.rustdesk_installer_url.strip()
+    # Each script reads its own platform's installer override.
+    installer_url = {
+        "builtin/rustdesk_activate.ps1": config.rustdesk_installer_url,
+        "builtin/rustdesk_activate_macos.sh": config.rustdesk_macos_installer_url,
+    }.get(script["path"], "")
+    if (installer_url or "").strip():
+        env["RUSTDESK_INSTALLER_URL"] = installer_url.strip()
     return await rmm_repo.create_run(
         script=script,
         content=script["content"],

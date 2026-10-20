@@ -104,6 +104,9 @@ Open **Event log rules** from the Event logs page (`/rmm/event-logs/rules`). A r
     device's asset linked and the matching events in its description. While that ticket is not
     closed, later matches from the same rule on the same device are added to it as internal
     updates instead of raising another ticket; once it is closed, the next match raises a new one.
+    Add the **Run Troubleshooting Bot** action to a *Ticket created* automation to have the AI
+    troubleshooter investigate these tickets automatically (see
+    [Tray App](../getting-started/Tray%20App.md#multi-stage-troubleshooter-ticket-assets)).
 
 Each rule has an **Action** menu (on the rules page and in the asset page's Event log
 automations) to edit it, turn it on or off, or delete it. Drop rules also have **Run now**, which

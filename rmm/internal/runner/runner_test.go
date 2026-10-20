@@ -201,6 +201,43 @@ func TestPowerShellUsesTextFileWrapper(t *testing.T) {
 	}
 }
 
+func TestCmdIsWindowsOnly(t *testing.T) {
+	r := New(t.TempDir())
+	r.Lookup = func(name string) (string, error) { return name, nil }
+	shells := r.AvailableShells()
+	hasCmd := false
+	for _, shell := range shells {
+		hasCmd = hasCmd || shell == "cmd"
+	}
+	if hasCmd != (runtime.GOOS == "windows") {
+		t.Fatalf("shells = %v", shells)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	script := "echo hello"
+	result := r.Run(context.Background(), client.Job{ID: 31, Language: "cmd", Script: script, SHA256: checksum(script), TimeoutSeconds: 30})
+	if result.ExitCode != nil || !strings.Contains(result.Error, "Windows only") {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestCmdWritesABatchFile(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Command Prompt runs on Windows only")
+	}
+	r := New(t.TempDir())
+	dir := t.TempDir()
+	name, args, err := r.cmdCommand(client.Job{Script: "echo one\nexit /b 4"}, dir)
+	if err != nil || !strings.HasSuffix(strings.ToLower(name), "cmd.exe") || args[len(args)-1] != filepath.Join(dir, "script.cmd") {
+		t.Fatalf("command = %q %v %v", name, args, err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "script.cmd"))
+	if string(data) != "@echo off\r\necho one\r\nexit /b 4" {
+		t.Fatalf("batch file = %q", data)
+	}
+}
+
 func TestForeverHasNoDeadlineAndStillHonorsCancellation(t *testing.T) {
 	parent, stop := context.WithCancel(context.Background())
 	defer stop()

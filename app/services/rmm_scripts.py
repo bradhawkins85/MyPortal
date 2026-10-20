@@ -72,6 +72,9 @@ AGENT_CONNECTED_WINDOW = timedelta(seconds=POLL_WAIT_SECONDS * 4)
 SENSITIVE_MASK = "••••••"
 # rmm_script_runs.run_source for a run started from a tray menu item.
 TRAY_RUN_SOURCE = "tray"
+# Who a script runs as on the device: the agent's own account (LocalSystem on
+# Windows, root elsewhere) or the user logged in to it.
+RUN_AS_OPTIONS = ("system", "user")
 CUSTOM_VALUE_SCOPES = ("asset", "company", "session")
 
 # Built-in jobs adjust their own runs through these hooks, registered by their
@@ -486,9 +489,17 @@ def validate_entries(script: Mapping[str, Any], submitted: Mapping[str, Any]) ->
 
 
 async def resolve_entries(
-    script: Mapping[str, Any], entries: Mapping[str, str], context: Mapping[str, Any]
+    script: Mapping[str, Any],
+    entries: Mapping[str, str],
+    context: Mapping[str, Any],
+    rendered: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Resolve variables for one device and convert parameters to their types."""
+    """Resolve variables for one device and convert parameters to their types.
+
+    A blank field whose script default is a MyPortal variable, such as
+    ``{{ COMPANY_NAME }}``, is filled from that default; left to the script it
+    would receive the variable's text. When given, ``rendered`` collects each
+    variable resolved, keyed like ``entries``, as ``template`` and ``value``."""
 
     errors: dict[str, str] = {}
     params: dict[str, Any] = {}
@@ -496,10 +507,24 @@ async def resolve_entries(
     order: list[str] = []
     for field_def in script_fields(script):
         entered = entries.get(field_def["key"], "")
+        from_default = False
+        if not entered.strip() and _TOKEN.search(str(field_def.get("default") or "")):
+            entered = str(field_def["default"])
+            from_default = True
         if _TOKEN.search(entered):
             resolved = await render_value(entered, context)
+            if rendered is not None:
+                rendered[field_def["key"]] = {"template": entered, "value": resolved}
         else:
             resolved = entered
+        if from_default and not resolved.strip() and field_def["type"] in {"string", "secret"}:
+            # The script's own default would be the variable's text, so send the empty value instead.
+            if field_def["kind"] == "env":
+                env[field_def["name"]] = ""
+            else:
+                params[field_def["name"]] = ""
+                order.append(field_def["name"])
+            continue
         if not resolved.strip():
             if field_def["mandatory"] and field_def["type"] != "switch":
                 errors[field_def["key"]] = "The variable has no value for this device."
@@ -545,6 +570,16 @@ def platform_allowed(script: Mapping[str, Any], agent: Mapping[str, Any]) -> boo
     return normalise_platform(agent.get("os")) in platforms
 
 
+def clean_run_as(value: Any) -> str:
+    """``system`` or ``user``; missing means ``system``, anything else is an error."""
+
+    if value is None or value == "":
+        return "system"
+    if value not in RUN_AS_OPTIONS:
+        raise RunRequestError({"run_as": "Choose System or Logged in user."})
+    return str(value)
+
+
 def notify_agent(agent_id: int) -> None:
     event = _agent_events.get(agent_id)
     if event is not None:
@@ -554,15 +589,15 @@ def notify_agent(agent_id: int) -> None:
 def device_problem(script: Mapping[str, Any], agent: Mapping[str, Any]) -> str | None:
     """Why ``script`` cannot run on ``agent``'s device, or ``None`` when it can."""
 
+    os_name = normalise_platform(agent.get("os"))
+    if script["language"] in {"bash", "zsh"} and os_name == "windows":
+        return "Shell scripts cannot run on Windows."
     if not platform_allowed(script, agent):
         label = SCRIPT_PLATFORMS.get(normalise_platform(agent.get("os")), "Unknown")
         return f"This script is not enabled for the device's platform ({label})."
-    os_name = normalise_platform(agent.get("os"))
     if script["language"] == "powershell" and os_name not in {"windows", ""}:
         if "pwsh" not in str(agent.get("shells") or ""):
             return "PowerShell is not installed on this device."
-    if script["language"] in {"bash", "zsh"} and os_name == "windows":
-        return "Shell scripts cannot run on Windows."
     return None
 
 
@@ -571,6 +606,34 @@ def stored_inputs(script: Mapping[str, Any], entries: Mapping[str, str]) -> list
 
     inputs = [_stored_input(field_def, entries.get(field_def["key"], "")) for field_def in script_fields(script)]
     return [item for item in inputs if item["value"]]
+
+
+def _run_inputs(
+    script: Mapping[str, Any], inputs: list[dict[str, Any]], rendered: Mapping[str, Mapping[str, str]]
+) -> list[dict[str, Any]]:
+    """``inputs`` with the value each variable resolved to on this device.
+
+    Script defaults that were MyPortal variables are added, marked
+    ``script_default``, so run history shows what the device was sent."""
+
+    result: list[dict[str, Any]] = []
+    shown: set[str] = set()
+    for item in inputs:
+        key = f"{item['kind']}:{item['name']}"
+        shown.add(key)
+        item = dict(item)
+        if key in rendered:
+            item["resolved"] = SENSITIVE_MASK if item.get("sensitive") and rendered[key]["value"] else rendered[key]["value"]
+        result.append(item)
+    for field_def in script_fields(script):
+        key = field_def["key"]
+        if key in rendered and key not in shown:
+            item = _stored_input(field_def, rendered[key]["template"])
+            value = rendered[key]["value"]
+            item["resolved"] = SENSITIVE_MASK if field_def.get("sensitive") and value else value
+            item["script_default"] = True
+            result.append(item)
+    return result
 
 
 async def queue_for_agent(
@@ -587,13 +650,16 @@ async def queue_for_agent(
     expires_at: datetime | None = None,
     notify: bool = True,
     extra_context: Mapping[str, Any] | None = None,
+    run_as: str = "system",
 ) -> int:
     """Resolve the values for one device and queue the run. Raises
     :class:`RunRequestError` with a ``device`` message when it cannot run there.
 
     ``extra_context`` adds variables for this run only, such as ``event`` for a
-    run started by an event log rule (``{{event.message}}``)."""
+    run started by an event log rule (``{{event.message}}``). ``run_as`` is
+    ``system`` or ``user`` (the user logged in to the device)."""
 
+    run_as = clean_run_as(run_as)
     problem = device_problem(script, agent)
     if problem:
         raise RunRequestError({"device": problem})
@@ -602,7 +668,9 @@ async def queue_for_agent(
     context = await build_template_context(company_id, asset_id)
     if extra_context:
         context.update(extra_context)
-    payload = await resolve_entries(script, entries, context)
+    rendered: dict[str, dict[str, str]] = {}
+    payload = await resolve_entries(script, entries, context, rendered)
+    inputs = _run_inputs(script, inputs, rendered)
     from app.services import rmm_script_files
 
     try:
@@ -624,6 +692,7 @@ async def queue_for_agent(
         run_source=run_source,
         schedule_id=schedule_id,
         onboarding_run_id=onboarding_run_id,
+        run_as=run_as,
     )
     if notify:
         notify_agent(int(agent["id"]))
@@ -638,6 +707,7 @@ async def queue_runs(
     submitted: Mapping[str, Any],
     timeout_seconds: Any,
     requested_by_user_id: int | None,
+    run_as: Any = "system",
 ) -> dict[str, Any]:
     """Queue the script on each device. Returns the queued run ids and per-device problems."""
 
@@ -650,6 +720,7 @@ async def queue_runs(
     if len(targets) > MAX_TARGETS_PER_RUN:
         raise RunRequestError({"assets": f"Choose at most {MAX_TARGETS_PER_RUN} devices at a time."})
     entries = validate_entries(script, submitted)
+    run_as = clean_run_as(run_as)
     timeout = clamp_timeout(timeout_seconds, int(script.get("default_timeout_seconds", 600)))
     inputs = stored_inputs(script, entries)
 
@@ -672,6 +743,7 @@ async def queue_runs(
                 inputs=inputs,
                 timeout_seconds=timeout,
                 requested_by_user_id=requested_by_user_id,
+                run_as=run_as,
             )
         except RunRequestError as exc:
             problem: dict[str, Any] = {
@@ -755,6 +827,7 @@ def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[st
         "agent_version": text("agent_version", 32),
         "script_files_supported": bool(payload.get("script_files_supported")) if payload.get("agent_version") is not None else payload.get("script_files_supported"),
         "run_anyway_supported": bool(payload.get("run_anyway_supported")) if payload.get("agent_version") is not None else payload.get("run_anyway_supported"),
+        "run_as_user_supported": bool(payload.get("run_as_user_supported")) if payload.get("agent_version") is not None else payload.get("run_as_user_supported"),
         "shells": (str(shells).strip()[:255] or None) if shells else None,
         "last_ip": (client_ip or "")[:64] or None,
     }
@@ -832,6 +905,7 @@ def _job_payload(row: Mapping[str, Any]) -> dict[str, Any] | None:
         "sha256": row.get("content_sha256"),
         "timeout_seconds": int(row.get("timeout_seconds", 600)),
         "run_anyway": bool(row.get("run_anyway")) and row.get("run_source") != "onboarding",
+        "run_as": "user" if row.get("run_as") == "user" else "system",
         "parameters": values.get("parameters") or {},
         "parameter_order": values.get("parameter_order") or [],
         "env": values.get("env") or {},
@@ -867,7 +941,7 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
     for row in await rmm_repo.next_jobs_for_agent(agent_id):
         # Recheck current restrictions: a queued job may predate a platform edit.
         script = await rmm_repo.get_script(int(row["script_id"])) if row.get("script_id") else None
-        if not platform_allowed(script or row, agent):
+        if row.get("run_source") != "command" and not platform_allowed(script or row, agent):
             await rmm_repo.cancel_run(int(row["id"]))
             continue
         if row.get("expires_at") is not None or row.get("run_source") == "patch":
@@ -889,6 +963,12 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
             await rmm_repo.finish_run(
                 int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],
                 error_message="Update the RMM agent before using Run Anyway execution mode.",
+            )
+            continue
+        if row.get("run_as") == "user" and not agent.get("run_as_user_supported"):
+            await rmm_repo.finish_run(
+                int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],
+                error_message="Update the RMM agent before running scripts as the logged-in user.",
             )
             continue
         job = _job_payload(row)
@@ -1161,13 +1241,20 @@ async def record_result(agent: Mapping[str, Any], run_id: int, payload: Mapping[
     custom_values = await apply_custom_values(run, [item for item in values if item["scope"] != "session"])
     if session_values:
         custom_values.extend(await rmm_remote_control.capture({**run, "id": run_id}, session_values))
+    stderr = rmm_remote_control.take_session_markers(readable_output(payload.get("stderr")))[0]
     await rmm_repo.finish_run(
         run_id,
         status=status,
         exit_code=exit_code,
         stdout=_truncate(stdout),
-        stderr=_truncate(rmm_remote_control.take_session_markers(readable_output(payload.get("stderr")))[0]),
+        stderr=_truncate(stderr),
         custom_values=custom_values,
         error_message=error,
     )
+    if run.get("run_source") == "ticket":
+        from app.services import rmm_ticket_scripts
+
+        await rmm_ticket_scripts.record_result(
+            run_id, status=status, exit_code=exit_code, stdout=stdout, stderr=stderr, error=error,
+        )
     return {"status": status, "custom_values": custom_values}

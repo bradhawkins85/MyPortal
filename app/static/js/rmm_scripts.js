@@ -126,6 +126,8 @@
   const noFields = runModal.querySelector('[data-rmm-no-fields]');
   const timeoutSection = runModal.querySelector('[data-rmm-timeout-section]');
   const timeoutInput = runModal.querySelector('[data-rmm-timeout]');
+  const runAsSection = runModal.querySelector('[data-rmm-run-as-section]');
+  const runAsSelect = runModal.querySelector('[data-rmm-run-as]');
   const previewSection = runModal.querySelector('[data-rmm-preview-section]');
   const submitButton = runModal.querySelector('[data-rmm-submit]');
   const formError = runModal.querySelector('[data-rmm-error="form"]');
@@ -215,7 +217,7 @@
         rows: multiline ? 3 : null,
         type: multiline ? null : (field.sensitive ? 'password' : 'text'),
         inputmode: field.type === 'integer' ? 'numeric' : (field.type === 'number' ? 'decimal' : null),
-        placeholder: field.default ? 'Script default: ' + field.default : (multiline ? 'One value per line' : ''),
+        placeholder: field.default ? 'Script default: ' + field.default + (field.default.includes('{{') ? ' (filled in for each device)' : '') : (multiline ? 'One value per line' : ''),
       });
       row.append(control);
       const insert = el('select', { className: 'form-input rmm-field__variable', 'aria-label': 'Use a MyPortal variable for ' + field.name });
@@ -486,7 +488,7 @@
     state.dirty = false;
     state.done = false;
     fieldsHost.replaceChildren();
-    [devicesSection, fieldsSection, timeoutSection, previewSection].forEach((section) => { section.hidden = true; });
+    [devicesSection, fieldsSection, timeoutSection, runAsSection, previewSection].forEach((section) => { section.hidden = true; });
     formError.hidden = true;
     assetsError.hidden = true;
     runModal.querySelector('[data-rmm-retry-help]').hidden = true;
@@ -528,6 +530,7 @@
     timeoutInput.min = '0';
     timeoutInput.step = retry ? 'any' : '1';
     timeoutInput.value = timeout === 0 ? 0 : Math.max(1, (timeout ?? 600) / 60);
+    runAsSelect.value = saved && saved.run_as === 'user' ? 'user' : 'system';
     if (saved) {
       Object.entries(saved.values || {}).forEach(([key, value]) => {
         const control = fieldsHost.querySelector('[data-rmm-value="' + CSS.escape(key) + '"]');
@@ -552,7 +555,7 @@
     } else {
       link.hidden = true;
     }
-    [devicesSection, fieldsSection, timeoutSection, previewSection].forEach((section) => { section.hidden = false; });
+    [devicesSection, fieldsSection, timeoutSection, runAsSection, previewSection].forEach((section) => { section.hidden = false; });
     applyMode();
     updatePreview();
   }
@@ -721,7 +724,9 @@
     try {
       const result = await api('/api/rmm/scripts/' + state.detail.script.id + '/runs', {
         method: 'POST',
-        body: { asset_ids: selectedAssets(), values: collectValues(), timeout_seconds: Math.round(minutes * 60) },
+        body: {
+          asset_ids: selectedAssets(), values: collectValues(), timeout_seconds: Math.round(minutes * 60), run_as: runAsSelect.value,
+        },
       });
       const queued = result.queued || [];
       const problems = result.problems || [];
@@ -767,6 +772,7 @@
       script_id: state.detail.script.id,
       values: collectValues(),
       timeout_seconds: timeoutSeconds,
+      run_as: runAsSelect.value,
       target_mode: targetMode.value,
       target_rules: targetMode.value === 'rules' ? targeting.getRules() : null,
     };
@@ -850,6 +856,10 @@
       source = ' · Windows Update scan' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     } else if (run.run_source === 'tray') {
       source = ' · tray menu';
+    } else if (run.run_source === 'ticket') {
+      source = ' · ticket automation';
+    } else if (run.run_source === 'command') {
+      source = ' · command' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     }
     resultModal.querySelector('[data-rmm-result-subtitle]').textContent =
       (run.asset_name ? 'On ' + run.asset_name : 'Device removed') + source;
@@ -857,6 +867,7 @@
     stats.replaceChildren(
       stat('Status', statusPill(run.status)),
       stat('Exit code', run.exit_code === null || run.exit_code === undefined ? '–' : String(run.exit_code)),
+      stat('Run as', run.run_as === 'user' ? 'Logged in user' : 'System'),
       stat('Queued', formatDate(run.queued_at)),
       stat('Finished', formatDate(run.completed_at)),
     );
@@ -897,7 +908,16 @@
     inputList.replaceChildren();
     inputs.forEach((item) => {
       const row = el('div');
-      row.append(el('dt', null, (item.kind === 'env' ? '$env:' : '-') + item.name), el('dd', null, item.value));
+      const label = item.kind === 'command' ? item.name : (item.kind === 'env' ? '$env:' : '-') + item.name;
+      const value = el('dd', null, item.kind === 'command' ? null : item.value);
+      if (item.kind === 'command') value.append(el('pre', { className: 'rmm-output' }, item.value));
+      if (item.resolved !== undefined) {
+        value.append(' → ', el('strong', null, item.resolved === '' ? '(empty)' : item.resolved));
+      }
+      if (item.script_default) {
+        value.append(' ', el('span', { className: 'rmm-optional' }, 'script default'));
+      }
+      row.append(el('dt', null, label), value);
       inputList.append(row);
     });
     resultModal.querySelector('[data-rmm-result-inputs-section]').hidden = inputs.length === 0;
@@ -950,6 +970,9 @@
       const secretKeys = [];
       (run.inputs || []).forEach((input) => {
         const key = input.kind + ':' + input.name;
+        if (input.script_default) {
+          return;
+        }
         if (input.sensitive && !input.is_variable) {
           secretKeys.push(key);
         } else {
@@ -960,7 +983,7 @@
       closeModal(resultModal);
       await openRunEditor(run.script_id, { item: {
         retry: true, script_id: run.script_id, asset_ids: [run.asset_id],
-        values: values, timeout_seconds: run.timeout_seconds, secret_keys: secretKeys,
+        values: values, timeout_seconds: run.timeout_seconds, run_as: run.run_as, secret_keys: secretKeys,
       } });
     } catch (error) {
       actionError(button, error.message);

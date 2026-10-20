@@ -46,6 +46,7 @@
           {% if step.kind == 'chocolatey' %}<li class="rmm-chip">Windows devices only</li>
           {% elif not step.script_active %}<li class="rmm-chip rmm-chip--warning">Script removed from Gitea</li>{% endif %}
           {% if step.inputs and step.kind != 'chocolatey' %}<li class="rmm-chip">{{ step.inputs | length }} value{{ '' if step.inputs | length == 1 else 's' }} set</li>{% endif %}
+          {% if step.run_as == 'user' and step.kind != 'chocolatey' %}<li class="rmm-chip">Runs as logged in user</li>{% endif %}
           <li class="rmm-chip">{{ 'Carries on if it fails' if step.continue_on_failure else 'Stops the sequence if it fails' }}</li>
         </ul>
       </div>
@@ -154,6 +155,7 @@
                 <ul class="rmm-chips" aria-label="Schedule details">
                   {% if schedule.scope == 'all' %}<li class="rmm-chip rmm-chip--env">Every company</li>{% endif %}
                   {% if not schedule.is_enabled %}<li class="rmm-chip rmm-chip--muted">Off</li>{% endif %}
+                  {% if schedule.run_as == 'user' %}<li class="rmm-chip">Runs as logged in user</li>{% endif %}
                   {% if not schedule.script_active %}<li class="rmm-chip rmm-chip--warning">Script removed from Gitea</li>{% endif %}
                 </ul>
               </td>

@@ -42,6 +42,7 @@ from app.services import gitea_sign_in
 from app.services import rmm_agent_deploy
 from app.services import rmm_automation
 from app.services import rmm_checks
+from app.services import rmm_commands
 from app.services import rmm_remote_control
 from app.services import rmm_script_parser as parser
 from app.services import rmm_script_summary
@@ -167,6 +168,7 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
         "agent_state": rmm_scripts.agent_state(agent),
         # RustDesk and MeshCentral are switched on through the agent, so they need one.
         "remote_control": await rmm_remote_control.enabled_providers() if can_run and agent else [],
+        "command_languages": rmm_commands.languages_for(agent) if can_run and agent else [],
     }
 
 
@@ -551,6 +553,7 @@ class RunRequest(BaseModel):
     asset_ids: list[int] = Field(default_factory=list, max_length=rmm_scripts.MAX_TARGETS_PER_RUN)
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
+    run_as: Literal["system", "user"] = "system"
 
 
 @router.post("/api/rmm/scripts/{script_id:int}/runs", summary="Push a script to one or more devices")
@@ -564,6 +567,7 @@ async def run_script_api(script_id: int, payload: RunRequest, request: Request):
             submitted=payload.values,
             timeout_seconds=payload.timeout_seconds,
             requested_by_user_id=user.get("id"),
+            run_as=payload.run_as,
         )
     except rmm_scripts.RunRequestError as exc:
         return JSONResponse({"detail": "Check the highlighted fields.", "errors": exc.errors}, status_code=400)
@@ -579,9 +583,48 @@ async def run_script_api(script_id: int, payload: RunRequest, request: Request):
                 "company_id": company_id,
                 "runs": [item["run_id"] for item in result["queued"]],
                 "assets": [item["asset_id"] for item in result["queued"]],
+                "run_as": payload.run_as,
             },
         )
     return result
+
+
+class CommandRequest(BaseModel):
+    language: Literal["powershell", "cmd", "bash", "zsh"]
+    command: str = Field(max_length=rmm_commands.MAX_COMMAND_LENGTH)
+    run_as: Literal["system", "user"] = "system"
+    timeout_seconds: int | None = None
+
+
+@router.post("/api/rmm/assets/{asset_id:int}/commands", summary="Run an ad hoc command on a device")
+async def run_command_api(asset_id: int, payload: CommandRequest, request: Request):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    agent = await rmm_repo.get_asset_agent(asset_id)
+    if not agent or int(agent.get("company_id") or 0) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No RMM agent is installed on this device.")
+    try:
+        run_id = await rmm_commands.queue_command(
+            agent={**agent, "company_id": int(company_id), "asset_id": asset_id},
+            language=payload.language,
+            command=payload.command,
+            run_as=payload.run_as,
+            timeout_seconds=payload.timeout_seconds,
+            requested_by_user_id=user.get("id"),
+        )
+    except rmm_scripts.RunRequestError as exc:
+        return JSONResponse({"detail": "; ".join(exc.errors.values()), "errors": exc.errors}, status_code=400)
+    await audit_service.record(
+        action="rmm.command.run",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="asset",
+        entity_id=asset_id,
+        metadata={
+            "company_id": company_id, "run_id": run_id, "language": payload.language, "run_as": payload.run_as,
+            "command": payload.command[: rmm_commands.SHOWN_COMMAND_LENGTH],
+        },
+    )
+    return {"run_id": run_id}
 
 
 @router.get("/api/rmm/runs", summary="List script runs for the current company")
@@ -665,6 +708,7 @@ class AgentDetails(BaseModel):
     shells: list[str] = Field(default_factory=list, max_length=16)
     script_files_supported: bool | None = None
     run_anyway_supported: bool | None = None
+    run_as_user_supported: bool | None = None
     thermal: ThermalSnapshot | None = None
 
 

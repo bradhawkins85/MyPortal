@@ -182,3 +182,14 @@ async def test_explicit_cross_platform_powershell_needs_shell(sqlite_db, monkeyp
     run_id = await rmm_scripts.queue_for_agent(script=script, agent=mac, entries={}, inputs=[],
                                                timeout_seconds=60, requested_by_user_id=9)
     assert [job['id'] for job in await rmm_scripts.claim_jobs(mac)] == [run_id]
+
+
+@pytest.mark.anyio
+async def test_ad_hoc_powershell_command_still_runs_on_mac_with_pwsh(sqlite_db):
+    from app.services import rmm_commands
+    _, mac = await _enrol(sqlite_db, tray_id=8, asset_id=11, uid='agent-uid-mac', os_name='darwin')
+    await repo.record_agent_checkin(mac['id'], {'shells': 'pwsh,bash'})
+    mac = await repo.get_agent(mac['id'])
+    run_id = await rmm_commands.queue_command(agent=mac, language='powershell', command='Get-Date',
+                                               run_as='system', timeout_seconds=60, requested_by_user_id=9)
+    assert [job['id'] for job in await rmm_scripts.claim_jobs(mac)] == [run_id]

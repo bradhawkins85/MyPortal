@@ -42,6 +42,8 @@ def tickets(monkeypatch):
     async def create_ticket(**kwargs):
         ticket_id = len(store["tickets"]) + 100
         store["tickets"][ticket_id] = {"id": ticket_id, "ticket_number": str(ticket_id), "status": "open", **kwargs}
+        if kwargs.get("asset_ids"):
+            store["links"][ticket_id] = list(kwargs["asset_ids"])
         return store["tickets"][ticket_id]
 
     async def get_ticket(ticket_id):
@@ -110,6 +112,20 @@ def test_parse_settings_validates_each_type():
     assert checks.parse_settings("script", {"script_expect": "exit_code", "script_value": "ok"})[3].keys() == {
         "script_value"}
     assert checks.parse_settings("offline", {"duration_minutes": "1"})[2] == checks.MIN_OFFLINE_MINUTES
+    for path in ("C:\\Program Files\\App\\app.exe", "\\\\server\\share\\a.txt", "/etc/app.conf",
+                 "%ProgramData%\\App", "C:\\Users\\*\\Desktop\\*.lnk"):
+        assert checks.parse_settings("file", {"file_path": f" {path} ", "file_expected": "missing"})[:2] == (
+            path, {"expected": "missing"}), path
+    for path in ("", "app.exe", "C:app.exe", "..\\app.exe", "/etc/\nx", "/" + "a" * 255, "C:\\" + "a" * 253):
+        assert checks.parse_settings("file", {"file_path": path})[3].keys() == {"file_path"}, path
+    assert checks.parse_settings("file", {"file_path": "/x", "file_expected": "maybe"})[3].keys() == {"file_expected"}
+    assert checks.parse_settings("process", {"process_name": "notepad.exe"})[:2] == ("notepad.exe", {"expected": "running"})
+    assert checks.parse_settings("process", {"process_name": "nginx", "process_expected": "not_running"})[1] == {
+        "expected": "not_running"}
+    for name in ("", "C:\\Windows\\notepad.exe", "/usr/sbin/nginx", "note*"):
+        assert checks.parse_settings("process", {"process_name": name})[3].keys() == {"process_name"}, name
+    assert checks.parse_settings("process", {"process_name": "x", "process_expected": "on"})[3].keys() == {
+        "process_expected"}
     assert checks.parse_settings("cpu", {"cpu_threshold": "80", "duration_minutes": "30"})[1:3] == ({"threshold": 80.0}, 30)
 
 
@@ -124,6 +140,15 @@ def test_reports_are_judged_for_each_type():
                   {"target": "down", "sent": 4, "received": 0, "error": "timed out"}],
         "services": [{"name": "Spooler", "status": "running", "action": "started it"},
                      {"name": "W32Time", "status": "running"}, {"name": "Gone", "status": "missing"}],
+        "files": [{"path": "C:\\App\\app.log", "exists": True, "kind": "file", "size_bytes": 1536,
+                   "modified_utc": "2026-10-01T09:30:00Z"},
+                  {"path": "C:\\App", "exists": True, "kind": "folder"},
+                  {"path": "C:\\Users\\*\\x.lnk", "exists": True, "found": "C:\\Users\\Bo\\x.lnk", "kind": "file",
+                   "size_bytes": 1},
+                  {"path": "/etc/gone", "exists": False},
+                  {"path": "/root/secret", "exists": False, "error": "permission denied"}],
+        "processes": [{"name": "notepad.exe", "count": 2}, {"name": "nginx", "count": 0},
+                      {"name": "broken", "count": 0, "error": "not supported on this system"}],
     }
 
     def judge(kind, target="", **settings):
@@ -148,6 +173,25 @@ def test_reports_are_judged_for_each_type():
     assert judge("service", "W32Time", expected="running") == (False, "Running")
     assert judge("service", "W32Time", expected="stopped")[0] is True
     assert judge("service", "Gone", expected="running") == (True, "Not installed")
+    assert judge("file", "C:\\App\\app.log", expected="exists") == (
+        False, "Found (1.5 KB, modified 2026-10-01 09:30:00 UTC)")
+    assert judge("file", "C:\\App\\app.log", expected="missing")[0] is True
+    assert judge("file", "C:\\App", expected="exists") == (False, "Found (folder)")
+    assert judge("file", "C:\\Users\\*\\x.lnk", expected="exists") == (False, "Found C:\\Users\\Bo\\x.lnk (1 byte)")
+    assert judge("file", "/etc/gone", expected="exists") == (True, "Not found")
+    assert judge("file", "/etc/gone", expected="missing") == (False, "Not found")
+    assert judge("file", "/root/secret", expected="missing") == (True, "Could not check it: permission denied")
+    assert judge("file", "/etc/other", expected="exists") is None
+    assert judge("process", "Notepad.exe", expected="running") == (False, "Running (2 processes)")
+    assert judge("process", "notepad.exe", expected="not_running") == (True, "Running (2 processes)")
+    assert judge("process", "nginx", expected="running") == (True, "Not running")
+    assert judge("process", "nginx", expected="not_running") == (False, "Not running")
+    assert judge("process", "broken", expected="not_running")[0] is True
+    assert judge("process", "sshd", expected="running") is None
+    assert checks.describe({"check_type": "file", "target": "/etc/app.conf", "settings": {"expected": "exists"},
+                            "duration_minutes": 5}) == "/etc/app.conf does not exist for 5 minutes"
+    assert checks.describe({"check_type": "process", "target": "nginx", "settings": {"expected": "not_running"}}) == (
+        "nginx is running")
     assert checks.evaluate({"check_type": "cpu", "target": "", "settings": {"threshold": 5}}, {}) is None
 
 
@@ -159,11 +203,17 @@ def test_agent_config_lists_what_to_measure():
         {"check_type": "service", "target": "Spooler", "settings": {"expected": "running", "fix": "none"}},
         {"check_type": "service", "target": "spooler", "settings": {"expected": "running", "fix": "restart"}},
         {"check_type": "offline", "target": "", "settings": {}},
+        {"check_type": "file", "target": "/etc/app.conf", "settings": {"expected": "exists"}},
+        {"check_type": "file", "target": "/etc/app.conf", "settings": {"expected": "missing"}},
+        {"check_type": "process", "target": "nginx", "settings": {"expected": "running"}},
+        {"check_type": "process", "target": "NGINX", "settings": {"expected": "running"}},
     ])
     assert config["enabled"] and config["disks"] and not config["cpu"] and not config["network"]
     assert config["pings"] == ["gw"]
     assert config["services"] == [{"name": "spooler", "expected": "running", "fix": "restart"}]
+    assert config["files"] == ["/etc/app.conf"] and config["processes"] == ["nginx"]
     assert not checks.agent_config_for([{"check_type": "offline", "target": "", "settings": {}}])["enabled"]
+    assert checks.agent_config_for([{"check_type": "process", "target": "x", "settings": {}}])["enabled"]
 
 
 @pytest.mark.anyio
@@ -495,7 +545,8 @@ def test_checks_page_and_asset_sections_render():
         script_actions=checks.SCRIPT_ACTIONS, schedule_modes=event_log_rules.SCHEDULE_MODES,
         disk_metrics=checks.DISK_METRICS, memory_metrics=checks.MEMORY_METRICS, comparisons=checks.COMPARISONS,
         network_directions=checks.NETWORK_DIRECTIONS, service_states=checks.SERVICE_STATES,
-        service_fixes=checks.SERVICE_FIXES, script_expectations=checks.SCRIPT_EXPECTATIONS, statuses=checks.STATUSES,
+        service_fixes=checks.SERVICE_FIXES, file_states=checks.FILE_STATES, process_states=checks.PROCESS_STATES,
+        script_expectations=checks.SCRIPT_EXPECTATIONS, statuses=checks.STATUSES,
         devices=[{"asset_id": 10, "asset_name": "PC-01"}], scripts=[], script=None, script_fields=[],
         check_script=None, check_script_fields=[], variables=[], csrf_token="tok",
     )
@@ -511,6 +562,9 @@ def test_checks_page_and_asset_sections_render():
     assert '<a href="#rmm-check-service-name">' in html and 'id="rmm-check-error-service_name"' in html
     assert 'aria-invalid="true" aria-describedby="rmm-check-service-name-help rmm-check-error-service_name"' in html
     assert 'name="auto_close_when_resolved" value="1"' in html
+    assert 'id="rmm-check-type-file"' in html and 'id="rmm-check-type-process"' in html
+    assert 'name="file_path"' in html and '<option value="missing" >Does not exist</option>' in html
+    assert 'name="process_name"' in html and '<option value="not_running" >Not running</option>' in html
     assert 'aria-describedby="rmm-check-auto-close-help"' in html
     assert "Auto-close when resolved" in html and "otherwise Closed" in html
     assert 'action="/rmm/checks/3/enabled"' in html and "/static/js/rmm_checks.js" in html
@@ -654,3 +708,26 @@ async def test_auto_close_preserves_manually_completed_ticket(sqlite_db, stats_d
     await checks.ingest_report(agent, {"cpu_percent": 20})
     assert tickets["tickets"][100]["status"] == status
     update.assert_not_awaited()
+
+
+def test_file_and_process_checks_round_trip_the_form_and_agent_report():
+    from app.features.rmm import check_routes
+
+    values = check_routes.form_values({"check_type": "file", "target": "/etc/app.conf", "settings": {"expected": "missing"}})
+    assert (values["file_path"], values["file_expected"]) == ("/etc/app.conf", "missing")
+    values = check_routes.form_values({"check_type": "process", "target": "nginx", "settings": {"expected": "not_running"}})
+    assert (values["process_name"], values["process_expected"]) == ("nginx", "not_running")
+    assert check_routes._blank_check(None, "file")["file_expected"] == "exists"
+
+    # What the Go agent sends; older agents send neither list.
+    report = check_routes.AgentCheckReport.model_validate({
+        "files": [{"path": "/etc/app.conf", "exists": True, "kind": "file", "size_bytes": 10,
+                   "modified_utc": "2026-10-01T09:30:00Z"}],
+        "processes": [{"name": "nginx", "count": 1}],
+    }).model_dump()
+    assert checks.evaluate({"check_type": "file", "target": "/etc/app.conf", "settings": {"expected": "exists"}},
+                           report)[0] is False
+    assert checks.evaluate({"check_type": "process", "target": "nginx", "settings": {"expected": "running"}},
+                           report) == (False, "Running (1 process)")
+    old = check_routes.AgentCheckReport.model_validate({}).model_dump()
+    assert checks.evaluate({"check_type": "process", "target": "nginx", "settings": {}}, old) is None

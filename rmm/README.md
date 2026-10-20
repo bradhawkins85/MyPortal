@@ -50,6 +50,21 @@ Deploy MyPortal and migration 495 before updating RMM agents for Run Anyway.
 Agents advertise `run_anyway_supported: true` on enrolment and check-in; Run Anyway
 runs fail with an update message on older agents. Sequential and parallel execution
 continue to work without an agent update.
+Jobs are PowerShell, Bash, Zsh or, on Windows, `cmd` (Command Prompt, used for
+ad hoc commands: the text is written to a `.cmd` file after `@echo off` and run with
+`cmd /D /Q /C`). Windows agents list `cmd` in their shells.
+
+Each job says who to run it as: `"run_as": "system"` (the service account, the
+default) or `"user"` for the user logged in to the device. For a user run the agent
+finds the signed-in user (Windows: the console session, else the first active
+Remote Desktop session, via `WTSQueryUserToken`; macOS: the owner of `/dev/console`;
+Linux: the active session on `seat0` from `loginctl`), gives that user the run's
+working folder, and starts the interpreter with the user's token and environment
+(Windows: `CreateProcessAsUser` on `winsta0\default`, hidden; macOS and Linux:
+the user's uid, gid and groups, `HOME`, `USER` and session bus). With nobody
+signed in the run fails without starting. Agents advertise
+`run_as_user_supported: true`; MyPortal fails user runs on older agents with an
+update message.
 While executing, it sends cumulative stdout/stderr snapshots once a second to
 `/api/rmm/agent/runs/{id}/output`. The technician's result view refreshes every
 second, follows new lines when scrolled to the bottom, and preserves the scroll

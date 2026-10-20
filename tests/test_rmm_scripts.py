@@ -203,6 +203,54 @@ async def test_bad_values_and_empty_variables_are_reported():
     assert set(exc.value.errors) == {"param:Drive", "param:MinFreeGB", "param:Level"}
 
 
+DEFAULTS_SCRIPT = {
+    "id": 2,
+    "parameters": [
+        {"name": "organizationName", "type": "string", "mandatory": False, "default": "{{ COMPANY_NAME }}",
+         "choices": [], "help": "", "sensitive": False},
+        {"name": "Slug", "type": "string", "mandatory": False, "default": "{{ company.variables.HUNTRESS_SLUG }}",
+         "choices": [], "help": "", "sensitive": False},
+        {"name": "Site", "type": "string", "mandatory": False, "default": "{{ company.variables.Missing }}",
+         "choices": [], "help": "", "sensitive": False},
+        {"name": "Count", "type": "integer", "mandatory": False, "default": "10",
+         "choices": [], "help": "", "sensitive": False},
+    ],
+    "env_vars": [],
+}
+DEFAULTS_CONTEXT = {"company": {"id": 3, "name": "Acme Pty", "variables": {"HUNTRESS_SLUG": "acme"}}, "asset": {"custom": {}}}
+
+
+@pytest.mark.anyio
+async def test_blank_fields_with_variable_defaults_are_filled_for_the_device():
+    entries = rmm_scripts.validate_entries(DEFAULTS_SCRIPT, {})
+    rendered: dict = {}
+    payload = await rmm_scripts.resolve_entries(DEFAULTS_SCRIPT, entries, DEFAULTS_CONTEXT, rendered)
+    # A literal default is still left to the script; an empty variable is sent empty, not as its text.
+    assert payload["parameters"] == {"organizationName": "Acme Pty", "Slug": "acme", "Site": ""}
+    assert payload["parameter_order"] == ["organizationName", "Slug", "Site"]
+    assert rendered["param:organizationName"] == {"template": "{{ COMPANY_NAME }}", "value": "Acme Pty"}
+
+
+@pytest.mark.anyio
+async def test_entered_values_override_variable_defaults():
+    entries = rmm_scripts.validate_entries(DEFAULTS_SCRIPT, {"param:organizationName": "{{company.name}} Ltd"})
+    payload = await rmm_scripts.resolve_entries(DEFAULTS_SCRIPT, entries, DEFAULTS_CONTEXT)
+    assert payload["parameters"]["organizationName"] == "Acme Pty Ltd"
+
+
+@pytest.mark.anyio
+async def test_run_history_shows_resolved_values():
+    entries = rmm_scripts.validate_entries(DEFAULTS_SCRIPT, {"param:Slug": "{{company.variables.HUNTRESS_SLUG}}"})
+    inputs = rmm_scripts.stored_inputs(DEFAULTS_SCRIPT, entries)
+    rendered: dict = {}
+    await rmm_scripts.resolve_entries(DEFAULTS_SCRIPT, entries, DEFAULTS_CONTEXT, rendered)
+    shown = {item["name"]: item for item in rmm_scripts._run_inputs(DEFAULTS_SCRIPT, inputs, rendered)}
+    assert shown["Slug"]["value"] == "{{company.variables.HUNTRESS_SLUG}}" and shown["Slug"]["resolved"] == "acme"
+    assert shown["organizationName"]["resolved"] == "Acme Pty" and shown["organizationName"]["script_default"]
+    assert "Count" not in shown
+    assert "resolved" not in inputs[0]
+
+
 def test_sensitive_literals_are_masked_but_variables_are_kept():
     fields = {field["key"]: field for field in rmm_scripts.script_fields(SCRIPT)}
     assert rmm_scripts._stored_input(fields["param:Password"], "hunter2")["value"] == rmm_scripts.SENSITIVE_MASK
@@ -307,7 +355,7 @@ async def sqlite_db(monkeypatch):
                  "493_rmm_script_parallel.sql", "494_rmm_chocolatey_sources.sql", "495_rmm_script_run_anyway.sql",
                  "496_rmm_chocolatey_catalog.sql", "498_rmm_windows_updates.sql",
                  "499_rmm_windows_update_blocks.sql", "500_rmm_check_auto_close.sql",
-                 "504_chocolatey_software_matches.sql", "505_chocolatey_catalog_lookups.sql", "508_rmm_script_policy.sql"):
+                 "504_chocolatey_software_matches.sql", "505_chocolatey_catalog_lookups.sql", "510_rmm_script_policy.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     # Mirrors migration 506 (Chocolatey onboarding steps), whose MODIFY SQLite cannot run.
     cursor = await conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'rmm_onboarding_steps'")
@@ -317,6 +365,8 @@ async def sqlite_db(monkeypatch):
         "DROP TABLE rmm_onboarding_steps;\n" + steps_sql.replace("script_id INT NOT NULL", "script_id INT NULL") + ";\n"
         "ALTER TABLE rmm_onboarding_steps ADD COLUMN package_ids_json TEXT;"
     )
+    for name in ("508_rmm_script_run_as.sql", "509_rmm_ticket_script_runs.sql"):
+        await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
           (1, 'BitLocker', 'text'), (2, 'Encrypted', 'checkbox'), (3, 'Checked', 'date'), (4, 'Photo', 'image');

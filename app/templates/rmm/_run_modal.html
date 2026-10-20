@@ -112,6 +112,15 @@
           </div>
           <p class="form-help" id="rmm-timeout-help">Enter 0 for Forever, or at least 1 minute. Overrides the global default for this run or saved automation. Also controls how long an offline device can wait to collect the script.</p>
         </div>
+        <div class="form-field" data-rmm-run-as-section hidden>
+          <label class="form-label" for="rmm-run-as">Run as</label>
+          <select class="form-input" id="rmm-run-as" data-rmm-run-as>
+            <option value="system">System</option>
+            <option value="user">Logged in user</option>
+          </select>
+          <p class="form-help">System runs with full rights on the device (LocalSystem on Windows, root on macOS and Linux). Logged in user runs as whoever is signed in, with their rights, profile and drive mappings; the run fails if nobody is signed in.</p>
+          <p class="form-help form-help--error" data-rmm-error="run_as" hidden></p>
+        </div>
         <p class="form-help form-help--error" data-rmm-error="form" role="alert" hidden></p>
       </div>
 

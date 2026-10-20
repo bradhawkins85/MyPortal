@@ -1,5 +1,6 @@
 """RMM checks: watch disk space, ping targets, CPU load, free memory, Windows
-services, network throughput, script results and agent check-ins.
+services, network throughput, files, processes, script results and agent
+check-ins.
 
 A check applies to every company (super admins only), one company or one
 device, like an event log rule. For the same thing on a device (its
@@ -10,11 +11,14 @@ replacing check that is off switches that thing off for its scope
 
 How each type is checked:
 
-* **Disk space, ping, CPU, memory, service and network** checks are measured
+* **Disk space, ping, CPU, memory, service, network, file and process** checks are measured
   by the device's RMM agent. It asks which to collect (:func:`agent_config`)
   and reports every :data:`REPORT_INTERVAL_SECONDS` (:func:`ingest_report`).
   A service check can have the agent start, restart or stop the service
-  itself when it is not in the expected state.
+  itself when it is not in the expected state. A file check passes when a
+  path exists (or does not); ``*`` and ``?`` match any name and ``%NAME%`` is
+  an environment variable on the device. A process check counts the processes
+  running with a name.
 * **Script** checks queue a Gitea script on the device every
   ``interval_minutes`` and compare its exit code or output with what is
   expected when it finishes (:func:`run_due_script_checks`, :func:`run_finished`).
@@ -66,10 +70,12 @@ CHECK_TYPES = {
     "memory": "Free memory",
     "service": "Windows service",
     "network": "Network throughput",
+    "file": "File or folder",
+    "process": "Process",
     "script": "Script result",
     "offline": "Agent offline",
 }
-AGENT_TYPES = ("disk", "ping", "cpu", "memory", "service", "network")
+AGENT_TYPES = ("disk", "ping", "cpu", "memory", "service", "network", "file", "process")
 STATS_TYPES = ("disk", "ping", "cpu", "memory", "network")
 ACTIONS = {
     "none": "Show the result only",
@@ -91,6 +97,8 @@ MAX_SCRIPT_INTERVAL = 7 * 24 * 60
 MAX_PINGS = 10
 UNCHANGED_WRITE_INTERVAL = timedelta(minutes=10)
 MAX_SERVICES = 50
+MAX_FILES = 50
+MAX_PROCESSES = 50
 
 DISK_METRICS = {"free_percent": "free space (%)", "free_gb": "free space (GB)"}
 MEMORY_METRICS = {"free_percent": "free memory (%)", "free_gb": "free memory (GB)"}
@@ -103,6 +111,8 @@ SERVICE_FIXES = {
     "restart": "Restart it",
     "stop": "Stop it",
 }
+FILE_STATES = {"exists": "Exists", "missing": "Does not exist"}
+PROCESS_STATES = {"running": "Running", "not_running": "Not running"}
 SCRIPT_EXPECTATIONS = {
     "exit_code": "exit code is",
     "output_contains": "output contains",
@@ -122,6 +132,9 @@ _SERVICE = re.compile(r"^[A-Za-z0-9_.$@][A-Za-z0-9 _.$@()+-]{0,255}$")
 _INTERFACE = re.compile(r"^[^\x00-\x1f]{0,255}$")
 _DRIVE_LETTER = re.compile(r"^([A-Za-z]):?\\?$")
 _MOUNT = re.compile(r"^/[^\x00-\x1f]{0,254}$")
+# An absolute path: C:\..., \\server\share, /... or one starting with %NAME%.
+_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\[^\\/\x00-\x1f]|/|%[A-Za-z0-9_()]+%)[^\x00-\x1f]{0,253}$")
+_PROCESS = re.compile(r'^[^\x00-\x1f\\/*?"<>|]{1,255}$')
 
 GB = 1024 ** 3
 
@@ -319,6 +332,12 @@ def describe(check: Mapping[str, Any]) -> str:
         if fix in ("start", "restart", "stop"):
             text += f"; the agent will {fix} it"
         return text
+    if kind == "file":
+        state = "does not exist" if settings.get("expected", "exists") == "exists" else "exists"
+        return f"{target} {state}{lasting}"
+    if kind == "process":
+        state = "is not running" if settings.get("expected", "running") == "running" else "is running"
+        return f"{target} {state}{lasting}"
     if kind == "network":
         where = f"{target}" if target else "All interfaces"
         return (f"{where}: data {NETWORK_DIRECTIONS.get(settings.get('direction'), 'received and sent')} "
@@ -403,6 +422,23 @@ def parse_settings(check_type: str, form: Mapping[str, Any]) -> tuple[str, dict[
             errors["service_fix"] = ("A service that should be running can be started or restarted."
                                      if expected == "running" else "A service that should be stopped can only be stopped.")
         settings = {"expected": expected, "fix": fix}
+    elif check_type == "file":
+        target = str(form.get("file_path") or "").strip()
+        if len(target) > 255 or not _PATH.match(target):
+            errors["file_path"] = ("Enter a full path such as C:\\Program Files\\App\\app.exe, /etc/app.conf or "
+                                   "%ProgramData%\\App, up to 255 characters.")
+        expected = str(form.get("file_expected") or "exists")
+        if expected not in FILE_STATES:
+            errors["file_expected"] = "Choose exists or does not exist."
+        settings = {"expected": expected}
+    elif check_type == "process":
+        target = str(form.get("process_name") or "").strip()
+        if not _PROCESS.match(target):
+            errors["process_name"] = "Enter the process's name, such as notepad.exe or nginx, not its path."
+        expected = str(form.get("process_expected") or "running")
+        if expected not in PROCESS_STATES:
+            errors["process_expected"] = "Choose running or not running."
+        settings = {"expected": expected}
     elif check_type == "network":
         target = str(form.get("network_interface") or "").strip()
         if not _INTERFACE.match(target):
@@ -747,10 +783,16 @@ async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], prob
 def agent_config_for(checks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     kinds = {check["check_type"] for check in checks}
     pings: list[str] = []
+    files: list[str] = []
+    processes: dict[str, str] = {}
     services: dict[str, dict[str, str]] = {}
     for check in checks:
         if check["check_type"] == "ping" and check["target"] not in pings and len(pings) < MAX_PINGS:
             pings.append(check["target"])
+        elif check["check_type"] == "file" and check["target"] not in files and len(files) < MAX_FILES:
+            files.append(check["target"])
+        elif check["check_type"] == "process" and len(processes) < MAX_PROCESSES:
+            processes.setdefault(check["target"].casefold(), check["target"])
         elif check["check_type"] == "service" and len(services) < MAX_SERVICES:
             settings = check.get("settings") or {}
             current = services.get(check["target"].casefold())
@@ -770,6 +812,8 @@ def agent_config_for(checks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "network": "network" in kinds,
         "pings": pings,
         "services": list(services.values()),
+        "files": files,
+        "processes": list(processes.values()),
     }
 
 
@@ -785,6 +829,28 @@ def _disk_name(value: Any) -> str:
 
 def _format_gb(value: float) -> str:
     return f"{_round(value / GB)} GB"
+
+
+def _format_size(value: float) -> str:
+    for unit, size in (("GB", GB), ("MB", 1024 ** 2), ("KB", 1024)):
+        if value >= size:
+            return f"{_round(value / size)} {unit}"
+    return f"{int(value)} byte{'s' if int(value) != 1 else ''}"
+
+
+def _file_result(item: Mapping[str, Any]) -> str:
+    if not item.get("exists"):
+        return "Not found"
+    found = str(item.get("found") or "")
+    text = f"Found {found[:255]}" if found else "Found"
+    details = []
+    if item.get("kind") == "folder":
+        details.append("folder")
+    elif _number(item.get("size_bytes")) is not None:
+        details.append(_format_size(float(item["size_bytes"])))
+    if item.get("modified_utc"):
+        details.append(f"modified {str(item['modified_utc'])[:20].replace('T', ' ').rstrip('Z')} UTC")
+    return text + (f" ({', '.join(details)})" if details else "")
 
 
 def evaluate(check: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[bool, str] | None:
@@ -862,6 +928,25 @@ def evaluate(check: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[bool,
             text += f" ({str(service['error'])[:200]})"
         # A service the agent had to fix still counts as a problem this time.
         return bool(service.get("action")) or status != expected, text
+    if kind == "file":
+        item = next((item for item in report.get("files") or [] if str(item.get("path") or "") == target), None)
+        if not item:
+            return None
+        if item.get("error"):
+            return True, f"Could not check it: {str(item['error'])[:200]}"
+        wanted = (settings.get("expected") or "exists") == "exists"
+        return bool(item.get("exists")) != wanted, _file_result(item)
+    if kind == "process":
+        item = next((item for item in report.get("processes") or []
+                     if str(item.get("name") or "").casefold() == target.casefold()), None)
+        if not item:
+            return None
+        if item.get("error"):
+            return True, f"Could not list processes: {str(item['error'])[:200]}"
+        count = max(0, int(item.get("count") or 0))
+        text = "Not running" if not count else f"Running ({count} process{'es' if count != 1 else ''})"
+        wanted = (settings.get("expected") or "running") == "running"
+        return (count > 0) != wanted, text
     if kind == "network":
         interfaces = report.get("network")
         if interfaces is None:

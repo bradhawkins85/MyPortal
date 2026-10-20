@@ -55,6 +55,8 @@ FORM_DEFAULTS: dict[str, Any] = {
     "memory_metric": "free_percent", "memory_threshold": "10",
     "service_name": "", "service_expected": "running", "service_fix": "none",
     "network_interface": "", "network_direction": "total", "network_operator": "above", "network_threshold": "100",
+    "file_path": "", "file_expected": "exists",
+    "process_name": "", "process_expected": "running",
     "script_expect": "exit_code", "script_value": "0", "script_interval": str(rmm_checks.DEFAULT_SCRIPT_INTERVAL),
 }
 DEFAULT_DURATIONS = {"cpu": 30, "memory": 15, "network": 15, "offline": 30}
@@ -105,6 +107,10 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
                       memory_threshold=rmm_checks._round(float(settings.get("threshold") or 0)))
     elif kind == "service":
         values.update(service_name=target, service_expected=settings.get("expected"), service_fix=settings.get("fix"))
+    elif kind == "file":
+        values.update(file_path=target, file_expected=settings.get("expected") or "exists")
+    elif kind == "process":
+        values.update(process_name=target, process_expected=settings.get("expected") or "running")
     elif kind == "network":
         values.update(network_interface=target, network_direction=settings.get("direction"),
                       network_operator=settings.get("operator"),
@@ -252,6 +258,8 @@ async def _render(
             "network_directions": rmm_checks.NETWORK_DIRECTIONS,
             "service_states": rmm_checks.SERVICE_STATES,
             "service_fixes": rmm_checks.SERVICE_FIXES,
+            "file_states": rmm_checks.FILE_STATES,
+            "process_states": rmm_checks.PROCESS_STATES,
             "script_expectations": rmm_checks.SCRIPT_EXPECTATIONS,
             "statuses": rmm_checks.STATUSES,
             "devices": [agent for agent in await rmm_repo.list_company_agents(company_id) if agent.get("asset_id")],
@@ -579,6 +587,22 @@ class AgentService(BaseModel):
     error: str | None = Field(default=None, max_length=1000)
 
 
+class AgentFile(BaseModel):
+    path: str = Field(max_length=255)
+    exists: bool = False
+    found: str | None = Field(default=None, max_length=4096)
+    kind: str | None = Field(default=None, max_length=16)
+    size_bytes: float | None = Field(default=None, ge=0)
+    modified_utc: str | None = Field(default=None, max_length=64)
+    error: str | None = Field(default=None, max_length=1000)
+
+
+class AgentProcess(BaseModel):
+    name: str = Field(max_length=255)
+    count: int = Field(default=0, ge=0)
+    error: str | None = Field(default=None, max_length=1000)
+
+
 class AgentCheckReport(BaseModel):
     cpu_percent: float | None = Field(default=None, ge=0, le=100)
     memory: AgentMemory | None = None
@@ -586,6 +610,8 @@ class AgentCheckReport(BaseModel):
     network: list[AgentInterface] | None = Field(default=None, max_length=64)
     pings: list[AgentPing] = Field(default_factory=list, max_length=rmm_checks.MAX_PINGS)
     services: list[AgentService] = Field(default_factory=list, max_length=rmm_checks.MAX_SERVICES)
+    files: list[AgentFile] = Field(default_factory=list, max_length=rmm_checks.MAX_FILES)
+    processes: list[AgentProcess] = Field(default_factory=list, max_length=rmm_checks.MAX_PROCESSES)
 
 
 @router.post("/api/rmm/agent/checks/report", summary="Send the RMM agent's measurements for checks")

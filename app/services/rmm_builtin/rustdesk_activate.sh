@@ -1,5 +1,6 @@
 #!/bin/bash
-# MyPortal built-in: switch RustDesk on for a remote session (macOS and Linux).
+# MyPortal built-in: switch RustDesk on for a remote session (Linux; macOS uses
+# rustdesk_activate_macos.sh).
 #
 # MyPortal sets these for each run:
 #   MYPORTAL_RUSTDESK_PASSWORD  one-time password for this session
