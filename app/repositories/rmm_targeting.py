@@ -416,3 +416,118 @@ async def contexts_for_agents(agents: list[dict[str, Any]]) -> dict[int, dict[st
             "incomplete_fields": incomplete_fields,
         }
     return contexts
+
+
+async def context_for_asset(
+    company_id: Any, asset_id: Any, *, agent: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Return a rule context for a device that has no active RMM agent.
+
+    Tray devices are not always RMM agents, so this loads the company, its
+    tags and variables, and (when linked) the asset with its tags and custom
+    fields, in the shape :func:`contexts_for_agents` produces. Software
+    inventory is unknown here, so software rules never match. ``agent``
+    supplies whatever hostname/OS/IP the caller knows about the device.
+    Archived companies return ``None``; an asset in another company or an
+    archived asset leaves the asset inventory unknown.
+    """
+    company_id = _identifier(company_id)
+    if company_id is None:
+        return None
+    row = await db.fetch_one(
+        "SELECT c.* FROM companies c WHERE c.id = %s AND COALESCE(c.archived, 0) = 0", (company_id,),
+    )
+    if not row:
+        return None
+    company = {
+        "id": company_id, "name": row.get("name"),
+        "vip": _boolean(row.get("is_vip")), "agent_count": 0,
+        "archived": False, "pending_approval": _boolean(row.get("pending_approval")),
+        "is_demo": _boolean(row.get("is_demo")),
+    }
+    count = await db.fetch_one(
+        "SELECT COUNT(*) AS agent_count FROM rmm_agents WHERE company_id = %s AND status = 'active'",
+        (company_id,),
+    )
+    company["agent_count"] = int((count or {}).get("agent_count") or 0)
+    company_variables: dict[str, Any] = {}
+    for variable in await db.fetch_all(
+        "SELECT d.*, d.id AS definition_id, v.value FROM company_variable_values v "
+        "JOIN company_variable_definitions d ON d.id = v.variable_id WHERE v.company_id = %s",
+        (company_id,),
+    ) or []:
+        if variable.get("is_secret") or variable.get("sensitive") or variable.get("field_type") == "secret":
+            continue
+        _map_value(company_variables, variable, variable.get("value"))
+    company_tag_ids: dict[int, str] = {
+        int(tag["tag_id"]): str(tag["name"])
+        for tag in await db.fetch_all(
+            "SELECT ct.company_id, t.id AS tag_id, t.name FROM company_tags ct "
+            "JOIN tags t ON t.id = ct.tag_id WHERE ct.company_id = %s", (company_id,),
+        ) or []
+    }
+
+    asset = None
+    asset_custom = None
+    asset_tags = None
+    asset_id = _identifier(asset_id)
+    if asset_id is not None:
+        row = await db.fetch_one(
+            "SELECT a.* FROM assets a WHERE a.id = %s AND a.company_id = %s AND a.archived_at IS NULL",
+            (asset_id, company_id),
+        )
+        if row:
+            asset = {key: row.get(key) for key in _ASSET_FIELDS}
+            asset["catalogue_type"] = asset_types.effective(row)
+            asset["manufacturer"] = row.get("motherboard_manufacturer")
+            asset["disk_gb"] = _capacity_gb(row.get("hdd_size"))
+            addresses: list[str] = []
+            for ip in await db.fetch_all(
+                "SELECT ip.address, ip.company_id FROM ip_addresses ip WHERE ip.asset_id = %s "
+                "UNION SELECT ip.address, i.company_id FROM asset_interfaces i "
+                "JOIN ip_addresses ip ON ip.id = i.ip_address_id AND ip.company_id = i.company_id "
+                "WHERE i.asset_id = %s", (asset_id, asset_id),
+            ) or []:
+                address = _ip_address(ip.get("address"))
+                if ip.get("company_id") == company_id and address is not None and address not in addresses:
+                    addresses.append(address)
+            asset["ip_address"] = addresses or None
+            asset_custom = {}
+            for value in await db.fetch_all(
+                "SELECT v.asset_id, d.id AS definition_id, d.name, d.field_type, "
+                "v.value_text, v.value_date, v.value_boolean FROM asset_custom_field_values v "
+                "JOIN asset_custom_field_definitions d ON d.id = v.field_definition_id "
+                "WHERE v.asset_id = %s", (asset_id,),
+            ) or []:
+                _map_value(asset_custom, value, _custom_value(value))
+            direct = {
+                str(tag["name"]) for tag in await db.fetch_all(
+                    "SELECT t.name FROM asset_tags at JOIN tags t ON t.id = at.tag_id WHERE at.asset_id = %s",
+                    (asset_id,),
+                ) or []
+            }
+            blocked = {
+                int(block["tag_id"]) for block in await db.fetch_all(
+                    "SELECT tag_id FROM asset_tag_blocks WHERE asset_id = %s", (asset_id,),
+                ) or []
+            }
+            asset_tags = sorted(direct | {
+                name for tag_id, name in company_tag_ids.items() if tag_id not in blocked
+            })
+
+    source = agent or {}
+    public_agent: dict[str, Any] = {key: None for key in _AGENT_FIELDS}
+    public_agent.update({key: source.get(key) for key in ("hostname", "os", "os_version", "last_ip")})
+    public_agent["architecture"] = None
+    public_agent["version"] = None
+    if asset is not None and source.get("os_version"):
+        asset["os_version"] = source.get("os_version")
+    return {
+        "agent": public_agent, "asset": asset, "company": company,
+        "software": None, "software_versions": None, "software_publishers": None,
+        "asset_tags": asset_tags,
+        "company_tags": sorted(set(company_tag_ids.values())),
+        "asset_custom": asset_custom,
+        "company_variables": company_variables,
+        "incomplete_fields": [],
+    }

@@ -67,6 +67,7 @@ from app.schemas.tray import (
     TrayInstallTokenResponse,
     TrayMenuConfigCreate,
     TrayMenuConfigUpdate,
+    TrayMenuTargetingPreview,
     TrayTicketQuestionCreate,
     TrayTicketQuestionsResponse,
     TrayTicketTokenResponse,
@@ -1780,6 +1781,8 @@ async def create_menu_config(
         branding_icon_url=payload.branding_icon_url,
         enabled=payload.enabled,
         created_by_user_id=int(current_user["id"]),
+        target_rules=_validated_target_rules(payload.target_rules),
+        priority=payload.priority,
     )
     await tray_service.broadcast_config_changed()
     return JSONResponse(_serialise_config(record), status_code=201)
@@ -1810,6 +1813,9 @@ async def update_menu_config(
     env_csv = (
         ",".join(payload.env_allowlist) if payload.env_allowlist is not None else None
     )
+    rule_changes: dict[str, Any] = {}
+    if "target_rules" in payload.model_fields_set:
+        rule_changes["target_rules"] = _validated_target_rules(payload.target_rules)
     await tray_repo.update_menu_config(
         config_id,
         name=payload.name,
@@ -1819,10 +1825,77 @@ async def update_menu_config(
         branding_icon_url=payload.branding_icon_url,
         enabled=payload.enabled,
         updated_by_user_id=int(current_user["id"]),
+        priority=payload.priority,
+        **rule_changes,
     )
     await tray_service.broadcast_config_changed()
     refreshed = await tray_repo.get_menu_config(config_id)
     return JSONResponse(_serialise_config(refreshed or existing))
+
+
+@router.get(
+    "/admin/configs/targeting/fields",
+    summary="Advanced rule fields and operators for tray menu configurations",
+)
+async def menu_config_targeting_fields(
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    from app.services import rmm_targeting
+
+    return JSONResponse({"fields": rmm_targeting.field_catalogue()})
+
+
+@router.post(
+    "/admin/configs/targeting/preview",
+    summary="Preview tray devices matching a menu configuration's scope and rules",
+)
+async def menu_config_targeting_preview(
+    payload: TrayMenuTargetingPreview,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    from app.services import rmm_targeting
+
+    try:
+        matches = rmm_targeting.compile_rules(payload.rules)
+    except ValueError as exc:
+        log_warning("Invalid tray targeting rules preview request", error=str(exc))
+        return JSONResponse(
+            {
+                "detail": "Invalid target rules.",
+                "errors": {"target_rules": "Invalid target rules."},
+            },
+            status_code=400,
+        )
+    scope_cfg = {"scope": payload.scope, "scope_ref_id": payload.scope_ref_id}
+    devices = [
+        device
+        for device in await tray_repo.list_devices(status="active")
+        if tray_service.config_in_scope(scope_cfg, device)
+    ]
+    eligible = 0
+    matched: list[dict[str, Any]] = []
+    for device in devices:
+        context = await tray_service.device_rule_context(device)
+        if context is None:
+            continue
+        eligible += 1
+        if matches(context):
+            matched.append(
+                {
+                    "id": device.get("id"),
+                    "asset_id": device.get("asset_id"),
+                    "hostname": device.get("hostname") or device.get("device_uid"),
+                    "company_name": (context.get("company") or {}).get("name"),
+                }
+            )
+    return JSONResponse(
+        {
+            "matched_count": len(matched),
+            "eligible_count": eligible,
+            "truncated": len(matched) > 100,
+            "agents": matched[:100],
+        }
+    )
 
 
 @router.delete(
@@ -2258,6 +2331,30 @@ def _serialise_token(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _validated_target_rules(rules: dict[str, Any] | None) -> str | None:
+    """Normalise advanced rules to stored JSON, 422 when they are invalid."""
+
+    if rules is None:
+        return None
+    from app.services import rmm_targeting
+
+    try:
+        return json.dumps(rmm_targeting.validate_rules(rules))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+def _stored_target_rules(row: dict[str, Any]) -> dict[str, Any] | None:
+    raw = row.get("target_rules")
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def _serialise_config(row: dict[str, Any]) -> dict[str, Any]:
     try:
         payload = json.loads(row.get("payload_json") or "[]")
@@ -2278,6 +2375,8 @@ def _serialise_config(row: dict[str, Any]) -> dict[str, Any]:
         "branding_icon_url": row.get("branding_icon_url"),
         "enabled": bool(row.get("enabled")),
         "version": int(row.get("version") or 1),
+        "target_rules": _stored_target_rules(row),
+        "priority": int(row.get("priority") if row.get("priority") is not None else 100),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }

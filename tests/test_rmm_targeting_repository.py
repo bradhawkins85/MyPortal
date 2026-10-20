@@ -20,6 +20,10 @@ class _Database:
         cursor = self.connection.execute(sql.replace("%s", "?"), params)
         return [dict(row) for row in cursor.fetchall()]
 
+    async def fetch_one(self, sql, params=()):
+        rows = await self.fetch_all(sql, params)
+        return rows[0] if rows else None
+
 
 @pytest.fixture
 def inventory_db(monkeypatch):
@@ -331,3 +335,33 @@ async def test_empty_or_invalid_agents_do_not_query(inventory_db):
     assert await targeting.contexts_for_agents([]) == {}
     assert await targeting.contexts_for_agents([{"id": True, "company_id": 1}]) == {}
     assert inventory_db.calls == []
+
+
+@pytest.mark.asyncio
+async def test_asset_context_without_rmm_agent_uses_asset_company_and_device_facts(inventory_db):
+    context = await targeting.context_for_asset(
+        1, 10, agent={"hostname": "TRAY-PC", "os": "windows", "os_version": "10.0.22631",
+                      "last_ip": "203.0.113.5", "auth_token_hash": "private"},
+    )
+    assert context["company"]["name"] == "VIP" and context["company"]["vip"] is True
+    assert context["company"]["agent_count"] == 2
+    assert context["company_variables"] == {"Tier": "Gold", "1": "Gold"}
+    assert context["company_tags"] == ["Blocked", "Managed"]
+    assert context["asset_tags"] == ["Local", "Managed"]
+    assert context["asset_custom"]["Site"] == "Brisbane"
+    assert context["asset"]["ip_address"] == ["10.1.2.3", "2001:db8::1"]
+    assert context["asset"]["os_version"] == "10.0.22631"
+    assert context["agent"]["hostname"] == "TRAY-PC" and context["agent"]["id"] is None
+    assert "auth_token_hash" not in json.dumps(context, default=str)
+    assert context["software"] is None  # unknown, so software rules never match
+
+
+@pytest.mark.asyncio
+async def test_asset_context_keeps_company_boundaries(inventory_db):
+    assert await targeting.context_for_asset(3, None) is None  # archived company
+    assert await targeting.context_for_asset(None, 10) is None
+    other = await targeting.context_for_asset(2, 10)  # asset belongs to company 1
+    assert other["company"]["name"] == "Other"
+    assert other["asset"] is None and other["asset_custom"] is None and other["asset_tags"] is None
+    archived_asset = await targeting.context_for_asset(1, 30)
+    assert archived_asset["asset"] is None

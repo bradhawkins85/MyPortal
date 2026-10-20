@@ -244,7 +244,7 @@ gracefully fall back to an empty string.
 
 ## Setup
 
-1. Ensure Python 3.10+ is available.
+1. Ensure Python 3.11+ is available.
 2. Install the native libraries required by WeasyPrint (Debian/Ubuntu example shown):
    ```bash
    sudo apt-get update

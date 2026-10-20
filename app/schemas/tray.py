@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, IPvAnyAddress
 
@@ -167,6 +167,10 @@ class TrayMenuConfigCreate(BaseModel):
     env_allowlist: list[str] = Field(default_factory=list)
     branding_icon_url: Optional[str] = Field(default=None, max_length=500)
     enabled: bool = True
+    # Advanced device rules (the RMM check rule tree). When set, only devices
+    # in scope whose inventory matches get this menu; others fall back.
+    target_rules: Optional[dict[str, Any]] = None
+    priority: int = Field(default=100, ge=0, le=10000)
 
 
 class TrayMenuConfigUpdate(BaseModel):
@@ -176,6 +180,15 @@ class TrayMenuConfigUpdate(BaseModel):
     env_allowlist: Optional[list[str]] = None
     branding_icon_url: Optional[str] = Field(default=None, max_length=500)
     enabled: Optional[bool] = None
+    # Send ``null`` explicitly to clear the rules; omit to leave them alone.
+    target_rules: Optional[dict[str, Any]] = None
+    priority: Optional[int] = Field(default=None, ge=0, le=10000)
+
+
+class TrayMenuTargetingPreview(BaseModel):
+    scope: str = Field(default="global", max_length=16)
+    scope_ref_id: Optional[int] = None
+    rules: dict[str, Any]
 
 
 class TrayInstallTokenCreate(BaseModel):

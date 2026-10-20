@@ -63,8 +63,10 @@ companion columns:
   `auth_token` hash, status (`pending` / `active` / `revoked`), facts,
   and last-seen metadata.
 * `tray_menu_configs` — menu templates. `scope ∈ {global, company, tag,
-  device}`; resolution precedence is **device &gt; tag &gt; company &gt; global**
-  (most specific enabled config wins).
+  device}`; resolution precedence is **device &gt; device rules &gt; tag &gt;
+  company &gt; global** (most specific enabled config wins). A config can
+  also carry advanced device rules (`target_rules`) and a `priority` — see
+  [Device-specific menus](#43-device-specific-menus-advanced-rules).
 * `tray_command_log` — audit trail of commands the server pushes to a
   device (chat invitations, refresh, ping).
 
@@ -102,7 +104,9 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/build-agent/jobs/{id}/complete`, `/fail` | POST | API key | Build agent finishes or reports a failure |
 | `/deploy/{slug}/install.ps1`, `/install.sh` | GET | Deployment URL slug | RMM install script with the token filled in |
 | `/api/tray/admin/configs` | GET / POST | Super admin | List / create menu configurations |
-| `/api/tray/admin/configs/{id}` | PUT / DELETE | Super admin | Update / delete |
+| `/api/tray/admin/configs/{id}` | PUT / DELETE | Super admin | Update / delete (send `"target_rules": null` to clear rules) |
+| `/api/tray/admin/configs/targeting/fields` | GET | Super admin | Advanced rule fields and operators (same catalogue as RMM checks) |
+| `/api/tray/admin/configs/targeting/preview` | POST | Super admin | Preview active tray devices matching a scope + rule tree |
 | `/api/tray/admin/devices` | GET | Helpdesk technician | List enrolled devices |
 | `/api/tray/admin/devices/{id}/revoke` | POST | Super admin | Revoke a device |
 | `/api/tray/{device_uid}/troubleshoot` | POST | Helpdesk / super admin | Ask an active device to run the AI troubleshooting agent for a ticket (queues + pushes a `troubleshoot` WS command) |
@@ -277,6 +281,45 @@ If you need advanced nesting, you can still use the **Advanced JSON** toggle to 
 | Menu does not refresh | Device is offline or WebSocket is disconnected | The client re-fetches config on reconnect; restart the tray service if the issue persists |
 
 ---
+
+### 4.3 Device-specific menus (advanced rules)
+
+A menu configuration can be limited to the devices whose inventory matches
+**advanced device rules** — the same rule builder RMM checks use (Tray
+Settings → Menu configurations → *Device rules*). This lets admins give a
+menu to, for example:
+
+* devices with a particular app installed (`Installed software name`
+  contains `AutoCAD`),
+* devices at one site (`Location` equals `Brisbane office`),
+* a type of client (`Company tag` is one of `Legal`, or a company custom
+  variable),
+* any mix of those, with nested AND / OR groups.
+
+Each tray device asks for its own menu (`GET /api/tray/config`, authenticated
+by its device token), so the server resolves a separate menu per asset:
+
+1. An enabled, rule-free **device**-scoped config for the device's asset.
+2. Enabled **rule-targeted** configs whose scope includes the device
+   (global, the device's company, the device's asset, or tag) **and** whose
+   rules match its inventory — lowest **priority** first, then device &gt;
+   company &gt; tag &gt; global, then the oldest config.
+3. Otherwise the existing rule-free **tag &gt; company &gt; global** configs,
+   then the built-in default menu.
+
+A device that matches no rule-targeted menu therefore keeps exactly the menu
+it had before. Inventory comes from the linked asset's MyPortal RMM agent
+(hardware, software, network) when there is one; otherwise from the asset,
+company, tags and custom fields plus the tray device's own hostname, OS and
+IP. Without an RMM agent software rules never match, and a device with no
+company only gets the scope-based menus. Rules that fail to parse never turn
+into an "every device" menu.
+
+Use **Preview matching devices** to see which active tray devices match the
+scope and rules before saving. Saving any configuration pushes
+`config_changed` to connected devices; inventory changes (such as installing
+an app) are picked up the next time the device fetches its config (start-up,
+the next `config_changed`, or a manual refresh from the tray).
 
 ## 5. Security model
 

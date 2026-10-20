@@ -7,6 +7,8 @@ umask 027
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 SERVICE_USER="myportal"
+# shellcheck source=lib/python_runtime.sh
+source "${SCRIPT_DIR}/lib/python_runtime.sh"
 
 # The coordinator runs as root, while the control checkout is frequently owned
 # by the administrator who cloned it. Git refuses to operate on repositories
@@ -467,7 +469,7 @@ install_dependencies() {
   local release="$1" key layer staging start=$SECONDS
   local lock="${release}/requirements.lock"
   [[ -s "$lock" ]] || { echo "Required dependency lock is missing: ${lock}" >&2; return 1; }
-  key=$(cat "${release}/pyproject.toml" "$lock"; python3 -c 'import sys; print(sys.implementation.name, *sys.version_info[:2])')
+  key=$(cat "${release}/pyproject.toml" "$lock"; "${RUNTIME_PYTHON:-python3}" -c 'import sys; print(sys.implementation.name, *sys.version_info[:2])')
   key=$(printf '%s' "$key" | sha256sum | awk '{print $1}')
   layer="${SHARED_ROOT}/dependency-layers/${key}"
   mkdir -p "${SHARED_ROOT}/dependency-layers"
@@ -484,7 +486,7 @@ install_dependencies() {
   rm -rf "$layer"
   staging="${layer}.staging.$$"
   rm -rf "$staging"
-  python3 -m venv "$staging"
+  "${RUNTIME_PYTHON:-python3}" -m venv "$staging"
   # Use the venv's bundled pip. Packaging tools are never upgraded as part of
   # deployment, and every runtime dependency comes from the committed lock.
   "$staging/bin/python" -m pip install --disable-pip-version-check --requirement "$lock"
@@ -1218,6 +1220,15 @@ if [[ -z "${MYPORTAL_UPGRADE_REEXEC:-}" ]] && update_control_checkout "$TARGET_R
   exec 9>&-
   MYPORTAL_UPGRADE_REEXEC=1 exec bash "${SCRIPT_DIR}/upgrade.sh" "${UPGRADE_ARGS[@]}"
 fi
+# Releases run on MYPORTAL_PYTHON_VERSION, not whatever python3 the host has.
+# Hosts installed on an older Python are moved over here; the interpreter
+# version is part of the dependency layer key, so the next release gets a
+# fresh virtual environment. Without it the running release stays in place.
+RUNTIME_PYTHON=$(ensure_runtime_python "${SHARED_ROOT}/python") || {
+  echo "Upgrade stopped: Python ${MYPORTAL_PYTHON_VERSION} is required to build the release." >&2
+  exit 1
+}
+echo "Release runtime: ${RUNTIME_PYTHON} ($("$RUNTIME_PYTHON" -V 2>&1))." >&2
 redis_env_before=$(sha256sum "$ENV_FILE")
 bash "${SCRIPT_DIR}/provision_redis.sh" "$ENV_FILE"
 # Gitea for the RMM script library is optional: a failure is reported and

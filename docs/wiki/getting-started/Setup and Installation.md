@@ -20,7 +20,7 @@ It uses a single downloadable script and doesn't need a clone.
 | Requirement | Supported |
 | --- | --- |
 | Operating system | Ubuntu 24.04 LTS or Debian 12 (or newer). Both must use `apt-get` and, for services, `systemd`. |
-| Python | 3.10 or newer (the distribution's `python3`) |
+| Python | Releases run on **Python 3.12**. The installer and upgrades use the system `python3.12` when present, otherwise install the distribution package, or a standalone build under `/opt/myportal/shared/python` (Debian 12, Ubuntu 22.04). The system `python3` (3.10 or newer) is still used to run the setup scripts. |
 | Database | **MariaDB 10.10 or newer.** The installers install the distribution's `mariadb-server` when `DB_HOST` is local. Oracle MySQL is not supported, because the schema migrations use MariaDB-only syntax. |
 | Network access | The distribution's package mirrors, PyPI, and the Git remote (`origin`) of your checkout |
 
@@ -119,7 +119,18 @@ directly. Each upgrade, including one started from the portal, first
 fast-forwards the control checkout to `origin/main` and runs the new
 `upgrade.sh`, so new setup steps (such as Gitea) apply without a manual
 `git pull`. A checkout with local changes, local commits or another branch is
-left alone, and the upgrade says so. `/opt/myportal/control` is only the suggested clone location; to find
+left alone, and the upgrade says so.
+
+Each upgrade also checks the release Python. If `python3.12` is missing, it
+installs `python3.12` and `python3.12-venv` from apt when the distribution offers
+them, and otherwise installs a standalone CPython 3.12 with
+[uv](https://docs.astral.sh/uv/) under `/opt/myportal/shared/python` (no system
+files are replaced). The new release then gets a fresh virtual environment on
+Python 3.12; the running release keeps its own until the cutover, and earlier
+releases kept for rollback keep theirs. If Python 3.12 cannot be installed the
+upgrade stops before building anything, and the current release stays live.
+
+`/opt/myportal/control` is only the suggested clone location; to find
 where yours is, run:
 
 ```bash
