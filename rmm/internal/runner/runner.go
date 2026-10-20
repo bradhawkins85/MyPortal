@@ -401,7 +401,14 @@ func PowerShellWrapper(scriptPath, paramsPath string) string {
 		"$h = @{}",
 		"if ($p) { foreach ($prop in $p.PSObject.Properties) { $h[$prop.Name] = $prop.Value } }",
 		"$global:LASTEXITCODE = 0",
-		"try { & " + psQuote(scriptPath) + " @h } catch { Write-Error $_; exit 1 }",
+		// Report the original error with its position in the script; a fresh
+		// Write-Error would blame wrapper.ps1 and hide the failing line.
+		"try { & " + psQuote(scriptPath) + " @h } catch {",
+		"  $e = $_",
+		"  [Console]::Error.WriteLine(($e | Out-String -Width 4096).Trim())",
+		"  if ($e.ScriptStackTrace) { [Console]::Error.WriteLine(\"Script stack trace:`n\" + $e.ScriptStackTrace) }",
+		"  exit 1",
+		"}",
 		"exit $LASTEXITCODE",
 	}, "\n")
 }
