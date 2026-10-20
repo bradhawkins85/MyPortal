@@ -217,7 +217,7 @@
         rows: multiline ? 3 : null,
         type: multiline ? null : (field.sensitive ? 'password' : 'text'),
         inputmode: field.type === 'integer' ? 'numeric' : (field.type === 'number' ? 'decimal' : null),
-        placeholder: field.default ? 'Script default: ' + field.default : (multiline ? 'One value per line' : ''),
+        placeholder: field.default ? 'Script default: ' + field.default + (field.default.includes('{{') ? ' (filled in for each device)' : '') : (multiline ? 'One value per line' : ''),
       });
       row.append(control);
       const insert = el('select', { className: 'form-input rmm-field__variable', 'aria-label': 'Use a MyPortal variable for ' + field.name });
@@ -907,6 +907,12 @@
       const label = item.kind === 'command' ? item.name : (item.kind === 'env' ? '$env:' : '-') + item.name;
       const value = el('dd', null, item.kind === 'command' ? null : item.value);
       if (item.kind === 'command') value.append(el('pre', { className: 'rmm-output' }, item.value));
+      if (item.resolved !== undefined) {
+        value.append(' → ', el('strong', null, item.resolved === '' ? '(empty)' : item.resolved));
+      }
+      if (item.script_default) {
+        value.append(' ', el('span', { className: 'rmm-optional' }, 'script default'));
+      }
       row.append(el('dt', null, label), value);
       inputList.append(row);
     });
@@ -960,6 +966,9 @@
       const secretKeys = [];
       (run.inputs || []).forEach((input) => {
         const key = input.kind + ':' + input.name;
+        if (input.script_default) {
+          return;
+        }
         if (input.sensitive && !input.is_variable) {
           secretKeys.push(key);
         } else {
