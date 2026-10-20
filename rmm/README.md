@@ -134,29 +134,21 @@ seconds and 256 sensors; missing hardware, inaccessible sensors and failed reads
 never prevent check-in. macOS currently reports collection as unsupported.
 
 Linux reads hwmon sensors from sysfs, falling back to ACPI thermal zones when
-hwmon is absent. Windows release builds embed LibreHardwareMonitorLib 0.9.6
-(.NET Framework 4.7.2) and its dependencies, with locked NuGet package hashes and
-original license notices. The agent expands its embedded bundle into a versioned
-folder under `%ProgramData%\MyPortal RMM\LibreHardwareMonitor` on first check-in.
-The existing agent download checksum covers the complete bundle. Install/update
-and rollback continue to deliver a single executable. No GUI or separate download
-is needed on endpoints; Windows PowerShell and .NET Framework 4.7.2 or later
-(4.8.1 on ARM64) are required. Sensor availability varies with hardware, drivers and Windows security
-settings. Low-level CPU and motherboard sensors use PawnIO. Windows builds also
-embed its upstream 2.1.0 installer, pinned by SHA-256, along with its license and
-corresponding sources. At service startup the agent checks the hardware manufacturer
-and model and skips PawnIO setup on virtual machines, which do not expose thermal
-sensors. Physical hosts running Hyper-V remain eligible. If hardware identification
-fails, setup is skipped and the error is logged; check-in continues normally.
-On physical machines the agent checks the installed version
-and runs `PawnIO_setup.exe -install -silent` if 2.1.0 or newer is absent. It keeps
-newer installations and verifies the registered version after setup. Setup runs
-in the background with a two-minute limit; failures are logged, leave check-in
-working and retry at the next service start. A fresh temperature check-in follows
-setup completion. PawnIO is shared system software, so agent rollback or removal
-does not downgrade or uninstall it.
+hwmon is absent.
 
-MyPortal keeps the latest snapshot for the asset's Scripts section. It also stores
+Windows reports collection as unsupported. Earlier Windows agents used
+LibreHardwareMonitor with the PawnIO kernel driver, and machines running them
+crashed with `SYSTEM_THREAD_EXCEPTION_NOT_HANDLED` (0x7E). At service startup the
+agent now removes PawnIO if it is registered: it runs the registered uninstall
+command with `-uninstall -silent` and confirms the registration is gone. This
+also removes PawnIO that other software installed. The agent also deletes the
+`%ProgramData%\MyPortal RMM\LibreHardwareMonitor` folder. Removal runs in the
+background with a two-minute limit. Failures are logged, leave check-in working
+and are retried at the next service start.
+
+MyPortal keeps the latest snapshot for the asset's Scripts section. It ignores
+temperatures from Windows agents, including older ones that still send them, and
+hides temperatures for Windows assets. It also stores
 temperature samples in the existing stats database independently of enabled
 checks, and displays sensor graphs in Machine stats with its 24-hour, 7-day and
 30-day ranges and configured retention. History uses server receipt time and the
@@ -164,20 +156,6 @@ configured stats sample period. If the stats database is unavailable, check-in
 and the latest snapshot still work. Missing readings do not become zero-degree
 samples. Older agents and job polling preserve the last snapshot and its timestamp.
 Deploy MyPortal and migration 487 before updating agents.
-
-For a local Windows build, install .NET SDK 8 and run from `rmm/`:
-
-```sh
-python3 thermal-bundle/build.py
-go build ./cmd/myportal-rmm
-```
-
-The release workflow prepares the bundle automatically for both Windows builds.
-Keep the checked-in NuGet lock file and include all library notices when changing
-versions. Upstream source and license links are preserved in the bundled notices.
-The disposable Windows CI runner also verifies silent PawnIO installation.
-That integration test requires `MYPORTAL_TEST_PAWNIO_INSTALL=1`; ordinary local
-test runs validate the setup policy without installing a driver.
 
 The `myportal-rmm verify` command checks that the agent service is running and
 sends an authenticated check-in using its saved enrolment. The tray uses this

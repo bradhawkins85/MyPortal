@@ -541,7 +541,8 @@ async def asset_checks_context(company_id: int, asset_id: int, *, can_edit: bool
         "has_agent": agent is not None,
         "can_edit": can_edit,
         "check_types": rmm_checks.CHECK_TYPES,
-        "stats": await rmm_stats.asset_stats_context(asset_id, stats_range, stats_type, stats_hardware),
+        "stats": await rmm_stats.asset_stats_context(asset_id, stats_range, stats_type, stats_hardware,
+                                                     temperatures=(agent or {}).get("os") != "windows"),
     }
 
 

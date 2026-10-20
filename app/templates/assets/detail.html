@@ -157,7 +157,7 @@
         <span data-rmm-remote-message></span>
         <a class="button button--primary button--small" data-rmm-remote-link href="#" target="_blank" rel="noopener noreferrer" hidden>Open</a>
       </div>{% endif %}
-      {% if rmm.agent and rmm.agent.thermal %}{% set thermal = rmm.agent.thermal %}
+      {% if rmm.agent and rmm.agent.thermal and rmm.agent.os != 'windows' %}{% set thermal = rmm.agent.thermal %}
       <details>
         <summary>Temperatures — {{ thermal.sensors | length }} sensor{{ 's' if thermal.sensors | length != 1 }}</summary>
         <p class="text-muted">Collected <span data-utc="{{ thermal.collected_at }}">{{ thermal.collected_at }}</span>. Readings update with the agent's regular check-in, approximately every 15 minutes.</p>
@@ -225,7 +225,7 @@
   {% set stats = chk.stats %}<section class="card card--panel ce-section" id="machine-stats" data-asset-edit-section="machine-stats" aria-labelledby="asset-machine-stats-heading">
     <header class="ce-section__header"><div class="ce-section__heading">
       <h2 class="card__title" id="asset-machine-stats-heading">Machine stats</h2>
-      <p class="card__subtitle">CPU, memory, disk, network and ping values the RMM agent reports while their checks are on, one sample every {{ stats.sample_minutes }} minute{{ "s" if stats.sample_minutes != 1 }}{% if stats.retention_days %}, kept for {{ stats.retention_days }} days{% endif %}. Temperatures are collected at regular agent check-in, approximately every 15 minutes, whether checks are enabled or not. Times are UTC.</p>
+      <p class="card__subtitle">CPU, memory, disk, network and ping values the RMM agent reports while their checks are on, one sample every {{ stats.sample_minutes }} minute{{ "s" if stats.sample_minutes != 1 }}{% if stats.retention_days %}, kept for {{ stats.retention_days }} days{% endif %}.{% if stats.temperatures %} Temperatures are collected at regular agent check-in, approximately every 15 minutes, whether checks are enabled or not.{% endif %} Times are UTC.</p>
     </div></header>
     <div class="ce-section__body">
       {% if not stats.database.configured %}
@@ -282,7 +282,7 @@
         {% endfor %}
       </div>
       {% else %}
-      <p class="text-muted">{{ 'No stats match these filters in the selected time range.' if stats.filtered else 'No stats for this time range.' }} Temperatures are kept at agent check-in when sensors are available; other stats are kept while their checks are enabled.</p>
+      <p class="text-muted">{{ 'No stats match these filters in the selected time range.' if stats.filtered else 'No stats for this time range.' }}{% if stats.temperatures %} Temperatures are kept at agent check-in when sensors are available; other stats are kept while their checks are enabled.{% else %} Stats are kept while their checks are enabled.{% endif %}</p>
       {% endif %}
       {% endif %}
     </div>

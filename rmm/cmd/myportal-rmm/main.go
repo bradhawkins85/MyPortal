@@ -326,15 +326,13 @@ func loop(ctx context.Context) {
 	slots := make(chan struct{}, maxConcurrent)
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	thermalReady := make(chan struct{})
 	wg.Add(1)
-	go func(ready chan struct{}) {
+	go func() {
 		defer wg.Done()
-		defer close(ready)
 		if err := thermal.Prepare(ctx); err != nil {
-			log.Printf("thermal setup failed: %v", err)
+			log.Printf("removing PawnIO failed: %v", err)
 		}
-	}(thermalReady)
+	}()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -362,13 +360,6 @@ func loop(ctx context.Context) {
 	backoff := 5 * time.Second
 	lastCheckin := time.Time{}
 	for ctx.Err() == nil {
-		select {
-		case <-thermalReady:
-			// Report newly available sensors promptly after driver setup.
-			lastCheckin = time.Time{}
-			thermalReady = nil
-		default:
-		}
 		if time.Since(lastCheckin) > checkinEvery {
 			report := details(r)
 			report.Thermal = thermal.Collect(ctx)

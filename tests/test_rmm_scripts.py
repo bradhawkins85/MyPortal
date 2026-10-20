@@ -1724,7 +1724,7 @@ async def test_thermal_checkin_persists_and_empty_snapshot_clears_readings(sqlit
     async def no_history(*args):
         return 0
     monkeypatch.setattr(rmm_stats, "ingest_thermal", no_history)
-    _, agent = await _enrol(sqlite_db)
+    _, agent = await _enrol(sqlite_db, os_name="linux")
     thermal = {"collected_at": "2026-10-13T00:00:00Z", "status": "available", "sensors": [
         {"id": "/cpu/0/temp/0", "name": "CPU Package", "hardware": "CPU", "celsius": 63.5}]}
     await rmm_scripts.checkin(agent, AgentDetails(thermal=thermal).model_dump(), None)
@@ -1737,6 +1737,31 @@ async def test_thermal_checkin_persists_and_empty_snapshot_clears_readings(sqlit
     thermal.update(status="unavailable", sensors=[])
     await rmm_scripts.checkin(agent, AgentDetails(thermal=thermal).model_dump(), None)
     assert (await rmm_repo.get_asset_agent(10))["thermal"]["sensors"] == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("payload_os", ["windows", None])
+async def test_windows_checkin_discards_temperatures(sqlite_db, monkeypatch, payload_os):
+    from app.features.rmm.routes import AgentDetails
+    from app.services import rmm_stats
+
+    ingested = []
+
+    async def record_history(_agent, snapshot):
+        ingested.append(snapshot)
+        return 0
+    monkeypatch.setattr(rmm_stats, "ingest_thermal", record_history)
+    _, agent = await _enrol(sqlite_db, os_name="windows")
+    # Readings stored before this change are cleared at the next check-in.
+    await rmm_repo.record_agent_checkin(agent["id"], {"thermal": {
+        "collected_at": "2026-10-12T00:00:00Z", "status": "available", "sensors": [
+            {"id": "/cpu/0/temp/0", "name": "CPU Package", "hardware": "CPU", "celsius": 60}]}})
+    thermal = {"collected_at": "2026-10-13T00:00:00Z", "status": "available", "sensors": [
+        {"id": "/cpu/0/temp/0", "name": "CPU Package", "hardware": "CPU", "celsius": 63.5}]}
+    await rmm_scripts.checkin(agent, AgentDetails(os=payload_os, thermal=thermal).model_dump(), None)
+    stored = (await rmm_repo.get_asset_agent(10))["thermal"]
+    assert stored["status"] == "unsupported" and stored["sensors"] == []
+    assert all(not snapshot["sensors"] for snapshot in ingested)
 
 
 def test_thermal_payload_bounds_and_legacy_compatibility():

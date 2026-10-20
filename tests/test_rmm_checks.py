@@ -606,7 +606,7 @@ def test_temperature_chart_supports_subzero_readings():
 
 @pytest.mark.anyio
 async def test_temperature_stats_outage_does_not_reject_checkin(sqlite_db, monkeypatch):
-    _, agent = await _enrol(sqlite_db)
+    _, agent = await _enrol(sqlite_db, os_name="linux")
     async def broken():
         raise RuntimeError("stats unavailable")
     monkeypatch.setattr(rmm_stats.stats_db, "ensure_connected", broken)

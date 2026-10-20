@@ -60,6 +60,20 @@ async def test_temperature_device_filters_preserve_every_matching_sensor(samples
 
 
 @pytest.mark.anyio
+async def test_temperatures_left_out_when_hidden(samples):
+    context = await rmm_stats.asset_stats_context(10, "24h", "temperature", "Intel CPU", temperatures=False)
+    assert context["type"] == "all" and context["hardware"] == "" and context["hardware_choices"] == []
+    assert "temperature" not in [item["key"] for item in context["types"]]
+    assert [item["title"] for item in context["charts"]] == ["CPU", "Memory used", "Disk free", "Network", "Ping"]
+    source = (Path(__file__).resolve().parents[1] / "app/templates/assets/detail.html").read_text()
+    section = source.split('{% set stats = chk.stats %}', 1)[1].split('</section>', 1)[0]
+    request = Request({"type": "http", "scheme": "https", "server": ("portal.test", 443),
+                       "path": "/assets/10", "query_string": b"", "headers": []})
+    html = _environment().from_string(section).render(stats=context, asset={"id": 10}, request=request)
+    assert "Temperature" not in html
+
+
+@pytest.mark.anyio
 async def test_invalid_filters_and_missing_device(samples):
     default = await rmm_stats.asset_stats_context(10, "invalid", "invalid")
     assert default["range"] == "24h" and default["type"] == "all" and not default["filtered"]

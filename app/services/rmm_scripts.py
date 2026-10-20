@@ -829,6 +829,18 @@ async def queue_tray_run(*, device: Mapping[str, Any], node: Mapping[str, Any]) 
 # --------------------------------------------------------------------------- #
 
 
+def _without_windows_temperatures(thermal: Any, os_name: str | None) -> Any:
+    """PawnIO, which Windows agents used for temperatures, crashed systems (0x7E).
+
+    Readings that older Windows agents still send are replaced with an empty
+    snapshot so the previous readings are cleared and none are stored or shown.
+    """
+
+    if thermal is None or os_name != "windows":
+        return thermal
+    return {"collected_at": thermal.get("collected_at"), "status": "unsupported", "sensors": []}
+
+
 def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[str, Any]:
     def text(key: str, limit: int) -> str | None:
         value = payload.get(key)
@@ -840,10 +852,11 @@ def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[st
     shells = payload.get("shells")
     if isinstance(shells, (list, tuple)):
         shells = ",".join(str(item).strip() for item in shells if str(item).strip())
+    os_name = (text("os", 32) or "").lower() or None
     return {
-        "thermal": payload.get("thermal"),
+        "thermal": _without_windows_temperatures(payload.get("thermal"), os_name),
         "hostname": text("hostname", 255),
-        "os": (text("os", 32) or "").lower() or None,
+        "os": os_name,
         "os_version": text("os_version", 128),
         "arch": text("arch", 32),
         "agent_version": text("agent_version", 32),
@@ -906,10 +919,12 @@ async def authenticate_agent(token: str) -> dict[str, Any] | None:
 
 
 async def checkin(agent: Mapping[str, Any], payload: Mapping[str, Any], client_ip: str | None) -> None:
-    await rmm_repo.record_agent_checkin(int(agent["id"]), _agent_details(payload, client_ip))
-    if payload.get("thermal") is not None:
+    details = _agent_details(payload, client_ip)
+    details["thermal"] = _without_windows_temperatures(details["thermal"], details["os"] or agent.get("os"))
+    await rmm_repo.record_agent_checkin(int(agent["id"]), details)
+    if details["thermal"] is not None:
         from app.services.rmm_stats import ingest_thermal
-        await ingest_thermal(agent, payload["thermal"])
+        await ingest_thermal(agent, details["thermal"])
 
 
 def _job_payload(row: Mapping[str, Any]) -> dict[str, Any] | None:

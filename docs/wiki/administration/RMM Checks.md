@@ -134,11 +134,11 @@ days or 30 days): CPU and memory use, free space on each drive, network throughp
 Temperature sensors also appear as graphs in Machine stats. The RMM agent collects them at
 startup and every detailed check-in (approximately 15 minutes), independently of enabled checks.
 Each sensor has its own graph in Celsius, using the same ranges and retention settings. Missing
-readings are never stored as zero-temperature samples; extended interruptions produce gaps. Windows agents bundle
-LibreHardwareMonitor and silently install bundled PawnIO 2.1.0 at service startup
-if 2.1.0 or newer is absent. Virtual machines are excluded from PawnIO setup because
-they do not expose thermal sensors. Physical Hyper-V hosts remain eligible. Hardware
-identification and setup failures are logged and do not stop check-in.
+readings are never stored as zero-temperature samples; extended interruptions produce gaps.
+Windows assets do not show temperatures. Earlier Windows agents installed the PawnIO driver
+to read them, and machines running those agents crashed with stop code 0x7E. Current Windows agents
+remove PawnIO at service startup, even if other software installed it, and MyPortal ignores
+temperatures that older Windows agents still send.
 Linux uses sysfs sensors; macOS temperature collection is currently unsupported.
 
 Use **Stat type** to focus on CPU, memory, disk, network, ping or temperature charts.
