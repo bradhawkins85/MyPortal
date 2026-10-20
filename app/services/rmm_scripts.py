@@ -1212,13 +1212,20 @@ async def record_result(agent: Mapping[str, Any], run_id: int, payload: Mapping[
     custom_values = await apply_custom_values(run, [item for item in values if item["scope"] != "session"])
     if session_values:
         custom_values.extend(await rmm_remote_control.capture({**run, "id": run_id}, session_values))
+    stderr = rmm_remote_control.take_session_markers(readable_output(payload.get("stderr")))[0]
     await rmm_repo.finish_run(
         run_id,
         status=status,
         exit_code=exit_code,
         stdout=_truncate(stdout),
-        stderr=_truncate(rmm_remote_control.take_session_markers(readable_output(payload.get("stderr")))[0]),
+        stderr=_truncate(stderr),
         custom_values=custom_values,
         error_message=error,
     )
+    if run.get("run_source") == "ticket":
+        from app.services import rmm_ticket_scripts
+
+        await rmm_ticket_scripts.record_result(
+            run_id, status=status, exit_code=exit_code, stdout=stdout, stderr=stderr, error=error,
+        )
     return {"status": status, "custom_values": custom_values}

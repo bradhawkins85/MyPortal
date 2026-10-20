@@ -624,6 +624,57 @@ async def finish_run(
     )
 
 
+async def record_ticket_run(*, run_id: int, ticket_id: int, batch_id: str, success_status: str | None) -> None:
+    """Remember the ticket a ticket automation queued ``run_id`` for."""
+
+    await db.execute(
+        "INSERT INTO rmm_ticket_script_runs (run_id, ticket_id, batch_id, success_status, created_at) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (run_id, ticket_id, batch_id, success_status, _utcnow()),
+    )
+
+
+async def get_ticket_run(run_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT run_id, ticket_id, batch_id, success_status FROM rmm_ticket_script_runs WHERE run_id = %s",
+        (run_id,),
+    )
+    return dict(row) if row else None
+
+
+async def claim_ticket_run_report(run_id: int) -> bool:
+    """Mark the run's outcome as posted to its ticket; False when it already was."""
+
+    return await db.execute_rowcount(
+        "UPDATE rmm_ticket_script_runs SET reported_at = %s WHERE run_id = %s AND reported_at IS NULL",
+        (_utcnow(), run_id),
+    ) > 0
+
+
+async def unreported_ticket_runs(*, limit: int = 50) -> list[int]:
+    """Ticket automation runs that finished without the agent reporting back
+    (expired, cancelled or timed out by the server) and are not yet posted."""
+
+    rows = await db.fetch_all(
+        "SELECT t.run_id FROM rmm_ticket_script_runs t JOIN rmm_script_runs r ON r.id = t.run_id "
+        "WHERE t.reported_at IS NULL AND r.status IN ('expired', 'cancelled', 'timed_out') "
+        "ORDER BY t.run_id LIMIT %s",
+        (limit,),
+    )
+    return [int(row["run_id"]) for row in rows or []]
+
+
+async def ticket_batch_statuses(batch_id: str) -> list[str]:
+    """The status of each run one ticket automation action queued."""
+
+    rows = await db.fetch_all(
+        "SELECT r.status FROM rmm_ticket_script_runs t JOIN rmm_script_runs r ON r.id = t.run_id "
+        "WHERE t.batch_id = %s",
+        (batch_id,),
+    )
+    return [str(row["status"]) for row in rows or []]
+
+
 async def cancel_run(run_id: int) -> bool:
     """Cancel a run the device has not collected yet."""
 

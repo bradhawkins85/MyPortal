@@ -1366,6 +1366,14 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "enabled": True,
     },
     {
+        "slug": "rmm-script",
+        "name": "My Portal RMM Script",
+        "description": "Run a MyPortal RMM script on the ticket's linked devices so an automation can try to fix the problem (such as cleaning up a full disk) before a technician touches the machine. The result is posted to the ticket as an internal note.",
+        "icon": "🛠️",
+        "settings": {},
+        "enabled": True,
+    },
+    {
         "slug": "add-ticket-reply",
         "name": "Add Ticket Reply",
         "description": "Add a reply to an existing ticket. Supports public replies, internal notes, and optional time tracking with billable/non-billable hours.",
@@ -1386,6 +1394,16 @@ _ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
 _ALWAYS_ON_TICKET_ACTION_MODULES_BY_SLUG = {
     module["slug"]: module for module in _ALWAYS_ON_TICKET_ACTION_MODULES
 }
+
+
+# Always-on actions that belong to an optional feature pack and are hidden
+# (and refuse to run) while that pack is disabled for the deployment.
+_ALWAYS_ON_ACTION_FEATURE_PACKS = {"rmm-script": "rmm"}
+
+
+def _always_on_action_pack_available(slug: str) -> bool:
+    pack = _ALWAYS_ON_ACTION_FEATURE_PACKS.get(slug)
+    return pack is None or get_component_availability().feature_pack_available(pack)
 
 
 def _normalise_slug(value: str | None) -> str:
@@ -2773,6 +2791,50 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "rmm-script": {
+        "fields": [
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "placeholder": "{{ticket.id}}",
+            },
+            {
+                "name": "script",
+                "label": "Script (Gitea path, name or ID)",
+                "type": "string",
+                "required": True,
+            },
+            {
+                "name": "asset_id",
+                "label": "Asset ID (optional; defaults to every linked device with the RMM agent)",
+                "type": "integer",
+            },
+            {
+                "name": "values",
+                "label": "Script values (optional JSON object keyed by parameter or environment variable name)",
+                "type": "json",
+                "placeholder": '{"Drive": "C"}',
+            },
+            {
+                "name": "timeout_seconds",
+                "label": "Timeout in seconds (optional; defaults to the script's)",
+                "type": "integer",
+            },
+            {
+                "name": "run_as",
+                "label": "Run as",
+                "type": "string",
+                "enum": ["system", "user"],
+            },
+            {
+                "name": "success_status",
+                "label": "Set ticket status when the script succeeds (optional)",
+                "type": "string",
+                "placeholder": "resolved",
+            },
+        ],
+    },
     "reprocess-ai": {
         "fields": [
             {
@@ -2961,15 +3023,39 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
         actionable_by_slug[module_slug] = redacted
     for module in _ALWAYS_ON_TICKET_ACTION_MODULES:
         module_slug = module["slug"]
-        if not availability.module_available(module_slug):
+        if not availability.module_available(module_slug) or not _always_on_action_pack_available(module_slug):
             continue
         internal_module = dict(module)
         internal_module["payload_schema"] = get_action_payload_schema(module_slug)
+        if module_slug == "rmm-script":
+            internal_module["payload_schema"] = await _rmm_script_payload_schema(
+                internal_module["payload_schema"]
+            )
         actionable_by_slug[module_slug] = internal_module
     return sorted(
         actionable_by_slug.values(),
         key=lambda module: str(module.get("name") or "").lower(),
     )
+
+
+async def _rmm_script_payload_schema(schema: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The RMM script action's schema with the active scripts to choose from."""
+
+    if not schema:
+        return None
+    try:
+        scripts = await import_module("app.repositories.rmm").list_scripts()
+    except Exception as exc:  # pragma: no cover - the form still accepts a typed value
+        logger.warning("Could not list RMM scripts for the automation form", error=str(exc))
+        return dict(schema)
+    paths = [str(script["path"]) for script in scripts if script.get("path")]
+    fields = []
+    for field in schema.get("fields") or []:
+        field = dict(field)
+        if field.get("name") == "script" and paths:
+            field["enum"] = paths
+        fields.append(field)
+    return {**schema, "fields": fields}
 
 
 async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None:
@@ -3140,6 +3226,8 @@ async def trigger_module(
         from app.services.component_availability import deployment_disabled_result
 
         return deployment_disabled_result(slug)
+    if not _always_on_action_pack_available(slug):
+        return {"status": "skipped", "reason": "Feature disabled for this deployment", "module": slug}
     module = _get_always_on_ticket_action_module(slug)
     if not module:
         module = await module_repo.get_module(slug)
@@ -3172,6 +3260,7 @@ async def trigger_module(
         "ai-link-related": _invoke_ai_link_related,
         "ai-request-missing-info": _invoke_ai_request_missing_info,
         "run-troubleshooting-bot": _invoke_run_troubleshooting_bot,
+        "rmm-script": _invoke_rmm_script,
         "reprocess-ai": _invoke_reprocess_ai,
         "add-ticket-reply": _invoke_add_ticket_reply,
         "smart-attachment-removal": _invoke_smart_attachment_removal,
@@ -6955,6 +7044,33 @@ async def _invoke_run_troubleshooting_bot(
         asset_id=asset_id,
         context=context,
         model=str(payload.get("model") or "").strip() or None,
+    )
+
+
+async def _invoke_rmm_script(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Queue a MyPortal RMM script on the ticket's linked devices.
+
+    The script runs when each device next checks in; its result is posted to
+    the ticket as an internal note (see :mod:`app.services.rmm_ticket_scripts`).
+    """
+
+    _ticket_id, ticket = await _load_ai_action_ticket(payload)
+    context = payload.get("context") if isinstance(payload.get("context"), Mapping) else {}
+    context_ticket = context.get("ticket") if isinstance(context.get("ticket"), Mapping) else None
+    return await import_module("app.services.rmm_ticket_scripts").run_for_ticket(
+        ticket=ticket,
+        script=payload.get("script"),
+        asset_id=_parse_nullable_int(payload.get("asset_id")),
+        values=payload.get("values"),
+        timeout_seconds=payload.get("timeout_seconds"),
+        run_as=str(payload.get("run_as") or "").strip() or None,
+        success_status=str(payload.get("success_status") or "").strip() or None,
+        ticket_context=context_ticket,
     )
 
 

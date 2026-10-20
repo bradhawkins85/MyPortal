@@ -854,6 +854,8 @@
       source = ' · Windows Update scan' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     } else if (run.run_source === 'tray') {
       source = ' · tray menu';
+    } else if (run.run_source === 'ticket') {
+      source = ' · ticket automation';
     } else if (run.run_source === 'command') {
       source = ' · command' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     }

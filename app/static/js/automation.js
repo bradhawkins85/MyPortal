@@ -370,6 +370,24 @@
         }),
       },
     ],
+    'rmm-script': [
+      {
+        label: 'Run a cleanup script on the linked device',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          script: 'Cleanup-Disk',
+        }),
+      },
+      {
+        label: 'Run with values and resolve on success',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          script: 'Cleanup-Disk',
+          values: { Drive: 'C', Computer: '{{asset.name}}' },
+          success_status: 'resolved',
+        }),
+      },
+    ],
     'reprocess-ai': [
       {
         label: 'Refresh all ticket AI',

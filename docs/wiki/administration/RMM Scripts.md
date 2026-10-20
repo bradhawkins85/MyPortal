@@ -478,6 +478,47 @@ adding a step, and **Stop onboarding** cancels the rest of a running sequence.
 Schedules for every company can only use scripts in `Common/` and are added and changed only
 by super admins; everyone else sees them read-only.
 
+## Running scripts from ticket automations
+
+The **My Portal RMM Script** ticket automation action runs a script on the devices linked to a
+ticket, so an automation can try to fix a problem before a technician touches the machine. For
+example, a *Ticket created* automation filtered to low disk space tickets (such as those raised by
+a [disk space check](RMM%20Checks.md) or an [event log rule](RMM%20Event%20Logs.md)) can run your
+disk clean-up script and move the ticket to **Resolved** if it works.
+
+Add the action to an automation (**Automation → Ticket automations**) with a payload such as:
+
+```json
+{
+  "ticket_id": "{{ ticket.id }}",
+  "script": "Cleanup-Disk",
+  "values": {"Drive": "C"},
+  "success_status": "resolved"
+}
+```
+
+| Field | What it does |
+| --- | --- |
+| `script` | The script to run: its Gitea path (`rmm/Common/Cleanup-Disk.ps1`), its name (`Cleanup-Disk`) or its ID. A script in the company's own folder wins over one in `Common/` with the same name. The form lists every active script. |
+| `asset_id` | Run only on this linked asset. Without it the script runs on every linked device with the RMM agent (up to 20). |
+| `values` | The script's parameters and environment variables, keyed by name (`Drive`) or as in the run form (`param:Drive`, `env:SITE_URL`). Values may use `{{ticket.*}}`, `{{asset.*}}` and `{{company.variables.*}}`; they are filled in for each device like a schedule's. A blank field whose script default is a MyPortal variable is filled from that default. |
+| `timeout_seconds` | Defaults to the script's own timeout. |
+| `run_as` | `system` (default) or `user`, the user logged in to the device. |
+| `success_status` | Ticket status to set once the script completes successfully (exit code 0) on every device it was queued on. Leave it out to leave the status alone. |
+
+The script is queued as an ordinary RMM run and shows as **Ticket automation** in run history.
+When the device reports back, the outcome, exit code and the end of the output are added to the
+ticket as an internal note. A run that expires before the device collects it (24 hours), never
+reports back or is cancelled gets a note too. Notes and status changes made this way do not fire
+further ticket automations.
+
+The action is **skipped** when the ticket has no linked asset, no linked device has the RMM agent,
+the same script from a ticket automation is still queued or running on the device, or the script
+cannot run on the device's platform. It **fails** when the script cannot be found for the
+ticket's company, a value does not match a script field, a mandatory value is missing, or
+`success_status` is not a ticket status. The action is hidden when the RMM feature is disabled.
+Apply migration **509** first.
+
 ## Who can use it
 
 The **Scripts** permission (RMM group in Roles) controls access per company. Read access shows
