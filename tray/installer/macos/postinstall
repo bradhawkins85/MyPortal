@@ -2,6 +2,7 @@
 # Package postinstall script — runs as root after the pkg payload is extracted.
 # Loads the LaunchDaemon and registers the LaunchAgent for current users.
 set -u
+PKG_PATH_ARG="${1:-}"
 
 BIN_DIR="/Library/MyPortal/Tray"
 DAEMON_PLIST="/Library/LaunchDaemons/io.myportal.tray.service.plist"
@@ -9,9 +10,40 @@ AGENT_PLIST="/Library/LaunchAgents/io.myportal.tray.agent.plist"
 LOG_DIR="/Library/Logs/MyPortal/tray"
 STATE_DIR="/Library/Application Support/MyPortal/Tray"
 ENV_FILE="/Library/Preferences/io.myportal.tray.env"
+DAEMON_LABEL="io.myportal.tray.service"
+AGENT_LABEL="io.myportal.tray.agent"
+# Deployment-URL zips ship this file next to myportal-tray.pkg so that
+# double-clicking the pkg configures the tray without the .command launcher.
+BUNDLED_ENV_NAME="myportal-tray.env"
+
+# Keep a copy of this script's output: Installer.app hides it, and it is the
+# first thing to check when the service or menu-bar agent did not start.
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+exec > >(tee -a "$LOG_DIR/postinstall.log") 2>&1
+echo "=== MyPortal Tray postinstall $(date '+%Y-%m-%d %H:%M:%S') ==="
 
 warn() {
     echo "Warning: $*" >&2
+}
+
+env_file_is_complete() {
+    [ -s "$1" ] && grep -q '^MYPORTAL_URL=..*' "$1" && grep -q '^ENROL_TOKEN=..*' "$1"
+}
+
+# Print the deployment env file shipped next to the package, if any. Installer
+# passes the package path as $1 and, for Installer.app, also as PACKAGE_PATH.
+bundled_env_file() {
+    local pkg dir candidate
+    for pkg in "${PACKAGE_PATH:-}" "${PKG_PATH_ARG:-}"; do
+        [ -n "$pkg" ] || continue
+        dir="$(dirname "$pkg")"
+        candidate="$dir/$BUNDLED_ENV_NAME"
+        if env_file_is_complete "$candidate"; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
 }
 
 prompt_console_user() {
@@ -65,7 +97,16 @@ ensure_configuration() {
         return 0
     fi
 
-    if [ -s "$ENV_FILE" ] && grep -q '^MYPORTAL_URL=' "$ENV_FILE" && grep -q '^ENROL_TOKEN=' "$ENV_FILE"; then
+    local bundled
+    if bundled="$(bundled_env_file)"; then
+        echo "Using configuration from $bundled"
+        if install -m 600 -o root -g wheel "$bundled" "$ENV_FILE"; then
+            return 0
+        fi
+        warn "failed to copy $bundled to $ENV_FILE"
+    fi
+
+    if env_file_is_complete "$ENV_FILE"; then
         return 0
     fi
 
@@ -91,33 +132,79 @@ chmod 755 "/Library/Application Support/MyPortal" "$STATE_DIR" 2>/dev/null || tr
 
 ensure_configuration
 
-# Make payload executables runnable.
+# Make payload executables runnable and launchd-loadable. launchd refuses
+# plists that are not root-owned or are group/world-writable, and a quarantine
+# flag inherited from a downloaded package can stop the binaries launching.
 chmod +x "$BIN_DIR/myportal-tray-service" "$BIN_DIR/myportal-tray-ui" "$BIN_DIR/uninstall.sh" 2>/dev/null || true
+chown root:wheel "$DAEMON_PLIST" "$AGENT_PLIST" 2>/dev/null || true
+chmod 644 "$DAEMON_PLIST" "$AGENT_PLIST" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$BIN_DIR" 2>/dev/null || true
 
-# Stop any existing jobs before bootstrapping the newly installed plists. Prefer
-# modern launchctl verbs and fall back to load/unload for older macOS releases.
-launchctl bootout system "$DAEMON_PLIST" 2>/dev/null || launchctl unload "$DAEMON_PLIST" 2>/dev/null || true
-if ! launchctl bootstrap system "$DAEMON_PLIST" 2>/dev/null; then
-    if ! launchctl load -w "$DAEMON_PLIST" 2>/dev/null; then
-        warn "failed to load $DAEMON_PLIST; the service should start after reboot or can be loaded manually"
+# Wait for launchd to finish removing a job after bootout. Bootstrapping
+# straight away fails with "5: Input/output error" while the old job lingers.
+wait_for_unload() {
+    local target="$1" i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        launchctl print "$target" >/dev/null 2>&1 || return 0
+        sleep 1
+    done
+    return 0
+}
+
+# bootstrap_job <domain> <plist> <label> [uid]
+# Replaces any loaded copy of the job with the newly installed plist, then
+# starts it. Prefers modern launchctl verbs and falls back to load/unload for
+# older macOS releases. Returns non-zero when the job could not be loaded.
+bootstrap_job() {
+    local domain="$1" plist="$2" label="$3" uid="${4:-}" attempt
+    local target="$domain/$label"
+
+    launchctl bootout "$target" 2>/dev/null || launchctl bootout "$domain" "$plist" 2>/dev/null || true
+    wait_for_unload "$target"
+    launchctl enable "$target" 2>/dev/null || true
+
+    for attempt in 1 2 3; do
+        if launchctl bootstrap "$domain" "$plist"; then
+            break
+        fi
+        if launchctl print "$target" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 2
+    done
+
+    if ! launchctl print "$target" >/dev/null 2>&1; then
+        if [ -n "$uid" ]; then
+            launchctl asuser "$uid" launchctl load -w "$plist" || true
+        else
+            launchctl load -w "$plist" || true
+        fi
     fi
+
+    if ! launchctl print "$target" >/dev/null 2>&1; then
+        return 1
+    fi
+    launchctl kickstart -k "$target" 2>/dev/null || true
+    return 0
+}
+
+if bootstrap_job system "$DAEMON_PLIST" "$DAEMON_LABEL"; then
+    echo "Started $DAEMON_LABEL."
+else
+    warn "failed to load $DAEMON_PLIST; the service should start after reboot or can be loaded with: sudo launchctl bootstrap system $DAEMON_PLIST"
 fi
-launchctl enable system/io.myportal.tray.service 2>/dev/null || true
-launchctl kickstart -k system/io.myportal.tray.service 2>/dev/null || true
 
 # Register the agent for the active console user and any other GUI sessions.
 # New sessions will also pick it up automatically from /Library/LaunchAgents.
-for uid in $(stat -f '%u' /dev/console 2>/dev/null; ps -axo uid= 2>/dev/null | sort -u); do
+for uid in $( (stat -f '%u' /dev/console 2>/dev/null; ps -axo uid= 2>/dev/null) | tr -d ' ' | sort -un); do
     if [[ "$uid" =~ ^[0-9]+$ && "$uid" -ge 500 ]]; then
-        launchctl bootout "gui/$uid" "$AGENT_PLIST" 2>/dev/null || launchctl asuser "$uid" launchctl unload "$AGENT_PLIST" 2>/dev/null || true
-        if ! launchctl bootstrap "gui/$uid" "$AGENT_PLIST" 2>/dev/null; then
-            if ! launchctl asuser "$uid" launchctl load -w "$AGENT_PLIST" 2>/dev/null; then
-                warn "failed to load the menu-bar agent for user $uid; it will be loaded at the next login"
-                continue
-            fi
+        # Only users with a GUI login session can run the menu-bar agent.
+        launchctl print "gui/$uid" >/dev/null 2>&1 || continue
+        if bootstrap_job "gui/$uid" "$AGENT_PLIST" "$AGENT_LABEL" "$uid"; then
+            echo "Started $AGENT_LABEL for user $uid."
+        else
+            warn "failed to load the menu-bar agent for user $uid; it will be loaded at the next login"
         fi
-        launchctl enable "gui/$uid/io.myportal.tray.agent" 2>/dev/null || true
-        launchctl kickstart -k "gui/$uid/io.myportal.tray.agent" 2>/dev/null || true
     fi
 done
 

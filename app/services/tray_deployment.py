@@ -375,8 +375,13 @@ _README = (
 
 _MACOS_STEPS = (
     "1. Open the zip file so it extracts into a folder.\n"
-    "2. Right-click \"Install MyPortal Tray.command\", choose Open, then Open\n"
-    "   again, and enter your Mac password when asked."
+    "2. Double-click \"myportal-tray.pkg\" and follow the installer. Keep\n"
+    "   \"myportal-tray.env\" in the same folder: the installer reads it to\n"
+    "   connect the Mac to your organisation.\n"
+    "3. If macOS says the package cannot be verified, open System Settings >\n"
+    "   Privacy & Security, click Open Anyway, then open the package again.\n\n"
+    "IT staff can instead run \"Install MyPortal Tray.command\" from Terminal:\n"
+    "   bash \"Install MyPortal Tray.command\""
 )
 
 

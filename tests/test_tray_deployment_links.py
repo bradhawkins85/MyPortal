@@ -101,8 +101,21 @@ def test_macos_bundle_contents(installers):
             launcher = archive.getinfo("Install MyPortal Tray.command")
             assert (launcher.external_attr >> 16) & 0o111
             assert "myportal-tray.pkg" in archive.namelist()
+            readme = archive.read("README.txt").decode()
+            assert "Double-click \"myportal-tray.pkg\"" in readme
     finally:
         path.unlink()
+
+
+def test_macos_postinstall_reads_env_file_next_to_package():
+    # Double-clicking the pkg from the deployment zip must pick up the
+    # myportal-tray.env shipped beside it, or the Mac never enrols.
+    script = (
+        Path(__file__).resolve().parent.parent / "tray" / "installer" / "macos" / "postinstall"
+    ).read_text()
+    assert 'BUNDLED_ENV_NAME="myportal-tray.env"' in script
+    assert "PACKAGE_PATH" in script
+    assert 'install -m 600 -o root -g wheel "$bundled" "$ENV_FILE"' in script
 
 
 def test_bundle_requires_cached_installer(tmp_path, monkeypatch):
