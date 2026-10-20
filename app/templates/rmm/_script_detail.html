@@ -31,12 +31,24 @@
         {% endif %}
       </div>
       <dl class="rmm-detail__facts">
-        <div><dt>Default timeout</dt><dd>{{ (script.default_timeout_seconds // 60) if script.default_timeout_seconds >= 60 else script.default_timeout_seconds }} {{ 'minutes' if script.default_timeout_seconds >= 60 else 'seconds' }}</dd></div>
+        <div><dt>Default timeout</dt><dd>{{ 'Forever' if script.default_timeout_seconds == 0 else (script.default_timeout_seconds // 60) ~ ' minutes' }}</dd></div>
         <div><dt>Execution</dt><dd>{{ 'Run Anyway' if script.execution_mode == 'run_anyway' else ('Parallel' if script.allow_parallel else 'Sequential') }}</dd></div>
         <div><dt>Lines</dt><dd>{{ script.line_count }}</dd></div>
         <div><dt>Last synced</dt><dd>{% if script.synced_at %}<span data-utc="{{ script.synced_at }}">{{ script.synced_at }}</span>{% else %}–{% endif %}</dd></div>
       </dl>
+      <p>Platforms: {{ script.platform_labels | join(', ') if script.platform_labels else 'None (disabled on all devices)' }}</p>
       {% if is_super_admin %}
+      <form method="post" action="/rmm/scripts/{{ script.id }}/platforms">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <fieldset class="form-field">
+          <legend class="form-label">Allowed platforms</legend>
+          {% for key, label in script_platforms.items() %}
+          <label><input type="checkbox" name="platforms" value="{{ key }}"{% if key in script.platforms %} checked{% endif %}> {{ label }}</label>
+          {% endfor %}
+          <p class="form-help">Only matching devices can run this script manually, on a schedule or during onboarding. Clear all platforms to prevent execution. Shell requirements still apply.</p>
+        </fieldset>
+        <button type="submit" class="button button--ghost button--small">Save platforms</button>
+      </form>
       <form method="post" action="/rmm/scripts/{{ script.id }}/execution">
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
         <div class="form-field">

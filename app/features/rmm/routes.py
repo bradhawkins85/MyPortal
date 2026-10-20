@@ -103,7 +103,9 @@ def _script_summary(script: dict[str, Any]) -> dict[str, Any]:
         "description": script.get("description") or "",
         "parameter_count": len(script.get("parameters") or []),
         "env_count": len(script.get("env_vars") or []),
-        "default_timeout_seconds": script.get("default_timeout_seconds") or 600,
+        "default_timeout_seconds": script.get("default_timeout_seconds", 600),
+        "platforms": script.get("platforms", rmm_repo.default_script_platforms(script.get("language"))),
+        "platform_labels": [rmm_scripts.SCRIPT_PLATFORMS.get(item, item) for item in script.get("platforms", rmm_repo.default_script_platforms(script.get("language")))],
         "allow_parallel": bool(script.get("allow_parallel")),
         "execution_mode": rmm_repo.script_execution_mode(script),
         "synced_at": _iso(script.get("synced_at")),
@@ -240,6 +242,8 @@ async def scripts_page(request: Request, script: int | None = Query(default=None
         user,
         extra={
             "title": "Scripts",
+            "global_timeout_seconds": await rmm_repo.get_global_script_timeout(),
+            "script_platforms": rmm_scripts.SCRIPT_PLATFORMS,
             "company": company,
             "script_groups": groups,
             "script_tree": _script_tree(groups),
@@ -309,9 +313,14 @@ async def gitea_identity(request: Request) -> Response:
 
 
 @router.get("/api/rmm/scripts", summary="List RMM scripts")
-async def list_scripts_api(request: Request):
+async def list_scripts_api(request: Request, asset_id: int | None = Query(default=None, ge=1)):
     _user, _company, company_id, _can_run = await _context(request, api=True)
     scripts = await rmm_repo.list_scripts(company_id=company_id)
+    if asset_id is not None:
+        agent = await rmm_repo.get_asset_agent(asset_id)
+        if not agent or int(agent.get("company_id") or 0) != company_id:
+            raise HTTPException(status_code=404, detail="Device not found")
+        scripts = [script for script in scripts if not rmm_scripts.device_problem(script, agent)]
     return {"scripts": [_script_summary(script) for script in scripts]}
 
 
@@ -326,7 +335,7 @@ async def get_script_api(script_id: int, request: Request):
         "script": {**_script_summary(script), "content": script.get("content") or ""},
         "fields": rmm_scripts.script_fields(script),
         "variables": await rmm_scripts.available_variables(),
-        "agents": [_serialise(agent) for agent in agents],
+        "agents": [_serialise(agent) for agent in agents if not rmm_scripts.device_problem(script, agent)],
         "source_url": await rmm_scripts.script_source_url(script),
         "can_run": can_run,
     }
@@ -352,6 +361,47 @@ async def summarise_script_api(script_id: int, request: Request):
         metadata={"script": script["name"], "model": state["model"]},
     )
     return state
+
+
+def _policy_timeout(raw: Any) -> int:
+    try:
+        minutes = int(str(raw))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Enter whole minutes, or 0 for forever") from None
+    if minutes < 0 or minutes > rmm_scripts.MAX_TIMEOUT_SECONDS // 60:
+        raise HTTPException(status_code=400, detail="Choose a valid timeout in minutes")
+    return minutes * 60
+
+
+@router.post("/rmm/scripts/timeout", summary="Save the global script timeout")
+async def update_global_script_timeout(request: Request):
+    user, _company, _company_id, _can_run = await _context(request, api=True)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    form = await request.form()
+    seconds = _policy_timeout(form.get("timeout_minutes"))
+    await rmm_repo.set_global_script_timeout(seconds)
+    await audit_service.record(action="rmm.script.timeout.update", request=request, user_id=user.get("id"),
+                               metadata={"timeout_seconds": seconds})
+    return flash_redirect("/rmm/scripts", "Global script timeout saved.", "success")
+
+
+@router.post("/rmm/scripts/{script_id:int}/platforms", summary="Save a script's allowed platforms")
+async def update_script_platforms(script_id: int, request: Request):
+    user, _company, company_id, _can_run = await _context(request, api=True)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    script = await rmm_repo.get_script(script_id)
+    if not rmm_repo.script_available_to(script, company_id):
+        raise HTTPException(status_code=404, detail="Script not found")
+    form = await request.form()
+    platforms = list(dict.fromkeys(str(item) for item in form.getlist("platforms")))
+    if any(item not in rmm_scripts.SCRIPT_PLATFORMS for item in platforms):
+        raise HTTPException(status_code=400, detail="Choose valid platforms")
+    await rmm_repo.set_script_platforms(script_id, platforms)
+    await audit_service.record(action="rmm.script.platforms.update", request=request, user_id=user.get("id"),
+                               entity_type="rmm_script", entity_id=script_id, metadata={"platforms": platforms})
+    return flash_redirect(f"/rmm/scripts?script={script_id}", "Script platforms saved.", "success")
 
 
 class ScriptExecutionRequest(BaseModel):

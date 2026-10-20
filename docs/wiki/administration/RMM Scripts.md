@@ -320,6 +320,29 @@ runs and the devices with the RMM agent. Choose a script to see, on the right:
 - **Script**: the source devices receive, as loaded at the last sync, with **Copy** and, for
   technicians who can sign in to Gitea, **Edit in Gitea**.
 
+## Timeouts and platforms
+
+Super administrators can set the **Global script timeout** on `/rmm/scripts` to
+any whole number of minutes (at least 1), or **0 for Forever**. New manual runs,
+schedules and onboarding steps start with this default. Technicians can override
+it in **Stop the script after** when running a script or creating/editing an
+automation. Existing schedules and steps retain their saved timeout.
+
+An offline device may wait up to the selected timeout to collect a run; Forever
+keeps it queued until collected or cancelled. Once collected, the execution timeout
+starts, with five extra minutes for the agent to report the result. Agent check-ins
+do not shorten these deadlines. Forever runs have no execution or result deadline.
+Deploy the updated RMM agent to use Forever; older agents interpret zero as ten minutes.
+
+Open each script to set its **Allowed platforms**: Windows, Mac, Linux or BSD.
+PowerShell scripts default to Windows; Bash and zsh scripts default to Mac and Linux.
+These settings survive Gitea sync. Clear all platforms to prevent execution everywhere.
+Device script pickers show only compatible scripts, and script device selectors and
+scheduled targets exclude incompatible platforms. Onboarding skips incompatible steps
+and continues. The server checks platform permissions again before dispatching queued
+runs. A compatible shell must still be installed, including PowerShell (`pwsh`) on
+Mac/Linux if you explicitly enable a PowerShell script there.
+
 ## Running a script
 
 Scripts default to **Sequential** execution on each device. A super administrator
@@ -397,7 +420,7 @@ RMM schedules are separate from MyPortal's scheduled tasks. Each schedule has:
 
 MyPortal checks for due schedules every 30 seconds. A device that is still working on (or has
 not yet collected) the previous run from the same schedule is skipped rather than given a
-second one, and a run waits for an offline device only until the schedule's next time. If
+second one. Offline devices wait for the configured timeout (or indefinitely with Forever). If
 MyPortal was down when a schedule was due, it runs once when MyPortal is back, not once per
 missed time. **Run now** runs a schedule straight away, **Turn off** pauses it, and the
 **Last run** column shows how many devices it reached and why any were skipped. Runs started

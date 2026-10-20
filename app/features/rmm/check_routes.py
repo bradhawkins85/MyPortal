@@ -367,7 +367,8 @@ async def targeting_preview(request: Request, payload: TargetingPreviewRequest):
         if (not script or not rmm_repo.script_available_to(script, company_id)
                 or (payload.scope == "global" and script.get("company_id") is not None)):
             raise HTTPException(status_code=404, detail="Script not found")
-        agents = [agent for agent in agents if rmm_repo.script_available_to(script, int(agent["company_id"]))]
+        agents = [agent for agent in agents if rmm_repo.script_available_to(script, int(agent["company_id"]))
+                  and rmm_scripts.platform_allowed(script, agent)]
     contexts = await targeting_repo.contexts_for_agents(agents)
     matched = [agent for agent in agents if int(agent["id"]) in contexts
                and matches(contexts[int(agent["id"])])]

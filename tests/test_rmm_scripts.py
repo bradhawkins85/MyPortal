@@ -307,7 +307,7 @@ async def sqlite_db(monkeypatch):
                  "493_rmm_script_parallel.sql", "494_rmm_chocolatey_sources.sql", "495_rmm_script_run_anyway.sql",
                  "496_rmm_chocolatey_catalog.sql", "498_rmm_windows_updates.sql",
                  "499_rmm_windows_update_blocks.sql", "500_rmm_check_auto_close.sql",
-                 "504_chocolatey_software_matches.sql", "505_chocolatey_catalog_lookups.sql"):
+                 "504_chocolatey_software_matches.sql", "505_chocolatey_catalog_lookups.sql", "508_rmm_script_policy.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     # Mirrors migration 506 (Chocolatey onboarding steps), whose MODIFY SQLite cannot run.
     cursor = await conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'rmm_onboarding_steps'")
@@ -515,7 +515,7 @@ async def test_failures_timeouts_and_other_agents(sqlite_db, monkeypatch):
     first = await rmm_scripts.queue_runs(script_id=script["id"], company_id=1, asset_ids=[11], submitted={},
                                          timeout_seconds=99999, requested_by_user_id=None)
     run_id = first["queued"][0]["run_id"]
-    assert (await rmm_repo.get_run(run_id))["timeout_seconds"] == rmm_scripts.MAX_TIMEOUT_SECONDS
+    assert (await rmm_repo.get_run(run_id))["timeout_seconds"] == 99999
     assert await rmm_scripts.record_result(windows_agent, run_id, {"exit_code": 0}) is None
     assert await rmm_scripts.wait_for_jobs(windows_agent, wait_seconds=0) == []
     await rmm_scripts.wait_for_jobs(mac_agent, wait_seconds=0)
@@ -1280,7 +1280,7 @@ def _detail(**overrides):
         "id": 7, "name": "Check-Disk", "path": "rmm/Common/disk/Check-Disk.ps1", "folder": "Common/disk",
         "scope": "common", "language": "powershell", "language_label": "PowerShell",
         "description": "Checks free disk space.", "parameter_count": 1, "env_count": 1,
-        "default_timeout_seconds": 600, "synced_at": "2026-10-10T00:00:00",
+        "default_timeout_seconds": 600, "platforms": ["windows"], "platform_labels": ["Windows"], "synced_at": "2026-10-10T00:00:00",
         "content": "param($Drive)\nWrite-Output '<script>alert(1)</script>'", "content_sha256": "a" * 64,
         "line_count": 2, "source_url": "https://git.example.com/msp/scripts/src/branch/main/rmm/Common/disk/Check-Disk.ps1",
         "fields": [
@@ -1305,6 +1305,7 @@ def _render_library(**context):
             "language_label": "PowerShell", "description": "", "parameter_count": 1, "env_count": 1,
         }]}],
         runs=[], agents=[], summary={"scripts": 1, "agents": 0, "running": 0, "failed": 0},
+        global_timeout_seconds=600, script_platforms=rmm_scripts.SCRIPT_PLATFORMS,
         can_run=True, can_sync=False, gitea_ready=True, gitea_message="", gitea_url="", company={"name": "Contoso"},
     )
     defaults.update(context)

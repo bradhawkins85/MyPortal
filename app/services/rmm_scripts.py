@@ -51,8 +51,13 @@ from app.services.rmm_script_layout import (
     script_scope,
 )
 
-MIN_TIMEOUT_SECONDS = 10
-MAX_TIMEOUT_SECONDS = 4 * 60 * 60
+MIN_TIMEOUT_SECONDS = 60
+# Largest whole-minute timeout representable by the database's signed INT.
+MAX_TIMEOUT_SECONDS = 2_147_483_640
+SCRIPT_PLATFORMS = {
+    "windows": "Windows", "darwin": "Mac", "linux": "Linux",
+    "freebsd": "FreeBSD", "openbsd": "OpenBSD", "netbsd": "NetBSD",
+}
 # How long a queued run waits for an offline device before it expires.
 QUEUE_LIFETIME = timedelta(hours=24)
 # Extra time after the script's own timeout for the agent to report back.
@@ -523,7 +528,21 @@ def clamp_timeout(value: Any, default: int) -> int:
         seconds = int(value)
     except (TypeError, ValueError):
         seconds = default
+    if seconds == 0:
+        return 0  # Forever, including while waiting for an offline agent.
     return max(MIN_TIMEOUT_SECONDS, min(MAX_TIMEOUT_SECONDS, seconds))
+
+
+def normalise_platform(value: Any) -> str:
+    name = str(value or "").strip().lower()
+    return {"mac": "darwin", "macos": "darwin", "osx": "darwin", "win32": "windows", "win": "windows"}.get(name, name)
+
+
+def platform_allowed(script: Mapping[str, Any], agent: Mapping[str, Any]) -> bool:
+    platforms = script.get("platforms")
+    if platforms is None:
+        platforms = rmm_repo.default_script_platforms(script.get("language"))
+    return normalise_platform(agent.get("os")) in platforms
 
 
 def notify_agent(agent_id: int) -> None:
@@ -535,7 +554,10 @@ def notify_agent(agent_id: int) -> None:
 def device_problem(script: Mapping[str, Any], agent: Mapping[str, Any]) -> str | None:
     """Why ``script`` cannot run on ``agent``'s device, or ``None`` when it can."""
 
-    os_name = str(agent.get("os") or "").lower()
+    if not platform_allowed(script, agent):
+        label = SCRIPT_PLATFORMS.get(normalise_platform(agent.get("os")), "Unknown")
+        return f"This script is not enabled for the device's platform ({label})."
+    os_name = normalise_platform(agent.get("os"))
     if script["language"] == "powershell" and os_name not in {"windows", ""}:
         if "pwsh" not in str(agent.get("shells") or ""):
             return "PowerShell is not installed on this device."
@@ -597,7 +619,8 @@ async def queue_for_agent(
         inputs=inputs,
         payload_encrypted=encrypt_secret(json.dumps(payload)),
         timeout_seconds=timeout_seconds,
-        expires_at=expires_at or datetime.now(timezone.utc).replace(tzinfo=None) + QUEUE_LIFETIME,
+        expires_at=(None if timeout_seconds == 0 else
+                    expires_at or datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=timeout_seconds)),
         run_source=run_source,
         schedule_id=schedule_id,
         onboarding_run_id=onboarding_run_id,
@@ -627,7 +650,7 @@ async def queue_runs(
     if len(targets) > MAX_TARGETS_PER_RUN:
         raise RunRequestError({"assets": f"Choose at most {MAX_TARGETS_PER_RUN} devices at a time."})
     entries = validate_entries(script, submitted)
-    timeout = clamp_timeout(timeout_seconds, int(script.get("default_timeout_seconds") or 600))
+    timeout = clamp_timeout(timeout_seconds, int(script.get("default_timeout_seconds", 600)))
     inputs = stored_inputs(script, entries)
 
     queued: list[dict[str, Any]] = []
@@ -695,7 +718,7 @@ async def queue_tray_run(*, device: Mapping[str, Any], node: Mapping[str, Any]) 
             agent={**agent, "company_id": company_id, "asset_id": asset_id},
             entries=entries,
             inputs=stored_inputs(script, entries),
-            timeout_seconds=clamp_timeout(None, int(script.get("default_timeout_seconds") or 600)),
+            timeout_seconds=clamp_timeout(None, int(script.get("default_timeout_seconds", 600))),
             requested_by_user_id=None,
             run_source=TRAY_RUN_SOURCE,
         )
@@ -807,7 +830,7 @@ def _job_payload(row: Mapping[str, Any]) -> dict[str, Any] | None:
         "language": row.get("language"),
         "script": row.get("script_content") or "",
         "sha256": row.get("content_sha256"),
-        "timeout_seconds": int(row.get("timeout_seconds") or 600),
+        "timeout_seconds": int(row.get("timeout_seconds", 600)),
         "run_anyway": bool(row.get("run_anyway")) and row.get("run_source") != "onboarding",
         "parameters": values.get("parameters") or {},
         "parameter_order": values.get("parameter_order") or [],
@@ -842,18 +865,24 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
     jobs: list[dict[str, Any]] = []
     agent_id = int(agent["id"])
     for row in await rmm_repo.next_jobs_for_agent(agent_id):
-        if row.get("run_source") == "patch":
+        # Recheck current restrictions: a queued job may predate a platform edit.
+        script = await rmm_repo.get_script(int(row["script_id"])) if row.get("script_id") else None
+        if not platform_allowed(script or row, agent):
+            await rmm_repo.cancel_run(int(row["id"]))
+            continue
+        if row.get("expires_at") is not None or row.get("run_source") == "patch":
             queue_deadline = row.get("expires_at")
             if isinstance(queue_deadline, str):
                 queue_deadline = datetime.fromisoformat(queue_deadline)
             if not queue_deadline or queue_deadline <= datetime.now(timezone.utc).replace(tzinfo=None):
-                await rmm_repo.cancel_run(int(row["id"]))
+                if row.get("run_source") == "patch":
+                    await rmm_repo.cancel_run(int(row["id"]))
+                else:
+                    await rmm_repo.expire_stale_runs()
                 continue
-        expires_at = (
-            datetime.now(timezone.utc).replace(tzinfo=None)
-            + timedelta(seconds=int(row.get("timeout_seconds") or 600))
-            + RESULT_GRACE
-        )
+        timeout = int(row.get("timeout_seconds", 600))
+        expires_at = (datetime.now(timezone.utc).replace(tzinfo=None)
+                      + timedelta(seconds=timeout) + RESULT_GRACE) if timeout else None
         if not await rmm_repo.mark_dispatched(int(row["id"]), agent_id, expires_at=expires_at):
             continue
         if row.get("run_anyway") and row.get("run_source") != "onboarding" and not agent.get("run_anyway_supported"):

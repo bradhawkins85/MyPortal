@@ -525,9 +525,9 @@
     noFields.hidden = detail.fields.length > 0;
     const timeout = saved ? saved.timeout_seconds : detail.script.default_timeout_seconds;
     const retry = saved && saved.retry;
-    timeoutInput.min = retry ? String(10 / 60) : '1';
+    timeoutInput.min = '0';
     timeoutInput.step = retry ? 'any' : '1';
-    timeoutInput.value = retry ? (timeout || 600) / 60 : Math.max(1, Math.round((timeout || 600) / 60));
+    timeoutInput.value = timeout === 0 ? 0 : Math.max(1, (timeout ?? 600) / 60);
     if (saved) {
       Object.entries(saved.values || {}).forEach(([key, value]) => {
         const control = fieldsHost.querySelector('[data-rmm-value="' + CSS.escape(key) + '"]');
@@ -558,15 +558,17 @@
   }
 
   async function ensureScriptOptions() {
-    if (state.scriptsLoaded) {
+    if (state.scriptsLoaded && state.scriptsAsset === config.asset_id) {
       return;
     }
-    const data = await api('/api/rmm/scripts');
+    const data = await api('/api/rmm/scripts' + (config.asset_id ? '?asset_id=' + encodeURIComponent(config.asset_id) : ''));
+    Array.from(scriptSelect.options).forEach((option) => { if (option.value) { option.remove(); } });
     (data.scripts || []).forEach((script) => {
       const label = (script.folder ? script.folder + ' / ' : '') + script.name + ' (' + script.language_label + ')';
       scriptSelect.append(el('option', { value: script.id }, label));
     });
     state.scriptsLoaded = true;
+    state.scriptsAsset = config.asset_id;
   }
 
   async function openRunEditor(scriptId, options) {
@@ -711,7 +713,7 @@
       }
     }
     submitButton.disabled = true;
-    const minutes = Number(timeoutInput.value) || 10;
+    const minutes = Number(timeoutInput.value);
     if (state.mode !== 'run') {
       await saveAutomation(Math.round(minutes * 60));
       return;
