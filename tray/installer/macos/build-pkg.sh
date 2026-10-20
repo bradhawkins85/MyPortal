@@ -41,8 +41,21 @@ cp io.myportal.tray.agent.plist   "$PAYLOAD_DIR/Library/LaunchAgents/"
 
 UNSIGNED_PKG="myportal-tray-${VERSION}-unsigned.pkg"
 
+# pkgbuild marks every .app bundle in the payload relocatable by default, so
+# Installer would put the chat shell wherever another copy with the same
+# bundle ID already lives instead of in $INSTALL_LOCATION. Pin every bundle.
+COMPONENT_PLIST="$(dirname "$PAYLOAD_DIR")/components.plist"
+pkgbuild --analyze --root "$PAYLOAD_DIR" "$COMPONENT_PLIST"
+i=0
+while /usr/libexec/PlistBuddy -c "Print :$i" "$COMPONENT_PLIST" >/dev/null 2>&1; do
+    /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" "$COMPONENT_PLIST"
+    i=$((i + 1))
+done
+
 pkgbuild \
     --root "$PAYLOAD_DIR" \
+    --component-plist "$COMPONENT_PLIST" \
+    --ownership recommended \
     --scripts "$SCRIPTS_DIR" \
     --identifier "$IDENTIFIER" \
     --version "$VERSION" \
