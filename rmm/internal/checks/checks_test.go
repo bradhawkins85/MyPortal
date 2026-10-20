@@ -88,6 +88,22 @@ tmpfs /run tmpfs rw 0 0
 	}
 }
 
+func TestParseHdiutilInfo(t *testing.T) {
+	images := parseHdiutilInfo("framework       : 671\n" +
+		"================================================\n" +
+		"image-path      : /Users/me/Downloads/Installer.dmg\n" +
+		"/dev/disk4          \tGUID_partition_scheme          \t\n" +
+		"/dev/disk4s1        \tApple_APFS                     \t\n" +
+		"/dev/disk5          \tEF57347C-0000-11AA-AA11-0030654\t\n" +
+		"/dev/disk5s1        \t41504653-0000-11AA-AA11-0030654\t/Volumes/My Installer\n")
+	if !isDiskImage(images, "/dev/disk5s1", "/Volumes/My Installer") || !isDiskImage(images, "/dev/disk4s2", "/Volumes/Other") {
+		t.Fatalf("got %v", images)
+	}
+	if isDiskImage(images, "/dev/disk3s5", "/System/Volumes/Data") || isDiskImage(images, "/dev/disk40s1", "/Volumes/USB") {
+		t.Fatalf("got %v", images)
+	}
+}
+
 func TestNetworkRates(t *testing.T) {
 	counters := parseNetDev(`Inter-|   Receive                                                |  Transmit
  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed

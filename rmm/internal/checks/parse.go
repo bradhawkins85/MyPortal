@@ -109,6 +109,45 @@ func parseMounts(text string) []string {
 	return mounts
 }
 
+// parseHdiutilInfo reads macOS "hdiutil info" output and returns the whole
+// disk devices (such as /dev/disk4) and mount points of attached disk images.
+func parseHdiutilInfo(text string) map[string]bool {
+	images := map[string]bool{}
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.HasPrefix(line, "/dev/") {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		images[wholeDisk(strings.TrimSpace(parts[0]))] = true
+		if len(parts) >= 3 {
+			if mount := strings.TrimSpace(parts[2]); mount != "" {
+				images[mount] = true
+			}
+		}
+	}
+	return images
+}
+
+// isDiskImage reports whether a volume belongs to an attached disk image.
+func isDiskImage(images map[string]bool, device, mount string) bool {
+	return images[mount] || images[wholeDisk(device)]
+}
+
+// wholeDisk trims the slice suffix from a macOS device: /dev/disk4s1 becomes
+// /dev/disk4.
+func wholeDisk(device string) string {
+	const prefix = "/dev/disk"
+	if !strings.HasPrefix(device, prefix) {
+		return device
+	}
+	rest := device[len(prefix):]
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	return prefix + rest[:end]
+}
+
 // parseVMStat reads macOS vm_stat output: the page size and the free,
 // inactive, speculative and purgeable pages that can be handed out.
 func parseVMStat(text string) (uint64, error) {
