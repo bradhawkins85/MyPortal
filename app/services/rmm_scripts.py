@@ -484,9 +484,17 @@ def validate_entries(script: Mapping[str, Any], submitted: Mapping[str, Any]) ->
 
 
 async def resolve_entries(
-    script: Mapping[str, Any], entries: Mapping[str, str], context: Mapping[str, Any]
+    script: Mapping[str, Any],
+    entries: Mapping[str, str],
+    context: Mapping[str, Any],
+    rendered: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Resolve variables for one device and convert parameters to their types."""
+    """Resolve variables for one device and convert parameters to their types.
+
+    A blank field whose script default is a MyPortal variable, such as
+    ``{{ COMPANY_NAME }}``, is filled from that default; left to the script it
+    would receive the variable's text. When given, ``rendered`` collects each
+    variable resolved, keyed like ``entries``, as ``template`` and ``value``."""
 
     errors: dict[str, str] = {}
     params: dict[str, Any] = {}
@@ -494,10 +502,24 @@ async def resolve_entries(
     order: list[str] = []
     for field_def in script_fields(script):
         entered = entries.get(field_def["key"], "")
+        from_default = False
+        if not entered.strip() and _TOKEN.search(str(field_def.get("default") or "")):
+            entered = str(field_def["default"])
+            from_default = True
         if _TOKEN.search(entered):
             resolved = await render_value(entered, context)
+            if rendered is not None:
+                rendered[field_def["key"]] = {"template": entered, "value": resolved}
         else:
             resolved = entered
+        if from_default and not resolved.strip() and field_def["type"] in {"string", "secret"}:
+            # The script's own default would be the variable's text, so send the empty value instead.
+            if field_def["kind"] == "env":
+                env[field_def["name"]] = ""
+            else:
+                params[field_def["name"]] = ""
+                order.append(field_def["name"])
+            continue
         if not resolved.strip():
             if field_def["mandatory"] and field_def["type"] != "switch":
                 errors[field_def["key"]] = "The variable has no value for this device."
@@ -564,6 +586,34 @@ def stored_inputs(script: Mapping[str, Any], entries: Mapping[str, str]) -> list
     return [item for item in inputs if item["value"]]
 
 
+def _run_inputs(
+    script: Mapping[str, Any], inputs: list[dict[str, Any]], rendered: Mapping[str, Mapping[str, str]]
+) -> list[dict[str, Any]]:
+    """``inputs`` with the value each variable resolved to on this device.
+
+    Script defaults that were MyPortal variables are added, marked
+    ``script_default``, so run history shows what the device was sent."""
+
+    result: list[dict[str, Any]] = []
+    shown: set[str] = set()
+    for item in inputs:
+        key = f"{item['kind']}:{item['name']}"
+        shown.add(key)
+        item = dict(item)
+        if key in rendered:
+            item["resolved"] = SENSITIVE_MASK if item.get("sensitive") and rendered[key]["value"] else rendered[key]["value"]
+        result.append(item)
+    for field_def in script_fields(script):
+        key = field_def["key"]
+        if key in rendered and key not in shown:
+            item = _stored_input(field_def, rendered[key]["template"])
+            value = rendered[key]["value"]
+            item["resolved"] = SENSITIVE_MASK if field_def.get("sensitive") and value else value
+            item["script_default"] = True
+            result.append(item)
+    return result
+
+
 async def queue_for_agent(
     *,
     script: Mapping[str, Any],
@@ -596,7 +646,9 @@ async def queue_for_agent(
     context = await build_template_context(company_id, asset_id)
     if extra_context:
         context.update(extra_context)
-    payload = await resolve_entries(script, entries, context)
+    rendered: dict[str, dict[str, str]] = {}
+    payload = await resolve_entries(script, entries, context, rendered)
+    inputs = _run_inputs(script, inputs, rendered)
     from app.services import rmm_script_files
 
     try:
