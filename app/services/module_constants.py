@@ -11,6 +11,7 @@ ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
     "ai-link-related",
     "ai-request-missing-info",
     "run-troubleshooting-bot",
+    "rmm-script",
     "add-ticket-reply",
     "smart-attachment-removal",
 }

@@ -76,6 +76,8 @@
     Windows Update scan{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'check' -%}
     Check
+  {%- elif run.run_source == 'ticket' -%}
+    Ticket automation
   {%- elif run.run_source == 'command' -%}
     Command{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'onboarding' -%}

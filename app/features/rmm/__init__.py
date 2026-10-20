@@ -50,7 +50,7 @@ from __future__ import annotations
 from app.core.features import FeaturePack
 
 from app.services import (rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_scripts, rmm_patching,
-                          rmm_software_updates, rmm_windows_updates)
+                          rmm_software_updates, rmm_ticket_scripts, rmm_windows_updates)
 
 from .agent_deploy_routes import router as agent_deploy_router
 from .automation_routes import router as automation_router
@@ -74,6 +74,8 @@ rmm_automation.register_tick_job(rmm_patching.tick)
 rmm_automation.register_tick_job(rmm_windows_updates.tick)
 # Findings analyses start on the tick when one is due and run in the background.
 rmm_automation.register_tick_job(rmm_findings.tick)
+# Ticket automation runs that expire or are cancelled are posted to their ticket.
+rmm_automation.register_tick_job(rmm_ticket_scripts.tick)
 # Onboarding steps can install Chocolatey packages through the patch job.
 rmm_automation.register_package_steps(validate=rmm_software_updates.package_ids, queue=rmm_software_updates.queue_apps)
 

@@ -453,6 +453,26 @@ async def _record_legacy_action_exception(
     )
 
 
+# Payload keys a module renders itself.  RMM script values are resolved per
+# device ({{asset.*}}, {{company.variables.*}}), which the automation context
+# cannot fill, so they reach the module as entered.
+_UNRENDERED_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {"rmm-script": ("values",)}
+
+
+async def _render_action_payload(
+    module_slug: str, payload: Mapping[str, Any], context: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    payload = dict(payload)
+    kept = {
+        key: payload.pop(key)
+        for key in _UNRENDERED_PAYLOAD_KEYS.get(module_slug, ())
+        if key in payload
+    }
+    rendered = await value_templates.render_value_async(payload, context)
+    rendered.update(kept)
+    return rendered
+
+
 def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
     normalised: list[dict[str, Any]] = []
     if not isinstance(actions, list):
@@ -1153,8 +1173,8 @@ async def _invoke_automation_actions_for_context_inner(
             module_payload = (
                 dict(payload_source) if isinstance(payload_source, Mapping) else {}
             )
-            module_payload = await value_templates.render_value_async(
-                module_payload, context
+            module_payload = await _render_action_payload(
+                module_slug, module_payload, context
             )
             if context:
                 module_payload.setdefault("context", context)
@@ -1238,8 +1258,8 @@ async def _invoke_automation_actions_for_context_inner(
         payload = {}
     module_slug = automation.get("action_module")
     if module_slug:
-        module_payload = await value_templates.render_value_async(
-            dict(payload), context
+        module_payload = await _render_action_payload(
+            str(module_slug), payload, context
         )
         if context:
             module_payload.setdefault("context", context)
@@ -1754,8 +1774,8 @@ async def _execute_automation_inner(
                         if isinstance(payload_source, Mapping)
                         else {}
                     )
-                    module_payload = await value_templates.render_value_async(
-                        module_payload, context
+                    module_payload = await _render_action_payload(
+                        module_slug, module_payload, context
                     )
                     if context:
                         module_payload.setdefault("context", context)
@@ -1851,8 +1871,8 @@ async def _execute_automation_inner(
                     payload = {}
                 module_slug = automation.get("action_module")
                 if module_slug:
-                    module_payload = await value_templates.render_value_async(
-                        dict(payload), context
+                    module_payload = await _render_action_payload(
+                        str(module_slug), payload, context
                     )
                     if context:
                         module_payload.setdefault("context", context)
