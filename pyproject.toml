@@ -5,7 +5,7 @@ description = "Python implementation of the MyPortal backend"
 authors = [{name = "MyPortal Team"}]
 readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
@@ -35,7 +35,7 @@ dependencies = [
     "python-multipart",
     "nh3",
     "python-magic",
-    "Pillow>=10.0.0",
+    "Pillow>=13.0.0",
     "markdown-it-py",
     "mutagen",
     "phonenumbers",

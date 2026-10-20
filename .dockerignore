@@ -9,6 +9,7 @@
 !.env.example
 venv
 .venv
+.python
 test_venv
 test_env
 tests

@@ -5,6 +5,8 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 ENV_TEMPLATE="${PROJECT_ROOT}/.env.example"
 VENV_DIR="${PROJECT_ROOT}/.venv"
+# shellcheck source=lib/python_runtime.sh
+source "${SCRIPT_DIR}/lib/python_runtime.sh"
 
 # Production layout. These match the defaults used by scripts/upgrade.sh,
 # deploy/systemd/myportal@.service and deploy/nginx/myportal-bluegreen.conf.
@@ -500,19 +502,22 @@ ensure_virtualenv() {
     # Earlier installer versions ran pip as root inside the checkout.
     chown -R "${SUDO_USER}:$(id -gn "$SUDO_USER")" "$VENV_DIR"
   fi
+  local runtime_python
+  runtime_python=$(ensure_runtime_python "${PROJECT_ROOT}/.python") || exit 1
   if [[ -d "$VENV_DIR" ]]; then
     local python_bin
     python_bin=$(venv_python)
-    if [[ -n "$python_bin" ]] && "$python_bin" -m pip --version >/dev/null 2>&1; then
+    if [[ -n "$python_bin" ]] && "$python_bin" -m pip --version >/dev/null 2>&1 \
+      && [[ "$("$python_bin" -c 'import sys; print("%d.%d" % sys.version_info[:2])')" == "$MYPORTAL_PYTHON_VERSION" ]]; then
       return
     fi
-    # A venv created before python3-venv was installed has no pip and cannot
-    # be repaired reliably; rebuild it.
-    echo "Existing virtual environment at ${VENV_DIR} is unusable; recreating it." >&2
+    # A venv created before python3-venv was installed has no pip, and one on
+    # an older Python cannot install the lock; neither can be repaired in place.
+    echo "Existing virtual environment at ${VENV_DIR} is unusable or not Python ${MYPORTAL_PYTHON_VERSION}; recreating it." >&2
     rm -rf "$VENV_DIR"
   fi
 
-  as_checkout_owner "$SYSTEM_PYTHON" -m venv "$VENV_DIR"
+  as_checkout_owner "$runtime_python" -m venv "$VENV_DIR"
   echo "Created virtual environment at ${VENV_DIR}." >&2
 }
 

@@ -46,6 +46,7 @@ tray/*.exe
 /shared/
 /instances/
 /.venv/
+/.python/
 /.cache/
 /.env.old
 *.log

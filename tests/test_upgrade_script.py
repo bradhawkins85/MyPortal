@@ -171,7 +171,7 @@ def test_valid_deployed_release_is_used_as_plan_base(tmp_path):
 
 
 def test_release_has_private_dependencies_and_shared_mutable_state():
-    assert 'python3 -m venv "$staging"' in SCRIPT
+    assert '"${RUNTIME_PYTHON:-python3}" -m venv "$staging"' in SCRIPT
     assert (
         '"$staging/bin/python" -m pip install --disable-pip-version-check --requirement "$lock"'
         in SCRIPT

@@ -1,0 +1,7 @@
+{
+  "guid": "fe044f1b-a37f-4daa-a9f3-f69708fd67e4",
+  "occurred_at": "2026-10-20T23:40Z",
+  "change_type": "Security",
+  "summary": "Upgrade Pillow to 13.0.0 (8 CVEs) and certifi; releases now run on Python 3.12, and bare-metal upgrades install Python 3.12 automatically (distribution package or a standalone build) before building the release",
+  "content_hash": "47e887c5c2ab27ff037ed2b3ba10270b00c2bdcb3767037ab76c5f28d0062d86"
+}

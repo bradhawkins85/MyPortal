@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/badge/license-AGPL%20v3-blue" /></a>
-  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" />
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" />
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white" />
   <img alt="MariaDB 10.10+" src="https://img.shields.io/badge/MariaDB-10.10%2B-003545?logo=mariadb&logoColor=white" />
   <img alt="Docker" src="https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white" />
@@ -254,7 +254,7 @@ Modules are enabled and configured under **Administration → Modules**.
 
 | Layer | Technology |
 |---|---|
-| Web and API | Python 3.10+, FastAPI, Uvicorn, Jinja2 templates; OpenAPI docs at `/docs` |
+| Web and API | Python 3.11+, FastAPI, Uvicorn, Jinja2 templates; OpenAPI docs at `/docs` |
 | Data | MariaDB 10.10+ through async drivers, with file-driven SQL migrations in [`migrations/`](migrations). Optional separate databases hold RMM event logs and machine stats |
 | Background work | APScheduler with cron expressions; optional Redis for multi-worker coordination |
 | Documents | WeasyPrint (PDF), python-docx |
@@ -314,7 +314,7 @@ sudo scripts/install_development.sh   # editable install, isolated database, opt
 
 ## Development
 
-Manual setup needs Python 3.10+ and MariaDB 10.10 or newer.
+Manual setup needs Python 3.11+ and MariaDB 10.10 or newer.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate

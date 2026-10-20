@@ -8,7 +8,7 @@ RMM is an extension of MyPortal's existing product and architecture. Preserve th
 
 ### Technology Stack
 
-- **Backend**: Python 3.10+, FastAPI, SQLAlchemy 2.0+
+- **Backend**: Python 3.11+, FastAPI, SQLAlchemy 2.0+
 - **Database**: MySQL (primary), SQLite (fallback)
 - **Frontend**: Jinja2 templates, responsive layouts
 - **Testing**: pytest, pytest-asyncio
