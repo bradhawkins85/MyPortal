@@ -1858,7 +1858,7 @@ async def menu_config_targeting_preview(
     try:
         matches = rmm_targeting.compile_rules(payload.rules)
     except ValueError as exc:
-        log_warning("Invalid tray targeting rules preview request: %s", str(exc))
+        log_warning("Invalid tray targeting rules preview request", error=str(exc))
         return JSONResponse(
             {
                 "detail": "Invalid target rules.",

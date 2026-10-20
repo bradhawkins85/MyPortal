@@ -163,3 +163,18 @@ def test_form_rules_validation():
     stored, error = _tray_form_rules({"target_mode": "rules", "target_rules": json.dumps(
         {"operator": "and", "children": [{"field": "nope", "operator": "equals", "value": "x"}]})})
     assert stored is None and "supported targeting field" in error
+
+
+async def test_preview_rejects_invalid_rules_without_echoing_details():
+    from app.api.routes.tray import menu_config_targeting_preview
+    from app.schemas.tray import TrayMenuTargetingPreview
+
+    response = await menu_config_targeting_preview(
+        TrayMenuTargetingPreview(rules={"operator": "and", "children": [
+            {"field": "nope", "operator": "equals", "value": "x"}]}),
+        current_user={"id": 1},
+    )
+    assert response.status_code == 400
+    assert json.loads(response.body) == {
+        "detail": "Invalid target rules.", "errors": {"target_rules": "Invalid target rules."},
+    }
