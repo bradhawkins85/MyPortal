@@ -1781,6 +1781,7 @@ async def create_menu_config(
         enabled=payload.enabled,
         created_by_user_id=int(current_user["id"]),
     )
+    await tray_service.broadcast_config_changed()
     return JSONResponse(_serialise_config(record), status_code=201)
 
 
@@ -1819,6 +1820,7 @@ async def update_menu_config(
         enabled=payload.enabled,
         updated_by_user_id=int(current_user["id"]),
     )
+    await tray_service.broadcast_config_changed()
     refreshed = await tray_repo.get_menu_config(config_id)
     return JSONResponse(_serialise_config(refreshed or existing))
 
@@ -1832,6 +1834,7 @@ async def delete_menu_config(
     current_user: dict = Depends(require_super_admin),
 ) -> JSONResponse:
     await tray_repo.delete_menu_config(config_id)
+    await tray_service.broadcast_config_changed()
     return JSONResponse({"status": "deleted"})
 
 

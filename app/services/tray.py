@@ -595,20 +595,78 @@ def _collect_rmm_script_ids(nodes: list[dict[str, Any]]) -> set[int]:
     return ids
 
 
+def _platform_from_os_name(value: Any) -> str:
+    """Map a free-form OS name ("macOS 14.5", "Microsoft Windows 11 Pro") to a
+    script platform key, or ``""`` when it is not recognised."""
+
+    from app.services import rmm_scripts
+
+    name = str(value or "").strip().lower()
+    if not name:
+        return ""
+    exact = rmm_scripts.normalise_platform(name)
+    if exact in rmm_scripts.SCRIPT_PLATFORMS:
+        return exact
+    for needle, platform in (
+        ("windows", "windows"),
+        ("macos", "darwin"),
+        ("mac os", "darwin"),
+        ("os x", "darwin"),
+        ("darwin", "darwin"),
+        ("freebsd", "freebsd"),
+        ("openbsd", "openbsd"),
+        ("netbsd", "netbsd"),
+        ("linux", "linux"),
+        ("ubuntu", "linux"),
+        ("debian", "linux"),
+    ):
+        if needle in name:
+            return platform
+    return ""
+
+
+async def _device_platform(device: dict[str, Any]) -> str:
+    """The script platform of ``device``'s computer, or ``""`` when unknown.
+
+    Older tray enrolments did not record an OS, so fall back to the linked
+    asset's RMM agent (the one that actually runs the script) and then the
+    asset's OS name rather than showing every item.
+    """
+
+    platform = _platform_from_os_name(device.get("os"))
+    if platform:
+        return platform
+    asset_id = device.get("asset_id")
+    if not asset_id:
+        return ""
+    try:
+        from app.repositories import rmm as rmm_repo
+
+        agent = await rmm_repo.get_asset_agent(int(asset_id))
+    except Exception:  # noqa: BLE001 - RMM feature pack may be absent
+        agent = None
+    if agent:
+        platform = _platform_from_os_name(agent.get("os"))
+        if platform:
+            return platform
+    asset = await assets_repo.get_asset_by_id(int(asset_id))
+    return _platform_from_os_name((asset or {}).get("os_name"))
+
+
 async def _filter_rmm_scripts_for_platform(
-    nodes: list[dict[str, Any]], device_os: Any
+    nodes: list[dict[str, Any]], device: dict[str, Any]
 ) -> list[dict[str, Any]]:
     """Drop ``rmm_script`` items whose script is not enabled for the device's OS.
 
     A Windows-only script is hidden from a Mac's tray menu (and vice versa).
-    Devices that have not reported an OS keep every item; the run endpoint
-    still refuses a script the device's platform cannot run.
+    Devices whose platform cannot be determined keep every item; the run
+    endpoint still refuses a script the device's platform cannot run.
     """
 
     from app.repositories import rmm as rmm_repo
     from app.services import rmm_scripts
 
-    platform = rmm_scripts.normalise_platform(device_os)
+    platform = await _device_platform(device)
     script_ids = _collect_rmm_script_ids(nodes)
     if not platform or not script_ids:
         return nodes
@@ -736,7 +794,7 @@ async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
         payload = list(_DEFAULT_MENU)
 
     payload = await _expand_menu_url_variables(payload, company_id)
-    payload = await _filter_rmm_scripts_for_platform(payload, device.get("os"))
+    payload = await _filter_rmm_scripts_for_platform(payload, device)
 
     return {
         "version": version,
@@ -860,6 +918,26 @@ async def send_to_device(
         log_warning("Tray websocket send failed", device_uid=device_uid, error=str(exc))
         unregister_connection(device_uid, websocket)
         return False
+
+
+CONFIG_CHANGED_MESSAGE: dict[str, Any] = {"type": "config_changed"}
+
+
+async def broadcast_config_changed() -> int:
+    """Tell every connected tray device to re-fetch its menu config.
+
+    Devices cache the resolved menu and only re-fetch it on start-up, on a
+    manual refresh or on ``config_changed``. Anything that changes what
+    :func:`resolve_config_for_device` returns (menu edits, a script's allowed
+    platforms) must call this or devices keep showing the stale menu.
+    Returns how many devices were notified on this app instance.
+    """
+
+    sent = 0
+    for device_uid in list(_active_connections):
+        if await send_to_device(device_uid, dict(CONFIG_CHANGED_MESSAGE)):
+            sent += 1
+    return sent
 
 
 # Key in a troubleshoot command payload holding state only the server reads.
