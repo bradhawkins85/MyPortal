@@ -140,7 +140,7 @@ Windows reports collection as unsupported. Earlier Windows agents used
 LibreHardwareMonitor with the PawnIO kernel driver, and machines running them
 crashed with `SYSTEM_THREAD_EXCEPTION_NOT_HANDLED` (0x7E). At service startup the
 agent now removes PawnIO if it is registered: it runs the registered uninstall
-command with `-uninstall -silent` and confirms the registration is gone. This
+command (adding `-silent` if it is missing) and confirms the registration is gone. This
 also removes PawnIO that other software installed. The agent also deletes the
 `%ProgramData%\MyPortal RMM\LibreHardwareMonitor` folder. Removal runs in the
 background with a two-minute limit. Failures are logged, leave check-in working

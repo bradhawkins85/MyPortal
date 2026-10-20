@@ -1,0 +1,7 @@
+{
+  "guid": "322a4533-4f49-41cc-a639-f692e56adbe8",
+  "occurred_at": "2026-10-20T08:30Z",
+  "change_type": "Feature",
+  "summary": "Add a Remove-PawnIO RMM script for removing the PawnIO driver from Windows devices before their agent updates.",
+  "content_hash": "c2fd4b91f224a5ddd9018ecb845c03ec16f0bd170fe3879ac115ba38e7cffd9b"
+}
