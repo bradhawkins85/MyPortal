@@ -3,7 +3,7 @@
   <header class="ce-section__header">
     <div class="ce-section__heading">
       <h2 class="card__title" id="tray-configurations-title">Menu configurations</h2>
-      <p class="card__subtitle">Choose what the tray icon menu shows on each device. When several configurations apply, the most specific enabled one wins: <strong>device, then tag, then company, then global</strong>.</p>
+      <p class="card__subtitle">Choose what the tray icon menu shows on each device. When several configurations apply, the most specific enabled one wins: <strong>device, then configurations whose device rules match (lowest priority first), then tag, then company, then global</strong>. A device that matches no device rules keeps the scope-based menu.</p>
     </div>
     <a class="button button--primary button--small" href="/admin/tray/configurations/new">New configuration</a>
   </header>
@@ -24,7 +24,10 @@
             <tr>
               <td><a href="/admin/tray/configurations/{{ cfg.id }}/edit"><strong>{{ cfg.name }}</strong></a></td>
               <td><span class="status status--info">{{ cfg.scope|capitalize }}</span></td>
-              <td>{{ cfg.scope_target_label or '—' }}</td>
+              <td>
+                {{ cfg.scope_target_label or '—' }}
+                {% if cfg.has_target_rules %}<span class="status status--warning">Device rules · priority {{ cfg.priority if cfg.priority is not none else 100 }}</span>{% endif %}
+              </td>
               <td>
                 {% if cfg.enabled %}<span class="status status--success">Enabled</span>{% else %}<span class="status status--neutral">Disabled</span>{% endif %}
               </td>

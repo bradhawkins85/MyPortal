@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
 {% block header_title %}<span class="header__title-text">{{ heading }}</span>{% endblock %}
 
 {% block header_actions %}
@@ -20,6 +21,7 @@
           <li class="scf-chip">{{ config.name or 'New configuration' }}</li>
           <li class="scf-chip">{{ (config.scope or 'global') | capitalize }} scope{% if config.scope_ref_id %} · #{{ config.scope_ref_id }}{% endif %}</li>
           <li class="scf-chip{% if not config.enabled %} scf-chip--muted{% endif %}">{{ 'Enabled' if config.enabled else 'Disabled' }}</li>
+          {% if config.target_rules %}<li class="scf-chip">Device rules · priority {{ config.priority }}</li>{% endif %}
           {% if config.version %}<li class="scf-chip scf-chip--muted">Version {{ config.version }}</li>{% endif %}
         </ul>
       </div>
@@ -37,7 +39,7 @@
         <input type="search" id="tray-config-nav-search" class="form-input" placeholder="Find a setting…" autocomplete="off" data-ae-search>
       </div>
       {% set config_groups = [
-        ("Configuration", [("general", "Name and scope"), ("menu-items", "Menu items")]),
+        ("Configuration", [("general", "Name and scope"), ("targeting", "Device rules"), ("menu-items", "Menu items")]),
         ("Menu content", [("display-text", "Display text"), ("environment", "Environment variables"), ("branding", "Branding")]),
       ] %}
       {% for group_label, items in config_groups %}
@@ -60,7 +62,7 @@
       <section class="card card--panel ce-section" id="general" data-ae-section="general" aria-labelledby="tray-config-general-title">
         <header class="ce-section__header"><div class="ce-section__heading">
           <h2 class="card__title" id="tray-config-general-title">Name and scope</h2>
-          <p class="card__subtitle">Which devices use this menu. The most specific enabled configuration wins: device, then tag, then company, then global.</p>
+          <p class="card__subtitle">Which devices use this menu. The most specific enabled configuration wins: device, then configurations with matching device rules, then tag, then company, then global.</p>
         </div></header>
         <div class="ce-section__body ce-form-grid">
           <div class="form-field">
@@ -84,6 +86,40 @@
             <label class="checkbox"><input type="checkbox" name="enabled" form="tray-config-form" {% if config.enabled %}checked{% endif %} value="1" /><span>Enabled</span></label>
             <p class="form-help">Disabled configurations are kept but never sent to devices.</p>
           </div>
+        </div>
+      </section>
+
+      <section class="card card--panel ce-section" id="targeting" data-ae-section="targeting" aria-labelledby="tray-config-targeting-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="tray-config-targeting-title">Device rules</h2>
+          <p class="card__subtitle">Give matching devices in the scope above their own menu, using the same rules as RMM checks: installed software, location, company tags, custom fields and more. Each device asks for its menu by its ID; a device that matches no rule-targeted menu falls back to the tag, company or global menu.</p>
+        </div></header>
+        <div class="ce-section__body" data-tray-config-targeting data-rmm-page>
+          {% set targeting_mode = 'rules' if config.target_rules else 'all' %}
+          <fieldset class="rmm-choices">
+            <legend class="form-label">Which devices in the scope</legend>
+            <div class="rmm-choices__grid rmm-choices__grid--compact">
+              <label class="rmm-choice rmm-choice--compact" for="tray-config-target-all">
+                <input class="rmm-choice__input" type="radio" id="tray-config-target-all" name="target_mode" value="all" form="tray-config-form" data-tray-target-mode {% if targeting_mode != 'rules' %}checked{% endif %}>
+                <span class="rmm-choice__title">All of them</span>
+                <span class="rmm-choice__text">Every device in the scope uses this menu, as before.</span>
+              </label>
+              <label class="rmm-choice rmm-choice--compact" for="tray-config-target-rules">
+                <input class="rmm-choice__input" type="radio" id="tray-config-target-rules" name="target_mode" value="rules" form="tray-config-form" data-tray-target-mode {% if targeting_mode == 'rules' %}checked{% endif %}>
+                <span class="rmm-choice__title">Only devices that match rules</span>
+                <span class="rmm-choice__text">For example devices with an app installed, at a location, or for a type of client.</span>
+              </label>
+            </div>
+          </fieldset>
+          <div class="form-field" data-tray-target-priority {% if targeting_mode != 'rules' %}hidden{% endif %}>
+            <label class="form-label" for="config-priority">Priority</label>
+            <input class="form-input" id="config-priority" name="priority" form="tray-config-form" type="number" min="0" max="10000" value="{{ config.priority if config.priority is not none else 100 }}" />
+            <p class="form-help">When a device matches the rules of several menus, the lowest number wins.</p>
+          </div>
+          <input type="hidden" name="target_rules" form="tray-config-form" data-tray-target-rules value="{{ config.target_rules | default(none) | tojson | forceescape }}">
+          <script type="application/json" id="tray-config-targeting-config">{{ {"fields": targeting_fields | default([])} | tojson }}</script>
+          <noscript><p class="alert alert--warning">JavaScript is required to build and preview device rules.</p></noscript>
+{% set targeting_id = "tray-config-rules-title" %}{% include "rmm/_device_rules.html" %}
         </div>
       </section>
 
@@ -186,6 +222,8 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/tray_config_targeting.js') }}" defer></script>
   <script>
     (function () {
       const builder = document.querySelector('[data-menu-node-builder]');

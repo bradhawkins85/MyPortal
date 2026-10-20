@@ -5,7 +5,7 @@ Responsibilities
 
 * Generate / hash install tokens and per-device auth tokens.
 * Resolve the effective tray menu config for a device (precedence:
-  device > tag > company > global).
+  device > advanced-rule matches by priority > tag > company > global).
 * Match enrolling devices to existing assets using serial / hostname
   heuristics borrowed from :mod:`app.services.asset_importer`.
 * Dispatch server-initiated commands (``chat_open``, ``config_changed`` …)
@@ -743,32 +743,140 @@ async def _expand_menu_url_variables(
     return expand(nodes)
 
 
+def _config_rules(cfg: dict[str, Any]) -> Any:
+    """The parsed rule tree of a menu config, ``None`` when untargeted.
+
+    A config whose stored rules cannot be parsed returns ``False`` so it never
+    becomes an untargeted menu that every device would receive.
+    """
+
+    raw = cfg.get("target_rules")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return False
+    return parsed if isinstance(parsed, dict) else False
+
+
+def config_in_scope(cfg: dict[str, Any], device: dict[str, Any]) -> bool:
+    scope = cfg.get("scope")
+    if scope == "device":
+        return cfg.get("scope_ref_id") == device.get("asset_id")
+    if scope == "company":
+        return cfg.get("scope_ref_id") == device.get("company_id")
+    return scope in ("tag", "global")
+
+
+async def device_rule_context(device: dict[str, Any]) -> dict[str, Any] | None:
+    """The advanced-rule inventory context for a tray device.
+
+    Uses the linked asset's RMM agent inventory (software, hardware, network)
+    when there is one, otherwise the asset, company, tags and custom fields
+    with the tray device's own hostname/OS/IP. ``None`` when the device has no
+    company, so rule-targeted menus are skipped and the fallback menus apply.
+    """
+
+    from app.repositories import rmm_targeting as targeting_repo
+
+    company_id = device.get("company_id")
+    asset_id = device.get("asset_id")
+    if not company_id:
+        return None
+    if asset_id:
+        try:
+            from app.repositories import rmm as rmm_repo
+
+            agent = await rmm_repo.get_asset_agent(int(asset_id))
+        except Exception:  # noqa: BLE001 - RMM feature pack may be absent
+            agent = None
+        if agent and int(agent.get("company_id") or 0) == int(company_id):
+            try:
+                contexts = await targeting_repo.contexts_for_agents([agent])
+            except Exception as exc:  # noqa: BLE001 - fall back to asset data
+                log_warning("Tray menu rule context failed", device_id=device.get("id"), error=str(exc))
+                contexts = {}
+            context = contexts.get(int(agent["id"]))
+            if context is not None:
+                return context
+    try:
+        return await targeting_repo.context_for_asset(
+            company_id, asset_id, agent={
+                "hostname": device.get("hostname"),
+                "os": device.get("os"),
+                "os_version": device.get("os_version"),
+                "last_ip": device.get("last_ip"),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - never block the menu on inventory
+        log_warning("Tray menu rule context failed", device_id=device.get("id"), error=str(exc))
+        return None
+
+
+async def select_config_for_device(
+    configs: list[dict[str, Any]], device: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Pick the menu config ``device`` uses from ``configs``.
+
+    1. An untargeted device-scoped config for the device's asset.
+    2. Rule-targeted configs (any scope) whose scope and advanced rules match
+       the device, lowest ``priority`` first, then device > company > tag >
+       global, then oldest.
+    3. The untargeted tag > company > global configs, as before rules existed.
+
+    Inventory is only loaded when an in-scope rule-targeted config exists, and
+    a device whose inventory cannot be loaded simply gets step 1 or 3.
+    """
+
+    from app.services import rmm_targeting
+
+    enabled = [c for c in configs if c.get("enabled") and config_in_scope(c, device)]
+    untargeted = [c for c in enabled if _config_rules(c) is None]
+    targeted = [c for c in enabled if _config_rules(c) is not None]
+
+    for cfg in untargeted:
+        if cfg.get("scope") == "device":
+            return cfg
+
+    if targeted:
+        scope_rank = {"device": 0, "company": 1, "tag": 2, "global": 3}
+        targeted.sort(key=lambda c: (
+            int(c.get("priority") if c.get("priority") is not None else 100),
+            scope_rank.get(str(c.get("scope")), 4),
+            int(c.get("id") or 0),
+        ))
+        context = await device_rule_context(device)
+        if context is not None:
+            for cfg in targeted:
+                rules = _config_rules(cfg)
+                if rules and rmm_targeting.matches_rules(rules, context):
+                    return cfg
+
+    for scope in ("tag", "company", "global"):
+        for cfg in untargeted:
+            if cfg.get("scope") == scope:
+                return cfg
+    return None
+
+
 async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
     """Return the menu config payload + branding to send to ``device``.
 
-    Precedence order: device-scoped > tag-scoped > company-scoped > global.
+    Each device asks for its own menu (by its device UID / auth token), so a
+    rule-targeted configuration gives every asset whose inventory matches it
+    a separate menu. See :func:`select_config_for_device` for precedence;
+    with no matching targeted config it is the original device > tag >
+    company > global order, and the built-in default menu after that.
     Tag matching is a placeholder for now — wired in once asset tags are
     fully exposed in the repository layer.
     """
 
     configs = await tray_repo.list_menu_configs()
-    enabled = [c for c in configs if c.get("enabled")]
-    asset_id = device.get("asset_id")
     company_id = device.get("company_id")
-
-    chosen: dict[str, Any] | None = None
-    for scope in ("device", "tag", "company", "global"):
-        for cfg in enabled:
-            if cfg.get("scope") != scope:
-                continue
-            if scope == "device" and cfg.get("scope_ref_id") != asset_id:
-                continue
-            if scope == "company" and cfg.get("scope_ref_id") != company_id:
-                continue
-            chosen = cfg
-            break
-        if chosen:
-            break
+    chosen = await select_config_for_device(configs, device)
 
     payload: list[dict[str, Any]]
     display_text: str | None = None

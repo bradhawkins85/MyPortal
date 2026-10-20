@@ -113,7 +113,9 @@ def tray_db(tray_event_loop):
                created_by_user_id INTEGER NULL,
                updated_by_user_id INTEGER NULL,
                created_at TEXT DEFAULT (datetime('now')),
-               updated_at TEXT DEFAULT (datetime('now'))
+               updated_at TEXT DEFAULT (datetime('now')),
+               target_rules TEXT NULL,
+               priority INTEGER NOT NULL DEFAULT 100
            )""",
         """CREATE TABLE IF NOT EXISTS tray_command_log (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
