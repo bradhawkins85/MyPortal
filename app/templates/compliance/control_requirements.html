@@ -139,7 +139,7 @@
       <button type="button" class="button button--ghost button--small" data-upload-evidence="{{ req.id }}">Upload evidence</button>
       {% endif %}
       {% if req.show_compliance_help and req.compliance_help_url %}
-      <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
+      <a href="{{ req.compliance_help_url }}" target="_blank" rel="noopener" class="button button--ghost button--small">
         Get compliance help
       </a>
       <button type="submit" form="e8-ticket-form-{{ req.id }}" class="button button--primary button--small">Submit ticket</button>
@@ -291,7 +291,7 @@
                 </label>
                 {% endif %}
                 {% if req.show_compliance_help and req.compliance_help_url %}
-                <a href="{{ req.compliance_help_url }}" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
+                <a href="{{ req.compliance_help_url }}" target="_blank" rel="noopener" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
                 {% endif %}
                 <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
@@ -338,7 +338,7 @@
                 </label>
                 {% endif %}
                 {% if req.show_compliance_help and req.compliance_help_url %}
-                <a href="{{ req.compliance_help_url }}" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
+                <a href="{{ req.compliance_help_url }}" target="_blank" rel="noopener" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
                 {% endif %}
                 <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
@@ -385,7 +385,7 @@
                 </label>
                 {% endif %}
                 {% if req.show_compliance_help and req.compliance_help_url %}
-                <a href="{{ req.compliance_help_url }}" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
+                <a href="{{ req.compliance_help_url }}" target="_blank" rel="noopener" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
                 {% endif %}
                 <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
