@@ -18,7 +18,7 @@ from app.core.logging import log_warning
 from app.core.stats_database import stats_db
 from app.repositories import rmm_stats as repo
 
-RANGES = {"24h": ("Last 24 hours", timedelta(days=1)), "7d": ("Last 7 days", timedelta(days=7)),
+RANGES = {"1h": ("Last 1 hour", timedelta(hours=1)), "24h": ("Last 24 hours", timedelta(days=1)), "7d": ("Last 7 days", timedelta(days=7)),
           "30d": ("Last 30 days", timedelta(days=30))}
 DEFAULT_RANGE = "24h"
 STAT_TYPES = {"all": "All stat types", "cpu": "CPU", "memory": "Memory", "disk": "Disk",
@@ -101,12 +101,15 @@ def chart(title: str, unit: str, series: Iterable[tuple[str, list[tuple[datetime
             raw_segments[-1].append((when, value))
             previous = when
         segments = []
+        hover = []
         for raw in raw_segments:
             segment = []
             for when, value in _average(raw, since, span):
                 x = (when - since).total_seconds() / span * WIDTH
                 y = HEIGHT - (max(bottom, min(value, top)) - bottom) / (top - bottom) * HEIGHT
                 segment.append(f"{x:.1f},{y:.1f}")
+                # What the hover readout shows at this point: x, y, UTC time, value.
+                hover.append([round(x, 1), round(y, 1), when.isoformat(), f"{_label(value)} {unit}".strip()])
             segments.append(segment)
         latest = points[-1][1]
         drawn.append({
@@ -115,6 +118,7 @@ def chart(title: str, unit: str, series: Iterable[tuple[str, list[tuple[datetime
             "segments": [" ".join(segment) for segment in segments],
             # A single point in a segment draws as a dot.
             "dots": [segment[0] for segment in segments if len(segment) == 1],
+            "points": hover,
             "latest": f"{_label(latest)} {unit}".strip(),
             "peak": f"{_label(max(value for _when, value in points))} {unit}".strip(),
         })
