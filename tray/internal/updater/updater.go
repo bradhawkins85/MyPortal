@@ -136,6 +136,9 @@ func (c *Checker) CheckNow(ctx context.Context, force bool) {
 		return
 	}
 	if !isNewer(resp.Version, c.current) {
+		if force {
+			logger.Info("Auto-update: no newer version available (server offers %s, current %s)", resp.Version, c.current)
+		}
 		return
 	}
 	logger.Info("New tray version available: %s (current %s)", resp.Version, c.current)
