@@ -80,6 +80,11 @@ func runDarwinTrayIconWorker() {
 // portal-wide .ico served to the Windows agent) and shows it as a PNG, which
 // the menu bar renders reliably.
 func fetchAndSetDarwinIcon() error {
+	if gPortalURL == "" {
+		// The service may have written the portal URL to its state file
+		// since the last attempt.
+		refreshPortalURL()
+	}
 	urls := trayIconURLs(gPortalURL, gConfig)
 	icon, url, err := fetchFirstTrayIcon(urls, downloadTrayIcon, func(data []byte) ([]byte, error) {
 		return trayIconPNGFromICO(data, darwinTrayIconPixels)

@@ -123,6 +123,33 @@ func saveState(s persistedState) {
 	_ = os.Chmod(path, mode)
 }
 
+// repairPersistedState rewrites the enrolled state when it lacks the current
+// portal URL or, on macOS, is not readable by the logged-in user. State is
+// otherwise only written at enrolment, so devices enrolled by older releases
+// kept a file the UI agent cannot get the portal URL from, and the UI could
+// never download the tray icon.
+func repairPersistedState(s *persistedState, portalURL string) {
+	var mode os.FileMode
+	if info, err := os.Stat(filepath.Join(stateDir(), stateFileName)); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if !persistedStateNeedsRewrite(s, portalURL, mode, runtime.GOOS) {
+		return
+	}
+	if portalURL != "" {
+		s.PortalURL = portalURL
+	}
+	saveState(*s)
+	logger.Info("Updated persisted state for the UI agent (portal=%s)", s.PortalURL)
+}
+
+func persistedStateNeedsRewrite(s *persistedState, portalURL string, mode os.FileMode, goos string) bool {
+	if portalURL != "" && s.PortalURL != portalURL {
+		return true
+	}
+	return goos == "darwin" && mode != 0644
+}
+
 // -----------------------------------------------------------------
 // Daemon
 // -----------------------------------------------------------------
@@ -486,6 +513,7 @@ func (d *daemon) ensureEnrolled() error {
 		d.client.SetAuth(s.DeviceUID, s.AuthToken)
 		logger.Info("Restored persisted auth (device_uid=%s)", s.DeviceUID)
 		logger.Debug("ensureEnrolled: persisted state at %s, portal=%s", filepath.Join(stateDir(), stateFileName), s.PortalURL)
+		repairPersistedState(s, d.cfg.PortalURL)
 		// Ensure the device UID is present in HKLM for the UI agent and
 		// any external tools that read HKLM\Software\MyPortal\Tray.
 		saveDeviceUIDToRegistry(s.DeviceUID)
