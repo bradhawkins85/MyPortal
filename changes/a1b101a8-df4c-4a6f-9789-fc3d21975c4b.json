@@ -1,0 +1,7 @@
+{
+  "guid": "a1b101a8-df4c-4a6f-9789-fc3d21975c4b",
+  "occurred_at": "2026-10-20T02:30Z",
+  "change_type": "Fix",
+  "summary": "Tray app: macOS and Windows tray icons now use the Branding icon URL set on the device's tray configuration, falling back to the portal-wide tray icon instead of keeping the default icon",
+  "content_hash": "ed3a60b5da82bdeecaf9699bb4a24c2421e6ee5e2e107526274cc19d95bde830"
+}
