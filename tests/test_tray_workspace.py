@@ -49,9 +49,6 @@ def _tray(**overrides: Any) -> dict[str, Any]:
             "matrix_enabled": False,
             "tray_release": {"version": "1.2.3", "loaded_assets": []},
             "outdated_device_count": 0,
-            "trmm_scripts": [],
-            "trmm_scripts_error": None,
-            "selected_update_script_id": None,
         },
         "tokens": {
             "tokens": [], "show_revoked": False, "hidden_revoked_count": 2, "companies": [],

@@ -25,34 +25,16 @@
     {% if is_super_admin %}
     <div class="ce-subsection" aria-labelledby="tray-agent-updates-title">
       <h3 id="tray-agent-updates-title">Agent updates</h3>
-      <form method="post" action="/admin/tray/update-script" class="form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <div class="ce-form-grid">
-          <div class="form-field">
-            <label class="form-label" for="tray-update-script">Tactical RMM update script</label>
-            <select class="form-input" id="tray-update-script" name="script_id">
-              <option value="">Select a script before using Update</option>
-              {% for script in d.trmm_scripts %}
-                <option value="{{ script.id }}" {% if d.selected_update_script_id == script.id %}selected{% endif %}>
-                  {{ script.name }}{% if script.script_type %} ({{ script.script_type }}){% endif %}
-                </option>
-              {% endfor %}
-            </select>
-            <p class="form-help">The Update button runs this Tactical RMM script on the device's linked asset. The script you pick is saved for later updates.</p>
-            {% if d.trmm_scripts_error %}<p class="form-help"><span class="status status--warning">Scripts could not be loaded: {{ d.trmm_scripts_error }}</span></p>{% endif %}
-          </div>
-        </div>
-        <div class="form-actions"><button type="submit" class="button button--primary">Save update script</button></div>
-      </form>
-      <form method="post" action="/admin/tray/devices/bulk-update-outdated" class="form" data-confirm="Queue the selected Tactical RMM update script for all non-revoked tray devices with an older agent version than the server tray app release?">
+      <p class="form-help">Update asks a tray device to install the latest release now, through the MyPortal Tray Agent's built-in updater. Offline devices receive the update when they reconnect.</p>
+      <form method="post" action="/admin/tray/devices/bulk-update-outdated" class="form" data-confirm="Update every non-revoked tray device whose agent is older than the server tray app release?">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <div class="form-actions">
           <button
             type="submit"
             class="button button--secondary"
-            {% if not d.selected_update_script_id or not d.outdated_device_count %}disabled{% endif %}
+            {% if not d.outdated_device_count %}disabled{% endif %}
           >Update all outdated agents</button>
-          <span class="form-help">{{ d.outdated_device_count }} linked tray {{ 'device is' if d.outdated_device_count == 1 else 'devices are' }} older than {{ release.version or 'the loaded release' }}.</span>
+          <span class="form-help">{{ d.outdated_device_count }} tray {{ 'device is' if d.outdated_device_count == 1 else 'devices are' }} older than {{ release.version or 'the loaded release' }}.</span>
         </div>
       </form>
     </div>
@@ -120,7 +102,7 @@
                   {% if not is_super_admin %}
                     —
                   {% elif device.status != 'revoked' %}
-                    <form method="post" action="/admin/tray/devices/{{ device.id }}/update" class="inline-form" data-confirm="Run the selected Tactical RMM update script on this device's linked asset?">
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/update" class="inline-form" data-confirm="Update the tray agent on this device to the latest release?">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <button type="submit" class="button button--small button--primary">Update</button>
                     </form>
