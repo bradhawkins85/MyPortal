@@ -579,6 +579,70 @@ def _filter_menu_nodes_for_company(
     return filtered
 
 
+def _collect_rmm_script_ids(nodes: list[dict[str, Any]]) -> set[int]:
+    ids: set[int] = set()
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if str(node.get("type") or "").strip().lower() == "rmm_script":
+            try:
+                ids.add(int(node.get("script_id") or 0))
+            except (TypeError, ValueError):
+                pass
+        children = node.get("children")
+        if isinstance(children, list):
+            ids |= _collect_rmm_script_ids(children)
+    return ids
+
+
+async def _filter_rmm_scripts_for_platform(
+    nodes: list[dict[str, Any]], device_os: Any
+) -> list[dict[str, Any]]:
+    """Drop ``rmm_script`` items whose script is not enabled for the device's OS.
+
+    A Windows-only script is hidden from a Mac's tray menu (and vice versa).
+    Devices that have not reported an OS keep every item; the run endpoint
+    still refuses a script the device's platform cannot run.
+    """
+
+    from app.repositories import rmm as rmm_repo
+    from app.services import rmm_scripts
+
+    platform = rmm_scripts.normalise_platform(device_os)
+    script_ids = _collect_rmm_script_ids(nodes)
+    if not platform or not script_ids:
+        return nodes
+    allowed: set[int] = set()
+    for script_id in script_ids:
+        script = await rmm_repo.get_script(script_id) if script_id else None
+        if script and rmm_scripts.platform_allowed(script, {"os": platform}):
+            allowed.add(script_id)
+
+    def keep(node_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        kept: list[dict[str, Any]] = []
+        for raw_node in node_list:
+            if not isinstance(raw_node, dict):
+                continue
+            node = dict(raw_node)
+            node_type = str(node.get("type") or "").strip().lower()
+            if node_type == "rmm_script":
+                try:
+                    script_id = int(node.get("script_id") or 0)
+                except (TypeError, ValueError):
+                    script_id = 0
+                if script_id not in allowed:
+                    continue
+            children = node.get("children")
+            if isinstance(children, list):
+                node["children"] = keep(children)
+                if node_type == "submenu" and not node["children"]:
+                    continue
+            kept.append(node)
+        return kept
+
+    return keep(nodes)
+
+
 async def _expand_menu_url_variables(
     nodes: list[dict[str, Any]], company_id: int | None
 ) -> list[dict[str, Any]]:
@@ -672,6 +736,7 @@ async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
         payload = list(_DEFAULT_MENU)
 
     payload = await _expand_menu_url_variables(payload, company_id)
+    payload = await _filter_rmm_scripts_for_platform(payload, device.get("os"))
 
     return {
         "version": version,

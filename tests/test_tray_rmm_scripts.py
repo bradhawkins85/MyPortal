@@ -83,3 +83,42 @@ def test_tray_runs_are_labelled_in_run_history():
     root = Path(__file__).resolve().parents[1]
     assert "run.run_source == 'tray'" in (root / "app/templates/rmm/_macros.html").read_text()
     assert "run.run_source === 'tray'" in (root / "app/static/js/rmm_scripts.js").read_text()
+
+
+@pytest.mark.anyio
+async def test_menu_hides_scripts_not_enabled_for_the_devices_platform(monkeypatch):
+    from app.repositories import rmm as rmm_repo
+    from app.services import tray as tray_service
+
+    scripts = {
+        1: {"id": 1, "language": "powershell", "platforms": ["windows"]},
+        2: {"id": 2, "language": "bash", "platforms": ["darwin", "linux"]},
+        3: {"id": 3, "language": "bash", "platforms": ["windows", "darwin"]},
+    }
+
+    async def get_script(script_id, *, with_content=False):
+        return scripts.get(script_id)
+
+    monkeypatch.setattr(rmm_repo, "get_script", get_script)
+    menu = [
+        {"type": "rmm_script", "label": "Windows fix", "script_id": 1},
+        {"type": "submenu", "label": "Windows only", "children": [
+            {"type": "rmm_script", "label": "Windows fix", "script_id": 1},
+        ]},
+        {"type": "submenu", "label": "Mixed", "children": [
+            {"type": "rmm_script", "label": "Mac fix", "script_id": 2},
+            {"type": "rmm_script", "label": "Both", "script_id": 3},
+        ]},
+        {"type": "link", "label": "Portal", "url": "/"},
+    ]
+
+    mac = await tray_service._filter_rmm_scripts_for_platform(menu, "macos")
+    assert [node["label"] for node in mac] == ["Mixed", "Portal"]
+    assert [node["label"] for node in mac[0]["children"]] == ["Mac fix", "Both"]
+
+    windows = await tray_service._filter_rmm_scripts_for_platform(menu, "windows")
+    assert [node["label"] for node in windows] == ["Windows fix", "Windows only", "Mixed", "Portal"]
+    assert [node["label"] for node in windows[2]["children"]] == ["Both"]
+
+    # A device that has not reported its OS keeps the menu as configured.
+    assert await tray_service._filter_rmm_scripts_for_platform(menu, None) == menu
