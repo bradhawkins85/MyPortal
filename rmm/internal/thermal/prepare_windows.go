@@ -5,17 +5,17 @@ package thermal
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"syscall"
 
+	"github.com/bradhawkins85/myportal-rmm/internal/state"
 	"golang.org/x/sys/windows/registry"
 )
 
-func installedPawnIOVersion() (string, error) {
-	installed := ""
-	// Official installations can register in either registry view. Preserve
-	// a compatible installation regardless of the agent's own architecture.
+func pawnIOUninstallCommand() (string, error) {
+	// Official installations can register in either registry view.
 	for _, view := range []uint32{registry.WOW64_64KEY, registry.WOW64_32KEY} {
 		key, err := registry.OpenKey(registry.LOCAL_MACHINE,
 			`SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO`, registry.QUERY_VALUE|view)
@@ -25,51 +25,32 @@ func installedPawnIOVersion() (string, error) {
 		if err != nil {
 			return "", err
 		}
-		version, _, err := key.GetStringValue("DisplayVersion")
+		for _, name := range []string{"QuietUninstallString", "UninstallString"} {
+			command, _, err := key.GetStringValue(name)
+			if err == nil && command != "" {
+				key.Close()
+				return command, nil
+			}
+			if err != nil && !errors.Is(err, registry.ErrNotExist) {
+				key.Close()
+				return "", err
+			}
+		}
 		key.Close()
-		if errors.Is(err, registry.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return "", err
-		}
-		if compatiblePawnIO(version) {
-			return version, nil
-		}
-		installed = version
+		return "", errors.New("PawnIO is registered without an uninstall command")
 	}
-	return installed, nil
+	return "", nil
 }
 
-func windowsMachineIdentity() (string, string, error) {
-	key, err := registry.OpenKey(registry.LOCAL_MACHINE,
-		`HARDWARE\DESCRIPTION\System\BIOS`, registry.QUERY_VALUE)
-	if err != nil {
-		return "", "", err
-	}
-	defer key.Close()
-	manufacturer, _, err := key.GetStringValue("SystemManufacturer")
-	if err != nil {
-		return "", "", err
-	}
-	model, _, err := key.GetStringValue("SystemProductName")
-	return manufacturer, model, err
+func runUninstaller(ctx context.Context, program, args string) error {
+	cmd := exec.CommandContext(ctx, program)
+	// Pass the registered arguments through unchanged, as Windows would.
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CmdLine: syscall.EscapeArg(program) + " " + args}
+	return cmd.Run()
 }
 
 func preparePlatform(ctx context.Context) error {
-	return preparePhysicalMachine(ctx, windowsMachineIdentity, installPhysicalPawnIO)
-}
-
-func installPhysicalPawnIO(ctx context.Context) error {
-	return preparePawnIO(ctx, installedPawnIOVersion, func(ctx context.Context) error {
-		// Verify all extracted files against the embedded bundle immediately
-		// before executing the pinned installer. No endpoint download is needed.
-		dll, err := bundlePath()
-		if err != nil {
-			return err
-		}
-		cmd := exec.CommandContext(ctx, filepath.Join(filepath.Dir(dll), "PawnIO_setup.exe"), "-install", "-silent")
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		return cmd.Run()
-	})
+	// Earlier agents extracted LibreHardwareMonitor here; it is no longer used.
+	_ = os.RemoveAll(filepath.Join(state.Dir(), "LibreHardwareMonitor"))
+	return removePawnIO(ctx, pawnIOUninstallCommand, runUninstaller)
 }

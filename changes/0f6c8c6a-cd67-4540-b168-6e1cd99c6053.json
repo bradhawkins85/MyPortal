@@ -1,0 +1,7 @@
+{
+  "guid": "0f6c8c6a-cd67-4540-b168-6e1cd99c6053",
+  "occurred_at": "2026-10-20T08:00Z",
+  "change_type": "Fix",
+  "summary": "Stop Windows RMM agents collecting temperatures and remove the PawnIO driver they installed, after machines crashed with stop code 0x7E; Windows assets no longer show temperatures.",
+  "content_hash": "04e6b7ad943174ea7128597ff7b2f7b84e5090b1df48b445c6067df8a0348257"
+}

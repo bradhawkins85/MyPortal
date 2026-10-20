@@ -200,12 +200,18 @@ def build_charts(samples: Iterable[dict[str, Any]], *, since: datetime, until: d
 
 
 async def asset_stats_context(asset_id: int, range_key: str | None = None,
-                              stat_type: str | None = None, hardware: str | None = None) -> dict[str, Any]:
-    """The asset page's Machine stats section."""
+                              stat_type: str | None = None, hardware: str | None = None,
+                              *, temperatures: bool = True) -> dict[str, Any]:
+    """The asset page's Machine stats section.
+
+    ``temperatures`` false leaves out temperature history and filters, as for
+    Windows assets (see ``rmm_scripts._without_windows_temperatures``).
+    """
 
     key = range_key if range_key in RANGES else DEFAULT_RANGE
-    selected_type = stat_type if stat_type in STAT_TYPES else "all"
-    selected_hardware = (hardware or "")[:40]
+    types = {name: label for name, label in STAT_TYPES.items() if temperatures or name != "temperature"}
+    selected_type = stat_type if stat_type in types else "all"
+    selected_hardware = (hardware or "")[:40] if temperatures else ""
     until = _utcnow()
     since = until - RANGES[key][1]
     status = stats_db.status()
@@ -214,7 +220,8 @@ async def asset_stats_context(asset_id: int, range_key: str | None = None,
         "range": key,
         "ranges": [{"key": name, "label": label} for name, (label, _span) in RANGES.items()],
         "type": selected_type,
-        "types": [{"key": name, "label": label} for name, label in STAT_TYPES.items()],
+        "types": [{"key": name, "label": label} for name, label in types.items()],
+        "temperatures": temperatures,
         "hardware": selected_hardware,
         "hardware_choices": [selected_hardware] if selected_hardware else [],
         "filtered": selected_type != "all" or bool(selected_hardware),
@@ -230,6 +237,8 @@ async def asset_stats_context(asset_id: int, range_key: str | None = None,
     except Exception as exc:  # the asset page must not fail with the stats database
         log_warning("Could not read RMM device stats for the asset page", asset_id=asset_id, error=str(exc))
         return context
+    if not temperatures:
+        samples = [sample for sample in samples if sample["metric"] != "temperature_celsius"]
     hardware_names = {_temperature_hardware(sample.get("instance")) for sample in samples
                       if sample["metric"] == "temperature_celsius"}
     if selected_hardware:

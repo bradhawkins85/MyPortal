@@ -2,93 +2,77 @@ package thermal
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 )
 
-const PawnIOVersion = "2.1.0"
-
-// Prepare installs hardware access dependencies on physical Windows machines.
-// Call once at startup in the background so a failed installation never blocks check-in.
+// Prepare removes the PawnIO driver that earlier Windows agents installed for
+// temperature readings. Systems running those agents reported
+// SYSTEM_THREAD_EXCEPTION_NOT_HANDLED (0x7E) crashes, so Windows no longer
+// collects temperatures. Call once at startup in the background so a failed
+// removal never blocks check-in.
 func Prepare(ctx context.Context) error { return preparePlatform(ctx) }
 
-// Match guest hardware identifiers, not HypervisorPresent: physical hosts with
-// Hyper-V or virtualization-based security still have real thermal sensors.
-func isVirtualMachine(manufacturer, model string) bool {
-	identity := strings.ToLower(manufacturer + " " + model)
-	for _, marker := range []string{
-		"virtual machine", "vmware", "virtualbox", "innotek", "kvm", "qemu",
-		"xen", "hvm domu", "parallels", "bhyve", "bochs", "openstack", "nutanix",
-		"google compute engine", "alibaba cloud",
-	} {
-		if strings.Contains(identity, marker) {
-			return true
+// uninstallArgs returns the program and its arguments from a registered
+// uninstall command line, adding PawnIO's -uninstall and -silent switches
+// when the registered command does not already include them.
+func uninstallArgs(command string) (string, string, error) {
+	command = strings.TrimSpace(command)
+	var program, args string
+	if strings.HasPrefix(command, `"`) {
+		end := strings.Index(command[1:], `"`)
+		if end < 0 {
+			return "", "", fmt.Errorf("unterminated quote in uninstall command %q", command)
+		}
+		program, args = command[1:end+1], command[end+2:]
+	} else if end := strings.Index(strings.ToLower(command), ".exe"); end >= 0 {
+		program, args = command[:end+4], command[end+4:]
+	} else {
+		program, args = command, ""
+	}
+	if program == "" || !strings.HasSuffix(strings.ToLower(program), ".exe") {
+		return "", "", fmt.Errorf("unexpected uninstall command %q", command)
+	}
+	args = strings.TrimSpace(args)
+	for _, flag := range []string{"-uninstall", "-silent"} {
+		if !strings.Contains(strings.ToLower(args), flag) {
+			args = strings.TrimSpace(args + " " + flag)
 		}
 	}
-	// EC2 bare-metal instances expose physical hardware and can have sensors.
-	return strings.Contains(identity, "amazon ec2") && !strings.Contains(strings.ToLower(model), ".metal")
+	return program, args, nil
 }
 
-func preparePhysicalMachine(ctx context.Context, identify func() (string, string, error), prepare func(context.Context) error) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	manufacturer, model, err := identify()
-	if err != nil {
-		return fmt.Errorf("identifying hardware before PawnIO setup: %w", err)
-	}
-	if isVirtualMachine(manufacturer, model) {
-		return nil
-	}
-	if strings.TrimSpace(manufacturer) == "" || strings.TrimSpace(model) == "" {
-		return fmt.Errorf("identifying hardware before PawnIO setup: missing manufacturer or model")
-	}
-	return prepare(ctx)
-}
-
-func compatiblePawnIO(version string) bool {
-	parts := strings.Split(version, ".")
-	if len(parts) > 4 {
-		return false
-	}
-	var numbers [4]int
-	for i, part := range parts {
-		number, err := strconv.Atoi(part)
-		if err != nil || number < 0 {
-			return false
-		}
-		numbers[i] = number
-	}
-	return numbers[0] > 2 || numbers[0] == 2 && numbers[1] >= 1
-}
-
-// The callbacks keep installation decisions testable without changing a
-// machine's driver configuration. Registry read failures must not cause an
-// existing installation to be overwritten.
-func preparePawnIO(ctx context.Context, version func() (string, error), install func(context.Context) error) error {
+// The callbacks keep removal decisions testable without changing a
+// machine's driver configuration. uninstallCommand returns "" when PawnIO
+// is not registered.
+func removePawnIO(ctx context.Context, uninstallCommand func() (string, error), run func(context.Context, string, string) error) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	installed, err := version()
+	command, err := uninstallCommand()
 	if err != nil {
-		return fmt.Errorf("reading installed PawnIO version: %w", err)
+		return fmt.Errorf("reading PawnIO uninstall command: %w", err)
 	}
-	if compatiblePawnIO(installed) {
+	if command == "" {
 		return nil
 	}
-	if err := install(ctx); err != nil {
-		return fmt.Errorf("installing bundled PawnIO %s: %w", PawnIOVersion, err)
-	}
-	installed, err = version()
+	program, args, err := uninstallArgs(command)
 	if err != nil {
-		return fmt.Errorf("verifying installed PawnIO version: %w", err)
+		return err
 	}
-	if !compatiblePawnIO(installed) {
-		return fmt.Errorf("PawnIO installer did not register version %s or newer", PawnIOVersion)
+	if err := run(ctx, program, args); err != nil {
+		return fmt.Errorf("uninstalling PawnIO: %w", err)
+	}
+	command, err = uninstallCommand()
+	if err != nil {
+		return fmt.Errorf("verifying PawnIO removal: %w", err)
+	}
+	if command != "" {
+		return errors.New("PawnIO is still registered after uninstalling")
 	}
 	return nil
 }
