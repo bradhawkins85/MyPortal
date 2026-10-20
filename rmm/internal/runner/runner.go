@@ -114,14 +114,6 @@ func (b *limitedBuffer) String() string {
 	return text
 }
 
-// scriptContext gives unlimited jobs cancellation without an execution deadline.
-func scriptContext(ctx context.Context, timeoutSeconds int) (context.Context, context.CancelFunc) {
-	if timeoutSeconds == 0 {
-		return context.WithCancel(ctx)
-	}
-	return context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
-}
-
 // Run executes one job and returns its result. It never returns an error:
 // problems are reported in Result.Error so MyPortal can show them.
 func (r *Runner) Run(ctx context.Context, job client.Job) client.Result {
@@ -137,8 +129,11 @@ func (r *Runner) RunStreaming(ctx context.Context, job client.Job, report func(c
 		result.Error = "The script content did not match its checksum, so it was not run."
 		return result
 	}
-	// Zero means forever. Parent cancellation still stops the script on shutdown.
-	runCtx, cancel := scriptContext(ctx, job.TimeoutSeconds)
+	timeout := time.Duration(job.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Minute
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if len(job.Files) > 0 {
 		if !job.RunAnyway {

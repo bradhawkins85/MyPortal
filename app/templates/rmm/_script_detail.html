@@ -31,13 +31,21 @@
         {% endif %}
       </div>
       <dl class="rmm-detail__facts">
-        <div><dt>Default timeout</dt><dd>{{ 'Forever' if script.default_timeout_seconds == 0 else (script.default_timeout_seconds // 60) ~ ' minutes' }}</dd></div>
+        <div><dt>Execution timeout</dt><dd>{{ (script.default_timeout_seconds // 60) if script.default_timeout_seconds >= 60 else script.default_timeout_seconds }} {{ 'minutes' if script.default_timeout_seconds >= 60 else 'seconds' }}</dd></div>
+        <div><dt>Offline wait timeout</dt><dd>{{ 'Forever' if not script.default_queue_timeout_seconds else (script.default_queue_timeout_seconds // 60) ~ ' minutes' }}</dd></div>
         <div><dt>Execution</dt><dd>{{ 'Run Anyway' if script.execution_mode == 'run_anyway' else ('Parallel' if script.allow_parallel else 'Sequential') }}</dd></div>
         <div><dt>Lines</dt><dd>{{ script.line_count }}</dd></div>
         <div><dt>Last synced</dt><dd>{% if script.synced_at %}<span data-utc="{{ script.synced_at }}">{{ script.synced_at }}</span>{% else %}–{% endif %}</dd></div>
       </dl>
       <p>Platforms: {{ script.platform_labels | join(', ') if script.platform_labels else 'None (disabled on all devices)' }}</p>
       {% if is_super_admin %}
+      <form method="post" action="/rmm/scripts/{{ script.id }}/queue-timeout">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <label class="form-label" for="rmm-script-queue-timeout">Offline wait timeout (minutes)</label>
+        <input class="form-input" id="rmm-script-queue-timeout" name="queue_timeout_minutes" type="number" min="0" max="35791394" step="1" required value="{{ (script.default_queue_timeout_seconds or 0) // 60 }}" aria-describedby="rmm-script-queue-timeout-help">
+        <p class="form-help" id="rmm-script-queue-timeout-help">How long this script may wait for an offline agent to collect it. Enter 0 for Forever, or at least 1 minute (for example, 300 for five hours). Technicians can override this when running or scheduling. The execution timeout starts separately when the agent collects the script.</p>
+        <button type="submit" class="button button--ghost button--small">Save offline wait timeout</button>
+      </form>
       <form method="post" action="/rmm/scripts/{{ script.id }}/platforms">
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
         <fieldset class="form-field">

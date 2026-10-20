@@ -23,19 +23,6 @@
     <p class="alert alert--info">Connect a Gitea repository to load scripts: {{ gitea_message }} See <a href="/help/administration/rmm-scripts">RMM Scripts help</a> for the settings.</p>
   {% endif %}
 
-  {% if is_super_admin %}
-  <section class="card card--panel" aria-labelledby="rmm-global-timeout-title">
-    <h2 class="card__title" id="rmm-global-timeout-title">Global script timeout</h2>
-    <form method="post" action="/rmm/scripts/timeout">
-      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-      <label class="form-label" for="rmm-global-timeout">Timeout in minutes</label>
-      <input class="form-input" id="rmm-global-timeout" name="timeout_minutes" type="number" min="0" max="35791394" step="1" required value="{{ global_timeout_seconds // 60 }}" aria-describedby="rmm-global-timeout-help">
-      <p class="form-help" id="rmm-global-timeout-help">Enter 0 for Forever, or at least 1 minute. Applies to new runs and newly configured schedules and onboarding steps. Technicians can override it when running or scheduling. Offline devices wait up to the selected timeout; the execution timeout starts when the agent collects the script.</p>
-      <button type="submit" class="button button--ghost button--small">Save global timeout</button>
-    </form>
-  </section>
-  {% endif %}
-
   <div class="ce-layout">
     <nav class="ce-nav rmm-nav" aria-label="Scripts" data-rmm-nav>
       {% if script_groups %}

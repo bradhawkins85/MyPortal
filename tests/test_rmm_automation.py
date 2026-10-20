@@ -106,9 +106,9 @@ async def test_due_schedule_queues_once_per_device_and_targets_tags(sqlite_db, m
     schedule = await automation_repo.get_schedule(schedule_id)
     assert schedule["last_run_summary"] == "Queued on 2 devices."
     assert str(schedule["next_run_at"]) > "2001"
-    # The default ten-minute timeout also limits the wait for an offline device.
+    # Uncollected runs inherit the script default of waiting indefinitely.
     stored = await sqlite_db.fetch_one("SELECT expires_at FROM rmm_script_runs WHERE id = %s", (runs[0]["id"],))
-    assert str(stored["expires_at"]) <= str(datetime.utcnow() + timedelta(minutes=16))
+    assert stored["expires_at"] is None
 
     # Devices still working on the last run are not given another.
     jobs = await rmm_scripts.wait_for_jobs(first, wait_seconds=0)

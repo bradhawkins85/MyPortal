@@ -105,12 +105,16 @@
         </section>
 
         <div class="form-field rmm-timeout" data-rmm-timeout-section hidden>
-          <label class="form-label" for="rmm-timeout">Stop the script after</label>
+          <label class="form-label" for="rmm-timeout">Execution timeout</label>
           <div class="rmm-timeout__row">
-            <input class="form-input" id="rmm-timeout" type="number" min="0" max="35791394" step="1" required value="10" aria-describedby="rmm-timeout-help" data-rmm-timeout />
+            <input class="form-input" id="rmm-timeout" type="number" min="1" max="240" step="1" required value="10" aria-describedby="rmm-timeout-help" data-rmm-timeout />
             <span>minutes</span>
           </div>
-          <p class="form-help" id="rmm-timeout-help">Enter 0 for Forever, or at least 1 minute. Overrides the global default for this run or saved automation. Also controls how long an offline device can wait to collect the script.</p>
+          <p class="form-help" id="rmm-timeout-help">How long the script can execute after the agent collects it. The device stops it if it runs longer.</p>
+          <label class="form-label" for="rmm-queue-timeout">Offline wait timeout (minutes)</label>
+          <input class="form-input" id="rmm-queue-timeout" type="number" min="0" max="35791394" step="1" data-rmm-queue-timeout aria-describedby="rmm-queue-timeout-help">
+          <p class="form-help" id="rmm-queue-timeout-help">Leave blank to use the script's setting. Enter 0 for Forever, or at least 1 minute. For example, 300 expires an uncollected script after five hours; 2880 allows two days. This does not change the execution timeout.</p>
+          <p class="form-help form-help--error" data-rmm-error="queue_timeout_seconds" hidden></p>
         </div>
         <div class="form-field" data-rmm-run-as-section hidden>
           <label class="form-label" for="rmm-run-as">Run as</label>

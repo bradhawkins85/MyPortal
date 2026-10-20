@@ -51,9 +51,9 @@ from app.services.rmm_script_layout import (
     script_scope,
 )
 
-MIN_TIMEOUT_SECONDS = 60
-# Largest whole-minute timeout representable by the database's signed INT.
-MAX_TIMEOUT_SECONDS = 2_147_483_640
+MIN_TIMEOUT_SECONDS = 10
+MAX_TIMEOUT_SECONDS = 4 * 60 * 60
+MAX_QUEUE_TIMEOUT_SECONDS = 2_147_483_640
 SCRIPT_PLATFORMS = {
     "windows": "Windows", "darwin": "Mac", "linux": "Linux",
     "freebsd": "FreeBSD", "openbsd": "OpenBSD", "netbsd": "NetBSD",
@@ -553,9 +553,24 @@ def clamp_timeout(value: Any, default: int) -> int:
         seconds = int(value)
     except (TypeError, ValueError):
         seconds = default
-    if seconds == 0:
-        return 0  # Forever, including while waiting for an offline agent.
     return max(MIN_TIMEOUT_SECONDS, min(MAX_TIMEOUT_SECONDS, seconds))
+
+
+def queue_timeout(value: Any, default: int = 0) -> int:
+    """Offline queue lifetime: zero means forever; execution uses clamp_timeout."""
+    if value is None or value == "":
+        return default
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        raise RunRequestError({"queue_timeout_seconds": "Enter minutes, or 0 for Forever."}) from None
+    if seconds != 0 and not 60 <= seconds <= MAX_QUEUE_TIMEOUT_SECONDS:
+        raise RunRequestError({"queue_timeout_seconds": "Choose at least 1 minute, or 0 for Forever."})
+    return seconds
+
+
+def queue_timeout_override(value: Any) -> int | None:
+    return None if value is None or value == "" else queue_timeout(value)
 
 
 def normalise_platform(value: Any) -> str:
@@ -651,6 +666,7 @@ async def queue_for_agent(
     notify: bool = True,
     extra_context: Mapping[str, Any] | None = None,
     run_as: str = "system",
+    queue_timeout_seconds: Any = None,
 ) -> int:
     """Resolve the values for one device and queue the run. Raises
     :class:`RunRequestError` with a ``device`` message when it cannot run there.
@@ -660,6 +676,9 @@ async def queue_for_agent(
     ``system`` or ``user`` (the user logged in to the device)."""
 
     run_as = clean_run_as(run_as)
+    queue_wait = queue_timeout(queue_timeout_seconds, int(script.get("default_queue_timeout_seconds") or 0))
+    if expires_at is None and queue_wait:
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=queue_wait)
     problem = device_problem(script, agent)
     if problem:
         raise RunRequestError({"device": problem})
@@ -687,8 +706,8 @@ async def queue_for_agent(
         inputs=inputs,
         payload_encrypted=encrypt_secret(json.dumps(payload)),
         timeout_seconds=timeout_seconds,
-        expires_at=(None if timeout_seconds == 0 else
-                    expires_at or datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=timeout_seconds)),
+        expires_at=expires_at,
+        queue_timeout_seconds=queue_wait,
         run_source=run_source,
         schedule_id=schedule_id,
         onboarding_run_id=onboarding_run_id,
@@ -708,6 +727,7 @@ async def queue_runs(
     timeout_seconds: Any,
     requested_by_user_id: int | None,
     run_as: Any = "system",
+    queue_timeout_seconds: Any = None,
 ) -> dict[str, Any]:
     """Queue the script on each device. Returns the queued run ids and per-device problems."""
 
@@ -721,7 +741,8 @@ async def queue_runs(
         raise RunRequestError({"assets": f"Choose at most {MAX_TARGETS_PER_RUN} devices at a time."})
     entries = validate_entries(script, submitted)
     run_as = clean_run_as(run_as)
-    timeout = clamp_timeout(timeout_seconds, int(script.get("default_timeout_seconds", 600)))
+    timeout = clamp_timeout(timeout_seconds, int(script.get("default_timeout_seconds") or 600))
+    queue_wait = queue_timeout(queue_timeout_seconds, int(script.get("default_queue_timeout_seconds") or 0))
     inputs = stored_inputs(script, entries)
 
     queued: list[dict[str, Any]] = []
@@ -742,6 +763,7 @@ async def queue_runs(
                 entries=entries,
                 inputs=inputs,
                 timeout_seconds=timeout,
+                queue_timeout_seconds=queue_wait,
                 requested_by_user_id=requested_by_user_id,
                 run_as=run_as,
             )
@@ -903,7 +925,7 @@ def _job_payload(row: Mapping[str, Any]) -> dict[str, Any] | None:
         "language": row.get("language"),
         "script": row.get("script_content") or "",
         "sha256": row.get("content_sha256"),
-        "timeout_seconds": int(row.get("timeout_seconds", 600)),
+        "timeout_seconds": int(row.get("timeout_seconds") or 600),
         "run_anyway": bool(row.get("run_anyway")) and row.get("run_source") != "onboarding",
         "run_as": "user" if row.get("run_as") == "user" else "system",
         "parameters": values.get("parameters") or {},
@@ -954,9 +976,9 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
                 else:
                     await rmm_repo.expire_stale_runs()
                 continue
-        timeout = int(row.get("timeout_seconds", 600))
-        expires_at = (datetime.now(timezone.utc).replace(tzinfo=None)
-                      + timedelta(seconds=timeout) + RESULT_GRACE) if timeout else None
+        # Collection ends the offline wait; execution gets its own full deadline.
+        timeout = clamp_timeout(row.get("timeout_seconds"), 600)
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=timeout) + RESULT_GRACE
         if not await rmm_repo.mark_dispatched(int(row["id"]), agent_id, expires_at=expires_at):
             continue
         if row.get("run_anyway") and row.get("run_source") != "onboarding" and not agent.get("run_anyway_supported"):
