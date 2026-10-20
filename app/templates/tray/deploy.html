@@ -49,7 +49,7 @@
         {% if windows_ready %}
           <div class="tray-deploy__option">
             <a class="button auth-card__wide" href="{{ deploy_base }}/windows.exe" rel="noreferrer">Download for Windows</a>
-            <p class="tray-deploy__help">Run the downloaded file and follow the installer. IT teams can use the <a href="{{ deploy_base }}/windows.msi" rel="noreferrer">MSI package</a> instead.</p>
+            <p class="tray-deploy__help">Run the downloaded file and follow the installer. IT teams can use the <a href="{{ deploy_base }}/windows.msi" rel="noreferrer">MSI package</a> instead, or upload the <a href="{{ deploy_base }}/windows.intunewin" rel="noreferrer">Intune package (.intunewin)</a> to Microsoft Intune as a Windows app (Win32).</p>
             {% include "tray/_download_help.html" %}
           </div>
         {% endif %}

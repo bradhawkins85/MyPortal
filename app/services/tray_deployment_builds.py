@@ -14,11 +14,13 @@ A build is queued when a deployment link is created, when an admin asks for a
 rebuild, and automatically when the server caches a newer tray release than
 the one a link's installers were built from.  Finished files live under
 ``private_uploads/tray-builds/<build id>/`` and are only served through the
-link's ``/deploy`` URL.
+link's ``/deploy`` URL.  The Intune package (``.intunewin``) is made from the
+MSI on the server the first time it is downloaded and kept with the build.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import shutil
@@ -29,6 +31,7 @@ from typing import Any, AsyncIterator
 from app.core.logging import log_info, log_warning
 from app.repositories import tray as tray_repo
 from app.security.encryption import decrypt_secret
+from app.services import intunewin
 from app.services import tray_deployment
 from app.services import tray_installer
 
@@ -38,6 +41,7 @@ BUILD_LEASE = timedelta(hours=2)
 
 _STORAGE_DIR = Path(__file__).resolve().parents[2] / "private_uploads" / "tray-builds"
 _RELEASE_TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/+-]{0,127}$")
+_intunewin_locks: dict[int, asyncio.Lock] = {}
 
 
 class BuildNotFound(Exception):
@@ -64,6 +68,10 @@ def artifact_path(build_id: int, kind: str) -> Path:
     if kind not in ARTIFACT_KINDS:
         raise ValueError("Unknown artifact kind")
     return build_dir(build_id) / ("myportal-tray." + kind)
+
+
+def intunewin_path(build_id: int) -> Path:
+    return build_dir(build_id) / "myportal-tray.intunewin"
 
 
 def product_version(release_tag: str) -> str:
@@ -336,6 +344,36 @@ async def ready_artifact(link_id: int, kind: str) -> Path | None:
         return None
     path = artifact_path(int(build["id"]), kind)
     return path if path.is_file() else None
+
+
+async def ready_intunewin(link_id: int, setup_name: str) -> Path | None:
+    """Return the Intune package for a link's ready build, making it if needed.
+
+    ``setup_name`` is the MSI's name inside the package, which Intune shows
+    and uses in the install command.
+    """
+
+    build = await tray_repo.get_latest_ready_deployment_build(int(link_id))
+    if build is None:
+        return None
+    build_id = int(build["id"])
+    msi = artifact_path(build_id, "msi")
+    target = intunewin_path(build_id)
+    lock = _intunewin_locks.setdefault(build_id, asyncio.Lock())
+    async with lock:
+        if target.is_file():
+            return target
+        if not msi.is_file():
+            return None
+        partial = target.with_suffix(".intunewin.part")
+        try:
+            await asyncio.to_thread(intunewin.build_package, msi, partial, setup_name=setup_name)
+            partial.replace(target)
+        finally:
+            partial.unlink(missing_ok=True)
+    _intunewin_locks.pop(build_id, None)
+    log_info("Tray deployment Intune package built", build_id=build_id, deployment_link_id=link_id)
+    return target
 
 
 async def latest_build_by_link() -> dict[int, dict[str, Any]]:

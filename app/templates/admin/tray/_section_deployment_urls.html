@@ -81,6 +81,13 @@
                       <pre class="code-block"><code>irm '{{ link.url }}/install.ps1' | iex</code></pre>
                       <pre class="code-block"><code>curl -fsSL '{{ link.url }}/install.sh' | sudo bash</code></pre>
                     </details>
+                    {% if link.build and link.build.status == "ready" %}
+                      <details>
+                        <summary>Microsoft Intune</summary>
+                        <p><a href="{{ link.url }}/windows.intunewin" rel="noreferrer">Download the .intunewin package</a>, then in Intune add an app of type <strong>Windows app (Win32)</strong> and upload it. Intune fills in the install command from the MSI.</p>
+                        <p class="form-help">The tray updates itself, which changes the MSI product code. Use a file detection rule instead of the MSI one: path <code>%ProgramFiles%\MyPortalTray</code>, file <code>myportal-tray-service.exe</code>, exists.</p>
+                      </details>
+                    {% endif %}
                   {% else %}—{% endif %}
                 </td>
                 <td>

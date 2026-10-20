@@ -144,6 +144,33 @@ async def deployment_windows_msi(slug: str) -> FileResponse:
     return await _windows_installer(slug, "msi")
 
 
+@router.get("/deploy/{slug}/windows.intunewin", include_in_schema=False)
+async def deployment_windows_intunewin(slug: str) -> FileResponse:
+    link, _token = await _resolve_or_404(slug)
+    setup_name = tray_deployment.download_filename(link.get("company_name"), "msi")
+    try:
+        path = await builds.ready_intunewin(int(link["id"]), setup_name)
+    except (OSError, ValueError) as exc:
+        log_error("Unable to build tray Intune package", link_id=link.get("id"), error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The Intune package could not be built.",
+        ) from exc
+    if path is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The Windows installer for this link is still being built.",
+        )
+    await tray_repo.mark_deployment_link_downloaded(int(link["id"]))
+    log_info(
+        "Tray deployment installer downloaded",
+        link_id=link.get("id"),
+        company_id=link.get("company_id"),
+        kind="intunewin",
+    )
+    return _counted_file(link, path, "intunewin", "application/octet-stream")
+
+
 @router.get("/deploy/{slug}/macos.zip", include_in_schema=False)
 async def deployment_macos_bundle(slug: str, request: Request) -> FileResponse:
     link, token = await _resolve_or_404(slug)

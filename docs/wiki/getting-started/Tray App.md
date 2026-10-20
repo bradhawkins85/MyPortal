@@ -90,6 +90,7 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/admin/deployment-links/{id}/revoke` | POST | Super admin | Revoke a deployment URL and its install token |
 | `/deploy/{slug}` | GET | Deployment URL slug | Public download page for one company |
 | `/deploy/{slug}/windows.exe`, `/windows.msi` | GET | Deployment URL slug | Company-specific signed Windows installers |
+| `/deploy/{slug}/windows.intunewin` | GET | Deployment URL slug | The company MSI packaged for Microsoft Intune |
 | `/deploy/{slug}/macos.zip` | GET | Deployment URL slug | pkg plus its settings file |
 | `/api/tray/admin/deployment-links/{id}/rebuild` | POST | Super admin | Queue a new Windows installer build |
 | `/api/tray/build-agent/jobs/claim` | POST | API key | Build agent claims the next build |
@@ -321,6 +322,17 @@ release installers (MSI, pkg, DMG) are built exactly as before.
   command-line value still overrides them). Until a build server is set up, or
   while a build is running, the page says the Windows installer is being
   prepared. See [Tray Build Server](Tray%20Build%20Server.md).
+* **Microsoft Intune** can deploy the same MSI from
+  `<link>/windows.intunewin`, linked on the download page and under
+  *Microsoft Intune* on the admin page once the Windows build is ready.
+  MyPortal packages the MSI on the server the first time it is downloaded,
+  the same way `IntuneWinAppUtil.exe` does, so no extra tooling is needed on
+  the build server. In Intune, add an app of type **Windows app (Win32)** and
+  upload the file; the install command (`msiexec /i ... /qn`) and MSI
+  details are filled in from the package. Because the tray updates itself and
+  each MSI has a new product code, replace the MSI detection rule with a file
+  rule: `%ProgramFiles%\MyPortalTray`, `myportal-tray-service.exe`, *File or
+  folder exists*.
 * **macOS** downloads a zip with the cached `myportal-tray.pkg`, its
   `myportal-tray.env` settings and `Install MyPortal Tray.command`, which
   writes the settings and runs the pkg after asking for the Mac password.
