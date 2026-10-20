@@ -42,6 +42,8 @@ def tickets(monkeypatch):
     async def create_ticket(**kwargs):
         ticket_id = len(store["tickets"]) + 100
         store["tickets"][ticket_id] = {"id": ticket_id, "ticket_number": str(ticket_id), "status": "open", **kwargs}
+        if kwargs.get("asset_ids"):
+            store["links"][ticket_id] = list(kwargs["asset_ids"])
         return store["tickets"][ticket_id]
 
     async def get_ticket(ticket_id):

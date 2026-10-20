@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import html
 import json
-import re
 from datetime import datetime, timezone
 from importlib import import_module
 from typing import Any
@@ -1802,85 +1801,6 @@ async def receive_troubleshoot_result(
 # AI troubleshooting agent — invoked from a ticket's asset list
 # ---------------------------------------------------------------------------
 
-_TAG_RE = re.compile(r"<[^<>]*>")
-_SPACE_RE = re.compile(r"\s+")
-
-
-def _strip_ticket_description(value: Any, limit: int = 2000) -> str:
-    """Reduce a ticket description to bounded plain text for the LLM prompt.
-
-    Mirrors the text-normalisation used elsewhere in the codebase (strip HTML
-    tags, unescape entities, collapse whitespace) so a long customer-written
-    description cannot blow the LLM prompt budget.
-    """
-    text = _SPACE_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", str(value or "")))).strip()
-    if len(text) <= limit:
-        return text
-    return text[: limit - 1].rstrip() + "…"
-
-
-def _build_asset_troubleshoot_prompt(
-    ticket: dict[str, Any],
-    asset: dict[str, Any],
-    extra_context: str | None,
-) -> str:
-    """Assemble the LLM "reported problem" from the ticket and asset data.
-
-    The troubleshooter LLM only sees this string plus the endpoint's own logs,
-    so the ticket's own data (subject, description, priority, category, status)
-    and the asset under investigation are folded in here. This is what makes
-    the agent's guidance specific to the reported problem rather than a
-    generic endpoint analysis.
-    """
-    header_bits: list[str] = []
-    ticket_number = str(ticket.get("ticket_number") or ticket.get("id") or "").strip()
-    if ticket_number:
-        header_bits.append(f"Ticket {ticket_number}")
-    subject = str(ticket.get("subject") or "").strip()
-    if subject:
-        header_bits.append(f"Subject: {subject}")
-    for field, label in (("priority", "Priority"), ("category", "Category"), ("status", "Status")):
-        value = str(ticket.get(field) or "").strip()
-        if value:
-            header_bits.append(f"{label}: {value}")
-
-    description = _strip_ticket_description(ticket.get("description"))
-
-    lines: list[str] = [
-        "AI troubleshooting request from a support ticket. Use this ticket context "
-        "together with the endpoint logs below to diagnose the problem."
-    ]
-    if header_bits:
-        lines.append(" | ".join(header_bits))
-    if description:
-        lines.append("")
-        lines.append("Ticket description (reported problem):")
-        lines.append(description)
-
-    asset_bits: list[str] = []
-    asset_name = str(asset.get("name") or "").strip()
-    if asset_name:
-        asset_bits.append(asset_name)
-    for field, label in (
-        ("serial_number", "Serial"),
-        ("os_name", "OS"),
-        ("type", "Type"),
-        ("status", "Status"),
-    ):
-        value = str(asset.get(field) or "").strip()
-        if value:
-            asset_bits.append(f"{label}: {value}")
-    if asset_bits:
-        lines.append("")
-        lines.append("Asset under investigation: " + ", ".join(asset_bits))
-
-    extra = str(extra_context or "").strip()
-    if extra:
-        lines.append("")
-        lines.append(f"Technician notes: {extra}")
-
-    return "\n".join(lines)
-
 
 async def _prepare_ticket_troubleshoot(
     ticket_id: int, asset_id: int, payload: TicketAssetTroubleshootRequest | None,
@@ -1977,9 +1897,9 @@ async def troubleshoot_ticket_reply(
         lines.append(
             f"Reply #{item.get('id')} at {item.get('created_at')} "
             f"({'AI' if tray_service.is_troubleshoot_agent_reply(item) else 'ticket update'}): "
-            + _strip_ticket_description(item.get("body"), limit=3000)
+            + ai_troubleshooter.plain_text(item.get("body"), 3000)
         )
-    problem = _build_asset_troubleshoot_prompt(ticket, asset, payload.context)
+    problem = ai_troubleshooter.build_asset_problem(ticket, asset, payload.context)
     problem += "\n\n" + "\n".join(lines)
     await ai_troubleshooter.start_reply_troubleshoot(
         ticket=ticket, asset=asset, device=device, problem=problem,
@@ -2021,7 +1941,7 @@ async def troubleshoot_ticket_asset(
     ticket, asset, device, llm = await _prepare_ticket_troubleshoot(ticket_id, asset_id, payload)
     device_uid = str(asset.get("tray_device_uid") or "").strip()
 
-    prompt = _build_asset_troubleshoot_prompt(
+    prompt = ai_troubleshooter.build_asset_problem(
         ticket, asset, payload.context if payload else None
     )
     # Research, recommended steps and (if the steps call for them) endpoint

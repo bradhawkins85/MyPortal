@@ -360,3 +360,108 @@ def test_ai_classify_does_not_replace_category_set_during_ai_call(monkeypatch):
 
     update.assert_not_awaited()
     assert result["updated_fields"] == []
+
+
+def _patch_troubleshooter(monkeypatch, assets, devices=None, model="llama3"):
+    from app.services import ai_troubleshooter
+
+    monkeypatch.setattr(
+        "app.repositories.tickets.get_ticket", AsyncMock(return_value=TICKET)
+    )
+    monkeypatch.setattr(
+        ai_troubleshooter.tickets_repo, "list_ticket_assets", AsyncMock(return_value=assets)
+    )
+    monkeypatch.setattr(
+        ai_troubleshooter.tray_repo,
+        "get_device_by_uid",
+        AsyncMock(side_effect=lambda uid: (devices or {}).get(uid)),
+    )
+    monkeypatch.setattr(
+        ai_troubleshooter.tray_service,
+        "build_troubleshoot_llm_config",
+        lambda override=None: {"base_url": "http://llm", "model": override or model, "api_key": ""},
+    )
+    start = AsyncMock()
+    monkeypatch.setattr(ai_troubleshooter, "start_asset_troubleshoot", start)
+    return start
+
+
+def test_run_troubleshooting_bot_prefers_asset_with_active_tray_agent(monkeypatch):
+    device = {"id": 3, "device_uid": "uid-2", "status": "active", "company_id": TICKET["company_id"]}
+    start = _patch_troubleshooter(
+        monkeypatch,
+        [
+            {"asset_id": 1, "name": "Printer"},
+            {"asset_id": 2, "name": "PC-02", "tray_device_uid": "uid-2"},
+        ],
+        {"uid-2": device},
+    )
+
+    result = asyncio.run(
+        modules._invoke_run_troubleshooting_bot(
+            {}, {"ticket_id": 42, "context": "Focus on disk errors"}
+        )
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["asset_id"] == 2
+    assert result["endpoint_collection"] is True
+    kwargs = start.await_args.kwargs
+    assert kwargs["device"] == device
+    assert kwargs["asset"]["asset_id"] == 2
+    assert "Focus on disk errors" in kwargs["problem"]
+    assert kwargs["requested_by"]["display_name"] == "ticket automation"
+
+
+def test_run_troubleshooting_bot_uses_stored_logs_without_tray_agent(monkeypatch):
+    start = _patch_troubleshooter(monkeypatch, [{"asset_id": 7, "name": "SRV-01"}])
+
+    result = asyncio.run(modules._invoke_run_troubleshooting_bot({}, {"ticket_id": 42}))
+
+    assert result["status"] == "succeeded"
+    assert result["endpoint_collection"] is False
+    assert start.await_args.kwargs["device"] == {"company_id": TICKET["company_id"]}
+
+
+def test_run_troubleshooting_bot_rejects_foreign_company_device(monkeypatch):
+    device = {"id": 3, "device_uid": "uid-2", "status": "active", "company_id": 999}
+    start = _patch_troubleshooter(
+        monkeypatch, [{"asset_id": 2, "tray_device_uid": "uid-2"}], {"uid-2": device}
+    )
+
+    result = asyncio.run(modules._invoke_run_troubleshooting_bot({}, {"ticket_id": 42}))
+
+    assert result["endpoint_collection"] is False
+    assert start.await_args.kwargs["device"] != device
+
+
+@pytest.mark.parametrize(
+    "assets, payload, status",
+    [
+        ([], {"ticket_id": 42}, "skipped"),
+        ([{"asset_id": 1}], {"ticket_id": 42, "asset_id": 5}, "error"),
+    ],
+)
+def test_run_troubleshooting_bot_needs_a_linked_asset(monkeypatch, assets, payload, status):
+    start = _patch_troubleshooter(monkeypatch, assets)
+
+    result = asyncio.run(modules._invoke_run_troubleshooting_bot({}, payload))
+
+    assert result["status"] == status
+    start.assert_not_awaited()
+
+
+def test_run_troubleshooting_bot_needs_an_llm_model(monkeypatch):
+    start = _patch_troubleshooter(monkeypatch, [{"asset_id": 1}], model="")
+
+    result = asyncio.run(modules._invoke_run_troubleshooting_bot({}, {"ticket_id": 42}))
+
+    assert result["status"] == "error"
+    start.assert_not_awaited()
+
+
+def test_run_troubleshooting_bot_is_an_ai_ticket_action():
+    assert "run-troubleshooting-bot" in modules.ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
+    assert modules._get_always_on_ticket_action_module("run-troubleshooting-bot")
+    assert "run-troubleshooting-bot" in modules._AI_TICKET_MODULE_SLUGS
+    assert modules.get_action_payload_schema("run-troubleshooting-bot")

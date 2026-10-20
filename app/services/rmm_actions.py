@@ -90,7 +90,6 @@ async def raise_ticket(
 ) -> dict[str, Any]:
     """Raise a ticket for the device's company with the device's asset linked."""
 
-    from app.repositories import tickets as tickets_repo
     from app.services import tickets as tickets_service
 
     company_id = int(agent["company_id"]) if agent.get("company_id") is not None else None
@@ -106,9 +105,8 @@ async def raise_ticket(
         category=None,
         module_slug="rmm",
         external_reference=reference,
+        asset_ids=[asset_id] if asset_id is not None else None,
     )
-    if asset_id is not None:
-        await tickets_repo.replace_ticket_assets(int(created["id"]), [asset_id])
     log_info("RMM automation raised a ticket", reference=reference, ticket_id=created["id"])
     return created
 
