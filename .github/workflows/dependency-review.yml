@@ -28,8 +28,8 @@ jobs:
           # Allow licenses that are commonly used in open source
           allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, GPL-3.0, LGPL-3.0
           # Permissive licenses the list above does not name: the RMM agent's
-          # service wrapper (Zlib) and Go's x/sys (BSD-3-Clause plus Google's
-          # patent grant).
-          allow-dependencies-licenses: pkg:golang/github.com/kardianos/service, pkg:golang/golang.org/x/sys
+          # service wrapper (Zlib), Go's x/sys (BSD-3-Clause plus Google's
+          # patent grant) and Pillow (MIT-CMU, the historical PIL license).
+          allow-dependencies-licenses: pkg:golang/github.com/kardianos/service, pkg:golang/golang.org/x/sys, pkg:pypi/pillow
           # Comment on the PR with vulnerability information
           comment-summary-in-pr: always
