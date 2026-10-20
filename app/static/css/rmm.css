@@ -300,6 +300,7 @@
 
 .rmm-source__code { max-height: 18rem; white-space: pre; }
 .rmm-output { max-height: 24rem; font-size: 0.875rem; line-height: 1.5; tab-size: 4; }
+.rmm-command__text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.875rem; tab-size: 4; resize: vertical; }
 .rmm-output--error { border-color: color-mix(in srgb, var(--hf-danger) 45%, transparent); }
 
 .rmm-preview__env,
