@@ -887,6 +887,53 @@ async def deliver_queued_commands(device: dict[str, Any]) -> dict[str, int]:
     return {"delivered": delivered, "failed": failed}
 
 
+async def dispatch_update_command(
+    device: dict[str, Any],
+    *,
+    initiated_by_user_id: int | None,
+    extra_payload: dict[str, Any] | None = None,
+) -> tuple[int | None, bool]:
+    """Ask a tray device to update itself through its built-in updater.
+
+    The tray service handles an ``update`` WebSocket message by checking
+    ``/api/tray/version`` immediately (even when automatic updates are off)
+    and installing a newer release. The command is logged as ``queued`` so an
+    offline device receives it on its next connection through
+    :func:`deliver_queued_commands`; a live device gets it straight away.
+
+    A device with an ``update`` command already waiting is not given another,
+    so repeated clicks do not stack installs. Returns ``(command_id,
+    delivered)``; ``command_id`` is ``None`` when an update was already queued.
+    """
+
+    device_id = int(device["id"])
+    queued = await tray_repo.get_queued_commands_for_device(device_id)
+    if any(command.get("command") == "update" for command in queued):
+        return None, False
+
+    payload = dict(extra_payload or {})
+    command_id = await tray_repo.log_command(
+        device_id=device_id,
+        command="update",
+        payload_json=json.dumps(payload),
+        initiated_by_user_id=initiated_by_user_id,
+        status="queued",
+    )
+    device_uid = str(device.get("device_uid") or "").strip()
+    delivered = bool(device_uid) and await send_to_device(
+        device_uid, {**payload, "type": "update", "command_id": command_id}
+    )
+    if delivered:
+        await tray_repo.mark_command_delivered(command_id)
+    log_info(
+        "Dispatched tray update command",
+        command_id=command_id,
+        device_uid=device_uid,
+        delivered=delivered,
+    )
+    return command_id, delivered
+
+
 def build_troubleshoot_llm_config(model_override: str | None = None) -> dict[str, str]:
     """Resolve the LLM endpoint / model / key for the AI troubleshooting agent.
 
