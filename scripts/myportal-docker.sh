@@ -816,7 +816,7 @@ REDIS_URL=redis://redis:6379/0
 TRUSTED_PROXIES=
 
 # Uvicorn worker processes.
-WEB_CONCURRENCY=2
+WEB_CONCURRENCY=4
 EOF
 
   cat >"$PROJECT_ENV" <<EOF

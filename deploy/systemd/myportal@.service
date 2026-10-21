@@ -23,6 +23,7 @@
 # host, set MYPORTAL_BIND_HOST in /etc/myportal.env (for example 0.0.0.0) and
 # firewall ports 8001/8002 to the proxy. The address must still accept
 # loopback connections because upgrade.sh checks /readyz on 127.0.0.1.
+# WEB_CONCURRENCY in the environment files sets workers per service (default 4).
 
 [Unit]
 Description=MyPortal customer portal (%i instance)
@@ -43,7 +44,7 @@ Group=myportal
 EnvironmentFile=/etc/myportal.env
 EnvironmentFile=-/etc/myportal.%i.env
 Environment=APP_INSTANCE_ID=%i
-ExecStart=/bin/sh -ec 'case %i in blue) port=8001;; green) port=8002;; *) echo "Invalid MyPortal instance %i; use myportal@blue.service or myportal@green.service (one .service suffix)." >&2; exit 64;; esac; host="$${MYPORTAL_BIND_HOST:-127.0.0.1}"; release=$$(readlink -f /opt/myportal/instances/%i); test -n "$$release"; cd "$$release"; exec "$$release/.venv/bin/python" -m uvicorn app.main:app --host "$$host" --port "$$port" --workers 2'
+ExecStart=/bin/sh -ec 'case %i in blue) port=8001;; green) port=8002;; *) echo "Invalid MyPortal instance %i; use myportal@blue.service or myportal@green.service (one .service suffix)." >&2; exit 64;; esac; host="$${MYPORTAL_BIND_HOST:-127.0.0.1}"; release=$$(readlink -f /opt/myportal/instances/%i); test -n "$$release"; cd "$$release"; exec "$$release/.venv/bin/python" -m uvicorn app.main:app --host "$$host" --port "$$port" --workers "$${WEB_CONCURRENCY:-4}"'
 # Graceful reload: SIGHUP causes uvicorn to gracefully restart workers
 # without dropping accepted connections.
 ExecReload=/bin/kill -s HUP $MAINPID

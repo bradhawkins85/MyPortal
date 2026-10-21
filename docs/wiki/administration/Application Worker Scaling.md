@@ -1,10 +1,18 @@
 # Application Worker Scaling
 
 MyPortal's production deployment runs two application services, `blue` and
-`green`. Each service starts two Uvicorn workers by default. Although nginx
+`green`. Each service starts four Uvicorn workers by default. Although nginx
 sends normal traffic to only one service at a time, both services are kept
 running to support health checks and zero-downtime upgrades. The default
-therefore allows up to four application worker processes across the host.
+therefore allows up to eight application worker processes across the host.
+
+Set `WEB_CONCURRENCY=4` in `/etc/myportal.env`, or use
+`/etc/myportal.blue.env` and `/etc/myportal.green.env` for per-service overrides.
+The updated systemd unit honors this setting; older units that hardcode
+`--workers 2` must first be updated through the normal deployment process.
+Restart or roll the services to apply changes. Docker uses the same setting
+in its application environment file; apply it with `myportal-docker restart`.
+An existing explicit value of `2` remains in effect until changed.
 
 ## Recommended limits
 
@@ -13,16 +21,17 @@ host, database, and external services have sufficient capacity.
 
 | Workers per service | Total application processes | Guidance |
 | ---: | ---: | --- |
-| 2 | 4 | Default and safest starting point |
-| 3 | 6 | Recommended first increase |
-| 4 | 8 | Conservative ceiling without dedicated load testing |
+| 2 | 4 | Lower-capacity hosts |
+| 3 | 6 | Intermediate setting |
+| 4 | 8 | Default. Conservative ceiling without dedicated load testing |
 | 5–8 | 10–16 | Use only after load testing and capacity verification |
 | More than 8 | More than 16 | Not recommended without application-specific benchmarking and tuning |
 
-Increase to three workers per service first and observe a representative
-peak-load period. Increase to four only if request latency or throughput still
-benefits. Treat four workers per service as the operational ceiling until a
-repeatable load test demonstrates that a higher value is both useful and safe.
+Four workers per service is the default for hosts with sufficient capacity.
+Observe a representative peak-load period and reduce to two or three if
+database or external-service contention increases. Treat four workers per
+service as the operational ceiling until a repeatable load test demonstrates
+that a higher value is useful and has sufficient capacity.
 
 > **SQLite limitation:** Do not increase the worker count on a production
 > deployment using SQLite. SQLite does not provide the distributed named locks
@@ -31,33 +40,34 @@ repeatable load test demonstrates that a higher value is both useful and safe.
 
 ## MySQL connection capacity
 
-Each application process has a MySQL connection pool with a maximum of ten
-connections. Both blue/green services must be included when estimating the
-potential connection demand:
+Each application process has a query pool (`DB_POOL_MAX_SIZE`, default 100)
+and an advisory lock pool (`DB_LOCK_POOL_MAX_SIZE`, default 10). Both blue/green
+services must be included when estimating the potential connection demand:
 
 ```text
-maximum application pool capacity = 2 services × workers per service × 10
+maximum main-database capacity = 2 services × workers per service × (100 + 10)
 ```
 
 | Workers per service | Potential application connections |
 | ---: | ---: |
-| 2 | 40 |
-| 3 | 60 |
-| 4 | 80 |
-| 6 | 120 |
-| 8 | 160 |
+| 2 | 440 |
+| 3 | 660 |
+| 4 | 880 |
+| 6 | 1320 |
+| 8 | 1760 |
 
-These totals do not include database administration, deployments, monitoring,
-voice-monitor services, or other applications. Reserve at least 20–30% of the
-MySQL connection limit for those uses. A conservative upper-bound calculation
-is:
+These totals do not include event-log and stats pools, database administration,
+monitoring, voice-monitor services, or other applications. Reserve at least
+20–30% of the MySQL connection limit for those uses. A conservative upper-bound
+calculation is:
 
 ```text
-workers per service <= floor(MyPortal's usable MySQL connections / 20)
+workers per service <= floor(MyPortal's usable main-database connections / 220)
 ```
 
-For example, if 80 connections are safely available exclusively to the two
-MyPortal application services, use no more than four workers per service.
+For example, if 880 connections are available exclusively to the two MyPortal
+services' main-database pools, use no more than four workers per service with
+these pool limits. Recalculate when changing either pool maximum.
 
 ## Background-work multiplication
 
@@ -92,12 +102,13 @@ count; change and measure one setting at a time.
    connections.
 3. Confirm that MySQL has sufficient connection headroom using the calculation
    above.
-4. Increase each blue/green service to three workers.
+4. Set `WEB_CONCURRENCY=4` for each blue/green service after installing the
+   updated service unit, and confirm the intended `DB_POOL_MAX_SIZE` value.
 5. Restart the services using the normal deployment process and verify both
    readiness endpoints.
 6. Observe at least one representative peak-load period.
-7. Increase to four only when the measurements show that another worker is
-   needed and sufficient capacity remains.
+7. Adjust the worker count only when measurements show a benefit and
+   sufficient capacity remains.
 
 Monitor the following during and after the rollout:
 
