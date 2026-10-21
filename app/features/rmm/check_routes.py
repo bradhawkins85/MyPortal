@@ -80,6 +80,9 @@ def check_summary(check: dict[str, Any], *, counts: dict[str, int] | None = None
     elif check.get("action") == "schedule_script":
         action = (f"Run {check.get('script_name') or 'a removed script'} "
                   f"{event_log_rules.describe_schedule(check)}")
+    limit = rmm_checks.describe_action_results(check)
+    if limit:
+        action = f"{action}, {limit}"
     return {
         **(_serialise(check) or {}),
         "type_label": rmm_checks.CHECK_TYPES.get(check.get("check_type"), check.get("check_type")),
@@ -141,7 +144,8 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
         "delay_minutes": check.get("delay_minutes") or event_log_rules.DEFAULT_DELAY_MINUTES,
         "run_time": check.get("run_time") or "02:00",
         "schedule_timezone": check.get("schedule_timezone") or rmm_automation.default_timezone(),
-        "is_enabled": bool(check.get("is_enabled")), **values,
+        "is_enabled": bool(check.get("is_enabled")),
+        "action_results": "\n".join(rmm_checks.action_results(check)), **values,
     }
 
 
@@ -204,6 +208,7 @@ def _posted(form: Any, check_id: int | None) -> dict[str, Any]:
         "schedule_timezone": str(form.get("schedule_timezone") or ""),
         "is_enabled": bool(form.get("is_enabled")),
         "auto_close_when_resolved": str(form.get("auto_close_when_resolved") or "").lower() in {"1", "on", "true", "yes"},
+        "action_results": str(form.get("action_results") or "")[:8192],
     }
 
 
@@ -264,6 +269,7 @@ async def _render(
             "file_states": rmm_checks.FILE_STATES,
             "process_states": rmm_checks.PROCESS_STATES,
             "script_expectations": rmm_checks.SCRIPT_EXPECTATIONS,
+            "result_examples": rmm_checks.RESULT_EXAMPLES,
             "statuses": rmm_checks.STATUSES,
             "devices": [agent for agent in await rmm_repo.list_company_agents(company_id) if agent.get("asset_id")],
             "scripts": await rmm_repo.list_scripts(company_id=company_id),
