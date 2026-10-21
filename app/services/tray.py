@@ -5,7 +5,8 @@ Responsibilities
 
 * Generate / hash install tokens and per-device auth tokens.
 * Resolve the effective tray menu config for a device (precedence:
-  device > advanced-rule matches by priority > tag > company > global).
+  device > tag > company > global), then filter its items by company and
+  advanced device rules.
 * Match enrolling devices to existing assets using serial / hostname
   heuristics borrowed from :mod:`app.services.asset_importer`.
 * Dispatch server-initiated commands (``chat_open``, ``config_changed`` …)
@@ -743,23 +744,95 @@ async def _expand_menu_url_variables(
     return expand(nodes)
 
 
-def _config_rules(cfg: dict[str, Any]) -> Any:
-    """The parsed rule tree of a menu config, ``None`` when untargeted.
+def _node_rules(node: dict[str, Any]) -> Any:
+    """The rule tree on a menu node: ``None`` when it has none, ``False`` when
+    it is unreadable (so the item is hidden rather than shown to everyone)."""
 
-    A config whose stored rules cannot be parsed returns ``False`` so it never
-    becomes an untargeted menu that every device would receive.
+    raw = node.get("target_rules")
+    if raw is None or raw == "" or raw == {}:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            return False
+    return raw if isinstance(raw, dict) else False
+
+
+def normalise_menu_rules(nodes: list[Any], path: str = "") -> None:
+    """Validate and normalise every item's ``target_rules`` in place.
+
+    Raises ``ValueError`` naming the item when a rule tree is invalid. Empty
+    rules are removed so the item shows on every device again.
     """
 
-    raw = cfg.get("target_rules")
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
-        return None
-    if isinstance(raw, dict):
-        return raw
-    try:
-        parsed = json.loads(raw)
-    except (ValueError, TypeError):
-        return False
-    return parsed if isinstance(parsed, dict) else False
+    from app.services import rmm_targeting
+
+    for index, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            continue
+        where = f"{path}{index + 1}"
+        raw = node.get("target_rules")
+        if raw is None or raw == "" or raw == {}:
+            node.pop("target_rules", None)
+        else:
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except (ValueError, TypeError):
+                    raise ValueError(f"Menu item {where}: device rules are not valid JSON") from None
+            label = str(node.get("label") or node.get("type") or "")
+            try:
+                node["target_rules"] = rmm_targeting.validate_rules(raw)
+            except ValueError as exc:
+                raise ValueError(f"Menu item {where} ({label}): {exc}") from None
+        children = node.get("children")
+        if isinstance(children, list):
+            normalise_menu_rules(children, f"{where}.")
+
+
+def _menu_has_rules(nodes: list[dict[str, Any]]) -> bool:
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if _node_rules(node) is not None:
+            return True
+        children = node.get("children")
+        if isinstance(children, list) and _menu_has_rules(children):
+            return True
+    return False
+
+
+def _filter_menu_nodes_for_rules(
+    nodes: list[dict[str, Any]], context: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Drop items whose advanced device rules do not match ``context``.
+
+    Items without rules are always kept. An item with rules is hidden when the
+    device's inventory is unknown (``context`` is ``None``) or its rules are
+    invalid. Submenus emptied by filtering are removed, and ``target_rules`` is
+    never sent to the device.
+    """
+
+    from app.services import rmm_targeting
+
+    filtered: list[dict[str, Any]] = []
+    for raw_node in nodes:
+        if not isinstance(raw_node, dict):
+            continue
+        rules = _node_rules(raw_node)
+        if rules is not None and not (
+            rules and context is not None and rmm_targeting.matches_rules(rules, context)
+        ):
+            continue
+        node = {key: value for key, value in raw_node.items() if key != "target_rules"}
+        children = node.get("children")
+        if isinstance(children, list):
+            node["children"] = _filter_menu_nodes_for_rules(children, context)
+            if str(node.get("type") or "").strip().lower() == "submenu" and not node["children"]:
+                continue
+        filtered.append(node)
+    return filtered
 
 
 def config_in_scope(cfg: dict[str, Any], device: dict[str, Any]) -> bool:
@@ -777,7 +850,7 @@ async def device_rule_context(device: dict[str, Any]) -> dict[str, Any] | None:
     Uses the linked asset's RMM agent inventory (software, hardware, network)
     when there is one, otherwise the asset, company, tags and custom fields
     with the tray device's own hostname/OS/IP. ``None`` when the device has no
-    company, so rule-targeted menus are skipped and the fallback menus apply.
+    company, so items with device rules are hidden from it.
     """
 
     from app.repositories import rmm_targeting as targeting_repo
@@ -819,44 +892,11 @@ async def device_rule_context(device: dict[str, Any]) -> dict[str, Any] | None:
 async def select_config_for_device(
     configs: list[dict[str, Any]], device: dict[str, Any]
 ) -> dict[str, Any] | None:
-    """Pick the menu config ``device`` uses from ``configs``.
-
-    1. An untargeted device-scoped config for the device's asset.
-    2. Rule-targeted configs (any scope) whose scope and advanced rules match
-       the device, lowest ``priority`` first, then device > company > tag >
-       global, then oldest.
-    3. The untargeted tag > company > global configs, as before rules existed.
-
-    Inventory is only loaded when an in-scope rule-targeted config exists, and
-    a device whose inventory cannot be loaded simply gets step 1 or 3.
-    """
-
-    from app.services import rmm_targeting
+    """Pick the enabled menu config for ``device``: device > tag > company > global."""
 
     enabled = [c for c in configs if c.get("enabled") and config_in_scope(c, device)]
-    untargeted = [c for c in enabled if _config_rules(c) is None]
-    targeted = [c for c in enabled if _config_rules(c) is not None]
-
-    for cfg in untargeted:
-        if cfg.get("scope") == "device":
-            return cfg
-
-    if targeted:
-        scope_rank = {"device": 0, "company": 1, "tag": 2, "global": 3}
-        targeted.sort(key=lambda c: (
-            int(c.get("priority") if c.get("priority") is not None else 100),
-            scope_rank.get(str(c.get("scope")), 4),
-            int(c.get("id") or 0),
-        ))
-        context = await device_rule_context(device)
-        if context is not None:
-            for cfg in targeted:
-                rules = _config_rules(cfg)
-                if rules and rmm_targeting.matches_rules(rules, context):
-                    return cfg
-
-    for scope in ("tag", "company", "global"):
-        for cfg in untargeted:
+    for scope in ("device", "tag", "company", "global"):
+        for cfg in enabled:
             if cfg.get("scope") == scope:
                 return cfg
     return None
@@ -865,11 +905,9 @@ async def select_config_for_device(
 async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
     """Return the menu config payload + branding to send to ``device``.
 
-    Each device asks for its own menu (by its device UID / auth token), so a
-    rule-targeted configuration gives every asset whose inventory matches it
-    a separate menu. See :func:`select_config_for_device` for precedence;
-    with no matching targeted config it is the original device > tag >
-    company > global order, and the built-in default menu after that.
+    Precedence order: device-scoped > tag-scoped > company-scoped > global.
+    Each device asks for its own menu (by its device UID / auth token), so
+    menu items with advanced device rules are filtered per asset.
     Tag matching is a placeholder for now — wired in once asset tags are
     fully exposed in the repository layer.
     """
@@ -893,6 +931,8 @@ async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
         except (ValueError, TypeError):
             payload = _DEFAULT_MENU
         payload = _filter_menu_nodes_for_company(payload, company_id)
+        if _menu_has_rules(payload):
+            payload = _filter_menu_nodes_for_rules(payload, await device_rule_context(device))
         display_text = chosen.get("display_text")
         branding_icon_url = chosen.get("branding_icon_url")
         raw_allow = chosen.get("env_allowlist") or ""

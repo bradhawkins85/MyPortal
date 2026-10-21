@@ -9174,7 +9174,6 @@ async def _tray_configurations_context() -> dict[str, Any]:
     for cfg in configurations:
         ref = cfg.get("scope_ref_id")
         cfg["scope_target_label"] = f"#{ref}" if ref else None
-        cfg["has_target_rules"] = bool(cfg.get("target_rules"))
     return {"configurations": configurations}
 
 
@@ -9234,35 +9233,6 @@ def _tray_targeting_fields() -> list[dict]:
     return rmm_targeting.field_catalogue()
 
 
-def _tray_stored_rules(raw: Any) -> dict | None:
-    import json as _json
-
-    if not raw:
-        return None
-    try:
-        parsed = _json.loads(raw)
-    except (ValueError, TypeError):
-        return None
-    return parsed if isinstance(parsed, dict) else None
-
-
-def _tray_form_rules(form) -> tuple[str | None, str | None]:
-    """The validated rules JSON from the form (``None`` for every device) and an error."""
-    import json as _json
-    from app.services import rmm_targeting
-
-    if str(form.get("target_mode", "all")).strip().lower() != "rules":
-        return None, None
-    raw = str(form.get("target_rules", "") or "").strip()
-    try:
-        parsed = _json.loads(raw) if raw else None
-        if parsed is None:
-            raise ValueError("Add at least one device rule, or choose all devices in the scope.")
-        return _json.dumps(rmm_targeting.validate_rules(parsed)), None
-    except (ValueError, TypeError) as exc:
-        return None, str(exc) or "Add at least one valid device rule."
-
-
 @app.get("/admin/tray/configurations/new", response_class=HTMLResponse)
 async def admin_tray_new_configuration_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
@@ -9284,8 +9254,6 @@ async def admin_tray_new_configuration_page(request: Request):
             "env_allowlist_csv": "",
             "branding_icon_url": "",
             "payload_json": "[]",
-            "target_rules": None,
-            "priority": 100,
         },
         "targeting_fields": _tray_targeting_fields(),
         "trmm_scripts": trmm_scripts,
@@ -9324,9 +9292,9 @@ async def admin_tray_edit_configuration_page(config_id: int, request: Request):
             "env_allowlist_csv": record.get("env_allowlist") or "",
             "branding_icon_url": record.get("branding_icon_url") or "",
             "payload_json": record.get("payload_json") or "[]",
-            "target_rules": _tray_stored_rules(record.get("target_rules")),
-            "priority": int(record.get("priority") if record.get("priority") is not None else 100),
             "version": record.get("version"),
+            # Menu-level rules from before device rules moved onto items.
+            "legacy_target_rules": record.get("target_rules") or None,
         },
         "targeting_fields": _tray_targeting_fields(),
         "trmm_scripts": trmm_scripts,
@@ -9359,6 +9327,10 @@ async def _save_tray_configuration_from_form(form, current_user, *, config_id: i
             raise ValueError("Menu payload must be a JSON array")
     except (ValueError, TypeError):
         parsed = []
+    try:
+        tray_service.normalise_menu_rules(parsed)
+    except ValueError as exc:
+        return str(exc)
     payload_json = _json.dumps(parsed)
     display_text = str(form.get("display_text", "") or "")
     if display_text:
@@ -9372,11 +9344,6 @@ async def _save_tray_configuration_from_form(form, current_user, *, config_id: i
         if v.strip()
     )
     branding = (str(form.get("branding_icon_url", "")).strip() or None)
-    target_rules, rules_error = _tray_form_rules(form)
-    if rules_error:
-        return rules_error
-    priority_raw = str(form.get("priority", "") or "").strip()
-    priority = min(max(int(priority_raw), 0), 10000) if priority_raw.isdigit() else 100
 
     if config_id is None:
         await tray_repo.create_menu_config(
@@ -9389,8 +9356,6 @@ async def _save_tray_configuration_from_form(form, current_user, *, config_id: i
             branding_icon_url=branding,
             enabled=enabled,
             created_by_user_id=int(current_user["id"]),
-            target_rules=target_rules,
-            priority=priority,
         )
     else:
         await tray_repo.update_menu_config(
@@ -9404,8 +9369,7 @@ async def _save_tray_configuration_from_form(form, current_user, *, config_id: i
             updated_by_user_id=int(current_user["id"]),
             scope=scope,
             scope_ref_id=None if scope == "global" else scope_ref_id,
-            target_rules=target_rules,
-            priority=priority,
+            clear_legacy_rules=True,
         )
     await tray_service.broadcast_config_changed()
     return None

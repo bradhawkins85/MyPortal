@@ -1,0 +1,7 @@
+{
+  "guid": "8d75dc6e-1f04-4f98-985f-a2582bb3b44c",
+  "occurred_at": "2026-10-21T00:10Z",
+  "change_type": "Improvement",
+  "summary": "Tray menus: device rules now apply to individual menu items instead of whole menus, so one menu can show items only on devices with an app installed, at a location or for a type of client; menus saved with menu-level rules are disabled so they are not shown to every device",
+  "content_hash": "92ec9799f6b8ca264221218fcbf8b98dc79fa5bd663dba7606a5aa957e418ec9"
+}

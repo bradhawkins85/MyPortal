@@ -21,13 +21,18 @@
           <li class="scf-chip">{{ config.name or 'New configuration' }}</li>
           <li class="scf-chip">{{ (config.scope or 'global') | capitalize }} scope{% if config.scope_ref_id %} · #{{ config.scope_ref_id }}{% endif %}</li>
           <li class="scf-chip{% if not config.enabled %} scf-chip--muted{% endif %}">{{ 'Enabled' if config.enabled else 'Disabled' }}</li>
-          {% if config.target_rules %}<li class="scf-chip">Device rules · priority {{ config.priority }}</li>{% endif %}
           {% if config.version %}<li class="scf-chip scf-chip--muted">Version {{ config.version }}</li>{% endif %}
         </ul>
       </div>
     </div>
   </section>
 
+  {% if config.legacy_target_rules %}
+    <div class="alert alert--warning" role="status">
+      <p>This configuration has menu-level device rules from an earlier version, so it was disabled. Device rules now go on individual menu items: add them under Menu items, then enable the configuration. The old rules were:</p>
+      <pre class="form-input--code">{{ config.legacy_target_rules }}</pre>
+    </div>
+  {% endif %}
   <form method="post" action="{{ form_action }}" class="form" id="tray-config-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   </form>
@@ -39,7 +44,7 @@
         <input type="search" id="tray-config-nav-search" class="form-input" placeholder="Find a setting…" autocomplete="off" data-ae-search>
       </div>
       {% set config_groups = [
-        ("Configuration", [("general", "Name and scope"), ("targeting", "Device rules"), ("menu-items", "Menu items")]),
+        ("Configuration", [("general", "Name and scope"), ("menu-items", "Menu items")]),
         ("Menu content", [("display-text", "Display text"), ("environment", "Environment variables"), ("branding", "Branding")]),
       ] %}
       {% for group_label, items in config_groups %}
@@ -62,7 +67,7 @@
       <section class="card card--panel ce-section" id="general" data-ae-section="general" aria-labelledby="tray-config-general-title">
         <header class="ce-section__header"><div class="ce-section__heading">
           <h2 class="card__title" id="tray-config-general-title">Name and scope</h2>
-          <p class="card__subtitle">Which devices use this menu. The most specific enabled configuration wins: device, then configurations with matching device rules, then tag, then company, then global.</p>
+          <p class="card__subtitle">Which devices use this menu. The most specific enabled configuration wins: device, then tag, then company, then global. Use device rules on individual menu items to show them only on some devices.</p>
         </div></header>
         <div class="ce-section__body ce-form-grid">
           <div class="form-field">
@@ -89,46 +94,13 @@
         </div>
       </section>
 
-      <section class="card card--panel ce-section" id="targeting" data-ae-section="targeting" aria-labelledby="tray-config-targeting-title">
-        <header class="ce-section__header"><div class="ce-section__heading">
-          <h2 class="card__title" id="tray-config-targeting-title">Device rules</h2>
-          <p class="card__subtitle">Give matching devices in the scope above their own menu, using the same rules as RMM checks: installed software, location, company tags, custom fields and more. Each device asks for its menu by its ID; a device that matches no rule-targeted menu falls back to the tag, company or global menu.</p>
-        </div></header>
-        <div class="ce-section__body" data-tray-config-targeting data-rmm-page>
-          {% set targeting_mode = 'rules' if config.target_rules else 'all' %}
-          <fieldset class="rmm-choices">
-            <legend class="form-label">Which devices in the scope</legend>
-            <div class="rmm-choices__grid rmm-choices__grid--compact">
-              <label class="rmm-choice rmm-choice--compact" for="tray-config-target-all">
-                <input class="rmm-choice__input" type="radio" id="tray-config-target-all" name="target_mode" value="all" form="tray-config-form" data-tray-target-mode {% if targeting_mode != 'rules' %}checked{% endif %}>
-                <span class="rmm-choice__title">All of them</span>
-                <span class="rmm-choice__text">Every device in the scope uses this menu, as before.</span>
-              </label>
-              <label class="rmm-choice rmm-choice--compact" for="tray-config-target-rules">
-                <input class="rmm-choice__input" type="radio" id="tray-config-target-rules" name="target_mode" value="rules" form="tray-config-form" data-tray-target-mode {% if targeting_mode == 'rules' %}checked{% endif %}>
-                <span class="rmm-choice__title">Only devices that match rules</span>
-                <span class="rmm-choice__text">For example devices with an app installed, at a location, or for a type of client.</span>
-              </label>
-            </div>
-          </fieldset>
-          <div class="form-field" data-tray-target-priority {% if targeting_mode != 'rules' %}hidden{% endif %}>
-            <label class="form-label" for="config-priority">Priority</label>
-            <input class="form-input" id="config-priority" name="priority" form="tray-config-form" type="number" min="0" max="10000" value="{{ config.priority if config.priority is not none else 100 }}" />
-            <p class="form-help">When a device matches the rules of several menus, the lowest number wins.</p>
-          </div>
-          <input type="hidden" name="target_rules" form="tray-config-form" data-tray-target-rules value="{{ config.target_rules | default(none) | tojson | forceescape }}">
-          <script type="application/json" id="tray-config-targeting-config">{{ {"fields": targeting_fields | default([])} | tojson }}</script>
-          <noscript><p class="alert alert--warning">JavaScript is required to build and preview device rules.</p></noscript>
-{% set targeting_id = "tray-config-rules-title" %}{% include "rmm/_device_rules.html" %}
-        </div>
-      </section>
-
       <section class="card card--panel ce-section" id="menu-items" data-ae-section="menu-items" aria-labelledby="tray-config-menu-title">
         <header class="ce-section__header"><div class="ce-section__heading">
           <h2 class="card__title" id="tray-config-menu-title">Menu items</h2>
-          <p class="card__subtitle">Build the tray menu row by row. Use Move up and Move down to reorder, and Level to place an item under the submenu above it. The JSON view is there for advanced edits.</p>
+          <p class="card__subtitle">Build the tray menu row by row. Use Move up and Move down to reorder, and Level to place an item under the submenu above it. Device rules on an item show it only on devices whose inventory matches, such as devices with an app installed or at one location. The JSON view is there for advanced edits.</p>
         </div></header>
         <div class="ce-section__body" data-menu-node-builder>
+          <script type="application/json" id="tray-config-targeting-config">{{ {"fields": targeting_fields | default([])} | tojson }}</script>
           <div class="form-stack" id="menu-node-list" aria-live="polite"></div>
           <div class="form-actions">
             <button type="button" class="button button--ghost" id="menu-node-add" aria-label="Add menu node">Add item</button>
@@ -223,7 +195,6 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
-  <script src="{{ static_url('/static/js/tray_config_targeting.js') }}" defer></script>
   <script>
     (function () {
       const builder = document.querySelector('[data-menu-node-builder]');
@@ -247,6 +218,77 @@
       const TRMM_SCRIPTS = {{ (trmm_scripts or [])|tojson }};
       const RMM_SCRIPTS = {{ (rmm_scripts or [])|tojson }};
       const TRAY_COMPANIES = {{ (companies or [])|tojson }};
+      let TARGETING_FIELDS = [];
+      try {
+        TARGETING_FIELDS = JSON.parse(document.getElementById('tray-config-targeting-config').textContent || '{}').fields || [];
+      } catch (error) {
+        // The rule editor loads the field catalogue through the API instead.
+      }
+
+      async function targetingApi(url, options) {
+        const token = document.querySelector('meta[name="csrf-token"]');
+        const form = document.getElementById('tray-config-form');
+        const init = Object.assign({ credentials: 'same-origin' }, options || {});
+        init.headers = { Accept: 'application/json' };
+        if (init.body) {
+          init.body = JSON.stringify(init.body);
+          init.headers['Content-Type'] = 'application/json';
+        }
+        if (init.method && init.method !== 'GET') {
+          init.headers['X-CSRF-Token'] = token ? token.getAttribute('content') : ((form && form.querySelector('[name="csrf_token"]')) || {}).value || '';
+        }
+        const response = await fetch(url, init);
+        let data = {};
+        try { data = await response.json(); } catch (error) { data = {}; }
+        if (!response.ok) {
+          const failure = new Error(typeof data.detail === 'string' ? data.detail : 'Request failed (' + response.status + ').');
+          failure.data = data;
+          throw failure;
+        }
+        return data;
+      }
+
+      function isRuleTree(value) {
+        return Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Array.isArray(value.children);
+      }
+
+      // The rule editor (rmm_targeting.js) loads deferred, after this script, so
+      // each item's editor is created on first use. Until then the item keeps
+      // the rules it was saved with.
+      function ensureTargeting(row) {
+        if (row._targeting || !window.MyPortalRmmTargeting) return row._targeting || null;
+        const host = row.querySelector('[data-rmm-rules-field]');
+        row._targeting = window.MyPortalRmmTargeting.create({
+          host: host,
+          fields: TARGETING_FIELDS,
+          api: targetingApi,
+          previewUrl: '/api/tray/admin/configs/targeting/preview',
+          fieldsUrl: '/api/tray/admin/configs/targeting/fields',
+          getContext: () => {
+            const scope = document.getElementById('config-scope');
+            const ref = document.getElementById('config-scope-ref');
+            return {
+              scope: scope ? scope.value : 'global',
+              scope_ref_id: ref && ref.value ? Number(ref.value) : null
+            };
+          }
+        });
+        row._targeting.setRules(row._pendingRules || null);
+        return row._targeting;
+      }
+
+      function rowRules(row) {
+        if (!row.querySelector('[data-node-rules-toggle]').checked) return null;
+        return row._targeting ? row._targeting.getRules() : (row._pendingRules || null);
+      }
+
+      function updateRulesVisibility(row) {
+        const on = row.querySelector('[data-node-rules-toggle]').checked;
+        row.querySelector('[data-rmm-rules-field]').hidden = !on;
+        const badge = row.querySelector('[data-node-rules-badge]');
+        if (badge) badge.hidden = !on;
+        if (on && !row.querySelector('[data-node-body]').hidden) ensureTargeting(row);
+      }
 
       const NODE_TYPES = [
         'label',
@@ -515,6 +557,7 @@
           <div data-node-header style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; user-select:none;">
             <button type="button" class="button button--ghost" data-collapse-toggle aria-expanded="${expanded}" aria-label="${expanded ? 'Collapse node' : 'Expand node'}" style="padding:0.25rem 0.5rem; min-width:2rem; flex-shrink:0;">${expanded ? '▼' : '▶'}</button>
             <span data-node-summary style="font-weight:500; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+            <span data-node-rules-badge class="status status--warning" style="font-size:0.75em; flex-shrink:0;" hidden>Device rules</span>
             <span data-node-level-badge style="font-size:0.75em; opacity:0.65; flex-shrink:0;"></span>
             <span data-node-type-badge style="font-size:0.75em; opacity:0.6; flex-shrink:0;"></span>
           </div>
@@ -586,6 +629,27 @@
                 <p class="form-help">Select companies where this menu item should be suppressed.</p>
               </div>
             </div>
+            <div class="form-stack" data-rmm-page>
+              <label class="checkbox"><input type="checkbox" data-node-rules-toggle /><span>Only show on devices that match rules</span></label>
+              <section class="rmm-targeting" data-rmm-rules-field hidden aria-labelledby="${rowId}-rules-title">
+                <h4 class="rmm-subheading" id="${rowId}-rules-title" tabindex="-1">Device rules</h4>
+                <p class="form-help">The same rules as RMM checks: installed software, location, company tags, custom fields and more. AND needs every condition to match; OR needs any one. Devices that do not match never see this item, and a submenu left empty is hidden.</p>
+                <div data-rmm-rule-builder></div>
+                <p class="form-help form-help--error" data-rmm-error="target_rules" role="alert" hidden></p>
+                <div class="rmm-targeting__preview-tools">
+                  <button type="button" class="button button--secondary button--small" data-rmm-rules-preview>Preview matching devices</button>
+                  <p class="form-help">Uses this configuration's scope. Matches update as inventory changes.</p>
+                </div>
+                <p class="form-help" data-rmm-rules-preview-status role="status" aria-live="polite"></p>
+                <div class="rmm-targeting__results table-wrapper" data-rmm-rules-preview-results hidden>
+                  <table class="table">
+                    <caption class="visually-hidden">Devices currently matching the rules</caption>
+                    <thead><tr><th scope="col">Device</th><th scope="col">Company</th></tr></thead>
+                    <tbody data-rmm-rules-preview-agents></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
             <div class="form-row">
               <div class="form-field" data-wrap-color style="max-width:12rem;">
                 <label class="form-label" for="${rowId}-color">Text color</label>
@@ -631,6 +695,10 @@
         });
         setSelectedCompanyIDs(row.querySelector('[data-node-visible-company-ids]'), node.visible_company_ids);
         setSelectedCompanyIDs(row.querySelector('[data-node-hidden-company-ids]'), node.hidden_company_ids);
+        row._pendingRules = isRuleTree(node.target_rules) ? JSON.parse(JSON.stringify(node.target_rules)) : null;
+        row.querySelector('[data-node-rules-toggle]').checked = Boolean(row._pendingRules);
+        row.querySelector('[data-node-rules-toggle]').addEventListener('change', () => updateRulesVisibility(row));
+        row.querySelector('[data-rmm-rules-field]').addEventListener('rmm:rules-change', scheduleSyncJsonFromRows);
 
         const colorEl = row.querySelector('[data-node-color]');
         const colorPreview = row.querySelector('[data-node-color-preview]');
@@ -667,6 +735,7 @@
 
         updateSummary(row);
         updateRowIndent(row);
+        updateRulesVisibility(row);
 
         const toggleBtn = row.querySelector('[data-collapse-toggle]');
         const body = row.querySelector('[data-node-body]');
@@ -678,6 +747,7 @@
           toggleBtn.setAttribute('aria-expanded', String(!isExpanded));
           toggleBtn.setAttribute('aria-label', isExpanded ? 'Expand node' : 'Collapse node');
           toggleBtn.textContent = isExpanded ? '▶' : '▼';
+          if (!isExpanded) updateRulesVisibility(row);
         }
 
         toggleBtn.addEventListener('click', (e) => {
@@ -750,7 +820,8 @@
             confirm: candidate.confirm === true,
             entries: (candidate.entries && typeof candidate.entries === 'object' && !Array.isArray(candidate.entries)) ? candidate.entries : {},
             visible_company_ids: parseCompanyIDs(candidate.visible_company_ids),
-            hidden_company_ids: parseCompanyIDs(candidate.hidden_company_ids)
+            hidden_company_ids: parseCompanyIDs(candidate.hidden_company_ids),
+            target_rules: isRuleTree(candidate.target_rules) ? candidate.target_rules : null
           };
           rows.push({ node: rest, level });
           const children = Array.isArray(candidate.children) ? candidate.children : [];
@@ -797,7 +868,8 @@
           confirm: row.querySelector('[data-node-confirm]').checked,
           entries: readRmmEntries(row),
           visible_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-visible-company-ids]')),
-          hidden_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-hidden-company-ids]'))
+          hidden_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-hidden-company-ids]')),
+          target_rules: rowRules(row)
         };
       }
 
@@ -819,6 +891,7 @@
           if (row.color) node.color = row.color;
           if (row.visible_company_ids.length) node.visible_company_ids = row.visible_company_ids;
           if (row.hidden_company_ids.length) node.hidden_company_ids = row.hidden_company_ids;
+          if (row.target_rules) node.target_rules = row.target_rules;
           if (row.type === 'TRMM_Script') {
             if (row.script_id) node.script_id = row.script_id;
             const script = TRMM_SCRIPTS.find((candidate) => Number(candidate.id) === Number(row.script_id));
@@ -908,6 +981,24 @@
 
       if (jsonInput.form) {
         jsonInput.form.addEventListener('ae:discarded', () => loadJsonIntoRows(jsonInput.value));
+        // Stop saving an item whose device rules are incomplete, and show it.
+        jsonInput.form.addEventListener('submit', (event) => {
+          const invalid = Array.from(listEl.children).find((row) => {
+            if (!row.querySelector('[data-node-rules-toggle]').checked) return false;
+            if (!row._targeting && row._pendingRules) return false;
+            const targeting = ensureTargeting(row);
+            const valid = Boolean(targeting) && targeting.validate(true);
+            if (!valid && row.querySelector('[data-node-body]').hidden) row.querySelector('[data-collapse-toggle]').click();
+            return !valid;
+          });
+          if (invalid) {
+            event.preventDefault();
+            const field = invalid.querySelector('[aria-invalid="true"]') || invalid.querySelector('[data-node-rules-toggle]');
+            if (field) field.focus();
+            return;
+          }
+          syncJsonFromRows();
+        });
       }
 
       if (!loadJsonIntoRows(jsonInput.value)) {

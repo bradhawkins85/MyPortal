@@ -587,8 +587,6 @@ async def delete_revoked_devices() -> int:
 # Menu configs
 # ---------------------------------------------------------------------------
 
-_UNSET: Any = object()
-
 
 async def create_menu_config(
     *,
@@ -601,16 +599,13 @@ async def create_menu_config(
     branding_icon_url: str | None,
     enabled: bool,
     created_by_user_id: int | None,
-    target_rules: str | None = None,
-    priority: int = 100,
 ) -> dict[str, Any]:
     placeholder = "?" if db.is_sqlite() else "%s"
     columns = (
         "name, scope, scope_ref_id, payload_json, display_text, env_allowlist, "
-        "branding_icon_url, enabled, created_by_user_id, updated_by_user_id, "
-        "target_rules, priority"
+        "branding_icon_url, enabled, created_by_user_id, updated_by_user_id"
     )
-    values = ", ".join([placeholder] * 12)
+    values = ", ".join([placeholder] * 10)
     # The column list is hardcoded and the VALUES placeholders come only from the fixed value count.
     await db.execute(
         f"INSERT INTO tray_menu_configs ({columns}) VALUES ({values})",  # nosec B608
@@ -625,8 +620,6 @@ async def create_menu_config(
             1 if enabled else 0,
             created_by_user_id,
             created_by_user_id,
-            target_rules,
-            int(priority),
         ),
     )
     rows = await db.fetch_all(
@@ -663,13 +656,12 @@ async def update_menu_config(
     updated_by_user_id: int | None = None,
     scope: str | None = None,
     scope_ref_id: int | None = None,
-    target_rules: Any = _UNSET,
-    priority: int | None = None,
+    clear_legacy_rules: bool = False,
 ) -> None:
     """Update the given fields; ``scope`` also sets ``scope_ref_id``.
 
-    ``target_rules`` is left alone unless passed; ``None`` clears the rules so
-    the configuration applies to every device in its scope again.
+    ``clear_legacy_rules`` drops the menu-level ``target_rules`` left from
+    before device rules moved onto menu items.
     """
     placeholder = "?" if db.is_sqlite() else "%s"
     sets: list[str] = []
@@ -679,12 +671,8 @@ async def update_menu_config(
         params.append(scope)
         sets.append(f"scope_ref_id = {placeholder}")
         params.append(scope_ref_id)
-    if target_rules is not _UNSET:
-        sets.append(f"target_rules = {placeholder}")
-        params.append(target_rules)
-    if priority is not None:
-        sets.append(f"priority = {placeholder}")
-        params.append(int(priority))
+    if clear_legacy_rules:
+        sets.append("target_rules = NULL")
     if name is not None:
         sets.append(f"name = {placeholder}")
         params.append(name)
