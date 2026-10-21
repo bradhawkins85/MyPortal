@@ -15,7 +15,8 @@
 
 /* Component display rules (grid, flex) would otherwise override the hidden attribute. */
 [data-rmm-page] [hidden],
-.rmm-modal [hidden] { display: none !important; }
+.rmm-modal [hidden],
+.rmm-check-form [hidden] { display: none !important; }
 
 .rmm-stats {
   display: grid;
