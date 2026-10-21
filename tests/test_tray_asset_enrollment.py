@@ -377,3 +377,106 @@ async def test_websocket_checkin_retries_pending_setup_ticket(setup_ticket_db, m
     await service.mark_websocket_alive(stale)
     create.assert_awaited_once()
     assert stale["setup_ticket_processed"] == 1
+
+
+@pytest.mark.anyio
+async def test_enrol_returns_credentials_while_slow_asset_work_continues(asset_db, monkeypatch):
+    from app.api.routes import tray as routes
+    from app.schemas.tray import TrayEnrolRequest
+
+    async def token_lookup(token_hash):
+        return {"id": 1, "company_id": 1}
+
+    async def create_device(**kwargs):
+        return await add_device(asset_db, uid=kwargs["device_uid"])
+
+    async def used(token_id):
+        pass
+
+    monkeypatch.setattr(tray, "get_install_token_by_hash", token_lookup)
+    monkeypatch.setattr(tray, "create_device", create_device)
+    monkeypatch.setattr(tray, "mark_install_token_used", used)
+    monkeypatch.setattr(service, "PROVISION_CHECKIN_WAIT_SECONDS", 0.01)
+    release = asyncio.Event()
+    original = service.ensure_device_asset
+    calls = 0
+
+    async def slow_asset(device):
+        nonlocal calls
+        calls += 1
+        await release.wait()
+        return await original(device)
+
+    monkeypatch.setattr(service, "ensure_device_asset", slow_asset)
+    response = await asyncio.wait_for(routes.enrol_device(
+        TrayEnrolRequest(install_token="a" * 32, device_uid="slow-mac", os="darwin"),
+        SimpleNamespace(),
+    ), timeout=1)
+    assert response.auth_token
+    assert response.asset_id is None
+    device = await tray.get_device_by_uid(response.device_uid)
+    task = service._device_provision_tasks[device["id"]]
+    try:
+        # An authenticated check-in shares the in-flight provisioning attempt.
+        assert await service.provision_device_for_checkin(dict(device)) is None
+        assert calls == 1
+        assert not task.cancelled()
+        release.set()
+        asset_id = await task
+        assert asset_id
+        assert (await tray.get_device_by_uid(response.device_uid))["asset_id"] == asset_id
+    finally:
+        release.set()
+        await task
+    assert device["id"] not in service._device_provision_tasks
+
+
+@pytest.mark.anyio
+async def test_provision_failure_does_not_block_authentication_or_heartbeat(asset_db, monkeypatch):
+    from app.api.dependencies.auth import get_current_tray_device
+    from app.api.routes import tray as routes
+    from app.schemas.tray import TrayHeartbeatRequest
+
+    device = await add_device(asset_db)
+    original = service.ensure_device_asset
+
+    async def fail_asset(device):
+        raise RuntimeError("asset database unavailable")
+
+    async def lookup(token_hash):
+        return dict(device)
+
+    heartbeats = []
+
+    async def heartbeat(device_id, **kwargs):
+        heartbeats.append(device_id)
+
+    monkeypatch.setattr(service, "ensure_device_asset", fail_asset)
+    monkeypatch.setattr(tray, "get_device_by_auth_hash", lookup)
+    monkeypatch.setattr(tray, "update_device_heartbeat", heartbeat)
+    request = SimpleNamespace(headers={"Authorization": "Bearer device-token"}, client=None)
+    authenticated = await get_current_tray_device(request)
+    response = await routes.heartbeat(TrayHeartbeatRequest(), request, authenticated)
+    assert response.status_code == 200
+    assert heartbeats == [device["id"]]
+    # A subsequent check-in retries and repairs provisioning after recovery.
+    monkeypatch.setattr(service, "ensure_device_asset", original)
+    assert await service.provision_device_for_checkin(device)
+
+
+@pytest.mark.anyio
+async def test_stalled_provision_attempt_times_out_and_retries(asset_db, monkeypatch):
+    device = await add_device(asset_db)
+    original = service.ensure_device_asset
+    monkeypatch.setattr(service, "PROVISION_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(service, "PROVISION_CHECKIN_WAIT_SECONDS", 1)
+
+    async def stalled_asset(device):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(service, "ensure_device_asset", stalled_asset)
+    assert await service.provision_device_for_checkin(device) is None
+    assert device["id"] not in service._device_provision_tasks
+    monkeypatch.setattr(service, "ensure_device_asset", original)
+    monkeypatch.setattr(service, "PROVISION_TIMEOUT_SECONDS", 120)
+    assert await service.provision_device_for_checkin(device)

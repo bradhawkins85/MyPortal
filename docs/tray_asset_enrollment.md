@@ -43,3 +43,34 @@ WebSocket reconnects do not create additional tickets, even after the setup
 ticket is closed. Temporary failures are logged and retried on subsequent
 enrolment, heartbeat or WebSocket check-ins; a partially created ticket is reused.
 Company-less and revoked devices do not create tickets.
+
+## Enrolment timeouts and recovery
+
+Enrolment and authenticated check-ins wait at most one second for optional
+asset/setup-ticket provisioning. Slow provisioning continues in the background,
+shared by check-ins on the same worker. Each attempt has a two-minute limit;
+failures are logged and retried by later check-ins. A provisioning failure does
+not withhold enrolment credentials or reject an otherwise authenticated device.
+An enrolment response can therefore initially have no asset ID; the device and
+its eventual asset remain linked through the existing tray identity.
+
+The tray service retries failed initial enrolment with backoff before starting
+its authenticated workers. It persists its pending identity separately in
+`tray-enrolment-pending.json`, next to `tray-state.json`, so retries and service
+restarts reuse the same device UID. Only successful enrolment writes the normal
+state file used by the UI and installation scripts.
+
+For a v0.9.7 Mac already stuck after an enrolment timeout, deploy the server fix,
+then restart the service to trigger another enrolment attempt:
+
+```bash
+sudo launchctl kickstart -k system/io.myportal.tray.service
+```
+
+The server change benefits existing clients. Automatic initial-enrolment retry
+and pending-identity persistence require a rebuilt tray package. The original
+incomplete device record may remain after retrying an older client, which did
+not persist its UID before enrolment completed. Confirm the working device
+checks in before removing an obsolete record. Persistent asset failures require
+checking the portal logs and database migrations, including
+`485_tray_device_assets.sql`; enrolment recovery does not repair a missing schema.

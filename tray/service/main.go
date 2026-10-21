@@ -25,6 +25,8 @@ package main
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,9 +56,10 @@ import (
 )
 
 const (
-	heartbeatInterval = 30 * time.Second
-	configCacheName   = "tray-config.json"
-	stateFileName     = "tray-state.json"
+	heartbeatInterval    = 30 * time.Second
+	configCacheName      = "tray-config.json"
+	stateFileName        = "tray-state.json"
+	pendingStateFileName = "tray-enrolment-pending.json"
 	// defenderPolicyStateFileName records the Defender exclusions and scan
 	// schedule the agent applied, so it never removes settings it did not add.
 	defenderPolicyStateFileName = "defender-policy.json"
@@ -74,7 +77,7 @@ type persistedState struct {
 	PortalURL string `json:"portal_url"`
 }
 
-func stateDir() string {
+var stateDir = func() string {
 	switch runtime.GOOS {
 	case "windows":
 		base := os.Getenv("ProgramData")
@@ -88,7 +91,11 @@ func stateDir() string {
 }
 
 func loadState() *persistedState {
-	path := filepath.Join(stateDir(), stateFileName)
+	return loadStateFile(stateFileName)
+}
+
+func loadStateFile(name string) *persistedState {
+	path := filepath.Join(stateDir(), name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -100,14 +107,20 @@ func loadState() *persistedState {
 	return &s
 }
 
-func saveState(s persistedState) {
+func saveState(s persistedState) error {
+	return saveStateFile(s, stateFileName)
+}
+
+func saveStateFile(s persistedState, name string) error {
 	dir := stateDir()
-	_ = os.MkdirAll(dir, 0700)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
 	if runtime.GOOS == "darwin" {
 		_ = os.Chmod(dir, 0755)
 	}
 	data, _ := json.Marshal(s)
-	path := filepath.Join(dir, stateFileName)
+	path := filepath.Join(dir, name)
 	mode := os.FileMode(0600)
 	if runtime.GOOS == "darwin" {
 		// The LaunchDaemon runs as root while the LaunchAgent runs as the
@@ -117,10 +130,12 @@ func saveState(s persistedState) {
 		// credential readable (but never writable) by those local users.
 		mode = 0644
 	}
-	_ = os.WriteFile(path, data, mode)
+	if err := os.WriteFile(path, data, mode); err != nil {
+		return err
+	}
 	// WriteFile preserves the permissions of an existing file. Apply the mode
 	// explicitly so upgrades repair state files created by older releases.
-	_ = os.Chmod(path, mode)
+	return os.Chmod(path, mode)
 }
 
 // repairPersistedState rewrites the enrolled state when it lacks the current
@@ -234,20 +249,19 @@ func (d *daemon) run() {
 		})
 	}
 
-	// Enrol (or restore persisted state).
-	if err := d.ensureEnrolled(); err != nil {
-		logger.Error("Enrolment failed: %v", err)
-	} else {
-		// Fetch the current config from the server immediately so the UI
-		// agent has an up-to-date copy on disk from the very first launch,
-		// rather than waiting for a config_changed WebSocket event.
-		go func() {
-			d.refreshConfig()
-			if d.ipcSrv != nil {
-				d.ipcSrv.Broadcast(ipc.Message{Type: "config_changed"})
-			}
-		}()
+	// Do not start authenticated workers until credentials have been received.
+	if !retryEnrolment(d.stopCh, d.ensureEnrolled, backoff) {
+		if d.ipcSrv != nil {
+			d.ipcSrv.Close()
+		}
+		return
 	}
+	go func() {
+		d.refreshConfig()
+		if d.ipcSrv != nil {
+			d.ipcSrv.Broadcast(ipc.Message{Type: "config_changed"})
+		}
+	}()
 
 	// Auto-update checker.
 	updateCtx, cancelUpdate := context.WithCancel(context.Background())
@@ -509,8 +523,27 @@ func (d *daemon) runNetworkScan(source string, cfg *api.ConfigResponse) {
 	logger.Info("Network scan (%s) uploaded (%d hosts)", source, len(hosts))
 }
 
+// retryEnrolment waits through temporary failures and stops with the service.
+func retryEnrolment(stopCh chan struct{}, enrol func() error, delay func(int) time.Duration) bool {
+	for attempt := 0; ; attempt++ {
+		select {
+		case <-stopCh:
+			return false
+		default:
+		}
+		if err := enrol(); err == nil {
+			return true
+		} else {
+			wait := delay(attempt)
+			logger.Error("Enrolment failed: %v — retry in %v", err, wait)
+			sleep(stopCh, wait)
+		}
+	}
+}
+
 func (d *daemon) ensureEnrolled() error {
-	if s := loadState(); s != nil && s.AuthToken != "" {
+	s := loadState()
+	if s != nil && s.AuthToken != "" {
 		d.client.SetAuth(s.DeviceUID, s.AuthToken)
 		logger.Info("Restored persisted auth (device_uid=%s)", s.DeviceUID)
 		logger.Debug("ensureEnrolled: persisted state at %s, portal=%s", filepath.Join(stateDir(), stateFileName), s.PortalURL)
@@ -525,10 +558,30 @@ func (d *daemon) ensureEnrolled() error {
 		return fmt.Errorf("no enrol token configured")
 	}
 
+	// Keep pending identity separate from tray-state.json: installers and the
+	// UI treat that file as proof of completed enrolment.
+	if s == nil {
+		s = loadStateFile(pendingStateFileName)
+	}
+
+	// Persist an identity before contacting the server. A timed-out request may
+	// already have created a row; retries and service restarts must reuse it.
+	if s == nil || s.DeviceUID == "" || (s.PortalURL != "" && s.PortalURL != d.cfg.PortalURL) {
+		var identity [16]byte
+		if _, err := cryptorand.Read(identity[:]); err != nil {
+			return fmt.Errorf("generate device identity: %w", err)
+		}
+		s = &persistedState{DeviceUID: hex.EncodeToString(identity[:]), PortalURL: d.cfg.PortalURL}
+		if err := saveStateFile(*s, pendingStateFileName); err != nil {
+			return fmt.Errorf("persist pending enrolment identity: %w", err)
+		}
+	}
+
 	facts := collectFacts()
 	logger.Debug("ensureEnrolled: enrolling against %s as %s/%s", d.cfg.PortalURL, facts.OS, facts.Hostname)
 	resp, err := d.client.Enrol(context.Background(), api.EnrolRequest{
 		InstallToken: d.cfg.EnrolToken,
+		DeviceUID:    s.DeviceUID,
 		OS:           facts.OS,
 		OSVersion:    facts.OSVersion,
 		Hostname:     facts.Hostname,
@@ -537,7 +590,10 @@ func (d *daemon) ensureEnrolled() error {
 	if err != nil {
 		return err
 	}
-	saveState(persistedState{DeviceUID: resp.DeviceUID, AuthToken: resp.AuthToken, PortalURL: d.cfg.PortalURL})
+	if err := saveState(persistedState{DeviceUID: resp.DeviceUID, AuthToken: resp.AuthToken, PortalURL: d.cfg.PortalURL}); err != nil {
+		return fmt.Errorf("persist enrolment credentials: %w", err)
+	}
+	_ = os.Remove(filepath.Join(stateDir(), pendingStateFileName))
 	saveDeviceUIDToRegistry(resp.DeviceUID)
 	logger.Info("Enrolled: device_uid=%s", resp.DeviceUID)
 	return nil

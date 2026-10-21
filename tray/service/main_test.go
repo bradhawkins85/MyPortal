@@ -2,13 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
+	"github.com/bradhawkins85/myportal-tray/internal/config"
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 )
 
@@ -140,5 +143,75 @@ func TestUninstallToleratesMissingService(t *testing.T) {
 	cfgIdx := strings.Index(src, "config.Load()")
 	if cmdIdx < 0 || cfgIdx < 0 || cmdIdx > cfgIdx {
 		t.Error("install/uninstall subcommand check must appear before config.Load() in main()")
+	}
+}
+
+func TestEnrolmentRetryRetainsIdentityAcrossServiceRestart(t *testing.T) {
+	previousStateDir := stateDir
+	dir := t.TempDir()
+	stateDir = func() string { return dir }
+	t.Cleanup(func() { stateDir = previousStateDir })
+	var requests []api.EnrolRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req api.EnrolRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		requests = append(requests, req)
+		if len(requests) == 1 {
+			// A failed response can follow successful device persistence on the server.
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(api.EnrolResponse{DeviceUID: req.DeviceUID, AuthToken: "device-auth"})
+	}))
+	defer server.Close()
+	cfg := &config.Config{PortalURL: server.URL, EnrolToken: "install-token"}
+	if err := newDaemon(cfg).ensureEnrolled(); err == nil {
+		t.Fatal("first enrolment should fail")
+	}
+	pending := loadStateFile(pendingStateFileName)
+	if pending == nil || pending.DeviceUID == "" || pending.AuthToken != "" {
+		t.Fatalf("pending state = %#v", pending)
+	}
+	if loadState() != nil {
+		t.Fatal("pending identity must not appear as completed enrolment")
+	}
+	// A fresh daemon must use the same identity and obtain working credentials.
+	d := newDaemon(cfg)
+	if err := d.ensureEnrolled(); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 || requests[0].DeviceUID != requests[1].DeviceUID {
+		t.Fatalf("enrolment identities changed: %#v", requests)
+	}
+	if d.client.DeviceUID() != pending.DeviceUID || loadState().AuthToken != "device-auth" {
+		t.Fatal("credentials were not installed and persisted")
+	}
+}
+
+func TestRetryEnrolmentRecoversAndStops(t *testing.T) {
+	stop := make(chan struct{})
+	attempts := 0
+	ok := retryEnrolment(stop, func() error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("response timed out")
+		}
+		return nil
+	}, func(int) time.Duration { return time.Millisecond })
+	if !ok || attempts != 2 {
+		t.Fatalf("result=%v attempts=%d", ok, attempts)
+	}
+	attempts = 0
+	ok = retryEnrolment(stop, func() error {
+		attempts++
+		close(stop)
+		return errors.New("offline")
+	}, func(int) time.Duration { return time.Hour })
+	if ok || attempts != 1 {
+		t.Fatalf("result=%v attempts=%d", ok, attempts)
 	}
 }
