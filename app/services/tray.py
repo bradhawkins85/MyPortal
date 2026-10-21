@@ -148,6 +148,53 @@ async def ensure_device_asset(device: dict[str, Any]) -> int | None:
     return int(asset_id)
 
 
+# Retain in-flight work after the HTTP response, and share it between check-ins.
+_device_provision_tasks: dict[int, asyncio.Task] = {}
+PROVISION_CHECKIN_WAIT_SECONDS = 1.0
+PROVISION_TIMEOUT_SECONDS = 120.0
+
+
+async def provision_device_for_checkin(device: dict[str, Any]) -> int | None:
+    """Provision without holding enrolment credentials or liveness behind slow work.
+
+    Quick provisioning still returns the asset in the enrolment response. Slow
+    work continues after the response; failed work is retried at the next check-in.
+    Device/asset identities and the setup-ticket lock also protect across workers.
+    """
+    if device.get("company_id") is None or device.get("status") != "active":
+        return device.get("asset_id")
+    device_id = int(device["id"])
+    task = _device_provision_tasks.get(device_id)
+    if task is None:
+        async def provision() -> int | None:
+            try:
+                async with asyncio.timeout(PROVISION_TIMEOUT_SECONDS):
+                    asset_id = await ensure_device_asset(device)
+                    await ensure_device_setup_ticket(device)
+                    return asset_id
+            except Exception as exc:
+                log_error(
+                    "Could not provision tray device; retrying on next check-in",
+                    device_uid=device.get("device_uid"),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                return device.get("asset_id")
+            finally:
+                _device_provision_tasks.pop(device_id, None)
+
+        task = asyncio.create_task(provision(), name=f"tray-provision:{device_id}")
+        _device_provision_tasks[device_id] = task
+    try:
+        asset_id = await asyncio.wait_for(
+            asyncio.shield(task), timeout=PROVISION_CHECKIN_WAIT_SECONDS,
+        )
+        if asset_id:
+            device["asset_id"] = asset_id
+    except TimeoutError:
+        pass
+    return device.get("asset_id")
+
+
 async def reconcile_device_assets() -> None:
     """Backfill existing devices at startup, retrying failures on the next run."""
     for device in await tray_repo.list_devices(status="active"):
@@ -1006,7 +1053,8 @@ WEBSOCKET_PRESENCE_WINDOW_SECONDS = 90
 async def mark_websocket_alive(device: dict[str, Any]) -> None:
     """Best-effort record that ``device`` holds a live WebSocket."""
 
-    await ensure_device_setup_ticket(device)
+    if not device.get("asset_id") or not device.get("setup_ticket_processed", 1):
+        await provision_device_for_checkin(device)
     try:
         await tray_repo.touch_device_websocket(int(device["id"]))
     except Exception as exc:  # noqa: BLE001 - presence is diagnostic only

@@ -193,5 +193,5 @@ async def get_current_tray_device(request: Request) -> dict:
             detail="Tray device authentication failed",
         )
     if not device.get("asset_id"):
-        await tray_service.ensure_device_asset(device)
+        await tray_service.provision_device_for_checkin(device)
     return device

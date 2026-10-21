@@ -1,0 +1,7 @@
+{
+  "guid": "0819a503-51b8-4f42-9184-a049852ae07e",
+  "occurred_at": "2026-10-21T00:18Z",
+  "change_type": "Fix",
+  "summary": "Keep tray enrolment and check-ins responsive during asset provisioning, and retry failed enrolment without creating duplicate device identities.",
+  "content_hash": "3fa1f6ea546fab0017c2497642657820bd46c3798097f242314ada4376e4ed83"
+}

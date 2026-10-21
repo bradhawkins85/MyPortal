@@ -1314,7 +1314,7 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
         return
 
     if not device.get("asset_id"):
-        await tray_service.ensure_device_asset(device)
+        await tray_service.provision_device_for_checkin(device)
     await websocket.accept()
     tray_service.register_connection(device_uid, websocket)
     await tray_service.mark_websocket_alive(device)
