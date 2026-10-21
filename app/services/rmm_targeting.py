@@ -305,7 +305,7 @@ def validate_rules(rules: Any) -> dict[str, Any]:
                     raise ValueError("a custom field, variable or software name key is required")
                 if len(key.strip()) > MAX_KEY_LENGTH:
                     raise ValueError(f"custom keys may contain at most {MAX_KEY_LENGTH} characters")
-                result["key"] = key.strip()
+                result["key"] = _normalize_key(field, key)
             elif "key" in node:
                 raise ValueError("only custom fields, company variables and software metadata accept a key")
             if operator in _PRESENCE:
@@ -337,6 +337,27 @@ def validate_rules(rules: Any) -> dict[str, Any]:
     return visit(rules, 1, "root")
 
 
+_KEY_PREFIXES = {
+    "company.variable": ("company.variables.", "company.variable.", "variables."),
+    "asset.custom": ("asset.custom.", "custom."),
+}
+
+
+def _normalize_key(field: str, key: str) -> str:
+    """Accept a template placeholder such as ``{{ company.variables.NAME }}``.
+
+    Editors commonly paste the script placeholder rather than the bare name;
+    the wrapper and scope prefix are stripped so the rule addresses NAME.
+    """
+    key = key.strip()
+    if key.startswith("{{") and key.endswith("}}"):
+        key = key[2:-2].strip()
+    for prefix in _KEY_PREFIXES.get(field, ()):
+        if key.casefold().startswith(prefix) and len(key) > len(prefix):
+            return key[len(prefix):].strip()
+    return key
+
+
 def _resolve(condition: dict[str, Any], context: Mapping[str, Any]) -> Any:
     field = condition["field"]
     collections = {"software.name": "software", "asset.tags": "asset_tags", "company.tags": "company_tags"}
@@ -363,7 +384,18 @@ def _resolve(condition: dict[str, Any], context: Mapping[str, Any]) -> Any:
     keyed = {"asset.custom": "asset_custom", "company.variable": "company_variables"}
     if field in keyed:
         values = context.get(keyed[field], _MISSING)
-        return values.get(condition["key"], _MISSING) if isinstance(values, Mapping) else _MISSING
+        if not isinstance(values, Mapping):
+            return _MISSING
+        key = condition["key"]
+        if key in values:
+            return values[key]
+        # Names match case insensitively, as script template placeholders do;
+        # an exact match above always takes precedence.
+        folded = key.casefold()
+        for name, value in values.items():
+            if isinstance(name, str) and name.casefold() == folded:
+                return value
+        return _MISSING
     scope, key = field.split(".", 1)
     values = context.get(scope, _MISSING)
     return values.get(key, _MISSING) if isinstance(values, Mapping) else _MISSING
