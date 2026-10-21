@@ -339,7 +339,7 @@ def validate_rules(rules: Any) -> dict[str, Any]:
 
 _KEY_PREFIXES = {
     "company.variable": ("company.variables.", "company.variable.", "variables."),
-    "asset.custom": ("asset.custom.", "custom."),
+    "asset.custom": ("asset.custom.", "asset.variables.", "custom."),
 }
 
 

@@ -20166,6 +20166,10 @@ a.shop-product-card {
   cursor: pointer;
 }
 
+.form-field > .ce-token {
+  align-self: flex-start;
+}
+
 .ce-token:hover,
 .ce-token:focus-visible {
   color: var(--hf-accent-strong);
