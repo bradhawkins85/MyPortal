@@ -198,8 +198,14 @@ async def touch_scripts(paths: Iterable[str]) -> None:
     for offset in range(0, len(paths), 500):
         batch = paths[offset:offset + 500]
         placeholders = ", ".join(["%s"] * len(batch))
+        # Only ``%s`` placeholders are joined in; no value is interpolated into
+        # the statement text, so the dynamic IN length is safe.
         await db.execute(
-            f"UPDATE rmm_scripts SET synced_at = %s, is_active = 1 WHERE path IN ({placeholders})",
+            "".join((
+                "UPDATE rmm_scripts SET synced_at = %s, is_active = 1 WHERE path IN (",
+                placeholders,
+                ")",
+            )),
             (now, *batch),
         )
 
@@ -212,8 +218,14 @@ async def deactivate_scripts(paths: Iterable[str]) -> None:
     for offset in range(0, len(paths), 500):
         batch = paths[offset:offset + 500]
         placeholders = ", ".join(["%s"] * len(batch))
+        # Only ``%s`` placeholders are joined in; no value is interpolated into
+        # the statement text, so the dynamic IN length is safe.
         await db.execute(
-            f"UPDATE rmm_scripts SET is_active = 0, updated_at = %s WHERE path IN ({placeholders})",
+            "".join((
+                "UPDATE rmm_scripts SET is_active = 0, updated_at = %s WHERE path IN (",
+                placeholders,
+                ")",
+            )),
             (now, *batch),
         )
 
@@ -333,22 +345,34 @@ async def record_agent_checkin(agent_id: int, details: dict[str, Any]) -> None:
     # Older agents and job polling omit thermal; preserve the last snapshot.
     # An explicit empty snapshot replaces old readings when sensors disappear.
     thermal = details.get("thermal")
-    thermal_sql = ", thermal_json = %s" if thermal is not None else ""
-    thermal_params = (json.dumps(thermal, default=lambda value: value.isoformat()),) if thermal is not None else ()
-    await db.execute(
-        "UPDATE rmm_agents SET last_seen_utc = %s, last_ip = COALESCE(%s, last_ip), "
-        "agent_version = COALESCE(%s, agent_version), shells = COALESCE(%s, shells), "
-        "hostname = COALESCE(%s, hostname), os_version = COALESCE(%s, os_version), updated_at = %s, "
-        "script_files_supported = COALESCE(%s, script_files_supported), "
-        "run_anyway_supported = COALESCE(%s, run_anyway_supported), "
-        "run_as_user_supported = COALESCE(%s, run_as_user_supported) "
-        + thermal_sql + " WHERE id = %s",
-        (
-            now, details.get("last_ip"), details.get("agent_version"), details.get("shells"),
-            details.get("hostname"), details.get("os_version"), now, details.get("script_files_supported"), details.get("run_anyway_supported"),
-            details.get("run_as_user_supported"),
-        ) + thermal_params + (agent_id,),
+    base_params = (
+        now, details.get("last_ip"), details.get("agent_version"), details.get("shells"),
+        details.get("hostname"), details.get("os_version"), now, details.get("script_files_supported"),
+        details.get("run_anyway_supported"), details.get("run_as_user_supported"),
     )
+    if thermal is not None:
+        await db.execute(
+            "UPDATE rmm_agents SET last_seen_utc = %s, last_ip = COALESCE(%s, last_ip), "
+            "agent_version = COALESCE(%s, agent_version), shells = COALESCE(%s, shells), "
+            "hostname = COALESCE(%s, hostname), os_version = COALESCE(%s, os_version), updated_at = %s, "
+            "script_files_supported = COALESCE(%s, script_files_supported), "
+            "run_anyway_supported = COALESCE(%s, run_anyway_supported), "
+            "run_as_user_supported = COALESCE(%s, run_as_user_supported), "
+            "thermal_json = %s WHERE id = %s",
+            base_params
+            + (json.dumps(thermal, default=lambda value: value.isoformat()),)
+            + (agent_id,),
+        )
+    else:
+        await db.execute(
+            "UPDATE rmm_agents SET last_seen_utc = %s, last_ip = COALESCE(%s, last_ip), "
+            "agent_version = COALESCE(%s, agent_version), shells = COALESCE(%s, shells), "
+            "hostname = COALESCE(%s, hostname), os_version = COALESCE(%s, os_version), updated_at = %s, "
+            "script_files_supported = COALESCE(%s, script_files_supported), "
+            "run_anyway_supported = COALESCE(%s, run_anyway_supported), "
+            "run_as_user_supported = COALESCE(%s, run_as_user_supported) WHERE id = %s",
+            base_params + (agent_id,),
+        )
 
 
 async def set_agent_status(agent_id: int, status: str) -> None:

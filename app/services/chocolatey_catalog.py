@@ -151,6 +151,7 @@ def _lookup_error(response: httpx.Response, name: str) -> str:
                 message = root.findtext('m:message', default='', namespaces=NS)
                 reason = ' '.join(message.split())[:300]
         except Exception:
+            # An unparseable SOAP error payload keeps the generic message below.
             pass
     detail = f': {reason}' if reason else ''
     return (f'Chocolatey software lookup failed with HTTP {response.status_code} for {name!r}{detail}; '

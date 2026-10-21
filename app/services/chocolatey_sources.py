@@ -96,11 +96,15 @@ async def save(company_id: int, keys: list[str]) -> None:
         raise ValueError('A selected Chocolatey source is no longer configured. Reload this page.')
     values = json.dumps({source['key']: source['key'] == 'DEFAULT' or source['key'] in keys for source in sources})
     if db.is_sqlite():
-        suffix = 'ON CONFLICT(company_id) DO UPDATE SET enabled_json = excluded.enabled_json'
+        await db.execute(
+            'INSERT INTO rmm_chocolatey_sources (company_id, enabled_json) VALUES (%s, %s) '
+            'ON CONFLICT(company_id) DO UPDATE SET enabled_json = excluded.enabled_json',
+            (company_id, values))
     else:
-        suffix = 'ON DUPLICATE KEY UPDATE enabled_json = VALUES(enabled_json)'
-    await db.execute('INSERT INTO rmm_chocolatey_sources (company_id, enabled_json) VALUES (%s, %s) ' + suffix,
-                     (company_id, values))
+        await db.execute(
+            'INSERT INTO rmm_chocolatey_sources (company_id, enabled_json) VALUES (%s, %s) '
+            'ON DUPLICATE KEY UPDATE enabled_json = VALUES(enabled_json)',
+            (company_id, values))
 
 
 def script() -> str:

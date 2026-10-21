@@ -29,6 +29,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from loguru import logger
+
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_checks as checks_repo
 from app.repositories import rmm_automation as automation_repo
@@ -366,7 +368,9 @@ async def targeting_preview(request: Request, payload: TargetingPreviewRequest):
     try:
         matches = rmm_targeting.compile_rules(payload.rules)
     except ValueError as exc:
-        return JSONResponse({"detail": str(exc), "errors": {"target_rules": str(exc)}}, status_code=400)
+        logger.debug("Check targeting rules rejected", error=str(exc))
+        return JSONResponse({"detail": "The targeting rules are invalid.",
+                            "errors": {"target_rules": "The targeting rules are invalid."}}, status_code=400)
     agents = await automation_repo.list_active_agents(company_id=None if payload.scope == "global" else company_id)
     if payload.scope == "asset":
         agents = [agent for agent in agents if agent.get("asset_id") == payload.asset_id]

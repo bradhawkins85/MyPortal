@@ -150,8 +150,6 @@ __all__ = [
     "get_next_ticket_number",
     "get_tray_icon_path",
     "get_tray_icon_tooltip_name",
-    "get_tray_update_trmm_script_id",
     "set_tray_icon_path",
     "set_tray_icon_tooltip_name",
-    "set_tray_update_trmm_script_id",
 ]

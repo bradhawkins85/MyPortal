@@ -191,6 +191,8 @@ async def provision_device_for_checkin(device: dict[str, Any]) -> int | None:
         if asset_id:
             device["asset_id"] = asset_id
     except TimeoutError:
+        # The slow check-in is retried on the next poll; the provisioning
+        # task keeps running in the background.
         pass
     return device.get("asset_id")
 
@@ -636,6 +638,7 @@ def _collect_rmm_script_ids(nodes: list[dict[str, Any]]) -> set[int]:
             try:
                 ids.add(int(node.get("script_id") or 0))
             except (TypeError, ValueError):
+                # A malformed script_id is ignored; the remaining nodes are still scanned.
                 pass
         children = node.get("children")
         if isinstance(children, list):

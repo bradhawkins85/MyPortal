@@ -33,6 +33,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field, model_validator
 
+from loguru import logger
+
 from app.api.dependencies.auth import get_current_tray_device, get_optional_user
 from app.repositories import rmm as rmm_repo
 from app.security.client_ip import get_client_ip
@@ -510,9 +512,11 @@ async def update_script_files_api(script_id: int, payload: ScriptFilesRequest, r
     try:
         files = await _save_script_files(request, user, script, [item.model_dump() for item in payload.files])
     except rmm_script_files.ScriptFileError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.warning("Script file association rejected", error=str(exc))
+        raise HTTPException(status_code=400, detail="The script file is invalid.") from exc
     except gitea.GiteaError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.error("Gitea script file association failed", error=str(exc))
+        raise HTTPException(status_code=503, detail="The file service is temporarily unavailable.") from exc
     return {"files": files}
 
 
@@ -535,9 +539,11 @@ async def add_script_file(script_id: int, request: Request):
     try:
         await _save_script_files(request, user, script, files)
     except (rmm_script_files.ScriptFileError, gitea.GiteaError) as exc:
+        logger.error("Script file association failed", error=str(exc))
+        message = "Could not associate the file with the script."
         if request.headers.get("Accept") == "application/json":
-            return JSONResponse({"detail": str(exc)}, status_code=400)
-        return flash_redirect(f"/rmm/scripts?script={script_id}", str(exc), "error")
+            return JSONResponse({"detail": message}, status_code=400)
+        return flash_redirect(f"/rmm/scripts?script={script_id}", message, "error")
     if request.headers.get("Accept") == "application/json":
         return JSONResponse({"ok": True})
     return flash_redirect(f"/rmm/scripts?script={script_id}", "File associated with the script.", "success")

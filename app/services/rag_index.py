@@ -193,13 +193,13 @@ def source_identity(
 def normalise_text(value: Any) -> str:
     # Keep angle-bracket email addresses from being mistaken for HTML tags on
     # repeated normalization, including addresses decoded from inbound mail.
-    raw = re.sub(r"<([^<>\s]+@[^<>\s]+)>", r"\1", str(value or ""))
+    raw = re.sub(r"<([^\s@<>]+@[^\s@<>]+)>", r"\1", str(value or ""))
     sanitized = sanitize_rich_text(raw)
     text = sanitized.text_content
     # Mail imports may contain entities escaped more than once.
     for _ in range(2):
         text = html.unescape(text)
-    text = re.sub(r"<([^<>\s]+@[^<>\s]+)>", r"\1", text)
+    text = re.sub(r"<([^\s@<>]+@[^\s@<>]+)>", r"\1", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
