@@ -1,4 +1,10 @@
-"""Associate Gitea files with scripts and serve the immutable versions queued for runs."""
+"""Associate Private-Files files with scripts and serve the immutable versions queued for runs.
+
+Script files live in the private ``Private-Files`` Gitea repository, in
+``Common/`` and ``Companies/<company>/`` folders. They reach endpoints only
+through a script's associated files (Add file). :func:`move_legacy_files` moves
+the scripts repository's earlier ``Files/`` folder there.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +16,7 @@ import re
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Mapping
 
+from app.core.logging import log_info, log_warning
 from app.repositories import companies as companies_repo
 from app.repositories import rmm as rmm_repo
 from app.security.encryption import decrypt_secret
@@ -20,6 +27,8 @@ MAX_FILES = 20
 MAX_FILE_BYTES = 50 * 1024 * 1024
 # Stands for the company folder of the company a Common script runs for.
 COMPANY_TOKEN = "{company}"
+# Raw bytes copied to Private-Files per commit while moving the old Files/ folder.
+_MOVE_BATCH_BYTES = 20 * 1024 * 1024
 
 
 class ScriptFileError(ValueError):
@@ -35,7 +44,7 @@ def validate_associations(files: list[Mapping[str, Any]]) -> list[dict[str, str]
         source = str(item.get("source_path") or "").strip()
         destination = str(item.get("destination") or "").strip()
         if not source or len(source) > 1024 or source.startswith("/") or "\\" in source:
-            raise ScriptFileError("Enter a repository file path under Files/Common or Files/Companies.")
+            raise ScriptFileError("Enter a Private-Files path under Common or Companies.")
         if any(part in ("", ".", "..") for part in source.split("/")) or any(ord(c) < 32 for c in source):
             raise ScriptFileError("The repository path contains invalid characters or path traversal.")
         if not destination or len(destination) > 1024 or any(ord(c) < 32 for c in destination):
@@ -68,12 +77,12 @@ def _allowed(
 ) -> dict[str, gitea.GiteaFile]:
     """Files ``script`` may use, keyed by association path.
 
-    A company script uses Files/Common and its own company's folder. A Common
-    script reaches a company's files as ``Files/Companies/{company}/...``, which
-    each run resolves to the company it runs for; ``company_ids`` limits those
-    to the given companies (``None`` means any company).
+    A company script uses Common and its own company's folder. A Common script
+    reaches a company's files as ``Companies/{company}/...``, which each run
+    resolves to the company it runs for; ``company_ids`` limits those to the
+    given companies (``None`` means any company).
     """
-    root = layouts._repo_path(layouts.FILES_FOLDER, settings.path)
+    root = settings.path
     owner = script.get("company_id")
     allowed: dict[str, gitea.GiteaFile] = {}
     for item in files:
@@ -92,6 +101,10 @@ def _allowed(
     return allowed
 
 
+async def _settings() -> gitea.GiteaSettings:
+    return gitea.private_files_settings(await gitea.load_settings())
+
+
 async def _files_layout(settings: gitea.GiteaSettings) -> tuple[list[gitea.GiteaFile], layouts.RepositoryLayout]:
     # Reuse the established company markers, including renamed file folders.
     files = await gitea.list_files(settings)
@@ -108,16 +121,15 @@ async def available_files(
 
 async def file_choices(script: Mapping[str, Any], company_id: int) -> tuple[list[str], str | None]:
     """Files the editor can pick for ``script`` while viewing ``company_id``, and
-    a warning when the missing ``Files/`` folders could not be created first."""
-    settings = await gitea.load_settings()
+    a warning when the missing Private-Files folders could not be created first."""
+    settings = await _settings()
     files, layout = await _files_layout(settings)
     warning = None
     if layout.missing:
-        missing = {f"{layouts.FILES_FOLDER}/{path}": content for path, content in layout.missing.items()}
         try:
-            await layouts._create_missing(settings, layouts.RepositoryLayout(missing=missing))
+            await layouts._create_missing(settings, layout)
         except gitea.GiteaError as exc:
-            warning = f"The Files folders could not be created in Gitea. {exc}"
+            warning = f"The Private-Files folders could not be created in Gitea. {exc}"
     choices = sorted(_allowed(settings, files, layout, script, {int(company_id)}), key=str.casefold)
     return choices, warning
 
@@ -126,15 +138,15 @@ async def validate_sources(script: Mapping[str, Any], files: list[Mapping[str, A
     result = validate_associations(files)
     if not result:
         return result
-    settings = await gitea.load_settings()
+    settings = await _settings()
     allowed = await available_files(settings, script)
     for item in result:
         source = allowed.get(item["source_path"])
         if source is None:
             raise ScriptFileError(
-                f"{item['source_path']} is missing or unavailable to this script. Company scripts use Files/Common and "
-                f"their company's files; Common scripts use Files/Common and Files/Companies/{COMPANY_TOKEN}/ for the "
-                "company each run is for."
+                f"{item['source_path']} is missing from Private-Files or unavailable to this script. Company scripts "
+                f"use Common and their company's files; Common scripts use Common and Companies/{COMPANY_TOKEN}/ for "
+                "the company each run is for."
             )
         if source.size > MAX_FILE_BYTES:
             raise ScriptFileError(f"{source.path} is larger than 50 MB.")
@@ -149,7 +161,7 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
         raise ScriptFileError("Update the RMM agent before running a script with associated files.")
     if script.get("company_id") is not None and int(script["company_id"]) != int(agent["company_id"]):
         raise ScriptFileError("The script's files are unavailable to this company.")
-    settings = await gitea.load_settings()
+    settings = await _settings()
     allowed = await available_files(settings, script, {int(agent["company_id"])})
     prepared: list[dict[str, Any]] = []
     metadata_by_sha: dict[str, dict[str, Any]] = {}
@@ -191,7 +203,7 @@ async def download_file(agent: Mapping[str, Any], run_id: int, index: int) -> tu
         item = files[index]
     except (IndexError, KeyError, TypeError, ValueError):
         return None
-    settings = await gitea.load_settings()
+    settings = await _settings()
     if settings.base_url != item["base_url"] or f"{settings.owner}/{settings.repo}" != item["repository"]:
         raise ScriptFileError("The Gitea repository configuration has changed. Queue a new run.")
     raw = await gitea.fetch_blob(settings, item["blob_sha"], max_bytes=MAX_FILE_BYTES,
@@ -199,3 +211,71 @@ async def download_file(agent: Mapping[str, Any], run_id: int, index: int) -> tu
     if len(raw) != item["size"] or hashlib.md5(raw, usedforsecurity=False).hexdigest() != item["md5"] or hashlib.sha256(raw).hexdigest() != item["sha256"]:
         raise ScriptFileError("The Gitea file failed download verification.")
     return raw, item["source_path"].rsplit("/", 1)[-1]
+
+
+async def move_legacy_files(settings: gitea.GiteaSettings) -> int:
+    """Move the scripts repository's old ``Files/`` folder into Private-Files
+    and point script associations at the new paths. Returns the files moved.
+
+    Each batch is copied before it is deleted from the scripts repository, so
+    an interrupted move resumes on the next run. A file already in
+    Private-Files at the same path is kept; the old copy stays in the scripts
+    repository's history.
+    """
+    private = gitea.private_files_settings(settings)
+    legacy_root = layouts._repo_path(layouts.LEGACY_FILES_FOLDER, settings.path)
+    legacy = [
+        (item, relative) for item in await gitea.list_files(settings)
+        if (relative := layouts._relative(item.path, legacy_root))
+    ]
+    moved = 0
+    if legacy:
+        present = {item.path for item in await gitea.list_files(private)}
+        commit = await gitea.resolve_commit(settings)
+        copies: dict[str, str | bytes] = {}
+        removals: dict[str, str] = {}
+        size = 0
+
+        async def flush() -> None:
+            nonlocal copies, removals, size, moved
+            if not removals:
+                return
+            await gitea.create_files(private, copies, "Move script files from the scripts repository")
+            await gitea.delete_files(settings, removals, "Move script files to Private-Files")
+            moved += len(removals)
+            copies, removals, size = {}, {}, 0
+
+        for item, relative in legacy:
+            if relative not in present:
+                if item.size > MAX_FILE_BYTES:
+                    log_warning("Script file too large to move to Private-Files; move it by hand", path=item.path)
+                    continue
+                raw = await gitea.fetch_blob(settings, item.sha, max_bytes=MAX_FILE_BYTES, path=item.path, ref=commit)
+                if copies and size + len(raw) > _MOVE_BATCH_BYTES:
+                    await flush()
+                copies[relative] = raw
+                size += len(raw)
+            removals[item.path] = item.sha
+        await flush()
+        if moved:
+            log_info("Moved script files to Private-Files", files=moved)
+    await _repoint_associations(legacy_root)
+    return moved
+
+
+async def _repoint_associations(legacy_root: str) -> None:
+    # Paths under the old folder are invalid in Private-Files, so stripping the
+    # prefix never changes the meaning of a current association. LIKE wildcards
+    # in the prefix only widen the search; the prefix check below decides.
+    prefix = legacy_root + "/"
+    for script in await rmm_repo.list_script_files_like("%" + prefix + "%"):
+        files = script["files"]
+        if not any(str(item.get("source_path") or "").startswith(prefix) for item in files):
+            continue
+        updated = [
+            {**item, "source_path": item["source_path"][len(prefix):]}
+            if str(item.get("source_path") or "").startswith(prefix) else item
+            for item in files
+        ]
+        await rmm_repo.set_script_files(script["id"], updated)
+        log_info("Script files now use Private-Files", script_id=script["id"])

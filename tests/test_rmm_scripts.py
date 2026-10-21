@@ -392,15 +392,17 @@ async def sqlite_db(monkeypatch):
     await conn.close()
 
 
-async def _sync(monkeypatch, files: dict[str, str], shas: dict[str, str] | None = None, *, created=None, refuse=False):
+async def _sync(monkeypatch, files: dict[str, str], shas: dict[str, str] | None = None, *, created=None, refuse=False,
+                private: dict[str, str] | None = None):
     settings = gitea.GiteaSettings("https://git.example.com", "https://git.example.com", "t", "msp", "scripts", "main", "rmm", True)
 
     async def load_settings():
         return settings
 
     async def list_files(_settings):
+        source = (private or {}) if _settings.repo == "Private-Files" else files
         return [gitea.GiteaFile(path=path, sha=(shas or {}).get(path, "sha-" + path), size=len(body))
-                for path, body in files.items()]
+                for path, body in source.items()]
 
     fetched = []
 
@@ -459,18 +461,17 @@ async def test_sync_adds_updates_skips_and_removes(sqlite_db, monkeypatch):
 async def test_sync_multiple_batches_preserves_scope_and_skips_unchanged(sqlite_db, monkeypatch):
     files = {f"rmm/Common/script-{i}.sh": "echo common\n" for i in range(19)}
     for company_id, name in ((1, "Renamed"), (2, "Other")):
-        for prefix in ("", "Files/"):
-            files[f"rmm/{prefix}Companies/{name}/.myportal-company"] = json.dumps({"company_id": company_id})
+        files[f"rmm/Companies/{name}/.myportal-company"] = json.dumps({"company_id": company_id})
         files[f"rmm/Companies/{name}/private.sh"] = "echo private\n"
     summary, fetched = await _sync(monkeypatch, files)
-    assert summary.added == 21 and len(fetched) == 25
+    assert summary.added == 21 and len(fetched) == 23
     scripts = {script["path"]: script for script in await rmm_repo.list_scripts()}
     assert scripts["rmm/Companies/Renamed/private.sh"]["company_id"] == 1
     assert scripts["rmm/Companies/Other/private.sh"]["company_id"] == 2
     assert scripts["rmm/Common/script-0.sh"]["company_id"] is None
     summary, fetched = await _sync(monkeypatch, files)
     assert (summary.added, summary.updated, summary.unchanged, summary.removed) == (0, 0, 21, 0)
-    assert len(fetched) == 4 and all(path.endswith(".myportal-company") for path in fetched)
+    assert len(fetched) == 2 and all(path.endswith(".myportal-company") for path in fetched)
 
 
 @pytest.mark.anyio
@@ -916,9 +917,7 @@ async def test_layout_links_markers_and_names_and_lists_missing_folders(monkeypa
     companies = _companies((1, "Contoso", 0), (2, "Fabrikam", 0), (3, "Northwind", 0), (4, "Gone", 1))
     layout = await rmm_scripts.read_layout(settings, files, companies)
     assert layout.company_folders == {"Renamed": 1, "fabrikam": 2, "Northwind": 3}
-    file_folders = {"Files/Common/README.md", "Files/Companies/README.md", "Files/Companies/Contoso/.myportal-company",
-                    "Files/Companies/Fabrikam/.myportal-company", "Files/Companies/Northwind/.myportal-company"}
-    assert set(layout.missing) == {"Companies/fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"} | file_folders
+    assert set(layout.missing) == {"Companies/fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"}
     assert json.loads(layout.missing["Companies/Northwind/.myportal-company"])["company_id"] == 3
 
     assert rmm_scripts.script_scope("Common/disk/a.ps1", layout) == (True, None, "")
@@ -929,20 +928,22 @@ async def test_layout_links_markers_and_names_and_lists_missing_folders(monkeypa
 
     empty = await rmm_scripts.read_layout(settings, [], companies)
     assert set(empty.missing) == {"Common/README.md", "Companies/README.md", "Companies/Contoso/.myportal-company",
-                                  "Companies/Fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"} | file_folders
+                                  "Companies/Fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"}
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("root", ["", "rmm"])
 async def test_file_folders_preserve_markers_and_are_maintained_idempotently(monkeypatch, root):
-    settings = gitea.GiteaSettings("https://g", "https://g", "t", "msp", "scripts", "main", root, True)
-    prefix = root + "/" if root else ""
+    from app.services import rmm_script_layout
+
+    # Private-Files keeps its folders at the top whatever GITEA_SCRIPTS_PATH is.
+    settings = gitea.private_files_settings(gitea.GiteaSettings("https://g", "https://g", "t", "msp", "scripts", "main", root, True))
     contents = {
-        prefix + "Files/Common/tool.exe": "binary",
-        prefix + "Files/Companies/Renamed/.myportal-company": '{"company_id": 1}',
-        prefix + "Files/Companies/fabrikam/setup.vbs": "script",
-        prefix + "Files/Companies/Broken/.myportal-company": "not json",
-        prefix + "Files/Companies/Archived/.myportal-company": '{"company_id": 4}',
+        "Common/tool.exe": "binary",
+        "Companies/Renamed/.myportal-company": '{"company_id": 1}',
+        "Companies/fabrikam/setup.vbs": "script",
+        "Companies/Broken/.myportal-company": "not json",
+        "Companies/Archived/.myportal-company": '{"company_id": 4}',
     }
 
     async def fetch_file(_settings, path, **kwargs):
@@ -950,13 +951,12 @@ async def test_file_folders_preserve_markers_and_are_maintained_idempotently(mon
 
     monkeypatch.setattr(gitea, "fetch_file", fetch_file)
     companies = _companies((1, "Contoso", 0), (2, "Fabrikam", 0), (3, "Northwind", 0), (4, "Archived", 1), (5, "Gone", 1))
-    layout = await rmm_scripts.read_layout(settings, _files(*contents), companies)
-    missing = {path for path in layout.missing if path.startswith("Files/")}
-    assert missing == {"Files/Companies/fabrikam/.myportal-company", "Files/Companies/Northwind/.myportal-company"}
-    for path in missing:
-        contents[prefix + path] = layout.missing[path]
-    again = await rmm_scripts.read_layout(settings, _files(*contents), companies)
-    assert not any(path.startswith("Files/") for path in again.missing)
+    layout = await rmm_script_layout._read_layout(settings, _files(*contents), companies, files_folder=True)
+    assert set(layout.missing) == {"Companies/fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"}
+    for path in layout.missing:
+        contents[path] = layout.missing[path]
+    again = await rmm_script_layout._read_layout(settings, _files(*contents), companies, files_folder=True)
+    assert again.missing == {}
     assert rmm_scripts.script_scope("Files/Common/tool.ps1", again)[0] is False
 
 
@@ -967,9 +967,7 @@ async def test_company_scripts_run_only_at_their_company(sqlite_db, monkeypatch)
              "rmm/stray.ps1": "Write-Output 3\n"}
     summary, _fetched = await _sync(monkeypatch, files, created=created)
     assert summary.added == 2 and summary.folders_created == len(created)
-    assert set(created) == {"rmm/Companies/Contoso/.myportal-company", "rmm/Companies/Other/.myportal-company",
-                            "rmm/Files/Common/README.md", "rmm/Files/Companies/README.md",
-                            "rmm/Files/Companies/Contoso/.myportal-company", "rmm/Files/Companies/Other/.myportal-company"}
+    assert set(created) == {"rmm/Companies/Contoso/.myportal-company", "rmm/Companies/Other/.myportal-company"}
     assert [item["path"] for item in summary.skipped] == ["rmm/stray.ps1"]
 
     assert {s["name"] for s in await rmm_repo.list_scripts(company_id=1)} == {"a", "only"}
@@ -1004,13 +1002,14 @@ async def test_associated_files_survive_sync_and_are_pinned_to_the_assigned_run(
     import hashlib
     from app.services import rmm_script_files
 
-    source = "rmm/Files/Common/tool.exe"
-    files = {"rmm/Common/run.ps1": "Write-Output 1\n", source: "binary"}
-    await _sync(monkeypatch, files)
+    source = "Common/tool.exe"
+    files = {"rmm/Common/run.ps1": "Write-Output 1\n"}
+    await _sync(monkeypatch, files, private={source: "binary"})
     script = (await rmm_repo.list_scripts())[0]
     association = {"source_path": source, "destination": "C:\\Tools\\tool.exe"}
     await rmm_repo.set_script_files(script["id"], [association])
-    await _sync(monkeypatch, {**files, "rmm/Common/run.ps1": "Write-Output 2\n"}, {"rmm/Common/run.ps1": "changed"})
+    await _sync(monkeypatch, {**files, "rmm/Common/run.ps1": "Write-Output 2\n"}, {"rmm/Common/run.ps1": "changed"},
+                private={source: "binary"})
     assert (await rmm_repo.get_script(script["id"], with_content=True))["files"] == [association]
     enrolment, agent = await _enrol(sqlite_db)
 
@@ -1181,11 +1180,13 @@ def _fake_gitea(monkeypatch, *, fail: bool = False):
             raise gitea.GiteaError("Gitea is down")
         calls.append(("sign_in", login, email, full_name))
 
+    labels = {"Public-Files": "public_", "Private-Files": "private_"}
+
     async def set_collaborator(_settings, login, permission):
-        calls.append(("grant", login, permission) if _settings.repo != "Public" else ("public_grant", login, permission))
+        calls.append((labels.get(_settings.repo, "") + "grant", login, permission))
 
     async def remove_collaborator(_settings, login):
-        calls.append(("remove", login) if _settings.repo != "Public" else ("public_remove", login))
+        calls.append((labels.get(_settings.repo, "") + "remove", login))
 
     monkeypatch.setattr(gitea, "load_settings", load_settings)
     monkeypatch.setattr(gitea, "sign_in_as", sign_in_as)
@@ -1204,15 +1205,16 @@ async def test_identity_creates_the_account_once_and_follows_role_changes(sqlite
 
     account = await gitea_sign_in.identity(user)
     assert (account.login, account.permission, account.full_name) == ("tech-9", "read", "Zoe Tech")
-    assert calls == [("sign_in", "tech-9", "tech@example.com", "Zoe Tech"), ("grant", "tech-9", "read"), ("public_remove", "tech-9")]
+    assert calls == [("sign_in", "tech-9", "tech@example.com", "Zoe Tech"), ("grant", "tech-9", "read"),
+                     ("private_grant", "tech-9", "read"), ("public_remove", "tech-9")]
     assert (await rmm_repo.get_gitea_account(9))["permission"] == "read"
 
     await gitea_sign_in.identity(user)
-    assert len(calls) == 3  # already granted on this worker
+    assert len(calls) == 4  # already granted on this worker
 
     roles[9] = [{"menu.rmm_script_editing": "write"}]
     assert (await gitea_sign_in.identity(user)).permission == "write"
-    assert calls[-2:] == [("grant", "tech-9", "write"), ("public_grant", "tech-9", "write")]
+    assert calls[-3:] == [("grant", "tech-9", "write"), ("private_grant", "tech-9", "write"), ("public_grant", "tech-9", "write")]
 
     # A changed email keeps the account MyPortal already made.
     assert (await gitea_sign_in.identity({**user, "email": "new@example.com"})).login == "tech-9"
@@ -1264,6 +1266,8 @@ async def test_reconcile_lowers_and_removes_repository_access(sqlite_db, monkeyp
     assert await gitea_sign_in.reconcile_accounts() == 3
     assert sorted(calls) == sorted([
         ("grant", "tech-9", "read"), ("remove", "gone-11"), ("remove", "off-12"),
+        ("private_grant", "tech-9", "read"), ("private_grant", "keep-10", "write"),
+        ("private_remove", "gone-11"), ("private_remove", "off-12"),
         ("public_remove", "tech-9"), ("public_grant", "keep-10", "write"),
         ("public_remove", "gone-11"), ("public_remove", "off-12"),
     ])
@@ -1271,7 +1275,8 @@ async def test_reconcile_lowers_and_removes_repository_access(sqlite_db, monkeyp
     assert stored == {9: "read", 10: "write", 11: "none", 12: "none", 13: "none"}
     calls.clear()
     assert await gitea_sign_in.reconcile_accounts() == 0
-    assert sorted(calls) == [("public_grant", "keep-10", "write"), ("public_remove", "tech-9")]
+    assert sorted(calls) == [("private_grant", "keep-10", "write"), ("private_grant", "tech-9", "read"),
+                             ("public_grant", "keep-10", "write"), ("public_remove", "tech-9")]
 
 
 @pytest.mark.anyio
@@ -1614,7 +1619,7 @@ async def test_public_downloads_need_no_identity_or_rmm_access(monkeypatch):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://portal") as client:
         response = await client.get("/downloads")
         assert response.status_code == 302
-        assert response.headers["location"] == "/gitea/myportal/Public"
+        assert response.headers["location"] == "/gitea/myportal/Public-Files"
         assert response.headers["cache-control"] == "no-store"
         async def unavailable():
             raise gitea.GiteaError("secret internal details")
@@ -1627,7 +1632,7 @@ async def test_public_downloads_need_no_identity_or_rmm_access(monkeypatch):
 def test_public_repository_is_separate_from_the_script_tree():
     scripts = gitea.GiteaSettings("https://git", "/gitea", "token", "myportal", "scripts", "dev", "rmm", True)
     public = gitea.public_settings(scripts)
-    assert (public.owner, public.repo, public.branch, public.path) == ("myportal", "Public", "main", "")
+    assert (public.owner, public.repo, public.branch, public.path) == ("myportal", "Public-Files", "main", "")
     assert (scripts.repo, scripts.branch, scripts.path) == ("scripts", "dev", "rmm")
     with pytest.raises(gitea.GiteaError, match="separate"):
         gitea.public_settings(public)
@@ -1646,7 +1651,7 @@ async def test_public_failure_does_not_prevent_private_access_revocation(sqlite_
         raise gitea.GiteaError("Public is unavailable")
 
     monkeypatch.setattr(gitea_sign_in.user_repo, "get_user_by_id", user)
-    monkeypatch.setattr(gitea_sign_in, "_public_access", unavailable)
+    monkeypatch.setattr(gitea_sign_in, "_files_access", unavailable)
     assert await gitea_sign_in.reconcile_accounts() == 0
     assert calls == [("remove", "tech-9")]
     # Keep the old permission recorded so Public revocation is retried.
@@ -1661,7 +1666,7 @@ async def test_public_failure_keeps_private_grants_tracked(sqlite_db, monkeypatc
     async def unavailable(settings, login, level):
         raise gitea.GiteaError("Public is unavailable")
 
-    monkeypatch.setattr(gitea_sign_in, "_public_access", unavailable)
+    monkeypatch.setattr(gitea_sign_in, "_files_access", unavailable)
     await gitea_sign_in.identity({"id": 9, "email": "tech@example.com"})
     assert (await rmm_repo.get_gitea_account(9))["permission"] == "write"
     assert 9 not in gitea_sign_in._granted

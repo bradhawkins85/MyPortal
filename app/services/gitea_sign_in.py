@@ -10,11 +10,13 @@ their next click after they lose Script editing access or sign out of MyPortal.
 
 The first time a technician comes through, MyPortal makes Gitea create their
 account and adds it to the script repository as a collaborator, with read or
-write access to match the ``menu.rmm_script_editing`` permission. The
-same write permission also allows uploads to the separate Public repository. The
-background folder check (``rmm_scripts.folder_maintenance_loop``) lowers or
-removes access to both repositories when the technician's roles change. Public
-downloads do not require an account or Script editing access.
+write access to match the ``menu.rmm_script_editing`` permission, and gives
+the same access to the private Private-Files repository of files scripts
+deploy. The same write permission also allows uploads to the separate
+Public-Files repository. The background folder check
+(``rmm_scripts.folder_maintenance_loop``) lowers or removes access to every
+repository when the technician's roles change. Public-Files downloads do not
+require an account or Script editing access.
 
 The login is always one MyPortal made (``gitea_login``); a stored value that is
 not is dropped, because the sign-in headers create Gitea accounts on first use
@@ -153,14 +155,19 @@ async def _ensure_access(user_id: int, account: GiteaIdentity) -> None:
             return
         await rmm_repo.save_gitea_account(user_id, account.login, account.permission)
         try:
-            await _public_access(settings, account.login, account.permission)
+            await _files_access(settings, account.login, account.permission)
         except gitea.GiteaError as exc:
-            log_warning("Could not update Public repository access", login=account.login, error=str(exc))
+            log_warning("Could not update file repository access", login=account.login, error=str(exc))
             return
         _granted[user_id] = (account.permission, time.monotonic())
 
 
-async def _public_access(settings: gitea.GiteaSettings, login: str, level: str) -> None:
+async def _files_access(settings: gitea.GiteaSettings, login: str, level: str) -> None:
+    private = gitea.private_files_settings(settings)
+    if level == "none":
+        await gitea.remove_collaborator(private, login)
+    else:
+        await gitea.set_collaborator(private, login, level)
     public = gitea.public_settings(settings)
     if level == "write":
         await gitea.set_collaborator(public, login, "write")
@@ -189,9 +196,10 @@ async def reconcile_accounts() -> int:
                     await gitea.remove_collaborator(settings, login)
                 else:
                     await gitea.set_collaborator(settings, login, level)
-            # Existing technicians need Public access even when their script
-            # permissions have not changed. Revoke private access first.
-            await _public_access(settings, login, level)
+            # Existing technicians need Private-Files and Public-Files access
+            # even when their script permissions have not changed. Revoke
+            # script repository access first.
+            await _files_access(settings, login, level)
         except gitea.GiteaError as exc:
             log_warning("Could not update a technician's repository access", login=login, error=str(exc))
             continue

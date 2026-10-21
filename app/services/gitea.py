@@ -1,10 +1,14 @@
 """Gitea client used to load RMM scripts from a repository.
 
 Gitea is where scripts are written and reviewed. MyPortal reads them, and only
-writes the script and file folder skeleton (``Common/``, ``Companies/<company>/``,
-``Files/Common/``, ``Files/Companies/<company>/``) with
+writes the folder skeleton (``Common/``, ``Companies/<company>/``) with
 :func:`create_files`. The repository, branch and optional folder come from the
 ``gitea`` integration module (``GITEA_*`` settings in ``.env``).
+
+Two more repositories sit beside the scripts under the same owner:
+``Public-Files`` (:func:`public_settings`), public downloads, and
+``Private-Files`` (:func:`private_files_settings`), the files scripts deploy to
+endpoints through MyPortal, with the same ``Common/`` and ``Companies/`` layout.
 
 For MyPortal sign-in, :func:`sign_in_as` makes the bundled Gitea create a
 technician's account and :func:`set_collaborator` gives it access to the
@@ -257,8 +261,8 @@ async def fetch_blob(
     return raw
 
 
-async def create_files(settings: GiteaSettings, files: dict[str, str], message: str) -> None:
-    """Create text files on the configured branch in a single commit.
+async def create_files(settings: GiteaSettings, files: dict[str, str | bytes], message: str) -> None:
+    """Create files on the configured branch in a single commit.
 
     ``files`` maps repository paths to their content. Needs a token with write
     access to the repository.
@@ -270,7 +274,10 @@ async def create_files(settings: GiteaSettings, files: dict[str, str], message: 
         "branch": settings.branch,
         "message": message,
         "files": [
-            {"operation": "create", "path": path, "content": base64.b64encode(content.encode("utf-8")).decode("ascii")}
+            {
+                "operation": "create", "path": path,
+                "content": base64.b64encode(content if isinstance(content, bytes) else content.encode("utf-8")).decode("ascii"),
+            }
             for path, content in files.items()
         ],
     }
@@ -282,6 +289,26 @@ async def create_files(settings: GiteaSettings, files: dict[str, str], message: 
     if response.status_code in (401, 403):
         raise GiteaError("Gitea refused to create folders. GITEA_API_TOKEN needs write access to the repository.")
     _raise_for(response, "creating folders")
+
+
+async def delete_files(settings: GiteaSettings, files: dict[str, str], message: str) -> None:
+    """Delete files, given as repository path to blob sha, in a single commit."""
+
+    if not files:
+        return
+    body = {
+        "branch": settings.branch,
+        "message": message,
+        "files": [{"operation": "delete", "path": path, "sha": sha} for path, sha in files.items()],
+    }
+    try:
+        async with _client(settings) as client:
+            response = await client.post(_repo_url(settings) + "/contents", json=body)
+    except httpx.HTTPError as exc:
+        raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
+    if response.status_code in (401, 403):
+        raise GiteaError("Gitea refused to delete files. GITEA_API_TOKEN needs write access to the repository.")
+    _raise_for(response, "deleting files")
 
 
 # Headers the bundled Gitea trusts from its proxy (REVERSE_PROXY_AUTHENTICATION_*).
@@ -356,8 +383,21 @@ def web_url(settings: GiteaSettings, path: str) -> str:
     )
 
 
+PUBLIC_FILES_REPOSITORY = "Public-Files"
+PRIVATE_FILES_REPOSITORY = "Private-Files"
+
+
+def _files_repository(settings: GiteaSettings, repo: str) -> GiteaSettings:
+    if settings.repo.casefold() in (PUBLIC_FILES_REPOSITORY.casefold(), PRIVATE_FILES_REPOSITORY.casefold()):
+        raise GiteaError(f"The scripts repository must be separate from {PUBLIC_FILES_REPOSITORY} and {PRIVATE_FILES_REPOSITORY}.")
+    return replace(settings, repo=repo, branch="main", path="")
+
+
 def public_settings(settings: GiteaSettings) -> GiteaSettings:
     """The separate public download repository owned by the scripts owner."""
-    if settings.repo.casefold() == "public":
-        raise GiteaError("The private scripts repository must be separate from Public.")
-    return replace(settings, repo="Public", branch="main", path="")
+    return _files_repository(settings, PUBLIC_FILES_REPOSITORY)
+
+
+def private_files_settings(settings: GiteaSettings) -> GiteaSettings:
+    """The private repository of files scripts deploy, owned by the scripts owner."""
+    return _files_repository(settings, PRIVATE_FILES_REPOSITORY)

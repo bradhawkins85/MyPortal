@@ -370,9 +370,9 @@
       try {
         const response = await fetch('/api/rmm/scripts/' + editor.dataset.rmmFileEditor + '/files', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || 'Could not load Gitea files.');
+        if (!response.ok) throw new Error(data.detail || 'Could not load Private-Files files.');
         available = data.available;
-        // Retry next time while Gitea could not create the Files folders.
+        // Retry next time while Gitea could not create the Private-Files folders.
         loaded = !data.warning;
         if (data.warning) throw new Error(data.warning);
       } catch (error) {

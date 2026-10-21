@@ -17,16 +17,16 @@ def anyio_backend():
 
 @pytest.mark.parametrize("destination", ["C:\\Tools\\setup.exe", "/opt/tools/setup.sh"])
 def test_absolute_file_destinations(destination):
-    assert rmm_script_files.validate_associations([{"source_path": "Files/Common/setup.exe", "destination": destination}])[0]["destination"] == destination
+    assert rmm_script_files.validate_associations([{"source_path": "Common/setup.exe", "destination": destination}])[0]["destination"] == destination
 
 
 @pytest.mark.parametrize("destination", ["setup.exe", "C:setup.exe", "/opt/../setup.exe", "C:\\Tools\\..\\setup.exe", "/", "/opt/tools/", "C:\\", "C:\\Tools\\setup.exe:stream", "C:\\Tools\\CON", "\\\\host\\share\\setup.exe", "/opt/\nsetup"])
 def test_invalid_destinations_are_rejected(destination):
     with pytest.raises(rmm_script_files.ScriptFileError):
-        rmm_script_files.validate_associations([{"source_path": "Files/Common/setup.exe", "destination": destination}])
+        rmm_script_files.validate_associations([{"source_path": "Common/setup.exe", "destination": destination}])
 
 
-@pytest.mark.parametrize("source", ["/Files/Common/x.exe", "Files/../x.exe", "Files//x.exe", "Files\\Common\\x.exe", "Files/Common/\nx.exe"])
+@pytest.mark.parametrize("source", ["/Common/x.exe", "Common/../x.exe", "Common//x.exe", "Common\\x.exe", "Common/\nx.exe"])
 def test_invalid_repository_paths_are_rejected(source):
     with pytest.raises(rmm_script_files.ScriptFileError):
         rmm_script_files.validate_associations([{"source_path": source, "destination": "/tmp/x.exe"}])
@@ -35,17 +35,19 @@ def test_invalid_repository_paths_are_rejected(source):
 def test_duplicate_windows_destinations_are_case_insensitive():
     with pytest.raises(rmm_script_files.ScriptFileError, match="different destination"):
         rmm_script_files.validate_associations([
-            {"source_path": "Files/Common/a", "destination": "C:\\Tools\\setup.exe"},
-            {"source_path": "Files/Common/b", "destination": "c:/tools/SETUP.exe"},
+            {"source_path": "Common/a", "destination": "C:\\Tools\\setup.exe"},
+            {"source_path": "Common/b", "destination": "c:/tools/SETUP.exe"},
         ])
 
 
 @pytest.mark.anyio
 async def test_file_catalog_respects_common_and_company_script_scope(monkeypatch):
-    settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "rmm", True)
-    paths = ["rmm/Files/Common/tool.exe", "rmm/Files/Companies/Renamed/.myportal-company",
-             "rmm/Files/Companies/Renamed/setup.vbs", "rmm/Files/Companies/Other/setup.exe",
-             "rmm/Common/script.ps1", "other/Files/Common/tool.exe"]
+    settings = gitea.private_files_settings(
+        gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "rmm", True)
+    )
+    paths = ["Common/tool.exe", "Companies/Renamed/.myportal-company",
+             "Companies/Renamed/setup.vbs", "Companies/Other/setup.exe",
+             "Files/Common/tool.exe", "README.md"]
 
     async def list_files(_settings):
         return [gitea.GiteaFile(path, "a" * 40, 1) for path in paths]
@@ -60,21 +62,21 @@ async def test_file_catalog_respects_common_and_company_script_scope(monkeypatch
     monkeypatch.setattr(gitea, "fetch_file", fetch_file)
     monkeypatch.setattr(rmm_script_files.companies_repo, "list_companies", companies)
     common = await rmm_script_files.available_files(settings, {"company_id": None}, set())
-    assert set(common) == {"rmm/Files/Common/tool.exe"}
+    assert set(common) == {"Common/tool.exe"}
     # A Common script reaches the run's company files through the {company} folder.
-    for company_id, sha in ((1, "rmm/Files/Companies/Renamed/setup.vbs"), (2, "rmm/Files/Companies/Other/setup.exe")):
+    for company_id, sha in ((1, "Companies/Renamed/setup.vbs"), (2, "Companies/Other/setup.exe")):
         for_company = await rmm_script_files.available_files(settings, {"company_id": None}, {company_id})
         assert {path: item.path for path, item in for_company.items()} == {
-            "rmm/Files/Common/tool.exe": "rmm/Files/Common/tool.exe",
-            "rmm/Files/Companies/{company}/" + sha.rsplit("/", 1)[-1]: sha,
+            "Common/tool.exe": "Common/tool.exe",
+            "Companies/{company}/" + sha.rsplit("/", 1)[-1]: sha,
         }
     any_company = await rmm_script_files.available_files(settings, {"company_id": None})
-    assert set(any_company) == {"rmm/Files/Common/tool.exe", "rmm/Files/Companies/{company}/setup.vbs",
-                                "rmm/Files/Companies/{company}/setup.exe"}
+    assert set(any_company) == {"Common/tool.exe", "Companies/{company}/setup.vbs",
+                                "Companies/{company}/setup.exe"}
     company = await rmm_script_files.available_files(settings, {"company_id": 1})
-    assert set(company) == {"rmm/Files/Common/tool.exe", "rmm/Files/Companies/Renamed/setup.vbs"}
+    assert set(company) == {"Common/tool.exe", "Companies/Renamed/setup.vbs"}
     other = await rmm_script_files.available_files(settings, {"company_id": 2})
-    assert set(other) == {"rmm/Files/Common/tool.exe", "rmm/Files/Companies/Other/setup.exe"}
+    assert set(other) == {"Common/tool.exe", "Companies/Other/setup.exe"}
 
 
 @pytest.mark.anyio
@@ -86,12 +88,16 @@ async def test_file_choices_create_missing_files_folders_first(monkeypatch):
         return settings
 
     async def list_files(_settings):
-        return [gitea.GiteaFile("Common/README.md", "a" * 40, 1), gitea.GiteaFile("Companies/Contoso/.myportal-company", "b" * 40, 1)]
+        # Script folders in the scripts repository do not stand in for Private-Files folders.
+        if _settings.repo == "scripts":
+            return [gitea.GiteaFile("Common/README.md", "a" * 40, 1), gitea.GiteaFile("Companies/Contoso/.myportal-company", "b" * 40, 1)]
+        return []
 
     async def companies(**kwargs):
         return [{"id": 1, "name": "Contoso"}]
 
     async def create_files(_settings, files, _message):
+        assert _settings.repo == "Private-Files"
         created.append(sorted(files))
 
     monkeypatch.setattr(gitea, "load_settings", load_settings)
@@ -100,7 +106,7 @@ async def test_file_choices_create_missing_files_folders_first(monkeypatch):
     monkeypatch.setattr(rmm_script_files.companies_repo, "list_companies", companies)
     choices, warning = await rmm_script_files.file_choices({"company_id": 1}, 1)
     assert choices == [] and warning is None
-    assert created == [["Files/Common/README.md", "Files/Companies/Contoso/.myportal-company", "Files/Companies/README.md"]]
+    assert created == [["Common/README.md", "Companies/Contoso/.myportal-company", "Companies/README.md"]]
 
     async def refuse(_settings, _files, _message):
         raise gitea.GiteaError("Gitea refused to create folders. GITEA_API_TOKEN needs write access to the repository.")
@@ -116,7 +122,7 @@ async def test_existing_files_are_never_recreated(monkeypatch):
 
     settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
     # A marker naming a deleted company, in the folder a current company would use.
-    files = [gitea.GiteaFile("Files/Companies/Contoso/.myportal-company", "a" * 40, 1)]
+    files = [gitea.GiteaFile("Companies/Contoso/.myportal-company", "a" * 40, 1)]
 
     async def fetch_file(_settings, _path, **kwargs):
         return b'{"company_id": 99}'
@@ -140,7 +146,7 @@ async def test_queue_rejects_missing_company_files_and_wrong_endpoint_paths(monk
 
     monkeypatch.setattr(gitea, "load_settings", load_settings)
     monkeypatch.setattr(rmm_script_files, "available_files", catalog)
-    script = {"company_id": 1, "files": [{"source_path": "Files/Companies/Contoso/setup.exe", "destination": "C:\\Tools\\setup.exe"}]}
+    script = {"company_id": 1, "files": [{"source_path": "Companies/Contoso/setup.exe", "destination": "C:\\Tools\\setup.exe"}]}
     agent = {"company_id": 1, "os": "windows", "script_files_supported": True}
     with pytest.raises(rmm_script_files.ScriptFileError, match="missing or unavailable"):
         await rmm_script_files.prepare_files(script, agent)
@@ -178,13 +184,13 @@ async def test_gitea_blob_preserves_binary_content_and_checks_git_hash(monkeypat
 async def test_common_script_uses_the_run_company_file(monkeypatch):
     settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
     raw = b"installer"
-    blob = gitea.GiteaFile("Files/Companies/Contoso/setup.exe", "c" * 40, len(raw))
+    blob = gitea.GiteaFile("Companies/Contoso/setup.exe", "c" * 40, len(raw))
 
     async def load_settings():
         return settings
 
     async def catalog(_settings, _script, company_ids=None):
-        return {"Files/Companies/{company}/setup.exe": blob} if company_ids == {1} else {}
+        return {"Companies/{company}/setup.exe": blob} if company_ids == {1} else {}
 
     async def fetch_blob(_settings, _sha, **kwargs):
         return raw
@@ -196,10 +202,11 @@ async def test_common_script_uses_the_run_company_file(monkeypatch):
     monkeypatch.setattr(gitea, "load_settings", load_settings)
     monkeypatch.setattr(gitea, "fetch_blob", fetch_blob)
     monkeypatch.setattr(rmm_script_files, "available_files", catalog)
-    script = {"company_id": None, "files": [{"source_path": "Files/Companies/{company}/setup.exe", "destination": "C:\\Tools\\setup.exe"}]}
+    script = {"company_id": None, "files": [{"source_path": "Companies/{company}/setup.exe", "destination": "C:\\Tools\\setup.exe"}]}
     agent = {"company_id": 1, "os": "windows", "script_files_supported": True}
     prepared = await rmm_script_files.prepare_files(script, agent)
-    assert prepared[0]["source_path"] == "Files/Companies/Contoso/setup.exe"
+    assert prepared[0]["source_path"] == "Companies/Contoso/setup.exe"
+    assert prepared[0]["repository"] == "msp/Private-Files"
     assert prepared[0]["commit_sha"] == "d" * 40
     assert prepared[0]["sha256"] == hashlib.sha256(raw).hexdigest()
     with pytest.raises(rmm_script_files.ScriptFileError, match="missing for this company"):
@@ -256,3 +263,87 @@ async def test_gitea_malformed_blob_is_rejected_without_raw_fallback(monkeypatch
     with pytest.raises(gitea.GiteaError, match="unreadable"):
         await gitea.fetch_blob(settings, "a" * 40, max_bytes=100, path="Files/Common/a", ref="d" * 40)
     assert len(seen) == 1
+
+
+def test_file_repositories_sit_beside_the_scripts_repository():
+    settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "dev", "rmm", True)
+    private = gitea.private_files_settings(settings)
+    public = gitea.public_settings(settings)
+    assert (private.owner, private.repo, private.branch, private.path) == ("msp", "Private-Files", "main", "")
+    assert (public.owner, public.repo, public.branch, public.path) == ("msp", "Public-Files", "main", "")
+    for name in ("private-files", "Public-Files"):
+        with pytest.raises(gitea.GiteaError, match="separate"):
+            gitea.private_files_settings(gitea.GiteaSettings("https://git", "https://git", "", "msp", name, "main", "", True))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("prefix", ["", "rmm/"])
+async def test_legacy_files_folder_moves_to_private_files(monkeypatch, prefix):
+    settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", prefix.rstrip("/"), True)
+    legacy = {
+        prefix + "Common/run.ps1": b"script",
+        prefix + "Files/Common/tool.exe": b"MZ\x00tool",
+        prefix + "Files/Companies/Renamed/.myportal-company": b'{"company_id": 1}',
+        prefix + "Files/Companies/Renamed/setup.exe": b"company copy",
+        prefix + "Files/Common/huge.iso": b"",
+    }
+    private = {"Companies/Renamed/setup.exe": b"already moved"}
+    calls = []
+    saved = {}
+
+    async def list_files(target):
+        source = private if target.repo == "Private-Files" else legacy
+        sizes = {prefix + "Files/Common/huge.iso": rmm_script_files.MAX_FILE_BYTES + 1}
+        return [gitea.GiteaFile(path, hashlib.sha1(path.encode()).hexdigest(), sizes.get(path, len(raw)))
+                for path, raw in source.items()]
+
+    async def resolve_commit(_settings):
+        return "d" * 40
+
+    async def fetch_blob(_settings, _sha, *, path, ref, **kwargs):
+        assert ref == "d" * 40
+        return legacy[path]
+
+    async def create_files(target, files, _message):
+        assert target.repo == "Private-Files"
+        calls.append(("create", sorted(files)))
+        private.update(files)
+
+    async def delete_files(target, files, _message):
+        assert target.repo == "scripts"
+        calls.append(("delete", sorted(files)))
+        for path in files:
+            legacy.pop(path)
+
+    async def list_like(pattern):
+        assert pattern == "%" + prefix + "Files/%"
+        return [{"id": 7, "files": [
+            {"source_path": prefix + "Files/Common/tool.exe", "destination": "C:\\Tools\\tool.exe"},
+            {"source_path": "Common/other.exe", "destination": "C:\\Tools\\other.exe"},
+        ]}, {"id": 8, "files": [{"source_path": "Common/Files/x.exe", "destination": "/opt/x"}]}]
+
+    async def set_files(script_id, files):
+        saved[script_id] = files
+
+    monkeypatch.setattr(gitea, "list_files", list_files)
+    monkeypatch.setattr(gitea, "resolve_commit", resolve_commit)
+    monkeypatch.setattr(gitea, "fetch_blob", fetch_blob)
+    monkeypatch.setattr(gitea, "create_files", create_files)
+    monkeypatch.setattr(gitea, "delete_files", delete_files)
+    monkeypatch.setattr(rmm_script_files.rmm_repo, "list_script_files_like", list_like)
+    monkeypatch.setattr(rmm_script_files.rmm_repo, "set_script_files", set_files)
+
+    assert await rmm_script_files.move_legacy_files(settings) == 3
+    assert private["Common/tool.exe"] == b"MZ\x00tool"
+    assert private["Companies/Renamed/.myportal-company"] == b'{"company_id": 1}'
+    # A file already in Private-Files is kept, and the old copy is still removed.
+    assert private["Companies/Renamed/setup.exe"] == b"already moved"
+    # Files too large to deliver stay behind for an administrator to move.
+    assert set(legacy) == {prefix + "Common/run.ps1", prefix + "Files/Common/huge.iso"}
+    assert saved == {7: [
+        {"source_path": "Common/tool.exe", "destination": "C:\\Tools\\tool.exe"},
+        {"source_path": "Common/other.exe", "destination": "C:\\Tools\\other.exe"},
+    ]}
+    calls.clear()
+    assert await rmm_script_files.move_legacy_files(settings) == 0
+    assert calls == []

@@ -280,7 +280,30 @@ def test_upgrade_adds_public_repository_with_existing_token(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     log = calls.read_text()
-    assert 'GET /repos/myportal/Public stdin=header = "Authorization: token existing"' in log
-    assert '"name":"Public"' in log and '"private":false' in log
+    assert 'GET /repos/myportal/Public-Files stdin=header = "Authorization: token existing"' in log
+    assert '"name":"Public-Files"' in log and '"private":false' in log
+    assert '"name":"Private-Files"' in log and '"private":true' in log
+    # Nothing to rename: no old "Public" repository exists.
+    assert "PATCH" not in log
     assert 'stdin=user = "myportal:installer-password"' in log
     assert "GITEA_API_TOKEN=existing" in path.read_text()
+
+
+def test_upgrade_renames_public_repository_to_public_files(tmp_path):
+    path = env_file(tmp_path, "GITEA_API_TOKEN=existing\n")
+    calls = tmp_path / "calls"
+    result = run(
+        f'GITEA_ADMIN_FILE="{tmp_path}/admin-credentials"\n'
+        'token_is_read_only() { return 1; }\n'
+        'gitea_cli() { exit 99; }\n'
+        f'gitea_api() {{ echo "$*" >> "{calls}"; cat >/dev/null; case "$1 $2" in '
+        '"GET /repos/myportal/Public") echo 200 ;; '
+        f'"GET /repos/myportal/Public-Files") [[ -e "{calls}.renamed" ]] && echo 200 || echo 404 ;; '
+        f'"GET /repos/myportal/Private-Files") echo 200 ;; PATCH*) touch "{calls}.renamed"; echo 200 ;; '
+        '*) echo 404 ;; esac; }\n'
+        'connect_myportal', path,
+    )
+    assert result.returncode == 0, result.stderr
+    log = calls.read_text()
+    assert 'PATCH /repos/myportal/Public {"name":"Public-Files"}' in log
+    assert "POST /user/repos" not in log
