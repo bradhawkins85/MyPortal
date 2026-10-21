@@ -1,0 +1,7 @@
+{
+  "guid": "18d5f298-f9a3-45cc-8e94-2e2693c33832",
+  "occurred_at": "2026-10-21T10:59Z",
+  "change_type": "Fix",
+  "summary": "RMM checks: show only the settings for the chosen check type, and return to the All checks list after saving a check",
+  "content_hash": "cecab6d89c1031f70b2b4da74eb9fa0c868682fd925adb30f88b1e134b476c49"
+}

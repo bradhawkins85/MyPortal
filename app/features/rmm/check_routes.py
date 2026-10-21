@@ -7,7 +7,8 @@ write access, and checks for every company need a super admin):
   edits one, ``?new=1`` (optionally ``&asset_id={id}`` and ``&type={type}``) adds
   one, and ``?new=1&asset_id={id}&from={check}`` copies a check as the device's
   own, which replaces it on that device
-* ``POST /rmm/checks`` and ``/rmm/checks/{id}`` save a check
+* ``POST /rmm/checks`` and ``/rmm/checks/{id}`` save a check and return to the
+  list, or stay on it while a newly chosen script's values need filling in
 * ``POST /rmm/checks/{id}/enabled`` and ``/delete``
 * ``GET /api/rmm/checks/{id}/devices?status=failing`` the company's devices a
   check is failing (or ``warning``) on, with their latest values, for the
@@ -428,8 +429,7 @@ async def _save(request: Request, check_id: int | None):
     if isinstance(context, RedirectResponse):
         return context
     user, company, company_id, can_edit = context
-    if check_id is not None:
-        await _editable_check(check_id, user, company_id)
+    previous = await _editable_check(check_id, user, company_id) if check_id is not None else None
     form = await request.form()
     try:
         saved_id = await rmm_checks.save_check(
@@ -455,10 +455,25 @@ async def _save(request: Request, check_id: int | None):
         },
     )
     message = f"Saved {saved['name']}."
-    new_script = (saved["action"] in rmm_checks.SCRIPT_ACTIONS and saved.get("script_id")) or saved.get("check_script_id")
-    if new_script and check_id is None:
-        message += " Fill in the script's values below if it needs any."
-    return flash_redirect(f"{PAGE_PATH}?check={saved_id}#rmm-check-form", message, "success")
+    if await _needs_script_values(saved, previous):
+        message += " Fill in the script's values below."
+        return flash_redirect(f"{PAGE_PATH}?check={saved_id}#rmm-check-form", message, "success")
+    return flash_redirect(f"{PAGE_PATH}#rmm-checks-all", message, "success")
+
+
+async def _needs_script_values(saved: dict[str, Any], previous: dict[str, Any] | None) -> bool:
+    """Whether the save chose a script with parameters, which are only shown to fill in once saved."""
+
+    for key in ("script_id", "check_script_id"):
+        script_id = saved.get(key)
+        if key == "script_id" and saved["action"] not in rmm_checks.SCRIPT_ACTIONS:
+            continue
+        if not script_id or (previous and previous.get(key) == script_id):
+            continue
+        script = await rmm_repo.get_script(int(script_id))
+        if script and rmm_scripts.script_fields(script):
+            return True
+    return False
 
 
 @router.post(PAGE_PATH, response_class=HTMLResponse, summary="Add an RMM check")
