@@ -87,7 +87,8 @@ class MapOptions:
     include_unlinked: bool = False
     # Devices with no link to another device are left off unless asked for.
     hide_unlinked: bool = True
-    site: str | None = None
+    # Sites to focus on; ``None`` means every site.
+    sites: frozenset[str] | None = None
     show_racks: bool = True
     layout: str = DEFAULT_LAYOUT
 
@@ -96,7 +97,9 @@ class MapOptions:
         """Read options from query parameters or a submitted form.
 
         ``types`` repeats once per selected asset type; when it is absent every
-        type is shown.
+        type is shown. ``site`` likewise repeats, once per selected site; when it
+        is absent every site is shown. Site names may contain commas, so a single
+        value is never split.
         """
         getlist = getattr(params, "getlist", None)
         raw_types = getlist("types") if getlist else params.get("types")
@@ -105,8 +108,9 @@ class MapOptions:
         types = None
         if raw_types:
             types = frozenset(key for key in raw_types if key in asset_types.BY_KEY)
+        raw_sites = getlist("site") if getlist else [params.get("site")]
+        sites = frozenset(str(site).strip() for site in (raw_sites or []) if str(site or "").strip()) or None
         detail = str(params.get("detail") or DEFAULT_DETAIL)
-        site = str(params.get("site") or "").strip() or None
         layout = str(params.get("layout") or DEFAULT_LAYOUT)
         return cls(
             layout=layout if layout in LAYOUTS else DEFAULT_LAYOUT,
@@ -115,7 +119,7 @@ class MapOptions:
             show_subnets=_truthy(params.get("subnets")),
             include_unlinked=_truthy(params.get("all_devices")),
             hide_unlinked=_hide_unlinked(params),
-            site=site,
+            sites=sites,
             show_racks=str(params.get("racks") or "1") != "0",
         )
 
@@ -131,8 +135,8 @@ class MapOptions:
             pairs.append(("all_devices", "1"))
         if not self.hide_unlinked:
             pairs.append(("unlinked", "show"))
-        if self.site:
-            pairs.append(("site", self.site))
+        if self.sites:
+            pairs += [("site", name) for name in sorted(self.sites)]
         if not self.show_racks:
             pairs.append(("racks", "0"))
         return pairs
@@ -439,8 +443,8 @@ def build_graph(overview: Mapping[str, Any], extra: Mapping[str, Any],
     nodes = {node_id: node for node_id, node in nodes.items() if keep(node)}
     edge_list = [edge for edge in edge_list if edge.a in nodes and edge.b in nodes]
 
-    if options.site:
-        focus = {node_id for node_id, node in nodes.items() if node.site == options.site}
+    if options.sites:
+        focus = {node_id for node_id, node in nodes.items() if node.site in options.sites}
         neighbours = {end for edge in edge_list if edge.a in focus or edge.b in focus
                       for end in (edge.a, edge.b)}
         nodes = {node_id: node for node_id, node in nodes.items() if node_id in focus | neighbours}
@@ -1225,8 +1229,8 @@ def describe_options(options: MapOptions) -> str:
         parts.append(f"{len(options.types)} device type{'s' if len(options.types) != 1 else ''}")
     else:
         parts.append("all device types")
-    if options.site:
-        parts.append(f"site: {options.site}")
+    if options.sites:
+        parts.append(f"sites: {', '.join(sorted(options.sites))}")
     if options.show_subnets:
         parts.append("subnets shown")
     if options.include_unlinked:

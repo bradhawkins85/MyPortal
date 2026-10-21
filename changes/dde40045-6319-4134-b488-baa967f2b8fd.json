@@ -1,0 +1,7 @@
+{
+  "guid": "dde40045-6319-4134-b488-baa967f2b8fd",
+  "occurred_at": "2026-10-21T11:24Z",
+  "change_type": "Improvement",
+  "summary": "Network map: filter by any combination of sites - a checkbox picker replaces the single-site dropdown, and exports can target a subset of sites",
+  "content_hash": "ae9683287405b4c9e5e2351cd7ebd8d6a76f5977df5e1f34ba5b5fe612de64ab"
+}
