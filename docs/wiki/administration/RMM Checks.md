@@ -33,6 +33,11 @@ service that should be running, or stop one that should be stopped. The agent do
 it sees the service in the wrong state. That minute still counts as a problem, so with a duration
 of 0 the check also raises its alert; with a longer duration a quick fix raises nothing.
 
+On Windows the agent opens a service with only the access each step needs (querying its status,
+or starting or stopping it). Some protected services, such as Microsoft Defender, refuse even a
+status query; for those the agent reads the state from the Service Control Manager's list of
+services instead. A check reports **Unknown** only when neither way works.
+
 CPU, memory, disk and network are measured on Windows, Linux and macOS; ping, file and process
 checks on all three; service checks on Windows and Linux. On macOS, disk checks leave out mounted
 disk images (such as an opened `.dmg` installer) and other read-only volumes under `/Volumes`.
