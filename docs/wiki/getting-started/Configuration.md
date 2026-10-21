@@ -21,7 +21,7 @@ separating these connections prevents the jobs from occupying every query slot.
 
 ```dotenv
 DB_POOL_MIN_SIZE=1
-DB_POOL_MAX_SIZE=50
+DB_POOL_MAX_SIZE=100
 DB_LOCK_POOL_MAX_SIZE=10
 DB_POOL_WAIT_TIMEOUT=10
 ```
@@ -29,11 +29,16 @@ DB_POOL_WAIT_TIMEOUT=10
 These are the defaults, including for existing `.env` files without these keys.
 Pool sizes are bounded positive integers (minimum query size can be zero), and
 the query minimum must not exceed its maximum. Restart or roll the application
-workers after changing them. SQLite does not use these pools.
+workers after changing them. An existing explicit `DB_POOL_MAX_SIZE=50` continues
+to override the default; change it to `100` in the service's environment file to
+use the larger pool. For the templated systemd service, check `/etc/myportal.env`
+and any `/etc/myportal.blue.env` or `/etc/myportal.green.env` overrides. SQLite
+does not use these pools.
 
 MariaDB's `max_connections` is a server-wide ceiling, independent of these
-per-worker limits. For example, four workers with the defaults can use up to
-240 main-database connections, plus any configured event-log and stats pools.
+per-worker limits. For example, the two-worker systemd service with the defaults
+can use up to 220 main-database connections, or 440 while both blue/green slots
+are running, plus any configured event-log and stats pools.
 Allow additional capacity for other clients and overlapping workers during
 blue/green upgrades. A 16 GB host with `max_connections=2500` does not need
 2,500 connections in each application pool; memory usage also depends on
