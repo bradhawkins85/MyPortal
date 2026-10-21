@@ -237,6 +237,17 @@ def test_update_pages_offer_button_and_live_progress():
     assert "/scheduler/system-updates/" in (ROOT / "app/static/js/system_updates.js").read_text()
 
 
+def test_update_pages_render_their_utc_timestamps():
+    # The detail stat strip shows Started via a data-utc span; tables.js is not
+    # loaded on these pages, so system_updates.js must render it itself.
+    detail = (ROOT / "app/templates/admin/system_update_detail.html").read_text()
+    script = (ROOT / "app/static/js/system_updates.js").read_text()
+    assert '<span data-utc="{{ update.started_at }}">' in detail
+    assert "tables.js" not in detail
+    assert "querySelectorAll('[data-utc]')" in script
+    assert "renderUtcTimes();" in script
+
+
 def _github_transport(monkeypatch, routes):
     import httpx
 
