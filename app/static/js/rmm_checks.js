@@ -112,7 +112,8 @@
       case 'memory': return 'Free memory is below ' + (value('memory_threshold') || '0') + unit('memory_metric') + lasting + '.';
       case 'service': {
         const fix = value('service_fix');
-        let text = (value('service_name') || 'The service') + ' is not ' + (value('service_expected') || 'running') + lasting + '.';
+        const problems = { running: ' is not running', stopped: ' is not stopped', exists: ' does not exist', missing: ' exists' };
+        let text = (value('service_name') || 'The service') + (problems[value('service_expected')] || problems.running) + lasting + '.';
         if (fix && fix !== 'none') text += ' The agent will ' + fix + ' it straight away.';
         return text;
       }
@@ -173,6 +174,14 @@
     form.querySelectorAll('[data-rmm-show]').forEach((element) => {
       element.hidden = !matches(element.getAttribute('data-rmm-show'), state);
     });
+    // The agent can only start, restart or stop a service, not install or remove one.
+    const serviceFix = form.querySelector('[data-rmm-service-fix-field]');
+    if (serviceFix) {
+      const presence = ['exists', 'missing'].indexOf(value('service_expected')) !== -1;
+      serviceFix.hidden = presence;
+      const fixSelect = serviceFix.querySelector('select');
+      if (presence && fixSelect) fixSelect.value = 'none';
+    }
     const mode = scheduleMode ? scheduleMode.value : 'delay';
     form.querySelectorAll('[data-rmm-show-schedule]').forEach((element) => {
       element.hidden = element.getAttribute('data-rmm-show-schedule') !== mode;
@@ -215,7 +224,7 @@
 
   form.addEventListener('change', (event) => {
     const target = event.target;
-    if (target.matches('[data-rmm-check-type], [data-rmm-check-action], [data-rmm-check-schedule-mode]')) update();
+    if (target.matches('[data-rmm-check-type], [data-rmm-check-action], [data-rmm-check-schedule-mode], [data-rmm-service-expected]')) update();
     if (target.matches('[data-rmm-check-target-mode]')) updateSelection();
     if (target.matches('[data-rmm-check-scope]')) {
       updateSelection();

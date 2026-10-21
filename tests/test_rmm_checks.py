@@ -110,6 +110,14 @@ def test_parse_settings_validates_each_type():
                                              "service_fix": "start"})[3].keys() == {"service_fix"}
     assert checks.parse_settings("service", {"service_name": "--now", "service_expected": "running"})[3].keys() == {
         "service_name"}
+    target, settings, _duration, errors = checks.parse_settings(
+        "service", {"service_name": "AppSvc", "service_expected": "missing"})
+    assert not errors and settings == {"expected": "missing", "fix": "none"}
+    assert checks.describe({"check_type": "service", "target": target, "settings": settings}) == "AppSvc exists"
+    assert checks.describe({"check_type": "service", "target": "AppSvc", "settings": {"expected": "exists"}}) == (
+        "AppSvc does not exist")
+    assert checks.parse_settings("service", {"service_name": "AppSvc", "service_expected": "exists",
+                                             "service_fix": "start"})[3].keys() == {"service_fix"}
     assert checks.parse_settings("script", {"script_expect": "exit_code", "script_value": "ok"})[3].keys() == {
         "script_value"}
     assert checks.parse_settings("offline", {"duration_minutes": "1"})[2] == checks.MIN_OFFLINE_MINUTES
@@ -174,6 +182,14 @@ def test_reports_are_judged_for_each_type():
     assert judge("service", "W32Time", expected="running") == (False, "Running")
     assert judge("service", "W32Time", expected="stopped")[0] is True
     assert judge("service", "Gone", expected="running") == (True, "Not installed")
+    # Installed or not, whatever the service is doing.
+    assert judge("service", "W32Time", expected="exists") == (False, "Running")
+    assert judge("service", "Gone", expected="exists") == (True, "Not installed")
+    assert judge("service", "Gone", expected="missing") == (False, "Not installed")
+    assert judge("service", "W32Time", expected="missing") == (True, "Running")
+    report["services"].append({"name": "Odd", "status": "unknown", "error": "access denied"})
+    assert judge("service", "Odd", expected="exists")[0] is True
+    assert judge("service", "Odd", expected="missing")[0] is True
     assert judge("file", "C:\\App\\app.log", expected="exists") == (
         False, "Found (1.5 KB, modified 2026-10-01 09:30:00 UTC)")
     assert judge("file", "C:\\App\\app.log", expected="missing")[0] is True

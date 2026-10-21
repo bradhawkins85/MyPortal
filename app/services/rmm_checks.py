@@ -14,8 +14,9 @@ How each type is checked:
 * **Disk space, ping, CPU, memory, service, network, file and process** checks are measured
   by the device's RMM agent. It asks which to collect (:func:`agent_config`)
   and reports every :data:`REPORT_INTERVAL_SECONDS` (:func:`ingest_report`).
-  A service check can have the agent start, restart or stop the service
-  itself when it is not in the expected state. A file check passes when a
+  A service check tests that a service is running, stopped, exists or does
+  not exist, and can have the agent start, restart or stop it itself when it
+  is not running or stopped as expected. A file check passes when a
   path exists (or does not); ``*`` and ``?`` match any name and ``%NAME%`` is
   an environment variable on the device. A process check counts the processes
   running with a name.
@@ -108,7 +109,12 @@ DISK_METRICS = {"free_percent": "free space (%)", "free_gb": "free space (GB)"}
 MEMORY_METRICS = {"free_percent": "free memory (%)", "free_gb": "free memory (GB)"}
 COMPARISONS = {"below": "is below", "above": "is above"}
 NETWORK_DIRECTIONS = {"in": "received", "out": "sent", "total": "received and sent"}
-SERVICE_STATES = {"running": "Running", "stopped": "Stopped"}
+SERVICE_STATES = {"running": "Running", "stopped": "Stopped", "exists": "Exists", "missing": "Does not exist"}
+# What a service check fails on, by its expected state.
+SERVICE_PROBLEMS = {"running": "is not running", "stopped": "is not stopped", "exists": "does not exist",
+                    "missing": "exists"}
+# Statuses that say nothing about whether a service is installed.
+_SERVICE_UNKNOWN = ("unknown", "unsupported")
 SERVICE_FIXES = {
     "none": "Do nothing on the device",
     "start": "Start it",
@@ -342,8 +348,8 @@ def describe(check: Mapping[str, Any]) -> str:
         unit = "%" if settings.get("metric") == "free_percent" else " GB"
         return f"Free memory is below {_round(float(settings.get('threshold') or 0))}{unit}{lasting}"
     if kind == "service":
-        expected = SERVICE_STATES.get(settings.get("expected"), "Running").lower()
-        text = f"{target} is not {expected}{lasting}"
+        problem = SERVICE_PROBLEMS.get(settings.get("expected") or "running", SERVICE_PROBLEMS["running"])
+        text = f"{target} {problem}{lasting}"
         fix = settings.get("fix") or "none"
         if fix in ("start", "restart", "stop"):
             text += f"; the agent will {fix} it"
@@ -481,12 +487,14 @@ def parse_settings(check_type: str, form: Mapping[str, Any]) -> tuple[str, dict[
             errors["service_name"] = "Enter the service's name (not its display name), such as Spooler."
         expected = str(form.get("service_expected") or "running")
         if expected not in SERVICE_STATES:
-            errors["service_expected"] = "Choose running or stopped."
+            errors["service_expected"] = "Choose running, stopped, exists or does not exist."
         fix = str(form.get("service_fix") or "none")
-        allowed = ("none", "start", "restart") if expected == "running" else ("none", "stop")
+        allowed = {"running": ("none", "start", "restart"), "stopped": ("none", "stop")}.get(expected, ("none",))
         if fix not in allowed:
-            errors["service_fix"] = ("A service that should be running can be started or restarted."
-                                     if expected == "running" else "A service that should be stopped can only be stopped.")
+            errors["service_fix"] = {
+                "running": "A service that should be running can be started or restarted.",
+                "stopped": "A service that should be stopped can only be stopped.",
+            }.get(expected, "The agent cannot install or remove a service; choose to do nothing on the device.")
         settings = {"expected": expected, "fix": fix}
     elif check_type == "file":
         target = str(form.get("file_path") or "").strip()
@@ -1015,6 +1023,10 @@ def evaluate(check: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[bool,
             text += f"; the agent {str(service['action'])[:200]}"
         if service.get("error"):
             text += f" ({str(service['error'])[:200]})"
+        if expected == "exists":
+            return status == "missing" or status in _SERVICE_UNKNOWN, text
+        if expected == "missing":
+            return status != "missing", text
         # A service the agent had to fix still counts as a problem this time.
         return bool(service.get("action")) or status != expected, text
     if kind == "file":
