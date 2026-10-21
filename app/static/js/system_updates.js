@@ -55,6 +55,16 @@
     }
   }
 
+  // These pages do not load tables.js, so render their UTC timestamps here.
+  function renderUtcTimes() {
+    document.querySelectorAll('[data-utc]').forEach((element) => {
+      const iso = element.getAttribute('data-utc');
+      if (!iso) return;
+      const date = new Date(iso);
+      if (!Number.isNaN(date.getTime())) element.textContent = date.toLocaleString();
+    });
+  }
+
   function tagClass(status) {
     if (status === 'succeeded') return 'tag--success';
     if (status === 'failed') return 'tag--danger';
@@ -133,6 +143,7 @@
   }
 
   function init() {
+    renderUtcTimes();
     bindHistoryFilters();
     pollProgress();
   }
