@@ -111,6 +111,44 @@ def test_log_level_filters_application_log_entries(tmp_path):
     logger.remove()
 
 
+def test_exception_logs_keep_traceback_without_user_record_locals(tmp_path, monkeypatch, capsys):
+    """Errors retain useful frames without rendering private user records."""
+    from types import SimpleNamespace
+
+    from app.core import config
+
+    paths = [tmp_path / name for name in ("app.log", "auth.log", "error.log")]
+    settings = SimpleNamespace(
+        log_level="INFO", verbose_logging=False,
+        app_log_path=paths[0], fail2ban_log_path=paths[1], error_log_path=paths[2],
+        log_rotation=None, log_retention=None, log_compression=None,
+    )
+    monkeypatch.setattr(config, "get_settings", lambda: settings)
+    secret = "private-user-hash-" + "42" * 10
+
+    def failing_lookup(user):
+        return int(user["id"])
+
+    try:
+        configure_logging()
+        user = {"id": "invalid", "password_hash": secret}
+        try:
+            failing_lookup(user)
+        except ValueError:
+            logger.exception("Identity lookup failed")
+        logger.complete()
+        console = capsys.readouterr().out
+        assert "Traceback (most recent call last):" in console
+        assert "failing_lookup" in console
+        assert "ValueError: invalid literal" in console
+        for contents in (console, *(path.read_text(encoding="utf-8") for path in paths)):
+            assert "Identity lookup failed" in contents
+            assert secret not in contents
+            assert "password_hash" not in contents
+    finally:
+        logger.remove()
+
+
 def test_log_level_normalizes_env_value():
     """LOG_LEVEL accepts lowercase values and inline comments from .env files."""
     from app.core.config import Settings
@@ -142,7 +180,7 @@ def test_default_application_log_rotation_and_retention():
         },
         clear=True,
     ):
-        settings = Settings()
+        settings = Settings(_env_file=None)
 
     assert settings.app_log_path == Path("/var/log/myportal/myportal.log")
     assert settings.log_rotation == "00:00"

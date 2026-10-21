@@ -133,7 +133,13 @@ def configure_logging() -> None:
     settings = get_settings()
     log_level = settings.log_level or ("DEBUG" if settings.verbose_logging else "INFO")
 
-    logger.add(sink=lambda msg: print(msg, end=""), format=_format_console_record, level=log_level)
+    # Traceback locals can contain full user records, password hashes and
+    # integration credentials. Keep the ordinary traceback, without expanding
+    # locals or the unrelated caller stack on every application error.
+    logger.add(
+        sink=lambda msg: print(msg, end=""), format=_format_console_record,
+        level=log_level, diagnose=False, backtrace=False,
+    )
     _configure_uvicorn_logging(log_level=log_level, verbose=settings.verbose_logging)
 
     app_log_path = getattr(settings, "app_log_path", None)
@@ -150,6 +156,8 @@ def configure_logging() -> None:
                     level=log_level,
                     encoding="utf-8",
                     enqueue=True,
+                    diagnose=False,
+                    backtrace=False,
                     rotation=rotation,
                     retention=retention,
                     compression=compression,
@@ -172,6 +180,8 @@ def configure_logging() -> None:
                     level="INFO",
                     encoding="utf-8",
                     enqueue=True,
+                    diagnose=False,
+                    backtrace=False,
                     rotation=rotation,
                     retention=retention,
                     compression=compression,
@@ -195,6 +205,8 @@ def configure_logging() -> None:
                     level="WARNING",
                     encoding="utf-8",
                     enqueue=True,
+                    diagnose=False,
+                    backtrace=False,
                     rotation=rotation,
                     retention=retention,
                     compression=compression,

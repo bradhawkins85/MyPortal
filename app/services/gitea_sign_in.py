@@ -31,6 +31,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from typing import Any, Mapping
+from weakref import WeakValueDictionary
 
 from app.api.dependencies.auth import is_user_active
 from app.core.logging import log_info, log_warning
@@ -44,6 +45,7 @@ PERMISSION = "menu.rmm_script_editing"
 _RANK = {"none": 0, "read": 1, "write": 2}
 # How long a worker trusts that it already gave a technician their access.
 GRANT_REFRESH_SECONDS = 600
+MAX_CACHED_GRANTS = 1024
 _LOGIN_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 _LOGIN_PUNCTUATION = re.compile(r"[._-]{2,}")
 _HEADER_UNSAFE = re.compile(r"[^\x20-\x7e]+")
@@ -54,8 +56,10 @@ _HEADER_UNSAFE = re.compile(r"[^\x20-\x7e]+")
 # administrator.
 _LOGIN_SHAPE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,28}[A-Za-z0-9])?-\d+")
 
-_granted: dict[int, tuple[str, float]] = {}
-_locks: dict[int, asyncio.Lock] = {}
+# Cache the stable account name along with the grant. Authorization is still
+# read on every request, while Gitea's parallel asset requests share one lookup.
+_granted: dict[int, tuple[str, str, float]] = {}
+_locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
 
 
 @dataclass(frozen=True)
@@ -114,52 +118,75 @@ async def identity(user: Mapping[str, Any]) -> GiteaIdentity | None:
     """Who the user is in Gitea, or ``None`` when they may not sign in there."""
 
     level = await access_level(user)
+    user_id = int(user["id"])
     if level == "none":
+        _granted.pop(user_id, None)
         return None
-    account = await rmm_repo.get_gitea_account(int(user["id"]))
-    # The stored login keeps the Gitea account stable if the user's email
-    # changes, but it must still be one MyPortal made: these sign-in headers
-    # create Gitea accounts on first use, so a value that is not -- a tampered
-    # row or a bug -- would be handed to Gitea as-is. An unexpected value falls
-    # back to the canonical login.
-    login = str(account["gitea_login"]) if account else gitea_login(user)
-    if not _is_gitea_login(login):
-        log_warning("Dropping an unexpected stored Gitea login", user_id=user["id"], login=login)
-        login = gitea_login(user)
-    result = GiteaIdentity(
-        login=login,
-        email=_header_text(user.get("email")),
-        full_name=_full_name(user),
-        permission=level,
-    )
-    await _ensure_access(int(user["id"]), result)
-    return result
-
-
-async def _ensure_access(user_id: int, account: GiteaIdentity) -> None:
-    """Create the Gitea account and give it repository access, at most once
-    per :data:`GRANT_REFRESH_SECONDS` per worker. A failure is logged and the
-    technician still signs in; the next request retries."""
-
     lock = _locks.setdefault(user_id, asyncio.Lock())
     async with lock:
         cached = _granted.get(user_id)
-        if cached and cached[0] == account.permission and time.monotonic() - cached[1] < GRANT_REFRESH_SECONDS:
-            return
-        try:
-            settings = await gitea.load_settings()
-            await gitea.sign_in_as(settings, account.login, email=account.email, full_name=account.full_name)
-            await gitea.set_collaborator(settings, account.login, account.permission)
-        except gitea.GiteaError as exc:
-            log_warning("Could not give a technician access to the script repository", login=account.login, error=str(exc))
-            return
+        if cached and cached[1] == level and time.monotonic() - cached[2] < GRANT_REFRESH_SECONDS:
+            return GiteaIdentity(cached[0], _header_text(user.get("email")), _full_name(user), level)
+        account = await rmm_repo.get_gitea_account(user_id)
+        # Keep the stored login stable across email changes, but never forward
+        # a hand-made or malformed account name in trusted sign-in headers.
+        login = str(account["gitea_login"]) if account else gitea_login(user)
+        if not _is_gitea_login(login):
+            log_warning("Dropping an unexpected stored Gitea login", user_id=user_id, login=login)
+            login = gitea_login(user)
+        result = GiteaIdentity(
+            login=login,
+            email=_header_text(user.get("email")),
+            full_name=_full_name(user),
+            permission=level,
+        )
+        return await _ensure_access(user_id, result, stored_account=account)
+
+
+async def _ensure_access(
+    user_id: int, account: GiteaIdentity, *, stored_account: Mapping[str, Any] | None = None
+) -> GiteaIdentity:
+    """Create the Gitea account and give it repository access, at most once
+    per :data:`GRANT_REFRESH_SECONDS` per worker. A failure is logged and the
+    technician still signs in; the next request retries. Called while the
+    user's identity lock is held, including the stored-account lookup."""
+
+    try:
+        settings = await gitea.load_settings()
+        await gitea.sign_in_as(settings, account.login, email=account.email, full_name=account.full_name)
+        await gitea.set_collaborator(settings, account.login, account.permission)
+    except gitea.GiteaError as exc:
+        log_warning("Could not give a technician access to the script repository", login=account.login, error=str(exc))
+        return account
+    if not stored_account or stored_account["permission"] != account.permission:
         await rmm_repo.save_gitea_account(user_id, account.login, account.permission)
-        try:
-            await _files_access(settings, account.login, account.permission)
-        except gitea.GiteaError as exc:
-            log_warning("Could not update file repository access", login=account.login, error=str(exc))
-            return
-        _granted[user_id] = (account.permission, time.monotonic())
+    if not stored_account:
+        # Another worker may have created this user's stable account between
+        # our lookup and the upsert, using an older email address. Resolve that
+        # winner before returning or caching trusted sign-in headers.
+        persisted = await rmm_repo.get_gitea_account(user_id)
+        if not persisted:
+            return account
+        persisted_login = str(persisted["gitea_login"])
+        if persisted_login != account.login and _is_gitea_login(persisted_login):
+            try:
+                await gitea.remove_collaborator(settings, account.login)
+            except gitea.GiteaError as exc:
+                log_warning("Could not remove a superseded script repository grant", login=account.login, error=str(exc))
+            return await _ensure_access(
+                user_id,
+                GiteaIdentity(persisted_login, account.email, account.full_name, account.permission),
+                stored_account=persisted,
+            )
+    try:
+        await _files_access(settings, account.login, account.permission)
+    except gitea.GiteaError as exc:
+        log_warning("Could not update file repository access", login=account.login, error=str(exc))
+        return account
+    if user_id not in _granted and len(_granted) >= MAX_CACHED_GRANTS:
+        _granted.pop(next(iter(_granted)))
+    _granted[user_id] = (account.login, account.permission, time.monotonic())
+    return account
 
 
 async def _files_access(settings: gitea.GiteaSettings, login: str, level: str) -> None:

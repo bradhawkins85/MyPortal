@@ -165,6 +165,18 @@ class Settings(BaseSettings):
             "Default: 10."
         ),
     )
+    db_connect_timeout: float = Field(
+        default=10.0, ge=0.5, le=600, validation_alias="DB_CONNECT_TIMEOUT",
+        description="Seconds for MySQL TCP connection setup (excludes authentication).",
+    )
+    db_query_timeout: float = Field(
+        default=60.0, ge=0.5, le=3600, validation_alias="DB_QUERY_TIMEOUT",
+        description=(
+            "Seconds for a MySQL repository query, including fetching results. "
+            "An expired query discards its connection and is never retried automatically. "
+            "Direct connection contexts used for migrations are excluded."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_database_pool_sizes(self) -> "Settings":

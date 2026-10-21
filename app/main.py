@@ -116,7 +116,7 @@ from uuid import uuid4
 
 from app.core.ai_identity import get_agent_name
 from app.core.config import get_settings, get_templates_config
-from app.core.database import db
+from app.core.database import DatabaseTimeoutError, db
 from app.core.event_log_database import event_log_db
 from app.core.stats_database import stats_db
 from app.core.static_assets import CompressedStaticFiles, content_hash, content_hash_for, release_files
@@ -2310,8 +2310,41 @@ async def handle_http_exception(request: Request, exc: HTTPException):
     return _apply_request_id_header(response, request_id)
 
 
+@app.exception_handler(DatabaseTimeoutError)
+async def handle_database_timeout(request: Request, exc: DatabaseTimeoutError):
+    """Report temporary database overload without doing more database work."""
+    request_id = _get_request_id(request)
+    log_warning(
+        "Database temporarily unavailable",
+        event="database.unavailable",
+        request_id=request_id,
+        path=_get_safe_error_path(request),
+        error_type=type(exc).__name__,
+    )
+    detail = "Service temporarily unavailable. Please try again shortly."
+    headers = {"Retry-After": "5", "Cache-Control": "no-store"}
+    # Error-page context loads the signed-in user and navigation from the
+    # database, which would queue another request on an already exhausted pool.
+    if request.url.path.startswith("/api/") or _request_prefers_json(request):
+        response = JSONResponse(
+            _error_payload(detail=detail, request_id=request_id),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers=headers,
+        )
+    else:
+        response = PlainTextResponse(
+            detail,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers=headers,
+        )
+    return _apply_request_id_header(response, request_id)
+
+
 @app.exception_handler(Exception)
 async def handle_unexpected_exception(request: Request, exc: Exception):  # pragma: no cover - defensive
+    # User middleware runs outside Starlette's typed exception handlers.
+    if isinstance(exc, DatabaseTimeoutError):
+        return await handle_database_timeout(request, exc)
     request_id = _get_request_id(request)
     error_reference = _generate_error_reference()
     log_error(
