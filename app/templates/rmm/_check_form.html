@@ -39,7 +39,7 @@
   "check_script_id": "rmm-check-script", "script_expect": "rmm-check-script-expect", "script_value": "rmm-check-script-value",
   "duration_minutes": "rmm-check-duration", "action": "rmm-check-action-" ~ (e.action or "none"),
   "script": "rmm-check-action-script", "script_id": "rmm-check-action-script",
-  "schedule_mode": "rmm-check-schedule-mode", "run_time": "rmm-check-run-time", "timezone": "rmm-check-timezone",
+  "action_results": "rmm-check-action-results", "schedule_mode": "rmm-check-schedule-mode", "run_time": "rmm-check-run-time", "timezone": "rmm-check-timezone",
 } %}
 {% macro field_error(key) -%}
   {%- if errors.get(key) %}<p class="form-help form-help--error rmm-field-error" id="rmm-check-error-{{ key }}">{{ errors.get(key) }}</p>{% endif -%}
@@ -423,6 +423,23 @@
         </div>
       </fieldset>
       {{ field_error("action") }}
+
+      <div class="rmm-reveal" data-rmm-show="action:run_script,schedule_script,create_ticket">
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-action-results">Only act on these results <span class="rmm-optional">optional</span></label>
+          <textarea class="form-input rmm-action-results" id="rmm-check-action-results" name="action_results" rows="3" maxlength="4200" spellcheck="false" placeholder="Not installed" data-rmm-action-results{{ invalid("action_results", "rmm-check-action-results-help") }}>{{ e.action_results or "" }}</textarea>
+          <p class="form-help" id="rmm-check-action-results-help">One per line. The action only happens when the check's result contains one of these (case does not matter), so you can install an app when a service is <q>Not installed</q> but not when it is <q>Unknown</q>. Other failures still show on the device. Leave blank to act on every failure.</p>
+          {{ field_error("action_results") }}
+          {% for kind, examples in result_examples.items() %}
+          <div class="rmm-result-examples" data-rmm-show="type:{{ kind }}">
+            <span class="form-help">Results this check gives:</span>
+            <ul class="rmm-tag-options">
+              {% for example in examples %}<li><button class="rmm-tag-option rmm-result-example" type="button" data-rmm-result-example="{{ example }}" aria-label="Add {{ example }}">+ {{ example }}</button></li>{% endfor %}
+            </ul>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
 
       <div class="rmm-reveal" data-rmm-show="action:run_script,schedule_script|type:script">
         <div class="rmm-field-row">

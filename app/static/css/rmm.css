@@ -1240,3 +1240,9 @@ body.navigation--top .rmm-library {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
+
+.rmm-action-results { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.rmm-result-examples { display: grid; gap: 0.35rem; margin-top: 0.35rem; }
+.rmm-result-example { font: inherit; font-size: 0.8rem; color: var(--hf-copy); background: transparent; cursor: pointer; }
+.rmm-result-example:hover,
+.rmm-result-example:focus-visible { border-color: var(--hf-accent); color: var(--hf-accent-strong); }

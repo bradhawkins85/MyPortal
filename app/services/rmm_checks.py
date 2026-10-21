@@ -33,6 +33,10 @@ the cooldown is 0), schedule a script for later (dropped if the check passes
 before it runs; :func:`run_due_scheduled_checks`) or raise a ticket for the
 device. Checks can optionally resolve that ticket on recovery. While that ticket
 is open, later failures and the recovery are added to it as internal updates.
+An action can be limited to some results (:func:`action_allowed`), such as
+installing an app only when a check says "Not installed" and not "Unknown": the
+check still fails with any other result but nothing is done until the result
+matches, which can be later in the same failure.
 
 While a device has disk, ping, CPU, memory or network checks, the values it
 reports are kept in the separate stats database (:mod:`app.core.stats_database`)
@@ -119,6 +123,18 @@ SCRIPT_EXPECTATIONS = {
     "output_not_contains": "output does not contain",
     "output_equals": "output is exactly",
 }
+# Results each type gives, offered as quick picks for limiting the action.
+RESULT_EXAMPLES = {
+    "disk": ("was not found on the device",),
+    "service": ("Not installed", "Stopped", "Unknown", "Paused"),
+    "network": ("was not found on the device",),
+    "file": ("Not found", "Found", "Could not check it"),
+    "process": ("Not running", "Running", "Could not list processes"),
+    "script": ("Exit code 1", "The script timed out"),
+    "offline": ("Has never checked in",),
+}
+MAX_ACTION_RESULTS = 20
+MAX_ACTION_RESULT_LENGTH = 200
 CHECK_VARIABLES = (
     ("Check name", "{{check.name}}"),
     ("Check type", "{{check.type}}"),
@@ -354,6 +370,56 @@ def describe(check: Mapping[str, Any]) -> str:
     return str(kind)
 
 
+def action_results(check: Mapping[str, Any]) -> list[str]:
+    """The results the check's action is limited to; empty acts on every failure."""
+
+    values = (check.get("settings") or {}).get("action_results") or []
+    return [str(value) for value in values if str(value).strip()] if isinstance(values, list) else []
+
+
+def action_allowed(check: Mapping[str, Any], result: str) -> bool:
+    """Whether a failing result should trigger the action: it contains one of
+    the chosen results (ignoring case), or no results were chosen."""
+
+    wanted = action_results(check)
+    text = str(result or "").casefold()
+    return not wanted or any(value.casefold() in text for value in wanted)
+
+
+def describe_action_results(check: Mapping[str, Any]) -> str:
+    """The action's result limit in words, or "" when it has none."""
+
+    wanted = action_results(check)
+    if not wanted or check.get("action") in (None, "", "none"):
+        return ""
+    quoted = [f"“{value}”" for value in wanted]
+    listed = quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + f" or {quoted[-1]}"
+    return f"only when the result contains {listed}"
+
+
+def parse_action_results(value: Any, errors: dict[str, str]) -> list[str]:
+    """One result per line, blanks and repeats dropped."""
+
+    if isinstance(value, (list, tuple)):
+        items = [str(item) for item in value]
+    else:
+        items = str(value or "").splitlines()
+    results: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = item.strip()
+        if not text or text.casefold() in seen:
+            continue
+        if len(text) > MAX_ACTION_RESULT_LENGTH or re.search(r"[\x00-\x1f]", text):
+            errors["action_results"] = f"Keep each result to {MAX_ACTION_RESULT_LENGTH} characters on one line."
+            continue
+        seen.add(text.casefold())
+        results.append(text)
+    if len(results) > MAX_ACTION_RESULTS:
+        errors["action_results"] = f"Choose at most {MAX_ACTION_RESULTS} results."
+    return results
+
+
 def can_edit(check: Mapping[str, Any], *, company_id: int, is_super_admin: bool) -> bool:
     if check.get("company_id") is None:
         return is_super_admin
@@ -543,6 +609,9 @@ async def save_check(
     action = str(form.get("action") or "none")
     if action not in ACTIONS:
         errors["action"] = "Choose what happens when the check fails."
+    limited = parse_action_results(form.get("action_results"), errors) if action != "none" else []
+    if limited:
+        settings = {**settings, "action_results": limited}
 
     check_script: dict[str, Any] | None = None
     check_entries: dict[str, str] = {}
@@ -663,6 +732,7 @@ async def _act_on_failure(check: Mapping[str, Any], agent: Mapping[str, Any], st
         run_at = rmm_event_log_rules.scheduled_time(check, now)
         name = check.get("script_name") or "the script"
         summary += f". Scheduled {name} for {run_at.isoformat(timespec='minutes')} UTC."
+        state["last_action_at"] = now
         await repo.record_failure(check_id, summary)
         log_info("RMM check scheduled a script", check_id=check_id, agent_id=agent_id, run_at=run_at.isoformat())
         return run_at
@@ -715,6 +785,16 @@ async def _on_recovery(check: Mapping[str, Any], agent: Mapping[str, Any], state
     await repo.set_summary(int(check["id"]), summary)
 
 
+def _action_waiting(check: Mapping[str, Any], state: Mapping[str, Any]) -> bool:
+    """A failing check limited to some results that has not acted since it
+    started failing, because the result did not match until now."""
+
+    if check.get("action") in (None, "", "none") or not action_results(check):
+        return False
+    last, since = state.get("last_action_at"), state.get("changed_at")
+    return last is None or (since is not None and last < since)
+
+
 def _blank_state() -> dict[str, Any]:
     return {"status": "pending", "value_text": None, "problem_since": None, "checked_at": None, "changed_at": None,
             "last_action_at": None, "ticket_id": None, "run_id": None, "next_run_at": None, "scheduled_at": None}
@@ -741,8 +821,17 @@ async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], prob
             if state["problem_since"] is None:
                 state["problem_since"] = now
             if now - state["problem_since"] >= duration:
+                allowed = action_allowed(check, result)
                 if previous != "failing":
                     state["status"], state["changed_at"] = "failing", now
+                    if allowed:
+                        run_at = await _act_on_failure(check, agent, state, result, now)
+                    else:
+                        await repo.record_failure(check_id, f"Failed on {rmm_actions.device_label(agent)}: {result}. "
+                                                            f"No action: the result does not match.")
+                elif not allowed:
+                    pass  # waits for a result the action is limited to
+                elif _action_waiting(check, state):
                     run_at = await _act_on_failure(check, agent, state, result, now)
                 elif check.get("action") == "run_script" and int(check.get("cooldown_minutes") or 0) > 0:
                     last = state.get("last_action_at")

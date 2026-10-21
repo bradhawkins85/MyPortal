@@ -227,6 +227,18 @@
     refreshText();
   });
   form.addEventListener('input', refreshText);
+
+  // Quick picks add a result the action is limited to, once.
+  const actionResults = form.querySelector('[data-rmm-action-results]');
+  form.addEventListener('click', (event) => {
+    const pick = event.target.closest('[data-rmm-result-example]');
+    if (!pick || !actionResults) return;
+    const text = pick.getAttribute('data-rmm-result-example');
+    const lines = actionResults.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (!lines.some((line) => line.toLowerCase() === text.toLowerCase())) lines.push(text);
+    actionResults.value = lines.join('\n');
+    actionResults.focus();
+  });
   rulesField.addEventListener('rmm:rules-change', writeRules);
 
   // Jump to the first control the browser's own validation stops on, wherever it is.

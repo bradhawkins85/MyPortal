@@ -550,7 +550,7 @@ def test_checks_page_and_asset_sections_render():
         disk_metrics=checks.DISK_METRICS, memory_metrics=checks.MEMORY_METRICS, comparisons=checks.COMPARISONS,
         network_directions=checks.NETWORK_DIRECTIONS, service_states=checks.SERVICE_STATES,
         service_fixes=checks.SERVICE_FIXES, file_states=checks.FILE_STATES, process_states=checks.PROCESS_STATES,
-        script_expectations=checks.SCRIPT_EXPECTATIONS, statuses=checks.STATUSES,
+        script_expectations=checks.SCRIPT_EXPECTATIONS, result_examples=checks.RESULT_EXAMPLES, statuses=checks.STATUSES,
         devices=[{"asset_id": 10, "asset_name": "PC-01"}], scripts=[], script=None, script_fields=[],
         check_script=None, check_script_fields=[], variables=[], csrf_token="tok",
     )
@@ -571,6 +571,7 @@ def test_checks_page_and_asset_sections_render():
     assert 'name="process_name"' in html and '<option value="not_running" >Not running</option>' in html
     assert 'aria-describedby="rmm-check-auto-close-help"' in html
     assert "Auto-close when resolved" in html and "otherwise Closed" in html
+    assert 'name="action_results"' in html and 'data-rmm-result-example="Not installed"' in html
     assert 'action="/rmm/checks/3/enabled"' in html and "/static/js/rmm_checks.js" in html
 
     detail = (ROOT / "app/templates/assets/detail.html").read_text()
@@ -735,3 +736,69 @@ def test_file_and_process_checks_round_trip_the_form_and_agent_report():
                            report) == (False, "Running (1 process)")
     old = check_routes.AgentCheckReport.model_validate({}).model_dump()
     assert checks.evaluate({"check_type": "process", "target": "nginx", "settings": {}}, old) is None
+
+
+def test_action_results_are_parsed_matched_and_described():
+    errors: dict[str, str] = {}
+    assert checks.parse_action_results("Not installed\n\n  missing \nNOT INSTALLED\n", errors) == ["Not installed", "missing"]
+    assert not errors
+    checks.parse_action_results("x" * 201, errors)
+    assert "action_results" in errors
+    errors = {}
+    checks.parse_action_results("\n".join(str(n) for n in range(21)), errors)
+    assert "at most" in errors["action_results"]
+
+    check = {"check_type": "service", "action": "run_script", "settings": {"action_results": ["Not installed", "Missing"]}}
+    assert checks.action_allowed(check, "Not installed")
+    assert checks.action_allowed(check, "Exit code 1: App MISSING")
+    assert not checks.action_allowed(check, "Unknown")
+    assert checks.action_allowed({"settings": {}}, "Unknown")  # no limit acts on every failure
+    assert checks.describe_action_results(check) == "only when the result contains “Not installed” or “Missing”"
+    assert checks.describe_action_results({**check, "action": "none"}) == ""
+
+    values = check_routes.form_values({**check, "target": "App"})
+    assert values["action_results"] == "Not installed\nMissing"
+    assert check_routes.check_summary({**check, "id": 1, "target": "App", "script_name": "Install"})[
+        "action_label"] == "Run Install, only when the result contains “Not installed” or “Missing”"
+
+
+@pytest.mark.anyio
+async def test_action_waits_for_a_result_it_is_limited_to(sqlite_db, stats_db, tickets, monkeypatch):
+    _result, agent = await _enrol(sqlite_db)
+    check_id = await _save({"name": "App service", "scope": "company", "check_type": "service", "service_name": "AppSvc",
+                            "service_expected": "running", "action": "create_ticket",
+                            "action_results": "Not installed\nMissing"})
+    check = await checks_repo.get_check(check_id)
+    assert check["settings"]["action_results"] == ["Not installed", "Missing"]
+    start = datetime(2026, 10, 12, 9, 0)
+    now = _clock(monkeypatch, start)
+
+    def report(status):
+        return {"services": [{"name": "AppSvc", "status": status}]}
+
+    # Unknown fails the check but takes no action.
+    await checks.ingest_report(agent, report("unknown"))
+    assert (await checks_repo.get_state(check_id, agent["id"]))["status"] == "failing"
+    assert not tickets["tickets"]
+    assert "No action" in (await checks_repo.get_check(check_id))["last_summary"]
+
+    # Still failing, now not installed: the action happens once.
+    now["value"] = start + timedelta(minutes=5)
+    await checks.ingest_report(agent, report("missing"))
+    assert len(tickets["tickets"]) == 1 and "Not installed" in tickets["tickets"][100]["description"]
+    now["value"] = start + timedelta(minutes=10)
+    await checks.ingest_report(agent, report("missing"))
+    assert len(tickets["tickets"]) == 1 and not tickets["replies"]
+
+    # Recovers, then fails again with a result it is not limited to: no update to the ticket.
+    now["value"] = start + timedelta(minutes=15)
+    await checks.ingest_report(agent, report("running"))
+    replies = len(tickets["replies"])
+    now["value"] = start + timedelta(minutes=20)
+    await checks.ingest_report(agent, report("stopped"))
+    assert len(tickets["replies"]) == replies and len(tickets["tickets"]) == 1
+
+    # A check with no action ignores the limit.
+    none_id = await _save({"name": "Other", "scope": "company", "check_type": "service", "service_name": "Other",
+                           "action": "none", "action_results": "Missing"})
+    assert "action_results" not in (await checks_repo.get_check(none_id))["settings"]
