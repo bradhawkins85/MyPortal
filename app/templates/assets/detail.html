@@ -499,10 +499,11 @@
   </section>{% endif %}
 
   {% if not customer_safe %}<section class="card card--panel ce-section" id="asset-custom-fields" data-asset-edit-section="custom-fields" aria-labelledby="asset-custom-fields-title">
-    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-custom-fields-title">Custom fields</h2><p class="card__subtitle">{{ 'Update additional inventory details alongside the asset profile.' if can_edit else 'Additional inventory details recorded for this asset.' }}</p></div></header>
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-custom-fields-title">Custom fields</h2><p class="card__subtitle">{{ 'Update additional inventory details alongside the asset profile.' if can_edit else 'Additional inventory details recorded for this asset.' }} Insert a field's value into a script or template with its token.</p></div></header>
     <div class="ce-section__body"><div class="ce-form-grid">
       {% for field in custom_fields %}<div class="form-field">
         {% if can_edit %}<label class="form-label" for="asset-custom-{{ field.id }}">{{ field.display_name or field.name }}</label>{% else %}<span class="form-label">{{ field.display_name or field.name }}</span>{% endif %}
+        {% if field.field_type != 'image' %}{% set token = '{{ asset.variables.' ~ field.name ~ ' }}' %}<button type="button" class="ce-token" data-ce-copy="{{ token }}" title="Copy the template token"><span class="ce-token__text">{{ token }}</span><span class="ce-token__hint" data-ce-copy-status aria-live="polite">Copy</span></button>{% endif %}
         {% if can_edit %}
           {% if field.field_type == 'checkbox' %}<label class="checkbox"><input id="asset-custom-{{ field.id }}" form="asset-settings-form" name="custom_{{ field.id }}" value="1" type="checkbox" {% if field.value %}checked{% endif %}><span>Yes</span></label>
           {% elif field.field_type == 'date' %}<input id="asset-custom-{{ field.id }}" form="asset-settings-form" class="form-input" name="custom_{{ field.id }}" type="date" value="{{ field.value or '' }}">

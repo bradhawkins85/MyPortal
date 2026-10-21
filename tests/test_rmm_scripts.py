@@ -696,8 +696,8 @@ async def test_job_poll_heartbeat_skips_recent_check_ins(sqlite_db, monkeypatch)
 @pytest.mark.anyio
 async def test_available_variables_list_asset_fields_and_company_variables(sqlite_db):
     tokens = [item["token"] for item in await rmm_scripts.available_variables()]
-    assert "{{asset.custom.BitLocker}}" in tokens and "{{company.variables.Tenant}}" in tokens
-    assert "{{asset.custom.Photo}}" not in tokens
+    assert "{{asset.variables.BitLocker}}" in tokens and "{{company.variables.Tenant}}" in tokens
+    assert "{{asset.variables.Photo}}" not in tokens
 
 
 # ---------------------------------------------------------------------------
@@ -866,6 +866,13 @@ async def test_variable_names_with_spaces_resolve_case_insensitively():
     assert await rmm_scripts.render_value("{{company.variables.tenant id}}/{{ asset.custom.BitLocker Status }}", context) == "contoso/On"
     assert await rmm_scripts.render_value("{{asset.name}} at {{company.name}}", context) == "PC-01 at Contoso"
     assert await rmm_scripts.render_value("{{asset.custom.Missing}}", context) == ""
+
+
+@pytest.mark.anyio
+async def test_asset_variables_token_resolves_custom_fields():
+    context = {"company": {"variables": {}},
+               "asset": {"custom": {"BitLocker Status": "On"}, "variables": {"BitLocker Status": "On"}}}
+    assert await rmm_scripts.render_value("{{ asset.variables.bitlocker status }}", context) == "On"
 
 
 def test_shell_read_targets_and_no_catastrophic_backtracking():

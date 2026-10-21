@@ -8,7 +8,7 @@ The flow for a manual run:
    company's devices only); :func:`ensure_folders` creates those folders.
 2. A technician fills in a field for each one, with a typed value or a MyPortal
    variable such as ``{{company.variables.TenantId}}`` or
-   ``{{asset.custom.BitLocker}}``. :func:`queue_runs` resolves those per device,
+   ``{{asset.variables.BitLocker}}`` (``{{asset.custom.BitLocker}}`` also works). :func:`queue_runs` resolves those per device,
    encrypts the resolved values and queues one run per device.
 3. The device's RMM agent collects the run (:func:`claim_jobs`), executes it and
    reports back (:func:`record_result`). Custom values the script returns update
@@ -100,7 +100,7 @@ _FALSE = {"0", "false", "no", "off", "n", "$false", ""}
 _TOKEN = re.compile(r"\{\{")
 # Custom field and variable names may contain spaces, which the general
 # template engine's tokens do not allow, so these are resolved first.
-_NAMED_VALUE_TOKEN = re.compile(r"\{\{\s*(asset\.custom|company\.variables)\.([^{}]+?)\s*\}\}")
+_NAMED_VALUE_TOKEN = re.compile(r"\{\{\s*(asset\.custom|asset\.variables|company\.variables)\.([^{}]+?)\s*\}\}")
 
 # Wakes an agent's long-poll on this worker when a run is queued for it.
 _agent_events: dict[int, asyncio.Event] = {}
@@ -346,7 +346,7 @@ async def available_variables() -> list[dict[str, str]]:
         variables.append({
             "group": "Asset custom fields",
             "label": str(definition.get("display_name") or name),
-            "token": "{{asset.custom." + name + "}}",
+            "token": "{{asset.variables." + name + "}}",
         })
     for row in await company_variables_repo.list_definitions():
         name = str(row.get("name") or "")
@@ -387,12 +387,14 @@ async def build_template_context(company_id: int, asset_id: int | None) -> dict[
             "name": company.get("name") or "",
             "variables": await company_variables_repo.value_map(company_id),
         },
-        "asset": {"custom": {}},
+        "asset": {"custom": {}, "variables": {}},
     }
     if asset_id is not None:
         asset = await assets_repo.get_asset_by_id(asset_id) or {}
         asset_context = {key: _scalar(value) for key, value in asset.items() if _scalar(value) is not None}
-        asset_context["custom"] = await _asset_custom_values(asset_id)
+        # Custom fields answer to asset.variables.NAME, matching company
+        # variables; asset.custom.NAME stays for values entered before that.
+        asset_context["custom"] = asset_context["variables"] = await _asset_custom_values(asset_id)
         context["asset"] = asset_context
     return context
 

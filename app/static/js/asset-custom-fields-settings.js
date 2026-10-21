@@ -37,7 +37,7 @@
     fields.forEach(field => {
       const row = document.createElement('tr');
       row.innerHTML = `
-        <td data-label="Name">${escapeHtml(field.name)}</td>
+        <td data-label="Name">${escapeHtml(field.name)}${field.field_type === 'image' ? '' : `<br><code class="text-muted">${escapeHtml('{{ asset.variables.' + field.name + ' }}')}</code>`}</td>
         <td data-label="Display Name">${field.display_name ? escapeHtml(field.display_name) : '<span style="color: var(--color-text-muted, #888);">—</span>'}</td>
         <td data-label="Type">${formatFieldType(field.field_type)}</td>
         <td data-label="Display Order">${field.display_order}</td>

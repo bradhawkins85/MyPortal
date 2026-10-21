@@ -410,7 +410,34 @@
     refresh();
   }
 
+  // Template token chips (data-ce-copy) copy their token to the clipboard.
+  function initCopyButtons(workspace) {
+    workspace.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-ce-copy]');
+      if (!button) {
+        return;
+      }
+      const status = button.querySelector('[data-ce-copy-status]');
+      try {
+        await navigator.clipboard.writeText(button.dataset.ceCopy);
+        if (status) {
+          status.textContent = 'Copied';
+        }
+      } catch (error) {
+        if (status) {
+          status.textContent = 'Press Ctrl+C';
+        }
+      }
+      window.setTimeout(() => {
+        if (status) {
+          status.textContent = 'Copy';
+        }
+      }, 1800);
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[data-asset-edit]').forEach(initCopyButtons);
     document.querySelectorAll('[data-asset-edit], [data-ae-workspace]').forEach((workspace) => {
       initSettingsForm(workspace, initWorkspace(workspace));
     });
