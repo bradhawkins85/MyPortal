@@ -7,7 +7,7 @@
   "ping": ("A host stops replying or replies slowly.", "M12 20h.01M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 14 0M2 9.5a15 15 0 0 1 20 0"),
   "cpu": ("The processor stays busy for too long.", "M7 7h10v10H7zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4"),
   "memory": ("Free memory drops too low.", "M3 8h18v8H3zM7 8v8M11 8v8M15 8v8M5 16v3M19 16v3"),
-  "service": ("A Windows service or systemd unit is not running or stopped as it should be.", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"),
+  "service": ("A Windows service or systemd unit is not running, stopped, present or absent as it should be.", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"),
   "network": ("Traffic on an interface is too high or too low.", "M7 17V5M3 9l4-4 4 4M17 7v12M13 15l4 4 4-4"),
   "file": ("A file or folder is missing, or exists when it should not.", "M14 3H6v18h12V7zM14 3v4h4M9 13h6M9 17h6"),
   "process": ("A program is not running, or is running when it should not be.", "M3 5h18v14H3zM3 9h18M7 13l2 2-2 2M12 17h4"),
@@ -197,12 +197,12 @@
           </div>
           <div class="form-field">
             <label class="form-label" for="rmm-check-service-expected">Should be</label>
-            <select class="form-input" id="rmm-check-service-expected" name="service_expected"{{ invalid("service_expected") }}>
+            <select class="form-input" id="rmm-check-service-expected" name="service_expected" data-rmm-service-expected{{ invalid("service_expected") }}>
               {% for key, label in service_states.items() %}<option value="{{ key }}" {% if e.service_expected == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
             </select>
             {{ field_error("service_expected") }}
           </div>
-          <div class="form-field">
+          <div class="form-field" data-rmm-service-fix-field{% if e.service_expected in ("exists", "missing") %} hidden{% endif %}>
             <label class="form-label" for="rmm-check-service-fix">If it is not, the agent should</label>
             <select class="form-input" id="rmm-check-service-fix" name="service_fix"{{ invalid("service_fix", "rmm-check-service-fix-help") }}>
               {% for key, label in service_fixes.items() %}<option value="{{ key }}" {% if e.service_fix == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
