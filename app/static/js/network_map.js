@@ -52,12 +52,25 @@
     });
   });
 
-  // Build query parameters from a map options form. Selecting every type is
-  // the same as no filter, so it is left out to keep links short.
+  // ---- Site pickers ---------------------------------------------------------
+  document.querySelectorAll('[data-nm-sites]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const scope = button.closest('form');
+      const mode = button.dataset.nmSites;
+      scope.querySelectorAll('input[name="site"]').forEach((box) => {
+        box.checked = mode === 'all';
+      });
+    });
+  });
+
+  // Build query parameters from a map options form. Selecting every type or
+  // site is the same as no filter, so it is left out to keep links short.
   const optionParams = (form) => {
     const data = new FormData(form);
     const boxes = Array.from(form.querySelectorAll('input[name="types"]'));
     if (boxes.length && boxes.every((box) => box.checked)) data.delete('types');
+    const siteBoxes = Array.from(form.querySelectorAll('input[name="site"]'));
+    if (siteBoxes.length && siteBoxes.every((box) => box.checked)) data.delete('site');
     // Hiding unlinked devices is the default, so only "show" needs sending.
     const hideUnlinked = data.getAll('unlinked').includes('hide');
     data.delete('unlinked');

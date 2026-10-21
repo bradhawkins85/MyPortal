@@ -284,10 +284,30 @@ def test_type_filter_drops_devices_and_their_links():
 
 
 def test_site_filter_keeps_neighbours_across_sites():
-    graph = _graph(site="Warehouse")
+    graph = _graph(sites=frozenset({"Warehouse"}))
     assert {"asset:5", "asset:6", "asset:7"} <= set(graph.nodes)
     assert "asset:4" in graph.nodes  # The far end of the wireless link.
     assert "asset:3" not in graph.nodes
+
+
+def test_site_filter_supports_multiple_sites():
+    graph = _graph(sites=frozenset({"Warehouse", "Head office"}))
+    # Devices at both selected sites are drawn.
+    assert {"asset:1", "asset:3", "asset:4", "asset:5", "asset:6", "asset:7"} <= set(graph.nodes)
+    assert all(node.site in {"Warehouse", "Head office"} for node in graph.nodes.values()
+               if node.kind in {"asset", "item"})
+
+
+def test_site_filter_reads_repeated_parameters():
+    from starlette.datastructures import QueryParams
+
+    # A legacy single-site link keeps working, alongside repeated values.
+    assert nm.MapOptions.from_params(QueryParams("site=Warehouse")).sites == frozenset({"Warehouse"})
+    options = nm.MapOptions.from_params(QueryParams("site=Head office&site=Warehouse"))
+    assert options.sites == frozenset({"Head office", "Warehouse"})
+    # Selecting every site is the same as no filter.
+    assert ("site", "Head office") in options.query() and ("site", "Warehouse") in options.query()
+    assert nm.MapOptions.from_params(QueryParams("site=")).sites is None
 
 
 def test_subnets_only_draw_when_requested():
@@ -308,7 +328,8 @@ def test_options_round_trip_through_query_parameters():
     from starlette.datastructures import QueryParams
 
     options = nm.MapOptions(detail="detailed", types=frozenset({"switch", "router"}), show_subnets=True,
-                            include_unlinked=True, site="Warehouse", show_racks=False, layout="sites",
+                            include_unlinked=True, sites=frozenset({"Warehouse"}), show_racks=False,
+                            layout="sites",
                             hide_unlinked=False)
     parsed = nm.MapOptions.from_params(QueryParams(options.query()))
     assert parsed == options

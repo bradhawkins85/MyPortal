@@ -27,7 +27,8 @@ On screen the map follows MyPortal's dark theme; exports are drawn on white for 
 - Select a device to highlight its links and see its addresses, interfaces and links in the
   side panel. Select a linked device's name to jump to it.
 - **Find a device** searches by name or IP address.
-- Filters: **Layout**, **Detail**, **Site** (a site plus the devices it links to), **Device types**,
+- Filters: **Layout**, **Detail**, **Sites** (any combination of sites, each plus the
+  devices it links to), **Device types**,
   **Show subnets**, **Hide devices not linked to other devices**, **Include undocumented
   devices** and **Ignore rack grouping** (sites layout).
 - **Hide devices not linked to other devices** is on by default, so the map shows only
