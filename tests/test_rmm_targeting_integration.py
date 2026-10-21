@@ -308,6 +308,10 @@ async def test_form_roundtrip_rules_and_legacy_scope_compatibility(target_db, mo
     async with api_client() as client:
         response = await client.post("/rmm/checks", data=payload)
         assert response.status_code == 303
+        assert response.headers["location"] == "/rmm/checks#rmm-checks-all"
+        check = (await checks_repo.list_checks_for_company(1))[0]
+        response = await client.post(f"/rmm/checks/{check['id']}", data=payload)
+        assert (response.status_code, response.headers["location"]) == (303, "/rmm/checks#rmm-checks-all")
     check = (await checks_repo.list_checks_for_company(1))[0]
     assert check["target_rules"] == rmm_targeting.validate_rules(rules)
     assert routes.form_values(check)["target_mode"] == "rules"

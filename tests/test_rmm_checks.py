@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from app.core.stats_database import StatsDatabase
+from app.features.rmm import check_routes
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_checks as checks_repo
 from app.repositories import rmm_stats as stats_repo
@@ -245,8 +246,11 @@ async def test_save_check_checks_scope_type_and_scripts(sqlite_db, monkeypatch):
             "action": "run_script", "script_id": str(scripts["Cleanup"]["id"]),
             "check_entry:param:Site": "{{asset.name}}", "entry:param:Reason": "{{check.result}}"}
     script_id = await _save(form)
+    first = await checks_repo.get_check(script_id)
+    assert await check_routes._needs_script_values(first, None)  # stays on the form to fill them in
     await _save(form, check_id=script_id)  # values for a newly chosen script are read on the next save
     stored = await checks_repo.get_check(script_id, with_secrets=True)
+    assert not await check_routes._needs_script_values(stored, first)  # same scripts: back to the list
     assert stored["target"] == str(scripts["Health"]["id"])
     assert checks.script_values(stored, scripts["Health"], own=True)[0]["value"] == "{{asset.name}}"
     assert checks.script_values(stored, scripts["Cleanup"])[0]["value"] == "{{check.result}}"
