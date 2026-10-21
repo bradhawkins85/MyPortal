@@ -250,6 +250,15 @@ async def set_script_parallel(script_id: int, allow_parallel: bool) -> None:
     await set_script_execution(script_id, "parallel" if allow_parallel else "sequential")
 
 
+async def list_script_files_like(pattern: str) -> list[dict[str, Any]]:
+    """``id`` and decoded ``files`` of scripts whose associations match the SQL
+    LIKE ``pattern``, including inactive scripts."""
+    rows = await db.fetch_all(
+        "SELECT id, files_json FROM rmm_scripts WHERE files_json LIKE %s", (pattern,)
+    )
+    return [{"id": int(row["id"]), "files": _decode_json(row.get("files_json"), [])} for row in rows]
+
+
 async def set_script_files(script_id: int, files: list[dict[str, str]]) -> None:
     await db.execute(
         "UPDATE rmm_scripts SET files_json = %s, updated_at = %s WHERE id = %s",

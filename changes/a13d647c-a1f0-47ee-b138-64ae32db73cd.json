@@ -1,0 +1,7 @@
+{
+  "guid": "a13d647c-a1f0-47ee-b138-64ae32db73cd",
+  "occurred_at": "2026-10-21T22:20Z",
+  "change_type": "Feature",
+  "summary": "Gitea: rename the Public repository to Public-Files and add a private Private-Files repository with Common and per-company folders for files scripts deploy via Add file",
+  "content_hash": "37d02a635a99c36d1171a1c1798acaae07faaf84816ea5733efac117be2b93ff"
+}

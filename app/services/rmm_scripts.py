@@ -46,6 +46,7 @@ from app.services.rmm_script_layout import (
     _create_missing,
     _display_name,
     _folder,
+    _read_layout,
     _relative,
     read_layout,
     script_scope,
@@ -167,13 +168,27 @@ FOLDER_CHECK_INTERVAL_SECONDS = 600
 
 
 async def ensure_folders() -> int:
-    """Create shared and company folders for scripts and ``Files/`` storage.
-    Returns the number of files created."""
+    """Create shared and company folders for scripts and in Private-Files,
+    after moving any old ``Files/`` folder there. Returns the number of
+    folder files created."""
+
+    from app.services import rmm_script_files
 
     settings = await gitea.load_settings()
-    files = await gitea.list_files(settings)
     companies = await companies_repo.list_companies(include_archived=True)
-    return await _create_missing(settings, await read_layout(settings, files, companies))
+    try:
+        await rmm_script_files.move_legacy_files(settings)
+        private = gitea.private_files_settings(settings)
+        private_files = await gitea.list_files(private)
+        created = await _create_missing(
+            private, await _read_layout(private, private_files, companies, files_folder=True)
+        )
+    except gitea.GiteaError as exc:
+        # Scripts keep working while Private-Files is missing or unreachable.
+        log_info("Private-Files folders not checked", reason=str(exc))
+        created = 0
+    files = await gitea.list_files(settings)
+    return created + await _create_missing(settings, await read_layout(settings, files, companies))
 
 
 @singleton_run("rmm_gitea_folders", ttl_seconds=300)

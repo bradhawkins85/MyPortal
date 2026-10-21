@@ -33,7 +33,7 @@ straight after installing:
   below. The administrator's password is in `/etc/gitea/admin-credentials` (bare metal) or
   `/opt/myportal-docker/gitea-admin.txt` (Docker). Technicians don't need it: they sign in with
   MyPortal (see [Signing in to Gitea](#signing-in-to-gitea)).
-- Self-registration is off. Public repositories can be read without signing in; the script repository stays private.
+- Self-registration is off. Public repositories can be read without signing in; the script and `Private-Files` repositories stay private.
 - Every upgrade checks Gitea: it is installed if missing, moved to the Gitea version the release
   ships with, and its address follows `PORTAL_URL`. Its data is kept, and a Gitea problem never
   stops a MyPortal upgrade (the next one retries).
@@ -47,20 +47,34 @@ To use your own Gitea server instead, set `GITEA_BASE_URL` (and the other settin
 the installers then leave Gitea alone. Set `GITEA_PROVISION=false` to stop them running Gitea
 without connecting another one.
 
-### Public downloads
+### Public Files and Private Files
 
-The installers also create **`myportal/Public`**, a separate public repository. All staff
-and users can open **Downloads** in the menu (`/downloads`), and anyone with the repository
-link can browse and download files without signing in. Technicians with **Script editing →
-Write**, including super administrators, can upload files using Gitea's **Add file → Upload
-file** action. Share a file's **Raw** link for a direct download.
+Besides the script repository, the installers keep two file repositories under the same owner:
 
-Public files are separate from the private RMM script repository and its company folders.
-Changes to technician roles remove upload access during the usual account reconciliation.
-Existing technicians receive Public upload access on their next visit or background check.
-For an external Gitea server, create a public repository named `Public` under the configured
-script repository owner, allow anonymous repository viewing, and grant the appropriate
-technician accounts write access; the installers leave external servers alone.
+- **`myportal/Public-Files`** is public. All staff and users can open **Downloads** in the
+  menu (`/downloads`), and anyone with the repository link can browse and download files
+  without signing in. Technicians with **Script editing → Write**, including super
+  administrators, can upload files using Gitea's **Add file → Upload file** action. Share a
+  file's **Raw** link for a direct download.
+- **`myportal/Private-Files`** is private, with a `Common/` folder and a folder per company
+  under `Companies/` (see [Repository layout](#repository-layout)). It has no public link:
+  its files reach endpoints only when a script lists them with **Add file** (see
+  [Associated files](#associated-files)). Technicians get the same read or write access to it
+  as to the script repository, so they can upload files there.
+
+Installations made before this change had a public repository named `Public`; the next install
+or upgrade renames it to `Public-Files`, and Gitea redirects old links to the new name.
+MyPortal also moves an existing `Files/` folder from the script repository into
+`Private-Files` (files over 50 MB stay behind and are logged so you can move them by hand) and
+updates script file associations to the new paths. Runs queued before the move must be queued
+again.
+
+Changes to technician roles update access to both repositories during the usual account
+reconciliation, and existing technicians receive access on their next visit or background
+check. For an external Gitea server, create a public repository named `Public-Files` (allow
+anonymous repository viewing) and a private repository named `Private-Files`, both with a
+`main` branch under the configured script repository owner; the installers leave external
+servers alone.
 
 ### Signing in to Gitea
 
@@ -123,11 +137,14 @@ MyPortal keeps these folders at the top of the repository (or of `GITEA_SCRIPTS_
 - **`Companies/`**: one folder per MyPortal company, for example `Companies/Contoso Ltd/`.
   Scripts in a company's folder, and its subfolders, are offered and run only on that company's
   devices.
-- **`Files/Common/`**: files shared across companies, such as installers, executables,
-  documents and supporting scripts.
-- **`Files/Companies/`**: one folder per MyPortal company for its stored files, for example
-  `Files/Companies/Contoso Ltd/`. These folders have their own `.myportal-company` markers,
-  so they can be renamed independently of the script folders.
+
+The **`Private-Files`** repository has the same layout for the files scripts deploy:
+
+- **`Common/`**: files shared across companies, such as installers, executables, documents
+  and supporting scripts.
+- **`Companies/`**: one folder per MyPortal company for its stored files, for example
+  `Companies/Contoso Ltd/`. These folders have their own `.myportal-company` markers, so
+  they can be renamed independently of the script folders.
 
 MyPortal creates these folders itself, along with a folder for every company, on each sync and
 every ten minutes, so a new company gets its folder without anyone touching Gitea. Archived
@@ -135,7 +152,7 @@ companies do not get a new folder. Git cannot store an empty folder, so each com
 holds a small `.myportal-company` file that records which company it belongs to; leave it in
 place. Because of that file you can rename a company folder in Gitea and it stays linked. A
 folder you make yourself under `Companies/` is linked to the company with the same name.
-The same folder maintenance applies under `Files/Companies/`.
+The same folder maintenance applies to `Private-Files`.
 
 Upload and download stored files directly in Gitea. The bundled Gitea allows all repository
 upload types, including `.exe` and `.vbs`, on both bare-metal and Docker installations.
@@ -145,10 +162,10 @@ upload count limits still apply (by default 50 MB per file and five files per up
 For an externally managed Gitea server, configure these settings in its `app.ini` and restart
 Gitea yourself.
 
-Files under `Files/` are stored in Gitea and are not imported into MyPortal's runnable script
-library, even when they have a supported script extension. The existing **Script editing**
-permission controls access to the whole repository, including all stored company files;
-company folders organise files and do not restrict who can view them in Gitea.
+Files in `Private-Files` are not imported into MyPortal's runnable script library, even when
+they have a supported script extension. The existing **Script editing** permission controls
+access to the whole repository, including all stored company files; company folders organise
+files and do not restrict who can view them in Gitea.
 
 Scripts anywhere else in the repository, and scripts in a `Companies/` folder that matches no
 company, are not loaded; sync lists them as skipped.
@@ -164,22 +181,22 @@ company folder.
 
 ### Associated files
 
-Open a script in **Scripts**, then use its **Files** section to add a Gitea file and an
-absolute endpoint file path, including the filename. The editor lists the files this script
-can use, and creates any missing `Files/` folders first. **Script editing → Write** permission
+Open a script in **Scripts**, then use its **Files** section to add a `Private-Files` file and
+an absolute endpoint file path, including the filename. The editor lists the files this script
+can use, and creates any missing `Private-Files` folders first. **Script editing → Write** permission
 is required to add, edit or remove these associations. They are stored in MyPortal and kept
 when the script is synced again.
 
-For example, associate `Files/Common/setup.exe` with `C:\Tools\setup.exe`, then have the
+For example, associate `Common/setup.exe` with `C:\Tools\setup.exe`, then have the
 PowerShell script use `C:\Tools\setup.exe`. A shell script might associate
-`Files/Common/helper.sh` with `/opt/myportal/helper.sh`. When `GITEA_SCRIPTS_PATH` is set,
-include it in the repository path (for example `rmm/Files/Common/setup.exe`).
+`Common/helper.sh` with `/opt/myportal/helper.sh`. Paths are relative to the top of
+`Private-Files`; `GITEA_SCRIPTS_PATH` applies only to the script repository.
 
-- Common scripts can use files under `Files/Common/`. Company scripts can also use files
-  under their own company's folder in `Files/Companies/`, including folders linked by a
+- Common scripts can use files under `Common/`. Company scripts can also use files under
+  their own company's folder in `Companies/`, including folders linked by a
   `.myportal-company` marker. Files from another company cannot be associated or delivered.
-- Common scripts can also use a company's files through `Files/Companies/{company}/`, for
-  example `Files/Companies/{company}/setup.exe`. The file picker lists the files of the
+- Common scripts can also use a company's files through `Companies/{company}/`, for
+  example `Companies/{company}/setup.exe`. The file picker lists the files of the
   company you are viewing in this form. Each run uses `{company}` as the folder of the company
   it runs for, so every company that runs the script needs its own copy of the file; a run
   for a company without it fails before the script starts.
@@ -216,8 +233,8 @@ The file APIs are:
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /api/rmm/scripts/{id}/files` | List saved associations and available Gitea paths; requires Script editing write access |
-| `PUT /api/rmm/scripts/{id}/files` | Replace the list with `{"files": [{"source_path": "Files/Common/setup.exe", "destination": "C:\\Tools\\setup.exe"}]}`; an empty list removes all associations |
+| `GET /api/rmm/scripts/{id}/files` | List saved associations and available `Private-Files` paths; requires Script editing write access |
+| `PUT /api/rmm/scripts/{id}/files` | Replace the list with `{"files": [{"source_path": "Common/setup.exe", "destination": "C:\\Tools\\setup.exe"}]}`; an empty list removes all associations |
 | `GET /api/rmm/agent/runs/{id}/files/{index}` | Download the pinned file at the zero-based index; requires the assigned agent's bearer token and a non-expired dispatched or running job |
 
 ### Parameters
