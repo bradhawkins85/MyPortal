@@ -147,9 +147,31 @@ def test_keyed_fields_accept_names_ids_numbers_and_booleans(context, field, key,
     assert matches_rules(group(condition(field, operator, value, key)), context) is expected
 
 
-def test_dynamic_key_lookup_is_exact_and_not_template_expanded(context):
-    assert not matches_rules(group(condition("company.variable", value=True, key="Monitor_VPN")), context)
-    assert not matches_rules(group(condition("company.variable", value=True, key="{{monitor_vpn}}")), context)
+@pytest.mark.parametrize("key", [
+    "Monitor_VPN",
+    "MONITOR_VPN",
+    "{{monitor_vpn}}",
+    "{{ company.variables.MONITOR_VPN }}",
+    "company.variables.monitor_vpn",
+])
+def test_company_variable_keys_ignore_case_and_placeholder_syntax(context, key):
+    assert matches_rules(group(condition("company.variable", value=True, key=key)), context)
+    assert matches_rules(group(condition("company.variable", "is_set", key=key)), context)
+
+
+def test_placeholder_keys_are_normalized_to_bare_names():
+    rules = validate_rules(group(
+        condition("company.variable", "is_set", key="{{ company.variables.HUNTRESS_SLUG }}"),
+        condition("asset.custom", "is_set", key="{{ asset.custom.Disk threshold }}"),
+    ))
+    assert [child["key"] for child in rules["children"]] == ["HUNTRESS_SLUG", "Disk threshold"]
+
+
+def test_dynamic_key_lookup_prefers_exact_match_and_never_expands_templates(context):
+    context["company_variables"] = {"Mode": "exact", "MODE": "other"}
+    assert matches_rules(group(condition("company.variable", value="other", key="MODE")), context)
+    assert matches_rules(group(condition("company.variable", value="exact", key="Mode")), context)
+    assert not matches_rules(group(condition("company.variable", "is_set", key="{{ company.name }}")), context)
 
 
 def test_software_versions_and_publishers_are_correlated_with_package_name(context):
