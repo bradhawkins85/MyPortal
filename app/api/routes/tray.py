@@ -67,6 +67,7 @@ from app.schemas.tray import (
     TrayInstallTokenResponse,
     TrayMenuConfigCreate,
     TrayMenuConfigUpdate,
+    TrayMenuNode,
     TrayMenuTargetingPreview,
     TrayTicketQuestionCreate,
     TrayTicketQuestionsResponse,
@@ -1773,16 +1774,12 @@ async def create_menu_config(
         name=payload.name,
         scope=payload.scope,
         scope_ref_id=payload.scope_ref_id,
-        payload_json=json.dumps(
-            [n.model_dump(exclude_none=True) for n in payload.payload]
-        ),
+        payload_json=_menu_payload_json(payload.payload),
         display_text=safe_text,
         env_allowlist=",".join(payload.env_allowlist),
         branding_icon_url=payload.branding_icon_url,
         enabled=payload.enabled,
         created_by_user_id=int(current_user["id"]),
-        target_rules=_validated_target_rules(payload.target_rules),
-        priority=payload.priority,
     )
     await tray_service.broadcast_config_changed()
     return JSONResponse(_serialise_config(record), status_code=201)
@@ -1802,9 +1799,7 @@ async def update_menu_config(
         raise HTTPException(status_code=404, detail="Configuration not found")
     payload_json = None
     if payload.payload is not None:
-        payload_json = json.dumps(
-            [n.model_dump(exclude_none=True) for n in payload.payload]
-        )
+        payload_json = _menu_payload_json(payload.payload)
     safe_text = (
         _sanitise_display_text(payload.display_text)
         if payload.display_text is not None
@@ -1813,9 +1808,6 @@ async def update_menu_config(
     env_csv = (
         ",".join(payload.env_allowlist) if payload.env_allowlist is not None else None
     )
-    rule_changes: dict[str, Any] = {}
-    if "target_rules" in payload.model_fields_set:
-        rule_changes["target_rules"] = _validated_target_rules(payload.target_rules)
     await tray_repo.update_menu_config(
         config_id,
         name=payload.name,
@@ -1825,8 +1817,6 @@ async def update_menu_config(
         branding_icon_url=payload.branding_icon_url,
         enabled=payload.enabled,
         updated_by_user_id=int(current_user["id"]),
-        priority=payload.priority,
-        **rule_changes,
     )
     await tray_service.broadcast_config_changed()
     refreshed = await tray_repo.get_menu_config(config_id)
@@ -2331,28 +2321,15 @@ def _serialise_token(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _validated_target_rules(rules: dict[str, Any] | None) -> str | None:
-    """Normalise advanced rules to stored JSON, 422 when they are invalid."""
+def _menu_payload_json(nodes: list[TrayMenuNode]) -> str:
+    """Serialise menu nodes, normalising item device rules (422 when invalid)."""
 
-    if rules is None:
-        return None
-    from app.services import rmm_targeting
-
+    dumped = [n.model_dump(exclude_none=True) for n in nodes]
     try:
-        return json.dumps(rmm_targeting.validate_rules(rules))
+        tray_service.normalise_menu_rules(dumped)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
-
-
-def _stored_target_rules(row: dict[str, Any]) -> dict[str, Any] | None:
-    raw = row.get("target_rules")
-    if not raw:
-        return None
-    try:
-        parsed = json.loads(raw)
-    except (ValueError, TypeError):
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    return json.dumps(dumped)
 
 
 def _serialise_config(row: dict[str, Any]) -> dict[str, Any]:
@@ -2375,8 +2352,6 @@ def _serialise_config(row: dict[str, Any]) -> dict[str, Any]:
         "branding_icon_url": row.get("branding_icon_url"),
         "enabled": bool(row.get("enabled")),
         "version": int(row.get("version") or 1),
-        "target_rules": _stored_target_rules(row),
-        "priority": int(row.get("priority") if row.get("priority") is not None else 100),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
