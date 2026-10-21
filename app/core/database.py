@@ -512,8 +512,6 @@ class Database:
         For complex migrations, SQLite-specific versions may be needed.
         """
         # Remove MySQL-specific clauses
-        import re
-        
         # Remove ENGINE, CHARSET, COLLATE clauses
         sql = re.sub(r'\s*ENGINE\s*=\s*\w+', '', sql, flags=re.IGNORECASE)
         sql = re.sub(r'\s*DEFAULT\s+CHARSET\s*=\s*\w+', '', sql, flags=re.IGNORECASE)
@@ -982,7 +980,7 @@ class Database:
                 try:
                     async with conn.cursor() as cursor:
                         await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
-                except BaseException as exc:
+                except (Exception, KeyboardInterrupt, SystemExit) as exc:
                     # Never return a session with a potentially held lock.
                     conn.close()
                     if not isinstance(exc, Exception):

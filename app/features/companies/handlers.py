@@ -1324,8 +1324,6 @@ async def admin_delete_company_address(company_id: int, address_id: int, request
 
 
 async def admin_create_company_variable(company_id: int, request: Request):
-    import re
-
     from app.repositories import company_variables as company_variables_repo
 
     current_user, redirect = await _main()._require_super_admin_page(request)

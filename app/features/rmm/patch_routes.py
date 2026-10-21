@@ -7,6 +7,9 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel, Field
+
+from loguru import logger
+
 from app.repositories import rmm_automation as agents_repo, rmm_patching as repo
 from app.services import audit, rmm_patching as patching, rmm_automation, rmm_targeting
 from app.repositories import rmm_targeting as targeting_repo
@@ -152,7 +155,9 @@ async def preview(request: Request, payload: TargetingPreviewRequest):
     try:
         matches = rmm_targeting.compile_rules(payload.rules)
     except ValueError as exc:
-        return JSONResponse({"detail": str(exc), "errors": {"target_rules": str(exc)}}, status_code=400)
+        logger.debug("Patching targeting rules rejected", error=str(exc))
+        return JSONResponse({"detail": "The targeting rules are invalid.",
+                            "errors": {"target_rules": "The targeting rules are invalid."}}, status_code=400)
     agents = [a for a in await agents_repo.list_active_agents(
         company_id=None if payload.scope == "global" else company_id) if str(a.get("os") or "").lower() == "windows"]
     contexts = await targeting_repo.contexts_for_agents(agents)

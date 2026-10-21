@@ -101,6 +101,14 @@ def release_version(value: str) -> str:
     return value
 
 
+def release_repo(value: str) -> str:
+    """Validate an ``owner/repo`` selector before using it in GitHub URLs."""
+    value = value.strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", value):
+        raise ValueError("Invalid RMM release repository")
+    return value
+
+
 def _package_dir(version: str | None = None) -> Path:
     return _STORAGE_DIR / release_version(version) if version else _STORAGE_DIR
 
@@ -229,7 +237,7 @@ async def fetch_latest_agent(*, repo: str | None = None, github_token: str | Non
     if version:
         version = release_version(version)
     settings = get_settings()
-    repo = repo or settings.github_tray_msi_repo
+    repo = release_repo(repo or settings.github_tray_msi_repo)
     github_token = github_token if github_token is not None else settings.github_token
     results = {file_name(os_name, arch): False for os_name, arch in PLATFORMS}
     async with _FETCH_LOCK:

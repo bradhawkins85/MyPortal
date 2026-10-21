@@ -208,7 +208,6 @@ from app.services import tickets as tickets_service
 from app.services import rag_index as rag_index_service
 from app.services.rag_permissions import can_access_candidate
 from app.services.rag_urls import canonical_source_url
-from app.services import template_variables
 from app.services import webhook_monitor
 from app.services import integration_operations as integration_operations_service
 from app.services import m365_jobs as m365_jobs_service

@@ -1187,8 +1187,6 @@ def _extract_numeric_ticket_id(ticket: dict[str, Any]) -> int | None:
             return int(ticket_number)
         except (ValueError, TypeError):
             # If the ticket number is not purely numeric, try to extract digits
-            import re
-
             digits = re.sub(r"\D", "", ticket_number)
             if digits:
                 try:

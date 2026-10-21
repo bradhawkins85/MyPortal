@@ -183,6 +183,7 @@ def build_charts(samples: Iterable[dict[str, Any]], *, since: datetime, until: d
             sensor = json.loads(instance)
             labels[(sensor["hardware"], sensor["name"])] += 1
         except (ValueError, TypeError, KeyError):
+            # A malformed sensor label is skipped in the duplicate-counting pass.
             pass
     numbered = Counter()
     for instance, points in temperature_series:
