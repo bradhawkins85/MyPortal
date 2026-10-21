@@ -134,23 +134,45 @@ var serviceStates = map[svc.State]string{
 	svc.Paused:          "paused",
 }
 
-func openService(name string) (*mgr.Mgr, *mgr.Service, error) {
-	m, err := mgr.Connect()
+// openService opens the service with only the rights the caller needs.
+// mgr.Connect and Mgr.OpenService ask for full access, which Windows refuses
+// for services with locked-down permissions (Defender, Sense and other
+// protected services) even when the agent runs as SYSTEM.
+func openService(name string, access uint32) (*mgr.Mgr, *mgr.Service, error) {
+	h, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
 		return nil, nil, err
 	}
-	s, err := m.OpenService(name)
+	m := &mgr.Mgr{Handle: h}
+	namePtr, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		m.Disconnect()
 		return nil, nil, err
 	}
-	return m, s, nil
+	sh, err := windows.OpenService(h, namePtr, access)
+	if err != nil {
+		m.Disconnect()
+		return nil, nil, err
+	}
+	return m, &mgr.Service{Name: name, Handle: sh}, nil
+}
+
+func stateName(state svc.State) string {
+	if name, ok := serviceStates[state]; ok {
+		return name
+	}
+	return "unknown"
 }
 
 func serviceStatus(_ context.Context, name string) (string, error) {
-	m, s, err := openService(name)
+	m, s, err := openService(name, windows.SERVICE_QUERY_STATUS)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return "missing", nil
+	}
+	if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		// Some services refuse even a status query; the service list
+		// still reports their state.
+		return enumeratedStatus(name, err)
 	}
 	if err != nil {
 		return "unknown", err
@@ -158,13 +180,47 @@ func serviceStatus(_ context.Context, name string) (string, error) {
 	defer m.Disconnect()
 	defer s.Close()
 	status, err := s.Query()
+	if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		return enumeratedStatus(name, err)
+	}
 	if err != nil {
 		return "unknown", err
 	}
-	if state, ok := serviceStates[status.State]; ok {
-		return state, nil
+	return stateName(status.State), nil
+}
+
+// enumeratedStatus finds the service's state in the service control
+// manager's list of services, which needs no access to the service itself.
+// cause is returned if the service is not in the list either.
+func enumeratedStatus(name string, cause error) (string, error) {
+	h, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_ENUMERATE_SERVICE)
+	if err != nil {
+		return "unknown", cause
 	}
-	return "unknown", nil
+	defer windows.CloseServiceHandle(h)
+	var needed, count, resume uint32
+	buf := make([]byte, 64*1024)
+	for {
+		err := windows.EnumServicesStatusEx(h, windows.SC_ENUM_PROCESS_INFO, windows.SERVICE_WIN32,
+			windows.SERVICE_STATE_ALL, &buf[0], uint32(len(buf)), &needed, &count, &resume, nil)
+		if err != nil && !errors.Is(err, windows.ERROR_MORE_DATA) {
+			return "unknown", cause
+		}
+		if count > 0 {
+			entries := unsafe.Slice((*windows.ENUM_SERVICE_STATUS_PROCESS)(unsafe.Pointer(&buf[0])), count)
+			for _, entry := range entries {
+				if strings.EqualFold(windows.UTF16PtrToString(entry.ServiceName), name) {
+					return stateName(svc.State(entry.ServiceStatusProcess.CurrentState)), nil
+				}
+			}
+		}
+		if err == nil || (count == 0 && int(needed) <= len(buf)) {
+			return "unknown", cause
+		}
+		if int(needed) > len(buf) {
+			buf = make([]byte, needed)
+		}
+	}
 }
 
 // waitFor polls the service until it reaches state or a minute passes.
@@ -188,7 +244,7 @@ func waitFor(ctx context.Context, s *mgr.Service, state svc.State) error {
 }
 
 func startService(ctx context.Context, name string) error {
-	m, s, err := openService(name)
+	m, s, err := openService(name, windows.SERVICE_START|windows.SERVICE_QUERY_STATUS)
 	if err != nil {
 		return err
 	}
@@ -201,7 +257,7 @@ func startService(ctx context.Context, name string) error {
 }
 
 func stopService(ctx context.Context, name string) error {
-	m, s, err := openService(name)
+	m, s, err := openService(name, windows.SERVICE_STOP|windows.SERVICE_QUERY_STATUS)
 	if err != nil {
 		return err
 	}
