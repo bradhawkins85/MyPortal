@@ -13,6 +13,29 @@ For integration-specific guidance refer to the dedicated documentation under
 `docs/`. For example, [docs/xero.md](xero.md) outlines the callback URL and
 credential requirements for the Xero module.
 
+## Application workers
+
+Production systemd services and Docker containers start four Uvicorn workers
+by default. Configure the number per service or container with:
+
+```dotenv
+WEB_CONCURRENCY=4
+```
+
+For systemd, set this in `/etc/myportal.env` or the per-slot environment file.
+Install the updated service template through the normal upgrade process; older
+units that hardcode `--workers 2` do not honor this setting. Restart or roll
+the services after changing the worker count; reloading an existing parent
+process does not reread its environment file. Docker installations use
+`WEB_CONCURRENCY` in their application environment file and apply it with
+`myportal-docker restart`. Existing explicit settings, such as
+`WEB_CONCURRENCY=2`, continue to override the default.
+
+Both blue/green services may remain running, so four workers per service means
+eight application processes on the host. See
+[Application Worker Scaling](../administration/Application%20Worker%20Scaling.md)
+for database connection budgets and background-work considerations.
+
 ## MySQL connection pools
 
 Each application worker has a query pool and a separate advisory lock pool.
@@ -21,7 +44,7 @@ separating these connections prevents the jobs from occupying every query slot.
 
 ```dotenv
 DB_POOL_MIN_SIZE=1
-DB_POOL_MAX_SIZE=50
+DB_POOL_MAX_SIZE=100
 DB_LOCK_POOL_MAX_SIZE=10
 DB_POOL_WAIT_TIMEOUT=10
 ```
@@ -29,11 +52,16 @@ DB_POOL_WAIT_TIMEOUT=10
 These are the defaults, including for existing `.env` files without these keys.
 Pool sizes are bounded positive integers (minimum query size can be zero), and
 the query minimum must not exceed its maximum. Restart or roll the application
-workers after changing them. SQLite does not use these pools.
+workers after changing them. An existing explicit `DB_POOL_MAX_SIZE=50` continues
+to override the default; change it to `100` in the service's environment file to
+use the larger pool. For the templated systemd service, check `/etc/myportal.env`
+and any `/etc/myportal.blue.env` or `/etc/myportal.green.env` overrides. SQLite
+does not use these pools.
 
 MariaDB's `max_connections` is a server-wide ceiling, independent of these
-per-worker limits. For example, four workers with the defaults can use up to
-240 main-database connections, plus any configured event-log and stats pools.
+per-worker limits. For example, the four-worker systemd service with the defaults
+can use up to 440 main-database connections, or 880 while both blue/green slots
+are running, plus any configured event-log and stats pools.
 Allow additional capacity for other clients and overlapping workers during
 blue/green upgrades. A 16 GB host with `max_connections=2500` does not need
 2,500 connections in each application pool; memory usage also depends on

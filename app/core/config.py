@@ -150,7 +150,7 @@ class Settings(BaseSettings):
     database_password: str | None = Field(default=None, validation_alias="DB_PASSWORD")
     database_name: str | None = Field(default=None, validation_alias="DB_NAME")
     db_pool_min_size: int = Field(default=1, ge=0, le=1000, validation_alias="DB_POOL_MIN_SIZE")
-    db_pool_max_size: int = Field(default=50, ge=1, le=1000, validation_alias="DB_POOL_MAX_SIZE")
+    db_pool_max_size: int = Field(default=100, ge=1, le=1000, validation_alias="DB_POOL_MAX_SIZE")
     db_lock_pool_max_size: int = Field(
         default=10, ge=1, le=1000, validation_alias="DB_LOCK_POOL_MAX_SIZE"
     )
