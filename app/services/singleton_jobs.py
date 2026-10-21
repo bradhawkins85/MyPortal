@@ -32,7 +32,7 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from app.core.database import db
+from app.core.database import DatabaseTimeoutError, db
 
 
 _INSTANCE_ID = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
@@ -155,6 +155,16 @@ def singleton_run(job_name: str, ttl_seconds: int = 300):
             owned = False
             try:
                 owned = await acquire(job_name, ttl_seconds)
+            except DatabaseTimeoutError as exc:
+                # Running every worker's copy when the database is saturated
+                # adds more work to the exhausted pool. Retry the lease on the
+                # next scheduled invocation instead.
+                logger.warning(
+                    "Deferring {job}: database lease acquisition timed out: {error}",
+                    job=job_name,
+                    error=str(exc),
+                )
+                return None
             except Exception as exc:
                 logger.warning(
                     "singleton_jobs.acquire failed for {job}: {error}",

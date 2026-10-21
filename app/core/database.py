@@ -24,11 +24,24 @@ else:
     _AIOMYSQL_IMPORT_ERROR = None
 
 
+class DatabaseTimeoutError(TimeoutError):
+    """A bounded database operation could not complete in time."""
+
+
+class DatabasePoolTimeout(DatabaseTimeoutError):
+    """No database connection became available before the pool deadline."""
+
+
+class DatabaseQueryTimeout(DatabaseTimeoutError):
+    """A database query exceeded its execution deadline."""
+
+
 class Database:
     def __init__(self) -> None:
         self._pool: Any | None = None
         self._lock_pool: Any | None = None
         self._sqlite_conn: aiosqlite.Connection | None = None
+        self._connect_lock = asyncio.Lock()
         self._settings = get_settings()
         self._use_sqlite = self._should_use_sqlite()
 
@@ -136,6 +149,12 @@ class Database:
         return statements
 
     async def connect(self) -> None:
+        # Lazy connection checks can race across requests. Publish only one
+        # pair of pools, rather than orphaning the losing callers' connections.
+        async with self._connect_lock:
+            await self._connect_unlocked()
+
+    async def _connect_unlocked(self) -> None:
         if self._pool or self._sqlite_conn:
             return
         
@@ -164,6 +183,7 @@ class Database:
                 db=self._settings.database_name,
                 autocommit=True,
                 pool_recycle=600,
+                connect_timeout=self._settings.db_connect_timeout,
                 init_command="SET time_zone = '+00:00'",
             )
             pool = await mysql.create_pool(
@@ -226,13 +246,53 @@ class Database:
                     "MySQL query pool exhausted: size={size}, free={free}, max={maximum}",
                     size=self._pool.size, free=self._pool.freesize, maximum=self._pool.maxsize,
                 )
-                raise TimeoutError(
+                raise DatabasePoolTimeout(
                     f"Timed out waiting {timeout}s for a free MySQL connection from the pool"
                 ) from None
             try:
                 yield conn
+            except asyncio.CancelledError:
+                # A cancelled command may leave unread protocol data. Never
+                # return that session to another borrower.
+                conn.close()
+                raise
             finally:
-                self._pool.release(conn)
+                self._release_mysql_connection(self._pool, conn)
+
+    def _release_mysql_connection(self, pool: Any, conn: Any) -> None:
+        pool.release(conn)
+        if conn.closed:
+            # aiomysql skips its wakeup when release discards a closed or
+            # transactional connection. Notify existing waiters so they can
+            # create its replacement instead of timing out on an empty pool.
+            asyncio.get_running_loop().create_task(pool._wakeup())
+
+    @asynccontextmanager
+    async def _mysql_cursor(self, *, dictionary: bool = False) -> AsyncIterator[Any]:
+        async with self.acquire() as conn:
+            deadline = asyncio.timeout(self._settings.db_query_timeout)
+            try:
+                async with deadline:
+                    args = (self._require_aiomysql().DictCursor,) if dictionary else ()
+                    async with conn.cursor(*args) as cursor:
+                        try:
+                            yield cursor
+                        except asyncio.CancelledError:
+                            # Close before cursor cleanup, which could otherwise
+                            # try to drain a result from an unresponsive server.
+                            conn.close()
+                            raise
+            except TimeoutError:
+                if not deadline.expired():
+                    raise
+                conn.close()
+                logger.warning(
+                    "MySQL query exceeded {timeout}s; connection discarded",
+                    timeout=self._settings.db_query_timeout,
+                )
+                raise DatabaseQueryTimeout(
+                    f"MySQL query exceeded {self._settings.db_query_timeout}s"
+                ) from None
 
     async def execute(self, sql: str, params: tuple | dict | None = None) -> None:
         if self._use_sqlite:
@@ -241,10 +301,9 @@ class Database:
             await self._sqlite_conn.execute(sql, params or ())
             await self._sqlite_conn.commit()
         else:
-            async with self.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
-                    await cursor.execute(adapted_sql, adapted_params)
+            async with self._mysql_cursor() as cursor:
+                adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                await cursor.execute(adapted_sql, adapted_params)
 
     async def execute_many(self, sql: str, params_seq: Iterable[tuple[Any, ...]]) -> None:
         seq = list(params_seq)
@@ -254,9 +313,8 @@ class Database:
             await self._sqlite_conn.executemany(sql, seq)
             await self._sqlite_conn.commit()
         else:
-            async with self.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.executemany(sql, seq)
+            async with self._mysql_cursor() as cursor:
+                await cursor.executemany(sql, seq)
 
     async def execute_rowcount(self, sql: str, params: tuple | dict | None = None) -> int:
         if self._use_sqlite:
@@ -266,11 +324,10 @@ class Database:
             await self._sqlite_conn.commit()
             return int(cursor.rowcount or 0)
         else:
-            async with self.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
-                    await cursor.execute(adapted_sql, adapted_params)
-                    return int(cursor.rowcount or 0)
+            async with self._mysql_cursor() as cursor:
+                adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                await cursor.execute(adapted_sql, adapted_params)
+                return int(cursor.rowcount or 0)
 
     async def execute_returning_lastrowid(
         self, sql: str, params: tuple | dict | None = None
@@ -282,11 +339,10 @@ class Database:
             await self._sqlite_conn.commit()
             return cursor.lastrowid if cursor.lastrowid else 0
         else:
-            async with self.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
-                    await cursor.execute(adapted_sql, adapted_params)
-                    last_row_id = cursor.lastrowid
+            async with self._mysql_cursor() as cursor:
+                adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                await cursor.execute(adapted_sql, adapted_params)
+                last_row_id = cursor.lastrowid
             return int(last_row_id) if last_row_id is not None else 0
 
     async def fetch_one(self, sql: str, params: tuple | dict | None = None):
@@ -298,12 +354,10 @@ class Database:
             # Convert sqlite3.Row to dict
             return dict(row) if row else None
         else:
-            mysql = self._require_aiomysql()
-            async with self.acquire() as conn:
-                async with conn.cursor(mysql.DictCursor) as cursor:
-                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
-                    await cursor.execute(adapted_sql, adapted_params)
-                    return await cursor.fetchone()
+            async with self._mysql_cursor(dictionary=True) as cursor:
+                adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                await cursor.execute(adapted_sql, adapted_params)
+                return await cursor.fetchone()
 
     async def fetch_many(self, sql: str, size: int, params: tuple | dict | None = None):
         """Execute ``sql`` and return at most ``size`` rows.
@@ -321,12 +375,10 @@ class Database:
             rows = await cursor.fetchmany(size)
             return [dict(row) for row in rows]
         else:
-            mysql = self._require_aiomysql()
-            async with self.acquire() as conn:
-                async with conn.cursor(mysql.DictCursor) as cursor:
-                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
-                    await cursor.execute(adapted_sql, adapted_params)
-                    return list(await cursor.fetchmany(size))
+            async with self._mysql_cursor(dictionary=True) as cursor:
+                adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                await cursor.execute(adapted_sql, adapted_params)
+                return list(await cursor.fetchmany(size))
 
     async def fetch_all(self, sql: str, params: tuple | dict | None = None):
         if self._use_sqlite:
@@ -337,12 +389,10 @@ class Database:
             # Convert sqlite3.Row objects to dicts
             return [dict(row) for row in rows]
         else:
-            mysql = self._require_aiomysql()
-            async with self.acquire() as conn:
-                async with conn.cursor(mysql.DictCursor) as cursor:
-                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
-                    await cursor.execute(adapted_sql, adapted_params)
-                    return await cursor.fetchall()
+            async with self._mysql_cursor(dictionary=True) as cursor:
+                adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                await cursor.execute(adapted_sql, adapted_params)
+                return await cursor.fetchall()
 
     def _adapt_params_for_mysql(
         self, sql: str, params: tuple | list | dict | None
@@ -961,13 +1011,29 @@ class Database:
                 "MySQL lock pool exhausted: size={size}, free={free}, max={maximum}",
                 size=pool.size, free=pool.freesize, maximum=pool.maxsize,
             )
-            raise TimeoutError("Timed out waiting for a MySQL advisory lock connection") from None
+            raise DatabasePoolTimeout("Timed out waiting for a MySQL advisory lock connection") from None
         lock_acquired = False
         try:
-            async with conn.cursor() as cursor:
-                await cursor.execute("SELECT GET_LOCK(%s, %s)", (lock_name, timeout))
-                result = await cursor.fetchone()
-                lock_acquired = bool(result and result[0] == 1)
+            # Allow the server's requested lock wait plus the normal query
+            # budget, so an unresponsive server cannot pin a lock-pool slot.
+            deadline = asyncio.timeout(timeout + self._settings.db_query_timeout)
+            try:
+                async with deadline:
+                    async with conn.cursor() as cursor:
+                        try:
+                            await cursor.execute("SELECT GET_LOCK(%s, %s)", (lock_name, timeout))
+                            result = await cursor.fetchone()
+                            lock_acquired = bool(result and result[0] == 1)
+                        except asyncio.CancelledError:
+                            conn.close()
+                            raise
+            except TimeoutError:
+                if not deadline.expired():
+                    raise
+                conn.close()
+                raise DatabaseQueryTimeout(
+                    "Timed out waiting for the MySQL advisory lock response"
+                ) from None
 
             yield lock_acquired
         except BaseException:
@@ -976,22 +1042,33 @@ class Database:
             conn.close()
             raise
         finally:
-            if lock_acquired and not conn.closed:
-                try:
-                    async with conn.cursor() as cursor:
-                        await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
-                except (Exception, KeyboardInterrupt, SystemExit) as exc:
-                    # Never return a session with a potentially held lock.
-                    conn.close()
-                    if not isinstance(exc, Exception):
-                        pool.release(conn)
-                        raise
-                    logger.warning(
-                        "Failed to explicitly release lock {lock}: {error}",
-                        lock=lock_name,
-                        error=str(exc),
-                    )
-            pool.release(conn)
+            try:
+                if lock_acquired and not conn.closed:
+                    release_deadline = asyncio.timeout(self._settings.db_query_timeout)
+                    try:
+                        async with release_deadline:
+                            async with conn.cursor() as cursor:
+                                try:
+                                    await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                                except asyncio.CancelledError:
+                                    conn.close()
+                                    raise
+                    except BaseException as exc:
+                        # Cancellation during cleanup can leave ownership unknown
+                        # just as cancellation during GET_LOCK can.
+                        conn.close()
+                        if not isinstance(exc, Exception):
+                            raise
+                        logger.warning(
+                            "Failed to explicitly release lock {lock}: {error}",
+                            lock=lock_name,
+                            error=(
+                                f"response exceeded {self._settings.db_query_timeout}s"
+                                if release_deadline.expired() else str(exc)
+                            ),
+                        )
+            finally:
+                self._release_mysql_connection(pool, conn)
 
 
 db = Database()
