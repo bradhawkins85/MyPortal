@@ -4,10 +4,12 @@
 #
 # Gitea runs from the official binary as the "gitea" service account on
 # 127.0.0.1:3000, and nginx serves it at /gitea on the portal's address. The
-# first run creates an administrator, a private "rmm-scripts" repository, a public "Public" repository and a
-# token MyPortal uses to read scripts and create the script folders, and
-# writes the GITEA_* settings MyPortal needs. Later runs move the binary to
-# GITEA_VERSION and keep data, accounts and settings.
+# first run creates an administrator, a private "rmm-scripts" repository, a
+# public "Public-Files" repository, a private "Private-Files" repository for the
+# files scripts deploy and a token MyPortal uses to read scripts and create the
+# script folders, and writes the GITEA_* settings MyPortal needs. Later runs
+# move the binary to GITEA_VERSION, rename an older "Public" repository to
+# "Public-Files", and keep data, accounts and settings.
 #
 # Skipped when GITEA_PROVISION=false or GITEA_BASE_URL names another server.
 #
@@ -414,10 +416,26 @@ token_is_read_only() {
   [[ -n "$scopes" ]] && ! grep -Eq '"(all|write:repository)"' <<<"$scopes"
 }
 
+rename_public_repository() {
+  # Installs before Private-Files named the public repository "Public". Gitea
+  # redirects the old name's links to the new one.
+  local token="$1" status
+  status=$(curl_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/Public-Files")
+  [[ "$status" != 200 ]] || return 0
+  status=$(curl_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/Public")
+  [[ "$status" == 200 ]] || return 0
+  info "Renaming the Gitea repository ${GITEA_ADMIN_USER}/Public to Public-Files…"
+  status=$(curl_auth "$token" | gitea_api PATCH "/repos/${GITEA_ADMIN_USER}/Public" '{"name":"Public-Files"}')
+  [[ "$status" == 200 ]] || warn "could not rename ${GITEA_ADMIN_USER}/Public to Public-Files in Gitea (HTTP ${status})."
+}
+
 ensure_repository() {
   local token="$1" repository="${2:-$GITEA_REPOSITORY}" private="${3:-true}" status
   local description="Scripts MyPortal runs on devices"
-  [[ "$private" == true ]] || description="Public downloads for MyPortal staff and users"
+  case "$repository" in
+    Public-Files) description="Public downloads for MyPortal staff and users" ;;
+    Private-Files) description="Files MyPortal scripts deploy to devices" ;;
+  esac
   status=$(curl_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/${repository}")
   [[ "$status" != 200 ]] || return 0
   info "Creating the Gitea repository ${GITEA_ADMIN_USER}/${repository}…"
@@ -448,7 +466,9 @@ connect_myportal() {
     ensure_repository "$token" || true
     env_default GITEA_API_TOKEN "$token" "${old:-}"
   fi
-  ensure_repository "$token" Public false || return 1
+  rename_public_repository "$token"
+  ensure_repository "$token" Public-Files false || return 1
+  ensure_repository "$token" Private-Files true || return 1
   env_default GITEA_BASE_URL "$GITEA_LOCAL_URL"
   env_default GITEA_PUBLIC_URL "$GITEA_PUBLIC_PATH"
   env_default GITEA_SCRIPTS_REPOSITORY "${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}"

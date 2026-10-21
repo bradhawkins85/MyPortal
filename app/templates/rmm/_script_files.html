@@ -32,19 +32,19 @@
           <input type="hidden" name="_csrf" value="{{ csrf_token }}">
           <input type="hidden" name="index" value="">
           <header class="modal__header">
-            <div><h2 class="modal__title" id="rmm-file-editor-title">Associate a file</h2><p class="card__subtitle">Choose a file in Gitea and where this script needs it.</p></div>
+            <div><h2 class="modal__title" id="rmm-file-editor-title">Associate a file</h2><p class="card__subtitle">Choose a file in the Private-Files repository and where this script needs it.</p></div>
             <button type="button" class="modal__close" data-rmm-file-close aria-label="Close file editor" hidden></button>
           </header>
           <div class="modal__body rmm-editor__body">
             <div class="rmm-editor__main">
               <p class="alert alert--error" data-rmm-file-error role="alert" hidden></p>
               <div class="form-field">
-                <label class="form-label" for="rmm-file-source">Gitea file</label>
+                <label class="form-label" for="rmm-file-source">Private-Files file</label>
                 <input class="form-input" id="rmm-file-source" name="source_path" maxlength="1024" required autocomplete="off" aria-describedby="rmm-file-source-help">
-                <p class="form-help" id="rmm-file-source-help">Pick a file below, or enter its repository path under Files/Common or {% if script.scope == 'company' %}this company's folder under Files/Companies{% else %}Files/Companies/{company}/. {company} uses the folder of the company each run is for, so every company needs its own copy{% endif %}.</p>
-                <p class="form-help" data-rmm-file-loading role="status" hidden>Loading files from Gitea…</p>
-                <p class="form-help" data-rmm-file-empty hidden>No files yet. Upload files to Files/Common or this company's folder under Files/Companies in Gitea, then reopen this editor.</p>
-                <select class="form-input" size="8" data-rmm-file-list aria-label="Files in Gitea" hidden></select>
+                <p class="form-help" id="rmm-file-source-help">Pick a file below, or enter its Private-Files path under Common or {% if script.scope == 'company' %}this company's folder under Companies{% else %}Companies/{company}/. {company} uses the folder of the company each run is for, so every company needs its own copy{% endif %}.</p>
+                <p class="form-help" data-rmm-file-loading role="status" hidden>Loading files from Private-Files…</p>
+                <p class="form-help" data-rmm-file-empty hidden>No files yet. Upload files to Common or this company's folder under Companies in the Private-Files repository in Gitea, then reopen this editor.</p>
+                <select class="form-input" size="8" data-rmm-file-list aria-label="Files in Private-Files" hidden></select>
               </div>
               <div class="form-field">
                 <label class="form-label" for="rmm-file-destination">Endpoint file path</label>
@@ -54,7 +54,7 @@
             </div>
             <aside class="rmm-editor__aside" aria-label="How files are prepared">
               <h3 class="rmm-detail__label">Before the script starts</h3>
-              <p>The endpoint checks the existing file. It downloads a replacement only when the file is missing or differs from Gitea.</p>
+              <p>Private-Files is not shared publicly: its files reach endpoints only through scripts. The endpoint checks the existing file and downloads a replacement only when the file is missing or differs from Gitea.</p>
               <p>Every download is verified. If a required file cannot be prepared, the run fails and the script does not start.</p>
             </aside>
           </div>

@@ -747,7 +747,8 @@ def test_connect_gitea_creates_account_repository_and_token(tmp_path):
     assert admin.stat().st_mode & 0o777 == 0o600
     log = (tmp_path / "calls").read_text()
     assert "--scopes write:repository" in log
-    assert 'api POST /user/repos' in log and '"name":"Public"' in log and '"private":false' in log
+    assert 'api POST /user/repos' in log and '"name":"Public-Files"' in log and '"private":false' in log
+    assert '"name":"Private-Files"' in log
     assert "secret-pw" not in log.split("stdin=")[0]
 
 
@@ -904,8 +905,11 @@ def test_connect_gitea_adds_public_on_upgrade_without_replacing_token(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     log = calls.read_text()
-    assert 'GET /repos/myportal/Public stdin=header = "Authorization: token existing"' in log
-    assert '"name":"Public"' in log and '"private":false' in log
+    assert 'GET /repos/myportal/Public-Files stdin=header = "Authorization: token existing"' in log
+    assert '"name":"Public-Files"' in log and '"private":false' in log
+    assert '"name":"Private-Files"' in log and '"private":true' in log
+    # Nothing to rename: no old "Public" repository exists.
+    assert "PATCH" not in log
     assert 'stdin=user = "myportal:installer-password"' in log
     assert "GITEA_API_TOKEN=existing" in app_env.read_text()
 
@@ -1004,3 +1008,24 @@ def test_refresh_requires_an_installed_release(tmp_path):
     assert result.returncode != 0
     assert "no installed release is recorded" in result.stderr
     assert not (tmp_path / "calls").exists()
+
+
+def test_upgrade_renames_public_repository_to_public_files(tmp_path):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text("GITEA_API_TOKEN=existing\n")
+    calls = tmp_path / "calls"
+    result = _run(
+        f'APP_ENV="{app_env}"; GITEA_ADMIN_FILE="{tmp_path}/admin-credentials"\n'
+        'gitea_token_is_read_only() { return 1; }\n'
+        'gitea_cli() { exit 99; }\n'
+        f'gitea_api() {{ echo "$*" >> "{calls}"; cat >/dev/null; case "$1 $2" in '
+        '"GET /repos/myportal/Public") echo 200 ;; '
+        f'"GET /repos/myportal/Public-Files") [[ -e "{calls}.renamed" ]] && echo 200 || echo 404 ;; '
+        f'"GET /repos/myportal/Private-Files") echo 200 ;; PATCH*) touch "{calls}.renamed"; echo 200 ;; '
+        '*) echo 404 ;; esac; }\n'
+        'connect_gitea',
+    )
+    assert result.returncode == 0, result.stderr
+    log = calls.read_text()
+    assert 'PATCH /repos/myportal/Public {"name":"Public-Files"}' in log
+    assert "POST /user/repos" not in log

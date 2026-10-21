@@ -2,8 +2,9 @@
 
 ``Common/`` holds scripts for every company and ``Companies/<company>/`` scripts
 for one company, linked by a ``.myportal-company`` marker so the folder can be
-renamed. ``Files/`` repeats that layout for stored files. :func:`_read_layout`
-finds the folders and the files still needed to create the missing ones.
+renamed. The ``Private-Files`` repository repeats that layout for the files
+scripts deploy. :func:`_read_layout` finds the folders and the files still
+needed to create the missing ones.
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ from app.services import gitea
 
 COMMON_FOLDER = "Common"
 COMPANIES_FOLDER = "Companies"
-FILES_FOLDER = "Files"
+# Where the scripts repository kept script files before Private-Files.
+LEGACY_FILES_FOLDER = "Files"
 # Links a folder in Companies/ to a MyPortal company, so the folder can be
 # renamed in Gitea without losing which company its scripts belong to.
 COMPANY_MARKER = ".myportal-company"
@@ -43,16 +45,18 @@ file; the folder itself can be renamed.
 _COMMON_FILES_README = """# Common files
 
 Store files shared across companies here, including executables, installers and
-scripts of any type. Manage uploads and downloads in Gitea. Files in this folder
-are not imported into MyPortal's runnable script library.
+scripts of any type. This repository is private: files reach endpoints only
+when a script lists them with Add file in MyPortal. Files here are not imported
+into MyPortal's runnable script library.
 """
 
 _COMPANY_FILES_README = """# Company files
 
 MyPortal creates a folder here for every company to store its files of any type.
 Each folder holds a `.myportal-company` file linking it to the company. Keep that
-file; the folder itself can be renamed. Manage uploads and downloads in Gitea.
-Repository permissions cover every company folder.
+file; the folder itself can be renamed. Files reach endpoints only when a script
+lists them with Add file in MyPortal. Repository permissions cover every company
+folder.
 """
 
 
@@ -117,10 +121,7 @@ class RepositoryLayout:
 async def read_layout(
     settings: gitea.GiteaSettings, files: list[gitea.GiteaFile], companies: list[Mapping[str, Any]]
 ) -> RepositoryLayout:
-    layout = await _read_layout(settings, files, companies)
-    file_layout = await _read_layout(settings, files, companies, files_folder=True)
-    layout.missing.update({f"{FILES_FOLDER}/{path}": content for path, content in file_layout.missing.items()})
-    return layout
+    return await _read_layout(settings, files, companies)
 
 
 async def _read_layout(
@@ -128,7 +129,7 @@ async def _read_layout(
     *, files_folder: bool = False,
 ) -> RepositoryLayout:
     layout = RepositoryLayout()
-    root = _repo_path(FILES_FOLDER, settings.path) if files_folder else settings.path
+    root = settings.path
     known = {int(company["id"]): company for company in companies}
     relative_paths = [rel for rel in (_relative(item.path, root) for item in files) if rel is not None]
     company_dirs = {

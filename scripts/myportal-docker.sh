@@ -552,10 +552,26 @@ gitea_token_is_read_only() {
   [[ -n "$scopes" ]] && ! grep -Eq '"(all|write:repository)"' <<<"$scopes"
 }
 
+rename_public_repository() {
+  # Installs before Private-Files named the public repository "Public". Gitea
+  # redirects the old name's links to the new one.
+  local token="$1" status
+  status=$(gitea_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/Public-Files")
+  [[ "$status" != 200 ]] || return 0
+  status=$(gitea_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/Public")
+  [[ "$status" == 200 ]] || return 0
+  info "Renaming the Gitea repository ${GITEA_ADMIN_USER}/Public to Public-Files…"
+  status=$(gitea_auth "$token" | gitea_api PATCH "/repos/${GITEA_ADMIN_USER}/Public" '{"name":"Public-Files"}')
+  [[ "$status" == 200 ]] || warn "could not rename ${GITEA_ADMIN_USER}/Public to Public-Files in Gitea (HTTP ${status})."
+}
+
 ensure_gitea_repository() {
   local token="$1" repository="${2:-$GITEA_REPOSITORY}" private="${3:-true}" status
   local description="Scripts MyPortal runs on devices"
-  [[ "$private" == true ]] || description="Public downloads for MyPortal staff and users"
+  case "$repository" in
+    Public-Files) description="Public downloads for MyPortal staff and users" ;;
+    Private-Files) description="Files MyPortal scripts deploy to devices" ;;
+  esac
   status=$(gitea_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/${repository}")
   [[ "$status" != 200 ]] || return 0
   info "Creating the Gitea repository ${GITEA_ADMIN_USER}/${repository}…"
@@ -587,7 +603,9 @@ connect_gitea() {
     ensure_gitea_repository "$token" || true
     set_setting "$APP_ENV" GITEA_API_TOKEN "$token" || return 1
   fi
-  ensure_gitea_repository "$token" Public false || return 1
+  rename_public_repository "$token"
+  ensure_gitea_repository "$token" Public-Files false || return 1
+  ensure_gitea_repository "$token" Private-Files true || return 1
   for key in GITEA_BASE_URL GITEA_PUBLIC_URL GITEA_SCRIPTS_REPOSITORY GITEA_SCRIPTS_BRANCH; do
     case "$key" in
       GITEA_BASE_URL) value="$GITEA_INTERNAL_URL" ;;

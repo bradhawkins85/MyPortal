@@ -53,7 +53,7 @@ def identity_backend(monkeypatch):
     monkeypatch.setattr(gitea, "load_settings", load_settings)
     monkeypatch.setattr(gitea, "sign_in_as", sign_in)
     monkeypatch.setattr(gitea, "set_collaborator", noop)
-    monkeypatch.setattr(gitea_sign_in, "_public_access", noop)
+    monkeypatch.setattr(gitea_sign_in, "_files_access", noop)
     return calls, rows, level, now
 
 
