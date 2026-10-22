@@ -82,6 +82,9 @@ func (c *Collector) Collect(ctx context.Context, cfg client.CheckConfig) client.
 	if len(cfg.Processes) > 0 {
 		report.Processes = CheckProcesses(cfg.Processes)
 	}
+	if len(cfg.Programs) > 0 {
+		report.Programs = CheckPrograms(ctx, cfg.Programs)
+	}
 	wg.Wait()
 	return report
 }

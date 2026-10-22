@@ -1,0 +1,7 @@
+{
+  "guid": "23a575ce-0edf-4de2-a124-ec3b28f853f5",
+  "occurred_at": "2026-10-22T03:22Z",
+  "change_type": "Feature",
+  "summary": "RMM checks: add installed program checks with optional version requirements and Chocolatey package installation as a failure action.",
+  "content_hash": "c4bb85d9710ea800bf882cf7ca0020f9478fc253493a54280cb9051d516d58dd"
+}

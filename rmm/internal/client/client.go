@@ -282,6 +282,7 @@ type CheckConfig struct {
 	Services        []CheckService `json:"services"`
 	Files           []string       `json:"files"`
 	Processes       []string       `json:"processes"`
+	Programs        []string       `json:"programs"`
 }
 
 // DiskUsage is one fixed drive or mounted filesystem.
@@ -340,6 +341,14 @@ type ProcessStatus struct {
 	Error string `json:"error,omitempty"`
 }
 
+// ProgramStatus reports installation and every observed version of an exact name.
+type ProgramStatus struct {
+	Name      string   `json:"name"`
+	Installed bool     `json:"installed"`
+	Versions  []string `json:"versions"`
+	Error     string   `json:"error,omitempty"`
+}
+
 // CheckReport is one round of measurements. A nil field was not measured.
 type CheckReport struct {
 	CPUPercent *float64        `json:"cpu_percent"`
@@ -350,6 +359,7 @@ type CheckReport struct {
 	Services   []ServiceStatus `json:"services"`
 	Files      []FileStatus    `json:"files"`
 	Processes  []ProcessStatus `json:"processes"`
+	Programs   []ProgramStatus `json:"programs"`
 }
 
 // GetCheckConfig asks what to measure for checks.

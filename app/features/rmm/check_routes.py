@@ -24,7 +24,7 @@ Agent side (``Authorization: Bearer`` token):
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -60,6 +60,8 @@ FORM_DEFAULTS: dict[str, Any] = {
     "network_interface": "", "network_direction": "total", "network_operator": "above", "network_threshold": "100",
     "file_path": "", "file_expected": "exists",
     "process_name": "", "process_expected": "running",
+    "program_name": "", "program_expected": "installed", "program_version_operator": "none", "program_version": "",
+    "package_id": "",
     "script_expect": "exit_code", "script_value": "0", "script_interval": str(rmm_checks.DEFAULT_SCRIPT_INTERVAL),
 }
 DEFAULT_DURATIONS = {"cpu": 30, "memory": 15, "network": 15, "offline": 30}
@@ -77,6 +79,8 @@ def check_summary(check: dict[str, Any], *, counts: dict[str, int] | None = None
     action = rmm_checks.ACTIONS.get(check.get("action"), check.get("action"))
     if check.get("action") == "run_script":
         action = f"Run {check.get('script_name') or 'a removed script'}"
+    elif check.get("action") == "install_choco":
+        action = f"Install Chocolatey package {(check.get('settings') or {}).get('package_id', '')}"
     elif check.get("action") == "schedule_script":
         action = (f"Run {check.get('script_name') or 'a removed script'} "
                   f"{event_log_rules.describe_schedule(check)}")
@@ -117,6 +121,9 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
         values.update(file_path=target, file_expected=settings.get("expected") or "exists")
     elif kind == "process":
         values.update(process_name=target, process_expected=settings.get("expected") or "running")
+    elif kind == "program":
+        values.update(program_name=target, program_expected=settings.get("expected", "installed"),
+                      program_version_operator=settings.get("version_operator", "none"), program_version=settings.get("version", ""))
     elif kind == "network":
         values.update(network_interface=target, network_direction=settings.get("direction"),
                       network_operator=settings.get("operator"),
@@ -124,6 +131,7 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
     elif kind == "script":
         values.update(script_expect=settings.get("expect"), script_value=settings.get("value"),
                       script_interval=settings.get("interval_minutes") or rmm_checks.DEFAULT_SCRIPT_INTERVAL)
+    values["package_id"] = settings.get("package_id", "")
     if check.get("asset_id") is not None:
         scope = "asset"
     elif check.get("company_id") is None and check.get("id") is not None:
@@ -268,6 +276,8 @@ async def _render(
             "service_fixes": rmm_checks.SERVICE_FIXES,
             "file_states": rmm_checks.FILE_STATES,
             "process_states": rmm_checks.PROCESS_STATES,
+            "program_states": rmm_checks.PROGRAM_STATES,
+            "version_operators": rmm_checks.VERSION_OPERATORS,
             "script_expectations": rmm_checks.SCRIPT_EXPECTATIONS,
             "result_examples": rmm_checks.RESULT_EXAMPLES,
             "statuses": rmm_checks.STATUSES,
@@ -629,6 +639,13 @@ class AgentProcess(BaseModel):
     error: str | None = Field(default=None, max_length=1000)
 
 
+class AgentProgram(BaseModel):
+    name: str = Field(max_length=255)
+    installed: bool
+    versions: list[Annotated[str, Field(max_length=255)]] = Field(default_factory=list, max_length=100)
+    error: str | None = Field(default=None, max_length=1000)
+
+
 class AgentCheckReport(BaseModel):
     cpu_percent: float | None = Field(default=None, ge=0, le=100)
     memory: AgentMemory | None = None
@@ -638,6 +655,7 @@ class AgentCheckReport(BaseModel):
     services: list[AgentService] = Field(default_factory=list, max_length=rmm_checks.MAX_SERVICES)
     files: list[AgentFile] = Field(default_factory=list, max_length=rmm_checks.MAX_FILES)
     processes: list[AgentProcess] = Field(default_factory=list, max_length=rmm_checks.MAX_PROCESSES)
+    programs: list[AgentProgram] = Field(default_factory=list, max_length=rmm_checks.MAX_PROGRAMS)
 
 
 @router.post("/api/rmm/agent/checks/report", summary="Send the RMM agent's measurements for checks")
