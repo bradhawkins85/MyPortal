@@ -686,6 +686,7 @@ services:
       GITEA__repository__DEFAULT_PRIVATE: private
       GITEA__repository_0X2E_upload__ENABLED: "true"
       GITEA__repository_0X2E_upload__ALLOWED_TYPES: "*/*"
+      GITEA__repository_0X2E_upload__FILE_MAX_SIZE: "1024"
       GITEA__openid__ENABLE_OPENID_SIGNIN: "false"
       GITEA__openid__ENABLE_OPENID_SIGNUP: "false"
       GITEA__mailer__ENABLED: "false"
@@ -1072,6 +1073,10 @@ NGINX
     }
 
     location ^~ /gitea/ {
+        # Gitea enforces the 1 GiB per-file limit; allow multipart overhead.
+        client_max_body_size 0;
+        proxy_request_buffering off;
+        proxy_send_timeout 600s;
         auth_request /_myportal/gitea-identity;
         auth_request_set $myportal_gitea_user $upstream_http_x_myportal_gitea_user;
         auth_request_set $myportal_gitea_email $upstream_http_x_myportal_gitea_email;
@@ -1093,7 +1098,7 @@ NGINX
         # keep the technician signed in after MyPortal sign-out (map above).
         proxy_set_header Cookie $myportal_gitea_forward_cookie;
         proxy_connect_timeout 10s;
-        proxy_read_timeout 300s;
+        proxy_read_timeout 600s;
     }
 
     location = /myportal-unavailable.html {

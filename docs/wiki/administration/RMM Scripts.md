@@ -34,6 +34,10 @@ straight after installing:
   `/opt/myportal-docker/gitea-admin.txt` (Docker). Technicians don't need it: they sign in with
   MyPortal (see [Signing in to Gitea](#signing-in-to-gitea)).
 - Self-registration is off. Public repositories can be read without signing in; the script and `Private-Files` repositories stay private.
+- Repository uploads accept all file types up to **1 GB (1024 MiB) per file**, including
+  installers and other supporting files. This limit is applied on install and upgrade for
+  both bare-metal and Docker deployments. An external Gitea server needs its own upload
+  and reverse proxy limits configured separately.
 - Every upgrade checks Gitea: it is installed if missing, moved to the Gitea version the release
   ships with, and its address follows `PORTAL_URL`. Its data is kept, and a Gitea problem never
   stops a MyPortal upgrade (the next one retries).

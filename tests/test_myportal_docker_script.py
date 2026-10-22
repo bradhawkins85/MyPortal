@@ -357,6 +357,7 @@ def test_compose_file_publishes_the_port_only_on_the_proxy(tmp_path):
     assert gitea["environment"]["GITEA__service__REQUIRE_SIGNIN_VIEW"] == "false"
     assert gitea["environment"]["GITEA__repository_0X2E_upload__ENABLED"] == "true"
     assert gitea["environment"]["GITEA__repository_0X2E_upload__ALLOWED_TYPES"] == "*/*"
+    assert gitea["environment"]["GITEA__repository_0X2E_upload__FILE_MAX_SIZE"] == "1024"
 
 
 @pytest.mark.parametrize("contents", ["", "REDIS_URL=\n", 'export REDIS_URL = ""\n', "# REDIS_URL=old\n"])
@@ -821,6 +822,11 @@ def test_proxy_serves_gitea_under_its_path(tmp_path):
     assert result.returncode == 0, result.stderr
     config = (proxy_dir / "myportal.conf").read_text(encoding="utf-8")
     assert "location ^~ /gitea/ {" in config
+    block = config.split("location ^~ /gitea/ {", 1)[1].split("}", 1)[0]
+    assert "client_max_body_size 0;" in block
+    assert "proxy_request_buffering off;" in block
+    assert "proxy_send_timeout 600s;" in block
+    assert "proxy_read_timeout 600s;" in block
     assert "rewrite ^/gitea(/.*)$ $1 break;" in config
     # A variable keeps the proxy starting when this installation has no Gitea.
     assert "set $myportal_gitea gitea:3000;" in config and "proxy_pass http://$myportal_gitea;" in config
