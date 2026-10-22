@@ -1,0 +1,7 @@
+{
+  "guid": "dd04d568-4b48-4220-a71d-84c76de8e498",
+  "occurred_at": "2026-10-22T00:00Z",
+  "change_type": "Fix",
+  "summary": "M365 Spam Search & Purge: retry mailbox binding while Microsoft applies the narrowed search scope, fixing purges that failed with a 409 dataSourceScopes conflict",
+  "content_hash": "595a8f6408235c7b79d4145a62b030c84f811f96b5b7273a67d7117133c961ff"
+}
