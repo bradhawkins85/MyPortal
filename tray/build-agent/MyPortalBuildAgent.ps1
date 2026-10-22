@@ -1,7 +1,7 @@
 #Requires -Version 7.2
 <#
 .SYNOPSIS
-    Builds company-specific MyPortal Tray installers (MSI and setup EXE).
+    Builds company-specific MyPortal Tray installers and optional provisioning packages.
 
 .DESCRIPTION
     Polls MyPortal for queued deployment URL builds. For each job it builds the
@@ -36,6 +36,9 @@ $GitHubRepo = if ($config.PSObject.Properties['GitHubRepo'] -and $config.GitHubR
 $WorkDir = if ($config.PSObject.Properties['WorkDir'] -and $config.WorkDir) { $config.WorkDir } else { 'C:\MyPortalBuild' }
 $Wix = if ($config.PSObject.Properties['WixPath'] -and $config.WixPath) { $config.WixPath } else { 'wix' }
 $TimestampServer = if ($config.PSObject.Properties['TimestampServer']) { $config.TimestampServer } else { $null }
+. (Join-Path $PSScriptRoot 'New-MyPortalProvisioningPackage.ps1')
+$requestedIcd = if ($config.PSObject.Properties['IcdPath']) { [string]$config.IcdPath } else { '' }
+$Icd = Resolve-MyPortalIcd $requestedIcd
 
 $PayloadDir = Join-Path $WorkDir 'payloads'
 $JobsDir = Join-Path $WorkDir 'jobs'
@@ -228,6 +231,8 @@ function Invoke-Build($Job) {
     if ($url -notmatch '^https?://[A-Za-z0-9.\-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~\-/]*)?$') { throw 'Portal URL from the server is not valid.' }
     if ($token -notmatch '^[A-Za-z0-9_\-]{16,128}$') { throw 'Install token from the server is not valid.' }
     if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Product version $version is not valid." }
+    $provisioning = if ($Job.PSObject.Properties['provisioning']) { $Job.provisioning } else { $null }
+    if ($provisioning -and -not $Icd) { throw 'Install Windows Configuration Designer from the Windows ADK to build provisioning packages.' }
 
     $payload = Get-Payload ([string]$Job.release_tag)
     $out = Join-Path $JobsDir ([string][int]$Job.id)
@@ -251,9 +256,20 @@ function Invoke-Build($Job) {
         Invoke-Wix burn reattach $exe -engine $engine -o $exe
         Set-Signature $exe
 
+        $completion = $null
+        if ($provisioning) {
+            $ppkg = Join-Path $out 'myportal-tray.ppkg'
+            $package = New-MyPortalProvisioningPackage -Settings $provisioning -MsiPath $msi `
+                -PackagePath $ppkg -IcdPath $Icd -BuildId ([int]$Job.id)
+            # Only the encrypted package is uploaded as an artifact. Its
+            # generated decryption password goes over the authenticated API
+            # separately, and must never be written to the agent log.
+            Send-Artifact $Job.id 'ppkg' $package.Path
+            $completion = @{ provisioning_password = $package.Password }
+        }
         Send-Artifact $Job.id 'msi' $msi
         Send-Artifact $Job.id 'exe' $exe
-        Invoke-Portal Post "/api/tray/build-agent/jobs/$($Job.id)/complete" $null | Out-Null
+        Invoke-Portal Post "/api/tray/build-agent/jobs/$($Job.id)/complete" $completion | Out-Null
     } finally {
         # The working folder holds the company's install token.
         Remove-Item -LiteralPath $out -Recurse -Force -ErrorAction SilentlyContinue
@@ -275,7 +291,11 @@ function Write-IdleStatus([string]$Status) {
 
 function Invoke-Queue {
     while ($true) {
-        $response = Invoke-Portal Post '/api/tray/build-agent/jobs/claim' $null
+        # Older agents and machines without WCD must not claim provisioning
+        # jobs. They can continue to serve the ordinary installer queue.
+        $claimPath = '/api/tray/build-agent/jobs/claim'
+        if ($Icd) { $claimPath += '?supports_ppkg=true' }
+        $response = Invoke-Portal Post $claimPath $null
         if ($response.StatusCode -eq 204) {
             Write-IdleStatus ([string]$response.Headers['X-MyPortal-Build-Status'])
             return
@@ -288,6 +308,11 @@ function Invoke-Queue {
             Write-Log "Job $($job.id) complete"
         } catch {
             $message = $_.Exception.Message
+            if ($job.PSObject.Properties['provisioning'] -and $job.provisioning) {
+                # HTTP validation or WCD diagnostics may echo request/source
+                # values. Do not log a raw exception for a job with secrets.
+                $message = 'Provisioning build failed. Validate the Windows ADK/WCD installation, desktop settings store and provisioning settings, then rebuild.'
+            }
             Write-Log "Job $($job.id) failed: $message"
             try {
                 Invoke-Portal Post "/api/tray/build-agent/jobs/$($job.id)/fail" @{ error = $message } | Out-Null

@@ -10,6 +10,10 @@ work.  The agent authenticates with a MyPortal API key and:
    defaults, then wraps it in a signed Burn setup bundle;
 3. uploads both files and marks the job complete (or reports a failure).
 
+Links with provisioning settings also require an encrypted ``.ppkg`` containing
+the signed MSI. Only agents advertising WCD support can claim those jobs; the
+generated package password is encrypted at rest and revealed only to admins.
+
 A build is queued when a deployment link is created, when an admin asks for a
 rebuild, and automatically when the server caches a newer tray release than
 the one a link's installers were built from.  Finished files live under
@@ -30,12 +34,12 @@ from typing import Any, AsyncIterator
 
 from app.core.logging import log_info, log_warning
 from app.repositories import tray as tray_repo
-from app.security.encryption import decrypt_secret
+from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import intunewin
 from app.services import tray_deployment
 from app.services import tray_installer
 
-ARTIFACT_KINDS = ("msi", "exe")
+ARTIFACT_KINDS = ("msi", "exe", "ppkg")
 MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024
 BUILD_LEASE = timedelta(hours=2)
 
@@ -131,7 +135,7 @@ async def queue_outdated_builds(release_tag: str) -> int:
     return queued
 
 
-async def claim_next_build(portal_url: str) -> dict[str, Any] | None:
+async def claim_next_build(portal_url: str, *, supports_ppkg: bool = False) -> dict[str, Any] | None:
     """Claim the next build for the agent and return its job description."""
 
     release_tag = current_release_tag()
@@ -139,12 +143,16 @@ async def claim_next_build(portal_url: str) -> dict[str, Any] | None:
         return None
     if not tray_deployment._PORTAL_URL_RE.match(portal_url or ""):
         raise ValueError("Portal URL contains characters that cannot be used in an installer")
-    if await tray_repo.get_next_claimable_deployment_build(_stale_before()) is None:
+    if await tray_repo.get_next_claimable_deployment_build(
+        _stale_before(), supports_ppkg=supports_ppkg
+    ) is None:
         if await queue_outdated_builds(release_tag):
             log_info("Queued tray deployment builds for new release", release_tag=release_tag)
 
     while True:
-        build = await tray_repo.get_next_claimable_deployment_build(_stale_before())
+        build = await tray_repo.get_next_claimable_deployment_build(
+            _stale_before(), supports_ppkg=supports_ppkg
+        )
         if build is None:
             return None
         build_id = int(build["id"])
@@ -160,7 +168,12 @@ async def claim_next_build(portal_url: str) -> dict[str, Any] | None:
             )
             continue
         company = await tray_deployment.companies_repo.get_company_by_id(int(link["company_id"]))
-        return {
+        try:
+            provisioning = tray_deployment.provisioning_settings(link)
+        except ValueError as exc:
+            await tray_repo.fail_deployment_build(build_id, error=str(exc))
+            continue
+        job = {
             "id": build_id,
             "deployment_link_id": int(link["id"]),
             "company_name": (company or {}).get("name") or "",
@@ -169,9 +182,12 @@ async def claim_next_build(portal_url: str) -> dict[str, Any] | None:
             "portal_url": portal_url,
             "enrol_token": token,
         }
+        if provisioning:
+            job["provisioning"] = provisioning
+        return job
 
 
-async def idle_reason() -> str:
+async def idle_reason(*, supports_ppkg: bool = False) -> str:
     """Explain why :func:`claim_next_build` has nothing for the agent.
 
     Sent to the build agent with an empty claim so its log says what to fix
@@ -187,6 +203,15 @@ async def idle_reason() -> str:
     links = await tray_repo.list_active_deployment_links()
     if not links:
         return "There are no active deployment URLs. Create one under Admin > Tray > Deployment URLs."
+    if not supports_ppkg and any(link.get("provisioning_encrypted") for link in links):
+        pending = await tray_repo.get_next_claimable_deployment_build(
+            _stale_before(), supports_ppkg=True
+        )
+        if pending:
+            return (
+                "Provisioning builds need the updated build agent and Windows Configuration Designer "
+                "from the Windows ADK. Install it or configure IcdPath on the build server."
+            )
     active_ids = {int(link["id"]) for link in links}
     newest: dict[int, dict[str, Any]] = {}
     for build in await tray_repo.list_deployment_builds():
@@ -307,15 +332,27 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-async def complete_build(build_id: int) -> None:
+async def complete_build(build_id: int, *, provisioning_password: str | None = None) -> None:
     build = await _building(build_id)
-    missing = [kind for kind in ARTIFACT_KINDS if not artifact_path(build_id, kind).is_file()]
+    link = await tray_repo.get_deployment_link(int(build["deployment_link_id"]))
+    if not link or link.get("revoked_at"):
+        raise BuildStateError("The deployment URL was revoked.")
+    provisioning_enabled = bool(link.get("provisioning_encrypted"))
+    required = ARTIFACT_KINDS if provisioning_enabled else ("msi", "exe")
+    missing = [kind for kind in required if not artifact_path(build_id, kind).is_file()]
     if missing:
         raise BuildStateError("Upload the " + " and ".join(missing) + " before completing.")
+    if provisioning_enabled and (
+        not provisioning_password or len(provisioning_password) > 256
+        or any(ord(c) < 32 or ord(c) == 127 for c in provisioning_password)
+    ):
+        raise BuildStateError("Supply the generated provisioning package password before completing.")
     await tray_repo.complete_deployment_build(
         int(build_id),
         msi_sha256=_sha256(artifact_path(build_id, "msi")),
         exe_sha256=_sha256(artifact_path(build_id, "exe")),
+        ppkg_sha256=_sha256(artifact_path(build_id, "ppkg")) if provisioning_enabled else None,
+        ppkg_password_encrypted=encrypt_secret(provisioning_password) if provisioning_enabled else None,
     )
     old_ids = await tray_repo.supersede_deployment_builds(
         int(build["deployment_link_id"]), keep_build_id=int(build_id)
@@ -328,6 +365,18 @@ async def complete_build(build_id: int) -> None:
         deployment_link_id=build.get("deployment_link_id"),
         release_tag=build.get("release_tag"),
     )
+
+
+async def provisioning_password(link_id: int) -> str | None:
+    build = await tray_repo.get_latest_ready_deployment_build(int(link_id))
+    if not build or not build.get("ppkg_password_encrypted"):
+        return None
+    if not artifact_path(int(build["id"]), "ppkg").is_file():
+        return None
+    try:
+        return decrypt_secret(str(build["ppkg_password_encrypted"]), allow_plaintext=False)
+    except Exception:
+        raise BuildStateError("The package password could not be decrypted. Rebuild the deployment URL.") from None
 
 
 async def fail_build(build_id: int, error: str) -> None:

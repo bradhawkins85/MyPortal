@@ -25,6 +25,7 @@ param(
     [string]$InstallDir = (Join-Path $env:ProgramFiles 'MyPortalBuildAgent'),
     [string]$WorkDir = 'C:\MyPortalBuild',
     [string]$WixVersion = '7.*',
+    [string]$IcdPath,
     [switch]$RunNow
 )
 
@@ -33,6 +34,11 @@ Set-StrictMode -Version 3
 
 if ($PortalUrl -notmatch '^https://') { throw 'PortalUrl must start with https://' }
 $CertificateThumbprint = ($CertificateThumbprint -replace '\s', '').ToUpperInvariant()
+. (Join-Path $PSScriptRoot 'New-MyPortalProvisioningPackage.ps1')
+$resolvedIcd = Resolve-MyPortalIcd $IcdPath
+if ($IcdPath -and -not $resolvedIcd) {
+    throw 'IcdPath must point to ICD.exe with Microsoft-Desktop-Provisioning.dat in the same directory. Install the Windows ADK Configuration Designer component.'
+}
 
 $missing = @(
     @{ Command = 'dotnet'; Name = '.NET SDK 8+ (winget install Microsoft.DotNet.SDK.8)' },
@@ -63,6 +69,7 @@ if (Test-Path -LiteralPath $wix) {
 if ($LASTEXITCODE -ne 0) { throw 'Installing WiX failed.' }
 
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'MyPortalBuildAgent.ps1') -Destination $InstallDir -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'New-MyPortalProvisioningPackage.ps1') -Destination $InstallDir -Force
 
 $configDir = Join-Path $env:ProgramData 'MyPortalBuildAgent'
 New-Item -ItemType Directory -Force -Path $configDir | Out-Null
@@ -75,6 +82,7 @@ $configPath = Join-Path $configDir 'config.json'
     GitHubRepo            = $GitHubRepo
     WorkDir               = $WorkDir
     WixPath               = $wix
+    IcdPath               = $resolvedIcd
 } | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding utf8
 
 # The config holds the API key and the work folder briefly holds install
@@ -100,6 +108,11 @@ Register-ScheduledTask -TaskName 'MyPortal Build Agent' -Action $action -Trigger
     -Principal $principal -Settings $settings -Force | Out-Null
 
 Write-Host "MyPortal build agent installed. Logs: $(Join-Path $WorkDir 'agent.log')"
+if ($resolvedIcd) {
+    Write-Host 'Windows provisioning package builds are enabled (Windows Configuration Designer found).'
+} else {
+    Write-Host 'Provisioning package builds are disabled. Install Windows ADK Configuration Designer or rerun this installer with -IcdPath to enable them.'
+}
 if ($RunNow) {
     Start-ScheduledTask -TaskName 'MyPortal Build Agent'
     Write-Host 'Started the first run.'

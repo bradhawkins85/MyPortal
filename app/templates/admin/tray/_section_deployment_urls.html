@@ -3,7 +3,7 @@
   <header class="ce-section__header">
     <div class="ce-section__heading">
       <h2 class="card__title" id="tray-deploy-title">Deployment URLs</h2>
-      <p class="card__subtitle">A private link to a ready-made tray installer for one company. The person installing opens it, downloads the Windows installer or macOS package and runs it, and the computer enrols into that company with no token to type. Installers stop working when the link expires or is revoked.</p>
+      <p class="card__subtitle">A private link to ready-made tray installers for one company, with an optional provisioning package for new Windows computers. The computer enrols into that company with no token to type. Expiry or revocation stops downloads and new enrolment.</p>
     </div>
   </header>
   <div class="ce-section__body">
@@ -39,6 +39,89 @@
             <p class="form-help">After this, the link and every package downloaded from it stop enrolling new devices. You can revoke any link early, including links with no expiry.</p>
           </div>
         </div>
+        <details>
+          <summary>Provision new Windows computers <span class="form-label__optional">optional</span></summary>
+          <p class="form-help">For Windows 11 Pro, Enterprise or Education on x64 computers. The package completes initial setup, creates the local administrator <code>ProvisioningAdmin</code> and installs MyPortal Tray. It can also join Microsoft Entra ID (Azure AD) or your local Active Directory domain. The tray icon starts after sign-in.</p>
+          <label class="checkbox" for="deploy-provisioning-enabled">
+            <input type="checkbox" id="deploy-provisioning-enabled" name="provisioning_enabled" value="1" data-provisioning-enabled aria-controls="deploy-provisioning-fields" />
+            <span>Build a Windows provisioning package (.ppkg)</span>
+          </label>
+          <fieldset id="deploy-provisioning-fields" data-provisioning-fields>
+            <legend>Provisioning settings</legend>
+            <div class="ce-form-grid">
+              <div class="form-field">
+                <label class="form-label" for="deploy-provisioning-password">ProvisioningAdmin password</label>
+                <input class="form-input" type="password" id="deploy-provisioning-password" name="provisioning_admin_password" autocomplete="new-password" minlength="12" maxlength="127" aria-describedby="deploy-provisioning-password-help" data-provisioning-admin-password />
+                <p class="form-help" id="deploy-provisioning-password-help">Required for provisioning. Use 12–127 characters and at least three of uppercase letters, lowercase letters, numbers and symbols. Do not include <code>ProvisioningAdmin</code>. Store it securely; it will not be shown again. Rotate this shared bootstrap password or remove the account after provisioning.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="deploy-provisioning-name">PC name template <span class="form-label__optional">optional</span></label>
+                <input class="form-input" id="deploy-provisioning-name" name="provisioning_device_name_template" maxlength="32" placeholder="MP-%RAND:8%" aria-describedby="deploy-provisioning-name-help" />
+                <p class="form-help" id="deploy-provisioning-name-help">Letters, numbers and hyphens, with one optional <code>%RAND:n%</code> for 1–15 random digits. The resulting name must fit in 15 characters. Local AD join requires a random token; a blank name uses <code>MP-%RAND:8%</code> for AD join. Other options keep the existing name when blank.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="deploy-provisioning-ssid">Wi-Fi network name (SSID) <span class="form-label__optional">optional</span></label>
+                <input class="form-input" id="deploy-provisioning-ssid" name="provisioning_wifi_ssid" maxlength="32" autocomplete="off" aria-describedby="deploy-provisioning-ssid-help" />
+                <p class="form-help" id="deploy-provisioning-ssid-help">Up to 32 bytes. Leave blank to use Ethernet or connect to Wi-Fi separately.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="deploy-provisioning-wifi-password">Wi-Fi password <span class="form-label__optional">optional</span></label>
+                <input class="form-input" type="password" id="deploy-provisioning-wifi-password" name="provisioning_wifi_password" autocomplete="new-password" minlength="8" maxlength="63" aria-describedby="deploy-provisioning-wifi-help" />
+                <p class="form-help" id="deploy-provisioning-wifi-help">WPA2-Personal, 8–63 printable ASCII characters. With an SSID, leave this blank only for an open network. Enterprise Wi-Fi is not supported.</p>
+              </div>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="deploy-provisioning-join-mode">Directory join</label>
+              <select class="form-input" id="deploy-provisioning-join-mode" name="provisioning_join_mode" data-provisioning-join-mode aria-controls="deploy-provisioning-entra deploy-provisioning-ad" aria-describedby="deploy-provisioning-join-help">
+                <option value="none" selected>Leave directory join for later</option>
+                <option value="entra">Microsoft Entra ID (Azure AD)</option>
+                <option value="active_directory">Local Active Directory domain</option>
+              </select>
+              <p class="form-help" id="deploy-provisioning-join-help">The local <code>ProvisioningAdmin</code> account is created for every option. Choose one directory to join during setup.</p>
+            </div>
+            <fieldset id="deploy-provisioning-entra" data-provisioning-join-fields="entra">
+              <legend>Microsoft Entra ID join</legend>
+              <div class="ce-form-grid">
+                <div class="form-field">
+                  <label class="form-label" for="deploy-provisioning-entra-token">WCD bulk enrolment token (BPRT)</label>
+                  <input class="form-input" type="password" id="deploy-provisioning-entra-token" name="provisioning_entra_bulk_token" maxlength="16384" autocomplete="new-password" spellcheck="false" aria-describedby="deploy-provisioning-entra-token-help" data-provisioning-secret data-join-required />
+                  <p class="form-help" id="deploy-provisioning-entra-token-help">Use <strong>Get Bulk Token</strong> in Windows Configuration Designer, save the project, and paste its <strong>Azure/BPRT</strong> value here. The token must be valid and unexpired; it is not a user password or an ordinary access token. MyPortal does not generate or renew it. The PC needs internet access during setup; tenant permissions and licensing requirements apply. Intune enrolment also requires your tenant’s automatic MDM enrolment configuration.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="deploy-provisioning-entra-authority">Microsoft sign-in authority</label>
+                  <input class="form-input" type="url" id="deploy-provisioning-entra-authority" name="provisioning_entra_authority" value="https://login.microsoftonline.com/common" maxlength="400" autocomplete="off" aria-describedby="deploy-provisioning-entra-authority-help" />
+                  <p class="form-help" id="deploy-provisioning-entra-authority-help">Use your tenant’s Microsoft public, US Government or China cloud authority. The default is the public cloud common authority.</p>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset id="deploy-provisioning-ad" data-provisioning-join-fields="active_directory">
+              <legend>Local Active Directory join</legend>
+              <div class="ce-form-grid">
+                <div class="form-field">
+                  <label class="form-label" for="deploy-provisioning-ad-domain">AD domain (DNS name)</label>
+                  <input class="form-input" id="deploy-provisioning-ad-domain" name="provisioning_ad_domain" placeholder="corp.example.com" maxlength="253" autocomplete="off" spellcheck="false" data-join-required />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="deploy-provisioning-ad-username">Domain join account</label>
+                  <input class="form-input" id="deploy-provisioning-ad-username" name="provisioning_ad_username" placeholder="CORP\provisioning or provisioning@corp.example.com" maxlength="256" autocomplete="off" spellcheck="false" aria-describedby="deploy-provisioning-ad-account-help" data-join-required />
+                  <p class="form-help" id="deploy-provisioning-ad-account-help">Use <code>DOMAIN\user</code> or a UPN. Delegate only the permissions needed to join computers in the intended location.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="deploy-provisioning-ad-password">Domain join account password</label>
+                  <input class="form-input" type="password" id="deploy-provisioning-ad-password" name="provisioning_ad_password" maxlength="127" autocomplete="new-password" data-provisioning-secret data-join-required />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="deploy-provisioning-ad-ou">Computer organizational unit (OU) <span class="form-label__optional">optional</span></label>
+                  <input class="form-input" id="deploy-provisioning-ad-ou" name="provisioning_ad_ou" placeholder="OU=Workstations,DC=corp,DC=example,DC=com" maxlength="1024" autocomplete="off" spellcheck="false" />
+                  <p class="form-help">Distinguished name of the target OU. Leave blank to use the domain’s default computer location.</p>
+                </div>
+              </div>
+              <p class="form-help">The PC must reach a domain controller and use working AD DNS during initial setup. This performs an online domain join; it does not provide a VPN or an offline domain join blob.</p>
+            </fieldset>
+            <p class="form-help">The encrypted package has a separate, generated unlock password, available to admins after the build finishes. Give that password to the person setting up the PC separately from the download link. A rebuild generates a new package password.</p>
+            <p class="form-help">These settings are fixed for this URL; create a new URL to change them or replace an expired bulk token. Expiry or revocation cannot undo a downloaded package’s local account, Wi-Fi, PC name, directory join or initial setup changes.</p>
+          </fieldset>
+        </details>
         <div class="form-actions"><button type="submit" class="button button--primary">Create URL</button></div>
       </form>
       <p class="form-help">Your Windows build server builds and signs the EXE and MSI installers for each company, and rebuilds them when a new tray release is cached{% if dl.release_tag %} (currently <code>{{ dl.release_tag }}</code>){% endif %}. See <em>Tray Build Server</em> in the wiki to set one up.</p>
@@ -86,6 +169,26 @@
                         <summary>Microsoft Intune</summary>
                         <p><a href="{{ link.url }}/windows.intunewin" rel="noreferrer">Download the .intunewin package</a>, then in Intune add an app of type <strong>Windows app (Win32)</strong> and upload it. Intune fills in the install command from the MSI.</p>
                         <p class="form-help">The tray updates itself, which changes the MSI product code. Use a file detection rule instead of the MSI one: path <code>%ProgramFiles%\MyPortalTray</code>, file <code>myportal-tray-service.exe</code>, exists.</p>
+                      </details>
+                    {% endif %}
+                    {% if link.provisioning_enabled %}
+                      <details data-provisioning-package>
+                        <summary>Windows provisioning package</summary>
+                        {% if link.build and link.build.status == "ready" %}
+                          <p><a href="{{ link.url }}/windows.ppkg" rel="noreferrer">Download the .ppkg package</a> for initial Windows setup from a USB drive.</p>
+                          <p class="form-help">The unlock password below belongs to the current build. It is separate from the <code>ProvisioningAdmin</code> password chosen when the URL was created.</p>
+                          <button type="button" class="button button--ghost button--small" data-provisioning-password-url="/api/tray/admin/deployment-links/{{ link.id }}/provisioning-password" aria-controls="deploy-package-password-panel-{{ link.id }}" aria-expanded="false">Show package password</button>
+                          <div id="deploy-package-password-panel-{{ link.id }}" data-provisioning-password-panel hidden>
+                            <label class="form-label" for="deploy-package-password-{{ link.id }}">Package unlock password</label>
+                            <div class="totp-copy-row">
+                              <input class="form-input scf-mono" id="deploy-package-password-{{ link.id }}" readonly autocomplete="off" data-provisioning-password-value />
+                              <button type="button" class="button button--ghost button--small" data-copy-target="deploy-package-password-{{ link.id }}">Copy password</button>
+                            </div>
+                          </div>
+                          <p class="form-help" data-provisioning-password-status role="status" aria-live="polite"></p>
+                        {% else %}
+                          <p class="form-help">The package and its unlock password will be available when the Windows build finishes.</p>
+                        {% endif %}
                       </details>
                     {% endif %}
                   {% else %}—{% endif %}

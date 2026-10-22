@@ -21,6 +21,7 @@ link through :func:`company_deployment_url`.
 
 from __future__ import annotations
 
+import json
 import re
 import tempfile
 import zipfile
@@ -28,11 +29,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.core.config import get_settings
 from app.core.logging import log_error
 from app.repositories import companies as companies_repo
 from app.repositories import tray as tray_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
+from app.schemas.tray import TrayProvisioningSettings
 from app.services import tray as tray_service
 from app.services import tray_installer
 
@@ -99,6 +103,7 @@ async def serialise_link(record: dict[str, Any], portal_url: str) -> dict[str, A
         "revoked_at": record.get("revoked_at"),
         "download_count": int(record.get("download_count") or 0),
         "last_downloaded_at": record.get("last_downloaded_at"),
+        "provisioning_enabled": bool(record.get("provisioning_encrypted")),
     }
 
 
@@ -115,6 +120,7 @@ async def create_deployment_link(
     label: str | None,
     created_by_user_id: int | None,
     expires_in_days: int = DEFAULT_EXPIRY_DAYS,
+    provisioning: TrayProvisioningSettings | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Create a deployment link and its install token. Returns ``(record, slug)``.
 
@@ -124,6 +130,9 @@ async def create_deployment_link(
 
     if expires_in_days not in EXPIRY_CHOICES_DAYS:
         raise ValueError("Choose how long the link should stay valid.")
+    provisioning_encrypted = (
+        encrypt_secret(json.dumps(provisioning.build_settings())) if provisioning else None
+    )
     expires_at = None
     if expires_in_days != NO_EXPIRY:
         expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_in_days)).replace(
@@ -155,10 +164,57 @@ async def create_deployment_link(
         install_token_encrypted=encrypt_secret(raw_token),
         created_by_user_id=created_by_user_id,
         expires_at=expires_at,
+        provisioning_encrypted=provisioning_encrypted,
     )
     if record.get("id"):
         await tray_repo.create_deployment_build(int(record["id"]))
     return record, slug
+
+
+def provisioning_from_form(form: Any) -> TrayProvisioningSettings | None:
+    if form.get("provisioning_enabled") not in ("on", "true", "1"):
+        return None
+    join_mode = str(form.get("provisioning_join_mode") or "none")
+    directory_join = None
+    if join_mode == "entra":
+        directory_join = {
+            "mode": "entra",
+            "bulk_token": str(form.get("provisioning_entra_bulk_token") or ""),
+            "authority": str(form.get("provisioning_entra_authority") or "https://login.microsoftonline.com/common"),
+        }
+    elif join_mode == "active_directory":
+        directory_join = {
+            "mode": "active_directory",
+            "domain_name": str(form.get("provisioning_ad_domain") or "").strip(),
+            "username": str(form.get("provisioning_ad_username") or "").strip(),
+            "password": str(form.get("provisioning_ad_password") or ""),
+            "organizational_unit": str(form.get("provisioning_ad_ou") or "").strip() or None,
+        }
+    elif join_mode != "none":
+        raise ValueError("Choose a supported directory join mode.")
+    try:
+        return TrayProvisioningSettings(
+            admin_password=str(form.get("provisioning_admin_password") or ""),
+            wifi_ssid=str(form.get("provisioning_wifi_ssid") or ""),
+            wifi_password=str(form.get("provisioning_wifi_password") or ""),
+            device_name_template=str(form.get("provisioning_device_name_template") or ""),
+            directory_join=directory_join,
+        )
+    except ValidationError as exc:
+        # ValidationError.__str__ can contain submitted secrets. Only use messages.
+        message = exc.errors(include_input=False, include_context=False)[0]["msg"]
+        raise ValueError("Provisioning settings: " + message) from None
+
+
+def provisioning_settings(record: dict[str, Any]) -> dict[str, Any] | None:
+    encrypted = record.get("provisioning_encrypted")
+    if not encrypted:
+        return None
+    try:
+        raw = decrypt_secret(str(encrypted), allow_plaintext=False)
+        return TrayProvisioningSettings.model_validate_json(raw).build_settings()
+    except Exception:
+        raise ValueError("The provisioning settings could not be decrypted. Create a new deployment URL.") from None
 
 
 def reveal_slug(record: dict[str, Any]) -> str | None:
@@ -289,6 +345,8 @@ def download_filename(company_name: str | None, kind: str) -> str:
         return stem + "Setup.msi"
     if kind == "intunewin":
         return stem + "Setup.intunewin"
+    if kind == "ppkg":
+        return stem + "Provisioning.ppkg"
     return stem + "macOS.zip"
 
 
