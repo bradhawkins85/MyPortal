@@ -1,0 +1,7 @@
+{
+  "guid": "1ce3957d-fccf-4568-bc97-3d777fe66d87",
+  "occurred_at": "2026-10-22T01:27Z",
+  "change_type": "Fix",
+  "summary": "M365 spam purge: clear the tenant-wide search scope before binding mailbox sources to prevent Graph HTTP 409 conflicts, while retaining source readback and fresh-estimate checks before deletion.",
+  "content_hash": "80143b0b5f59a5a1944fdf5580eca5004a66e7e630e11b50067d8d7ff1b0cd72"
+}

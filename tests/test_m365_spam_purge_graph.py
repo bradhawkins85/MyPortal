@@ -399,9 +399,9 @@ async def test_purge_binds_reviewed_mailbox_and_reestimates_before_deletion(monk
     _FakeClient.calls = []
     _FakeClient.responses = [
         httpx.Response(200, json={"value": []}),
+        httpx.Response(204),
         httpx.Response(201, json=source),
         httpx.Response(200, json={"value": [source]}),
-        httpx.Response(204),
         httpx.Response(202, headers={"Location": OPERATION}),
         httpx.Response(200, json={"status": "succeeded"}),
     ]
@@ -418,12 +418,12 @@ async def test_purge_binds_reviewed_mailbox_and_reestimates_before_deletion(monk
 
     await service._run_purge(8)
 
-    assert [method for method, _, _ in _FakeClient.calls] == ["GET", "POST", "GET", "PATCH", "POST", "GET"]
-    assert _FakeClient.calls[1][1].endswith("/additionalSources")
-    assert _FakeClient.calls[1][2] == {
+    assert [method for method, _, _ in _FakeClient.calls] == ["GET", "PATCH", "POST", "GET", "POST", "GET"]
+    assert _FakeClient.calls[2][1].endswith("/additionalSources")
+    assert _FakeClient.calls[2][2] == {
         "@odata.type": "microsoft.graph.security.userSource", "email": "alice@example.com", "includedSources": "mailbox",
     }
-    assert _FakeClient.calls[3][2] == {"dataSourceScopes": "none"}
+    assert _FakeClient.calls[1][2] == {"dataSourceScopes": "none"}
     assert _FakeClient.calls[4][1].endswith("/purgeData")
     assert repo["request"]["purge_status"] == "completed"
     assert repo["request"]["purge_details"]["mailboxes"] == ["alice@example.com"]
@@ -485,6 +485,7 @@ async def test_source_binding_error_stops_before_purge_submission(monkeypatch, r
     _FakeClient.calls = []
     _FakeClient.responses = [
         httpx.Response(200, json={"value": []}),
+        httpx.Response(204),
         httpx.Response(403, json={"error": {"code": "Forbidden", "message": "Cannot add mailbox source"}}),
     ]
     monkeypatch.setattr(ediscovery.httpx, "AsyncClient", _FakeClient)
@@ -497,17 +498,69 @@ async def test_source_binding_error_stops_before_purge_submission(monkeypatch, r
 
 
 @pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("initial_scope", ["allTenantMailboxes", "none"])
+async def test_mailbox_binding_obeys_graph_scope_constraint_and_retries_safely(monkeypatch, initial_scope):
+    state = {"scope": initial_scope, "mailboxes": {"alice@example.com"}, "additions": []}
+
+    class ScopeAwareClient(_FakeClient):
+        async def request(self, method, url, *, headers, json=None):
+            if method == "PATCH":
+                state["scope"] = json["dataSourceScopes"]
+                return httpx.Response(204)
+            if method == "GET" and url.endswith("/additionalSources"):
+                return httpx.Response(200, json={"value": [
+                    {"email": mailbox, "includedSources": "mailbox"} for mailbox in sorted(state["mailboxes"])
+                ]})
+            if method == "POST" and url.endswith("/additionalSources"):
+                if state["scope"] != "none":
+                    return httpx.Response(409, json={"error": {
+                        "code": "Conflict",
+                        "message": "Cannot add additional data sources when using dataSourceScopes. Please update the search dataSourceScopes to 'none' and then try again.",
+                    }})
+                state["additions"].append(json["email"])
+                state["mailboxes"].add(json["email"])
+                return httpx.Response(201, json=json)
+            raise AssertionError(f"Unexpected request: {method} {url}")
+
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", ScopeAwareClient)
+
+    await ediscovery.bind_purge_mailboxes("tok", CASE, SEARCH, ["alice@example.com", "bob@example.com"])
+    await ediscovery.bind_purge_mailboxes("tok", CASE, SEARCH, ["alice@example.com", "bob@example.com"])
+
+    assert state["scope"] == "none"
+    assert state["additions"] == ["bob@example.com"]
+    assert state["mailboxes"] == {"alice@example.com", "bob@example.com"}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_scope_update_failure_stops_before_adding_mailboxes(monkeypatch):
+    _FakeClient.calls = []
+    _FakeClient.responses = [
+        httpx.Response(200, json={"value": []}),
+        httpx.Response(403, json={"error": {"code": "Forbidden", "message": "Cannot change search scope"}}),
+    ]
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", _FakeClient)
+
+    with pytest.raises(M365Error, match="Cannot change search scope"):
+        await ediscovery.bind_purge_mailboxes("tok", CASE, SEARCH, ["alice@example.com"])
+
+    assert [method for method, _, _ in _FakeClient.calls] == ["GET", "PATCH"]
+
+
+@pytest.mark.anyio("asyncio")
 async def test_mailbox_binding_reconciles_paginated_sources_without_duplicates(monkeypatch):
     next_url = f"{ediscovery.GRAPH_CASES_URL}/{CASE}/searches/{SEARCH}/additionalSources?$skiptoken=next"
     first = {"value": [{"email": "ALICE@example.com", "includedSources": "mailbox"}], "@odata.nextLink": next_url}
     second = {"value": [{"email": "bob@example.com", "includedSources": "mailbox"}]}
     _FakeClient.calls = []
-    _FakeClient.responses = [httpx.Response(200, json=body) for body in (first, second, first, second)] + [httpx.Response(204)]
+    _FakeClient.responses = [httpx.Response(200, json=body) for body in (first, second)] + [
+        httpx.Response(204), *[httpx.Response(200, json=body) for body in (first, second)],
+    ]
     monkeypatch.setattr(ediscovery.httpx, "AsyncClient", _FakeClient)
 
     await ediscovery.bind_purge_mailboxes("tok", CASE, SEARCH, ["alice@example.com", "bob@example.com"])
 
-    assert [method for method, _, _ in _FakeClient.calls] == ["GET", "GET", "GET", "GET", "PATCH"]
+    assert [method for method, _, _ in _FakeClient.calls] == ["GET", "GET", "PATCH", "GET", "GET"]
 
 
 @pytest.mark.anyio("asyncio")
@@ -529,14 +582,14 @@ async def test_mailbox_binding_rejects_unreviewed_or_non_mailbox_sources(monkeyp
 @pytest.mark.anyio("asyncio")
 async def test_mailbox_binding_requires_sources_to_be_retained(monkeypatch):
     _FakeClient.calls = []
-    _FakeClient.responses = [httpx.Response(200, json={"value": []}), httpx.Response(201, json={}),
+    _FakeClient.responses = [httpx.Response(200, json={"value": []}), httpx.Response(204), httpx.Response(201, json={}),
                              httpx.Response(200, json={"value": []})]
     monkeypatch.setattr(ediscovery.httpx, "AsyncClient", _FakeClient)
 
     with pytest.raises(ValueError, match="did not retain"):
         await ediscovery.bind_purge_mailboxes("tok", CASE, SEARCH, ["alice@example.com"])
 
-    assert all(method != "PATCH" for method, _, _ in _FakeClient.calls)
+    assert [method for method, _, _ in _FakeClient.calls] == ["GET", "PATCH", "POST", "GET"]
 
 
 @pytest.mark.anyio("asyncio")
