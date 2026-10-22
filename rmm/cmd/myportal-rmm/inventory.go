@@ -12,7 +12,7 @@ import (
 
 const (
 	inventoryStartDelay = 45 * time.Second
-	inventoryPoll       = 2 * time.Minute
+	inventoryPoll       = 2 * time.Hour
 	inventoryRetryWait  = 15 * time.Minute
 	// A portal without the inventory API (older MyPortal) is asked again this often.
 	inventoryUnsupportedWait = time.Hour
@@ -44,7 +44,7 @@ func inventoryLoop(ctx context.Context, api *client.Client) {
 			continue
 		}
 		lastError = ""
-		if cfg.PollSeconds >= 30 {
+		if cfg.PollSeconds >= int(inventoryPoll.Seconds()) {
 			wait = time.Duration(cfg.PollSeconds) * time.Second
 		}
 		if cfg.Due || !sent {

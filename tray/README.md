@@ -2,6 +2,34 @@
 
 Cross-platform (Windows + macOS) tray application for the MyPortal helpdesk portal. Deployed via RMM; provides a server-driven system-tray menu, environment-variable display, and a push-to-device chat channel.
 
+## Reporting and urgent work
+
+Routine device heartbeats, Defender status and the Defender command fallback
+poll run every 1–2 hours, with jitter to spread fleet traffic. Configuration
+and the tray icon refresh automatically every six hours (plus up to 30 minutes
+of jitter). Startup, an explicit refresh, an administrator's configuration
+change, and **Check in now** can refresh them sooner. The network scanner
+uses the cached configuration instead of fetching it every minute.
+
+On Windows, a native subscription to Defender detection/remediation events
+triggers immediate detection uploads through `/api/tray/defender/detections`.
+Successful fingerprints are persisted so unchanged history is not uploaded
+again; failed uploads retry after one minute. Routine protection status uses
+its separate slower schedule. Excluded devices are not queried by PowerShell.
+Defender commands wake the service over its existing WebSocket; queued wakeups
+are retained for cross-worker delivery and reconnects. WebSocket keepalives,
+chat, remote commands, and the RMM agent's 25-second job long poll remain active.
+
+**Check in now** on the asset editor queues an audited, one-off RMM task and
+wakes the tray service. It refreshes facts, thermal readings, hardware/software
+inventory, configured monitoring checks and Windows event logs; the tray also
+refreshes its configuration and Defender reports. It does not reschedule the
+normal timers. The task's result lists completed and failed collection steps.
+The existing hardware/software **Refresh now** actions also queue this task.
+Update the tray and RMM agents to receive these changes; deploying server code
+alone does not change an older agent's hardcoded timers. Older RMM agents show
+an upgrade message in the new task's result rather than claiming success.
+
 ## Repository layout
 
 ```

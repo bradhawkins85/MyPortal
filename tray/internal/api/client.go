@@ -428,7 +428,24 @@ func (c *Client) ReportDefenderStatus(ctx context.Context, status DefenderStatus
 	return nil
 }
 
-// Heartbeat sends a liveness ping and updates device facts on the server.
+// ReportDefenderDetection immediately uploads a new or changed detection.
+func (c *Client) ReportDefenderDetection(ctx context.Context, detection DefenderDetection) error {
+	body, err := json.Marshal(detection)
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, "/api/tray/defender/detections", body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("defender detection: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// Heartbeat updates routine device facts independently of WebSocket keepalives.
 func (c *Client) Heartbeat(ctx context.Context, req HeartbeatRequest) error {
 	body, err := json.Marshal(req)
 	if err != nil {

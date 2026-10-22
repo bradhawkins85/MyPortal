@@ -1,5 +1,7 @@
 """Company-scoped Windows Defender UI and tray-agent API."""
 from importlib import import_module
+from app.services import tray as tray_service
+from app.core.logging import log_warning
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -177,6 +179,7 @@ async def create_defender_command(device_id: int, command_type: str, request: Re
     if not await repo.device_is_managed(device_id, company_id):
         raise HTTPException(409, "Device is excluded from Defender management")
     command_id = await repo.queue_command(company_id, device_id, command_type, user["id"])
+    await _wake_defender_commands(device_id, user["id"])
     await audit_service.log_action(action="defender.command.queued", user_id=user["id"], entity_type="defender_command",
         entity_id=command_id, metadata={"company_id": company_id, "device_id": device_id, "command": command_type}, request=request)
     return {"id": command_id, "status": "pending"}
@@ -209,6 +212,7 @@ async def detection_action(detection_id: int, payload: DefenderDetectionAction, 
         if not await repo.device_is_managed(int(row["tray_device_id"]), company_id):
             raise HTTPException(409, "Device is excluded from Defender management")
         command_id = await repo.queue_command(company_id, row["tray_device_id"], payload.action, user["id"], detection_id)
+        await _wake_defender_commands(int(row["tray_device_id"]), user["id"])
         await audit_service.log_action(action=f"defender.detection.{payload.action}.queued", user_id=user["id"],
             entity_type="defender_command", entity_id=command_id, metadata={"company_id": company_id, "detection_id": detection_id}, request=request)
         return {"id": command_id, "status": "pending"}
@@ -257,6 +261,14 @@ async def create_device_ticket(device_id: int, request: Request):
     if row.get("asset_id"):
         await tickets_repo.replace_ticket_assets(ticket["id"], [row["asset_id"]])
     return {"ticket_id": ticket["id"], "url": f"/tickets/{ticket['id']}"}
+
+async def _wake_defender_commands(device_id: int, user_id: int) -> None:
+    try:
+        await tray_service.dispatch_device_event(device_id, "defender_commands", initiated_by_user_id=user_id)
+    except Exception as exc:
+        # The Defender command remains pending for the fallback poll.
+        log_warning("Could not wake Defender command delivery", device_id=device_id, error=str(exc))
+
 
 async def _tray(request: Request, *, require_managed: bool = True):
     device = await _resolve_tray_device(type("Payload", (), {"device_uid": None})(), request)

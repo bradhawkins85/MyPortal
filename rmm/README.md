@@ -127,7 +127,7 @@ go build ./cmd/myportal-rmm
 
 ## Temperatures
 
-At service startup and every regular detailed check-in (approximately 15 minutes),
+At service startup and every regular detailed check-in (every two hours),
 the agent sends available endpoint temperature sensors in Celsius. Each reading
 has an identifier, sensor name and hardware name. Collection is bounded to 20
 seconds and 256 sensors; missing hardware, inaccessible sensors and failed reads

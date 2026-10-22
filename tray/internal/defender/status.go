@@ -3,6 +3,7 @@ package defender
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,21 @@ var ErrUnsupported = errors.New("Microsoft Defender status is only supported on 
 // Collect returns the current Microsoft Defender status.
 func Collect() (api.DefenderStatus, error) {
 	return collect()
+}
+
+// CollectDetections reads protection history without collecting routine status.
+func CollectDetections(ctx context.Context) ([]api.DefenderDetection, error) {
+	return collectDetections(ctx)
+}
+
+func decodeDetections(output []byte) ([]api.DefenderDetection, error) {
+	output = bytes.TrimSpace(bytes.TrimPrefix(output, []byte{0xef, 0xbb, 0xbf}))
+	var status api.DefenderStatus
+	if err := json.Unmarshal(output, &status.Detections); err != nil {
+		return nil, err
+	}
+	limitStatus(&status)
+	return status.Detections, nil
 }
 
 func decodeStatus(output []byte) (api.DefenderStatus, error) {

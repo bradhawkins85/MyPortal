@@ -607,6 +607,29 @@ async def run_script_api(script_id: int, payload: RunRequest, request: Request):
     return result
 
 
+@router.post("/rmm/assets/{asset_id:int}/checkin", summary="Queue a one-off full agent check-in")
+async def checkin_now(asset_id: int, request: Request):
+    context = await _context(request, write=True)
+    if isinstance(context, RedirectResponse):
+        return context
+    user, _company, company_id, _can_run = context
+    agent = await rmm_repo.get_asset_agent(asset_id)
+    if not agent or int(agent.get("company_id") or 0) != int(company_id):
+        raise HTTPException(404, "No RMM agent is installed on this device.")
+    run_id = await rmm_commands.queue_checkin({**agent, "asset_id": asset_id}, user.get("id"))
+    from app.services import tray as tray_service
+    from app.repositories import tray as tray_repo
+    try:
+        devices = await tray_repo.list_active_devices_by_asset_ids([asset_id])
+        if device := devices.get(asset_id):
+            await tray_service.dispatch_device_event(int(device["id"]), "checkin_now", initiated_by_user_id=user.get("id"))
+    except Exception as exc:
+        logger.warning("Tray check-in wakeup failed for asset {asset}: {error}", asset=asset_id, error=str(exc))
+    await audit_service.record(action="rmm.checkin.queued", request=request, user_id=user.get("id"),
+        entity_type="asset", entity_id=asset_id, metadata={"company_id": company_id, "run_id": run_id})
+    return flash_redirect(f"/assets/{asset_id}#scripts", f"Full check-in queued as task #{run_id}. View its progress in run history. The normal reporting schedule is unchanged.", "success")
+
+
 class CommandRequest(BaseModel):
     language: Literal["powershell", "cmd", "bash", "zsh"]
     command: str = Field(max_length=rmm_commands.MAX_COMMAND_LENGTH)

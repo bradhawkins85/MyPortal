@@ -29,7 +29,7 @@ class TrayEnrolResponse(BaseModel):
     auth_token: str
     company_id: Optional[int] = None
     asset_id: Optional[int] = None
-    poll_interval_seconds: int = 30
+    poll_interval_seconds: int = 3600
 
 
 class TrayTRMMSyncRequest(BaseModel):

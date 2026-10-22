@@ -7,7 +7,7 @@
 //     stored in the registry (Windows) or plist (macOS).
 //   - Maintains a persistent WebSocket connection to /ws/tray/{device_uid}
 //     with exponential back-off and jitter.
-//   - Sends a heartbeat every 30 s.
+//   - Reports routine facts every 1–2 hours, independently of command delivery.
 //   - Pulls /api/tray/config and caches it to disk; re-fetches on
 //     config_changed WebSocket event.
 //   - Dispatches server commands (chat_open, show_notification, config_changed)
@@ -56,10 +56,11 @@ import (
 )
 
 const (
-	heartbeatInterval    = 30 * time.Second
-	configCacheName      = "tray-config.json"
-	stateFileName        = "tray-state.json"
-	pendingStateFileName = "tray-enrolment-pending.json"
+	heartbeatInterval     = time.Hour
+	configRefreshInterval = 6 * time.Hour
+	configCacheName       = "tray-config.json"
+	stateFileName         = "tray-state.json"
+	pendingStateFileName  = "tray-enrolment-pending.json"
 	// defenderPolicyStateFileName records the Defender exclusions and scan
 	// schedule the agent applied, so it never removes settings it did not add.
 	defenderPolicyStateFileName = "defender-policy.json"
@@ -184,7 +185,14 @@ type daemon struct {
 	rmmInstallMu sync.Mutex
 	// defenderScanMu serialises Defender scans, which run in the background
 	// because Start-MpScan blocks until a (possibly hours-long) scan finishes.
-	defenderScanMu sync.Mutex
+	defenderScanMu     sync.Mutex
+	defenderStatusMu   sync.Mutex
+	manualCheckinMu    sync.Mutex
+	configMu           sync.RWMutex
+	configRefreshMu    sync.Mutex
+	cachedConfig       *api.ConfigResponse
+	defenderCommands   chan struct{}
+	defenderDetections chan struct{}
 }
 
 func newDaemon(cfg *config.Config) *daemon {
@@ -198,9 +206,11 @@ func newDaemon(cfg *config.Config) *daemon {
 		}
 	}
 	return &daemon{
-		cfg:    cfg,
-		client: api.New(cfg.PortalURL),
-		stopCh: make(chan struct{}),
+		cfg:                cfg,
+		client:             api.New(cfg.PortalURL),
+		stopCh:             make(chan struct{}),
+		defenderCommands:   make(chan struct{}, 1),
+		defenderDetections: make(chan struct{}, 1),
 	}
 }
 
@@ -225,8 +235,7 @@ func (d *daemon) run() {
 	} else {
 		d.ipcSrv.On("refresh_config", func(msg ipc.Message) {
 			logger.Info("refresh_config received from UI — re-fetching config")
-			d.refreshConfig()
-			d.ipcSrv.Broadcast(ipc.Message{Type: "config_changed"})
+			d.refreshConfigAndNotify()
 		})
 		d.ipcSrv.On("scan_network", func(msg ipc.Message) {
 			logger.Info("Manual network scan request received from UI")
@@ -256,12 +265,7 @@ func (d *daemon) run() {
 		}
 		return
 	}
-	go func() {
-		d.refreshConfig()
-		if d.ipcSrv != nil {
-			d.ipcSrv.Broadcast(ipc.Message{Type: "config_changed"})
-		}
-	}()
+	go d.configRefreshLoop()
 
 	// Auto-update checker.
 	updateCtx, cancelUpdate := context.WithCancel(context.Background())
@@ -275,6 +279,7 @@ func (d *daemon) run() {
 	go d.heartbeatLoop()
 	go d.defenderStatusLoop()
 	go d.defenderCommandLoop()
+	go d.defenderDetectionLoop()
 	go d.networkScannerLoop()
 	go d.trayUIWatchdogLoop()
 
@@ -290,14 +295,16 @@ func (d *daemon) defenderCommandLoop() {
 	if runtime.GOOS != "windows" {
 		return
 	}
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
 	for {
 		d.processDefenderCommands()
+		timer := time.NewTimer(routineInterval())
 		select {
 		case <-d.stopCh:
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-d.defenderCommands:
+			timer.Stop()
+		case <-timer.C:
 		}
 	}
 }
@@ -381,14 +388,14 @@ func (d *daemon) defenderStatusLoop() {
 	// Report immediately after service startup, then periodically. Previously
 	// the service never called the Defender endpoints, leaving every enrolled
 	// device permanently at "Awaiting report".
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
 	for {
 		d.reportDefenderStatus()
+		timer := time.NewTimer(routineInterval())
 		select {
 		case <-d.stopCh:
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
@@ -397,6 +404,10 @@ func (d *daemon) reportDefenderStatus() {
 	if runtime.GOOS != "windows" {
 		return
 	}
+	if !d.defenderStatusMu.TryLock() {
+		return
+	}
+	defer d.defenderStatusMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	policy, err := d.client.GetDefenderPolicy(ctx)
 	cancel()
@@ -440,12 +451,8 @@ func (d *daemon) networkScannerLoop() {
 	defer ticker.Stop()
 	var lastScan time.Time
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		cfg, err := d.client.GetConfig(ctx)
-		cancel()
-		if err != nil {
-			logger.Warn("Interval network scan config lookup: %v", err)
-		} else if cfg.NetworkScannerEnabled {
+		cfg := d.currentConfig()
+		if cfg != nil && cfg.NetworkScannerEnabled {
 			interval := time.Duration(cfg.NetworkScanIntervalMinutes) * time.Minute
 			if interval < 5*time.Minute {
 				interval = 5 * time.Minute
@@ -673,10 +680,14 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 		// nothing — pong is sent in the goroutine above
 	case "config_changed":
 		logger.Info("config_changed received — re-fetching config")
-		go d.refreshConfig()
-		if d.ipcSrv != nil {
-			d.ipcSrv.Broadcast(ipc.Message{Type: "config_changed"})
+		go d.refreshConfigAndNotify()
+	case "defender_commands":
+		select {
+		case d.defenderCommands <- struct{}{}:
+		default:
 		}
+	case "checkin_now":
+		go d.fullTrayCheckin()
 	case "chat_open":
 		logger.Info("chat_open received")
 		rawPayload, _ := json.Marshal(msg)
@@ -720,7 +731,7 @@ func (d *daemon) rmmVersionLoop(ctx context.Context) {
 	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
 		return
 	}
-	ticker := time.NewTicker(30 * time.Minute)
+	ticker := time.NewTicker(2 * time.Hour)
 	defer ticker.Stop()
 	for {
 		d.rmmInstallMu.Lock()
@@ -909,35 +920,76 @@ func (d *daemon) consumePendingUIMessage() *ipc.Message {
 }
 
 func (d *daemon) heartbeatLoop() {
-	ticker := time.NewTicker(heartbeatInterval)
-	defer ticker.Stop()
 	for {
+		facts := collectFacts()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := d.client.Heartbeat(ctx, api.HeartbeatRequest{
+			ConsoleUser: facts.ConsoleUser, AgentVersion: updater.AgentVersion,
+		}); err != nil {
+			logger.Warn("Heartbeat: %v", err)
+		}
+		cancel()
+		timer := time.NewTimer(routineInterval())
 		select {
 		case <-d.stopCh:
+			timer.Stop()
 			return
-		case <-ticker.C:
-			facts := collectFacts()
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := d.client.Heartbeat(ctx, api.HeartbeatRequest{
-				ConsoleUser:  facts.ConsoleUser,
-				AgentVersion: updater.AgentVersion,
-			}); err != nil {
-				logger.Warn("Heartbeat: %v", err)
-			}
-			cancel()
+		case <-timer.C:
 		}
 	}
 }
 
-func (d *daemon) refreshConfig() {
+// Spread routine reports across the fleet without delaying urgent channels.
+func routineInterval() time.Duration {
+	return heartbeatInterval + time.Duration(rand.Int63n(int64(time.Hour)))
+}
+
+func (d *daemon) configRefreshLoop() {
+	for {
+		wait := configRefreshInterval + time.Duration(rand.Int63n(int64(30*time.Minute)))
+		if !d.refreshConfigAndNotify() {
+			wait = time.Minute + time.Duration(rand.Int63n(int64(4*time.Minute)))
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-d.stopCh:
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+func (d *daemon) currentConfig() *api.ConfigResponse {
+	d.configMu.RLock()
+	defer d.configMu.RUnlock()
+	return d.cachedConfig
+}
+
+func (d *daemon) refreshConfigAndNotify() bool {
+	if !d.refreshConfig() {
+		return false
+	}
+	if d.ipcSrv != nil {
+		d.ipcSrv.Broadcast(ipc.Message{Type: "config_changed"})
+	}
+	return true
+}
+
+func (d *daemon) refreshConfig() bool {
+	d.configRefreshMu.Lock()
+	defer d.configRefreshMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	logger.Debug("refreshConfig: GET %s/api/tray/config", d.cfg.PortalURL)
 	cfg, err := d.client.GetConfig(ctx)
 	if err != nil {
 		logger.Warn("GetConfig: %v", err)
-		return
+		return false
 	}
+	d.configMu.Lock()
+	d.cachedConfig = cfg
+	d.configMu.Unlock()
 	// Persist config to disk for the UI agent to read.
 	data, _ := json.Marshal(cfg)
 	dir := stateDir()
@@ -947,6 +999,7 @@ func (d *daemon) refreshConfig() {
 	logger.Info("Config refreshed (version %d)", cfg.Version)
 	logger.Debug("refreshConfig: wrote %d bytes to %s, menu_nodes=%d, chat_enabled=%t, branding_icon_url=%q",
 		len(data), path, len(cfg.Menu), cfg.ChatEnabled, cfg.BrandingIconURL)
+	return true
 }
 
 // -----------------------------------------------------------------

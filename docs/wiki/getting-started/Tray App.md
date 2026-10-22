@@ -52,6 +52,37 @@ Every endpoint runs **two** cooperating components:
 
 ---
 
+## Reporting frequency and Check in now
+
+Updated agents separate routine reporting from urgent work:
+
+| Work | Automatic schedule |
+| --- | --- |
+| Tray facts/heartbeat and routine Defender status | Every 1–2 hours, with jitter |
+| Tray configuration and icon | Every 6 hours, plus up to 30 minutes of jitter |
+| RMM device facts and thermal status | Every 2 hours |
+| RMM inventory due lookup | Every 2 hours; snapshots remain daily unless requested |
+| Defender detections | Local Windows events trigger immediate uploads; failed uploads retry |
+| Script execution | Existing 25-second RMM long poll; queued scripts wake it early |
+
+WebSocket keepalives, chats, administrator commands, and configured monitoring
+checks/event-log collection retain their responsive channels. Defender commands
+use WebSocket wakeups instead of a 15-second REST poll; a 1–2 hour fallback
+poll recovers missed wakeups. Startup, explicit configuration changes, and manual
+refreshes can update the tray sooner than its automatic six-hour interval.
+
+Technicians with permission to run RMM scripts can choose **Check in now** in
+the asset editor. It queues an audited task that performs device facts, thermal
+status, hardware/software inventory, configured checks, and Windows event logs
+without waiting for their timers. The tray service is also asked to refresh
+its facts, configuration, and Defender reports. Follow the task in the asset's
+run history to see completed or failed steps. The existing hardware/software
+**Refresh now** buttons use the same task. Normal schedules are unchanged.
+
+Deploy updated tray and RMM agents to activate these schedules and the native
+full-check-in task. Older RMM agents show an update-required result for the new
+task. A server-only update cannot replace an installed agent's timers.
+
 ## 2. Server-side data model
 
 Migration `migrations/235_tray_app.sql` creates four tables and two
