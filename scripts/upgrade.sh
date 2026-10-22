@@ -1050,6 +1050,20 @@ update_control_checkout() {
   echo "Updated the control checkout at ${PROJECT_ROOT} to ${target}." >&2
 }
 
+provision_gitea_for_revision() {
+  # The control checkout may be pinned or locally edited. Use the same
+  # fetched revision as the application, without modifying those local files.
+  local revision="$1" helper status=0
+  helper=$(mktemp "${UPDATER_STATE_DIR}/provision-gitea.XXXXXX") || return 1
+  if ! git show "${revision}:scripts/provision_gitea.sh" >"$helper"; then
+    rm -f "$helper"
+    return 1
+  fi
+  bash "$helper" "$ENV_FILE" || status=$?
+  rm -f "$helper"
+  return "$status"
+}
+
 verify_release_sources() {
   # Refuse a release whose Python does not even parse (for example a stray
   # "continue" outside a loop) before migrations run or any slot restarts.
@@ -1233,7 +1247,7 @@ redis_env_before=$(sha256sum "$ENV_FILE")
 bash "${SCRIPT_DIR}/provision_redis.sh" "$ENV_FILE"
 # Gitea for the RMM script library is optional: a failure is reported and
 # retried by the next upgrade, never blocks this one.
-bash "${SCRIPT_DIR}/provision_gitea.sh" "$ENV_FILE" \
+provision_gitea_for_revision "$TARGET_REVISION" \
   || echo "Warning: Gitea for RMM scripts was not set up or upgraded; the next upgrade retries." >&2
 redis_env_after=$(sha256sum "$ENV_FILE")
 UPGRADE_STARTED_AT=$(date --iso-8601=seconds)

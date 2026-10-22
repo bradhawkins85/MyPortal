@@ -479,7 +479,10 @@ connect_myportal() {
 
 main() {
   ENV_FILE="${1:?Usage: provision_gitea.sh ENV_FILE}"
-  managed_gitea || exit 0
+  if ! managed_gitea; then
+    info "Gitea provisioning skipped: GITEA_PROVISION is disabled or GITEA_BASE_URL points to another server; upload limits were not changed."
+    exit 0
+  fi
   if ! command -v systemctl >/dev/null 2>&1 || [[ ! -d /run/systemd/system ]]; then
     warn "Gitea needs systemd; skipping it. Set GITEA_* in ${ENV_FILE} to use another Gitea server."
     exit 1
@@ -514,6 +517,7 @@ main() {
     systemctl enable --now gitea.service >/dev/null 2>&1
   fi
   wait_for_gitea || { warn "Gitea did not start; see 'journalctl -u gitea'."; exit 1; }
+  info "Gitea repository upload limit: 1024 MiB per file (${GITEA_CONFIG})."
   connect_myportal
 }
 
