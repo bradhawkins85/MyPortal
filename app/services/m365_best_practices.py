@@ -3453,6 +3453,114 @@ async def _check_laps_enabled(token: str) -> dict[str, Any]:
                    "LAPS is not enabled; enable it under Devices → All Devices → Device Settings → Enable Local Admin Password Solution.")
 
 
+_REPORTED_EMAIL_NOTIFICATION_CHECK_ID = "bp_reported_email_support_notifications"
+_REPORTED_EMAIL_NOTIFICATION_CHECK_NAME = "Reported junk and phishing alerts notify IT support"
+_REPORTED_EMAIL_ALERT_NAMES = {
+    "junk": {"email reported by user as junk"},
+    "phishing": {
+        "email reported by user as malware or phish",
+        "email reported by user as phish",
+        "email reported by user as phishing",
+    },
+}
+
+
+def _reported_email_support_address() -> str:
+    address = get_settings().m365_it_support_external_email_address.strip().lower()
+    if not re.fullmatch(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+", address):
+        return ""
+    return address
+
+
+def _protection_alert_recipients(policy: Mapping[str, Any]) -> list[str]:
+    values = policy.get("NotifyUser") or []
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple)) or any(not isinstance(value, str) for value in values):
+        raise M365Error("The alert notification recipients could not be read safely; no recipients were replaced.")
+    # Preserve role recipients such as TenantAdmins as well as SMTP addresses.
+    return [value for value in values if value.strip()]
+
+
+async def _reported_email_notification_state(
+    scc_token: str, tenant_id: str, support: str
+) -> dict[str, Any]:
+    response = await _scc_invoke_command(scc_token, tenant_id, "Get-ProtectionAlert")
+    policies = []
+    found = set()
+    for policy in _exo_rows(response):
+        names = {str(policy.get(key) or "").strip().casefold() for key in ("Name", "DisplayName")}
+        kinds = {kind for kind, aliases in _REPORTED_EMAIL_ALERT_NAMES.items() if names & aliases}
+        if not kinds:
+            continue
+        found.update(kinds)
+        recipients = _protection_alert_recipients(policy)
+        compliant = (
+            not _coerce_exo_bool(policy.get("Disabled"))
+            and _coerce_exo_bool(policy.get("NotificationEnabled"))
+            and support in {_smtp_value(value) for value in recipients}
+        )
+        policies.append({"policy": policy, "recipients": recipients, "compliant": compliant})
+    missing = sorted(set(_REPORTED_EMAIL_ALERT_NAMES) - found)
+    return {"policies": policies, "missing": missing,
+            "compliant": not missing and all(row["compliant"] for row in policies)}
+
+
+async def _check_reported_email_support_notifications(scc_token: str, tenant_id: str) -> dict[str, Any]:
+    support = _reported_email_support_address()
+    if not support:
+        return _result(_REPORTED_EMAIL_NOTIFICATION_CHECK_ID, _REPORTED_EMAIL_NOTIFICATION_CHECK_NAME,
+                       STATUS_FAIL, "Configure a valid M365_IT_SUPPORT_EXTERNAL_EMAIL_ADDRESS for support notifications.")
+    state = await _reported_email_notification_state(scc_token, tenant_id, support)
+    if state["missing"]:
+        return _result(_REPORTED_EMAIL_NOTIFICATION_CHECK_ID, _REPORTED_EMAIL_NOTIFICATION_CHECK_NAME,
+                       STATUS_UNSUPPORTED, "Built-in reported-email alert policies are unavailable for: "
+                       + ", ".join(state["missing"]) + ". Check the tenant's Defender alert policies and licensing.")
+    return _result(_REPORTED_EMAIL_NOTIFICATION_CHECK_ID, _REPORTED_EMAIL_NOTIFICATION_CHECK_NAME,
+                   STATUS_PASS if state["compliant"] else STATUS_FAIL,
+                   f"Reported junk and phishing alert policies include {support} with email notifications enabled."
+                   if state["compliant"] else
+                   "Reported junk or phishing alert policies are disabled, have email notifications disabled, "
+                   "or do not include the configured support address. Existing recipients will be preserved.")
+
+
+async def _remediate_reported_email_support_notifications(
+    scc_token: str, tenant_id: str
+) -> tuple[bool, str]:
+    support = _reported_email_support_address()
+    if not support:
+        return False, "Configure a valid M365_IT_SUPPORT_EXTERNAL_EMAIL_ADDRESS before remediation."
+    state = await _reported_email_notification_state(scc_token, tenant_id, support)
+    if state["missing"]:
+        return False, ("Built-in reported-email alert policies are unavailable for "
+                       + ", ".join(state["missing"]) + "; no policies were changed. "
+                       "Check Defender alert policy availability and licensing.")
+    updates = []
+    for row in state["policies"]:
+        if row["compliant"]:
+            continue
+        policy = row["policy"]
+        identity = policy.get("Identity") or policy.get("Guid") or policy.get("Id") or policy.get("Name")
+        if not identity:
+            return False, "A reported-email alert policy has no usable identity; no policies were changed."
+        params: dict[str, Any] = {"Identity": identity}
+        if _coerce_exo_bool(policy.get("Disabled")):
+            params["Disabled"] = False
+        if not _coerce_exo_bool(policy.get("NotificationEnabled")):
+            params["NotificationEnabled"] = True
+        if support not in {_smtp_value(value) for value in row["recipients"]}:
+            params["NotifyUser"] = [*row["recipients"], support]
+        updates.append(params)
+    if not updates:
+        return True, "Reported junk and phishing alert notifications already include support."
+    for params in updates:
+        await _scc_invoke_command(scc_token, tenant_id, "Set-ProtectionAlert", params)
+    verified = await _reported_email_notification_state(scc_token, tenant_id, support)
+    if not verified["compliant"]:
+        return False, "Reported-email notification updates were submitted but are not fully visible. Wait for propagation and rerun the check."
+    return True, "Enabled reported junk and phishing email notifications for support, preserving existing recipients. Submit a test report to verify ticket delivery."
+
+
 # Name used when creating (and identifying) the MyPortal-managed protection alert policy.
 _BREAK_GLASS_ALERT_POLICY_NAME = "MyPortal – Break Glass Account Sign-In Alert"
 
@@ -5368,6 +5476,29 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": True,
         "remediation_type": "break_glass_alert_policy",
         "requires_licenses": [CAP_EXCHANGE_ONLINE_P2],
+    },
+    {
+        "id": _REPORTED_EMAIL_NOTIFICATION_CHECK_ID,
+        "name": _REPORTED_EMAIL_NOTIFICATION_CHECK_NAME,
+        "description": (
+            "Send Defender alert notification emails for user-reported junk and "
+            "phishing messages to the same support address used for admin consent "
+            "requests, in addition to each policy's existing notification recipients."
+        ),
+        "remediation": (
+            "Use Set-ProtectionAlert to add M365_IT_SUPPORT_EXTERNAL_EMAIL_ADDRESS "
+            "to the built-in reported junk and phishing policies, enabling the "
+            "policies and email notifications. Preserve existing recipients, "
+            "severity, thresholds and suppression settings. Requires Security & "
+            "Compliance alert policy management access. Test ticket delivery with "
+            "a reported message after remediation."
+        ),
+        "source": _check_reported_email_support_notifications,
+        "source_type": "scc",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_type": "reported_email_support_notifications",
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     # ------------------------------------------------------------------
     # Exchange Online (real auto-detection via EXO REST)
@@ -9985,6 +10116,14 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 )
                 success = False
                 outcome_message = str(exc)
+        elif bp.get("remediation_type") == "reported_email_support_notifications":
+            try:
+                success, outcome_message = await _remediate_reported_email_support_notifications(
+                    scc_tok, scc_tid
+                )
+            except M365Error as exc:
+                success = False
+                outcome_message = f"{exc} Verify Security & Compliance alert policy management access."
         else:
             success = False
             outcome_message = "Unknown SCC remediation type."
