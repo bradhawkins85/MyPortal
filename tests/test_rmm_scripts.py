@@ -15,6 +15,7 @@ from app.repositories import assets as assets_repo
 from app.repositories import company_variables as company_variables_repo
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_automation as automation_repo
+from app.repositories import rmm_inventory as inventory_repo
 from app.repositories import rmm_checks as checks_repo
 from app.repositories import rmm_patching as patch_repo
 from app.repositories import rmm_windows_updates as windows_updates_repo
@@ -365,7 +366,8 @@ async def sqlite_db(monkeypatch):
         "DROP TABLE rmm_onboarding_steps;\n" + steps_sql.replace("script_id INT NOT NULL", "script_id INT NULL") + ";\n"
         "ALTER TABLE rmm_onboarding_steps ADD COLUMN package_ids_json TEXT;"
     )
-    for name in ("508_rmm_script_run_as.sql", "509_rmm_ticket_script_runs.sql", "512_rmm_onboarding_skip_existing.sql"):
+    for name in ("508_rmm_script_run_as.sql", "509_rmm_ticket_script_runs.sql", "512_rmm_onboarding_skip_existing.sql",
+                 "517_rmm_onboarding_inventory_gate.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -374,7 +376,7 @@ async def sqlite_db(monkeypatch):
         INSERT INTO company_variable_values (company_id, variable_id, value) VALUES (1, 1, 'contoso');
     """)
     fake = _SqliteDb(conn)
-    for module in (rmm_repo, automation_repo, remote_repo, event_log_repo, event_log_rules_repo, checks_repo, tags_repo,
+    for module in (rmm_repo, automation_repo, inventory_repo, remote_repo, event_log_repo, event_log_rules_repo, checks_repo, tags_repo,
                    asset_fields_repo, company_variables_repo, assets_repo, deploy_repo, tray_repo, targeting_repo, patch_repo, chocolatey_sources,
                    chocolatey_catalog_repo, windows_updates_repo):
         monkeypatch.setattr(module, "db", fake)

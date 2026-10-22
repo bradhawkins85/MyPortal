@@ -493,14 +493,16 @@ by a schedule show the schedule's name in **Started by** in the run history.
 
 ### Onboarding scripts
 
-Onboarding scripts run once, the first time a device's RMM agent enrols with MyPortal (a
-reinstall that keeps the agent's identity does not run them again). Each company has its own
-ordered list of steps, and the steps run one at a time in that order: the next step is sent
+Onboarding scripts run once, after a device's RMM agent enrols with MyPortal and sends
+its first hardware and software inventory snapshot. A reinstall that keeps the agent's
+identity does not run them again. Each company has its own ordered list of steps, and the steps run one at a time in that order: the next step is sent
 only after the previous one reports back.
 
 Each step can run on **every device**, devices with **any of the chosen tags**, or
 **devices that match rules**. Existing steps keep their tag filters. A tag on the company
 counts for all of its devices. Devices outside the selection skip the step.
+Step targeting is evaluated after that first snapshot has been saved. Pending onboarding
+survives service restarts.
 Automatic tags are refreshed before tag matching; device rules use current inventory
 just before each step is queued.
 

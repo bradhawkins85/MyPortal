@@ -11,6 +11,8 @@ from app.repositories import rmm_automation as automation_repo
 from app.repositories import tags as tags_repo
 from app.services import rmm_automation as automation
 from app.services import rmm_scripts
+from app.services import rmm_inventory as inventory
+from tests.test_rmm_inventory import inventory_db, _snapshot  # noqa: F401 - fixture
 from app.services.rmm_scripts import RunRequestError
 from tests.test_rmm_scripts import POWERSHELL, _enrol, _sync, anyio_backend, sqlite_db  # noqa: F401 - fixtures
 
@@ -195,14 +197,21 @@ async def _finish_current(agent, exit_code=0):
 
 
 @pytest.mark.anyio
-async def test_onboarding_runs_steps_one_at_a_time_on_first_enrolment(sqlite_db, monkeypatch):
+async def test_onboarding_runs_steps_one_at_a_time_after_first_inventory(inventory_db, monkeypatch):
+    sqlite_db = inventory_db
     scripts = await _scripts(monkeypatch)
     await _onboarding_steps(sqlite_db, scripts)
     result, agent = await _enrol(sqlite_db)
     assert result["created"] is True
     onboarding_id = await automation.on_agent_enrolled(result["agent_id"])
     assert onboarding_id
+    assert await rmm_scripts.wait_for_jobs(agent, wait_seconds=0) == []
+    await automation.reconcile_onboarding()
+    pending = await automation_repo.get_onboarding_run(onboarding_id)
+    assert pending["current_index"] == -1
+    assert all(entry["status"] == "pending" for entry in pending["plan"])
 
+    await inventory.ingest(agent, _snapshot())
     first = await _finish_current(agent)
     assert first["name"] == "Setup" and first["parameters"] == {"Site": "Contoso", "Password": "pw"}
     second = await _finish_current(agent)
@@ -218,10 +227,53 @@ async def test_onboarding_runs_steps_one_at_a_time_on_first_enrolment(sqlite_db,
     assert [entry["tags"] for entry in onboarding["plan"]][:3] == [["Workstation"], ["Server", "Workstation"], ["Server"]]
     runs = await rmm_repo.list_runs(company_id=1)
     assert {run["run_source"] for run in runs} == {"onboarding"}
+    await inventory.ingest(agent, _snapshot())
+    assert len(await automation_repo.list_onboarding_runs(company_id=1)) == 1
+    assert await rmm_scripts.wait_for_jobs(agent, wait_seconds=0) == []
 
     # Enrolling again (a reinstall) does not onboard the device a second time.
     again, _agent = await _enrol(sqlite_db)
     assert again["created"] is False
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("existing", [False, True])
+async def test_automatic_onboarding_skip_existing_waits_for_software(inventory_db, monkeypatch, existing):
+    scripts = await _scripts(monkeypatch)
+    from tests.test_rmm_targeting_integration import condition, group
+
+    step_id = await automation.save_step(step_id=None, company_id=1, user_id=9, payload={
+        "script_id": scripts["Second"]["id"], "skip_existing_assets": True,
+        "target_mode": "rules",
+        "target_rules": group("and", condition("software.name", "contains", "Google Chrome")),
+    })
+    # Fix the cutoff so the test does not depend on database timestamp precision.
+    await inventory_db.execute(
+        "UPDATE rmm_onboarding_steps SET skip_existing_before = '2026-01-01 00:00:00' WHERE id = %s",
+        (step_id,),
+    )
+    result, agent = await _enrol(inventory_db)
+    await inventory_db.execute(
+        "UPDATE rmm_agents SET created_at = %s WHERE id = %s",
+        ("2020-01-01 00:00:00" if existing else "2026-10-01 00:00:00", agent["id"]),
+    )
+    onboarding_id = await automation.on_agent_enrolled(result["agent_id"])
+    # A refresh request creates an inventory row but has no collected snapshot.
+    await inventory.request_refresh(agent, 9)
+    await automation.reconcile_onboarding()
+    assert (await automation_repo.get_onboarding_run(onboarding_id))["current_index"] == -1
+    assert await rmm_scripts.wait_for_jobs(agent, wait_seconds=0) == []
+
+    await inventory.ingest(agent, _snapshot())
+    state = await automation_repo.get_onboarding_run(onboarding_id)
+    if existing:
+        assert state["status"] == "completed"
+        assert state["plan"][0]["status"] == "skipped"
+        assert "enrolled before" in state["plan"][0]["message"]
+        assert await rmm_scripts.wait_for_jobs(agent, wait_seconds=0) == []
+    else:
+        assert (await _finish_current(agent))["name"] == "Second"
+        assert (await automation_repo.get_onboarding_run(onboarding_id))["status"] == "completed"
 
 
 @pytest.mark.anyio

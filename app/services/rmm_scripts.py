@@ -891,7 +891,8 @@ async def enrol_agent(
     """Enrol (or re-enrol) the RMM agent installed alongside a tray device.
 
     ``created`` in the result is true the first time this agent enrols, which
-    is when its onboarding scripts start (see :mod:`app.services.rmm_automation`).
+    registers onboarding to start after its first inventory snapshot
+    (see :mod:`app.services.rmm_automation`).
     """
 
     company_id = tray_device.get("company_id")

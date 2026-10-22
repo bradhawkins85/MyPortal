@@ -100,7 +100,7 @@ async def test_onboarding_steps_save_run_as_and_queue_with_it(sqlite_db, monkeyp
     assert (await automation_repo.get_step(step_id))["run_as"] == "user"
     result, agent = await _enrol(sqlite_db)
     agent = await _capable(agent)
-    assert await automation.on_agent_enrolled(result["agent_id"])
+    assert await automation.start_onboarding(agent, started_by_user_id=9)
     jobs = await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
     assert [(job["name"], job["run_as"]) for job in jobs] == [("Whoami", "user")]
 
