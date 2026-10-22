@@ -1431,6 +1431,80 @@ async def run_due_scheduled_checks(now: datetime | None = None) -> int:
     return queued
 
 
+async def evaluate_check_now(check_id: int, *, requested_by_user_id: int | None = None) -> dict[str, Any]:
+    """Trigger one-off evaluation for a check across every matching active device.
+
+    Agent metrics are forced by queuing a full check-in; script checks are run
+    immediately and their next normal interval is kept intact; offline checks are
+    judged immediately against the current last check-in timestamp.
+    """
+
+    check = await repo.get_check(check_id, with_secrets=True)
+    if check is None:
+        return {"check_id": check_id, "kind": None, "matched": 0, "queued": 0}
+    kind = check.get("check_type")
+    agents = await repo.list_active_agents()
+    selected = await targeted_checks_for_agents([check], agents)
+    applicable = [
+        agent for agent in agents
+        if any(int(item["id"]) == int(check_id) for item in selected.get(int(agent["id"]), []))
+    ]
+    if not applicable:
+        return {"check_id": check_id, "kind": kind, "matched": 0, "queued": 0}
+    now = _utcnow()
+    queued = 0
+    from app.services import rmm_commands
+    for agent in applicable:
+        try:
+            if kind == "script":
+                state = {**_blank_state(), **(await repo.get_state(check_id, int(agent["id"])) or {})}
+                if state.get("run_id"):
+                   run = await rmm_repo.get_run(int(state["run_id"]))
+                   if run and run.get("status") in _RUN_WAITING:
+                       continue
+                   if run:
+                       state["run_id"] = None
+                       state = await record_result(check, agent, *script_outcome(check, run), now=now, state=state)
+                interval = timedelta(minutes=int((check.get("settings") or {}).get("interval_minutes")
+                                                 or DEFAULT_SCRIPT_INTERVAL))
+                state["next_run_at"] = now + interval
+                run_id, summary, attempted = await rmm_actions.run_script(
+                   script_id=check.get("check_script_id"),
+                   entries_encrypted=check.get("check_entries_encrypted"),
+                   inputs=check.get("check_inputs"),
+                   timeout_seconds=check.get("timeout_seconds"),
+                   agent=agent,
+                   run_source=RUN_SOURCE,
+                   extra_context=check_context(check, agent, ""),
+                )
+                state["run_id"] = run_id
+                if run_id is None:
+                   await repo.set_summary(int(check["id"]), summary)
+                else:
+                   queued += 1
+                await repo.save_state(int(check["id"]), int(agent["id"]), state)
+                if attempted:
+                   log_info("RMM check evaluated now", check_id=check_id, agent_id=agent["id"], run_id=run_id)
+            elif kind == "offline":
+                last_seen = agent.get("last_seen_utc")
+                if last_seen is None:
+                   problem, result = True, "Has never checked in"
+                else:
+                   away = now - last_seen
+                   problem = away >= timedelta(minutes=int(check.get("duration_minutes") or 30))
+                   result = f"Last checked in {_ago(away)} ago" if away >= timedelta(minutes=1) else "Checked in just now"
+                state = await repo.get_state(check_id, int(agent["id"])) or _blank_state()
+                await record_result(check, agent, problem, result, now=now, state=state, duration_minutes=0)
+                queued += 1
+            else:
+                run_id = await rmm_commands.queue_checkin({**agent, "asset_id": agent.get("asset_id")}, requested_by_user_id)
+                queued += 1
+                log_info("Queued RMM check-in to evaluate check now", check_id=check_id, agent_id=agent["id"], run_id=run_id)
+        except Exception as exc:  # noqa: BLE001 - one device must not stop the others
+            log_error("RMM check forced evaluation failed", check_id=check_id, agent_id=agent.get("id"), error=str(exc))
+    return {"check_id": check_id, "kind": kind, "matched": len(applicable), "queued": queued}
+
+
 async def tick() -> None:
     """Server-side checks; called by the RMM automation loop on one instance at a time."""
 

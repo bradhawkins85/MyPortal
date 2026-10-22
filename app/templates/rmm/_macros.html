@@ -222,6 +222,11 @@
     {%- if asset_id and not check.asset_id %}
     <a class="dropdown__item" role="menuitem" href="/rmm/checks?new=1&amp;asset_id={{ asset_id }}&amp;from={{ check.id }}#rmm-check-form">Change for this device</a>
     {%- endif %}
+    <form method="post" action="/rmm/checks/{{ check.id }}/evaluate" class="rmm-menu__form">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+      {% if asset_id %}<input type="hidden" name="return_asset_id" value="{{ asset_id }}">{% endif %}
+      <button class="dropdown__item" role="menuitem" type="submit">Evaluate now</button>
+    </form>
     {%- if check.can_edit %}
     <form method="post" action="/rmm/checks/{{ check.id }}/enabled" class="rmm-menu__form">
       {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}

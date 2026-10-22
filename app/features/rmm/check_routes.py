@@ -519,6 +519,29 @@ async def set_check_enabled(check_id: int, request: Request):
     return flash_redirect(_asset_back(form) or PAGE_PATH, f"{check['name']} turned {'on' if enabled else 'off'}.", "success")
 
 
+@router.post(PAGE_PATH + "/{check_id:int}/evaluate", response_class=HTMLResponse, summary="Force an RMM check to evaluate now")
+async def evaluate_check_now(check_id: int, request: Request):
+    context = await _load(request, write=True)
+    if isinstance(context, RedirectResponse):
+        return context
+    user, _company, company_id, _can_edit = context
+    check = await _editable_check(check_id, user, company_id)
+    form = await request.form()
+    result = await rmm_checks.evaluate_check_now(check_id, requested_by_user_id=user.get("id"))
+    await audit_service.record(
+        action="rmm.check.evaluate_now", request=request, user_id=user.get("id"),
+        entity_type="rmm_check", entity_id=check_id,
+        metadata={"name": check["name"], "kind": check.get("check_type"), "matched": result.get("matched"), "queued": result.get("queued")},
+    )
+    if result.get("queued"):
+        message = f"{check['name']} has been queued to evaluate now."
+    elif result.get("matched"):
+        message = f"{check['name']} matched devices, but nothing was queued to run right away."
+    else:
+        message = f"{check['name']} is not active on any devices right now."
+    return flash_redirect(_asset_back(form) or PAGE_PATH, message, "success")
+
+
 @router.post(PAGE_PATH + "/{check_id:int}/delete", response_class=HTMLResponse, summary="Delete an RMM check")
 async def delete_check(check_id: int, request: Request):
     context = await _load(request, write=True)
