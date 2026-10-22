@@ -1257,7 +1257,7 @@ def test_control_checkout_fast_forwards_so_new_upgrade_steps_run(tmp_path):
     # Already current: nothing to re-run.
     assert _update_control_checkout(control, target).returncode == 1
     main_flow = SCRIPT[SCRIPT.index("validate_required_configuration\ngit fetch") :]
-    assert main_flow.index("update_control_checkout") < main_flow.index('bash "${SCRIPT_DIR}/provision_gitea.sh"')
+    assert main_flow.index("update_control_checkout") < main_flow.index('provision_gitea_for_revision "$TARGET_REVISION"')
     assert 'MYPORTAL_UPGRADE_REEXEC=1 exec bash "${SCRIPT_DIR}/upgrade.sh" "${UPGRADE_ARGS[@]}"' in main_flow
 
 
@@ -1267,3 +1267,33 @@ def test_control_checkout_with_local_changes_is_left_alone(tmp_path):
     result = _update_control_checkout(control, target)
     assert result.returncode == 1 and "local changes" in result.stderr
     assert (control / "upgrade.sh").read_text() == "edited\n"
+
+
+def test_gitea_provisioning_uses_target_revision_with_dirty_control_checkout(tmp_path):
+    origin, control, _target = _control_checkouts(tmp_path)
+    helper = origin / "scripts/provision_gitea.sh"
+    helper.parent.mkdir()
+    helper.write_text('printf "target settings\\n" > "$1"\nexit "${HELPER_STATUS:-0}"\n')
+    subprocess.run(["git", "add", "."], cwd=origin, check=True)
+    subprocess.run(["git", "commit", "-qm", "new Gitea settings"], cwd=origin, check=True)
+    subprocess.run(["git", "fetch", "-q", "origin", "main"], cwd=control, check=True)
+    stale_helper = control / "scripts/provision_gitea.sh"
+    stale_helper.parent.mkdir()
+    stale_helper.write_text('echo "stale helper ran" >&2\nexit 99\n')
+    (control / "upgrade.sh").write_text("local edits\n")
+    state = tmp_path / "private-state"
+    state.mkdir(mode=0o700)
+    config = tmp_path / "config"
+    function = SCRIPT[SCRIPT.index("provision_gitea_for_revision() {") : SCRIPT.index("\nverify_release_sources()")]
+    for status in (0, 17):
+        result = subprocess.run(
+            ["bash", "-c", 'set -Eeuo pipefail\n' + function + '\nprovision_gitea_for_revision origin/main'],
+            cwd=control, text=True, capture_output=True, check=False,
+            env={**os.environ, "UPDATER_STATE_DIR": str(state), "ENV_FILE": str(config), "HELPER_STATUS": str(status)},
+        )
+        assert result.returncode == status, result.stderr
+        assert config.read_text() == "target settings\n"
+        assert not list(state.iterdir())
+        assert "stale helper ran" not in result.stderr
+    assert stale_helper.read_text() == 'echo "stale helper ran" >&2\nexit 99\n'
+    assert (control / "upgrade.sh").read_text() == "local edits\n"

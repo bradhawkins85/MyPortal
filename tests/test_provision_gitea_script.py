@@ -52,7 +52,9 @@ def test_external_gitea_is_left_alone(tmp_path):
     contents = "GITEA_BASE_URL=https://git.example.com\nGITEA_API_TOKEN=keep\n"
     path = env_file(tmp_path, contents)
     result = subprocess.run(["bash", str(SCRIPT), str(path)], text=True, capture_output=True, check=False)
-    assert result.returncode == 0 and result.stdout == "" and result.stderr == ""
+    assert result.returncode == 0 and result.stdout == ""
+    assert "Gitea provisioning skipped" in result.stderr
+    assert "upload limits were not changed" in result.stderr
     assert path.read_text(encoding="utf-8") == contents
 
 
@@ -204,7 +206,7 @@ def test_read_only_token_is_replaced_once(tmp_path, scopes, replaced):
 
 def test_baremetal_upgrade_provisions_gitea_without_blocking_and_nginx_serves_it():
     upgrade = (ROOT / "scripts/upgrade.sh").read_text()
-    call = upgrade.index('bash "${SCRIPT_DIR}/provision_gitea.sh" "$ENV_FILE" \\\n  || echo')
+    call = upgrade.index('provision_gitea_for_revision "$TARGET_REVISION" \\\n  || echo')
     # Before the env checksum, so new Gitea settings reload the workers.
     assert upgrade.index('bash "${SCRIPT_DIR}/provision_redis.sh"') < call < upgrade.index("redis_env_after=")
     nginx = (ROOT / "deploy/nginx/myportal-bluegreen.conf").read_text()
