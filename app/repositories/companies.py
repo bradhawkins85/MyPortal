@@ -245,6 +245,9 @@ async def list_companies(include_archived: bool = False) -> List[dict[str, Any]]
 
 async def create_company(**data: Any) -> dict[str, Any]:
     _validate_company_fields(data)
+    # Apply to every creation path (including imports), while allowing an
+    # explicit opt-out. Updates must keep the admin's saved preference.
+    data.setdefault("rmm_agent_auto_deploy", 1)
     log_info("Creating company", name=data.get("name"))
     email_domains = data.pop("email_domains", None) or []
     email_domains = normalise_email_domains(email_domains)
