@@ -104,6 +104,7 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
 # Permissions from the legacy provisioning inventory that the named baseline
 # omitted. They remain explicit and additive for compatibility.
 _PROVISION_ONLY = {
+    "Policy.ReadWrite.ConsentRequest": ("admin_consent_requests", "GET/PUT /policies/adminConsentRequestPolicy", "write", "required"),
     "Application.ReadWrite.OwnedBy": ("credential_rotation", "POST /applications/{id}/addPassword", "write", "bootstrap-only"),
     "Organization.Read.All": ("tenant_inventory", "GET /organization", "read", "required"),
     "MailboxSettings.Read": ("mailbox_reporting", "GET /users/{id}/mailboxSettings", "read", "required"),
@@ -160,10 +161,20 @@ def _entry(resource: str, permission_type: str, name: str) -> RequiredPermission
                               "Tenant administrator/admin consent", modes, disposition)
 
 
+# These permissions are resolved by name from the tenant's Graph service
+# principal; they do not need a static fallback role ID.
+GRAPH_APPLICATION_DYNAMIC_PERMISSIONS = frozenset({"Policy.ReadWrite.ConsentRequest"})
+
 _named_baseline = [
     _entry("Microsoft Graph", "Application", name)
     for name in GRAPH_APPLICATION_PERMISSION_IDS
 ]
+# Resolve this role by name from the tenant's Graph service principal during
+# provisioning/repair rather than hard-coding an unverified role identifier.
+_named_baseline.extend(
+    _entry("Microsoft Graph", "Application", name)
+    for name in sorted(GRAPH_APPLICATION_DYNAMIC_PERMISSIONS)
+)
 
 # Purview compliance/eDiscovery cmdlets do not support this app-only execution
 # route.  In particular, Microsoft Exchange Online Protection does not expose

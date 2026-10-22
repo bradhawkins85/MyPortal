@@ -1,5 +1,6 @@
 from app.services.m365_access_baseline import (
     GRAPH_APPLICATION_PERMISSION_IDS,
+    GRAPH_APPLICATION_DYNAMIC_PERMISSIONS,
     REQUIRED_DIRECTORY_ROLES,
     REQUIRED_PERMISSIONS,
 )
@@ -10,7 +11,7 @@ def test_required_access_baseline_contains_only_permissions_used_by_myportal():
     entries = {(item.permission_type, item.resource, item.name) for item in REQUIRED_PERMISSIONS}
     expected = {
         ("Application", "Microsoft Graph", name)
-        for name in GRAPH_APPLICATION_PERMISSION_IDS
+        for name in set(GRAPH_APPLICATION_PERMISSION_IDS) | GRAPH_APPLICATION_DYNAMIC_PERMISSIONS
     }
 
     assert entries == expected

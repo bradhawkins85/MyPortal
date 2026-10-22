@@ -38,6 +38,7 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
 from app.services.m365_access_baseline import (
     GRAPH_APPLICATION_PERMISSION_IDS,
+    GRAPH_APPLICATION_DYNAMIC_PERMISSIONS,
     PERMISSION_CONTRACT,
     REQUIRED_DIRECTORY_ROLES,
     RESOURCE_APP_IDS,
@@ -2206,6 +2207,7 @@ async def ensure_graph_app_roles_on_manifest(company_id: int, access_token: str)
         # manifest invalid, so filter exactly as provisioning does.
         _, graph_sp_role_ids = await _get_sp_app_role_ids(access_token, _GRAPH_APP_ID)
         roles = [r for r in _PROVISION_APP_ROLES if _is_graph_role_grantable(r, graph_sp_role_ids)]
+        roles.extend(await _get_dynamic_graph_app_role_ids(access_token))
         added = await _merge_manifest_scopes(
             access_token, client_id, _GRAPH_APP_ID, roles, access_type="Role",
         )
@@ -6164,6 +6166,22 @@ async def _ensure_teams_service_admin_role(
         return False
 
 
+async def _get_dynamic_graph_app_role_ids(access_token: str) -> set[str]:
+    """Resolve named additions without treating a fallback GUID as authority."""
+    response = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id,appRoles",
+    )
+    return {
+        str(role["id"])
+        for principal in response.get("value", [])
+        for role in principal.get("appRoles", [])
+        if role.get("id") and role.get("value") in GRAPH_APPLICATION_DYNAMIC_PERMISSIONS
+        and role.get("isEnabled", True) and "Application" in role.get("allowedMemberTypes", ["Application"])
+    }
+
+
 async def try_grant_missing_permissions(
     company_id: int,
     access_token: str,
@@ -6232,6 +6250,7 @@ async def try_grant_missing_permissions(
         }
 
         required_roles: set[str] = set(_PROVISION_APP_ROLES)
+        required_roles.update(await _get_dynamic_graph_app_role_ids(access_token))
         missing: list[str] = sorted(required_roles - assigned_roles)
 
         # Look up the Exchange Online service principal so its ManageAsApp
