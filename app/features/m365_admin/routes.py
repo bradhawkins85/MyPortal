@@ -865,6 +865,23 @@ async def retry_failed_search(request_id: int, request: Request):
     return flash_redirect("/m365/spam-purge", "Compliance search retry queued.", "success")
 
 
+@router.post("/m365/spam-purge/{request_id}/verify")
+async def verify_purge_result(request_id: int, request: Request):
+    user, company_id, redirect = await _context(request)
+    if redirect:
+        return redirect
+    try:
+        await purge_service.start_verification(request_id, company_id)
+    except (LookupError, ValueError, m365_service.M365Error) as exc:
+        return flash_redirect("/m365/spam-purge", str(exc), "error")
+    await audit_service.record(
+        action="m365.spam_purge.verify", request=request, user_id=int(user["id"]),
+        entity_type="m365_spam_purge_request", entity_id=request_id,
+        after={"verification_only": True},
+    )
+    return flash_redirect("/m365/spam-purge", "Purge verification queued. No new deletion will be submitted.", "success")
+
+
 _REPORTED_KINDS = {"all", "phish", "junk"}
 _REPORTED_IGNORED_FILTERS = {"hide", "show", "only"}
 

@@ -105,6 +105,69 @@ async def test_api_start_search_returns_service_unavailable_for_preflight_error(
     assert exc_info.value.detail == "Purview preflight did not pass"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_verify_route_queues_inspection_without_purge_confirmation(monkeypatch):
+    request = object()
+    monkeypatch.setattr(routes, "_context", AsyncMock(return_value=({"id": 9}, 2, None)))
+    verify = AsyncMock()
+    purge = AsyncMock()
+    audit = AsyncMock()
+    monkeypatch.setattr(service, "start_verification", verify)
+    monkeypatch.setattr(service, "start_purge", purge)
+    monkeypatch.setattr(routes.audit_service, "record", audit)
+
+    response = await routes.verify_purge_result(7, request)
+
+    assert response.status_code == 303
+    verify.assert_awaited_once_with(7, 2)
+    purge.assert_not_awaited()
+    assert audit.await_args.kwargs["action"] == "m365.spam_purge.verify"
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("error, expected", [(LookupError("missing"), 404), (ValueError("unfinished"), 409)])
+async def test_verify_api_returns_ownership_and_state_errors(monkeypatch, error, expected):
+    monkeypatch.setattr(api_routes, "_company_id", AsyncMock(return_value=2))
+    monkeypatch.setattr(service, "start_verification", AsyncMock(side_effect=error))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await api_routes.verify_purge(7, object(), {})
+    assert exc_info.value.status_code == expected
+
+
+@pytest.mark.parametrize("purge_status", ["completed", "needs_review"])
+@pytest.mark.parametrize("has_report", [False, True])
+def test_purge_template_flags_unchanged_results_and_offers_verification(purge_status, has_report):
+    from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
+
+    environment = Environment(loader=ChoiceLoader([
+        DictLoader({"base.html": "{% block content %}{% endblock %}"}),
+        FileSystemLoader("app/templates"),
+    ]), autoescape=True)
+    source = environment.get_template("m365/spam_purge.html").render(requests=[{
+        "id": 7, "created_by": 9, "search_status": "completed", "purge_status": purge_status,
+        "matched_items": 1, "matched_size": 0, "removed_items": 0,
+        "search_details": {}, "purge_details": {
+            "operation_url": "https://graph.microsoft.com/operation",
+            "operation": {"status": "succeeded"}, "remaining_items": 1,
+            "remaining_items_unknown": False,
+            **({"summary": {"location_count": 0, "attempted_items": 0, "purged_items": 0},
+                "report_no_op": True, "removed_items_source": "purge_report"} if has_report else {}),
+        },
+    }], csrf_token="csrf-test")
+
+    assert 'status--warning">Needs review' in source
+    assert 'action="/m365/spam-purge/7/verify"' in source
+    assert 'value="csrf-test"' in source
+    assert 'action="/m365/spam-purge/7/purge"' not in source
+    assert "Microsoft job status" in source and "succeeded" in source
+    if has_report:
+        assert "Locations targeted</dt><dd>0" in source
+        assert "Items attempted</dt><dd>0" in source
+        assert "Removed (Microsoft report)" in source
+        assert "No deletion was performed" in source
+
+
 def test_domain_read_all_is_provisioned_and_visible_in_diagnostics():
     domain_read_all = "dbb9058a-0e50-45d7-ae91-66909b5d4664"
 
@@ -310,7 +373,7 @@ def test_jwt_appid_returns_none_when_claim_absent():
 
 def test_spam_purge_discloses_limits_retention_and_unknown_counts():
     source = open("app/templates/m365/spam_purge.html", encoding="utf-8").read()
-    assert "Up to 10 items/mailbox/action" in source
+    assert "Up to 100 items/mailbox/action" in source
     assert "Holds and retention" in source
     assert "Remaining:" in source and "Unknown" in source
     assert "does not guarantee every match was removed" in source

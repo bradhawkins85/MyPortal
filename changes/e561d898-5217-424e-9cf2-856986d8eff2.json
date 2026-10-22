@@ -1,0 +1,7 @@
+{
+  "guid": "e561d898-5217-424e-9cf2-856986d8eff2",
+  "occurred_at": "2026-10-22T00:46Z",
+  "change_type": "Fix",
+  "summary": "Spam purge: bind reviewed mailbox sources and validate their fresh estimate before deletion; detect empty jobs from Microsoft report counters and verify existing purges without submitting another deletion.",
+  "content_hash": "d14a23f1a307feb3d5736e5983bc1639dd71e6c692c47e6be3b8393838a17005"
+}

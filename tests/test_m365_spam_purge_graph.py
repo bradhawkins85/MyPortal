@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from unittest.mock import AsyncMock
 
 import httpx
@@ -27,10 +28,11 @@ def repo(monkeypatch):
     state: dict = {"request": None, "updates": []}
 
     async def get_request(_id):
-        return state["request"]
+        return deepcopy(state["request"])
 
     async def update_request(_id, values):
-        state["updates"].append(values)
+        state["updates"].append(deepcopy(values))
+        state["request"].update(deepcopy(values))
 
     monkeypatch.setattr(service.purge_repo, "get_request", get_request)
     monkeypatch.setattr(service.purge_repo, "update_request", update_request)
@@ -94,12 +96,17 @@ async def test_run_search_records_graph_role_error_with_remediation(monkeypatch,
 @pytest.mark.anyio("asyncio")
 async def test_run_purge_submits_once_and_reports_remaining_from_reestimate(monkeypatch, repo):
     repo["request"] = {"id": 8, "company_id": 2, "matched_items": 12,
-                       "search_details": {"case_id": CASE, "search_id": SEARCH}}
+                       "search_details": {"case_id": CASE, "search_id": SEARCH,
+                                          "locations": [{"location": "alice@example.com", "count": 12}]}}
     start = AsyncMock(return_value=OPERATION)
     monkeypatch.setattr(ediscovery, "start_purge", start)
     operations = [{"status": "running"}, {"status": "succeeded"}]
     monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(side_effect=lambda *_a: operations.pop(0)))
-    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value={"indexedItemCount": 2}))
+    monkeypatch.setattr(ediscovery, "bind_purge_mailboxes", AsyncMock())
+    monkeypatch.setattr(service, "_estimate", AsyncMock(side_effect=[
+        {"status": "succeeded", "indexedItemCount": 12, "mailboxCount": 1},
+        *[{"status": "succeeded", "indexedItemCount": 2}] * 3,
+    ]))
     folder_assistant = AsyncMock()
     monkeypatch.setattr(service, "_run_managed_folder_assistant", folder_assistant)
 
@@ -107,10 +114,11 @@ async def test_run_purge_submits_once_and_reports_remaining_from_reestimate(monk
 
     start.assert_awaited_once_with("tok", CASE, SEARCH)
     final = repo["updates"][-1]
-    assert final["purge_status"] == "completed"
+    assert final["purge_status"] == "needs_review"
     assert final["removed_items"] == 10
     assert final["purge_details"]["remaining_items"] == 2
     assert final["purge_details"]["operation_url"] == OPERATION
+    assert final["purge_details"]["verification_attempts"] == 3
     folder_assistant.assert_awaited_once_with(8)
 
 
@@ -122,7 +130,7 @@ async def test_purge_retry_reconciles_remote_success_without_second_purge(monkey
     start = AsyncMock()
     monkeypatch.setattr(ediscovery, "start_purge", start)
     monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(return_value={"status": "succeeded"}))
-    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value={"indexedItemCount": 0}))
+    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value={"status": "succeeded", "indexedItemCount": 0}))
     monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
 
     await service._run_purge(8)
@@ -134,20 +142,24 @@ async def test_purge_retry_reconciles_remote_success_without_second_purge(monkey
 @pytest.mark.anyio("asyncio")
 async def test_purge_resubmits_after_remote_failure(monkeypatch, repo):
     repo["request"] = {"id": 8, "company_id": 2, "matched_items": 3,
-                       "search_details": {"case_id": CASE, "search_id": SEARCH},
+                       "search_details": {"case_id": CASE, "search_id": SEARCH,
+                                          "locations": [{"location": "alice@example.com", "count": 3}]},
                        "purge_details": {"operation_url": OPERATION}}
     start = AsyncMock(return_value=OPERATION)
     monkeypatch.setattr(ediscovery, "start_purge", start)
     operations = [{"status": "failed"}, {"status": "succeeded"}]
     monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(side_effect=lambda *_a: operations.pop(0)))
-    monkeypatch.setattr(service, "_estimate", AsyncMock(side_effect=TimeoutError("slow")))
+    monkeypatch.setattr(ediscovery, "bind_purge_mailboxes", AsyncMock())
+    monkeypatch.setattr(service, "_estimate", AsyncMock(side_effect=[
+        {"status": "succeeded", "indexedItemCount": 3, "mailboxCount": 1}, TimeoutError("slow"),
+    ]))
     monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
 
     await service._run_purge(8)
 
     start.assert_awaited_once()
     final = repo["updates"][-1]
-    assert final["purge_status"] == "completed"
+    assert final["purge_status"] == "needs_review"
     assert final["purge_details"]["remaining_items_unknown"] is True
 
 
@@ -160,6 +172,202 @@ async def test_purge_requires_graph_search_ids(repo):
     final = repo["updates"][-1]
     assert final["purge_status"] == "failed"
     assert "run the search again" in final["error_message"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_successful_job_with_one_unchanged_match_needs_review(monkeypatch, repo):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH},
+        "purge_details": {"operation_url": OPERATION},
+    }
+    start = AsyncMock()
+    monkeypatch.setattr(ediscovery, "start_purge", start)
+    monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(return_value={"status": "succeeded"}))
+    estimate = AsyncMock(return_value={"status": "succeeded", "indexedItemCount": 1})
+    monkeypatch.setattr(service, "_estimate", estimate)
+    monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
+
+    await service._run_purge(8)
+
+    final = repo["request"]
+    assert final["purge_status"] == "needs_review"
+    assert final["removed_items"] == 0
+    assert final["purge_details"]["remaining_items"] == 1
+    assert final["purge_details"]["operation"]["status"] == "succeeded"
+    assert "Outlook on the web" in final["error_message"]
+    assert estimate.await_count == 3
+    start.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_purge_cleans_up_before_verification_and_waits_for_indexing(monkeypatch, repo):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH},
+        "purge_details": {"operation_url": OPERATION},
+    }
+    monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(return_value={"status": "succeeded"}))
+    events = []
+
+    async def cleanup(_id):
+        events.append("cleanup")
+        details = dict(repo["request"]["purge_details"])
+        details["managed_folder_assistant_mailboxes"] = ["a@example.com"]
+        await service.purge_repo.update_request(8, {"purge_details": details})
+
+    async def estimate(*_args):
+        events.append("estimate")
+        return {"status": "succeeded", "indexedItemCount": 1 if len(events) == 2 else 0}
+
+    monkeypatch.setattr(service, "_run_managed_folder_assistant", cleanup)
+    monkeypatch.setattr(service, "_estimate", estimate)
+
+    await service._run_purge(8)
+
+    assert events == ["cleanup", "estimate", "estimate"]
+    assert repo["request"]["purge_status"] == "completed"
+    assert repo["request"]["removed_items"] == 1
+    assert repo["request"]["purge_details"]["managed_folder_assistant_mailboxes"] == ["a@example.com"]
+    service.asyncio.sleep.assert_awaited_once_with(service.POLL_INTERVAL_SECONDS)
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("estimate", [
+    {"status": "failed", "indexedItemCount": 0},
+    {"status": "partiallySucceeded", "indexedItemCount": 0},
+    {"status": "succeeded"},
+    {"status": "succeeded", "indexedItemCount": None},
+    {"status": "succeeded", "indexedItemCount": -1},
+    {"status": "succeeded", "indexedItemCount": "invalid"},
+    {"status": "succeeded", "indexedItemCount": False},
+])
+async def test_bad_verification_never_reports_all_messages_removed(monkeypatch, repo, estimate):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH},
+        "purge_details": {"operation_url": OPERATION},
+    }
+    monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(return_value={"status": "succeeded"}))
+    monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
+    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value=estimate))
+
+    await service._run_purge(8)
+
+    final = repo["request"]
+    assert final["purge_status"] == "needs_review"
+    assert final["removed_items"] == 0
+    assert final["purge_details"]["remaining_items"] is None
+    assert final["purge_details"]["removed_items_unknown"] is True
+    assert final["purge_details"]["verification_error"]
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("remote_status", ["succeeded", "partiallySucceeded", "failed", "submissionFailed"])
+async def test_verify_existing_job_never_submits_deletion(monkeypatch, repo, remote_status):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1, "purge_status": "completed",
+        "search_details": {"case_id": CASE, "search_id": SEARCH},
+        "purge_details": {"operation_url": OPERATION},
+    }
+    start = AsyncMock()
+    monkeypatch.setattr(ediscovery, "start_purge", start)
+    monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(return_value={"status": remote_status}))
+    monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
+    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value={"status": "succeeded", "indexedItemCount": 0}))
+
+    queued = await service.start_verification(8, 2)
+    assert queued["purge_status"] == "queued"
+    assert queued["purge_details"]["verification_only"] is True
+    await service._run_purge(8)
+
+    start.assert_not_awaited()
+    expected = {"succeeded": "completed", "partiallySucceeded": "partiallysucceeded"}.get(remote_status, "failed")
+    assert repo["request"]["purge_status"] == expected
+
+
+@pytest.mark.anyio("asyncio")
+async def test_verification_requires_owned_request_with_operation(repo):
+    repo["request"] = {"id": 8, "company_id": 2, "purge_status": "completed", "purge_details": {}}
+    with pytest.raises(LookupError):
+        await service.start_verification(8, 99)
+    with pytest.raises(ValueError, match="no Microsoft purge operation"):
+        await service.start_verification(8, 2)
+    assert repo["updates"] == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_verify_worker_does_not_submit_when_operation_reference_is_missing(monkeypatch, repo):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH},
+        "purge_details": {"verification_only": True},
+    }
+    start = AsyncMock()
+    monkeypatch.setattr(ediscovery, "start_purge", start)
+
+    await service._run_purge(8)
+
+    start.assert_not_awaited()
+    assert repo["request"]["purge_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_report_failure_keeps_existing_operation_and_needs_review(monkeypatch, repo):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH},
+        "purge_details": {"operation_url": OPERATION},
+    }
+    monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(return_value={
+        "status": "succeeded", "reportFileMetadata": [{"downloadUrl": REPORT_URL}],
+    }))
+    monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
+    monkeypatch.setattr(service, "_estimate", AsyncMock(side_effect=TimeoutError("estimate timeout")))
+    monkeypatch.setattr(m365_service, "_acquire_ediscovery_download_token", AsyncMock(side_effect=M365Error("report not ready")))
+
+    await service._run_purge(8)
+
+    final = repo["request"]
+    assert final["purge_status"] == "needs_review"
+    assert final["purge_details"]["operation_url"] == OPERATION
+    assert final["purge_details"]["report_error"] == "report not ready"
+    assert final["purge_details"]["verification_attempts"] == 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_purge_report_evidence_is_retained_even_when_job_succeeds(monkeypatch, repo):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH},
+        "purge_details": {"operation_url": OPERATION},
+    }
+    monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(return_value={
+        "status": "succeeded", "reportFileMetadata": [{"downloadUrl": REPORT_URL}],
+    }))
+    monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
+    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value={"status": "succeeded", "indexedItemCount": 0}))
+    monkeypatch.setattr(m365_service, "_acquire_ediscovery_download_token", AsyncMock(return_value="download-token"))
+    download = AsyncMock(return_value=_report_zip("Location,Status,ErrorWarning\na@example.com,Failed,Access denied\n"))
+    monkeypatch.setattr(ediscovery, "download_report", download)
+
+    await service._run_purge(8)
+
+    download.assert_awaited_once_with("download-token", REPORT_URL)
+    reports = repo["request"]["purge_details"]["reports"]
+    assert reports[1]["rows"][0]["ErrorWarning"] == "Access denied"
+    assert repo["request"]["purge_details"]["report_has_errors"] is True
+    assert repo["request"]["purge_status"] == "needs_review"
+
+
+def test_purge_report_preview_bounds_rows_and_rejects_bad_archives():
+    report = _report_zip("Location,Status\n" + "a@example.com,Succeeded\n" * 25 + "b@example.com,Failed\n")
+    preview = ediscovery.purge_report_preview(report)
+    assert len(preview[1]["rows"]) == 20
+    assert preview[1]["truncated"] is True
+    assert preview[1]["issues"] == [{"Location": "b@example.com", "Status": "Failed"}]
+    with pytest.raises(M365Error, match="not a ZIP"):
+        ediscovery.purge_report_preview(b"not a zip")
 
 
 class _FakeClient:
@@ -178,6 +386,157 @@ class _FakeClient:
     async def request(self, method, url, *, headers, json=None):
         self.calls.append((method, url, json))
         return self.responses.pop(0)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_purge_binds_reviewed_mailbox_and_reestimates_before_deletion(monkeypatch, repo):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH,
+                           "locations": [{"location": "alice@example.com", "count": 1}]},
+    }
+    source = {"email": "alice@example.com", "includedSources": "mailbox"}
+    _FakeClient.calls = []
+    _FakeClient.responses = [
+        httpx.Response(200, json={"value": []}),
+        httpx.Response(201, json=source),
+        httpx.Response(200, json={"value": [source]}),
+        httpx.Response(204),
+        httpx.Response(202, headers={"Location": OPERATION}),
+        httpx.Response(200, json={"status": "succeeded"}),
+    ]
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", _FakeClient)
+
+    async def estimate(*_args):
+        if len(_FakeClient.calls) == 4:
+            assert not any(url.endswith("/purgeData") for _, url, _ in _FakeClient.calls)
+            return {"status": "succeeded", "indexedItemCount": 1, "mailboxCount": 1}
+        return {"status": "succeeded", "indexedItemCount": 0, "mailboxCount": 0}
+
+    monkeypatch.setattr(service, "_estimate", estimate)
+    monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
+
+    await service._run_purge(8)
+
+    assert [method for method, _, _ in _FakeClient.calls] == ["GET", "POST", "GET", "PATCH", "POST", "GET"]
+    assert _FakeClient.calls[1][1].endswith("/additionalSources")
+    assert _FakeClient.calls[1][2] == {
+        "@odata.type": "microsoft.graph.security.userSource", "email": "alice@example.com", "includedSources": "mailbox",
+    }
+    assert _FakeClient.calls[3][2] == {"dataSourceScopes": "none"}
+    assert _FakeClient.calls[4][1].endswith("/purgeData")
+    assert repo["request"]["purge_status"] == "completed"
+    assert repo["request"]["purge_details"]["mailboxes"] == ["alice@example.com"]
+    assert repo["request"]["purge_details"]["scope_estimate"]["mailboxCount"] == 1
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("estimate", [
+    {"status": "succeeded", "indexedItemCount": 1, "mailboxCount": 0},
+    {"status": "succeeded", "indexedItemCount": 1, "mailboxCount": True},
+    {"status": "succeeded", "indexedItemCount": 1},
+    {"status": "succeeded", "indexedItemCount": 0, "mailboxCount": 0},
+    {"status": "succeeded", "indexedItemCount": 2, "mailboxCount": 1},
+    {"status": "failed", "indexedItemCount": 1, "mailboxCount": 1},
+])
+async def test_purge_refuses_empty_or_changed_explicit_scope(monkeypatch, repo, estimate):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH,
+                           "locations": [{"location": "alice@example.com", "count": 1}]},
+    }
+    monkeypatch.setattr(ediscovery, "bind_purge_mailboxes", AsyncMock())
+    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value=estimate))
+    start = AsyncMock()
+    monkeypatch.setattr(ediscovery, "start_purge", start)
+
+    await service._run_purge(8)
+
+    start.assert_not_awaited()
+    assert repo["request"]["purge_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("locations", [None, [], [{"location": "not a mailbox", "count": 1}]])
+async def test_purge_refuses_unavailable_mailbox_report(monkeypatch, repo, locations):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH, "locations": locations},
+    }
+    bind = AsyncMock()
+    start = AsyncMock()
+    monkeypatch.setattr(ediscovery, "bind_purge_mailboxes", bind)
+    monkeypatch.setattr(ediscovery, "start_purge", start)
+
+    await service._run_purge(8)
+
+    bind.assert_not_awaited()
+    start.assert_not_awaited()
+    assert repo["request"]["purge_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_source_binding_error_stops_before_purge_submission(monkeypatch, repo):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH,
+                           "locations": [{"location": "alice@example.com", "count": 1}]},
+    }
+    _FakeClient.calls = []
+    _FakeClient.responses = [
+        httpx.Response(200, json={"value": []}),
+        httpx.Response(403, json={"error": {"code": "Forbidden", "message": "Cannot add mailbox source"}}),
+    ]
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", _FakeClient)
+
+    await service._run_purge(8)
+
+    assert not any(url.endswith("/purgeData") for _, url, _ in _FakeClient.calls)
+    assert repo["request"]["purge_status"] == "failed"
+    assert "Cannot add mailbox source" in repo["request"]["error_message"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_mailbox_binding_reconciles_paginated_sources_without_duplicates(monkeypatch):
+    next_url = f"{ediscovery.GRAPH_CASES_URL}/{CASE}/searches/{SEARCH}/additionalSources?$skiptoken=next"
+    first = {"value": [{"email": "ALICE@example.com", "includedSources": "mailbox"}], "@odata.nextLink": next_url}
+    second = {"value": [{"email": "bob@example.com", "includedSources": "mailbox"}]}
+    _FakeClient.calls = []
+    _FakeClient.responses = [httpx.Response(200, json=body) for body in (first, second, first, second)] + [httpx.Response(204)]
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", _FakeClient)
+
+    await ediscovery.bind_purge_mailboxes("tok", CASE, SEARCH, ["alice@example.com", "bob@example.com"])
+
+    assert [method for method, _, _ in _FakeClient.calls] == ["GET", "GET", "GET", "GET", "PATCH"]
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("source", [
+    {"email": "outside@example.com", "includedSources": "mailbox"},
+    {"email": "alice@example.com", "includedSources": "mailbox,site"},
+])
+async def test_mailbox_binding_rejects_unreviewed_or_non_mailbox_sources(monkeypatch, source):
+    _FakeClient.calls = []
+    _FakeClient.responses = [httpx.Response(200, json={"value": [source]})]
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", _FakeClient)
+
+    with pytest.raises(ValueError):
+        await ediscovery.bind_purge_mailboxes("tok", CASE, SEARCH, ["alice@example.com"])
+
+    assert len(_FakeClient.calls) == 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_mailbox_binding_requires_sources_to_be_retained(monkeypatch):
+    _FakeClient.calls = []
+    _FakeClient.responses = [httpx.Response(200, json={"value": []}), httpx.Response(201, json={}),
+                             httpx.Response(200, json={"value": []})]
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", _FakeClient)
+
+    with pytest.raises(ValueError, match="did not retain"):
+        await ediscovery.bind_purge_mailboxes("tok", CASE, SEARCH, ["alice@example.com"])
+
+    assert all(method != "PATCH" for method, _, _ in _FakeClient.calls)
 
 
 @pytest.mark.anyio("asyncio")
@@ -357,6 +716,98 @@ def _report_zip(csv_text: str, *, bom: bool = True, name: str = "Locations-2026-
         archive.writestr("Summary-2026-10-02_06-19-06.csv", "Name,Value\nItems,6\n")
         archive.writestr(name, (("﻿" if bom else "") + csv_text).encode("utf-8"))
     return buffer.getvalue()
+
+
+def _purge_job_report(*, locations=0, identified=0, attempted=0, purged=0, failed=0) -> bytes:
+    import csv
+
+    summary = io.StringIO()
+    csv.writer(summary).writerows([
+        ["Job ID", "op-1", "A unique identifier"],
+        ["Case Name", "MyPortal spam removal", "Case name"], [],
+        ["Query", '(From:"sender@example.com")'],
+        ["StartTime (UTC)", "10/21/2026 10:50:46 AM"],
+        ["EndTime (UTC)", "10/21/2026 10:51:28 AM"],
+        ["SubmittedBySmtp", "admin@example.com"],
+        ["LocationCount", locations], ["CompletedLocationCount", locations],
+        ["Items identified for purge", identified], ["Items attempted to be purged", attempted],
+        ["Items successfully purged", purged], ["Items that failed to be purged", failed],
+        ["Item no longer exists", 0], ["Total item size purged (bytes)", 0],
+    ])
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("Summary-Purge.csv", "\ufeff" + summary.getvalue())
+    return buffer.getvalue()
+
+
+def test_purge_summary_reads_headerless_metadata_blank_lines_and_zero_counts():
+    report = ediscovery.purge_report_preview(_purge_job_report())[0]
+    assert report["rows"][0]["Name"] == "Job ID"
+    assert report["rows"][0]["Value"] == "op-1"
+    assert report["metrics"] == {
+        "location_count": 0, "completed_location_count": 0, "identified_items": 0,
+        "attempted_items": 0, "purged_items": 0, "failed_items": 0,
+        "no_longer_exists_items": 0, "purged_bytes": 0,
+    }
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("remaining", [0, 1])
+async def test_zero_location_job_is_never_success_even_when_search_becomes_empty(monkeypatch, repo, remaining):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_details": {"case_id": CASE, "search_id": SEARCH},
+        "purge_details": {"operation_url": OPERATION},
+    }
+    monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(return_value={
+        "status": "succeeded", "reportFileMetadata": [{"downloadUrl": REPORT_URL}],
+    }))
+    monkeypatch.setattr(m365_service, "_acquire_ediscovery_download_token", AsyncMock(return_value="dl"))
+    monkeypatch.setattr(ediscovery, "download_report", AsyncMock(return_value=_purge_job_report()))
+    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value={"status": "succeeded", "indexedItemCount": remaining}))
+    cleanup, start = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(service, "_run_managed_folder_assistant", cleanup)
+    monkeypatch.setattr(ediscovery, "start_purge", start)
+
+    await service._run_purge(8)
+
+    final = repo["request"]
+    assert final["purge_status"] == "needs_review"
+    assert final["removed_items"] == 0
+    assert final["purge_details"]["summary"]["location_count"] == 0
+    assert final["purge_details"]["summary"]["attempted_items"] == 0
+    assert final["purge_details"]["report_no_op"] is True
+    assert final["purge_details"]["removed_items_source"] == "purge_report"
+    assert "No deletion was performed" in final["error_message"]
+    cleanup.assert_not_awaited()
+    start.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_report_deletion_and_failure_counts_override_search_difference(monkeypatch, repo):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 12,
+        "search_details": {"case_id": CASE, "search_id": SEARCH},
+        "purge_details": {"operation_url": OPERATION},
+    }
+    monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(return_value={
+        "status": "succeeded", "reportFileMetadata": [{"downloadUrl": REPORT_URL}],
+    }))
+    monkeypatch.setattr(m365_service, "_acquire_ediscovery_download_token", AsyncMock(return_value="dl"))
+    monkeypatch.setattr(ediscovery, "download_report", AsyncMock(return_value=_purge_job_report(
+        locations=1, identified=4, attempted=4, purged=3, failed=1,
+    )))
+    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value={"status": "succeeded", "indexedItemCount": 0}))
+    monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
+
+    await service._run_purge(8)
+
+    final = repo["request"]
+    assert final["purge_status"] == "needs_review"
+    assert final["removed_items"] == 3
+    assert final["purge_details"]["summary"]["failed_items"] == 1
+    assert final["purge_details"]["report_has_errors"] is True
+    assert final["purge_details"]["removed_items_unknown"] is False
 
 
 def test_locations_with_matches_lists_only_positive_counts():

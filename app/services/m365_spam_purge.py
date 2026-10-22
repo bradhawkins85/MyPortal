@@ -8,6 +8,8 @@ from contextlib import suppress
 from datetime import date, datetime, timezone
 from typing import Any
 
+from email_validator import EmailNotValidError, validate_email
+
 from app.core.logging import log_error, log_info
 from app.repositories import m365_spam_purge as purge_repo
 from app.services import m365 as m365_service
@@ -16,6 +18,7 @@ from app.services import m365_ediscovery as ediscovery
 
 POLL_INTERVAL_SECONDS = 30
 MAX_POLL_ATTEMPTS = 120
+POST_PURGE_ESTIMATE_ATTEMPTS = 3
 _API = "graph_ediscovery"
 
 
@@ -114,6 +117,24 @@ async def start_purge(request_id: int, company_id: int) -> dict[str, Any]:
         raise ValueError("Purge has already been started")
     await purge_repo.update_request(request_id, {
         "purge_status": "queued", "error_message": None, "purge_started_at": _utcnow(),
+        "purge_completed_at": None,
+        "purge_details": {**_dict(request.get("purge_details")), "verification_only": False},
+    })
+    return (await purge_repo.get_request(request_id)) or request
+
+
+async def start_verification(request_id: int, company_id: int) -> dict[str, Any]:
+    """Queue inspection of an existing purge; never submit another deletion."""
+    request = await _owned_request(request_id, company_id)
+    if str(request["purge_status"]).lower() not in {"completed", "needs_review", "partiallysucceeded", "failed"}:
+        raise ValueError("Only a finished purge can be verified")
+    details = _dict(request.get("purge_details"))
+    if not details.get("operation_url"):
+        raise ValueError("This request has no Microsoft purge operation to verify")
+    await purge_repo.update_request(request_id, {
+        "purge_status": "queued", "error_message": None,
+        "purge_completed_at": None,
+        "purge_details": {**details, "verification_only": True},
     })
     return (await purge_repo.get_request(request_id)) or request
 
@@ -165,6 +186,8 @@ async def _estimate(token: str, case_id: str, search_id: str) -> dict[str, Any]:
 
 def _local_status(operation: dict[str, Any]) -> str:
     status = ediscovery.operation_status(operation)
+    if status == "submissionfailed":
+        return "failed"
     return "completed" if status == "succeeded" else (status or "failed")
 
 
@@ -193,6 +216,70 @@ async def _record_locations(company_id: int, estimate: dict[str, Any], details: 
     except Exception as exc:  # noqa: BLE001 - report is optional detail
         log_error("Spam search report download failed", company_id=company_id, error=str(exc))
         details["locations_error"] = _failure_message(exc)[:500]
+
+
+async def _record_purge_report(company_id: int, operation: dict[str, Any], details: dict[str, Any]) -> None:
+    url = ediscovery.report_download_url(operation)
+    if not url:
+        details["report_error"] = "Microsoft did not return a purge job report."
+        return
+    try:
+        token = await m365_service._acquire_ediscovery_download_token(company_id)
+        details["reports"] = ediscovery.purge_report_preview(await ediscovery.download_report(token, url))
+        summary = {key: value for report in details["reports"] for key, value in report["metrics"].items()}
+        details["summary"] = summary
+        details["report_no_op"] = summary.get("location_count") == 0 or summary.get("attempted_items") == 0
+        details["report_has_errors"] = bool(summary.get("failed_items")) or any(report["issues"] for report in details["reports"])
+    except Exception as exc:  # report evidence is optional; retain the operation outcome
+        log_error("Spam purge report download failed", company_id=company_id, error=str(exc))
+        details["report_error"] = _failure_message(exc)[:500]
+
+
+def _verified_estimate_count(estimate: dict[str, Any]) -> int:
+    """Missing, failed or partial estimates must never be treated as zero."""
+    if ediscovery.operation_status(estimate) != "succeeded":
+        raise ValueError(_operation_error(estimate, "Search estimate did not succeed"))
+    value = estimate.get("indexedItemCount")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("Search estimate did not return a valid indexed item count")
+    return value
+
+
+def _purge_mailboxes(search: dict[str, Any]) -> list[str]:
+    locations = search.get("locations")
+    if not isinstance(locations, list) or not locations:
+        raise ValueError("Cannot purge without the matched mailbox locations. Run a new search and ensure its mailbox report is available.")
+    mailboxes: dict[str, str] = {}
+    for item in locations:
+        if not isinstance(item, dict) or _count(item.get("count")) < 1:
+            continue
+        try:
+            mailbox = validate_email(str(item.get("location") or ""), check_deliverability=False).normalized
+        except EmailNotValidError as exc:
+            raise ValueError("The search report contains a match without a usable mailbox address; run a new search") from exc
+        mailboxes.setdefault(mailbox.casefold(), mailbox)
+    if not mailboxes:
+        raise ValueError("The search report contains no matched mailbox locations; no purge was submitted")
+    return list(mailboxes.values())
+
+
+async def _prepare_purge_scope(token: str, request: dict[str, Any], details: dict[str, Any]) -> None:
+    search = _dict(request.get("search_details"))
+    case_id, search_id = str(search["case_id"]), str(search["search_id"])
+    mailboxes = _purge_mailboxes(search)
+    await ediscovery.bind_purge_mailboxes(token, case_id, search_id, mailboxes)
+    details["mailboxes"] = mailboxes
+    # Binding sources changes the search configuration. Estimate the explicit
+    # scope afresh; never authorize deletion from the previous tenant-wide run.
+    estimate = await _estimate(token, case_id, search_id)
+    details["scope_estimate"] = estimate
+    await purge_repo.update_request(int(request["id"]), {"purge_details": details})
+    count = _verified_estimate_count(estimate)
+    mailbox_count = estimate.get("mailboxCount")
+    if isinstance(mailbox_count, bool) or not isinstance(mailbox_count, int) or mailbox_count < 1:
+        raise ValueError("Microsoft resolved zero mailbox locations for the explicit purge scope; no purge was submitted")
+    if count < 1 or count != int(request.get("matched_items") or 0):
+        raise ValueError("The explicit mailbox search no longer matches the reviewed item count; run a new search and review it before purging")
 
 
 async def _run_search(request_id: int, *, retry: bool = False) -> None:
@@ -252,18 +339,22 @@ async def _run_purge(request_id: int) -> None:
         case_id, search_id = str(case_id), str(search_id)
         token = await m365_service._acquire_ediscovery_access_token(company_id)
         details = _dict(request.get("purge_details"))
+        verification_only = bool(details.get("verification_only"))
+        if verification_only and not details.get("operation_url"):
+            raise ValueError("This request has no Microsoft purge operation to verify")
         operation: dict[str, Any] | None = None
         # Reconcile first. A previous attempt can have been accepted remotely and
         # then failed locally; submitting purgeData again would start a second
         # destructive operation.  Only a purge Graph reports as failed is resubmitted.
         if details.get("operation_url"):
             operation = await ediscovery.get_operation(token, str(details["operation_url"]))
-            if ediscovery.operation_status(operation) == "failed":
+            if not verification_only and ediscovery.operation_status(operation) in {"failed", "submissionfailed"}:
                 operation = None
                 details = {}
         if operation is None:
+            await _prepare_purge_scope(token, request, details)
             operation_url = await ediscovery.start_purge(token, case_id, search_id)
-            details = {"api": _API, "operation_url": operation_url, "purge_type": "HardDelete"}
+            details.update({"api": _API, "operation_url": operation_url, "purge_type": "HardDelete"})
             await purge_repo.update_request(request_id, {"purge_status": "running", "purge_details": details})
             operation = {}
         else:
@@ -276,33 +367,77 @@ async def _run_purge(request_id: int) -> None:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
             operation = await ediscovery.get_operation(token, str(details["operation_url"]))
         status = _local_status(operation)
+        for key in ("reports", "report_error", "report_has_errors", "report_no_op", "summary", "verification_estimate", "verification_error", "verification_attempts"):
+            details.pop(key, None)
         matched = int(request.get("matched_items") or 0)
         remaining: int | None = None
-        if status == "completed":
-            # Graph does not report a deleted-item count; re-estimate the same
-            # search so the operator sees what is still left to remove.
-            try:
-                remaining = _count((await _estimate(token, case_id, search_id)).get("indexedItemCount"))
-            except Exception as exc:  # noqa: BLE001 - purge succeeded; counts stay unknown
-                log_error("Post-purge estimate failed", request_id=request_id, error=str(exc))
-        removed = max(matched - remaining, 0) if remaining is not None else 0
+        details["operation"] = operation
+        await _record_purge_report(company_id, operation, details)
+        if status in {"completed", "partiallysucceeded"}:
+            # Save Microsoft's outcome before cleanup. Reconciliation must retain
+            # the operation URL even if cleanup/verification subsequently fails.
+            await purge_repo.update_request(request_id, {"purge_details": details})
+            if not details.get("report_no_op"):
+                await _run_managed_folder_assistant(request_id)
+            refreshed = await purge_repo.get_request(request_id)
+            details.update(_dict((refreshed or {}).get("purge_details")))
+            # Cleanup and search indexing are asynchronous. Retry estimates,
+            # never the destructive purge, while allowing changes to propagate.
+            for attempt in range(POST_PURGE_ESTIMATE_ATTEMPTS):
+                if attempt:
+                    await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                try:
+                    token = await m365_service._acquire_ediscovery_access_token(company_id)
+                    estimate = await _estimate(token, case_id, search_id)
+                    remaining = _verified_estimate_count(estimate)
+                    details["verification_estimate"] = estimate
+                    details.pop("verification_error", None)
+                except Exception as exc:  # keep unknown counts separate from zero
+                    log_error("Post-purge estimate failed", request_id=request_id, error=str(exc))
+                    details["verification_error"] = _failure_message(exc)
+                    remaining = None
+                    details["verification_attempts"] = attempt + 1
+                    break
+                details["verification_attempts"] = attempt + 1
+                if remaining == 0 or details.get("report_no_op"):
+                    break
+        reported_removed = _dict(details.get("summary")).get("purged_items")
+        removed = reported_removed if reported_removed is not None else (max(matched - remaining, 0) if remaining is not None else 0)
         details.update({
             "operation": operation,
             "submitted_items": matched,
             "removed_items": removed,
+            "removed_items_unknown": reported_removed is None and remaining is None,
+            "removed_items_source": "purge_report" if reported_removed is not None else "search_estimate",
             "remaining_items": remaining,
             "remaining_items_unknown": remaining is None,
             "purge_type": "HardDelete",
         })
+        if status == "completed" and (remaining != 0 or details.get("report_has_errors") or details.get("report_no_op")):
+            status = "needs_review"
+        details["verification_status"] = (
+            "unavailable" if remaining is None else "no_remaining_matches" if remaining == 0 else "matches_remain"
+        )
         updates = {
             "purge_status": status, "removed_items": removed, "purge_details": details,
             "purge_completed_at": _utcnow(),
         }
-        if status != "completed":
+        if status == "needs_review":
+            updates["error_message"] = (
+                "Microsoft finished the purge job, but message removal could not be verified. "
+                + ("The purge report confirms an empty job: zero locations or zero items attempted. No deletion was performed. " if details.get("report_no_op") else "")
+                + ("The purge report contains errors or warnings. " if details.get("report_has_errors") else "")
+                + (f"The search still returns {remaining} matching item(s). " if remaining is not None else "The remaining count is unknown. ")
+                + "Check the purge job report and affected mailboxes in Outlook on the web. "
+                "If messages are still visible there, the purge has not achieved the requested outcome. "
+                "Recoverable or held copies can also remain searchable. Verify the existing job or inspect "
+                "its report in Microsoft Purview before submitting another purge."
+            )
+        elif status != "completed":
             updates["error_message"] = _operation_error(operation, "Purge did not complete")
+        else:
+            updates["error_message"] = None
         await purge_repo.update_request(request_id, updates)
-        if status == "completed":
-            await _run_managed_folder_assistant(request_id)
     except Exception as exc:  # noqa: BLE001 - background boundary records safe error
         log_error("M365 spam purge failed", request_id=request_id, company_id=company_id, error=str(exc))
         await purge_repo.update_request(request_id, {

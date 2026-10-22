@@ -11,9 +11,65 @@ the currently selected customer tenant.
 4. Type `PURGE` and start the separate hard-delete action.
 
 All timestamps are stored in UTC and localised by the browser. Request history,
-matching and removal counts, raw result details, errors, and the initiating user
-are retained. Successful purges also start Managed Folder Assistant for each
-mailbox, matching the prior console workflow.
+matching and removal counts, raw result details, errors, and the
+initiating user are retained. Purge jobs that succeed or partially succeed start
+Managed Folder Assistant before post-purge verification, targeting the matched
+mailboxes when available. Known empty jobs skip this cleanup.
+
+## Verify a purge outcome
+
+Before submitting a purge, MyPortal attaches the matched mailboxes from the
+reviewed search report as explicit `additionalSources` with `includedSources`
+set to `mailbox`, then sets `dataSourceScopes` to `none`. This avoids relying on
+the purge service to expand a tenant-wide scope: a reported failure returned a
+successful tenant-wide estimate with a mailbox hit, followed by a purge job
+with `LocationCount=0` and no items attempted. The explicit scope uses the same
+query and only the mailboxes with matches in the reviewed result.
+
+Source registration is reconciled and read back before a new estimate runs.
+The purge is blocked if the mailbox report is unavailable, any source falls
+outside the reviewed mailbox list, the fresh estimate has no mailbox locations,
+or its item count differs from the reviewed count. In those cases, run a new
+search and review its results before requesting another deletion. Existing
+Microsoft operations are reconciled without changing their search scope or
+automatically repeating the purge.
+
+A Microsoft purge operation reporting `succeeded` does not establish that all
+matching messages disappeared. After requesting mailbox cleanup, MyPortal runs
+up to three fresh estimates, with a pause between attempts for search indexing.
+Only a successful estimate with an explicit zero indexed-item count permits a
+successful job to be marked `completed`. A failed, partial, or missing estimate
+keeps the count unknown. A successful job with remaining or unknown matches is
+marked `needs_review`, with the remote operation preserved separately.
+
+The **Removed** value uses **Items successfully purged** from Microsoft's purge
+summary when available. Otherwise, a count marked **~** is the decrease in search
+matches. Recoverable copies, holds, other mailbox changes, and indexing delays
+can affect this estimate. Check the affected
+mailbox in Outlook on the web to establish whether messages remain visible.
+The history also flags older `completed` records with remaining or unknown
+matches as **Needs review**.
+
+Use **Verify purge** on a finished request to inspect its existing Microsoft
+operation, retrieve its purge job report, and refresh verification. This action
+never submits `purgeData`, including when Microsoft reports the original job as
+failed. The normal purge action remains separate and requires confirmation.
+
+The details dialog retains bounded CSV previews of Microsoft's purge job report
+(up to five files and 20 rows per file), including the original status and error
+columns. A missing or inaccessible report is shown explicitly. Download the
+full report from the **MyPortal spam removal** case in Microsoft Purview to
+inspect omitted rows. A report's generic `Count` column is never assumed to be
+a deleted-item count. The headerless name/value rows in `Summary.csv` are parsed
+separately: locations, identified, attempted, successfully purged, and failed
+item counts are displayed directly. An explicit zero-location or zero-attempt
+job is always flagged for review, even if a later search happens to be empty.
+
+The [Graph purge API](https://learn.microsoft.com/graph/api/security-ediscoverysearch-purgedata?view=graph-rest-1.0)
+limits a purge to 100 items per mailbox location. Holds and retention can keep
+recoverable copies searchable. Unchanged results should be investigated using
+the purge report before another deletion is submitted. MyPortal does not
+disable holds or retention, or automatically repeat destructive actions.
 
 ## Permissions
 
@@ -206,6 +262,7 @@ The authenticated endpoints are documented interactively at `/docs` under the
 - `GET/DELETE /m365/spam-purge/api/requests/{request_id}`
 - `POST /m365/spam-purge/api/requests/{request_id}/search`
 - `POST /m365/spam-purge/api/requests/{request_id}/purge`
+- `POST /m365/spam-purge/api/requests/{request_id}/verify`
 
 Creating an API request produces a draft. Search and purge remain explicit,
 separate API calls so an operator can review the completed result before any
