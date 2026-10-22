@@ -533,6 +533,75 @@ async def test_mailbox_binding_obeys_graph_scope_constraint_and_retries_safely(m
 
 
 @pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("applied_after_sleeps", [1, 2])
+async def test_mailbox_binding_waits_for_delayed_scope_change(monkeypatch, applied_after_sleeps):
+    # Purview acknowledges the PATCH before it applies it, so the first source
+    # addition can still be rejected because the search is tenant-wide.
+    state = {"scope": "allTenantMailboxes", "patches": 0, "mailboxes": set(), "sleeps": 0}
+
+    class LaggingScopeClient(_FakeClient):
+        async def request(self, method, url, *, headers, json=None):
+            if method == "PATCH":
+                state["patches"] += 1
+                return httpx.Response(204)
+            if method == "GET" and "dataSourceScopes" in url:
+                return httpx.Response(200, json={"dataSourceScopes": state["scope"]})
+            if method == "GET" and url.endswith("/additionalSources"):
+                return httpx.Response(200, json={"value": [
+                    {"email": mailbox, "includedSources": "mailbox"} for mailbox in sorted(state["mailboxes"])
+                ]})
+            if method == "POST" and url.endswith("/additionalSources"):
+                if state["scope"] != "none":
+                    return httpx.Response(409, json={"error": {
+                        "code": "Conflict",
+                        "message": "Cannot add additional data sources when using dataSourceScopes.",
+                    }})
+                state["mailboxes"].add(json["email"])
+                return httpx.Response(201, json=json)
+            raise AssertionError(f"Unexpected request: {method} {url}")
+
+    async def sleep(_seconds):
+        state["sleeps"] += 1
+        if state["sleeps"] >= applied_after_sleeps:
+            state["scope"] = "none"
+
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", LaggingScopeClient)
+    monkeypatch.setattr(ediscovery.asyncio, "sleep", sleep)
+
+    await ediscovery.bind_purge_mailboxes("tok", CASE, SEARCH, ["alice@example.com"])
+
+    assert state["mailboxes"] == {"alice@example.com"}
+    assert state["sleeps"] == applied_after_sleeps
+    # The initial PATCH, then one re-application per rejected addition.
+    assert state["patches"] == 1 + applied_after_sleeps
+
+
+@pytest.mark.anyio("asyncio")
+async def test_mailbox_binding_gives_up_when_scope_never_changes(monkeypatch):
+    conflict = {"error": {"code": "Conflict", "message": "Cannot add additional data sources when using dataSourceScopes."}}
+    posts = []
+
+    class StuckScopeClient(_FakeClient):
+        async def request(self, method, url, *, headers, json=None):
+            if method == "PATCH":
+                return httpx.Response(204)
+            if method == "GET" and "dataSourceScopes" in url:
+                return httpx.Response(200, json={"dataSourceScopes": "allTenantMailboxes"})
+            if method == "GET":
+                return httpx.Response(200, json={"value": []})
+            posts.append(url)
+            return httpx.Response(409, json=conflict)
+
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", StuckScopeClient)
+    monkeypatch.setattr(ediscovery.asyncio, "sleep", AsyncMock())
+
+    with pytest.raises(M365Error, match="409"):
+        await ediscovery.bind_purge_mailboxes("tok", CASE, SEARCH, ["alice@example.com"])
+
+    assert len(posts) == ediscovery.SCOPE_PROPAGATION_ATTEMPTS
+
+
+@pytest.mark.anyio("asyncio")
 async def test_scope_update_failure_stops_before_adding_mailboxes(monkeypatch):
     _FakeClient.calls = []
     _FakeClient.responses = [

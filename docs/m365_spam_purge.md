@@ -21,7 +21,12 @@ mailboxes when available. Known empty jobs skip this cleanup.
 Before submitting a purge, MyPortal sets `dataSourceScopes` to `none`, then
 attaches the matched mailboxes from the reviewed search report as explicit
 `additionalSources` with `includedSources` set to `mailbox`. Graph rejects
-source additions with HTTP 409 while a tenant-wide scope is enabled. This avoids
+source additions with HTTP 409 while a tenant-wide scope is enabled. Microsoft
+acknowledges the scope change before applying it, so a 409 on a source
+addition re-reads the search scope, re-applies `none` when it is still
+tenant-wide, and retries after a short pause (up to six attempts, about 30
+seconds in total). If Microsoft never applies the change, the purge fails with
+that 409 and nothing is deleted. This avoids
 relying on the purge service to expand a tenant-wide scope: a reported failure returned a
 successful tenant-wide estimate with a mailbox hit, followed by a purge job
 with `LocationCount=0` and no items attempted. The explicit scope uses the same

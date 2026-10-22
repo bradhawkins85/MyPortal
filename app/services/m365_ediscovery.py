@@ -8,6 +8,7 @@ request against that user's eDiscovery Manager / Search And Purge roles.
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import zipfile
@@ -26,6 +27,11 @@ CASE_DESCRIPTION = "Created by MyPortal Spam Search & Purge. Searches in this ca
 
 # Graph ``ediscoveryCaseOperation.status`` values that will not change again.
 TERMINAL_OPERATION_STATUSES = frozenset({"succeeded", "failed", "partiallysucceeded", "submissionfailed"})
+
+# A dataSourceScopes PATCH returns 204 before Purview applies it, so adding a
+# source straight afterwards can still hit the tenant-wide-scope 409.
+SCOPE_PROPAGATION_ATTEMPTS = 6
+SCOPE_PROPAGATION_DELAY_SECONDS = 5
 
 
 def _segment(value: Any) -> str:
@@ -159,21 +165,45 @@ async def bind_purge_mailboxes(token: str, case_id: str, search_id: str, mailbox
             url = body.get("@odata.nextLink")
         return found
 
+    async def narrow_scope() -> None:
+        await _request(
+            token, "PATCH", _search_url(case_id, search_id), "purge scope configuration",
+            {"dataSourceScopes": "none"},
+        )
+
+    async def current_scope() -> str:
+        body = _json(await _request(
+            token, "GET", _search_url(case_id, search_id) + "?$select=id,dataSourceScopes", "purge scope lookup",
+        ))
+        return str(body.get("dataSourceScopes") or "none")
+
+    async def add_source(mailbox: str) -> None:
+        payload = {"@odata.type": "microsoft.graph.security.userSource", "email": mailbox, "includedSources": "mailbox"}
+        for attempt in range(1, SCOPE_PROPAGATION_ATTEMPTS + 1):
+            try:
+                await _request(
+                    token, "POST", _search_url(case_id, search_id) + "/additionalSources", "purge mailbox binding",
+                    payload,
+                )
+                return
+            except m365_service.M365Error as exc:
+                if exc.http_status != 409 or attempt == SCOPE_PROPAGATION_ATTEMPTS:
+                    raise
+            # Re-apply the scope if Purview still reports a tenant-wide one,
+            # then give the change time to take effect before retrying.
+            if (await current_scope()).lower() != "none":
+                await narrow_scope()
+            await asyncio.sleep(SCOPE_PROPAGATION_DELAY_SECONDS)
+
     existing = await sources()
     # Graph rejects additionalSources with 409 while a tenant-wide scope is
     # enabled. Narrow the scope first; the caller will not submit purgeData
     # until source readback and a fresh estimate have both succeeded.
-    await _request(
-        token, "PATCH", _search_url(case_id, search_id), "purge scope configuration",
-        {"dataSourceScopes": "none"},
-    )
+    await narrow_scope()
     for mailbox in mailboxes:
         if mailbox.casefold() in existing:
             continue
-        await _request(
-            token, "POST", _search_url(case_id, search_id) + "/additionalSources", "purge mailbox binding",
-            {"@odata.type": "microsoft.graph.security.userSource", "email": mailbox, "includedSources": "mailbox"},
-        )
+        await add_source(mailbox)
         existing.add(mailbox.casefold())
     # Read sources back so a 201 with no usable source cannot authorize purge.
     if await sources() != expected:
