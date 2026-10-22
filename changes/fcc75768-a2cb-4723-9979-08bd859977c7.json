@@ -1,0 +1,7 @@
+{
+  "guid": "fcc75768-a2cb-4723-9979-08bd859977c7",
+  "occurred_at": "2026-10-22T01:59Z",
+  "change_type": "Fix",
+  "summary": "Fix mobile navigation in portrait and landscape with a labelled drawer, working submenu and icon taps, and preserved desktop menu preferences.",
+  "content_hash": "037e00186c3539704ff98b68ece480a0696126e1c543cadb38192c0d47ea769e"
+}
