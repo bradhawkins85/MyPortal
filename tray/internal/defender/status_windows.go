@@ -40,7 +40,33 @@ $scanHistory = @(
     status = if ($_.completed_at) { 'completed' } else { 'running' }
   }
 } | Sort-Object { if ($_.completed_at) { [datetime]$_.completed_at } else { [datetime]$_.started_at } } -Descending
-$threats = @{}
+` + detectionScript + `
+[ordered]@{
+  antivirus_enabled = [bool]$s.AntivirusEnabled
+  realtime_protection_enabled = [bool]$s.RealTimeProtectionEnabled
+  tamper_protection_enabled = [bool]$s.IsTamperProtected
+  firewall_domain_enabled = $firewall['Domain']
+  firewall_private_enabled = $firewall['Private']
+  firewall_public_enabled = $firewall['Public']
+  signatures_updated_at = if ($s.AntivirusSignatureLastUpdated) { $s.AntivirusSignatureLastUpdated.ToUniversalTime().ToString('o') } else { $null }
+  last_scan_at = if ($lastScan) { $lastScan.ToUniversalTime().ToString('o') } else { $null }
+  scan_history = @($scanHistory)
+  health_status = $health
+  details = [ordered]@{ antivirus_product_names = @($antivirusProducts); engine_version = $s.AMEngineVersion; product_version = $s.AMProductVersion; signature_version = $s.AntivirusSignatureVersion; signature_age_days = $s.AntivirusSignatureAge; running_mode = [string]$s.AMRunningMode; tamper_protection_source = [string]$s.TamperProtectionSource }
+  detections = $detections
+} | ConvertTo-Json -Depth 4 -Compress`
+
+func collect() (api.DefenderStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	out, err := runPowerShell(ctx, statusScript)
+	if err != nil {
+		return api.DefenderStatus{}, fmt.Errorf("query Microsoft Defender: %w", err)
+	}
+	return decodeStatus(out)
+}
+
+const detectionScript = `$threats = @{}
 Get-MpThreat | ForEach-Object { $threats[[string]$_.ThreatID] = $_ }
 $detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -or $_.LastThreatStatusChangeTime } | ForEach-Object {
   $detectedAt = if ($_.InitialDetectionTime) { $_.InitialDetectionTime } else { $_.LastThreatStatusChangeTime }
@@ -65,28 +91,14 @@ $detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -
       resources = @($_.Resources)
     }
   }
-})
-[ordered]@{
-  antivirus_enabled = [bool]$s.AntivirusEnabled
-  realtime_protection_enabled = [bool]$s.RealTimeProtectionEnabled
-  tamper_protection_enabled = [bool]$s.IsTamperProtected
-  firewall_domain_enabled = $firewall['Domain']
-  firewall_private_enabled = $firewall['Private']
-  firewall_public_enabled = $firewall['Public']
-  signatures_updated_at = if ($s.AntivirusSignatureLastUpdated) { $s.AntivirusSignatureLastUpdated.ToUniversalTime().ToString('o') } else { $null }
-  last_scan_at = if ($lastScan) { $lastScan.ToUniversalTime().ToString('o') } else { $null }
-  scan_history = @($scanHistory)
-  health_status = $health
-  details = [ordered]@{ antivirus_product_names = @($antivirusProducts); engine_version = $s.AMEngineVersion; product_version = $s.AMProductVersion; signature_version = $s.AntivirusSignatureVersion; signature_age_days = $s.AntivirusSignatureAge; running_mode = [string]$s.AMRunningMode; tamper_protection_source = [string]$s.TamperProtectionSource }
-  detections = $detections
-} | ConvertTo-Json -Depth 4 -Compress`
+})`
 
-func collect() (api.DefenderStatus, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+func collectDetections(ctx context.Context) ([]api.DefenderDetection, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	out, err := runPowerShell(ctx, statusScript)
+	out, err := runPowerShell(ctx, "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"+detectionScript+"\nConvertTo-Json -InputObject @($detections | Sort-Object detected_at -Descending | Select-Object -First 100) -Depth 5 -Compress")
 	if err != nil {
-		return api.DefenderStatus{}, fmt.Errorf("query Microsoft Defender: %w", err)
+		return nil, err
 	}
-	return decodeStatus(out)
+	return decodeDetections(out)
 }

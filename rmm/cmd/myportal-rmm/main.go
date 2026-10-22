@@ -48,7 +48,7 @@ var Version = "0.0.0-dev"
 const (
 	pollWait       = 25 * time.Second
 	maxConcurrent  = 4
-	checkinEvery   = 15 * time.Minute
+	checkinEvery   = 2 * time.Hour
 	reportAttempts = 5
 
 	eventLogStartDelay = 30 * time.Second
@@ -329,6 +329,11 @@ func loop(ctx context.Context) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		checkinLoop(ctx, api, r)
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		if err := thermal.Prepare(ctx); err != nil {
 			log.Printf("removing PawnIO failed: %v", err)
 		}
@@ -358,17 +363,7 @@ func loop(ctx context.Context) {
 	}()
 
 	backoff := 5 * time.Second
-	lastCheckin := time.Time{}
 	for ctx.Err() == nil {
-		if time.Since(lastCheckin) > checkinEvery {
-			report := details(r)
-			report.Thermal = thermal.Collect(ctx)
-			if err := api.Checkin(ctx, report); err != nil {
-				log.Printf("check-in failed: %v", err)
-			} else {
-				lastCheckin = time.Now()
-			}
-		}
 		jobs, err := api.Jobs(ctx, pollWait)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -424,7 +419,9 @@ func execute(ctx context.Context, api *client.Client, r *runner.Runner, job clie
 		log.Printf("run %d: could not mark as started: %v", job.ID, err)
 	}
 	var result client.Result
-	if !refreshChocolateyPlan(ctx, api, &job) {
+	if job.Path == "agent/checkin" {
+		result = performFullCheckin(ctx, api, r)
+	} else if !refreshChocolateyPlan(ctx, api, &job) {
 		result.Error = "Company Chocolatey sources could not be refreshed; app management was stopped."
 	} else {
 		result = r.RunStreaming(ctx, job, func(output client.Output) bool {
@@ -477,6 +474,8 @@ func eventLogLoop(ctx context.Context, api *client.Client) {
 		}
 		lookback := time.Duration(cfg.InitialLookbackHours) * time.Hour
 		off := false
+		eventCollectionMu.Lock()
+		collector.Cursors = eventlog.LoadCursors(path)
 		for _, name := range cfg.Logs {
 			err := collector.SyncLog(ctx, name, cfg.MaxBatch, lookback)
 			if errors.Is(err, client.ErrUnavailable) {
@@ -497,6 +496,7 @@ func eventLogLoop(ctx context.Context, api *client.Client) {
 				lastErrors[name] = message
 			}
 		}
+		eventCollectionMu.Unlock()
 		if off {
 			sleep(ctx, eventLogsOffWait)
 			continue

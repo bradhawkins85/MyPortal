@@ -16,6 +16,7 @@
 {% block header_actions %}
     {% set detail_actions = [] %}
     {% if can_edit and not customer_safe %}{% set _ = detail_actions.append({"label": "Save changes", "type": "submit", "variant": "primary", "form": "asset-settings-form", "attrs": {"data-asset-save": "", "title": "Save the asset profile and editable custom fields"}}) %}{% endif %}
+    {% if rmm and rmm.can_run and not customer_safe %}{% set _ = detail_actions.append({"label": "Check in now", "type": "submit", "form": "asset-checkin-form", "attrs": {"title": "Queue a full agent check-in without changing its normal schedule"}}) %}{% endif %}
     {% if rmm and rmm.can_push_agent and not rmm.agent and not customer_safe %}{% set _ = detail_actions.append({"label": "Push RMM agent", "type": "button", "attrs": {"data-rmm-agent-install": asset.id, "data-rmm-agent-name": asset_display_name}}) %}{% endif %}
     {% if rmm and rmm.can_push_agent and not customer_safe %}{% set _ = detail_actions.append({"label": "Repair RMM agent", "type": "button", "attrs": {"data-rmm-agent-repair": asset.id, "data-rmm-agent-name": asset_display_name}}) %}{% endif %}
     {% set _ = detail_actions.append({"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id}) %}
@@ -27,6 +28,9 @@
 
 {% block content %}
 <div class="asset-edit-page ce-workspace" data-asset-id="{{ asset.id }}" data-asset-edit>
+  {% if rmm and rmm.can_run and not customer_safe %}
+    <form id="asset-checkin-form" method="post" action="/rmm/assets/{{ asset.id }}/checkin">{% include "partials/csrf.html" %}</form>
+  {% endif %}
   {% if customer_safe %}
     <div class="alert alert--info" role="status">Customer view — internal notes, custom fields, tickets, integration identifiers and inaccessible links are omitted.</div>
   {% endif %}

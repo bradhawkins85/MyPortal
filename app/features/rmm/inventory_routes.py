@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.repositories import rmm as rmm_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
-from app.services import rmm_inventory
+from app.services import rmm_inventory, rmm_commands
 
 from .routes import _context, _serialise, get_current_rmm_agent
 
@@ -57,6 +57,7 @@ async def refresh_asset_inventory(asset_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission to run scripts is required")
     agent = await _company_agent(company_id, asset_id)
     await rmm_inventory.request_refresh(agent, user.get("id"))
+    await rmm_commands.queue_checkin({**agent, "asset_id": asset_id}, user.get("id"))
     await audit_service.record(
         action="rmm.inventory.refresh", request=request, user_id=user.get("id"), entity_type="asset",
         entity_id=asset_id,
@@ -65,7 +66,7 @@ async def refresh_asset_inventory(asset_id: int, request: Request):
     section = "software" if form.get("section") == "software" else "hardware"
     return flash_redirect(
         f"/assets/{asset_id}#{section}",
-        "Refresh requested. The device sends a new snapshot the next time it checks in, usually within a few minutes.",
+        "A full check-in task is queued to refresh this inventory without waiting for the next scheduled report.",
         "success",
     )
 

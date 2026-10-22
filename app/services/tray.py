@@ -1229,6 +1229,26 @@ async def deliver_queued_commands(device: dict[str, Any]) -> dict[str, int]:
     return {"delivered": delivered, "failed": failed}
 
 
+async def dispatch_device_event(device_id: int, event: str, *, initiated_by_user_id: int | None = None) -> bool:
+    """Persist a wakeup before live delivery, including across app workers."""
+    if event not in {"defender_commands", "checkin_now"}:
+        raise ValueError("Unsupported device event")
+    device = await tray_repo.get_device_by_id(device_id)
+    if not device or device.get("status") != "active":
+        return False
+    queued = await tray_repo.get_queued_commands_for_device(device_id)
+    if any(command.get("command") == event for command in queued):
+        return False
+    command_id = await tray_repo.log_command(
+        device_id=device_id, command=event, payload_json="{}",
+        initiated_by_user_id=initiated_by_user_id, status="queued",
+    )
+    delivered = await send_to_device(str(device["device_uid"]), {"type": event, "command_id": command_id})
+    if delivered:
+        await tray_repo.mark_command_delivered(command_id)
+    return delivered
+
+
 async def dispatch_update_command(
     device: dict[str, Any],
     *,
