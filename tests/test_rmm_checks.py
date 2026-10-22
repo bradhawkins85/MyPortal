@@ -566,6 +566,7 @@ def test_checks_page_and_asset_sections_render():
         disk_metrics=checks.DISK_METRICS, memory_metrics=checks.MEMORY_METRICS, comparisons=checks.COMPARISONS,
         network_directions=checks.NETWORK_DIRECTIONS, service_states=checks.SERVICE_STATES,
         service_fixes=checks.SERVICE_FIXES, file_states=checks.FILE_STATES, process_states=checks.PROCESS_STATES,
+        program_states=checks.PROGRAM_STATES, version_operators=checks.VERSION_OPERATORS,
         script_expectations=checks.SCRIPT_EXPECTATIONS, result_examples=checks.RESULT_EXAMPLES, statuses=checks.STATUSES,
         devices=[{"asset_id": 10, "asset_name": "PC-01"}], scripts=[], script=None, script_fields=[],
         check_script=None, check_script_fields=[], variables=[], csrf_token="tok",
@@ -818,3 +819,116 @@ async def test_action_waits_for_a_result_it_is_limited_to(sqlite_db, stats_db, t
     none_id = await _save({"name": "Other", "scope": "company", "check_type": "service", "service_name": "Other",
                            "action": "none", "action_results": "Missing"})
     assert "action_results" not in (await checks_repo.get_check(none_id))["settings"]
+
+
+def test_program_check_settings_config_and_versions():
+    form = {"program_name": "Google Chrome", "program_expected": "installed",
+            "program_version_operator": "ge", "program_version": "130.0"}
+    target, settings, duration, errors = checks.parse_settings("program", form)
+    assert not errors
+    check = {"id": 1, "check_type": "program", "target": target, "settings": settings, "duration_minutes": duration}
+    restored = check_routes.form_values(check)
+    assert all(restored[key] == value for key, value in form.items())
+    config = checks.agent_config_for([check, {**check, "target": "google chrome"}])
+    assert config["enabled"] and config["programs"] == ["Google Chrome"]
+    assert checks.evaluate(check, {}) is None  # older agents cannot say it is missing
+
+    def judge(installed=True, versions=None, error=None):
+        report = check_routes.AgentCheckReport(programs=[{
+            "name": "google chrome", "installed": installed, "versions": versions or [], "error": error,
+        }]).model_dump()
+        return checks.evaluate(check, report)
+
+    assert judge(False) == (True, "Not installed")
+    assert judge(versions=["130"]) == (False, "Installed (130)")
+    assert judge(versions=["130.1", "129.0"])[0]  # every installed version must satisfy it
+    assert judge(versions=["129"])[1].startswith("Version mismatch")
+    assert judge(versions=["unreadable"])[1].startswith("Unknown")
+    assert judge()[1].startswith("Unknown")
+    assert judge(False, error="Access denied") == (True, "Unknown: Access denied")
+    settings["expected"] = "missing"
+    assert judge(False) == (False, "Not installed")
+    assert judge()[0]
+    for operator, version, expected in [("eq", "130.0.0", False), ("ne", "130", True),
+                                         ("lt", "129", False), ("le", "130", False),
+                                         ("gt", "130", True), ("ge", "131", False)]:
+        settings.update(expected="installed", version_operator=operator)
+        assert judge(versions=[version])[0] is expected
+    settings["version_operator"] = "none"
+    assert judge(versions=["unreadable"])[0] is False
+    for invalid in ({"program_name": ""}, {**form, "program_expected": "bad"},
+                    {**form, "program_version_operator": "bad"}, {**form, "program_version": "1.beta"}):
+        assert checks.parse_settings("program", invalid)[3]
+    assert not checks.parse_settings("program", {**form, "program_expected": "missing", "program_version": "bad"})[3]
+
+
+@pytest.mark.anyio
+async def test_program_failure_installs_chocolatey_with_filters_and_cooldown(sqlite_db, stats_db, monkeypatch):
+    from app.services import rmm_software_updates
+    _result, agent = await _enrol(sqlite_db)
+    form = {"name": "Chrome required", "scope": "company", "check_type": "program",
+            "program_name": "Google Chrome", "program_expected": "installed",
+            "action": "install_choco", "package_id": " GoogleChrome ", "action_results": "Not installed",
+            "cooldown_minutes": "60"}
+    check_id = await _save(form)
+    check = await checks_repo.get_check(check_id)
+    assert check["settings"]["package_id"] == "googlechrome"
+    assert check_routes.form_values(check)["package_id"] == "googlechrome"
+    calls = []
+
+    async def queue_apps(device, ids, mode, user_id):
+        calls.append((device["id"], ids, mode, user_id))
+        return 123
+
+    monkeypatch.setattr(rmm_software_updates, "queue_apps", queue_apps)
+    start = datetime(2026, 10, 22, 9)
+    clock = _clock(monkeypatch, start)
+    missing = {"programs": [{"name": "Google Chrome", "installed": False}]}
+    await checks.ingest_report(agent, {"programs": [{"name": "Google Chrome", "installed": False, "error": "unavailable"}]})
+    assert not calls
+    await checks.ingest_report(agent, missing)
+    assert calls == [(agent["id"], ["googlechrome"], "install", None)]
+    await checks.ingest_report(agent, missing)
+    assert len(calls) == 1
+    clock["value"] = start + timedelta(minutes=61)
+    await checks.ingest_report(agent, missing)
+    assert len(calls) == 2
+    await checks.ingest_report(agent, {"programs": [{"name": "Google Chrome", "installed": True}]})
+    state = (await checks_repo.list_states_for_agent(agent["id"]))[check_id]
+    assert state["status"] == "passing"
+    await checks.ingest_report(agent, missing)
+    assert len(calls) == 3
+    for package in ("", "--force", "chrome; reboot", "../chrome"):
+        with pytest.raises(checks.CheckError) as exc:
+            await _save({**form, "package_id": package})
+        assert "package_id" in exc.value.errors
+
+
+@pytest.mark.anyio
+async def test_check_creates_real_chocolatey_job_and_records_rejection(sqlite_db, stats_db, monkeypatch):
+    import json
+    from app.services import rmm_patching
+    _result, agent = await _enrol(sqlite_db)
+    check_id = await _save({"name": "Install Chrome", "check_type": "program", "program_name": "Google Chrome",
+                            "action": "install_choco", "package_id": "googlechrome", "cooldown_minutes": "0"})
+    report = {"programs": [{"name": "Google Chrome", "installed": False}]}
+    await checks.ingest_report(agent, report)
+    row = (await rmm_repo.next_jobs_for_agent(agent["id"]))[0]
+    job = rmm_scripts._job_payload(row)
+    plan = json.loads(job["env"]["MYPORTAL_PATCH_PLAN"])
+    assert plan["manual_apps"] == {"mode": "install", "package_ids": ["googlechrome"],
+                                   "force": False, "ignore_pending_reboots": True}
+    assert plan["apps"][0]["install_missing"] is True
+    assert plan["sources"] and plan["reboot"] == {"reboot_mode": "never"}
+    assert await rmm_patching.job_is_current(agent, job)
+    await checks.ingest_report(agent, report)
+    assert len(await rmm_repo.list_runs(company_id=1)) == 1  # zero cooldown attempts only once
+    saved = await checks_repo.get_check(check_id)
+    assert "Queued Chocolatey installation" in saved["last_summary"]
+
+    _, linux = await _enrol(sqlite_db, tray_id=8, asset_id=11, uid="linux-program-check", os_name="linux")
+    await checks.ingest_report(linux, report)
+    saved = await checks_repo.get_check(check_id)
+    assert "active Windows device" in saved["last_summary"]
+    state = (await checks_repo.list_states_for_agent(linux["id"]))[check_id]
+    assert state["status"] == "failing" and state["last_action_at"] is not None

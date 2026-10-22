@@ -1,5 +1,5 @@
 """RMM checks: watch disk space, ping targets, CPU load, free memory, Windows
-services, network throughput, files, processes, script results and agent
+services, network throughput, files, processes, installed programs, script results and agent
 check-ins.
 
 A check applies to every company (super admins only), one company or one
@@ -11,7 +11,7 @@ replacing check that is off switches that thing off for its scope
 
 How each type is checked:
 
-* **Disk space, ping, CPU, memory, service, network, file and process** checks are measured
+* **Disk space, ping, CPU, memory, service, network, file, process and program** checks are measured
   by the device's RMM agent. It asks which to collect (:func:`agent_config`)
   and reports every :data:`REPORT_INTERVAL_SECONDS` (:func:`ingest_report`).
   A service check tests that a service is running, stopped, exists or does
@@ -27,12 +27,13 @@ How each type is checked:
   ``duration_minutes`` on the server (:func:`evaluate_offline`).
 
 A problem must last ``duration_minutes`` before the check fails (status
-``warning`` until then). When a check starts failing it takes the same actions
-as an event log rule (:mod:`app.services.rmm_actions`): run a script on the
+``warning`` until then). When a check starts failing it can run a script on the
 device (again each ``cooldown_minutes`` while it keeps failing, or once when
 the cooldown is 0), schedule a script for later (dropped if the check passes
 before it runs; :func:`run_due_scheduled_checks`) or raise a ticket for the
-device. Checks can optionally resolve that ticket on recovery. While that ticket
+device, or install a Chocolatey package using the company’s enabled sources
+(on Windows, with the same cooldown as script actions). Checks can optionally
+resolve that ticket on recovery. While that ticket
 is open, later failures and the recovery are added to it as internal updates.
 An action can be limited to some results (:func:`action_allowed`), such as
 installing an app only when a check says "Not installed" and not "Unknown": the
@@ -77,16 +78,18 @@ CHECK_TYPES = {
     "network": "Network throughput",
     "file": "File or folder",
     "process": "Process",
+    "program": "Program check",
     "script": "Script result",
     "offline": "Agent offline",
 }
-AGENT_TYPES = ("disk", "ping", "cpu", "memory", "service", "network", "file", "process")
+AGENT_TYPES = ("disk", "ping", "cpu", "memory", "service", "network", "file", "process", "program")
 STATS_TYPES = ("disk", "ping", "cpu", "memory", "network")
 ACTIONS = {
     "none": "Show the result only",
     "run_script": "Run a script",
     "schedule_script": "Schedule a script",
     "create_ticket": "Create a ticket",
+    "install_choco": "Install a Chocolatey package",
 }
 SCRIPT_ACTIONS = ("run_script", "schedule_script")
 STATUSES = {"pending": "Waiting", "passing": "Passing", "warning": "Problem", "failing": "Failing"}
@@ -104,6 +107,10 @@ UNCHANGED_WRITE_INTERVAL = timedelta(minutes=10)
 MAX_SERVICES = 50
 MAX_FILES = 50
 MAX_PROCESSES = 50
+MAX_PROGRAMS = 50
+PROGRAM_STATES = {"installed": "Installed", "missing": "Not installed"}
+VERSION_OPERATORS = {"none": "Any version", "eq": "Equals", "ne": "Does not equal",
+                     "lt": "Less than", "le": "At most", "gt": "Greater than", "ge": "At least"}
 
 DISK_METRICS = {"free_percent": "free space (%)", "free_gb": "free space (GB)"}
 MEMORY_METRICS = {"free_percent": "free memory (%)", "free_gb": "free memory (GB)"}
@@ -136,6 +143,7 @@ RESULT_EXAMPLES = {
     "network": ("was not found on the device",),
     "file": ("Not found", "Found", "Could not check it"),
     "process": ("Not running", "Running", "Could not list processes"),
+    "program": ("Not installed", "Installed", "Version mismatch", "Unknown"),
     "script": ("Exit code 1", "The script timed out"),
     "offline": ("Has never checked in",),
 }
@@ -360,6 +368,14 @@ def describe(check: Mapping[str, Any]) -> str:
     if kind == "process":
         state = "is not running" if settings.get("expected", "running") == "running" else "is running"
         return f"{target} {state}{lasting}"
+    if kind == "program":
+        if settings.get("expected", "installed") == "missing":
+            return f"{target} is installed{lasting}"
+        operator = settings.get("version_operator", "none")
+        version = settings.get("version", "")
+        requirement = (f" or its version fails the requirement: {VERSION_OPERATORS.get(operator, operator).lower()} {version}"
+                       if operator != "none" else "")
+        return f"{target} is not installed{requirement}{lasting}"
     if kind == "network":
         where = f"{target}" if target else "All interfaces"
         return (f"{where}: data {NETWORK_DIRECTIONS.get(settings.get('direction'), 'received and sent')} "
@@ -513,6 +529,20 @@ def parse_settings(check_type: str, form: Mapping[str, Any]) -> tuple[str, dict[
         if expected not in PROCESS_STATES:
             errors["process_expected"] = "Choose running or not running."
         settings = {"expected": expected}
+    elif check_type == "program":
+        target = str(form.get("program_name") or "").strip()
+        if not target or len(target) > 255 or re.search(r"[\x00-\x1f]", target):
+            errors["program_name"] = "Enter the exact installed program name, up to 255 characters."
+        expected = str(form.get("program_expected") or "installed")
+        if expected not in PROGRAM_STATES:
+            errors["program_expected"] = "Choose installed or not installed."
+        operator = str(form.get("program_version_operator") or "none") if expected == "installed" else "none"
+        if operator not in VERSION_OPERATORS:
+            errors["program_version_operator"] = "Choose a version comparison."
+        version = str(form.get("program_version") or "").strip() if operator != "none" else ""
+        if operator != "none" and (len(version) > 255 or not re.fullmatch(r"[vV]?\d+(?:\.\d+)*", version)):
+            errors["program_version"] = "Enter a numeric version such as 1.2.3."
+        settings = {"expected": expected, "version_operator": operator, "version": version}
     elif check_type == "network":
         target = str(form.get("network_interface") or "").strip()
         if not _INTERFACE.match(target):
@@ -620,6 +650,13 @@ async def save_check(
     limited = parse_action_results(form.get("action_results"), errors) if action != "none" else []
     if limited:
         settings = {**settings, "action_results": limited}
+
+    if action == "install_choco":
+        from app.services.rmm_software_updates import package_ids
+        try:
+            settings["package_id"] = package_ids([form.get("package_id")])[0]
+        except RunRequestError as exc:
+            errors.update(exc.errors)
 
     check_script: dict[str, Any] | None = None
     check_entries: dict[str, str] = {}
@@ -736,6 +773,15 @@ async def _act_on_failure(check: Mapping[str, Any], agent: Mapping[str, Any], st
         state["last_action_at"] = now
         summary += f". {ran}{'.' if run_id is not None else ''}"
         log_info("RMM check ran a script", check_id=check_id, agent_id=agent_id, run_id=run_id, attempted=attempted)
+    elif action == "install_choco":
+        from app.services import rmm_software_updates
+        try:
+            ids = rmm_software_updates.package_ids([(check.get("settings") or {}).get("package_id")])
+            run_id = await rmm_software_updates.queue_apps(dict(agent), ids, "install", None)
+            summary += f". Queued Chocolatey installation of {ids[0]} (run {run_id})."
+        except RunRequestError as exc:
+            summary += f". Could not install: {'; '.join(exc.errors.values())}"
+        state["last_action_at"] = now
     elif action == "schedule_script" and not repeat:
         run_at = rmm_event_log_rules.scheduled_time(check, now)
         name = check.get("script_name") or "the script"
@@ -841,7 +887,7 @@ async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], prob
                     pass  # waits for a result the action is limited to
                 elif _action_waiting(check, state):
                     run_at = await _act_on_failure(check, agent, state, result, now)
-                elif check.get("action") == "run_script" and int(check.get("cooldown_minutes") or 0) > 0:
+                elif check.get("action") in ("run_script", "install_choco") and int(check.get("cooldown_minutes") or 0) > 0:
                     last = state.get("last_action_at")
                     if last is None or now - last >= timedelta(minutes=int(check["cooldown_minutes"])):
                         await _act_on_failure(check, agent, state, result, now, repeat=True)
@@ -882,6 +928,7 @@ def agent_config_for(checks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     pings: list[str] = []
     files: list[str] = []
     processes: dict[str, str] = {}
+    programs: dict[str, str] = {}
     services: dict[str, dict[str, str]] = {}
     for check in checks:
         if check["check_type"] == "ping" and check["target"] not in pings and len(pings) < MAX_PINGS:
@@ -890,6 +937,8 @@ def agent_config_for(checks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             files.append(check["target"])
         elif check["check_type"] == "process" and len(processes) < MAX_PROCESSES:
             processes.setdefault(check["target"].casefold(), check["target"])
+        elif check["check_type"] == "program" and len(programs) < MAX_PROGRAMS:
+            programs.setdefault(check["target"].casefold(), check["target"])
         elif check["check_type"] == "service" and len(services) < MAX_SERVICES:
             settings = check.get("settings") or {}
             current = services.get(check["target"].casefold())
@@ -911,6 +960,7 @@ def agent_config_for(checks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "services": list(services.values()),
         "files": files,
         "processes": list(processes.values()),
+        "programs": list(programs.values()),
     }
 
 
@@ -1048,6 +1098,33 @@ def evaluate(check: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[bool,
         text = "Not running" if not count else f"Running ({count} process{'es' if count != 1 else ''})"
         wanted = (settings.get("expected") or "running") == "running"
         return (count > 0) != wanted, text
+    if kind == "program":
+        item = next((item for item in report.get("programs") or []
+                     if str(item.get("name") or "").casefold() == target.casefold()), None)
+        if item is None:
+            return None
+        if item.get("error"):
+            return True, f"Unknown: {str(item['error'])[:200]}"
+        installed = bool(item.get("installed"))
+        wanted = settings.get("expected", "installed") == "installed"
+        versions = item.get("versions") or []
+        text = "Installed" + (f" ({', '.join(versions)})" if versions else "") if installed else "Not installed"
+        if installed != wanted:
+            return True, text
+        operator = settings.get("version_operator", "none")
+        if not installed or operator == "none":
+            return False, text
+        from app.services.chocolatey_catalog import version_key
+        required = version_key(str(settings.get("version") or ""))
+        found = [version_key(str(version)) for version in versions]
+        if required is None or not found or any(version is None for version in found):
+            return True, f"Unknown: could not compare installed version ({', '.join(versions) or 'not reported'})"
+        matches = {"eq": lambda v: v == required, "ne": lambda v: v != required,
+                   "lt": lambda v: v < required, "le": lambda v: v <= required,
+                   "gt": lambda v: v > required, "ge": lambda v: v >= required}
+        # Every installed instance must satisfy the requirement.
+        bad = operator not in matches or not all(matches[operator](version) for version in found)
+        return bad, f"Version mismatch: {text}" if bad else text
     if kind == "network":
         interfaces = report.get("network")
         if interfaces is None:

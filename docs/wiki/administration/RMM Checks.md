@@ -19,6 +19,7 @@ started and when it was last checked.
 | **Network throughput** | Data received, sent or both, on one interface or all of them together, is above (or below) a number of Mbps. | Agent |
 | **File or folder** | A path does not exist (or exists when it should not). Use a full path such as `C:\Program Files\App\app.exe`, `\\server\share\file.txt` or `/etc/app.conf`. `*` and `?` match any name, for example `C:\Users\*\Desktop\App.lnk`, and `%NAME%` is an environment variable on the device, such as `%ProgramData%`. | Agent |
 | **Process** | No process with a name is running (or one is running when it should not be). Use the program's file name, such as `notepad.exe` or `nginx`; case and `.exe` do not matter. | Agent |
+| **Program check** | A program is missing (or installed when it should not be), or an installed version fails an optional numeric comparison. Use its exact installed software name, ignoring case. | Agent |
 | **Script result** | A Gitea script, run on the device every few minutes, does not return what you expect: an exit code, or output that contains, does not contain or exactly matches some text. | Server queues the script |
 | **Agent offline** | The agent has not checked in for a number of minutes, for example 30 for a server. | Server |
 
@@ -47,6 +48,16 @@ profile, not the signed-in user's; use a pattern such as `C:\Users\*\...` instea
 cannot read counts as a problem, with the reason as the result. A process check matches the name
 Windows shows in Task Manager's Details tab; on Linux it matches either the process's short name or
 its program's file name, and on macOS the program's file name.
+
+A **Program check** reads installed software directly on each measurement, independently of
+whether the program is running. Windows checks include 32-bit and 64-bit machine installations
+and loaded user hives; Linux uses dpkg, RPM or pacman. Other platforms report **Unknown**.
+Use the Windows Apps & features name (such as `Google Chrome`) or the Linux package name.
+The optional version requirement supports equals, does not equal, less than, at most,
+greater than and at least. Numeric components are compared (`1.10` is newer than `1.9`;
+`1.2` equals `1.2.0`), and every installed version must satisfy the requirement.
+Unreadable versions or collection errors report **Unknown**, distinct from **Not installed**.
+Program checks require an updated RMM agent; older agents leave them waiting for measurements.
 
 ## Who a check applies to
 
@@ -112,7 +123,7 @@ overrides. A pending script action is dropped if the check no longer applies.
 
 ## What happens when a check fails
 
-Checks use the same actions as event log rules:
+Checks offer these failure actions:
 
 * **Show the result only**: the result shows on the asset page and the Checks page.
 * **Run a script**: queue a Gitea script on the device. Its values can use
@@ -123,6 +134,13 @@ Checks use the same actions as event log rules:
   time of day in a time zone, such as a clean-up at 02:00 out of hours. One run is scheduled each
   time the check starts failing; if the check passes again before then, the run is dropped. The
   asset page shows when a scheduled run is waiting.
+* **Install a Chocolatey package**: enter an exact package ID, such as `googlechrome`.
+  Active Windows devices install it through the company's enabled Chocolatey sources,
+  installing Chocolatey if needed. Jobs appear in patch run history and never automatically
+  reboot. While the check keeps failing, the action repeats after its cooldown; 0 attempts it
+  once per failure. A busy patch queue or unavailable source is recorded in the check summary.
+  Use **Only act on these results** with `Not installed` to avoid installation on an Unknown
+  result. Already installed Chocolatey packages are skipped.
 * **Create a ticket**: raise a ticket for the device's company with the device linked. While that
   ticket is not closed, a later failure on the same device adds an internal update to it instead of
   raising another, and the ticket gets an internal update when the check passes again.

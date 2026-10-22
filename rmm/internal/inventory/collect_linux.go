@@ -103,7 +103,7 @@ func linuxPackages(ctx context.Context, s *Snapshot) []Program {
 		name, source string
 		args         []string
 	}{
-		{"dpkg-query", "dpkg", []string{"-W", "-f", "${Package}\t${Version}\t${Maintainer}\n"}},
+		{"dpkg-query", "dpkg", []string{"-W", "-f", "${db:Status-Status}\t${Package}\t${Version}\t${Maintainer}\n"}},
 		{"rpm", "rpm", []string{"-qa", "--queryformat", "%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\n"}},
 		{"pacman", "pacman", []string{"-Q"}},
 	}
@@ -115,6 +115,15 @@ func linuxPackages(ctx context.Context, s *Snapshot) []Program {
 		if err != nil {
 			s.fail("software", err)
 			return nil
+		}
+		if manager.source == "dpkg" {
+			lines := []string{}
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasPrefix(line, "installed\t") {
+					lines = append(lines, strings.TrimPrefix(line, "installed\t"))
+				}
+			}
+			out = strings.Join(lines, "\n")
 		}
 		return parsePackages(out, manager.source)
 	}

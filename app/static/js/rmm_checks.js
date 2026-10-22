@@ -86,6 +86,7 @@
       case 'memory': return 'Low memory';
       case 'service': return value('service_name') ? value('service_name') + ' service' : 'Service';
       case 'file': return value('file_path') ? (value('file_expected') === 'missing' ? 'No ' : '') + value('file_path') : 'File check';
+      case 'program': return value('program_name') ? value('program_name') + ' installation' : 'Program check';
       case 'process': return value('process_name') ? value('process_name') + (value('process_expected') === 'not_running' ? ' not running' : ' process') : 'Process';
       case 'network': return 'Network throughput' + (value('network_interface') ? ' on ' + value('network_interface') : '');
       case 'script': return selectedText('check_script_id') || 'Script check';
@@ -124,6 +125,14 @@
       case 'process': {
         const state = value('process_expected') === 'not_running' ? ' is running' : ' is not running';
         return (value('process_name') || 'The process') + state + lasting + '.';
+      }
+      case 'program': {
+        const name = value('program_name') || 'The program';
+        if (value('program_expected') === 'missing') return name + ' is installed' + lasting + '.';
+        const operator = value('program_version_operator');
+        const requirement = operator && operator !== 'none'
+          ? ' or its version fails the requirement: ' + selectedText('program_version_operator').toLowerCase() + ' ' + (value('program_version') || 'the required version') : '';
+        return name + ' is not installed' + requirement + lasting + '.';
       }
       case 'network': {
         const where = value('network_interface') || 'All interfaces together';
@@ -182,6 +191,10 @@
       const fixSelect = serviceFix.querySelector('select');
       if (presence && fixSelect) fixSelect.value = 'none';
     }
+    const programVersion = form.querySelector('[data-rmm-program-version]');
+    if (programVersion) programVersion.hidden = value('program_expected') === 'missing';
+    const programValue = form.querySelector('[data-rmm-program-version-value]');
+    if (programValue) programValue.hidden = value('program_version_operator') === 'none';
     const mode = scheduleMode ? scheduleMode.value : 'delay';
     form.querySelectorAll('[data-rmm-show-schedule]').forEach((element) => {
       element.hidden = element.getAttribute('data-rmm-show-schedule') !== mode;
@@ -224,7 +237,7 @@
 
   form.addEventListener('change', (event) => {
     const target = event.target;
-    if (target.matches('[data-rmm-check-type], [data-rmm-check-action], [data-rmm-check-schedule-mode], [data-rmm-service-expected]')) update();
+    if (target.matches('[data-rmm-check-type], [data-rmm-check-action], [data-rmm-check-schedule-mode], [data-rmm-service-expected], [data-rmm-program-expected], [data-rmm-program-operator]')) update();
     if (target.matches('[data-rmm-check-target-mode]')) updateSelection();
     if (target.matches('[data-rmm-check-scope]')) {
       updateSelection();

@@ -10,6 +10,7 @@
   "service": ("A Windows service or systemd unit is not running, stopped, present or absent as it should be.", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"),
   "network": ("Traffic on an interface is too high or too low.", "M7 17V5M3 9l4-4 4 4M17 7v12M13 15l4 4 4-4"),
   "file": ("A file or folder is missing, or exists when it should not.", "M14 3H6v18h12V7zM14 3v4h4M9 13h6M9 17h6"),
+  "program": ("Check whether a program is installed, with an optional version requirement.", "M3 4h18v16H3zM3 8h18M7 12h10M7 16h6"),
   "process": ("A program is not running, or is running when it should not be.", "M3 5h18v14H3zM3 9h18M7 13l2 2-2 2M12 17h4"),
   "script": ("Run a script on a schedule and test its exit code or output.", "M4 17l6-6-6-6M12 19h8"),
   "offline": ("The device's agent stops checking in.", "M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5.2-2.8M19 13a10 10 0 0 0-2.4-1.6M2 9.5a15 15 0 0 1 4.3-2.7M12 20h.01"),
@@ -18,6 +19,7 @@
   "none": "Record the result on the device. Nobody is alerted.",
   "run_script": "Run a script on the device as soon as the check fails.",
   "schedule_script": "Run a script on the device later, such as out of hours.",
+  "install_choco": "Install a package from the company’s enabled Chocolatey sources. Windows devices only.",
   "create_ticket": "Open one ticket per device and update it when the check passes again.",
 } %}
 {#- The control each server error belongs to, for the error summary's links. -#}
@@ -36,6 +38,9 @@
   "network_operator": "rmm-check-network-operator", "network_threshold": "rmm-check-network-threshold",
   "file_path": "rmm-check-file-path", "file_expected": "rmm-check-file-expected",
   "process_name": "rmm-check-process-name", "process_expected": "rmm-check-process-expected",
+  "program_name": "rmm-check-program-name", "program_expected": "rmm-check-program-expected",
+  "program_version_operator": "rmm-check-program-version-operator", "program_version": "rmm-check-program-version",
+  "package_id": "rmm-check-package-id",
   "check_script_id": "rmm-check-script", "script_expect": "rmm-check-script-expect", "script_value": "rmm-check-script-value",
   "duration_minutes": "rmm-check-duration", "action": "rmm-check-action-" ~ (e.action or "none"),
   "script": "rmm-check-action-script", "script_id": "rmm-check-action-script",
@@ -283,6 +288,40 @@
         </div>
       </fieldset>
 
+      <fieldset class="rmm-check__settings" data-rmm-check-fields="program">
+        <legend class="visually-hidden">Program settings</legend>
+        <div class="rmm-field-row">
+          <div class="form-field rmm-field--grow">
+            <label class="form-label" for="rmm-check-program-name">Program name</label>
+            <input class="form-input" id="rmm-check-program-name" name="program_name" maxlength="255" value="{{ e.program_name }}" placeholder="Google Chrome" autocomplete="off"{{ invalid("program_name", "rmm-check-program-name-help") }}>
+            <p class="form-help" id="rmm-check-program-name-help">Exact installed software name, ignoring case. On Windows, use its Apps &amp; features name; on Linux, its package name. This checks installation, even when the program is not running.</p>
+            {{ field_error("program_name") }}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-program-expected">Should be</label>
+            <select class="form-input" id="rmm-check-program-expected" name="program_expected" data-rmm-program-expected{{ invalid("program_expected") }}>
+              {% for key, label in program_states.items() %}<option value="{{ key }}" {% if e.program_expected == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            {{ field_error("program_expected") }}
+          </div>
+        </div>
+        <div class="rmm-field-row" data-rmm-program-version>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-program-version-operator">Version requirement</label>
+            <select class="form-input" id="rmm-check-program-version-operator" name="program_version_operator" data-rmm-program-operator{{ invalid("program_version_operator") }}>
+              {% for key, label in version_operators.items() %}<option value="{{ key }}" {% if e.program_version_operator == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            {{ field_error("program_version_operator") }}
+          </div>
+          <div class="form-field" data-rmm-program-version-value>
+            <label class="form-label" for="rmm-check-program-version">Version</label>
+            <input class="form-input" id="rmm-check-program-version" name="program_version" maxlength="255" value="{{ e.program_version }}" placeholder="1.2.3"{{ invalid("program_version", "rmm-check-program-version-help") }}>
+            <p class="form-help" id="rmm-check-program-version-help">Numeric versions such as 1.2.3. Every installed version must match. Unreadable versions report Unknown.</p>
+            {{ field_error("program_version") }}
+          </div>
+        </div>
+      </fieldset>
+
       <fieldset class="rmm-check__settings" data-rmm-check-fields="script">
         <legend class="visually-hidden">Script result settings</legend>
         <div class="rmm-field-row">
@@ -424,7 +463,7 @@
       </fieldset>
       {{ field_error("action") }}
 
-      <div class="rmm-reveal" data-rmm-show="action:run_script,schedule_script,create_ticket">
+      <div class="rmm-reveal" data-rmm-show="action:run_script,schedule_script,create_ticket,install_choco">
         <div class="form-field">
           <label class="form-label" for="rmm-check-action-results">Only act on these results <span class="rmm-optional">optional</span></label>
           <textarea class="form-input rmm-action-results" id="rmm-check-action-results" name="action_results" rows="3" maxlength="4200" spellcheck="false" placeholder="Not installed" data-rmm-action-results{{ invalid("action_results", "rmm-check-action-results-help") }}>{{ e.action_results or "" }}</textarea>
@@ -438,6 +477,15 @@
             </ul>
           </div>
           {% endfor %}
+        </div>
+      </div>
+
+      <div class="rmm-reveal" data-rmm-show="action:install_choco">
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-package-id">Chocolatey package ID</label>
+          <input class="form-input" id="rmm-check-package-id" name="package_id" maxlength="128" value="{{ e.package_id }}" placeholder="googlechrome" autocomplete="off" spellcheck="false"{{ invalid("package_id", "rmm-check-package-help") }}>
+          <p class="form-help" id="rmm-check-package-help">Use an exact package ID from the company’s enabled sources. Runs on active Windows devices and appears in patch run history. Installs Chocolatey if needed and never automatically reboots.</p>
+          {{ field_error("package_id") }}
         </div>
       </div>
 
@@ -457,11 +505,14 @@
             <div class="rmm-input-unit"><input class="form-input" id="rmm-check-timeout" name="timeout_seconds" type="number" inputmode="numeric" min="30" max="86400" value="{{ e.timeout_seconds }}" aria-describedby="rmm-check-timeout-help"><span class="rmm-input-unit__suffix" aria-hidden="true">sec</span></div>
             <p class="form-help" id="rmm-check-timeout-help">The script is stopped after this long.</p>
           </div>
-          <div class="form-field" data-rmm-show="action:run_script">
-            <label class="form-label" for="rmm-check-cooldown">Run again while failing every</label>
-            <div class="rmm-input-unit"><input class="form-input" id="rmm-check-cooldown" name="cooldown_minutes" type="number" inputmode="numeric" min="0" max="10080" value="{{ e.cooldown_minutes }}" aria-describedby="rmm-check-cooldown-help"><span class="rmm-input-unit__suffix" aria-hidden="true">min</span></div>
-            <p class="form-help" id="rmm-check-cooldown-help">0 runs it once each time the check fails.</p>
-          </div>
+        </div>
+      </div>
+
+      <div class="rmm-field-row" data-rmm-show="action:run_script,install_choco">
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-cooldown">Run again while failing every</label>
+          <div class="rmm-input-unit"><input class="form-input" id="rmm-check-cooldown" name="cooldown_minutes" type="number" inputmode="numeric" min="0" max="10080" value="{{ e.cooldown_minutes }}" aria-describedby="rmm-check-cooldown-help"><span class="rmm-input-unit__suffix" aria-hidden="true">min</span></div>
+          <p class="form-help" id="rmm-check-cooldown-help">0 runs it once each time the check fails.</p>
         </div>
       </div>
 
