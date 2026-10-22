@@ -245,7 +245,7 @@ def test_sign_in_settings_are_applied_to_existing_and_new_configs(tmp_path):
 
 
 @pytest.mark.parametrize("existing", ["", "[repository.upload]\nENABLED = false\nALLOWED_TYPES = image/*\nFILE_MAX_SIZE = 100\n"])
-def test_repository_uploads_allow_all_types_on_install_and_upgrade(tmp_path, existing):
+def test_repository_uploads_allow_all_types_up_to_1gib_on_install_and_upgrade(tmp_path, existing):
     config = tmp_path / "app.ini"
     config.write_text("[security]\nINSTALL_LOCK = true\n" + existing)
     snippet = f'GITEA_CONFIG="{config}"\nconfigure_uploads'
@@ -255,12 +255,20 @@ def test_repository_uploads_allow_all_types_on_install_and_upgrade(tmp_path, exi
     assert "ENABLED = true" in text.splitlines()
     assert "ALLOWED_TYPES = */*" in text.splitlines()
     assert "INSTALL_LOCK = true" in text.splitlines()
-    if existing:
-        assert "FILE_MAX_SIZE = 100" in text.splitlines()
+    assert "FILE_MAX_SIZE = 1024" in text.splitlines()
     again = run(snippet, env_file(tmp_path, ""))
     assert again.returncode == 0 and again.stdout == "", again.stderr
     assert config.read_text() == text
     assert 'changed+=$(configure_uploads)' in SCRIPT.read_text()
+
+
+def test_baremetal_proxy_allows_large_gitea_uploads():
+    config = (ROOT / "deploy/nginx/myportal-bluegreen.conf").read_text()
+    block = config.split("location ^~ /gitea/ {", 1)[1].split("}", 1)[0]
+    assert "client_max_body_size 0;" in block
+    assert "proxy_request_buffering off;" in block
+    assert "proxy_send_timeout 600s;" in block
+    assert "proxy_read_timeout 600s;" in block
 
 
 def test_upgrade_adds_public_repository_with_existing_token(tmp_path):

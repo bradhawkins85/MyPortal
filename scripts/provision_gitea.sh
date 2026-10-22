@@ -245,6 +245,7 @@ DEFAULT_PRIVATE = private
 [repository.upload]
 ENABLED = true
 ALLOWED_TYPES = */*
+FILE_MAX_SIZE = 1024
 
 [security]
 INSTALL_LOCK = true
@@ -280,9 +281,10 @@ INI
 }
 
 configure_uploads() {
-  # Repository files include executables and scripts; allow all upload types.
+  # Allow scripts and supporting files up to 1 GiB (Gitea uses MiB).
   ini_set repository.upload ENABLED true
   ini_set repository.upload ALLOWED_TYPES '*/*'
+  ini_set repository.upload FILE_MAX_SIZE 1024
 }
 
 configure_sign_in() {
