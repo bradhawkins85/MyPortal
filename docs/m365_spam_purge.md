@@ -18,10 +18,11 @@ mailboxes when available. Known empty jobs skip this cleanup.
 
 ## Verify a purge outcome
 
-Before submitting a purge, MyPortal attaches the matched mailboxes from the
-reviewed search report as explicit `additionalSources` with `includedSources`
-set to `mailbox`, then sets `dataSourceScopes` to `none`. This avoids relying on
-the purge service to expand a tenant-wide scope: a reported failure returned a
+Before submitting a purge, MyPortal sets `dataSourceScopes` to `none`, then
+attaches the matched mailboxes from the reviewed search report as explicit
+`additionalSources` with `includedSources` set to `mailbox`. Graph rejects
+source additions with HTTP 409 while a tenant-wide scope is enabled. This avoids
+relying on the purge service to expand a tenant-wide scope: a reported failure returned a
 successful tenant-wide estimate with a mailbox hit, followed by a purge job
 with `LocationCount=0` and no items attempted. The explicit scope uses the same
 query and only the mailboxes with matches in the reviewed result.

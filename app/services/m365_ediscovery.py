@@ -160,6 +160,13 @@ async def bind_purge_mailboxes(token: str, case_id: str, search_id: str, mailbox
         return found
 
     existing = await sources()
+    # Graph rejects additionalSources with 409 while a tenant-wide scope is
+    # enabled. Narrow the scope first; the caller will not submit purgeData
+    # until source readback and a fresh estimate have both succeeded.
+    await _request(
+        token, "PATCH", _search_url(case_id, search_id), "purge scope configuration",
+        {"dataSourceScopes": "none"},
+    )
     for mailbox in mailboxes:
         if mailbox.casefold() in existing:
             continue
@@ -168,14 +175,9 @@ async def bind_purge_mailboxes(token: str, case_id: str, search_id: str, mailbox
             {"@odata.type": "microsoft.graph.security.userSource", "email": mailbox, "includedSources": "mailbox"},
         )
         existing.add(mailbox.casefold())
-    # Switch away from implicit tenant expansion only after adding the explicit
-    # sources. Read them back so a 201 with no usable source cannot authorize purge.
+    # Read sources back so a 201 with no usable source cannot authorize purge.
     if await sources() != expected:
         raise ValueError("Microsoft did not retain all reviewed purge mailbox locations; no purge was submitted")
-    await _request(
-        token, "PATCH", _search_url(case_id, search_id), "purge scope configuration",
-        {"dataSourceScopes": "none"},
-    )
 
 
 async def start_estimate(token: str, case_id: str, search_id: str) -> None:
