@@ -396,13 +396,31 @@ file destinations can also be used independently.
 Choose **Run** on a script, **Run a script** at the top of the page, or **Run script** on
 an asset's page. Then:
 
-1. Tick the devices to run it on. Only devices with the RMM agent are listed.
+1. Tick the devices to run it on. Assets without an agent are also listed, labelled **Waiting for RMM agent**.
 2. Fill in each field with a value, or pick **Use a variable…** to insert a MyPortal variable
    such as `{{asset.custom.BitLocker}}`, `{{company.variables.Tenant ID}}`, `{{asset.name}}` or
    `{{company.name}}`. Variables are filled in separately for each device, so one run can give
    every device its own value. Leaving an optional field empty uses the script's default.
 3. Set how long the script may run before the device stops it.
 4. Choose who it runs as under **Run as**, then run it.
+
+### Queue before the agent is installed
+
+Technicians can queue scripts from an asset's **Scripts** card or the script library
+before the RMM agent is installed, including while the asset is offline. The run
+appears in history as **Queued** and can be cancelled there. Installing the agent
+is a separate action; queueing a script does not install it.
+
+When an active agent for the same asset and company connects and polls for work,
+it collects the pending runs through the normal device queue. The script content,
+entered values and resolved variables are captured when queued. Platform, shell,
+associated file paths and agent capabilities are checked before execution; an
+incompatible script is not sent to the device.
+
+The **Offline wait timeout** starts when the script is queued, including time
+waiting for installation. Choose **Forever** (0) to wait indefinitely, or set a
+limit so the run expires if the agent does not collect it in time. The execution
+timeout starts separately when the agent collects the script.
 
 ### Run as System or the logged in user
 

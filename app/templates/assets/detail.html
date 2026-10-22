@@ -151,7 +151,7 @@
     <header class="ce-section__header">
       <div class="ce-section__heading">
         <h2 class="card__title" id="asset-scripts-heading">Scripts {{ rmm_ui.agent_indicator(rmm.agent_state) }}</h2>
-        <p class="card__subtitle">{% if rmm.agent %}RMM agent {{ rmm.agent.agent_version or '' }} on {{ (rmm.agent.os or 'unknown') | title }}{% if rmm.agent.os_version %} {{ rmm.agent.os_version }}{% endif %}, last seen {% if rmm.agent.last_seen_utc %}<span data-utc="{{ rmm.agent.last_seen_utc }}">{{ rmm.agent.last_seen_utc }}</span>{% else %}never{% endif %}.{% else %}The RMM agent is not installed on this device yet, so scripts cannot run here.{{ rmm_ui.agent_deploy_status(rmm.deploy) }}{% endif %} <a href="/rmm/scripts">All scripts</a></p>
+        <p class="card__subtitle">{% if rmm.agent %}RMM agent {{ rmm.agent.agent_version or '' }} on {{ (rmm.agent.os or 'unknown') | title }}{% if rmm.agent.os_version %} {{ rmm.agent.os_version }}{% endif %}, last seen {% if rmm.agent.last_seen_utc %}<span data-utc="{{ rmm.agent.last_seen_utc }}">{{ rmm.agent.last_seen_utc }}</span>{% else %}never{% endif %}.{% else %}The RMM agent is not installed yet. Queue scripts now to run after it installs and connects.{{ rmm_ui.agent_deploy_status(rmm.deploy) }}{% endif %} <a href="/rmm/scripts">All scripts</a></p>
       </div>
       {% set choco_install = rmm.can_run and rmm.agent and (rmm.agent.os or '') | lower == 'windows' %}
       {% if rmm.can_run or rmm.remote_control %}{{ rmm_ui.asset_menu(asset.id, asset_display_name, rmm.remote_control or [], run_script=rmm.can_run, rustdesk_in_menu=true, choco_install=choco_install, run_command=rmm.command_languages | default([]) | length > 0, tray_repair=rmm.tray_repair) }}{% endif %}

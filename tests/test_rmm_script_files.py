@@ -209,6 +209,8 @@ async def test_common_script_uses_the_run_company_file(monkeypatch):
     assert prepared[0]["repository"] == "msp/Private-Files"
     assert prepared[0]["commit_sha"] == "d" * 40
     assert prepared[0]["sha256"] == hashlib.sha256(raw).hexdigest()
+    pending = {"id": None, "company_id": 1, "pending_install": True}
+    assert await rmm_script_files.prepare_files(script, pending) == prepared
     with pytest.raises(rmm_script_files.ScriptFileError, match="missing for this company"):
         await rmm_script_files.prepare_files(script, {**agent, "company_id": 2})
 

@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field, model_validator
 from loguru import logger
 
 from app.api.dependencies.auth import get_current_tray_device, get_optional_user
+from app.repositories import assets as assets_repo
 from app.repositories import rmm as rmm_repo
 from app.security.client_ip import get_client_ip
 from app.security.flash import flash_redirect
@@ -170,7 +171,7 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
             _serialise(attempt) for attempt in await rmm_agent_deploy.asset_install_history(asset_id, limit=10)
         ],
         "runs": [_serialise(run) for run in await rmm_repo.list_runs(company_id=company_id, asset_id=asset_id, limit=10)],
-        "can_run": can_run and agent is not None,
+        "can_run": can_run,
         "agent_state": rmm_scripts.agent_state(agent),
         # RustDesk and MeshCentral are switched on through the agent, so they need one.
         "remote_control": await rmm_remote_control.enabled_providers() if can_run and agent else [],
@@ -325,10 +326,14 @@ async def list_scripts_api(request: Request, asset_id: int | None = Query(defaul
     _user, _company, company_id, _can_run = await _context(request, api=True)
     scripts = await rmm_repo.list_scripts(company_id=company_id)
     if asset_id is not None:
-        agent = await rmm_repo.get_asset_agent(asset_id)
-        if not agent or int(agent.get("company_id") or 0) != company_id:
+        asset = await assets_repo.get_asset_by_id(asset_id)
+        if not asset or int(asset.get("company_id") or 0) != company_id:
             raise HTTPException(status_code=404, detail="Device not found")
-        scripts = [script for script in scripts if not rmm_scripts.device_problem(script, agent)]
+        agent = await rmm_repo.get_asset_agent(asset_id)
+        if agent:
+            if int(agent.get("company_id") or 0) != company_id:
+                raise HTTPException(status_code=404, detail="Device not found")
+            scripts = [script for script in scripts if not rmm_scripts.device_problem(script, agent)]
     return {"scripts": [_script_summary(script) for script in scripts]}
 
 
@@ -338,7 +343,7 @@ async def get_script_api(script_id: int, request: Request):
     script = await rmm_repo.get_script(script_id, with_content=True)
     if not rmm_repo.script_available_to(script, company_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Script not found")
-    agents = await rmm_repo.list_company_agents(company_id)
+    agents = await rmm_repo.list_script_targets(company_id)
     return {
         "script": {**_script_summary(script), "content": script.get("content") or ""},
         "fields": rmm_scripts.script_fields(script),

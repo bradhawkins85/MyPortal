@@ -496,6 +496,7 @@ async def test_run_round_trip_updates_custom_fields_and_variables(sqlite_db, mon
     script = (await rmm_repo.list_scripts())[0]
     _result, agent = await _enrol(sqlite_db)
     await asset_fields_repo.set_asset_field_value(10, 1, value_text="Off")
+    await asset_fields_repo.set_asset_field_value(11, 1, value_text="Off")
 
     queued = await rmm_scripts.queue_runs(
         script_id=script["id"], company_id=1, asset_ids=[10, 11, 20],
@@ -503,9 +504,9 @@ async def test_run_round_trip_updates_custom_fields_and_variables(sqlite_db, mon
                    "env:TENANT_ID": "{{company.variables.Tenant}}", "env:SITE_CODE": "{{asset.serial_number}}"},
         timeout_seconds=5, requested_by_user_id=9,
     )
-    assert [item["asset_id"] for item in queued["queued"]] == [10]
+    assert [item["asset_id"] for item in queued["queued"]] == [10, 11]
     problems = {item["asset_id"]: item["message"] for item in queued["problems"]}
-    assert problems == {11: "No RMM agent is installed.", 20: "Device not found."}
+    assert problems == {20: "Device not found."}
     run_id = queued["queued"][0]["run_id"]
 
     stored = await sqlite_db.fetch_one("SELECT * FROM rmm_script_runs WHERE id = %s", (run_id,))
@@ -857,7 +858,8 @@ async def test_asset_card_context_hides_agent_secrets(sqlite_db):
     context = await routes.asset_rmm_context(1, 10, can_run=True)
     assert context["can_run"] and context["agent"]["hostname"] == "PC"
     assert "auth_token_hash" not in context["agent"]
-    assert (await routes.asset_rmm_context(1, 11, can_run=True))["can_run"] is False
+    assert (await routes.asset_rmm_context(1, 11, can_run=True))["can_run"] is True
+    assert (await routes.asset_rmm_context(1, 11, can_run=False))["can_run"] is False
 
 
 @pytest.mark.anyio
@@ -1789,3 +1791,111 @@ def test_thermal_payload_bounds_and_legacy_compatibility():
     thermal["sensors"] *= 257
     with pytest.raises(ValidationError):
         AgentDetails(thermal=thermal)
+
+
+@pytest.mark.anyio
+async def test_prequeue_collects_once_after_install_and_keeps_snapshot(sqlite_db, monkeypatch):
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": 'param([string]$Name)\necho $Name'})
+    script = (await rmm_repo.list_scripts())[0]
+    result = await rmm_scripts.queue_runs(
+        script_id=script["id"], company_id=1, asset_ids=[10, 10, 20],
+        submitted={"param:Name": "{{asset.serial_number}}"}, timeout_seconds=60, requested_by_user_id=9,
+    )
+    assert len(result["queued"]) == 1
+    assert result["problems"] == [{"asset_id": 20, "message": "Device not found."}]
+    run_id = result["queued"][0]["run_id"]
+    assert (await rmm_repo.get_run(run_id))["agent_id"] is None
+    assert (await rmm_repo.list_runs(company_id=1, asset_id=10))[0]["id"] == run_id
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": "echo changed"}, shas={"rmm/Common/a.ps1": "changed"})
+    _, other = await _enrol(sqlite_db, tray_id=8, asset_id=11, uid="other-agent-001")
+    assert await rmm_scripts.claim_jobs(other) == []
+    _, agent = await _enrol(sqlite_db)
+    jobs = await rmm_scripts.claim_jobs(agent)
+    assert [job["id"] for job in jobs] == [run_id]
+    assert jobs[0]["parameters"] == {"Name": "SN1"}
+    assert jobs[0]["script"] == 'param([string]$Name)\necho $Name'
+    assert await rmm_scripts.claim_jobs(agent) == []
+
+
+@pytest.mark.anyio
+async def test_prequeue_expired_cancelled_incompatible_and_wrong_company(sqlite_db, monkeypatch):
+    from datetime import datetime, timedelta
+
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": "echo 1"})
+    script = (await rmm_repo.list_scripts())[0]
+    runs = []
+    for _ in range(5):
+        result = await rmm_scripts.queue_runs(
+            script_id=script["id"], company_id=1, asset_ids=[10], submitted={},
+            timeout_seconds=60, requested_by_user_id=9,
+        )
+        runs.append(result["queued"][0]["run_id"])
+    expired, cancelled, wrong_company, wrong_asset_company, incompatible = runs
+    await sqlite_db.execute("UPDATE rmm_script_runs SET expires_at = %s WHERE id = %s",
+                            (datetime.now() - timedelta(days=1), expired))
+    assert await rmm_repo.cancel_run(cancelled)
+    await sqlite_db.execute("UPDATE rmm_script_runs SET company_id = 2 WHERE id = %s", (wrong_company,))
+    await sqlite_db.execute("UPDATE rmm_script_runs SET asset_id = 20 WHERE id = %s", (wrong_asset_company,))
+    _, agent = await _enrol(sqlite_db, os_name="linux")
+    assert await rmm_scripts.claim_jobs(agent) == []
+    assert (await rmm_repo.get_run(incompatible))["status"] == "cancelled"
+    for run_id in (expired, cancelled, wrong_company, wrong_asset_company):
+        assert (await rmm_repo.get_run(run_id))["agent_id"] is None
+    assert (await rmm_repo.get_run(cancelled))["status"] == "cancelled"
+    await rmm_repo.expire_stale_runs()
+    assert (await rmm_repo.get_run(expired))["status"] == "expired"
+
+
+@pytest.mark.anyio
+async def test_prequeue_picker_and_asset_api_respect_company(sqlite_db, monkeypatch):
+    from fastapi import HTTPException
+    from app.features.rmm import routes
+
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": "echo 1"})
+    async def context(*args, **kwargs):
+        return {}, {}, 1, True
+    monkeypatch.setattr(routes, "_context", context)
+    assert len((await routes.list_scripts_api(None, asset_id=10))["scripts"]) == 1
+    with pytest.raises(HTTPException) as error:
+        await routes.list_scripts_api(None, asset_id=20)
+    assert error.value.status_code == 404
+    script = (await rmm_repo.list_scripts())[0]
+    detail = await routes.get_script_api(script["id"], None)
+    assert {a["asset_id"] for a in detail["agents"]} == {10, 11}
+    assert all(a["pending_install"] for a in detail["agents"])
+    await _enrol(sqlite_db)
+    targets = await rmm_repo.list_script_targets(1)
+    assert [a["asset_id"] for a in targets].count(10) == 1
+    assert {a["asset_id"] for a in targets} == {10, 11}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("os_name,supported,expected", [
+    ("windows", True, "dispatched"),
+    ("windows", False, "failed"),
+    ("linux", True, "failed"),
+])
+async def test_prequeue_associated_files_checked_when_agent_arrives(sqlite_db, monkeypatch, os_name, supported, expected):
+    from app.services import rmm_script_files
+
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": "echo 1"})
+    script = (await rmm_repo.list_scripts())[0]
+    await rmm_repo.set_script_platforms(script["id"], ["windows", "linux"])
+    async def files(script, agent):
+        assert agent["pending_install"]
+        return [{"source_path": "Common/tool.exe", "destination": "C:\\Tools\\tool.exe",
+                 "md5": "0" * 32, "sha256": "0" * 64, "size": 1}]
+    monkeypatch.setattr(rmm_script_files, "prepare_files", files)
+    result = await rmm_scripts.queue_runs(
+        script_id=script["id"], company_id=1, asset_ids=[10], submitted={},
+        timeout_seconds=60, queue_timeout_seconds=3600, requested_by_user_id=9,
+    )
+    run_id = result["queued"][0]["run_id"]
+    stored = await rmm_repo.get_run(run_id)
+    assert stored["queue_timeout_seconds"] == 3600 and stored["expires_at"] is not None
+    _, agent = await _enrol(sqlite_db, os_name=os_name)
+    agent["script_files_supported"] = supported
+    agent["shells"] = "pwsh"
+    jobs = await rmm_scripts.claim_jobs(agent)
+    assert bool(jobs) == (expected == "dispatched")
+    assert (await rmm_repo.get_run(run_id))["status"] == expected
