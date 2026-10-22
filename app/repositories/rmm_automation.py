@@ -300,7 +300,7 @@ async def set_step_positions(step_ids: list[int]) -> None:
 
 _ONBOARDING_COLUMNS = (
     "b.id, b.agent_id, b.company_id, b.asset_id, b.status, b.plan_json, b.current_index, b.current_run_id, "
-    "b.failed_steps, b.error_message, b.started_by_user_id, b.started_at, b.completed_at, "
+    "b.failed_steps, b.error_message, b.wait_for_inventory, b.started_by_user_id, b.started_at, b.completed_at, "
     "a.name AS asset_name, g.hostname AS agent_hostname, u.email AS started_by_email"
 )
 _ONBOARDING_JOINS = (
@@ -311,12 +311,12 @@ _ONBOARDING_JOINS = (
 
 async def create_onboarding_run(
     *, agent_id: int, company_id: int, asset_id: int | None, plan: list[dict[str, Any]],
-    started_by_user_id: int | None,
+    started_by_user_id: int | None, wait_for_inventory: bool = False,
 ) -> int:
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_onboarding_runs (agent_id, company_id, asset_id, status, plan_json, current_index, "
-        "started_by_user_id, started_at) VALUES (%s, %s, %s, 'running', %s, -1, %s, %s)",
-        (agent_id, company_id, asset_id, json.dumps(plan), started_by_user_id, _utcnow()),
+        "started_by_user_id, started_at, wait_for_inventory) VALUES (%s, %s, %s, 'running', %s, -1, %s, %s, %s)",
+        (agent_id, company_id, asset_id, json.dumps(plan), started_by_user_id, _utcnow(), int(wait_for_inventory)),
     )
 
 
@@ -338,8 +338,12 @@ async def list_onboarding_runs(*, company_id: int, limit: int = 50) -> list[dict
     return [_onboarding_row(row) for row in rows or []]
 
 
-async def running_onboarding_ids() -> list[int]:
-    rows = await db.fetch_all("SELECT id FROM rmm_onboarding_runs WHERE status = 'running' ORDER BY id")
+async def running_onboarding_ids(*, agent_id: int | None = None) -> list[int]:
+    condition = " AND agent_id = %s" if agent_id is not None else ""
+    rows = await db.fetch_all(
+        "SELECT id FROM rmm_onboarding_runs WHERE status = 'running'" + condition + " ORDER BY id",
+        (agent_id,) if agent_id is not None else (),
+    )
     return [int(row["id"]) for row in rows or []]
 
 

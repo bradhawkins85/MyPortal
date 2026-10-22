@@ -204,6 +204,12 @@
       "compatible-from": "*",
       "compatible-to": "*",
       "maintenance": false
+    },
+    "517_rmm_onboarding_inventory_gate.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
     }
   }
 }

@@ -1,0 +1,7 @@
+{
+  "guid": "69d0e171-0d39-49b8-8300-bfe56f0c4e6a",
+  "occurred_at": "2026-10-22T02:30Z",
+  "change_type": "Fix",
+  "summary": "RMM: wait for the first hardware and software inventory before evaluating automatic onboarding steps, preserving skip existing assets enrolment cutoffs.",
+  "content_hash": "fc517d4fed517017cf74904bb1afd59dac99a3ca3f37f4ca9980405df4ed0ca2"
+}

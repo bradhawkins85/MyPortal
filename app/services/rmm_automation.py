@@ -9,8 +9,8 @@ and are resolved per device each time a run is queued.
   :data:`TICK_SECONDS` on one instance at a time. A device that still has an
   unfinished run from the same schedule is skipped rather than given a second.
 * **Onboarding** runs a company's ordered list of scripts the first time one of
-  its devices' RMM agent enrols. Each step selects all devices, matching tags
-  or advanced device rules. Devices outside the selection skip the step. Steps run
+  its devices' RMM agent enrols and sends its first inventory snapshot. Each step
+  selects all devices, matching tags or advanced device rules. Devices outside the selection skip the step. Steps run
   one at a time; the next is queued only once the previous one has finished. A
   failed step stops the sequence unless that step is set to continue on
   failure. A step set to skip existing assets runs only on devices enrolled
@@ -37,6 +37,7 @@ from app.core.logging import log_info, log_warning
 from app.repositories import assets as assets_repo
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_automation as automation_repo
+from app.repositories import rmm_inventory as inventory_repo
 from app.repositories import tags as tags_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import cron_expression, rmm_device_targeting, rmm_scripts
@@ -554,9 +555,14 @@ class _StepSkipped(Exception):
     was deleted after the sequence started)."""
 
 
-async def start_onboarding(agent: Mapping[str, Any], *, started_by_user_id: int | None = None) -> int | None:
+async def start_onboarding(
+    agent: Mapping[str, Any], *, started_by_user_id: int | None = None, wait_for_inventory: bool = False,
+) -> int | None:
     """Start the onboarding sequence on ``agent``'s device. Returns its id, or
-    ``None`` when there are no steps. Raises ``ValueError`` if one is running."""
+    ``None`` when there are no steps. Raises ``ValueError`` if one is running.
+    Automatic enrolment sets ``wait_for_inventory`` so target evaluation waits
+    for the first saved snapshot; explicitly requested reruns start immediately.
+    """
 
     if agent.get("company_id") is None:
         return None
@@ -571,6 +577,7 @@ async def start_onboarding(agent: Mapping[str, Any], *, started_by_user_id: int 
         asset_id=int(agent["asset_id"]) if agent.get("asset_id") is not None else None,
         plan=plan,
         started_by_user_id=started_by_user_id,
+        wait_for_inventory=wait_for_inventory,
     )
     log_info("RMM onboarding started", onboarding_run_id=onboarding_id, agent_id=agent["id"], steps=len(plan))
     await advance_onboarding(onboarding_id)
@@ -578,11 +585,11 @@ async def start_onboarding(agent: Mapping[str, Any], *, started_by_user_id: int 
 
 
 async def on_agent_enrolled(agent_id: int) -> int | None:
-    """Start onboarding for a newly enrolled agent. Never raises: enrolment must succeed."""
+    """Register automatic onboarding, pending the first inventory. Never blocks enrolment."""
 
     try:
         agent = await rmm_repo.get_agent(agent_id)
-        return await start_onboarding(agent) if agent else None
+        return await start_onboarding(agent, wait_for_inventory=True) if agent else None
     except Exception as exc:  # noqa: BLE001 - logged; the agent is enrolled either way
         log_warning("RMM onboarding could not start", agent_id=agent_id, error=str(exc))
         return None
@@ -699,6 +706,11 @@ async def advance_onboarding(onboarding_run_id: int) -> None:
     plan: list[dict[str, Any]] = list(onboarding.get("plan") or [])
     index = int(onboarding.get("current_index") if onboarding.get("current_index") is not None else -1)
     current_run_id = onboarding.get("current_run_id")
+    # Persist this gate so the periodic reconciler cannot evaluate targets early.
+    if index < 0 and onboarding.get("wait_for_inventory"):
+        inventory = await inventory_repo.get_for_agent(int(onboarding["agent_id"]))
+        if not inventory or inventory.get("received_at") is None:
+            return
     failed = int(onboarding.get("failed_steps") or 0)
 
     if 0 <= index < len(plan) and current_run_id is not None:
@@ -783,8 +795,8 @@ async def cancel_onboarding(onboarding: Mapping[str, Any]) -> bool:
     return cancelled
 
 
-async def reconcile_onboarding() -> None:
-    for onboarding_id in await automation_repo.running_onboarding_ids():
+async def reconcile_onboarding(*, agent_id: int | None = None) -> None:
+    for onboarding_id in await automation_repo.running_onboarding_ids(agent_id=agent_id):
         try:
             await advance_onboarding(onboarding_id)
         except Exception as exc:  # noqa: BLE001 - one bad sequence must not stop the rest

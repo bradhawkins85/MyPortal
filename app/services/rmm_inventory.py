@@ -23,7 +23,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 
-from app.core.logging import log_info
+from app.core.logging import log_info, log_warning
 from app.repositories import rmm_inventory as repo
 from app.repositories import network_map as network_map_repo
 
@@ -235,6 +235,14 @@ async def ingest(agent: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[s
             int(agent["company_id"]), int(agent["asset_id"]), details["network_adapters"],
         )
     log_info("RMM inventory received", agent_id=agent.get("id"), software=len(software))
+    # Resume only after hardware, software and network interfaces have been saved.
+    # The periodic reconciler retries if onboarding cannot advance right now.
+    from app.services import rmm_automation
+
+    try:
+        await rmm_automation.reconcile_onboarding(agent_id=int(agent["id"]))
+    except Exception as exc:  # noqa: BLE001 - inventory has already been saved
+        log_warning("RMM onboarding could not resume after inventory", agent_id=agent["id"], error=str(exc))
     return {"ok": True, "software": len(software)}
 
 
