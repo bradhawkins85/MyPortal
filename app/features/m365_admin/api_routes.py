@@ -134,6 +134,18 @@ async def start_search(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.post("/requests/{request_id}/verify", response_model=SpamPurgeRequestResponse)
+async def verify_purge(
+    request_id: int, request: Request, _: dict = Depends(_require_spam_purge_access),
+):
+    try:
+        return await purge_service.start_verification(request_id, await _company_id(request))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/requests/{request_id}/purge", response_model=SpamPurgeRequestResponse)
 async def start_purge(
     request_id: int, request: Request, _: dict = Depends(_require_spam_purge_access),

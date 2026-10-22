@@ -73,10 +73,10 @@
         <div><dt>3. Confirm</dt><dd>Type PURGE</dd></div>
         <div><dt>Search scope</dt><dd>All Exchange locations</dd></div>
         <div><dt>Purge type</dt><dd>HardDelete</dd></div>
-        <div><dt>Service limit</dt><dd>Up to 10 items/mailbox/action</dd></div>
+        <div><dt>Service limit</dt><dd>Up to 100 items/mailbox/action</dd></div>
       </dl>
       <p class="form-help">Searches run against all Exchange locations in the selected company tenant. Holds and retention can preserve recoverable copies; this workflow does not bypass them.</p>
-      <p class="form-help"><strong>How it runs:</strong> searches and purges use the Microsoft Graph eDiscovery API under the delegated sign-in of the Microsoft admin who last reconnected this company. That admin needs the eDiscovery Manager role group (search) and the Search And Purge role (purge) in Microsoft Purview. Searches are kept in the Purview eDiscovery case "MyPortal spam removal". If items remain after a purge, run the search and purge again.</p>
+      <p class="form-help"><strong>How it runs:</strong> searches and purges use the Microsoft Graph eDiscovery API under the delegated sign-in of the Microsoft admin who last reconnected this company. That admin needs the eDiscovery Manager role group (search) and the Search And Purge role (purge) in Microsoft Purview. Searches are kept in the Purview eDiscovery case "MyPortal spam removal". If results remain unchanged, use Verify purge and check the job report before submitting another deletion. Confirm whether messages are still visible in Outlook on the web.</p>
     </div>
   </aside>
 </div>
@@ -97,20 +97,28 @@
     {{ table_toolbar("spam-purge-history", search=true, search_placeholder="Filter requests", columns=columns) }}
     {% call data_table(columns, table_id="spam-purge-history", columns=columns, aria_label="Spam purge request history") %}
       {% for item in requests %}
+      {% set purge = item.purge_details if item.purge_details is mapping else {} %}
+      {% set needs_review = item.purge_status == 'needs_review' or (item.purge_status == 'completed' and (purge.remaining_items_unknown|default(true) or purge.remaining_items|default(none) != 0)) %}
       {% set search_variant = 'success' if item.search_status == 'completed' else 'danger' if item.search_status == 'failed' else 'warning' if item.search_status in ['queued','starting','running'] else 'neutral' %}
-      {% set purge_variant = 'success' if item.purge_status == 'completed' else 'danger' if item.purge_status == 'failed' else 'warning' if item.purge_status in ['queued','starting','running'] else 'neutral' %}
+      {% set purge_variant = 'warning' if needs_review or item.purge_status == 'partiallysucceeded' else 'success' if item.purge_status == 'completed' else 'danger' if item.purge_status == 'failed' else 'warning' if item.purge_status in ['queued','starting','running'] else 'neutral' %}
       <tr>
         <td data-column-key="created" data-sort-value="{{ item.created_at }}"><span data-utc="{{ item.created_at }}">{{ item.created_at }}</span></td>
         <td data-column-key="criteria"><div class="purge-query">{{ item.content_match_query }}</div></td>
         <td data-column-key="search"><span class="status status--{{ search_variant }}">{{ item.search_status|replace('_',' ')|title }}</span></td>
         <td data-column-key="matched" data-sort-value="{{ item.matched_items }}">{{ item.matched_items }}</td>
-        <td data-column-key="purge"><span class="status status--{{ purge_variant }}">{{ item.purge_status|replace('_',' ')|title }}</span></td>
-        <td data-column-key="removed" data-sort-value="{{ item.removed_items }}">{{ item.removed_items }}</td>
+        <td data-column-key="purge"><span class="status status--{{ purge_variant }}">{{ 'Needs review' if needs_review else item.purge_status|replace('_',' ')|title }}</span></td>
+        <td data-column-key="removed" data-sort-value="{{ item.removed_items }}">{% if purge.removed_items_unknown|default(false) %}Unknown{% elif purge and purge.removed_items_source != 'purge_report' %}<span title="Estimated from the decrease in search matches">~{{ item.removed_items }}</span>{% else %}{{ item.removed_items }}{% endif %}</td>
         <td data-column-key="requested_by">{{ item.requested_by_email or item.created_by }}</td>
         <td data-column-key="actions">
           {% set can_purge = item.search_status == 'completed' and item.matched_items > 0 and item.purge_status in ['not_started','failed'] %}
           <div class="purge-row-actions">
             <button type="button" class="button button--ghost button--small" data-purge-details-open="purge-details-{{ item.id }}" aria-haspopup="dialog" aria-controls="purge-details-{{ item.id }}">Details</button>
+            {% if purge.operation_url and item.purge_status in ['completed','needs_review','partiallysucceeded','failed'] %}
+            <form method="post" action="/m365/spam-purge/{{ item.id }}/verify">
+              {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+              <button class="button button--ghost button--small" type="submit">Verify purge</button>
+            </form>
+            {% endif %}
             {% if item.search_status == 'failed' %}
             <form method="post" action="/m365/spam-purge/{{ item.id }}/retry">
               {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
@@ -134,6 +142,7 @@
 {% set search = item.search_details if item.search_details is mapping else {} %}
 {% set estimate = search.estimate if search.estimate is mapping else {} %}
 {% set purge = item.purge_details if item.purge_details is mapping else {} %}
+{% set needs_review = item.purge_status == 'needs_review' or (item.purge_status == 'completed' and (purge.remaining_items_unknown|default(true) or purge.remaining_items|default(none) != 0)) %}
 <div class="modal purge-modal" id="purge-details-{{ item.id }}" role="dialog" aria-modal="true" aria-labelledby="purge-details-title-{{ item.id }}" aria-hidden="true" hidden>
   <div class="modal__content" role="document">
     <button type="button" class="modal__close" data-modal-close><span class="visually-hidden">Close search details</span>&times;</button>
@@ -176,23 +185,46 @@
       <section class="purge-modal__section">
         <h3>Purge outcome</h3>
         <dl class="purge-summary">
-          <div><dt>Status</dt><dd>{{ item.purge_status|replace('_',' ')|title }}</dd></div>
+          <div><dt>Status</dt><dd>{{ 'Needs review' if needs_review else item.purge_status|replace('_',' ')|title }}</dd></div>
+          {% if purge.operation is mapping %}<div><dt>Microsoft job status</dt><dd>{{ purge.operation.status }}</dd></div>{% endif %}
           <div><dt>Submitted</dt><dd>{{ purge.submitted_items|default(item.matched_items) }}</dd></div>
-          <div><dt>Removed</dt><dd>{{ purge.removed_items|default(item.removed_items) }}</dd></div>
+          <div><dt>{{ 'Removed (Microsoft report)' if purge.removed_items_source == 'purge_report' else 'Estimated removed' }}</dt><dd>{% if purge.removed_items_unknown|default(false) %}Unknown{% else %}{{ purge.removed_items|default(item.removed_items) }}{% endif %}</dd></div>
           <div><dt>Remaining:</dt><dd>{% if purge.remaining_items_unknown|default(true) %}Unknown{% else %}{{ purge.remaining_items }}{% endif %}</dd></div>
+          {% if purge.mailboxes %}<div><dt>Mailboxes submitted</dt><dd>{{ purge.mailboxes|join(', ') }}</dd></div>{% endif %}
+          {% if purge.summary is mapping %}
+          {% for key, label in [('location_count','Locations targeted'), ('completed_location_count','Locations processed'), ('identified_items','Items identified for purge'), ('attempted_items','Items attempted'), ('purged_items','Items successfully purged'), ('failed_items','Items that failed')] %}
+          {% if key in purge.summary %}<div><dt>{{ label }}</dt><dd>{{ purge.summary[key] }}</dd></div>{% endif %}
+          {% endfor %}
+          {% endif %}
           {% if item.purge_completed_at %}<div><dt>Completed</dt><dd><span data-utc="{{ item.purge_completed_at }}">{{ item.purge_completed_at }}</span></dd></div>{% endif %}
           {% if purge.managed_folder_assistant_scope == 'matched_mailboxes' %}<div><dt>Managed Folder Assistant</dt><dd>{{ purge.managed_folder_assistant_mailboxes|join(', ') or 'No mailboxes' }}</dd></div>
           {% elif purge.managed_folder_assistant_mailboxes is defined %}<div><dt>Managed Folder Assistant</dt><dd>{{ purge.managed_folder_assistant_mailboxes }} mailboxes</dd></div>{% endif %}
           {% if purge.managed_folder_assistant_failures %}<div><dt>Assistant failures</dt><dd>{{ purge.managed_folder_assistant_failures|length }}</dd></div>{% endif %}
           {% if purge.managed_folder_assistant_warning %}<div><dt>Assistant warning</dt><dd>{{ purge.managed_folder_assistant_warning }}</dd></div>{% endif %}
         </dl>
-        <p class="form-help">Completed means the remote action ended; it does not guarantee every match was removed.</p>
+        <p class="form-help">Microsoft job success does not guarantee every match was removed. Removal counts use the purge report when available. Counts marked ~ are estimated from the decrease in search matches after mailbox cleanup; retained copies and indexing delays can affect those estimates.</p>
+        {% if purge.report_no_op %}<p class="alert alert--warning" role="status">Microsoft's report confirms an empty purge job: zero locations or zero items attempted. No deletion was performed.</p>{% endif %}
+        {% if needs_review %}<p class="alert alert--warning" role="status">Message removal has not been verified. If messages are still visible in Outlook on the web, review the purge report in Microsoft Purview before another deletion. Verify purge checks the existing job without submitting another purge.</p>{% endif %}
+        {% if purge.verification_error %}<p class="form-help">Verification unavailable: {{ purge.verification_error }}</p>{% endif %}
+        {% if purge.report_error %}<p class="form-help">Purge report unavailable: {{ purge.report_error }}</p>{% endif %}
+        {% if purge.reports %}
+        <details class="purge-raw">
+          <summary>Microsoft purge job report</summary>
+          <p class="form-help">Report previews include up to 20 rows per file. Review any location or item errors. Download the full report in Microsoft Purview for all rows.</p>
+          {% for report in purge.reports %}
+          <h4>{{ report.file_name }}</h4>
+          {% if report.issues %}<p class="alert alert--warning" role="status">Microsoft reported errors or warnings in this file.</p><pre>{{ report.issues|tojson(indent=2) }}</pre>{% endif %}
+          {% if report.truncated %}<p class="form-help">Additional rows omitted from this preview.</p>{% endif %}
+          <pre>{{ report.rows|tojson(indent=2) }}</pre>
+          {% endfor %}
+        </details>
+        {% endif %}
       </section>
       {% endif %}
       {% if item.search_status == 'completed' and item.matched_items > 0 and item.purge_status in ['not_started','failed'] %}
       <section class="purge-modal__section">
         <h3>Hard delete</h3>
-        <p class="form-help">Permanently deletes the {{ item.matched_items }} matched item{{ '' if item.matched_items == 1 else 's' }} from every mailbox. Type PURGE to confirm.</p>
+        <p class="form-help">Requests hard deletion of the {{ item.matched_items }} matched item{{ '' if item.matched_items == 1 else 's' }}, up to 100 per mailbox. Retention and holds still apply. Type PURGE to confirm.</p>
         <form method="post" action="/m365/spam-purge/{{ item.id }}/purge" class="purge-actions">
           {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
           <label class="visually-hidden" for="confirmation-{{ item.id }}">Type PURGE</label>

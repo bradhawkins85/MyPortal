@@ -25,7 +25,7 @@ CASE_DISPLAY_NAME = "MyPortal spam removal"
 CASE_DESCRIPTION = "Created by MyPortal Spam Search & Purge. Searches in this case are reviewed before purge."
 
 # Graph ``ediscoveryCaseOperation.status`` values that will not change again.
-TERMINAL_OPERATION_STATUSES = frozenset({"succeeded", "failed", "partiallysucceeded"})
+TERMINAL_OPERATION_STATUSES = frozenset({"succeeded", "failed", "partiallysucceeded", "submissionfailed"})
 
 
 def _segment(value: Any) -> str:
@@ -133,6 +133,51 @@ async def delete_search(token: str, case_id: str, search_id: str) -> None:
     await _request(token, "DELETE", _search_url(case_id, search_id), "search removal")
 
 
+async def bind_purge_mailboxes(token: str, case_id: str, search_id: str, mailboxes: list[str]) -> None:
+    """Bind an explicit, reviewed mailbox scope before a destructive action.
+
+    A tenant-wide estimate can have hits while purgeData expands that scope to
+    zero locations. Do not rely on that expansion for the purge. Reconcile the
+    sources on retries and refuse any source outside the reviewed mailboxes.
+    """
+    expected = {mailbox.casefold() for mailbox in mailboxes}
+    if not expected:
+        raise ValueError("Cannot submit a purge without explicit mailbox locations")
+
+    async def sources() -> set[str]:
+        found: set[str] = set()
+        url: str | None = _search_url(case_id, search_id) + "/additionalSources"
+        while url:
+            body = _json(await _request(token, "GET", url, "purge mailbox lookup"))
+            for source in body.get("value") or []:
+                email = str(source.get("email") or "").strip().casefold() if isinstance(source, dict) else ""
+                if email not in expected:
+                    raise ValueError("The search contains a data source outside the reviewed purge mailboxes; run a new search")
+                if str(source.get("includedSources") or "").lower() != "mailbox":
+                    raise ValueError("The purge search contains a source that is not restricted to a mailbox; run a new search")
+                found.add(email)
+            url = body.get("@odata.nextLink")
+        return found
+
+    existing = await sources()
+    for mailbox in mailboxes:
+        if mailbox.casefold() in existing:
+            continue
+        await _request(
+            token, "POST", _search_url(case_id, search_id) + "/additionalSources", "purge mailbox binding",
+            {"@odata.type": "microsoft.graph.security.userSource", "email": mailbox, "includedSources": "mailbox"},
+        )
+        existing.add(mailbox.casefold())
+    # Switch away from implicit tenant expansion only after adding the explicit
+    # sources. Read them back so a 201 with no usable source cannot authorize purge.
+    if await sources() != expected:
+        raise ValueError("Microsoft did not retain all reviewed purge mailbox locations; no purge was submitted")
+    await _request(
+        token, "PATCH", _search_url(case_id, search_id), "purge scope configuration",
+        {"dataSourceScopes": "none"},
+    )
+
+
 async def start_estimate(token: str, case_id: str, search_id: str) -> None:
     await _request(
         token, "POST", _search_url(case_id, search_id) + "/estimateStatistics", "estimate",
@@ -224,6 +269,75 @@ def _decode_csv(raw: bytes) -> str:
     if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
         return raw.decode("utf-16")
     return raw.decode("utf-8-sig", errors="replace")
+
+
+_PURGE_SUMMARY_METRICS = {
+    "locationcount": "location_count",
+    "completedlocationcount": "completed_location_count",
+    "items identified for purge": "identified_items",
+    "items attempted to be purged": "attempted_items",
+    "items successfully purged": "purged_items",
+    "items that failed to be purged": "failed_items",
+    "item no longer exists": "no_longer_exists_items",
+    "total item size purged (bytes)": "purged_bytes",
+}
+
+
+def purge_report_preview(report_zip: bytes) -> list[dict[str, Any]]:
+    """Keep bounded CSV evidence of the purge, including per-location errors.
+
+    Do not infer deletions from a report's generic Count column: its meaning
+    varies between report types. Preserve Microsoft's column names instead.
+    """
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(report_zip))
+    except zipfile.BadZipFile as exc:
+        raise m365_service.M365Error("eDiscovery purge report is not a ZIP file") from exc
+    reports: list[dict[str, Any]] = []
+    with archive:
+        if sum(info.file_size for info in archive.infolist()) > MAX_REPORT_BYTES:
+            raise m365_service.M365Error("Uncompressed eDiscovery purge report is too large")
+        for name in archive.namelist():
+            filename = PurePosixPath(name).name
+            if not filename.lower().endswith(".csv"):
+                continue
+            if len(reports) >= 5:
+                break
+            content = io.StringIO(_decode_csv(archive.read(name)))
+            is_summary = filename.lower().startswith("summary")
+            # Summary.csv has headerless name/value/description rows, interspersed
+            # with blanks and two-column metadata. It is not a columnar table.
+            reader = (
+                ({"Name": row[0], "Value": row[1], "Description": row[2] if len(row) > 2 else ""}
+                 for row in csv.reader(content) if len(row) >= 2)
+                if is_summary else csv.DictReader(content)
+            )
+            rows = []
+            issues = []
+            metrics: dict[str, int] = {}
+            truncated = False
+            for row in reader:
+                if is_summary:
+                    metric = _PURGE_SUMMARY_METRICS.get(str(row["Name"]).strip().lower())
+                    value = str(row["Value"]).strip().replace(",", "")
+                    if metric and value.isascii() and value.isdigit():
+                        metrics[metric] = int(value)
+                fields = {str(key).lower().replace(" ", "").replace("_", ""): str(value or "").strip() for key, value in row.items()}
+                issue = (
+                    fields.get("status", "").lower() in {"failed", "failure", "error", "partiallysucceeded", "submissionfailed"}
+                    or fields.get("errorwarning", "").lower() not in {"", "none", "n/a", "0"}
+                )
+                preview = {str(key)[:100]: str(value or "")[:1000] for key, value in list(row.items())[:30]}
+                if issue and len(issues) < 20:
+                    issues.append(preview)
+                if len(rows) >= 20:
+                    truncated = True
+                    continue
+                rows.append(preview)
+            reports.append({"file_name": filename, "rows": rows, "issues": issues, "metrics": metrics, "truncated": truncated})
+    if not reports:
+        raise m365_service.M365Error("eDiscovery purge report contains no CSV files")
+    return reports
 
 
 def _parse_count(value: Any) -> int:
