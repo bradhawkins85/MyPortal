@@ -501,8 +501,29 @@ async def script_files_api(script_id: int, request: Request):
     return {"files": script.get("files") or [], "available": available, "warning": warning}
 
 
-async def _save_script_files(request: Request, user: dict, script: dict, files: list[dict]) -> list[dict]:
-    validated = await rmm_script_files.validate_sources(script, files)
+# Fixed explanations keyed by ScriptFileError.code, so responses never echo exception text.
+_SCRIPT_FILE_ERRORS = {
+    "too_many": f"A script can have at most {rmm_script_files.MAX_FILES} files.",
+    "source": "Choose a Private-Files file under Common or Companies.",
+    "destination": (
+        "Enter an absolute endpoint file path including the filename, such as C:\\Tools\\setup.exe or "
+        "/opt/tools/setup.sh. Use a local drive rather than a network share, and avoid '..' and characters "
+        "Windows does not allow in file names."
+    ),
+    "duplicate": "Another file of this script already uses that endpoint file path.",
+    "unavailable": (
+        "The file is missing from Private-Files or unavailable to this script. Company scripts use Common and "
+        "their company's folder; Common scripts use Common and Companies/{company}/."
+    ),
+    "too_large": "The file is larger than 50 MB, the most a script file can be.",
+}
+_SCRIPT_FILE_SERVICE_ERROR = "Could not reach the Private-Files repository in Gitea. Try again shortly."
+
+
+async def _save_script_files(
+    request: Request, user: dict, script: dict, files: list[dict], *, changed: set[str] | None = None,
+) -> list[dict]:
+    validated = await rmm_script_files.validate_sources(script, files, changed=changed)
     await rmm_repo.set_script_files(int(script["id"]), validated)
     await audit_service.record(
         action="rmm.script.files.update", request=request, user_id=user.get("id"),
@@ -518,10 +539,10 @@ async def update_script_files_api(script_id: int, payload: ScriptFilesRequest, r
         files = await _save_script_files(request, user, script, [item.model_dump() for item in payload.files])
     except rmm_script_files.ScriptFileError as exc:
         logger.warning("Script file association rejected", error=str(exc))
-        raise HTTPException(status_code=400, detail="The script file is invalid.") from exc
+        raise HTTPException(status_code=400, detail=_SCRIPT_FILE_ERRORS.get(exc.code, "The script file is invalid.")) from exc
     except gitea.GiteaError as exc:
         logger.error("Gitea script file association failed", error=str(exc))
-        raise HTTPException(status_code=503, detail="The file service is temporarily unavailable.") from exc
+        raise HTTPException(status_code=503, detail=_SCRIPT_FILE_SERVICE_ERROR) from exc
     return {"files": files}
 
 
@@ -542,12 +563,20 @@ async def add_script_file(script_id: int, request: Request):
     else:
         files.append(association)
     try:
-        await _save_script_files(request, user, script, files)
-    except (rmm_script_files.ScriptFileError, gitea.GiteaError) as exc:
-        logger.error("Script file association failed", error=str(exc))
-        message = "Could not associate the file with the script."
+        await _save_script_files(request, user, script, files, changed={association["source_path"].strip()})
+    except rmm_script_files.ScriptFileError as exc:
+        logger.warning("Script file association rejected", error=str(exc))
+        message = _SCRIPT_FILE_ERRORS.get(exc.code, "Could not associate the file with the script.")
+        status_code = 400
+    except gitea.GiteaError as exc:
+        logger.error("Gitea script file association failed", error=str(exc))
+        message = _SCRIPT_FILE_SERVICE_ERROR
+        status_code = 503
+    else:
+        message = None
+    if message is not None:
         if request.headers.get("Accept") == "application/json":
-            return JSONResponse({"detail": message}, status_code=400)
+            return JSONResponse({"detail": message}, status_code=status_code)
         return flash_redirect(f"/rmm/scripts?script={script_id}", message, "error")
     if request.headers.get("Accept") == "application/json":
         return JSONResponse({"ok": True})

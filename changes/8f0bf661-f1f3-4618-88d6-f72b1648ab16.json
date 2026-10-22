@@ -1,0 +1,7 @@
+{
+  "guid": "8f0bf661-f1f3-4618-88d6-f72b1648ab16",
+  "occurred_at": "2026-10-22T00:00Z",
+  "change_type": "Fix",
+  "summary": "RMM Scripts: adding a Private-Files file now checks only the file being saved, so an earlier association whose file has moved no longer blocks it, and the editor explains why a file was rejected (too large, unavailable or an invalid endpoint path) instead of a generic error",
+  "content_hash": "ed9bb623e5c62849aa9c4e11a523116ec245c5427e874a1572662169e5d2c5c0"
+}
