@@ -2,7 +2,7 @@
   'use strict';
 
   // The asset page's "Install Choco Package" modal: pick an app from the
-  // downloaded Chocolatey list (or type a package ID) and push the install.
+  // downloaded Chocolatey list (or type a package ID) and push the chosen action.
   const modal = document.querySelector('[data-choco-modal]');
   if (!modal) return;
   const form = modal.querySelector('[data-choco-modal-form]');

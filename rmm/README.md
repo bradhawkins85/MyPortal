@@ -164,8 +164,8 @@ after repairs and reports failure if either check fails.
 
 ### Chocolatey application catalog and company sources
 
-Deploy MyPortal with migration **494** before updating the RMM agents. Chocolatey
-must already be installed on Windows endpoints. Patch management now browses and
+Deploy MyPortal with migration **494** before updating the RMM agents. Missing
+Chocolatey installations are installed automatically before source sync. Patch management browses and
 searches the stable Chocolatey community catalog. Selecting an application fills
 its package ID and display name; adjust the display name to match device inventory.
 The asset Software table checks visible rows against that catalog and offers
@@ -174,6 +174,13 @@ Ambiguous names, unknown version formats, per-user applications, and versions
 already current or newer are not automatically upgraded. One-off upgrades are
 verified against current inventory again at dispatch and appear in Scripts run
 history. They do not reboot the device.
+
+Package selection on the asset page and Script automation offers Install,
+Upgrade and Uninstall modes, an optional Force flag, and Ignore pending reboots
+(checked by default). Unticking the latter defers the action while a reboot is
+pending. Upgrade refuses to install missing packages; Uninstall uses local
+metadata without requiring the package to remain in an enabled feed. Package
+pushes record these options in run history and never request a device restart.
 
 Define available repositories in MyPortal's `.env` (or process environment):
 

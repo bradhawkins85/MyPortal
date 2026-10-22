@@ -12,15 +12,17 @@
   </header>
   {% if hw.can_install_apps %}
   <div class="ce-section__body">
-    <form method="post" action="/rmm/assets/{{ asset.id }}/software/install" class="rmm-inventory__install" data-choco-install data-confirm="Install or update this application using the company's enabled Chocolatey sources?">
+    <form method="post" action="/rmm/assets/{{ asset.id }}/software/install" class="rmm-inventory__install" data-choco-install data-confirm="Run the selected Chocolatey action on this device?">
       {% include "partials/csrf.html" %}
-      <label class="form-label" for="choco-install-package">Install an app with Chocolatey</label>
+      <label class="form-label" for="choco-install-package">Manage a Chocolatey package</label>
       <div class="form-field__group">
         <input type="search" class="form-input" id="choco-install-package" name="package_id" list="choco-install-options" maxlength="128" placeholder="Package ID, such as googlechrome" required autocomplete="off" aria-describedby="choco-install-help" data-choco-install-input>
         <datalist id="choco-install-options" data-choco-install-options></datalist>
-        <button type="submit" class="button button--secondary button--small">Install</button>
       </div>
-      <p class="form-help" id="choco-install-help">Suggestions come from the downloaded Chocolatey app list; you can also enter any exact package ID from the company's enabled sources. An app that is already installed is updated to the latest version.</p>
+      <p class="form-help" id="choco-install-help">Suggestions come from the downloaded Chocolatey app list; you can also enter an exact package ID.</p>
+      {% set choco_options_id = 'choco-install' %}
+      {% include "rmm/_choco_options.html" %}
+      <button type="submit" class="button button--secondary button--small">Push now</button>
     </form>
   </div>
   {% endif %}

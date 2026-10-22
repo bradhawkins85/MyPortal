@@ -44,16 +44,41 @@ function Choco-Output([string[]]$arguments) {
     if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed ($LASTEXITCODE)." }
     return $output
 }
+function Latest-ChocolateyVersion([string]$id) {
+    # Search each source separately so a newer community version cannot override
+    # a package in a preferred company feed.
+    foreach ($source in @($plan.sources | Where-Object { $_.enabled } | Sort-Object { [int]$_.priority })) {
+        $rows = @(Choco-Output @('search', $id, '--exact', '--limit-output', "--source=$($source.name)"))
+        $matchingRows = @($rows | Where-Object { "$_" -match "^$([regex]::Escape($id))\|" })
+        if ($matchingRows.Count -gt 1) { throw "No unique stable Chocolatey version for $id in $($source.name)." }
+        if ($matchingRows.Count -eq 1) { return ([string]$matchingRows[0]).Split('|')[1] }
+    }
+    throw "No stable Chocolatey version for $id in the enabled sources."
+}
+function Run-ChocolateyPackage([string[]]$arguments) {
+    Write-Output "Chocolatey: $($arguments -join ' ')"
+    & $script:choco @arguments | ForEach-Object { Write-Output $_ }
+    $code = $LASTEXITCODE
+    if ($code -in @(1641, 3010)) { $script:rebootRequired = $true }
+    elseif ($code -ne 0) { throw "Chocolatey returned $code for $($arguments[1])." }
+}
 try {
     if (@($plan.apps).Count -gt 0) {
         if ($null -eq $plan.sources) { throw 'Company Chocolatey sources are missing.' }
         Sync-ChocolateySources @($plan.sources)
-        if (@($plan.sources | Where-Object { $_.enabled }).Count -eq 0) { throw 'No Chocolatey sources are enabled.' }
+        if ($plan.manual_apps.mode -ne 'uninstall' -and @($plan.sources | Where-Object { $_.enabled }).Count -eq 0) {
+            throw 'No Chocolatey sources are enabled.'
+        }
     }
-    if (Pending-Reboot) {
-        $rebootRequired = $true
+    # Only manually pushed app actions can opt out of the reboot gate.
+    # Missing options on older queued app jobs use the same default as the UI.
+    $ignorePendingReboots = $plan.manual_apps -and $plan.manual_apps.ignore_pending_reboots -ne $false
+    $pendingReboot = Pending-Reboot
+    if ($pendingReboot) { $rebootRequired = $true }
+    if ($pendingReboot -and -not $ignorePendingReboots) {
         Write-Output 'Installation deferred: a restart is already pending.'
     } else {
+        if ($pendingReboot) { Write-Output 'Proceeding despite a pending restart as requested.' }
         if ($plan.windows) {
             try {
                 $session = New-Object -ComObject Microsoft.Update.Session
@@ -126,19 +151,23 @@ try {
                 try {
                     $id = [string]$app.package_id
                     if ($id -notmatch '^[a-z0-9][a-z0-9._-]{0,127}$') { throw 'Invalid package ID.' }
-                    # Search each source separately: an aggregate search may select
-                    # a newer Default version over a package in a preferred custom feed.
-                    $latest = $null
-                    foreach ($source in @($plan.sources | Where-Object { $_.enabled } | Sort-Object { [int]$_.priority })) {
-                        $latestRows = @(Choco-Output @('search', $id, '--exact', '--limit-output', "--source=$($source.name)"))
-                        $latestRow = @($latestRows | Where-Object { "$_" -match "^$([regex]::Escape($id))\|" })
-                        if ($latestRow.Count -gt 1) { throw "No unique stable Chocolatey version for $id in $($source.name)." }
-                        if ($latestRow.Count -eq 1) {
-                            $latest = ([string]$latestRow[0]).Split('|')[1]
-                            break
+                    if ($plan.manual_apps) {
+                        $mode = [string]$plan.manual_apps.mode
+                        if ($mode -notin @('install', 'upgrade', 'uninstall')) { throw 'Invalid Chocolatey action.' }
+                        $chocoArgs = @($mode, $id, '--yes', '--no-progress', '--use-package-exit-codes')
+                        if ($plan.manual_apps.force) { $chocoArgs += '--force' }
+                        if ($ignorePendingReboots) { $chocoArgs += '--ignore-detected-reboot' }
+                        if ($mode -eq 'upgrade') { $chocoArgs += '--fail-on-not-installed' }
+                        if ($mode -ne 'uninstall') {
+                            $latest = Latest-ChocolateyVersion $id
+                            $chocoArgs += "--version=$latest"
                         }
+                        # Uninstall uses local package metadata; it must still
+                        # work when a package has been removed from the feeds.
+                        Run-ChocolateyPackage $chocoArgs
+                        continue
                     }
-                    if (-not $latest) { throw "No stable Chocolatey version for $id in the enabled sources." }
+                    $latest = Latest-ChocolateyVersion $id
                     $managed = @($local | Where-Object { "$_" -match "^$([regex]::Escape($id))\|" })
                     $chocoArgs = @('--yes', '--no-progress', '--use-package-exit-codes', '--ignore-detected-reboot',
                         "--version=$latest")
@@ -157,11 +186,7 @@ try {
                         if ($external.Count -eq 0 -and -not $app.install_missing) { Write-Output "$id is not installed; skipped."; continue }
                         $chocoArgs = @('install', $id, '--force') + $chocoArgs
                     }
-                    Write-Output "Chocolatey: $($chocoArgs -join ' ')"
-                    & $script:choco @chocoArgs | ForEach-Object { Write-Output $_ }
-                    $code = $LASTEXITCODE
-                    if ($code -in @(1641, 3010)) { $rebootRequired = $true }
-                    elseif ($code -ne 0) { throw "Chocolatey returned $code for $id." }
+                    Run-ChocolateyPackage $chocoArgs
                 } catch { $failed = $true; Write-Output "Application patch error: $_" }
             }
         }
