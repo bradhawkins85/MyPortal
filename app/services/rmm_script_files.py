@@ -14,7 +14,7 @@ import ntpath
 import posixpath
 import re
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Any, Mapping
+from typing import Any, Collection, Mapping
 
 from app.core.logging import log_info, log_warning
 from app.repositories import companies as companies_repo
@@ -32,40 +32,44 @@ _MOVE_BATCH_BYTES = 20 * 1024 * 1024
 
 
 class ScriptFileError(ValueError):
-    pass
+    """``code`` names the problem so routes can explain it without echoing the exception."""
+
+    def __init__(self, message: str, code: str = "invalid") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def validate_associations(files: list[Mapping[str, Any]]) -> list[dict[str, str]]:
     if len(files) > MAX_FILES:
-        raise ScriptFileError(f"Associate at most {MAX_FILES} files with a script.")
+        raise ScriptFileError(f"Associate at most {MAX_FILES} files with a script.", "too_many")
     result: list[dict[str, str]] = []
     destinations: set[str] = set()
     for item in files:
         source = str(item.get("source_path") or "").strip()
         destination = str(item.get("destination") or "").strip()
         if not source or len(source) > 1024 or source.startswith("/") or "\\" in source:
-            raise ScriptFileError("Enter a Private-Files path under Common or Companies.")
+            raise ScriptFileError("Enter a Private-Files path under Common or Companies.", "source")
         if any(part in ("", ".", "..") for part in source.split("/")) or any(ord(c) < 32 for c in source):
-            raise ScriptFileError("The repository path contains invalid characters or path traversal.")
+            raise ScriptFileError("The repository path contains invalid characters or path traversal.", "source")
         if not destination or len(destination) > 1024 or any(ord(c) < 32 for c in destination):
-            raise ScriptFileError("Enter the full destination file path on the endpoint.")
+            raise ScriptFileError("Enter the full destination file path on the endpoint.", "destination")
         windows = bool(re.match(r"^[A-Za-z]:", destination)) or destination.startswith("\\")
         path = PureWindowsPath(destination) if windows else PurePosixPath(destination)
         if not path.is_absolute() or ".." in path.parts or not path.name or str(path) == path.anchor:
-            raise ScriptFileError("Use an absolute destination file path without '..', such as C:\\Tools\\setup.exe or /opt/tools/setup.sh.")
+            raise ScriptFileError("Use an absolute destination file path without '..', such as C:\\Tools\\setup.exe or /opt/tools/setup.sh.", "destination")
         if windows:
             if not re.match(r"^[A-Za-z]:[\\/]", destination):
-                raise ScriptFileError("Use a local Windows drive path for the destination.")
+                raise ScriptFileError("Use a local Windows drive path for the destination.", "destination")
             if any(re.search(r'[:*?"<>|]', part) or part.endswith((" ", ".")) or PureWindowsPath(part).is_reserved()
                    for part in path.parts[1:]):
-                raise ScriptFileError("The destination contains an invalid Windows filename.")
+                raise ScriptFileError("The destination contains an invalid Windows filename.", "destination")
             canonical = ntpath.normcase(ntpath.normpath(destination))
         else:
             if destination.startswith("//") or destination.endswith("/"):
-                raise ScriptFileError("Enter an absolute local file path, including its filename.")
+                raise ScriptFileError("Enter an absolute local file path, including its filename.", "destination")
             canonical = posixpath.normpath(destination)
         if canonical in destinations:
-            raise ScriptFileError("Each file needs a different destination path.")
+            raise ScriptFileError("Each file needs a different destination path.", "duplicate")
         destinations.add(canonical)
         result.append({"source_path": source, "destination": destination})
     return result
@@ -134,22 +138,29 @@ async def file_choices(script: Mapping[str, Any], company_id: int) -> tuple[list
     return choices, warning
 
 
-async def validate_sources(script: Mapping[str, Any], files: list[Mapping[str, Any]]) -> list[dict[str, str]]:
+async def validate_sources(
+    script: Mapping[str, Any], files: list[Mapping[str, Any]], *, changed: Collection[str] | None = None,
+) -> list[dict[str, str]]:
+    """Validate every association, checking Gitea only for the ``changed``
+    source paths (``None`` checks all). An existing association whose file has
+    since moved must not stop another file being added; queueing a run still
+    rejects it."""
     result = validate_associations(files)
-    if not result:
+    checked = [item for item in result if changed is None or item["source_path"] in changed]
+    if not checked:
         return result
     settings = await _settings()
     allowed = await available_files(settings, script)
-    for item in result:
+    for item in checked:
         source = allowed.get(item["source_path"])
         if source is None:
             raise ScriptFileError(
                 f"{item['source_path']} is missing from Private-Files or unavailable to this script. Company scripts "
                 f"use Common and their company's files; Common scripts use Common and Companies/{COMPANY_TOKEN}/ for "
-                "the company each run is for."
+                "the company each run is for.", "unavailable",
             )
         if source.size > MAX_FILE_BYTES:
-            raise ScriptFileError(f"{source.path} is larger than 50 MB.")
+            raise ScriptFileError(f"{source.path} is larger than 50 MB.", "too_large")
     return result
 
 

@@ -349,3 +349,44 @@ async def test_legacy_files_folder_moves_to_private_files(monkeypatch, prefix):
     calls.clear()
     assert await rmm_script_files.move_legacy_files(settings) == 0
     assert calls == []
+
+
+@pytest.mark.anyio
+async def test_adding_a_file_only_checks_the_changed_source(monkeypatch):
+    async def available(_settings, _script, company_ids=None):
+        return {
+            "Common/tool.exe": gitea.GiteaFile("Common/tool.exe", "a" * 40, 1),
+            "Common/large.msi": gitea.GiteaFile("Common/large.msi", "b" * 40, rmm_script_files.MAX_FILE_BYTES + 1),
+        }
+
+    async def settings():
+        return None
+
+    monkeypatch.setattr(rmm_script_files, "available_files", available)
+    monkeypatch.setattr(rmm_script_files, "_settings", settings)
+    files = [
+        {"source_path": "Common/moved.exe", "destination": "C:\\Tools\\moved.exe"},
+        {"source_path": "Common/tool.exe", "destination": "C:\\Tools\\tool.exe"},
+    ]
+    # An existing association whose file has moved must not block adding another file.
+    assert await rmm_script_files.validate_sources({"company_id": None}, files, changed={"Common/tool.exe"}) == files
+    with pytest.raises(rmm_script_files.ScriptFileError) as missing:
+        await rmm_script_files.validate_sources({"company_id": None}, files)
+    assert missing.value.code == "unavailable"
+    with pytest.raises(rmm_script_files.ScriptFileError) as large:
+        await rmm_script_files.validate_sources(
+            {"company_id": None}, [{"source_path": "Common/large.msi", "destination": "C:\\Tools\\large.msi"}],
+        )
+    assert large.value.code == "too_large"
+
+
+@pytest.mark.parametrize(("files", "code"), [
+    ([{"source_path": "Common/a.exe", "destination": "Tools\\a.exe"}], "destination"),
+    ([{"source_path": "../a.exe", "destination": "C:\\a.exe"}], "source"),
+    ([{"source_path": "Common/a.exe", "destination": "C:\\a.exe"},
+      {"source_path": "Common/b.exe", "destination": "c:\\A.exe"}], "duplicate"),
+])
+def test_association_errors_name_their_problem(files, code):
+    with pytest.raises(rmm_script_files.ScriptFileError) as error:
+        rmm_script_files.validate_associations(files)
+    assert error.value.code == code
