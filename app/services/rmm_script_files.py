@@ -157,7 +157,7 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
     associations = validate_associations(script.get("files") or [])
     if not associations:
         return []
-    if not agent.get("script_files_supported"):
+    if not agent.get("pending_install") and not agent.get("script_files_supported"):
         raise ScriptFileError("Update the RMM agent before running a script with associated files.")
     if script.get("company_id") is not None and int(script["company_id"]) != int(agent["company_id"]):
         raise ScriptFileError("The script's files are unavailable to this company.")
@@ -169,7 +169,7 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
     for item in associations:
         destination = item["destination"]
         windows = str(agent.get("os") or "").lower() == "windows"
-        if bool(re.match(r"^[A-Za-z]:[\\/]", destination)) != windows:
+        if not agent.get("pending_install") and bool(re.match(r"^[A-Za-z]:[\\/]", destination)) != windows:
             raise ScriptFileError(f"{destination} is not an absolute file path for this endpoint's operating system.")
         source = allowed.get(item["source_path"])
         if source is None:

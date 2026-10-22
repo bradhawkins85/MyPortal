@@ -480,7 +480,7 @@
       }
       const label = el('label', { for: id });
       label.append(el('span', { className: 'rmm-device__name' }, agent.asset_name || agent.hostname || 'Device'));
-      label.append(el('span', { className: 'rmm-device__meta' }, [agent.os, agent.os_version].filter(Boolean).join(' ') + (agent.last_seen_utc ? ' · last seen ' + formatDate(agent.last_seen_utc) : '')));
+      label.append(el('span', { className: 'rmm-device__meta' }, (agent.id == null ? 'Waiting for RMM agent' : [agent.os, agent.os_version].filter(Boolean).join(' ')) + (agent.last_seen_utc ? ' · last seen ' + formatDate(agent.last_seen_utc) : '')));
       item.append(box, label);
       devicesList.append(item);
     });

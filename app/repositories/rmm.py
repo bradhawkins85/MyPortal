@@ -401,6 +401,34 @@ async def list_company_agents(company_id: int) -> list[dict[str, Any]]:
     return [dict(row) for row in rows or []]
 
 
+async def list_script_targets(company_id: int) -> list[dict[str, Any]]:
+    """Installed agents plus assets waiting for their first active agent."""
+    targets = await list_company_agents(company_id)
+    rows = await db.fetch_all(
+        "SELECT a.id AS asset_id, a.name AS asset_name FROM assets a "
+        "WHERE a.company_id = %s AND a.archived_at IS NULL AND NOT EXISTS "
+        "(SELECT 1 FROM rmm_agents g WHERE g.asset_id = a.id "
+        "AND g.company_id = a.company_id AND g.status = 'active') ORDER BY a.name",
+        (company_id,),
+    )
+    targets.extend({**dict(row), "id": None, "os": None, "pending_install": True} for row in rows or [])
+    return targets
+
+
+async def bind_asset_runs(agent_id: int, company_id: int, asset_id: int) -> None:
+    """Atomically attach unclaimed manual runs to an active agent of this asset."""
+    await db.execute(
+        "UPDATE rmm_script_runs SET agent_id = %s "
+        "WHERE agent_id IS NULL AND company_id = %s AND asset_id = %s "
+        "AND status = 'queued' AND run_source = 'manual' "
+        "AND (expires_at IS NULL OR expires_at > %s) "
+        "AND EXISTS (SELECT 1 FROM rmm_agents g JOIN assets a ON a.id = g.asset_id "
+        "WHERE g.id = %s AND g.status = 'active' AND g.company_id = a.company_id "
+        "AND g.company_id = %s AND g.asset_id = %s)",
+        (agent_id, company_id, asset_id, _utcnow(), agent_id, company_id, asset_id),
+    )
+
+
 async def list_company_asset_agents(company_id: int) -> dict[int, dict[str, Any]]:
     """Each of a company's assets with an active RMM agent, keyed by asset ID (latest check-in)."""
 
@@ -438,7 +466,7 @@ async def create_run(
     *,
     script: dict[str, Any],
     content: str,
-    agent_id: int,
+    agent_id: int | None,
     company_id: int,
     asset_id: int | None,
     requested_by_user_id: int | None,

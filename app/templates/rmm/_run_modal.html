@@ -94,8 +94,9 @@
             <input type="search" class="form-input" id="rmm-device-search" placeholder="Search devices" data-rmm-device-search />
             <button type="button" class="button button--ghost button--small" data-rmm-select-all>Select all</button>
           </div>
-          <ul class="rmm-devices" data-rmm-devices aria-label="Devices with the RMM agent"></ul>
-          <p class="form-help" data-rmm-devices-empty hidden>No devices in this company have the RMM agent yet.</p>
+          <ul class="rmm-devices" data-rmm-devices aria-label="Devices"></ul>
+          <p class="form-help">Devices without an agent can be queued now. They collect scripts after the RMM agent installs and connects; platform compatibility is checked then. The offline wait timeout includes time waiting for installation.</p>
+          <p class="form-help" data-rmm-devices-empty hidden>No devices in this company are available for this script.</p>
           <p class="form-help form-help--error" data-rmm-error="assets" hidden></p>
         </fieldset>
 

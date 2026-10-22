@@ -621,6 +621,9 @@ def notify_agent(agent_id: int) -> None:
 def device_problem(script: Mapping[str, Any], agent: Mapping[str, Any]) -> str | None:
     """Why ``script`` cannot run on ``agent``'s device, or ``None`` when it can."""
 
+    if agent.get("pending_install"):
+        # Platform and shell availability are checked when the agent arrives.
+        return None
     os_name = normalise_platform(agent.get("os"))
     if script["language"] in {"bash", "zsh"} and os_name == "windows":
         return "Shell scripts cannot run on Windows."
@@ -716,7 +719,7 @@ async def queue_for_agent(
     run_id = await rmm_repo.create_run(
         script=dict(script),
         content=str(script.get("content") or ""),
-        agent_id=int(agent["id"]),
+        agent_id=int(agent["id"]) if agent.get("id") is not None else None,
         company_id=company_id,
         asset_id=asset_id,
         requested_by_user_id=requested_by_user_id,
@@ -730,7 +733,7 @@ async def queue_for_agent(
         onboarding_run_id=onboarding_run_id,
         run_as=run_as,
     )
-    if notify:
+    if notify and agent.get("id") is not None:
         notify_agent(int(agent["id"]))
     return run_id
 
@@ -770,9 +773,11 @@ async def queue_runs(
             problems.append({"asset_id": asset_id, "message": "Device not found."})
             continue
         agent = await rmm_repo.get_asset_agent(asset_id)
-        if not agent:
-            problems.append({"asset_id": asset_id, "asset_name": asset.get("name"), "message": "No RMM agent is installed."})
+        if agent and int(agent.get("company_id") or 0) != int(company_id):
+            problems.append({"asset_id": asset_id, "message": "Device not found."})
             continue
+        if not agent:
+            agent = {"id": None, "os": None, "pending_install": True}
         try:
             run_id = await queue_for_agent(
                 script=script,
@@ -992,10 +997,12 @@ def agent_state(agent: Mapping[str, Any] | None, *, now: datetime | None = None)
 async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
     jobs: list[dict[str, Any]] = []
     agent_id = int(agent["id"])
+    if agent.get("asset_id") is not None:
+        await rmm_repo.bind_asset_runs(agent_id, int(agent["company_id"]), int(agent["asset_id"]))
     for row in await rmm_repo.next_jobs_for_agent(agent_id):
         # Recheck current restrictions: a queued job may predate a platform edit.
         script = await rmm_repo.get_script(int(row["script_id"])) if row.get("script_id") else None
-        if row.get("run_source") != "command" and not platform_allowed(script or row, agent):
+        if row.get("run_source") != "command" and device_problem(script or row, agent):
             await rmm_repo.cancel_run(int(row["id"]))
             continue
         if row.get("expires_at") is not None or row.get("run_source") == "patch":
@@ -1056,6 +1063,16 @@ async def claim_jobs(agent: Mapping[str, Any]) -> list[dict[str, Any]]:
                 job["env"]["MYPORTAL_PATCH_PLAN"] = json.dumps(config)
         for hook in list(_DISPATCH_HOOKS.values()):
             await hook(agent, row, job)
+        if any(
+            bool(re.match(r"^[A-Za-z]:[\\/]", item["destination"]))
+            != (normalise_platform(agent.get("os")) == "windows")
+            for item in job["files"]
+        ):
+            await rmm_repo.finish_run(
+                int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],
+                error_message="An associated file path is not valid for this device's operating system.",
+            )
+            continue
         if job["files"] and not agent.get("script_files_supported"):
             await rmm_repo.finish_run(
                 int(row["id"]), status="failed", exit_code=None, stdout="", stderr="", custom_values=[],
