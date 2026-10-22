@@ -1,0 +1,19 @@
+{# Set choco_options_id to a unique prefix before including in a package form. #}
+<div class="form-field">
+  <label class="form-label" for="{{ choco_options_id }}-mode">Mode</label>
+  <select class="form-input" id="{{ choco_options_id }}-mode" name="mode">
+    <option value="install">Install</option>
+    <option value="upgrade">Upgrade</option>
+    <option value="uninstall">Uninstall</option>
+  </select>
+</div>
+<div class="form-field">
+  <input type="hidden" name="force" value="false">
+  <label for="{{ choco_options_id }}-force"><input type="checkbox" id="{{ choco_options_id }}-force" name="force" value="true" aria-describedby="{{ choco_options_id }}-force-help"> Force</label>
+  <p class="form-help" id="{{ choco_options_id }}-force-help">Run the selected action even when Chocolatey would normally skip it.</p>
+</div>
+<div class="form-field">
+  <input type="hidden" name="ignore_pending_reboots" value="false">
+  <label for="{{ choco_options_id }}-ignore-reboots"><input type="checkbox" id="{{ choco_options_id }}-ignore-reboots" name="ignore_pending_reboots" value="true" checked aria-describedby="{{ choco_options_id }}-ignore-reboots-help"> Ignore pending reboots</label>
+  <p class="form-help" id="{{ choco_options_id }}-ignore-reboots-help">Continue even if the device already needs a restart. The device is not restarted.</p>
+</div>

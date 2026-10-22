@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  // Push Chocolatey installs and updates from Script automation.
+  // Push Chocolatey package actions from Script automation.
   const form = document.querySelector('[data-rmm-app-push-form]');
   if (!form) return;
   const extra = form.querySelector('[data-rmm-app-extra]');
@@ -36,16 +36,20 @@
     const agentIds = Array.from(agents.selectedOptions).map((option) => Number(option.value));
     if (!ids.length) { show('Choose at least one application.', 'warning'); return; }
     if (!allDevices && !agentIds.length) { show('Choose at least one device.', 'warning'); return; }
-    const mode = form.querySelector('[data-rmm-app-mode]').value;
+    const mode = form.querySelector('[name="mode"]').value;
+    const force = form.querySelector('input[type="checkbox"][name="force"]').checked;
+    const ignorePendingReboots = form.querySelector('input[type="checkbox"][name="ignore_pending_reboots"]').checked;
     const devices = allDevices ? 'every Windows device' : agentIds.length + ' device' + (agentIds.length === 1 ? '' : 's');
-    if (!window.confirm((mode === 'install' ? 'Install or update ' : 'Update ') + ids.join(', ') + ' on ' + devices + '?')) return;
+    const action = { install: 'Install', upgrade: 'Upgrade', uninstall: 'Uninstall' }[mode];
+    if (!window.confirm(action + ' ' + ids.join(', ') + ' on ' + devices + '?')) return;
     submit.disabled = true;
     try {
       const csrf = document.querySelector('meta[name="csrf-token"]');
       const response = await fetch('/api/rmm/chocolatey/push', {
         method: 'POST', credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrf ? csrf.content : '' },
-        body: JSON.stringify({ package_ids: ids, mode: mode, all_devices: allDevices, agent_ids: agentIds }),
+        body: JSON.stringify({ package_ids: ids, mode: mode, force: force,
+          ignore_pending_reboots: ignorePendingReboots, all_devices: allDevices, agent_ids: agentIds }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not push the applications.');

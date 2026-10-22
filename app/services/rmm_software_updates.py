@@ -1,7 +1,7 @@
 """One-off Chocolatey application jobs through patch run history.
 
 * inventory-verified upgrades of one installed application (:func:`queue`)
-* installs and updates of chosen packages pushed from the asset page or
+* package actions pushed from the asset page or
   Script automation (:func:`queue_apps`), without writing a script
 """
 
@@ -17,7 +17,7 @@ from app.services.rmm_scripts import RunRequestError
 
 
 MAX_PUSH_PACKAGES = 20
-MODES = {'install', 'upgrade'}
+MODES = {'install', 'upgrade', 'uninstall'}
 
 
 def _windows(agent: dict) -> bool:
@@ -87,10 +87,9 @@ def package_ids(values) -> list[str]:
 async def plan_apps(agent: dict, ids: list[str], mode: str) -> list[dict]:
     """The patch plan's apps for one device.
 
-    An app the Software inventory shows is installed is named exactly as the
-    device reports it, so the patch script can compare its version and skip it
-    when current. ``upgrade`` skips apps that are not installed; ``install``
-    installs them from the company's enabled sources.
+    Inventory names are kept for run history, but a stale portal inventory must
+    not prevent an explicit action. Chocolatey's local state decides whether
+    an upgrade or uninstall applies.
     """
     installed = [item['name'] for item in await inventory_repo.list_software(int(agent['id']))
                  if item.get('source') != 'user']
@@ -101,22 +100,26 @@ async def plan_apps(agent: dict, ids: list[str], mode: str) -> list[dict]:
         on_device = sorted({name for name in installed if name.casefold() in known})
         if on_device:
             apps.append({'package_id': package_id, 'display_name': on_device[0], 'install_missing': mode == 'install'})
-        elif mode == 'install':
+        else:
             # A name no registry entry uses, so only Chocolatey's own records decide.
             apps.append({'package_id': package_id, 'display_name': (stored or {}).get('title') or package_id,
-                         'install_missing': True})
+                         'install_missing': mode == 'install'})
     return apps
 
 
 async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None, *,
-                     onboarding_run_id: int | None = None) -> int | None:
-    """Queue one patch job installing or updating ``ids``; ``None`` when nothing applies.
+                     onboarding_run_id: int | None = None, force: bool = False,
+                     ignore_pending_reboots: bool = True) -> int | None:
+    """Queue one package action; ``None`` when nothing applies.
 
     An onboarding step's job waits as long as a script step would and lets the
     onboarding sequence notify the device once it has moved on.
     """
     if mode not in MODES:
-        raise RunRequestError({'mode': 'Choose install or update.'})
+        raise RunRequestError({'mode': 'Choose install, upgrade or uninstall.'})
+    if not isinstance(force, bool) or not isinstance(ignore_pending_reboots, bool):
+        raise RunRequestError({'options': 'Force and ignore pending reboots must be true or false.'})
+    ids = package_ids(ids)
     if not _windows(agent):
         raise RunRequestError({'device': 'Chocolatey apps need an active Windows device.'})
     apps = await plan_apps(agent, ids, mode)
@@ -124,14 +127,15 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None
         return None
     if await patch_repo.has_active_run(int(agent['id'])):
         raise RunRequestError({'device': 'A patch job is already waiting or running on this device.'})
-    config = {'manual_apps': {'mode': mode, 'package_ids': ids}, 'apps': apps,
+    config = {'manual_apps': {'mode': mode, 'package_ids': ids, 'force': force,
+                              'ignore_pending_reboots': ignore_pending_reboots}, 'apps': apps,
               'windows': None, 'reboot': {'reboot_mode': 'never'},
               'sources': await sources.for_company(int(agent['company_id']), secrets=True)}
-    if not any(s['enabled'] for s in config['sources']):
+    if mode != 'uninstall' and not any(s['enabled'] for s in config['sources']):
         raise RunRequestError({'sources': 'Enable a Chocolatey source for this company first.'})
     content = patch.script_content()
     label = ', '.join(app['package_id'] for app in apps)
-    name = f"{'Install' if mode == 'install' else 'Update'} {label}"[:255]
+    name = f'{mode.title()} {label}'[:255]
     script = {'id': None, 'name': name, 'path': 'builtin/patch.ps1', 'language': 'powershell',
               'content_sha256': hashlib.sha256(content.encode()).hexdigest()}
     problem = rmm_scripts.device_problem(script, agent)
@@ -140,7 +144,10 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None
     run_id = await rmm_repo.create_run(script=script, content=content, agent_id=int(agent['id']),
         company_id=int(agent['company_id']), asset_id=agent.get('asset_id'), requested_by_user_id=user_id,
         inputs=[{'key': 'applications', 'label': 'Applications', 'value': label},
-                {'key': 'mode', 'label': 'Action', 'value': 'Install or update' if mode == 'install' else 'Update only'}],
+                {'key': 'mode', 'label': 'Action', 'value': mode.title()},
+                {'key': 'force', 'label': 'Force', 'value': 'Yes' if force else 'No'},
+                {'key': 'ignore_pending_reboots', 'label': 'Ignore pending reboots',
+                 'value': 'Yes' if ignore_pending_reboots else 'No'}],
         payload_encrypted=encrypt_secret(json.dumps({'env': {'MYPORTAL_PATCH_PLAN': json.dumps(config)}})),
         timeout_seconds=7200, run_source='patch', onboarding_run_id=onboarding_run_id,
         expires_at=patch.utcnow() + (rmm_scripts.QUEUE_LIFETIME if onboarding_run_id else timedelta(minutes=15)))

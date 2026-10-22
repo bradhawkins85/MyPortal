@@ -168,7 +168,7 @@ def chosen_updates_current(agent: Mapping[str, Any], config: Mapping[str, Any]) 
 
 
 def manual_apps_current(agent: Mapping[str, Any], config: Mapping[str, Any]) -> bool:
-    """A job installing or updating apps a technician chose still applies at
+    """A job managing apps a technician chose still applies at
     dispatch: the device is an active Windows agent and the plan holds only
     the packages that were chosen (see app.services.rmm_software_updates)."""
 
@@ -176,7 +176,9 @@ def manual_apps_current(agent: Mapping[str, Any], config: Mapping[str, Any]) -> 
     ids = manual.get("package_ids") or []
     apps = config.get("apps") or []
     return bool(agent.get("status") == "active" and str(agent.get("os") or "").lower() == "windows"
-                and manual.get("mode") in {"install", "upgrade"} and apps
+                and manual.get("mode") in {"install", "upgrade", "uninstall"} and apps
+                and isinstance(manual.get("force", False), bool)
+                and isinstance(manual.get("ignore_pending_reboots", True), bool)
                 and all(PACKAGE.fullmatch(str(i)) for i in ids)
                 and all(a.get("package_id") in ids and a.get("display_name")
                         and (manual["mode"] == "install" or not a.get("install_missing")) for a in apps)

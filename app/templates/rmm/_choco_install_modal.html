@@ -1,4 +1,4 @@
-{# Install or update one Chocolatey package on this device without a script, opened from the
+{# Manage one Chocolatey package on this device without a script, opened from the
    asset page's RMM menu. rmm_choco_install.js searches the downloaded app list; the form posts
    to the same endpoint as the Software section's install form. #}
 <div class="modal rmm-modal" id="choco-install-modal" role="dialog" aria-modal="true" aria-labelledby="choco-install-title" hidden data-choco-modal>
@@ -8,10 +8,10 @@
     <header class="modal__header">
       <div>
         <p class="rmm-editor__eyebrow">Chocolatey</p>
-        <h2 class="modal__title" id="choco-install-title">Install Choco Package</h2>
-        <p class="rmm-editor__subtitle">Install an app on {{ asset_display_name }} with the company's enabled Chocolatey sources. An app that is already installed is updated to the latest version. The device is not restarted.</p>
+        <h2 class="modal__title" id="choco-install-title">Manage Choco Package</h2>
+        <p class="rmm-editor__subtitle">Install, upgrade or uninstall a package on {{ asset_display_name }} using the company's enabled Chocolatey sources.</p>
       </div>
-      <button type="button" class="modal__close" data-choco-modal-close aria-label="Close Chocolatey install"></button>
+      <button type="button" class="modal__close" data-choco-modal-close aria-label="Close Chocolatey package action"></button>
     </header>
     <div class="modal__body">
       <div class="form-field">
@@ -31,12 +31,14 @@
         <input type="text" class="form-input" id="choco-modal-other" maxlength="128" placeholder="Such as googlechrome" autocomplete="off" aria-describedby="choco-modal-other-help" data-choco-modal-other>
         <p class="form-help" id="choco-modal-other-help">For packages in the company's own sources that are not in the downloaded list.</p>
       </div>
+      {% set choco_options_id = 'choco-modal' %}
+      {% include "rmm/_choco_options.html" %}
       <p class="alert alert--warning" role="alert" data-choco-modal-error hidden></p>
     </div>
     <footer class="modal__footer">
       <span class="rmm-editor__spacer"></span>
       <button type="button" class="button button--ghost" data-choco-modal-close>Cancel</button>
-      <button type="submit" class="button button--primary">Push install</button>
+      <button type="submit" class="button button--primary">Push now</button>
     </footer>
   </form>
 </div>

@@ -107,29 +107,35 @@ Installer exit codes 1641 and 3010 indicate a required reboot; other nonzero
 installation codes fail. Review packages before deployment: package scripts and
 vendor installers can have their own restart behavior.
 
-## Installing and updating apps without a script
+## Managing packages without a script
 
 Technicians with write access to `menu.rmm_scripts` can push Chocolatey packages
-without writing a script. Both actions run the built-in patch job (shown in
+without writing a script. Package actions run the built-in patch job (shown in
 **Scripts → Run history**) with the company's enabled Chocolatey sources, need an
 active Windows agent, and never restart the device.
 
 - **Asset page → Scripts → RMM → Install Choco Package**: opens a window to
   search the downloaded app list, choose an app (or enter a package ID) and push
-  the install. Shown for Windows devices with the RMM agent.
-- **Asset page → Software → Install an app with Chocolatey**: enter an exact
+  an action. Shown for Windows devices with the RMM agent.
+- **Asset page → Software → Manage a Chocolatey package**: enter an exact
   package ID (suggestions come from the downloaded app list; any package in the
-  company's enabled sources works). An installed app is updated to the latest
-  version instead.
+  company's enabled sources works), then choose the action and options.
 - **Script automation → Chocolatey apps**: tick up to 20 apps from the downloaded
-  app list (or add package IDs), choose **Install, or update where already
-  installed** or **Update only where already installed**, and push to every
+  app list (or add package IDs), choose the action and options, and push to every
   Windows device of the company or chosen devices. Devices already running a patch
   job are listed and skipped.
 
-Apps that Software shows as installed are matched by their exact inventory name,
-so current versions are skipped as described above. To keep apps updated on a
-schedule, use a Chocolatey patch policy.
+Each package form offers **Install**, **Upgrade** and **Uninstall** modes. These
+run the corresponding Chocolatey command. Upgrade fails if Chocolatey does not
+have the package installed; it does not install a missing package. Uninstall uses
+the device's local package metadata, so the package need not remain in a feed.
+
+**Force** is off by default and passes Chocolatey's force option when selected.
+**Ignore pending reboots** is checked by default: the action proceeds even if the
+device already needs a restart. Untick it to defer the action until the pending
+restart is cleared. Neither choice restarts the device. The mode and options are
+recorded in run history. These options apply to package pushes; scheduled patch
+policies keep their version checks and pending-reboot deferral.
 
 ## Device Windows updates
 

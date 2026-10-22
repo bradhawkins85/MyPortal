@@ -203,7 +203,7 @@
     <header class="ce-section__header">
       <div class="ce-section__heading">
         <h2 class="card__title" id="rmm-apps-heading">Chocolatey apps</h2>
-        <p class="card__subtitle">Install or update applications now on {{ company.name if company else "this company" }}'s Windows devices using its enabled Chocolatey sources, without writing a script. To keep an app updated on a schedule, add a policy in <a href="/rmm/patching">Patch management</a>.</p>
+        <p class="card__subtitle">Install, upgrade or uninstall applications now on {{ company.name if company else "this company" }}'s Windows devices using its enabled Chocolatey sources. To keep an app updated on a schedule, add a policy in <a href="/rmm/patching">Patch management</a>.</p>
       </div>
     </header>
     <div class="ce-section__body">
@@ -222,13 +222,8 @@
           <input type="text" id="rmm-app-extra" class="form-input" maxlength="1000" placeholder="Optional, comma separated, such as googlechrome, 7zip" aria-describedby="rmm-app-extra-help" data-rmm-app-extra>
           <p class="form-help" id="rmm-app-extra-help">For packages in the company's own sources that are not in the downloaded list. Up to 20 applications at a time.</p>
         </fieldset>
-        <div class="form-field">
-          <label class="form-label" for="rmm-app-mode">Action</label>
-          <select id="rmm-app-mode" class="form-input" data-rmm-app-mode>
-            <option value="install">Install, or update where already installed</option>
-            <option value="upgrade">Update only where already installed</option>
-          </select>
-        </div>
+        {% set choco_options_id = 'rmm-app' %}
+        {% include "rmm/_choco_options.html" %}
         <fieldset class="form-field">
           <legend class="form-label">Devices</legend>
           <label><input type="radio" name="rmm-app-target" value="all" checked data-rmm-app-target> All {{ windows_agents | length }} Windows device{{ '' if windows_agents | length == 1 else 's' }}</label>
