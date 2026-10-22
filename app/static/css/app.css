@@ -20677,11 +20677,20 @@ progress {
 /* Off-canvas navigation (tablet and phone). */
 @media (max-width: 1024px) {
   .layout__sidebar {
+    /* Keep a drawer in landscape too, despite earlier tablet width rules. */
+    width: min(280px, 86vw);
+    max-width: 86vw;
+    max-height: 100dvh;
     background: linear-gradient(180deg, #0e1520, #0a1018);
   }
 
   .layout--sidebar-open .layout__sidebar {
     box-shadow: 1px 0 0 var(--hf-line), 1.5rem 0 3rem -0.75rem rgba(0, 0, 0, 0.75);
+  }
+
+  .layout__mobile-toggle {
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .layout__header {

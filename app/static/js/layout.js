@@ -268,8 +268,8 @@
     sidebar.addEventListener('click', (event) => {
       if (
         mobileMedia.matches &&
-        event.target instanceof HTMLElement &&
-        event.target.closest('a, button:not([data-mobile-nav-toggle])')
+        event.target instanceof Element &&
+        event.target.closest('a[href]')
       ) {
         closeSidebar();
       }
@@ -464,6 +464,24 @@
     return rows;
   };
 
+  const syncNavigationPresentation = () => {
+    // Mobile always uses the labelled drawer; retain the saved desktop preference.
+    const useTopNavigation = !mobileMedia.matches && activeSidebarPreferences.navigation_style === 'top';
+    document.body.classList.toggle('navigation--top', useTopNavigation);
+    // On standard resolution displays (1080p or lower) the labelled
+    // top menu runs past the edge of the screen, so collapse it to icons
+    // only with hover tooltips unless the user opted into always
+    // showing the labels.
+    const standardResolutionDisplay =
+      window.screen && Number.isFinite(window.screen.height) && window.screen.height <= 1080;
+    const compactTopMenu =
+      useTopNavigation &&
+      activeSidebarPreferences.top_menu_labels !== 'always' &&
+      standardResolutionDisplay;
+    document.body.classList.toggle('navigation--top-compact', compactTopMenu);
+  };
+  mobileMedia.addEventListener('change', syncNavigationPresentation);
+
   const applySidebarPreferences = (preferences) => {
     if (!sidebarMenuRoot) {
       return;
@@ -480,18 +498,7 @@
       hidden: Array.isArray(preferences?.hidden) ? preferences.hidden : [],
       groups: Array.isArray(preferences?.groups) ? preferences.groups : [],
     };
-    document.body.classList.toggle('navigation--top', activeSidebarPreferences.navigation_style === 'top');
-    // On standard resolution displays (1080p or lower) the labelled
-    // top menu runs past the edge of the screen, so collapse it to icons
-    // only with hover tooltips unless the user opted into always
-    // showing the labels.
-    const standardResolutionDisplay =
-      window.screen && Number.isFinite(window.screen.height) && window.screen.height <= 1080;
-    const compactTopMenu =
-      activeSidebarPreferences.navigation_style === 'top' &&
-      activeSidebarPreferences.top_menu_labels !== 'always' &&
-      standardResolutionDisplay;
-    document.body.classList.toggle('navigation--top-compact', compactTopMenu);
+    syncNavigationPresentation();
     const roleSwitcherContainer = document.querySelector('[data-role-switcher-container]');
     if (roleSwitcherContainer) {
       // While viewing as another role a hidden switcher falls back to the
