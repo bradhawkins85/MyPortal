@@ -53,6 +53,7 @@ from app.repositories import tickets as tickets_repo
 from app.services import hudu as hudu_service
 from app.services import tickets as tickets_service
 from app.services import m365_secure_score as m365_secure_score_service
+from app.services import m365_admin_consent as admin_consent_service
 from app.services.cis_benchmark import (
     STATUS_FAIL,
     STATUS_PASS,
@@ -6693,6 +6694,29 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
     },
+    {
+        "id": admin_consent_service.CHECK_ID,
+        "name": admin_consent_service.CHECK_NAME,
+        "description": (
+            "Enable the admin consent request workflow and send reviewer emails "
+            "through the IT Support baseline group to the configured ticketing "
+            "address, in addition to existing reviewers."
+        ),
+        "remediation": (
+            "Reuse the IT contact forwarding baseline and create a hidden shared "
+            "mailbox as the Entra reviewer identity. Forward its notifications to "
+            "IT Support, enable reviewer emails, and preserve existing reviewers, "
+            "expiry and reminder settings. Requires Policy.ReadWrite.ConsentRequest "
+            "and Exchange recipient management. No admin role is granted to the "
+            "mailbox. Test a consent request to confirm ticket ingestion."
+        ),
+        "source": admin_consent_service.check,
+        "uses_company_id": True,
+        "has_remediation": True,
+        "remediation_type": "admin_consent_requests",
+        "default_enabled": True,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
 ]
 
 # All Intune-grouped checks require a Microsoft Intune license; mark them
@@ -9689,7 +9713,27 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 "success": False,
                 "message": graph_token_error_message,
             }
-        if bp.get("remediation_type") == "ews_dependency_allow_list":
+        if bp.get("remediation_type") == "admin_consent_requests":
+            try:
+                try:
+                    success, outcome_message = await admin_consent_service.remediate(
+                        graph_token, company_id
+                    )
+                except admin_consent_service.MissingBaselineError:
+                    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+                    success, outcome_message = await _remediate_it_contact_baseline(
+                        exo_token, tenant_id
+                    )
+                    if success:
+                        success, outcome_message = await admin_consent_service.remediate(
+                            graph_token, company_id
+                        )
+            except M365Error as exc:
+                success, outcome_message = False, (
+                    f"{exc} Verify Policy.ReadWrite.ConsentRequest admin consent "
+                    "and Exchange recipient management access."
+                )
+        elif bp.get("remediation_type") == "ews_dependency_allow_list":
             try:
                 success, outcome_message = await _remediate_ews_dependency_allow_list(
                     graph_token, company_id
