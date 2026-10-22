@@ -113,7 +113,8 @@ See `internal/inventory` and `docs/wiki/administration/RMM Inventory.md`.
 
 Windows Update and Chocolatey policies run as built-in PowerShell jobs through the
 existing runner, with policy targeting rechecked before dispatch. They appear in
-Scripts run history. Chocolatey must already be installed. See
+Scripts run history. Missing Chocolatey installations are installed automatically
+before company sources are synced and applications are installed. See
 `docs/wiki/administration/RMM Patch Management.md` for scope, schedule and reboot behavior.
 Deploy MyPortal and migration 491 to enable policies; no agent upgrade is required.
 
@@ -207,6 +208,10 @@ The Windows RMM agent checks sources on startup and every 24 hours without
 requiring a patch policy or queued action, retrying failures after 15 minutes.
 Before app management it fetches current company sources again, reconciles and
 verifies them under the same mutex as app installation, and stops on failure.
+If Chocolatey is missing, the job first installs it using the official installer
+at `https://community.chocolatey.org/install.ps1`. Installation and source sync
+must both succeed before an application can be installed. Devices need outbound
+HTTPS access to that installer and its package downloads, plus the enabled feeds.
 Repositories outside the enabled company list are disabled, including locally
 added repositories. Enabled sources are recreated to apply URL and credential
 changes. All-disabled companies perform no app management. Source definitions

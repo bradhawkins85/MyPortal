@@ -4,7 +4,11 @@ Open **Patch management** to configure Windows Update and Chocolatey application
 Apply migration **491** with the portal deployment. These jobs use the existing RMM
 agent's PowerShell runner; no new agent version is required. Windows endpoints need
 Windows PowerShell, an active RMM agent running as LocalSystem, and access to their
-configured Windows Update service. Chocolatey must already be installed for app policies.
+configured Windows Update service. For app policies, the RMM automatically installs
+Chocolatey if missing, then syncs and verifies the company's sources from MyPortal
+before installing applications. Devices need HTTPS access to
+`https://community.chocolatey.org/install.ps1`, its package downloads and the
+enabled company feeds. If installation or source sync fails, applications are not installed.
 
 ## Scope and device rules
 
