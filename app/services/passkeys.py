@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
+from publicsuffix2 import get_sld
 from webauthn import (
     generate_authentication_options,
     generate_registration_options,
@@ -67,13 +68,34 @@ def is_valid_browser_binding_token(token: Any) -> bool:
     return isinstance(token, str) and bool(_BROWSER_BINDING_TOKEN_PATTERN.match(token))
 
 
+def _effective_rp_hostname(hostname: str) -> str:
+    """Use the registrable domain for multi-subdomain passkey sharing when possible.
+
+    WebAuthn RP IDs must be registrable, not arbitrary subdomains, and iOS
+    Keychain passkeys are especially strict about this. A custom subdomain like
+    "portal.example.com" should register under "example.com" unless there is an
+    explicit configuration override.
+    """
+    clean = hostname.rstrip(".").lower()
+    if not clean:
+        return ""
+    if clean in {"localhost", "127.0.0.1"}:
+        return clean
+    try:
+        registrable = get_sld(clean, strict=False)
+    except Exception:
+        registrable = None
+    return registrable or clean
+
+
 def relying_party_id(settings: Settings | None = None) -> str:
     active_settings = settings or get_settings()
     explicit = active_settings.passkey_rp_id.strip()
     if explicit:
-        return explicit
+        return explicit.rstrip(".").lower()
     if active_settings.portal_url:
-        return urlsplit(active_settings.portal_url.unicode_string()).hostname or "localhost"
+        hostname = urlsplit(active_settings.portal_url.unicode_string()).hostname or "localhost"
+        return _effective_rp_hostname(hostname) or "localhost"
     return "localhost"
 
 
@@ -85,7 +107,7 @@ def relying_party_id_for_origin(origin: str, settings: Settings | None = None) -
         raise ValueError("Passkey request origin does not contain a valid hostname")
     explicit = active_settings.passkey_rp_id.strip().rstrip(".").lower()
     if not explicit:
-        return hostname
+        return _effective_rp_hostname(hostname) or hostname
     if hostname != explicit and not hostname.endswith(f".{explicit}"):
         raise ValueError("Configured PASSKEY_RP_ID is not valid for this portal hostname")
     return explicit
