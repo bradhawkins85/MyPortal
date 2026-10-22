@@ -394,6 +394,11 @@ async def _run_purge(request_id: int) -> None:
             # Verify against the explicit purge search when available, falling
             # back to the discovery search for operations that predate it.
             verify_search_id = str(details.get("purge_search_id") or search_id)
+            if not details.get("purge_search_id"):
+                log_info(
+                    "Post-purge verification falling back to the discovery search",
+                    request_id=request_id, company_id=company_id, search_id=verify_search_id,
+                )
             for attempt in range(POST_PURGE_ESTIMATE_ATTEMPTS):
                 if attempt:
                     await asyncio.sleep(POLL_INTERVAL_SECONDS)
