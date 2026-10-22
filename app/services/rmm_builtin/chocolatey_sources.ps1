@@ -1,15 +1,47 @@
 # Data is JSON; source definitions are never evaluated as PowerShell.
+function Find-ChocolateyExecutable {
+    $command = Get-Command choco.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    # A running agent does not inherit PATH or ChocolateyInstall changes made
+    # by an installer. Check both custom and default installation locations.
+    $roots = @($env:ChocolateyInstall, [Environment]::GetEnvironmentVariable('ChocolateyInstall', 'Machine'))
+    if ($env:ProgramData) { $roots += Join-Path $env:ProgramData 'chocolatey' }
+    foreach ($root in $roots) {
+        if (-not $root) { continue }
+        $candidate = Join-Path $root 'bin\choco.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+}
+
+function Ensure-ChocolateyInstalled {
+    $script:choco = Find-ChocolateyExecutable
+    if (-not $script:choco) {
+        Write-Output 'Chocolatey is missing; installing Chocolatey.'
+        # Isolate the official installer so its exit/scope changes cannot end
+        # this job before company sources have been reconciled. No policy data
+        # or source credentials are interpolated into this command.
+        $bootstrap = @'
+$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-Expression ((New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+'@
+        try {
+            $null = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $bootstrap 2>&1
+            if ($LASTEXITCODE -ne 0) { throw 'Installer failed.' }
+        } catch { throw 'Chocolatey installation failed.' }
+        $script:choco = Find-ChocolateyExecutable
+        if (-not $script:choco) { throw 'Chocolatey installation failed: choco.exe was not found after installation.' }
+    }
+    # Package scripts also need the shim directory in this job's inherited PATH.
+    $env:Path = "$(Split-Path -Parent $script:choco);$env:Path"
+}
+
 function Sync-ChocolateySources($sources) {
     # Windows PowerShell 5.1 emits a JSON array from ConvertFrom-Json as one
     # object, so @(... | ConvertFrom-Json) is a single nested array. Flatten it
     # or source names collapse into one string and every source is disabled.
     $sources = @($sources | ForEach-Object { $_ })
-    $command = Get-Command choco.exe -ErrorAction SilentlyContinue
-    if ($command) { $script:choco = $command.Source }
-    else {
-        $script:choco = Join-Path $env:ProgramData 'chocolatey\bin\choco.exe'
-        if (-not (Test-Path $script:choco)) { throw 'Chocolatey is not installed.' }
-    }
+    Ensure-ChocolateyInstalled
     function Source-Command([string[]]$arguments) {
         # Suppress output: Chocolatey can echo credentials in its diagnostics.
         $null = & $script:choco @arguments 2>&1

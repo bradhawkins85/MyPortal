@@ -114,11 +114,8 @@ try {
             } catch { $failed = $true; Write-Output "Windows Update error: $_" }
         }
         if (@($plan.apps).Count -gt 0) {
-            $command = Get-Command choco.exe -ErrorAction SilentlyContinue
-            if (-not $command) {
-                $fallback = Join-Path $env:ProgramData 'chocolatey\bin\choco.exe'
-                if (Test-Path $fallback) { $script:choco = $fallback } else { throw 'Chocolatey is not installed. Install Chocolatey before enabling app policies.' }
-            } else { $script:choco = $command.Source }
+            # Sync-ChocolateySources already installed/resolved Chocolatey and
+            # verified company policy. Reuse that executable even with stale PATH.
             $chocoVersion = @(Choco-Output @('--version'))[-1]
             $listArgs = @('list', '--limit-output')
             if ([int]($chocoVersion.Split('.')[0]) -lt 2) { $listArgs += '--local-only' }

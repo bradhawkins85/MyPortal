@@ -35,7 +35,7 @@ switch ($args[0]) {
 ''')
     harness = tmp_path / 'harness.ps1'
     harness.write_text('''
-function Sync-ChocolateySources { param($sources) }
+function Sync-ChocolateySources { param($sources); $script:choco = $env:TEST_CHOCO }
 function Get-Command { [pscustomobject]@{ Source = $env:TEST_CHOCO } }
 function Test-Path { $false }
 function Get-ItemProperty {
@@ -44,7 +44,7 @@ function Get-ItemProperty {
         [pscustomobject]@{ DisplayName = 'Test Application'; DisplayVersion = $env:TEST_INSTALLED }
     }
 }
-& $env:TEST_PATCH_SCRIPT
+. $env:TEST_PATCH_SCRIPT
 ''')
     log = tmp_path / 'commands.txt'
     plan = {'sources': [{'name': name, 'enabled': enabled, 'priority': priority} for name, enabled, priority in
