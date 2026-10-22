@@ -138,13 +138,14 @@ async def create_deployment_link(
     install_token_encrypted: str,
     created_by_user_id: int | None,
     expires_at: datetime | None,
+    provisioning_encrypted: str | None = None,
 ) -> dict[str, Any]:
     await db.execute(
         """INSERT INTO tray_deployment_links
            (company_id, label, slug_hash, slug_prefix, slug_encrypted,
             install_token_id, install_token_encrypted, created_by_user_id,
-            expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            expires_at, provisioning_encrypted)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             company_id,
             label,
@@ -155,6 +156,7 @@ async def create_deployment_link(
             install_token_encrypted,
             created_by_user_id,
             expires_at,
+            provisioning_encrypted,
         ),
     )
     return await get_deployment_link_by_slug_hash(slug_hash) or {}
@@ -262,7 +264,9 @@ async def get_latest_ready_deployment_build(link_id: int) -> dict[str, Any] | No
     return dict(row) if row else None
 
 
-async def get_next_claimable_deployment_build(stale_before: datetime) -> dict[str, Any] | None:
+async def get_next_claimable_deployment_build(
+    stale_before: datetime, *, supports_ppkg: bool = False
+) -> dict[str, Any] | None:
     """Return the oldest queued build, or a build whose agent stopped reporting."""
 
     row = await db.fetch_one(
@@ -270,8 +274,9 @@ async def get_next_claimable_deployment_build(stale_before: datetime) -> dict[st
         "JOIN tray_deployment_links AS l ON l.id = b.deployment_link_id "
         "WHERE l.revoked_at IS NULL AND (b.status = 'queued' "
         "OR (b.status = 'building' AND b.claimed_at < ?)) "
+        "AND (? = 1 OR l.provisioning_encrypted IS NULL OR l.provisioning_encrypted = '') "
         "ORDER BY b.id LIMIT 1",
-        (stale_before,),
+        (stale_before, int(supports_ppkg)),
     )
     return dict(row) if row else None
 
@@ -289,12 +294,16 @@ async def claim_deployment_build(
     return updated > 0
 
 
-async def complete_deployment_build(build_id: int, *, msi_sha256: str, exe_sha256: str) -> None:
+async def complete_deployment_build(
+    build_id: int, *, msi_sha256: str, exe_sha256: str,
+    ppkg_sha256: str | None = None, ppkg_password_encrypted: str | None = None,
+) -> None:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.execute(
         "UPDATE tray_deployment_builds SET status = 'ready', msi_sha256 = ?, "
-        "exe_sha256 = ?, completed_at = ?, error = NULL WHERE id = ?",
-        (msi_sha256, exe_sha256, now, build_id),
+        "exe_sha256 = ?, ppkg_sha256 = ?, ppkg_password_encrypted = ?, "
+        "completed_at = ?, error = NULL WHERE id = ?",
+        (msi_sha256, exe_sha256, ppkg_sha256, ppkg_password_encrypted, now, build_id),
     )
 
 

@@ -44,11 +44,13 @@ async def sqlite_db(tmp_path, monkeypatch):
           slug_encrypted TEXT NOT NULL, install_token_id INT,
           install_token_encrypted TEXT NOT NULL, created_by_user_id INT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP, expires_at DATETIME,
-          revoked_at DATETIME, download_count INT DEFAULT 0, last_downloaded_at DATETIME);
+          revoked_at DATETIME, download_count INT DEFAULT 0, last_downloaded_at DATETIME,
+          provisioning_encrypted TEXT);
         CREATE TABLE tray_deployment_builds (
           id INTEGER PRIMARY KEY AUTOINCREMENT, deployment_link_id INT NOT NULL,
           status VARCHAR(16) NOT NULL DEFAULT 'queued', release_tag TEXT,
           error TEXT, msi_sha256 TEXT, exe_sha256 TEXT,
+          ppkg_sha256 TEXT, ppkg_password_encrypted TEXT,
           requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           claimed_at DATETIME, completed_at DATETIME);
         INSERT INTO tray_install_tokens (id, company_id, label, token_hash, token_prefix)

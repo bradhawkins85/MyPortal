@@ -42,7 +42,7 @@
     {% if state != "open" %}
       <div class="alert alert--warning" role="status">{{ message or "This deployment link is not valid." }}</div>
       <p class="form-help">Ask your IT support team for a new link.</p>
-    {% elif not windows_ready and not macos_ready %}
+    {% elif not windows_ready and not macos_ready and not ppkg_ready %}
       <div class="alert alert--warning" role="status">The installers for this link are still being prepared. Please try again later.</div>
     {% else %}
       <div class="tray-deploy__options">
@@ -52,6 +52,22 @@
             <p class="tray-deploy__help">Run the downloaded file and follow the installer. IT teams can use the <a href="{{ deploy_base }}/windows.msi" rel="noreferrer">MSI package</a> instead, or upload the <a href="{{ deploy_base }}/windows.intunewin" rel="noreferrer">Intune package (.intunewin)</a> to Microsoft Intune as a Windows app (Win32).</p>
             {% include "tray/_download_help.html" %}
           </div>
+        {% endif %}
+        {% if ppkg_ready %}
+          <details class="tray-deploy__option">
+            <summary>Set up a new Windows computer</summary>
+            <p class="tray-deploy__help">Use this package only for a new or reset Windows 11 Pro, Enterprise or Education x64 computer during initial setup. It creates a local administrator named <strong>ProvisioningAdmin</strong>, completes initial setup and installs MyPortal Tray, with any Wi-Fi, PC naming and directory join settings selected by your IT team.</p>
+            <p><a class="button button--secondary auth-card__wide" href="{{ deploy_base }}/windows.ppkg" rel="noreferrer">Download provisioning package (.ppkg)</a></p>
+            <ol>
+              <li>On another computer, download the package and copy the <strong>.ppkg</strong> file to the root of a USB drive.</li>
+              <li>Turn on the new computer and insert the USB drive at the first Windows setup screen. If provisioning does not appear, press the <strong>Windows key five times</strong>.</li>
+              <li>Select the package if asked, confirm the package is from your IT team, and enter the <strong>package unlock password</strong> provided separately by IT.</li>
+              <li>Leave the USB drive connected until provisioning finishes. Windows may restart. Sign in using the <strong>ProvisioningAdmin account password</strong> supplied by IT; the tray icon starts after sign-in.</li>
+            </ol>
+            <p class="tray-deploy__help">The package unlock password and account password are different. Internet access is needed to register with MyPortal or join Microsoft Entra ID. If IT configured a local domain join, connect to the organisation’s network so the PC can reach its domain controller and DNS. Your IT team can finish the remaining setup later.</p>
+          </details>
+        {% elif provisioning_enabled %}
+          <p class="tray-deploy__help" role="status">The provisioning package for new Windows computers is still being prepared. Please check back shortly.</p>
         {% endif %}
         {% if macos_ready %}
           <div class="tray-deploy__option">

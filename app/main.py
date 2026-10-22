@@ -2242,6 +2242,14 @@ async def _render_error_page(
 async def handle_request_validation_error(request: Request, exc: RequestValidationError):
     path = request.url.path
     request_id = _get_request_id(request)
+    errors = exc.errors()
+    if path == "/api/tray/admin/deployment-links" or re.fullmatch(r"/api/tray/build-agent/jobs/\d+/complete", path):
+        # Provisioning requests contain bootstrap credentials. Never reflect
+        # submitted values (including a whole nested model) in validation errors.
+        errors = [{key: error[key] for key in ("type", "loc", "msg")} for error in errors]
+        for error in errors:
+            if error["type"] == "union_tag_invalid":
+                error["msg"] = "Choose a supported directory join mode."
     if path.startswith("/api/integration-modules/"):
         logger.warning(
             "Webhook payload validation failed",
@@ -2252,7 +2260,7 @@ async def handle_request_validation_error(request: Request, exc: RequestValidati
             user_agent=request.headers.get("user-agent"),
         )
     response = JSONResponse(
-        content=jsonable_encoder({"detail": exc.errors()}),
+        content=jsonable_encoder({"detail": errors}),
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     )
     return _apply_request_id_header(response, request_id)
@@ -9052,6 +9060,7 @@ async def admin_tray_create_deployment_link(request: Request):
                 if expiry_raw.isdigit()
                 else tray_deployment_service.DEFAULT_EXPIRY_DAYS
             ),
+            provisioning=tray_deployment_service.provisioning_from_form(form),
         )
     except ValueError as exc:
         return flash_redirect("/admin/tray#deployment-urls", str(exc), "error")

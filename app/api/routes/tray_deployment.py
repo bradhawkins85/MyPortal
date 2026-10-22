@@ -20,6 +20,7 @@ from app.api.dependencies.auth import require_super_admin
 from app.core.logging import log_error, log_info
 from app.repositories import tray as tray_repo
 from app.schemas.tray import (
+    TrayDeploymentBuildComplete,
     TrayDeploymentBuildFailure,
     TrayDeploymentLinkCreate,
     TrayDeploymentLinkResponse,
@@ -51,6 +52,8 @@ async def _render_page(
     company_name: str | None = None,
     message: str | None = None,
     windows_ready: bool = False,
+    ppkg_ready: bool = False,
+    provisioning_enabled: bool = False,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     main = _main()
@@ -64,6 +67,8 @@ async def _render_page(
             "company_name": company_name,
             "slug": slug,
             "windows_ready": windows_ready,
+            "ppkg_ready": ppkg_ready,
+            "provisioning_enabled": provisioning_enabled,
             "macos_ready": state == "open" and tray_deployment.installer_path("macos") is not None,
             "deploy_base": portal_url + tray_deployment.link_path(slug) if slug else "",
         },
@@ -87,12 +92,16 @@ async def deployment_page(slug: str, request: Request) -> HTMLResponse:
             status_code=status.HTTP_404_NOT_FOUND,
         )
     windows_ready = await builds.ready_artifact(int(link["id"]), "exe") is not None
+    provisioning_enabled = bool(link.get("provisioning_encrypted"))
+    ppkg_ready = provisioning_enabled and await builds.ready_artifact(int(link["id"]), "ppkg") is not None
     return await _render_page(
         request,
         slug=slug,
         state="open",
         company_name=link.get("company_name"),
         windows_ready=windows_ready,
+        ppkg_ready=ppkg_ready,
+        provisioning_enabled=provisioning_enabled,
     )
 
 
@@ -142,6 +151,19 @@ async def deployment_windows_exe(slug: str) -> FileResponse:
 @router.get("/deploy/{slug}/windows.msi", include_in_schema=False)
 async def deployment_windows_msi(slug: str) -> FileResponse:
     return await _windows_installer(slug, "msi")
+
+
+@router.get("/deploy/{slug}/windows.ppkg", include_in_schema=False)
+async def deployment_windows_ppkg(slug: str) -> FileResponse:
+    link, _token = await _resolve_or_404(slug)
+    if not link.get("provisioning_encrypted"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provisioning is not enabled for this link.")
+    path = await builds.ready_artifact(int(link["id"]), "ppkg")
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="The provisioning package is still being built.")
+    await tray_repo.mark_deployment_link_downloaded(int(link["id"]))
+    log_info("Tray deployment installer downloaded", link_id=link.get("id"), company_id=link.get("company_id"), kind="ppkg")
+    return _counted_file(link, path, "ppkg", "application/octet-stream")
 
 
 @router.get("/deploy/{slug}/windows.intunewin", include_in_schema=False)
@@ -272,6 +294,7 @@ async def create_deployment_link(
             label=payload.label,
             created_by_user_id=int(current_user["id"]),
             expires_in_days=payload.expires_in_days,
+            provisioning=payload.provisioning,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -289,6 +312,26 @@ async def create_deployment_link(
     )
     portal_url = tray_deployment.resolve_portal_url(request)
     return TrayDeploymentLinkResponse(**await tray_deployment.serialise_link(record, portal_url))
+
+
+@router.get(
+    "/api/tray/admin/deployment-links/{link_id}/provisioning-password",
+    summary="Reveal the current provisioning package password (admin)",
+)
+async def deployment_provisioning_password(
+    link_id: int,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    link = await tray_repo.get_deployment_link(link_id)
+    if not link or not link.get("provisioning_encrypted") or await tray_deployment.link_status(link) != "active":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active provisioning URL not found")
+    try:
+        password = await builds.provisioning_password(link_id)
+    except builds.BuildStateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if password is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="The provisioning package is still being built.")
+    return JSONResponse({"password": password}, headers=_PRIVATE_HEADERS)
 
 
 @router.post(
@@ -350,17 +393,18 @@ def _build_error(exc: Exception) -> HTTPException:
 )
 async def build_agent_claim(
     request: Request,
+    supports_ppkg: bool = False,
     _api_key: dict = Depends(require_api_key),
 ):
     portal_url = tray_deployment.resolve_portal_url(request)
     try:
-        job = await builds.claim_next_build(portal_url)
+        job = await builds.claim_next_build(portal_url, supports_ppkg=supports_ppkg)
     except ValueError as exc:
         log_error("Unable to hand out tray deployment build", error=str(exc))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     if job is None:
         # Header values must be latin-1, and the reasons are plain ASCII.
-        reason = (await builds.idle_reason()).encode("ascii", "replace").decode("ascii")
+        reason = (await builds.idle_reason(supports_ppkg=supports_ppkg)).encode("ascii", "replace").decode("ascii")
         return Response(
             status_code=status.HTTP_204_NO_CONTENT,
             headers={"X-MyPortal-Build-Status": reason},
@@ -375,7 +419,7 @@ async def build_agent_claim(
 )
 async def build_agent_upload(
     build_id: int,
-    kind: Literal["msi", "exe"],
+    kind: Literal["msi", "exe", "ppkg"],
     request: Request,
     offset: int | None = Query(default=None, ge=0, description="Bytes already sent when uploading in parts"),
     total: int | None = Query(default=None, ge=1, description="The whole file's size when uploading in parts"),
@@ -399,14 +443,16 @@ async def build_agent_upload(
 
 @router.post(
     "/api/tray/build-agent/jobs/{build_id}/complete",
-    summary="Mark a build complete after both installers are uploaded (build agent)",
+    summary="Mark a build complete after all required installers are uploaded (build agent)",
 )
 async def build_agent_complete(
     build_id: int,
+    payload: TrayDeploymentBuildComplete | None = None,
     _api_key: dict = Depends(require_api_key),
 ) -> dict:
     try:
-        await builds.complete_build(build_id)
+        password = payload.provisioning_password.get_secret_value() if payload and payload.provisioning_password else None
+        await builds.complete_build(build_id, provisioning_password=password)
     except (builds.BuildNotFound, builds.BuildStateError) as exc:
         raise _build_error(exc) from exc
     return {"status": "ready"}

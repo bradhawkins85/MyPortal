@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, IPvAnyAddress
+from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress, SecretStr, field_validator, model_validator
 
 
 class TrayDeviceFacts(BaseModel):
@@ -206,10 +208,195 @@ class TrayInstallTokenResponse(BaseModel):
     use_count: int = 0
 
 
+class TrayEntraJoinSettings(BaseModel):
+    """An opaque WCD bulk provisioning token, obtained by a tenant admin."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    mode: Literal["entra"]
+    bulk_token: SecretStr = Field(min_length=1, max_length=16384)
+    authority: str = Field(default="https://login.microsoftonline.com/common", max_length=400)
+
+    @field_validator("bulk_token")
+    @classmethod
+    def check_bulk_token(cls, value: SecretStr) -> SecretStr:
+        if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value.get_secret_value()):
+            raise ValueError("Entra bulk token must not contain whitespace or control characters.")
+        return value
+
+    @field_validator("authority")
+    @classmethod
+    def check_authority(cls, value: str) -> str:
+        message = "Entra authority must be an HTTPS Microsoft login URL with one tenant path and no credentials, port, query or fragment."
+        try:
+            parsed = urlsplit(value)
+            hosts = {"login.microsoftonline.com", "login.microsoftonline.us", "login.chinacloudapi.cn"}
+            if (parsed.scheme != "https" or parsed.netloc not in hosts
+                    or "?" in value or "#" in value or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value)
+                    or not re.fullmatch(r"/[A-Za-z0-9][A-Za-z0-9.-]{0,252}/?", parsed.path)):
+                raise ValueError(message)
+            tenant = parsed.path.strip("/")
+            tenant_domain = tenant.split(".")
+            if not (
+                tenant.lower() in {"common", "organizations"}
+                or re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", tenant)
+                or (len(tenant_domain) >= 2 and all(re.fullmatch(
+                    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label
+                ) for label in tenant_domain))
+            ):
+                raise ValueError(message)
+        except ValueError:
+            raise ValueError(message) from None
+        return value.rstrip("/")
+
+    def build_settings(self) -> dict[str, Any]:
+        return {"mode": self.mode, "bulk_token": self.bulk_token.get_secret_value(), "authority": self.authority}
+
+
+class TrayActiveDirectoryJoinSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    mode: Literal["active_directory"]
+    domain_name: str = Field(min_length=1, max_length=253)
+    username: str = Field(min_length=1, max_length=256)
+    password: SecretStr = Field(min_length=1, max_length=127)
+    organizational_unit: Optional[str] = Field(default=None, max_length=1024)
+
+    @field_validator("domain_name")
+    @classmethod
+    def check_domain(cls, value: str) -> str:
+        labels = value.split(".")
+        if (len(labels) < 2 or not re.search(r"[A-Za-z]", value)
+                or any(not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", part) for part in labels)):
+            raise ValueError("AD domain must be a DNS domain name, such as ad.example.com.")
+        return value
+
+    @field_validator("username")
+    @classmethod
+    def check_join_username(cls, value: str) -> str:
+        if (any(ord(c) < 32 or ord(c) == 127 for c in value)
+                or not re.fullmatch(r"[^\\/@]+\\[^\\/@]+|[^\\/@\s]+@[^\\/@\s]+", value)
+                or value != value.strip()):
+            raise ValueError("AD join username must use DOMAIN\\user or user@domain format.")
+        return value
+
+    @field_validator("password")
+    @classmethod
+    def check_join_password(cls, value: SecretStr) -> SecretStr:
+        if any(ord(c) < 32 or ord(c) == 127 for c in value.get_secret_value()):
+            raise ValueError("AD join password must not contain control characters.")
+        return value
+
+    @field_validator("organizational_unit")
+    @classmethod
+    def check_organizational_unit(cls, value: str | None) -> str | None:
+        if value is not None and any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError("AD organizational unit must not contain control characters.")
+        return value or None
+
+    def build_settings(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode, "domain_name": self.domain_name, "username": self.username,
+            "password": self.password.get_secret_value(), "organizational_unit": self.organizational_unit,
+        }
+
+
+TrayDirectoryJoinSettings = Annotated[
+    TrayEntraJoinSettings | TrayActiveDirectoryJoinSettings, Field(discriminator="mode")
+]
+
+
+class TrayProvisioningSettings(BaseModel):
+    """Bootstrap credentials; never include this model in a public response."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    admin_password: SecretStr = Field(min_length=12, max_length=127)
+    wifi_ssid: Optional[str] = None
+    wifi_password: Optional[SecretStr] = None
+    device_name_template: Optional[str] = Field(default=None, max_length=64)
+    directory_join: Optional[TrayDirectoryJoinSettings] = None
+
+    @field_validator("admin_password")
+    @classmethod
+    def check_admin_password(cls, value: SecretStr) -> SecretStr:
+        password = value.get_secret_value()
+        if any(ord(c) < 32 or ord(c) == 127 for c in password):
+            raise ValueError("Administrator password must not contain control characters.")
+        if "provisioningadmin" in password.lower():
+            raise ValueError("Administrator password must not contain the account name.")
+        categories = sum(bool(re.search(pattern, password)) for pattern in (
+            r"[A-Z]", r"[a-z]", r"[0-9]", r"[^A-Za-z0-9]",
+        ))
+        if categories < 3:
+            raise ValueError("Administrator password needs three of: uppercase, lowercase, numbers and symbols.")
+        return value
+
+    @field_validator("wifi_ssid")
+    @classmethod
+    def check_ssid(cls, value: str | None) -> str | None:
+        if value == "" or value is None:
+            return None
+        if len(value.encode("utf-8")) > 32 or any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError("Wi-Fi name must be at most 32 UTF-8 bytes without control characters.")
+        return value
+
+    @field_validator("wifi_password")
+    @classmethod
+    def check_wifi_password(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None or not value.get_secret_value():
+            return None
+        password = value.get_secret_value()
+        if not 8 <= len(password) <= 63 or any(not 32 <= ord(c) <= 126 for c in password):
+            raise ValueError("Wi-Fi password must contain 8 to 63 printable ASCII characters.")
+        return value
+
+    @field_validator("device_name_template")
+    @classmethod
+    def check_device_name(cls, value: str | None) -> str | None:
+        value = (value or "").strip()
+        if not value:
+            return None
+        token_pattern = r"%RAND:([1-9]|1[0-5])%"
+        tokens = re.findall(token_pattern, value)
+        literal = re.sub(token_pattern, "", value)
+        if (len(tokens) > 1 or not re.fullmatch(r"[A-Za-z0-9-]*", literal)
+                or any(not 1 <= int(n) <= 15 for n in tokens)):
+            raise ValueError("PC name must use letters, numbers, hyphens and at most one %RAND:n% token (1 to 15 digits).")
+        expanded = re.sub(token_pattern, lambda m: "0" * int(m[1]), value)
+        if (len(expanded) > 15 or expanded.startswith("-") or expanded.endswith("-")
+                or not re.search(r"[A-Za-z]", literal)):
+            raise ValueError("PC name must expand to 1 to 15 characters, include a letter, and start and end without a hyphen.")
+        return value
+
+    @model_validator(mode="after")
+    def check_wifi_network(self) -> TrayProvisioningSettings:
+        if self.wifi_password and not self.wifi_ssid:
+            raise ValueError("Enter a Wi-Fi name when providing a Wi-Fi password.")
+        if self.directory_join and self.directory_join.mode == "active_directory":
+            if not self.device_name_template:
+                self.device_name_template = "MP-%RAND:8%"
+            if "%RAND:" not in self.device_name_template:
+                raise ValueError("AD join requires a PC name template containing %RAND:n% for unique computer names.")
+        return self
+
+    def build_settings(self) -> dict[str, Any]:
+        settings = {
+            "admin_password": self.admin_password.get_secret_value(),
+            "wifi_ssid": self.wifi_ssid,
+            "wifi_password": self.wifi_password.get_secret_value() if self.wifi_password else None,
+            "device_name_template": self.device_name_template,
+        }
+        if self.directory_join:
+            settings["directory_join"] = self.directory_join.build_settings()
+        return settings
+
+
 class TrayDeploymentLinkCreate(BaseModel):
     company_id: int = Field(ge=1)
     label: Optional[str] = Field(default=None, max_length=150)
     expires_in_days: Literal[0, 1, 7, 30, 90, 365] = 7
+    provisioning: Optional[TrayProvisioningSettings] = None
 
 
 class TrayDeploymentLinkResponse(BaseModel):
@@ -224,6 +411,13 @@ class TrayDeploymentLinkResponse(BaseModel):
     revoked_at: Optional[datetime] = None
     download_count: int = 0
     last_downloaded_at: Optional[datetime] = None
+    provisioning_enabled: bool = False
+
+
+class TrayDeploymentBuildComplete(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    provisioning_password: Optional[SecretStr] = Field(default=None, min_length=1, max_length=256)
 
 
 class TrayDeploymentBuildFailure(BaseModel):
