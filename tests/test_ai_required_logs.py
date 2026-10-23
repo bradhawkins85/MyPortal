@@ -20,8 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture(autouse=True)
 def _no_approvals(monkeypatch):
-    monkeypatch.setattr(required, "_approved", {})
-    monkeypatch.setattr(required, "_approved_loaded_at", 0.0)
+    monkeypatch.setattr(required, "_approvals", required._ApprovalCache())
 
 
 @pytest.fixture

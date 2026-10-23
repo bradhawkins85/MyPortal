@@ -24,10 +24,12 @@ import hashlib
 import re
 import time
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.logging import log_warning
 from app.repositories import ai_required_logs as repo
+from app.services import log_paths
 
 REASON_NOT_ALLOWED = "not_allowed"
 REASON_UNAVAILABLE = "unavailable"
@@ -36,8 +38,6 @@ REASONS = (REASON_NOT_ALLOWED, REASON_UNAVAILABLE)
 FEATURE_TROUBLESHOOTER = "troubleshooter"
 FEATURE_HEALTH_CHECK = "health_check"
 FEATURE_LABELS = {FEATURE_TROUBLESHOOTER: "AI troubleshooter", FEATURE_HEALTH_CHECK: "Health check"}
-
-STATUSES = ("open", "approved", "dismissed")
 
 KIND_EVENT_LOG = "event_log"
 KIND_FILE = "file"
@@ -58,8 +58,17 @@ _UNAVAILABLE_SECTION_RE = re.compile(
 )
 
 _APPROVED_TTL_SECONDS = 15.0
-_approved: dict[str, dict[str, tuple[str, ...]]] = {}
-_approved_loaded_at = 0.0
+
+
+@dataclass
+class _ApprovalCache:
+    """Approved entries by platform and kind, reloaded every few seconds."""
+
+    values: dict[str, dict[str, tuple[str, ...]]] = field(default_factory=dict)
+    loaded_at: float = 0.0
+
+
+_approvals = _ApprovalCache()
 
 
 def valid_event_log_channel(name: str) -> bool:
@@ -89,8 +98,6 @@ def looks_like_log_source(source: str, platform: str) -> bool:
     logs") off the review list.
     """
 
-    from app.services import ai_troubleshooter
-
     text = str(source or "").strip()
     kind = source_kind(text)
     if kind == KIND_MACOS:
@@ -98,10 +105,10 @@ def looks_like_log_source(source: str, platform: str) -> bool:
     if kind == KIND_FILE:
         path = text[len("file:"):].strip()
         windows = platform != "macos" and (len(path) > 2 and path[1] == ":" or "%" in path)
-        candidate = ai_troubleshooter._expand_windows_variables(path) if windows else path
+        candidate = log_paths.expand_windows_variables(path) if windows else path
         if not windows and candidate.startswith("~/"):
             candidate = "/Users/*" + candidate[1:]
-        segments = ai_troubleshooter._split_path(candidate, windows)
+        segments = log_paths.split_path(candidate, windows)
         return bool(segments) and len(segments) >= 2
     if platform == "macos" or not valid_event_log_channel(text):
         return False
@@ -111,8 +118,6 @@ def looks_like_log_source(source: str, platform: str) -> bool:
 
 def suggest_approval(source: str, platform: str) -> tuple[str | None, str | None]:
     """The approved-list entry that would let ``source`` be collected."""
-
-    from app.services import ai_troubleshooter
 
     text = str(source or "").strip()
     kind = source_kind(text)
@@ -124,10 +129,10 @@ def suggest_approval(source: str, platform: str) -> tuple[str | None, str | None
         return None, None
     path = text[len("file:"):].strip()
     windows = platform != "macos" and (len(path) > 2 and path[1] == ":" or "%" in path)
-    candidate = ai_troubleshooter._expand_windows_variables(path) if windows else path
+    candidate = log_paths.expand_windows_variables(path) if windows else path
     if not windows and candidate.startswith("~/"):
         candidate = "/Users/*" + candidate[1:]
-    segments = ai_troubleshooter._split_path(candidate, windows)
+    segments = log_paths.split_path(candidate, windows)
     if not segments or len(segments) < 3:
         return APPROVE_FOLDER, None
     # The folder holding the file, cut back to the last folder without a wildcard.
@@ -140,15 +145,13 @@ def suggest_approval(source: str, platform: str) -> tuple[str | None, str | None
     folder = separator.join(folder_segments)
     if not windows and not folder.startswith("/"):
         folder = "/" + folder
-    if ai_troubleshooter._valid_extra_root(folder, windows):
+    if log_paths.valid_extra_root(folder, windows):
         return APPROVE_FOLDER, folder
     return APPROVE_FOLDER, None
 
 
 def validate_approval(kind: str | None, value: str, platform: str) -> str | None:
     """Return the cleaned approved-list value, or ``None`` when it is not allowed."""
-
-    from app.services import ai_troubleshooter
 
     text = str(value or "").strip().strip('"').strip()
     if kind == APPROVE_EVENT_LOG:
@@ -159,7 +162,7 @@ def validate_approval(kind: str | None, value: str, platform: str) -> str | None
             text = text.replace("/", "\\").rstrip("\\")
         else:
             text = text.rstrip("/") or text
-        return text if ai_troubleshooter._valid_extra_root(text, windows) else None
+        return text if log_paths.valid_extra_root(text, windows) else None
     return None
 
 
@@ -180,8 +183,7 @@ def unavailable_detail(body: str) -> str | None:
 async def refresh_approvals(*, force: bool = False) -> None:
     """Reload approved entries (cheap; cached for a few seconds per worker)."""
 
-    global _approved, _approved_loaded_at
-    if not force and time.monotonic() - _approved_loaded_at < _APPROVED_TTL_SECONDS:
+    if not force and time.monotonic() - _approvals.loaded_at < _APPROVED_TTL_SECONDS:
         return
     try:
         rows = await repo.list_approved()
@@ -198,18 +200,18 @@ async def refresh_approvals(*, force: bool = False) -> None:
         values = approved.setdefault(platform, {}).setdefault(kind, [])
         if value not in values:
             values.append(value)
-    _approved = {
+    _approvals.values = {
         platform: {kind: tuple(values) for kind, values in kinds.items()}
         for platform, kinds in approved.items()
     }
-    _approved_loaded_at = time.monotonic()
+    _approvals.loaded_at = time.monotonic()
 
 
 def approved_values(platform: str, kind: str) -> list[str]:
     platforms = ("windows", "macos") if platform == "unknown" else (platform,)
     values: list[str] = []
     for name in platforms:
-        for value in _approved.get(name, {}).get(kind, ()):
+        for value in _approvals.values.get(name, {}).get(kind, ()):
             if value not in values:
                 values.append(value)
     return values
@@ -304,7 +306,9 @@ __all__ = [
     "APPROVE_EVENT_LOG",
     "APPROVE_FOLDER",
     "FEATURE_HEALTH_CHECK",
+    "FEATURE_LABELS",
     "FEATURE_TROUBLESHOOTER",
+    "KIND_LABELS",
     "REASON_NOT_ALLOWED",
     "REASON_UNAVAILABLE",
     "approved_values",

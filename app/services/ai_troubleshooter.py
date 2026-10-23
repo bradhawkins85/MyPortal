@@ -54,6 +54,9 @@ from app.services import ai_consent
 from app.services import ai_prompt_security
 from app.services import ai_required_logs
 from app.services import knowledge_base as knowledge_base_service
+from app.services.log_paths import expand_windows_variables as _expand_windows_variables
+from app.services.log_paths import split_path as _split_path
+from app.services.log_paths import valid_extra_root as _valid_extra_root
 from app.services import llm_usage
 from app.services import rmm_event_logs
 from app.services import tray as tray_service
@@ -155,22 +158,6 @@ MACOS_LOG_FILE_ROOTS: dict[str, str] = {
 }
 LOG_FILE_EXTENSIONS = ".log, .txt, .wer, .lo_, .ips, .crash, .panic, .diag"
 _LOG_FILE_NAME_RE = re.compile(r"\.(log|txt|wer|lo_|ips|crash|panic|diag)(\.[0-9]{1,3})?$", re.IGNORECASE)
-_MAX_FILE_PATTERN_LEN = 400
-# Environment variables articles use in log paths, mapped to the folders the
-# agent (running as SYSTEM) should read instead.
-_WINDOWS_PATH_VARIABLES: dict[str, str] = {
-    "%systemroot%": "C:\\Windows",
-    "%windir%": "C:\\Windows",
-    "%systemdrive%": "C:",
-    "%programdata%": "C:\\ProgramData",
-    "%allusersprofile%": "C:\\ProgramData",
-    "%userprofile%": "C:\\Users\\*",
-    "%appdata%": "C:\\Users\\*\\AppData\\Roaming",
-    "%localappdata%": "C:\\Users\\*\\AppData\\Local",
-    "%temp%": "C:\\Users\\*\\AppData\\Local\\Temp",
-    "%tmp%": "C:\\Users\\*\\AppData\\Local\\Temp",
-}
-_WINDOWS_PATH_VARIABLE_RE = re.compile(r"%[A-Za-z]+%")
 
 DEFAULT_LOG_HOURS = 24
 MAX_LOG_HOURS = 72
@@ -304,36 +291,6 @@ def allowed_log_sources(platform: str) -> dict[str, str]:
     return sources
 
 
-def _split_path(path: str, windows: bool) -> list[str] | None:
-    """Mirror of pathStyle.splitPath in the tray agent."""
-
-    if not path or len(path) > _MAX_FILE_PATTERN_LEN:
-        return None
-    if any(ch in path for ch in '[]"<>|\x00') or any(ord(ch) < 0x20 for ch in path):
-        return None
-    if windows:
-        path = path.replace("/", "\\")
-        if len(path) < 3 or not path[0].isascii() or not path[0].isalpha() or path[1:3] != ":\\":
-            return None
-        if ":" in path[2:]:
-            return None
-        parts = path.split("\\")
-    else:
-        if not path.startswith("/"):
-            return None
-        parts = path.split("/")
-    segments: list[str] = []
-    for index, part in enumerate(parts):
-        if part == "" and index > 0:
-            continue
-        if part in {".", ".."}:
-            return None
-        if windows and index > 0 and part.rstrip(". ") != part:
-            return None
-        segments.append(part)
-    return segments
-
-
 def _under_root(segments: Sequence[str], root: str, windows: bool) -> bool:
     root_segments = _split_path(root, windows) or []
     if not root_segments or len(segments) <= len(root_segments):
@@ -346,12 +303,6 @@ def _under_root(segments: Sequence[str], root: str, windows: bool) -> bool:
         if (segment.lower() != root_segment.lower()) if windows else (segment != root_segment):
             return False
     return True
-
-
-def _expand_windows_variables(path: str) -> str:
-    return _WINDOWS_PATH_VARIABLE_RE.sub(
-        lambda match: _WINDOWS_PATH_VARIABLES.get(match.group(0).lower(), match.group(0)), path
-    )
 
 
 def normalise_file_source(source: str, platform: str) -> str | None:
@@ -390,22 +341,6 @@ def normalise_file_source(source: str, platform: str) -> str | None:
 
 _MAX_EXTRA_LOG_FOLDERS = 50
 _EXTRA_FOLDER_DESCRIPTION = "Added by this portal's owner"
-
-
-def _valid_extra_root(folder: str, windows: bool) -> bool:
-    """Mirror of validExtraRoot in the tray agent."""
-
-    segments = _split_path(folder, windows)
-    if not segments or len(segments) < 3 or segments[1] == "*":
-        return False
-    literal = 0
-    for segment in segments[1:]:
-        if segment == "*":
-            continue
-        if any(ch in segment for ch in "*?"):
-            return False
-        literal += 1
-    return literal >= 2
 
 
 def extra_log_folders(platform: str) -> list[str]:

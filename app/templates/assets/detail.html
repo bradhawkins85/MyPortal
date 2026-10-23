@@ -18,6 +18,7 @@
     {% set detail_actions = [] %}
     {% if can_edit and not customer_safe %}{% set _ = detail_actions.append({"label": "Save changes", "type": "submit", "variant": "primary", "form": "asset-settings-form", "attrs": {"data-asset-save": "", "title": "Save the asset profile and editable custom fields"}}) %}{% endif %}
     {% if rmm and rmm.can_run and not customer_safe %}{% set _ = detail_actions.append({"label": "Check in now", "type": "submit", "form": "asset-checkin-form", "attrs": {"title": "Queue a full agent check-in without changing its normal schedule"}}) %}{% endif %}
+    {% if health_check and health_check.can_manage and not customer_safe %}{% set _ = detail_actions.append({"label": "Run health check", "type": "submit", "form": "asset-health-check-form", "attrs": {"title": "A health check is already running" if health_check.active else ("Review this computer's health with the AI troubleshooter and list the steps back to optimal performance" ~ (". On physical Windows hardware PawnIO is installed briefly to read sensors and removed afterwards." if health_check.pawnio_available else "")) if health_check.can_run else "Needs the tray app connected on this computer", "disabled": true if (health_check.active or not health_check.can_run) else none}}) %}{% endif %}
     {% if rmm and rmm.can_push_agent and not rmm.agent and not customer_safe %}{% set _ = detail_actions.append({"label": "Push RMM agent", "type": "button", "attrs": {"data-rmm-agent-install": asset.id, "data-rmm-agent-name": asset_display_name}}) %}{% endif %}
     {% if rmm and rmm.can_push_agent and not customer_safe %}{% set _ = detail_actions.append({"label": "Repair RMM agent", "type": "button", "attrs": {"data-rmm-agent-repair": asset.id, "data-rmm-agent-name": asset_display_name}}) %}{% endif %}
     {% set _ = detail_actions.append({"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id}) %}
@@ -31,6 +32,9 @@
 <div class="asset-edit-page ce-workspace" data-asset-id="{{ asset.id }}" data-asset-edit>
   {% if rmm and rmm.can_run and not customer_safe %}
     <form id="asset-checkin-form" method="post" action="/rmm/assets/{{ asset.id }}/checkin">{% include "partials/csrf.html" %}</form>
+  {% endif %}
+  {% if health_check and health_check.can_run and not customer_safe %}
+    <form id="asset-health-check-form" method="post" action="/rmm/assets/{{ asset.id }}/health-check">{% include "partials/csrf.html" %}</form>
   {% endif %}
   {% if customer_safe %}
     <div class="alert alert--info" role="status">Customer view — internal notes, custom fields, tickets, integration identifiers and inaccessible links are omitted.</div>
@@ -416,24 +420,24 @@
     <header class="ce-section__header">
       <div class="ce-section__heading">
         <h2 class="card__title" id="asset-health-check-heading">Health check</h2>
-        <p class="card__subtitle">An AI review of this computer's health through its tray app: drives and impending drive failure, chkdsk and defrag state, temperatures, crashes, hardware errors, performance, updates and security, with the steps that bring it back to optimal performance. <a href="/health-checks?asset_id={{ asset.id }}">All health checks for this asset</a></p>
+        <p class="card__subtitle">An RMM option: an AI review of this computer's health through its tray app (drives and impending drive failure, chkdsk and defrag state, temperatures, crashes, hardware errors, performance, updates and security) with the steps that bring it back to optimal performance. Also in the Actions menu. <a href="/health-checks?asset_id={{ asset.id }}">All health checks for this asset</a></p>
       </div>
     </header>
     <div class="ce-section__body">
       {% if hcx.can_run %}
-      <form method="post" action="/health-checks/start" class="form">
+      <form method="post" action="/rmm/assets/{{ asset.id }}/health-check" class="form">
         {% include "partials/csrf.html" %}
-        <input type="hidden" name="asset_id" value="{{ asset.id }}">
+        <input type="hidden" name="pawnio_choice" value="1">
         {% if hcx.pawnio_available %}
         <label class="form-checkbox"><input type="checkbox" name="allow_pawnio" value="1" checked> Read hardware sensors (CPU, GPU and motherboard temperatures, fans and voltages) with PawnIO</label>
         <p class="form-help">On physical computers only, the tray app installs the PawnIO driver for the length of the check and removes it again before reporting back.</p>
         {% elif hcx.platform == 'windows' and not hcx.pawnio_enabled %}
         <p class="form-help">Hardware sensors through PawnIO are turned off (HEALTH_CHECK_PAWNIO_ENABLED); built-in Windows sensors are still read.</p>
         {% endif %}
-        <div class="form-actions"><button class="button button--primary" type="submit"{% if hcx.checks and hcx.checks[0].is_active %} disabled title="A health check is already running"{% endif %}>Run health check</button></div>
+        <div class="form-actions"><button class="button button--primary" type="submit"{% if hcx.active %} disabled title="A health check is already running"{% endif %}>Run health check</button></div>
       </form>
-      {% elif not hcx.device %}
-      <p class="text-muted">This asset has no active tray app, so a health check cannot run on it.</p>
+      {% elif hcx.can_manage and not hcx.device %}
+      <p class="text-muted">The health check runs through the tray app, which is not connected on this computer.</p>
       {% endif %}
       {% if hcx.checks %}
       <div class="table-wrapper"><table class="table">

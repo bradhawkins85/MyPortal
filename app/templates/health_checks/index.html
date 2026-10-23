@@ -22,7 +22,7 @@
 {% endblock %}
 {% block content %}
 <section class="hc-workspace" aria-describedby="hc-intro">
-  <p id="hc-intro" class="hc-muted">A health check takes a snapshot of a computer's health through its tray app (drives, chkdsk and defrag state, temperatures, crashes, hardware errors, performance, updates and security), reviews it and its logs with the AI model, and lists the steps that bring the computer back to optimal performance. Start one from an asset's <strong>Health check</strong> section.</p>
+  <p id="hc-intro" class="hc-muted">A health check takes a snapshot of a computer's health through its tray app (drives, chkdsk and defrag state, temperatures, crashes, hardware errors, performance, updates and security), reviews it and its logs with the AI model, and lists the steps that bring the computer back to optimal performance. It is an RMM option: choose <strong>Run health check</strong> in the Actions menu of an asset with the RMM agent deployed.</p>
 
   {{ counter_strip([
     {"label": "Critical", "value": counts.get('critical', 0), "variant": "danger", "title": "Assets whose latest health check is critical"},
@@ -41,7 +41,7 @@
     {% else %}
       <div class="card card--panel">
         <h2 class="card__title">No health checks yet</h2>
-        <p>Open an asset with an active tray app and choose <strong>Run health check</strong> in its Health check section.</p>
+        <p>Open an asset with the RMM agent deployed and choose <strong>Run health check</strong> in its Actions menu.</p>
         <p><a class="button button--ghost" href="/assets">Go to assets</a></p>
       </div>
     {% endif %}

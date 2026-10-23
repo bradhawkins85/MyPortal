@@ -1,12 +1,18 @@
 """Health check pages and APIs (:mod:`app.services.ai_health_check`).
 
-Technicians (helpdesk technicians and super admins):
+The health check is an RMM option: it needs the RMM feature pack and an RMM
+agent deployed on the asset. Users with RMM scripts access see their
+company's health checks; helpdesk technicians and super admins see every
+company's.
 
+* ``POST /rmm/assets/{asset_id}/health-check`` run one from the asset page's
+  Actions menu or Health check section (RMM scripts write access, as for
+  Check in now)
 * ``GET /health-checks`` recent health checks; ``?asset_id=`` for one asset
 * ``GET /health-checks/{id}`` a health check's report
-* ``POST /health-checks/start`` start one from the asset page
 * ``GET /api/health-checks``, ``GET /api/health-checks/{id}`` and
-  ``POST /api/assets/{asset_id}/health-checks`` the same as JSON
+  ``POST /api/assets/{asset_id}/health-checks`` (helpdesk technicians and
+  super admins) the same as JSON
 
 The asset's tray device (device token):
 
@@ -48,6 +54,7 @@ router = APIRouter(tags=["Health checks"])
 
 LIST_PATH = "/health-checks"
 REQUIRED_LOGS_PATH = "/admin/required-logs"
+RMM_PERMISSION = "menu.rmm_scripts"
 _MAX_SNAPSHOT_UPLOAD = 4 * 1024 * 1024
 _MAX_LOG_UPLOAD = 16 * 1024 * 1024
 
@@ -58,14 +65,71 @@ def _main():
     return main_module
 
 
-async def _technician_page(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
+def _rmm_available() -> bool:
+    return bool(_main()._feature_pack_available("rmm"))
+
+
+async def _rmm_access(
+    request: Request, *, asset_id: int | None = None, write: bool = False
+) -> tuple[dict[str, Any] | None, int | None, bool, RedirectResponse | None]:
+    """``(user, company_id, can_run, redirect)`` under the RMM scripts permission.
+
+    Resolved like the asset page's other RMM actions: against the asset's own
+    company when ``asset_id`` is given and the user may manage it there.
+    """
+
+    if not _rmm_available():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RMM is not available")
+    from app.features.assets import routes as asset_routes
+
+    main = _main()
+    user, membership, _company, company_id, redirect = await asset_routes._load_asset_context(
+        request, RMM_PERMISSION, asset_id=asset_id
+    )
+    if redirect:
+        if not user:
+            return None, None, False, redirect
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="RMM scripts access required")
+    can_run = bool(user.get("is_super_admin")) or main._membership_menu_can(
+        user, membership, RMM_PERMISSION, write=True
+    )
+    if write and not can_run:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission to run RMM actions is required")
+    return user, int(company_id), can_run, None
+
+
+async def _viewer(
+    request: Request, *, asset_id: int | None = None
+) -> tuple[dict[str, Any] | None, int | None, RedirectResponse | None]:
+    """``(user, company scope, redirect)``: ``None`` scope means every company.
+
+    Helpdesk technicians and super admins see every company's checks; other
+    users with RMM scripts access see their company's.
+    """
+
     main = _main()
     user, redirect = await main._require_authenticated_user(request)
     if redirect:
-        return None, redirect
-    if not await main._is_helpdesk_technician(user, request):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Helpdesk technician access required")
-    return user, None
+        return None, None, redirect
+    if user.get("is_super_admin") or await main._is_helpdesk_technician(user, request):
+        return user, None, None
+    rmm_user, company_id, _can_run, redirect = await _rmm_access(request, asset_id=asset_id)
+    if redirect:
+        return None, None, redirect
+    return rmm_user, company_id, None
+
+
+async def _can_run_on(request: Request, asset_id: int, company_id: int) -> bool:
+    """Whether the viewer may run a health check on the asset now."""
+
+    try:
+        _user, rmm_company, can_run, redirect = await _rmm_access(request, asset_id=asset_id)
+    except HTTPException:
+        return False
+    return (
+        bool(can_run) and not redirect and rmm_company == int(company_id)
+        and await service.rmm_agent_deployed(asset_id, company_id)
+    )
 
 
 def _json(value: Any) -> Any:
@@ -88,6 +152,8 @@ async def _start(
     model: str | None,
     request: Request,
 ) -> dict[str, Any]:
+    if not _rmm_available():
+        raise service.HealthCheckError("The health check is an RMM option and RMM is not available.", 404)
     asset = await asset_repo.get_asset_by_id(asset_id)
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
@@ -123,17 +189,26 @@ async def _start(
     return result
 
 
-@router.post(f"{LIST_PATH}/start", response_class=HTMLResponse, summary="Start a health check from the asset page")
-async def start_from_form(request: Request):
-    user, redirect = await _technician_page(request)
+@router.post("/rmm/assets/{asset_id:int}/health-check", response_class=HTMLResponse,
+             summary="Run a health check on the asset (RMM)")
+async def start_from_asset(asset_id: int, request: Request):
+    """The asset page's Actions menu and Health check section.
+
+    The Actions menu sends no PawnIO choice, so HEALTH_CHECK_PAWNIO_ENABLED
+    decides; the section's form sends ``pawnio_choice`` with its checkbox.
+    """
+
+    user, company_id, _can_run, redirect = await _rmm_access(request, asset_id=asset_id, write=True)
     if redirect:
         return redirect
+    asset = await asset_repo.get_asset_by_id(asset_id)
+    if not asset or int(asset.get("company_id") or 0) != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
     form = await request.form()
-    try:
-        asset_id = int(str(form.get("asset_id") or ""))
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose an asset.") from None
-    allow_pawnio = str(form.get("allow_pawnio") or "").lower() in {"1", "on", "true", "yes"}
+    allow_pawnio = (
+        str(form.get("allow_pawnio") or "").lower() in {"1", "on", "true", "yes"}
+        if form.get("pawnio_choice") else None
+    )
     try:
         result = await _start(asset_id=asset_id, user=user, allow_pawnio=allow_pawnio, ticket_id=None,
                               model=None, request=request)
@@ -190,12 +265,14 @@ def _summary_view(check: dict[str, Any]) -> dict[str, Any]:
 
 @router.get(LIST_PATH, response_class=HTMLResponse, summary="Recent health checks")
 async def list_page(request: Request, asset_id: int | None = Query(default=None, gt=0)):
-    user, redirect = await _technician_page(request)
+    user, scope, redirect = await _viewer(request, asset_id=asset_id)
     if redirect:
         return redirect
     await service.expire_stale()
-    checks = [service.present(check) for check in await repo.list_checks(asset_id=asset_id, limit=200)]
+    checks = [service.present(check) for check in await repo.list_checks(asset_id=asset_id, company_id=scope, limit=200)]
     asset = await asset_repo.get_asset_by_id(asset_id) if asset_id else None
+    if asset and scope is not None and int(asset.get("company_id") or 0) != scope:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
     counts = {key: 0 for key in service.OVERALL_LABELS}
     latest_per_asset: set[int] = set()
     for check in checks:
@@ -237,13 +314,14 @@ def _snapshot_view(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 @router.get(f"{LIST_PATH}/{{health_check_id}}", response_class=HTMLResponse, summary="A health check report")
 async def report_page(request: Request, health_check_id: int):
-    user, redirect = await _technician_page(request)
+    check = await repo.get(health_check_id)
+    user, scope, redirect = await _viewer(request, asset_id=int(check["asset_id"]) if check else None)
     if redirect:
         return redirect
-    await service.expire_stale()
-    check = await repo.get(health_check_id)
-    if not check:
+    if not check or (scope is not None and int(check.get("company_id") or 0) != scope):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Health check not found")
+    await service.expire_stale()
+    check = await repo.get(health_check_id) or check
     report = check.get("report") or {}
     signals = report.get("signals") if check.get("status") == service.STATUS_COMPLETED else None
     if signals is None:
@@ -264,6 +342,7 @@ async def report_page(request: Request, health_check_id: int):
             "areas": service.AREAS,
             "previous": previous,
             "is_super_admin": bool(user.get("is_super_admin")),
+            "can_run_again": await _can_run_on(request, int(check["asset_id"]), int(check["company_id"])),
         },
     )
 
@@ -289,15 +368,22 @@ async def api_get(health_check_id: int, current_user: dict = Depends(require_hel
 
 
 async def asset_context(asset: dict[str, Any], *, can_run: bool) -> dict[str, Any]:
-    """The asset page's Health check section."""
+    """The asset page's Health check section and its Actions menu entry.
+
+    The asset page only asks for it when the asset has an RMM agent deployed;
+    ``can_run`` is the user's RMM scripts write access.
+    """
 
     asset_id = int(asset["id"])
     device = await repo.find_tray_device_for_asset(asset_id)
     platform = ai_troubleshooter.endpoint_platform(device, asset) if device else "unknown"
     pawnio_enabled = bool(getattr(get_settings(), "health_check_pawnio_enabled", True))
+    checks = [service.present(check) for check in await repo.list_checks(asset_id=asset_id, limit=5)]
     return {
-        "checks": [service.present(check) for check in await repo.list_checks(asset_id=asset_id, limit=5)],
+        "checks": checks,
+        "active": bool(checks and checks[0]["is_active"]),
         "device": {"hostname": device.get("hostname"), "last_seen_utc": device.get("last_seen_utc")} if device else None,
+        "can_manage": can_run,
         "can_run": can_run and bool(device),
         "platform": platform,
         "pawnio_available": pawnio_enabled and platform == "windows",

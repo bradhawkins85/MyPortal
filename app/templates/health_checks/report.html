@@ -10,7 +10,7 @@
 {% endblock %}
 {% block header_actions %}
   {% set actions = [] %}
-  {% if not check.is_active %}{% set _ = actions.append({"label": "Run again", "type": "submit", "variant": "primary", "form": "hc-run-again", "attrs": {"title": "Start a new health check on this asset"}}) %}{% endif %}
+  {% if can_run_again and not check.is_active %}{% set _ = actions.append({"label": "Run again", "type": "submit", "variant": "primary", "form": "hc-run-again", "attrs": {"title": "Start a new health check on this asset"}}) %}{% endif %}
   {% set _ = actions.append({"label": "Back to asset", "type": "link", "href": "/assets/" ~ check.asset_id ~ "#health-check"}) %}
   {% set _ = actions.append({"label": "Health checks for this asset", "type": "link", "href": "/health-checks?asset_id=" ~ check.asset_id}) %}
   {% if is_super_admin %}{% set _ = actions.append({"label": "Required logs", "type": "link", "href": "/admin/required-logs"}) %}{% endif %}
@@ -33,7 +33,7 @@
     </ul>
   </section>
 
-  <form id="hc-run-again" method="post" action="/health-checks/start" hidden>{% include "partials/csrf.html" %}<input type="hidden" name="asset_id" value="{{ check.asset_id }}"><input type="hidden" name="allow_pawnio" value="{{ '1' if check.allow_pawnio else '' }}"></form>
+  {% if can_run_again %}<form id="hc-run-again" method="post" action="/rmm/assets/{{ check.asset_id }}/health-check" hidden>{% include "partials/csrf.html" %}<input type="hidden" name="pawnio_choice" value="1"><input type="hidden" name="allow_pawnio" value="{{ '1' if check.allow_pawnio else '' }}"></form>{% endif %}
 
   {% if check.is_active %}
   <section class="card card--panel" aria-labelledby="hc-progress-title">

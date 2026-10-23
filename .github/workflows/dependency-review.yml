@@ -27,9 +27,13 @@ jobs:
           fail-on-severity: moderate
           # Allow licenses that are commonly used in open source
           allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, GPL-3.0, LGPL-3.0
-          # Permissive licenses the list above does not name: the RMM agent's
-          # service wrapper (Zlib), Go's x/sys (BSD-3-Clause plus Google's
-          # patent grant) and Pillow (MIT-CMU, the historical PIL license).
-          allow-dependencies-licenses: pkg:golang/github.com/kardianos/service, pkg:golang/golang.org/x/sys, pkg:pypi/pillow
+          # Licenses the list above does not name: the RMM agent's service
+          # wrapper (Zlib), Go's x/sys (BSD-3-Clause plus Google's patent
+          # grant), Pillow (MIT-CMU, the historical PIL license), and the tray
+          # health check's sensor bundle: LibreHardwareMonitorLib (MPL-2.0,
+          # shipped unmodified with its source and notices) and .NET's
+          # build-only reference assemblies (MIT, not shipped; NuGet reports no
+          # license expression for them).
+          allow-dependencies-licenses: pkg:golang/github.com/kardianos/service, pkg:golang/golang.org/x/sys, pkg:pypi/pillow, pkg:nuget/LibreHardwareMonitorLib, pkg:nuget/Microsoft.NETFramework.ReferenceAssemblies
           # Comment on the PR with vulnerability information
           comment-summary-in-pr: always

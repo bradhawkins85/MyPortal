@@ -5,9 +5,16 @@ computer's [tray app](../getting-started/Tray%20App.md), uses the AI troubleshoo
 settings (the same language model, public web search, internal knowledge base and approved
 log list), and lists the steps that bring the computer back to optimal performance.
 
-Helpdesk technicians and super admins start one from an asset's **Health check** section
-(`/assets/{id}#health-check`) and see every check under **Health checks** in the main menu
-(`/health-checks`). The asset needs an active tray app in its own company.
+The health check is an **RMM option**: it is only offered on assets with the
+[RMM agent](RMM%20Scripts.md) deployed (and the RMM feature pack turned on). Start one from the
+asset page's **Actions** menu (**Run health check**, next to **Check in now**) or from its
+**Health check** section, which also lets you leave PawnIO out (below). Running one needs the
+same RMM scripts write access as the other RMM actions; the check itself runs through the
+asset's tray app, which must be connected.
+
+Every check is listed under **Health checks** in the main menu (`/health-checks`). Users with
+RMM scripts access see their company's checks; helpdesk technicians and super admins see every
+company's.
 
 ## What it looks at
 
@@ -59,7 +66,8 @@ PawnIO is the driver earlier RMM agents kept installed, on machines that then re
 `SYSTEM_THREAD_EXCEPTION_NOT_HANDLED` (0x7E) crashes; the RMM agent still removes it when it
 starts. The health check only installs it for the minutes the sensors take to read. Turn it
 off for every check with `HEALTH_CHECK_PAWNIO_ENABLED=false`, or untick **Read hardware
-sensors** when starting a check; built-in Windows sensors are still read. Development tray
+sensors** when starting a check from the Health check section (the Actions menu follows the
+setting); built-in Windows sensors are still read. Development tray
 builds without the sensor bundle report that sensors are not part of the build.
 
 ## How the report is written
@@ -113,6 +121,7 @@ The approved list is the built-in channels and folders, plus
 
 | Endpoint | Method | Auth | Purpose |
 | --- | --- | --- | --- |
+| `/rmm/assets/{asset_id}/health-check` | POST (form) | RMM scripts write | The Actions menu and Health check section; optional `pawnio_choice` and `allow_pawnio` fields |
 | `/api/assets/{asset_id}/health-checks` | POST | Helpdesk / super admin | Start a check; body `{"allow_pawnio": bool, "model": str, "ticket_id": int}` (all optional) |
 | `/api/health-checks` | GET | Helpdesk / super admin | Recent checks (`?asset_id=`) |
 | `/api/health-checks/{id}` | GET | Helpdesk / super admin | A check with its snapshot and report |
@@ -126,6 +135,7 @@ The tray app receives `{"type": "health_check", "command_id", "health_check_id",
 "event_days"}` over its WebSocket; offline devices receive it from the queue when they
 reconnect.
 
-Disable the feature with `DISABLED_FEATURE_PACKS=health_check`: the menu entries, the asset
-page section and the routes go away, and the troubleshooter keeps recording the logs it
-could not read.
+Every way of starting a check refuses assets without a deployed RMM agent. Disable the feature
+with `DISABLED_FEATURE_PACKS=health_check` (or disable `rmm`): the menu entries, the asset page's
+Actions entry and section, and the routes go away, and the troubleshooter keeps recording the
+logs it could not read.

@@ -315,8 +315,7 @@ async def store(monkeypatch):
     monkeypatch.setattr(tray_service, "send_to_device", send_to_device)
     monkeypatch.setattr(tray_service, "add_troubleshoot_note", add_note)
     monkeypatch.setattr(tray_service, "build_troubleshoot_llm_config", lambda model=None: dict(LLM, model=model or "test-model"))
-    monkeypatch.setattr(ai_required_logs, "_approved", {})
-    monkeypatch.setattr(ai_required_logs, "_approved_loaded_at", 0.0)
+    monkeypatch.setattr(ai_required_logs, "_approvals", ai_required_logs._ApprovalCache())
     scheduled: list = []
 
     def schedule(coro, *, description, health_check_id):
@@ -324,7 +323,14 @@ async def store(monkeypatch):
         coro.close()
 
     monkeypatch.setattr(hc, "_schedule", schedule)
-    yield {"db": fake, "sent": sent, "notes": notes, "scheduled": scheduled}
+    # Assets with an RMM agent deployed (the health check is an RMM option).
+    agents = {10: {"id": 1, "asset_id": 10, "company_id": 1}, 11: {"id": 2, "asset_id": 11, "company_id": 1}}
+
+    async def get_asset_agent(asset_id):
+        return agents.get(asset_id)
+
+    monkeypatch.setattr(hc.rmm_repo, "get_asset_agent", get_asset_agent)
+    yield {"db": fake, "sent": sent, "notes": notes, "scheduled": scheduled, "agents": agents}
     await conn.close()
 
 
@@ -478,6 +484,19 @@ async def test_start_refuses_bad_devices_and_respects_the_pawnio_setting(store, 
 
 
 @pytest.mark.anyio
+async def test_start_needs_a_deployed_rmm_agent(store):
+    asset = {"id": 10, "company_id": 1, "name": "PC-01"}
+    store["agents"].pop(10)
+    with pytest.raises(hc.HealthCheckError, match="Deploy the RMM agent"):
+        await hc.start_health_check(asset=asset, device=await _device(5), requested_by=None)
+    # An agent registered to another company does not count.
+    store["agents"][10] = {"id": 3, "asset_id": 10, "company_id": 2}
+    with pytest.raises(hc.HealthCheckError, match="Deploy the RMM agent"):
+        await hc.start_health_check(asset=asset, device=await _device(5), requested_by=None)
+    assert store["sent"] == [] and await repo.list_checks(asset_id=10) == []
+
+
+@pytest.mark.anyio
 async def test_offline_device_queues_and_stale_checks_expire(store, monkeypatch):
     async def offline(device_uid, payload):
         return False
@@ -550,13 +569,14 @@ def client(store, monkeypatch):
     from types import SimpleNamespace
 
     from fastapi import FastAPI
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import HTMLResponse, RedirectResponse
     from fastapi.testclient import TestClient
 
     from app.api.dependencies import auth
     from app.features.health_check import routes
 
-    state = {"device": None, "user": {"id": 9, "is_super_admin": True}}
+    state = {"device": None, "user": {"id": 9, "is_super_admin": True}, "technician": True,
+             "rmm_read": True, "rmm_write": True, "rmm_pack": True, "company_id": 1}
 
     async def current_device():
         return state["device"]
@@ -568,7 +588,16 @@ def client(store, monkeypatch):
         return state["user"], None
 
     async def is_technician(user, request=None):
-        return True
+        return state["technician"]
+
+    async def load_asset_context(request, permission_key="menu.assets", *, asset_id=None):
+        assert permission_key == "menu.rmm_scripts"
+        if not (state["user"].get("is_super_admin") or state["rmm_read"]):
+            return state["user"], {}, None, state["company_id"], RedirectResponse("/", status_code=303)
+        return state["user"], {}, None, state["company_id"], None
+
+    def menu_can(user, membership, key, write=False):
+        return state["rmm_write"] if write else state["rmm_read"]
 
     async def require_super_admin_page(request):
         return state["user"], None
@@ -580,8 +609,13 @@ def client(store, monkeypatch):
         return HTMLResponse(template)
 
     main = SimpleNamespace(_require_authenticated_user=require_authenticated_user, _is_helpdesk_technician=is_technician,
-                           _require_super_admin_page=require_super_admin_page, _render_template=render_template)
+                           _require_super_admin_page=require_super_admin_page, _render_template=render_template,
+                           _feature_pack_available=lambda slug: state["rmm_pack"] if slug == "rmm" else True,
+                           _membership_menu_can=menu_can)
     monkeypatch.setattr(routes, "_main", lambda: main)
+    from app.features.assets import routes as asset_routes
+
+    monkeypatch.setattr(asset_routes, "_load_asset_context", load_asset_context)
     audits = []
 
     async def log_action(**kwargs):
@@ -646,6 +680,63 @@ async def test_start_errors_are_reported(client, store, monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_asset_actions_menu_route_is_an_rmm_option(client, store, monkeypatch):
+    test_client, state, _rendered, audits = client
+    monkeypatch.setattr("app.features.health_check.routes.asset_repo.get_asset_by_id", _asset_lookup)
+    monkeypatch.setattr(hc.get_settings(), "health_check_pawnio_enabled", True)
+
+    # The Actions menu sends no PawnIO choice: the setting decides.
+    response = test_client.post("/rmm/assets/10/health-check", follow_redirects=False)
+    assert response.status_code == 303, response.text
+    check = (await repo.list_checks(asset_id=10))[0]
+    assert response.headers["location"] == f"/health-checks/{check['id']}"
+    assert store["sent"][-1][1]["allow_pawnio"] is True and audits[-1]["action"] == "health_check.start"
+
+    # The section's form sends its checkbox; unticked means no PawnIO.
+    await repo.update(check["id"], status="completed", completed=True)
+    response = test_client.post("/rmm/assets/10/health-check", data={"pawnio_choice": "1"}, follow_redirects=False)
+    assert response.status_code == 303 and store["sent"][-1][1]["allow_pawnio"] is False
+    await repo.update((await repo.list_checks(asset_id=10))[0]["id"], status="completed", completed=True)
+
+    # Without a deployed RMM agent the asset page gets an error instead.
+    agent = store["agents"].pop(10)
+    response = test_client.post("/rmm/assets/10/health-check", follow_redirects=False)
+    assert response.status_code == 303 and response.headers["location"] == "/assets/10#health-check"
+    assert len(await repo.list_checks(asset_id=10)) == 2
+    api = test_client.post("/api/assets/10/health-checks", json={})
+    assert api.status_code == 409 and "RMM agent" in api.json()["detail"]
+    store["agents"][10] = agent
+
+    # RMM permissions, like Check in now.
+    state["user"] = {"id": 12, "is_super_admin": False}
+    state["rmm_write"] = False
+    assert test_client.post("/rmm/assets/10/health-check", follow_redirects=False).status_code == 403
+    state["rmm_write"] = True
+    state["company_id"] = 2
+    assert test_client.post("/rmm/assets/10/health-check", follow_redirects=False).status_code == 404
+    state["company_id"] = 1
+    state["rmm_pack"] = False
+    assert test_client.post("/rmm/assets/10/health-check", follow_redirects=False).status_code == 404
+
+
+@pytest.mark.anyio
+async def test_rmm_users_see_only_their_companys_checks(client, store, monkeypatch):
+    test_client, state, rendered, _audits = client
+    mine = await repo.create(company_id=1, asset_id=10, tray_device_id=5, ticket_id=None, platform="windows",
+                             model="m", allow_pawnio=False, requested_by_user_id=None)
+    theirs = await repo.create(company_id=2, asset_id=20, tray_device_id=7, ticket_id=None, platform="windows",
+                               model="m", allow_pawnio=False, requested_by_user_id=None)
+    state.update(user={"id": 12, "is_super_admin": False}, technician=False, rmm_write=False)
+    assert test_client.get("/health-checks").status_code == 200
+    assert [check["id"] for check in rendered[-1][1]["checks"]] == [mine]
+    assert test_client.get(f"/health-checks/{mine}").status_code == 200
+    assert rendered[-1][1]["can_run_again"] is False  # read-only RMM access
+    assert test_client.get(f"/health-checks/{theirs}").status_code == 404
+    state["rmm_read"] = False
+    assert test_client.get("/health-checks").status_code == 403
+
+
+@pytest.mark.anyio
 async def test_pages_render(client, store, monkeypatch):
     test_client, state, rendered, _audits = client
     monkeypatch.setattr("app.features.health_check.routes.asset_repo.get_asset_by_id", _asset_lookup)
@@ -655,7 +746,7 @@ async def test_pages_render(client, store, monkeypatch):
     assert template == "health_checks/index.html" and extra["checks"][0]["id"] == started["id"] and extra["running"] == 1
     assert test_client.get(f"/health-checks/{started['id']}").status_code == 200
     template, extra = rendered[-1]
-    assert template == "health_checks/report.html" and extra["check"]["is_active"]
+    assert template == "health_checks/report.html" and extra["check"]["is_active"] and extra["can_run_again"]
     assert test_client.get("/health-checks/999").status_code == 404
 
 
@@ -687,7 +778,7 @@ def test_report_template_renders_and_escapes():
     }
     from app.features.health_check.routes import _snapshot_view
 
-    html = _render("health_checks/report.html", check=check, report=report, signals=signals,
+    html = _render("health_checks/report.html", check=check, report=report, signals=signals, can_run_again=True,
                    snapshot=_snapshot_view(WINDOWS_SNAPSHOT),
                    logs=[{"source": "System", "reason": "disk", "text": "<b>bad</b>", "truncated": False,
                           "unavailable": None, "phase": "snapshot"}],
@@ -697,7 +788,8 @@ def test_report_template_renders_and_escapes():
     assert "Steps to optimal performance" in html and "Back up the data" in html
     assert "Old HDD" in html and "Predictive Failure" in html and "Hardware sensors: Temperature" in html
     assert 'href="/admin/required-logs"' in html and "Microsoft-Windows-Kernel-EventTracing/Admin" in html
-    assert "[Run again]" in html and 'id="hc-run-again"' in html and 'name="allow_pawnio" value="1"' in html
+    assert "[Run again]" in html and 'action="/rmm/assets/10/health-check"' in html
+    assert 'name="pawnio_choice" value="1"' in html and 'name="allow_pawnio" value="1"' in html
     assert "PawnIO was installed for the check and removed afterwards." in html
 
 
@@ -710,3 +802,29 @@ def test_index_and_required_logs_templates_render():
     assert 'href="/health-checks/4"' in html and "Reading hardware sensors" in html
     assert "No health checks yet" in _render("health_checks/index.html", checks=[], filter_asset=None,
                                              counts={}, running=0, status_labels=hc.STATUS_LABELS)
+
+
+def test_asset_actions_menu_offers_the_health_check_only_with_an_rmm_agent():
+    root = ROOT / "app/templates"
+    source = (root / "assets/detail.html").read_text(encoding="utf-8")
+    fragment = source.split("{% block header_actions %}", 1)[1].split("{% endblock %}", 1)[0]
+    from jinja2 import Environment, FileSystemLoader
+
+    env = Environment(loader=FileSystemLoader(root), autoescape=True)
+    template = env.from_string('{% from "macros/header.html" import page_header_actions with context %}' + fragment)
+    health = {"can_manage": True, "can_run": True, "active": False, "pawnio_available": True}
+    values = {"asset": {"id": 10, "company_id": 1}, "rmm": {"can_run": True, "agent": {"id": 1}},
+              "health_check": health, "can_edit": False, "customer_safe": False}
+    html = template.render(**values)
+    assert "Run health check" in html and 'form="asset-health-check-form"' in html and "PawnIO" in html
+    # The asset page only builds the health check context when an RMM agent is deployed.
+    assert "Run health check" not in template.render(**{**values, "health_check": None})
+    assert "Run health check" not in template.render(**{**values, "customer_safe": True})
+    assert "Run health check" not in template.render(**{**values, "health_check": {**health, "can_manage": False}})
+    busy = template.render(**{**values, "health_check": {**health, "active": True}})
+    assert "A health check is already running" in busy and "disabled" in busy.split("Run health check")[0].rsplit("<button", 1)[1]
+    no_tray = template.render(**{**values, "health_check": {**health, "can_run": False}})
+    assert "Needs the tray app connected" in no_tray
+    form = source[source.index('<form id="asset-health-check-form"'):].split("</form>", 1)[0] + "</form>"
+    rendered = env.from_string(form).render(asset={"id": 10}, csrf_token="test-csrf")
+    assert 'method="post"' in rendered and "/rmm/assets/10/health-check" in rendered and "test-csrf" in rendered

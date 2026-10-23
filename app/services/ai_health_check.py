@@ -1,6 +1,7 @@
 """AI health check for the computer behind an asset.
 
-A technician starts a health check from an asset (or a ticket's asset). It
+A technician starts a health check from the asset page's Actions menu. It is
+an RMM option, offered only when the asset has the RMM agent deployed. It
 uses the AI troubleshooter's settings - the same language model
 (``TROUBLESHOOT_LLM_*``), public web search (``TROUBLESHOOT_WEB_SEARCH_*``),
 internal knowledge base and approved log list - and works in stages:
@@ -47,6 +48,7 @@ from app.core.ai_identity import get_agent_name
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import ai_health_checks as repo
+from app.repositories import rmm as rmm_repo
 from app.repositories import tray as tray_repo
 from app.services import ai_prompt_security
 from app.services import ai_required_logs
@@ -954,6 +956,13 @@ def _note_header() -> str:
     return f"<p><strong>{html.escape(get_agent_name())}</strong> - "
 
 
+async def rmm_agent_deployed(asset_id: int, company_id: int) -> bool:
+    """True when the asset has an active RMM agent in its own company."""
+
+    agent = await rmm_repo.get_asset_agent(int(asset_id))
+    return bool(agent) and int(agent.get("company_id") or 0) == int(company_id)
+
+
 async def start_health_check(
     *,
     asset: Mapping[str, Any],
@@ -966,13 +975,16 @@ async def start_health_check(
     """Create a health check for ``asset`` and send the snapshot command to its device.
 
     ``asset`` needs ``id`` (or ``asset_id``), ``company_id`` and ``name``;
-    ``device`` is the asset's active tray device in the same company.
+    ``device`` is the asset's active tray device in the same company. The
+    health check is an RMM option: the asset must have the RMM agent deployed.
     """
 
     asset_id = _int_or_none(asset.get("asset_id") or asset.get("id"))
     company_id = _int_or_none(asset.get("company_id") or device.get("company_id"))
     if not asset_id or not company_id:
         raise HealthCheckError("The asset is missing its company.", 400)
+    if not await rmm_agent_deployed(asset_id, company_id):
+        raise HealthCheckError("Deploy the RMM agent to this computer first; the health check is an RMM option.")
     if device.get("status") != "active":
         raise HealthCheckError("The asset's tray device is not active.")
     if int(device.get("company_id") or 0) != company_id:
@@ -1402,6 +1414,7 @@ __all__ = [
     "receive_device_result",
     "record_device_status",
     "report_note",
+    "rmm_agent_deployed",
     "run_report",
     "run_triage",
     "score",
