@@ -22,7 +22,8 @@ When a rule matches it either:
   rules cannot run each other forever.
 
 Text comparisons ignore case. Regular expressions use the ``regex`` module
-with a time limit, so a slow pattern cannot hold up the portal.
+(installed with tiktoken and pinned in requirements.lock) with a time limit,
+so a slow pattern cannot hold up the portal.
 """
 
 from __future__ import annotations
