@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% import "health_checks/_macros.html" as hc %}
+{% block title %}Health checks{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/health_checks.css') }}">{% endblock %}
+{% block header_title %}
+<div class="page-header-bar">
+  <span class="header__title-text">Health checks{% if filter_asset %}<span class="header__title-meta">{{ filter_asset.name }}</span>{% endif %}</span>
+  <div class="page-header-toolbar">
+    <label class="visually-hidden" for="hc-search">Search health checks</label>
+    <input id="hc-search" type="search" class="form-input page-header-toolbar__search" placeholder="Search health checks" autocomplete="off" data-hc-search hidden>
+    <span class="page-header-toolbar__info" data-hc-info aria-live="polite">{{ checks | length }} health check{{ '' if checks | length == 1 else 's' }}</span>
+  </div>
+</div>
+{% endblock %}
+{% block header_actions %}
+  {% set actions = [] %}
+  {% if filter_asset %}{% set _ = actions.append({"label": "Back to asset", "type": "link", "href": "/assets/" ~ filter_asset.id ~ "#health-check"}) %}{% set _ = actions.append({"label": "All health checks", "type": "link", "href": "/health-checks"}) %}{% endif %}
+  {% if is_super_admin %}{% set _ = actions.append({"label": "Required logs", "type": "link", "href": "/admin/required-logs"}) %}{% endif %}
+  {% if actions %}{{ page_header_actions(actions, menu_id="hc-actions") }}{% endif %}
+{% endblock %}
+{% block content %}
+<section class="hc-workspace" aria-describedby="hc-intro">
+  <p id="hc-intro" class="hc-muted">A health check takes a snapshot of a computer's health through its tray app (drives, chkdsk and defrag state, temperatures, crashes, hardware errors, performance, updates and security), reviews it and its logs with the AI model, and lists the steps that bring the computer back to optimal performance. It is an RMM option: choose <strong>Run health check</strong> in the Actions menu of an asset with the RMM agent deployed.</p>
+
+  {{ counter_strip([
+    {"label": "Critical", "value": counts.get('critical', 0), "variant": "danger", "title": "Assets whose latest health check is critical"},
+    {"label": "Needs attention", "value": counts.get('attention', 0), "variant": "warning"},
+    {"label": "Healthy", "value": counts.get('healthy', 0), "variant": "success"},
+    {"label": "Running", "value": running, "variant": "info"},
+  ]) }}
+
+  <section aria-labelledby="hc-list-title">
+    <h2 class="visually-hidden" id="hc-list-title">Recent health checks</h2>
+    {% if checks %}
+      <ul class="hc-cards" role="list">
+        {% for check in checks %}<li>{{ hc.check_card(check, show_asset=not filter_asset) }}</li>{% endfor %}
+      </ul>
+      <p class="hc-muted" data-hc-empty hidden>No health checks match your search.</p>
+    {% else %}
+      <div class="card card--panel">
+        <h2 class="card__title">No health checks yet</h2>
+        <p>Open an asset with the RMM agent deployed and choose <strong>Run health check</strong> in its Actions menu.</p>
+        <p><a class="button button--ghost" href="/assets">Go to assets</a></p>
+      </div>
+    {% endif %}
+  </section>
+</section>
+<script src="{{ static_url('/static/js/health_checks.js') }}" defer></script>
+{% endblock %}

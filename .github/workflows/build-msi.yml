@@ -51,9 +51,28 @@ jobs:
           cache: npm
           cache-dependency-path: tray/chat-shell/package-lock.json
 
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Install WiX v7
         shell: pwsh
         run: dotnet tool install --global wix --version "7.*"
+
+      # The AI health check reads hardware sensors with LibreHardwareMonitor and
+      # the pinned PawnIO installer, embedded in the service build.
+      - name: Bundle health check sensor library
+        shell: pwsh
+        env:
+          SENSOR_ARCH: amd64
+        run: python sensor-bundle/build.py
+
+      # Runs the read-only health snapshot script and loads the sensor library
+      # on this Windows runner; PawnIO is never installed by the tests.
+      - name: Verify health check on Windows
+        shell: pwsh
+        run: go test -count=1 -timeout 15m ./internal/healthcheck/
 
       - name: Build Windows binaries
         shell: pwsh

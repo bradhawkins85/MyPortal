@@ -142,6 +142,8 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/admin/devices/{id}/revoke` | POST | Super admin | Revoke a device |
 | `/api/tray/{device_uid}/troubleshoot` | POST | Helpdesk / super admin | Ask an active device to run the AI troubleshooting agent for a ticket (queues + pushes a `troubleshoot` WS command) |
 | `/api/tickets/{ticket_id}/troubleshoot-complete` | POST | Device bearer | AI agent reports generated guidance + sanitized log bundle for a ticket (multipart) |
+| `/api/health-checks/{id}/device-status` | POST | Device bearer | Health check progress (see [Health Check](../administration/Health%20Check.md)) |
+| `/api/health-checks/{id}/device-result` | POST | Device bearer | Health check snapshot and redacted log bundle (multipart) |
 
 All endpoints appear in the Swagger UI at `/docs` per project convention.
 
@@ -155,6 +157,7 @@ All endpoints appear in the Swagger UI at `/docs` per project convention.
 * `{"type": "run_menu_action", "node_id": "..."}` *(only for whitelisted server-defined actions)*
 * `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "prompt": "...", "llm_base_url": "...", "llm_model": "...", "llm_api_key": "..."}` *(AI troubleshooting: the device collects sanitized local logs, asks a local LLM for guidance, then POSTs the result back to `troubleshoot-complete`. Fields are flat top-level JSON.)*
 * `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "mode": "collect_logs", "log_requests": [{"source": "System", "reason": "...", "hours": 24}]}` *(Multi-stage troubleshooter: the device collects only the allowlisted log sources named, scrubs them and uploads them to `troubleshoot-complete`; the server analyses them. No LLM credentials are sent.)*
+* `{"type": "health_check", "command_id": <int>, "health_check_id": <int>, "phase": "snapshot"|"logs", "log_requests": [...], "extra_log_folders": [...], "extra_event_logs": [...], "allow_pawnio": <bool>, "event_days": <int>}` *(AI health check: the device reads a read-only health snapshot (and, on physical Windows hardware when allowed, hardware sensors through a temporarily installed PawnIO driver), collects the named allowlisted logs and uploads them to `/api/health-checks/{id}/device-result`. See [Health Check](../administration/Health%20Check.md).)*
 
 **Device → server:**
 * `{"type": "pong"}`
@@ -677,6 +680,14 @@ in stages, each posted to the ticket as an internal note:
    They are added to the built-in list, sent to the device with the request
    and re-checked there; a folder must name at least two real folders, so a
    drive or `C:\Users\*` on its own is ignored.
+
+   Extra event log channels can be allowed with
+   `TROUBLESHOOT_EVENT_LOGS_WINDOWS` (separated by `;`). When a step needs a
+   log that is not allowed, the plan lists it under **Logs not on the
+   approved list** and it is recorded on **Admin → Required logs**, where a
+   super admin can approve its channel or folder for every later run; logs
+   the endpoint could not read are recorded there too (see
+   [Health Check](../administration/Health%20Check.md#required-logs)).
 3. **Log collection** - when logs are needed, Windows event logs that
    MyPortal already stores for the asset (see
    [RMM Event Logs](../administration/RMM%20Event%20Logs.md)) are read from

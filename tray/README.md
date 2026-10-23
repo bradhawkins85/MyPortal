@@ -420,6 +420,39 @@ Guidance is printed to stdout (or `(no guidance)` in `-no-llm` mode). The
 log bundle is written to `-out` when provided (otherwise only its size is
 reported). Ctrl-C cancels an in-flight LLM call.
 
+## AI Health Check
+
+`internal/healthcheck` runs the endpoint side of the portal's AI health check
+(`health_check` WebSocket command, see `docs/wiki/administration/Health Check.md`):
+
+- **Snapshot** — on Windows a fixed, read-only PowerShell script
+  (`health_windows.ps1`, passed on standard input to Windows PowerShell)
+  reads built-in metrics: disk health, reliability counters and SMART failure
+  prediction, volume free space and dirty (chkdsk) bits, defrag/TRIM state and
+  hard-disk fragmentation, thermal zones and CPU throttling, memory, boot
+  performance, crashes and WHEA errors, problem devices, updates, security and
+  battery. macOS uses `system_profiler`, `pmset` and `sysctl`.
+- **Hardware sensors** — the bundled LibreHardwareMonitor library reads CPU,
+  GPU and motherboard sensors. On physical Windows hardware, when the server
+  allows it (`HEALTH_CHECK_PAWNIO_ENABLED`), the service installs the pinned
+  PawnIO driver for the length of the check and always removes it before
+  reporting back. A marker in the state folder makes the next service start
+  remove it if the service stopped part-way. The bundle is extracted to a
+  folder only SYSTEM and Administrators can use, and deleted afterwards.
+- **Logs** — the allowlisted logs the server asks for, through `internal/agent`.
+
+Release builds embed the sensor bundle; build it on a host with the .NET SDK
+before `make build-windows` (the MSI workflow does this and then runs the
+Windows tests of `internal/healthcheck` on the runner):
+
+```sh
+cd tray
+make sensor-bundle    # python3 sensor-bundle/build.py
+```
+
+Without it, health checks still run and report that hardware sensors are not
+part of the build.
+
 ## Security model
 
 - The install token is **single-company** and **rotatable** from the admin UI.

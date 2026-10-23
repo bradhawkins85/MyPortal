@@ -337,3 +337,35 @@ func TestRunProgressSkipsAnalysingWithoutModel(t *testing.T) {
 		t.Errorf("stages = %v, want collecting + collected", stages)
 	}
 }
+
+func TestExtraEventLogsAreValidated(t *testing.T) {
+	channels, ignored := ExtraEventLogs([]string{
+		"Microsoft-Windows-Kernel-EventTracing/Admin",
+		" HardwareEvents ",
+		"System", // already built in
+		"/q:*",
+		"Bad  Name",
+		"Microsoft-Windows-Kernel-EventTracing/Admin",
+		"",
+	})
+	if strings.Join(channels, "|") != "Microsoft-Windows-Kernel-EventTracing/Admin|HardwareEvents" {
+		t.Fatalf("channels %q", channels)
+	}
+	if strings.Join(ignored, "|") != "/q:*|Bad  Name" {
+		t.Fatalf("ignored %q", ignored)
+	}
+}
+
+func TestAgentAllowsApprovedEventLogsOnlyWhereChannelsApply(t *testing.T) {
+	a := NewAgent()
+	errs := a.PrepareSources(nil, []string{"Microsoft-Windows-Kernel-EventTracing/Admin"})
+	if len(errs) != 0 {
+		t.Fatalf("errors %v", errs)
+	}
+	if got := a.AllowedSource("Microsoft-Windows-Kernel-EventTracing/Admin"); got != platformExtraChannels {
+		t.Fatalf("approved channel allowed=%v on a platform where extra channels apply=%v", got, platformExtraChannels)
+	}
+	if a.AllowedSource("Microsoft-Windows-Something/Else") {
+		t.Fatal("unapproved channel allowed")
+	}
+}

@@ -1,0 +1,21 @@
+MyPortal tray Windows release builds include, in this folder, the files the
+AI health check uses to read hardware sensors. They are added at build time by
+tray/sensor-bundle/build.py and are not kept in source control:
+
+- LibreHardwareMonitorLib 0.9.6 (unmodified, Mozilla Public License 2.0) and
+  its NuGet dependencies. Source:
+  https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/tree/3d331e3370efb858411f19511373eff65a218701
+  Licences and notices: LICENSE.txt, upstream-notices.txt and
+  third-party-notices.txt.
+- The PawnIO 2.1.0 driver installer (PawnIO_setup.exe, unmodified), SHA-256
+  a3a46226c5e2824f4cdd42be0eecbabfc672c86f7889710f5ab1e6ad385b47a0.
+  PawnIO-COPYING.txt holds the driver licence. Corresponding source archives
+  accompany the driver and its embedded LGPL modules (extract PawnPP into the
+  PawnIO source's PawnPP subdirectory to reconstruct the submodule):
+  PawnIO: https://github.com/namazso/PawnIO/tree/e1043d7750f501b6b0d3ac0a71bd5b9406cd17b6
+  PawnPP: https://github.com/namazso/PawnPP/tree/e64e4c37b2d8ba0d8ee57205faf8183aee12c438
+  Modules: https://github.com/namazso/PawnIO.Modules/tree/4aa792beb020a14c8261072e9786d2dfb38489d9
+
+The library only reads sensors. The health check installs PawnIO on physical
+Windows hardware for the length of one check, when the portal allows it, and
+uninstalls it again before reporting back.

@@ -25,10 +25,13 @@ var (
 // isPlatformLogSource reports whether source is an allowlisted macOS source.
 func isPlatformLogSource(source string) bool { return isMacOSLogSource(source) }
 
+// platformExtraChannels is false: macOS sources are fixed predicates.
+const platformExtraChannels = false
+
 // collectPlatformLogs reads the macOS unified log for each requested source
 // using `log show`, which is read-only and needs no special entitlement. Each
 // source maps to a fixed predicate; unlisted sources are refused.
-func collectPlatformLogs(ctx context.Context, specs []LogSpec) (string, []string, error) {
+func collectPlatformLogs(ctx context.Context, specs []LogSpec, _ []string) (string, []string, error) {
 	var b strings.Builder
 	var sources []string
 	var lastErr error
