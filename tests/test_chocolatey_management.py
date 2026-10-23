@@ -596,6 +596,6 @@ def test_asset_rmm_menu_offers_install_choco_package_with_modal():
 
 def test_asset_page_shows_choco_install_only_for_windows_agents_with_run_access():
     source = (ROOT / 'app/templates/assets/detail.html').read_text()
-    assert "choco_install=choco_install" in source
+    assert "data-choco-modal-open" in source
     assert source.count("rmm.can_run and rmm.agent and (rmm.agent.os or '') | lower == 'windows'") == 2
     assert 'rmm_choco_install.js' in source
