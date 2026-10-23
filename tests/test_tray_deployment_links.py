@@ -143,6 +143,7 @@ async def test_create_link_stores_hashes_and_encrypted_values(monkeypatch):
     monkeypatch.setattr(tray_repo, "create_install_token", create_token)
     create_link = AsyncMock(side_effect=lambda **kwargs: {"id": 7, **kwargs})
     monkeypatch.setattr(tray_repo, "create_deployment_link", create_link)
+    monkeypatch.setattr(tray_repo, "list_deployment_links", AsyncMock(return_value=[]))
     queue_build = AsyncMock(return_value=1)
     monkeypatch.setattr(tray_repo, "create_deployment_build", queue_build)
 
@@ -167,6 +168,27 @@ async def test_create_link_stores_hashes_and_encrypted_values(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_create_link_rejects_company_with_active_link(monkeypatch):
+    monkeypatch.setattr(
+        tray_deployment.companies_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 3, "name": "Acme"}),
+    )
+    monkeypatch.setattr(
+        tray_repo, "list_deployment_links", AsyncMock(return_value=[{"id": 5, "company_id": 3}])
+    )
+    monkeypatch.setattr(tray_deployment, "link_status", AsyncMock(return_value="active"))
+    create_link = AsyncMock()
+    monkeypatch.setattr(tray_repo, "create_deployment_link", create_link)
+
+    with pytest.raises(ValueError, match="already has an active deployment URL"):
+        await tray_deployment.create_deployment_link(
+            company_id=3, label="", created_by_user_id=1, expires_in_days=30
+        )
+    create_link.assert_not_awaited()
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("days", [365, tray_deployment.NO_EXPIRY])
 async def test_create_long_lived_links(monkeypatch, days):
     monkeypatch.setattr(
@@ -178,6 +200,7 @@ async def test_create_long_lived_links(monkeypatch, days):
     monkeypatch.setattr(tray_repo, "create_install_token", create_token)
     create_link = AsyncMock(side_effect=lambda **kwargs: {"id": 7, **kwargs})
     monkeypatch.setattr(tray_repo, "create_deployment_link", create_link)
+    monkeypatch.setattr(tray_repo, "list_deployment_links", AsyncMock(return_value=[]))
     monkeypatch.setattr(tray_repo, "create_deployment_build", AsyncMock(return_value=1))
 
     await tray_deployment.create_deployment_link(

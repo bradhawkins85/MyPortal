@@ -125,7 +125,7 @@
         <div class="form-actions"><button type="submit" class="button button--primary">Create URL</button></div>
       </form>
       <p class="form-help">Your Windows build server builds and signs the EXE and MSI installers for each company, and rebuilds them when a new tray release is cached{% if dl.release_tag %} (currently <code>{{ dl.release_tag }}</code>){% endif %}. See <em>Tray Build Server</em> in the wiki to set one up.</p>
-      <p class="form-help">Use <code>{{ "{{ tray.deploymentUrl }}" }}</code> in automations, ticket replies, canned responses, message templates and email signatures to insert the company's deployment URL. When a company has more than one active URL, the one that stays valid longest is used.</p>
+      <p class="form-help">Use <code>{{ "{{ tray.deploymentUrl }}" }}</code> in automations, ticket replies, canned responses, message templates and email signatures to insert the company's deployment URL. Each company can have one active URL; companies that already have one are not listed. Revoke a company's URL to create a new one.</p>
     </div>
 
     <div class="ce-subsection" aria-labelledby="tray-deploy-list-title">

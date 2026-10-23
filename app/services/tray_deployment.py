@@ -141,6 +141,12 @@ async def create_deployment_link(
     company = await companies_repo.get_company_by_id(int(company_id))
     if not company:
         raise ValueError("Company not found")
+    for existing in await tray_repo.list_deployment_links(company_id=int(company_id)):
+        if await link_status(existing) == "active":
+            raise ValueError(
+                f"{company.get('name') or 'This company'} already has an active deployment URL. "
+                "Revoke it before creating a new one."
+            )
     clean_label = (label or "").strip() or f"{company.get('name') or 'Company'} deployment"
     clean_label = clean_label[:150]
 
