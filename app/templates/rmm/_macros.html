@@ -68,6 +68,8 @@
     Remote control{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'event_log' -%}
     Event log rule
+  {%- elif run.run_source == 'result_rule' -%}
+    Script result rule
   {%- elif run.run_source == 'tray' -%}
     Tray menu
   {%- elif run.run_source == 'patch' -%}
@@ -203,6 +205,25 @@
     <form method="post" action="/rmm/event-logs/rules/{{ rule.id }}/delete" class="rmm-menu__form" data-confirm="Delete {{ rule.name }}?">
       {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
       {% if asset_id %}<input type="hidden" name="asset_id" value="{{ asset_id }}">{% endif %}
+      <button class="dropdown__item dropdown__item--danger" role="menuitem" type="submit">Delete</button>
+    </form>
+  </div>
+</details>
+{%- endmacro %}
+
+{# One script result rule's Action menu (rules page and a script's page). #}
+{% macro result_rule_menu(rule, csrf_token=none) -%}
+<details class="rmm-menu rmm-menu--end" data-rmm-menu>
+  <summary class="button button--ghost button--small rmm-menu__toggle" aria-label="Actions for {{ rule.name }}">Action <span aria-hidden="true">▾</span></summary>
+  <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="Actions for {{ rule.name }}">
+    <a class="dropdown__item" role="menuitem" href="/rmm/scripts/result-rules?rule={{ rule.id }}#rmm-result-rule-form">Edit</a>
+    <form method="post" action="/rmm/scripts/result-rules/{{ rule.id }}/enabled" class="rmm-menu__form">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+      <input type="hidden" name="enabled" value="{{ '0' if rule.is_enabled else '1' }}">
+      <button class="dropdown__item" role="menuitem" type="submit">{{ "Turn off" if rule.is_enabled else "Turn on" }}</button>
+    </form>
+    <form method="post" action="/rmm/scripts/result-rules/{{ rule.id }}/delete" class="rmm-menu__form" data-confirm="Delete {{ rule.name }}?">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
       <button class="dropdown__item dropdown__item--danger" role="menuitem" type="submit">Delete</button>
     </form>
   </div>

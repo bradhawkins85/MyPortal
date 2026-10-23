@@ -46,6 +46,8 @@ dependencies = [
     "tiktoken>=0.6",
     "dnspython>=2.7",
     "publicsuffix2>=2.20191221",
+    # Script result rules run technicians' regular expressions with a time limit.
+    "regex",
 ]
 
 [project.optional-dependencies]

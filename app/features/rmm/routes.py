@@ -38,6 +38,7 @@ from loguru import logger
 from app.api.dependencies.auth import get_current_tray_device, get_optional_user
 from app.repositories import assets as assets_repo
 from app.repositories import rmm as rmm_repo
+from app.repositories import rmm_script_result_rules as result_rules_repo
 from app.security.client_ip import get_client_ip
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
@@ -49,6 +50,7 @@ from app.services import rmm_checks
 from app.services import rmm_commands
 from app.services import rmm_remote_control
 from app.services import rmm_script_parser as parser
+from app.services import rmm_script_result_rules
 from app.services import rmm_script_summary
 from app.services import rmm_script_files
 from app.services import rmm_scripts
@@ -228,6 +230,13 @@ async def scripts_page(request: Request, script: int | None = Query(default=None
     agents = await rmm_repo.list_company_agents(company_id)
     runs = [_serialise(run) for run in await rmm_repo.list_runs(company_id=company_id, limit=200)]
     selected = await _script_detail(script, company_id, runs) if script else None
+    if selected:
+        is_super_admin = bool(user.get("is_super_admin"))
+        selected["result_rules"] = [
+            {**rmm_script_result_rules.rule_summary(rule), "can_edit": can_run and rmm_script_result_rules.can_edit(
+                rule, company_id=company_id, is_super_admin=is_super_admin)}
+            for rule in await result_rules_repo.list_rules_for_company(company_id, script_id=selected["id"])
+        ]
     groups = _group_scripts(scripts)
     gitea_ready = True
     gitea_message = ""

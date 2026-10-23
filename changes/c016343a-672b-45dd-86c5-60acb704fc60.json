@@ -1,0 +1,7 @@
+{
+  "guid": "c016343a-672b-45dd-86c5-60acb704fc60",
+  "occurred_at": "2026-10-22T09:00Z",
+  "change_type": "Feature",
+  "summary": "RMM scripts: script result rules read a finished script's output, error output, exit code, result and returned values (contains, does not contain, less/greater than, exit code and regex checks) and raise a ticket with the result or run another script on the device, optionally passing the result and output values to it",
+  "content_hash": "d556f39065e2ca557bf125809550d888618f46347a038c62bf06a87bdcdc4052"
+}

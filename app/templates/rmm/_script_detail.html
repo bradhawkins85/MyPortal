@@ -76,6 +76,37 @@
 
   {% include "rmm/_script_files.html" %}
 
+  <section class="card card--panel ce-section" aria-labelledby="rmm-result-rules-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="rmm-result-rules-title">When it finishes</h2>
+        <p class="card__subtitle">Script result rules that read this script's output, exit code and returned values, then raise a ticket or run another script.</p>
+      </div>
+      <div class="ce-section__meta">
+        <a class="button button--ghost button--small" href="/rmm/scripts/result-rules">All rules</a>
+        {% if can_run %}<a class="button button--primary button--small" href="/rmm/scripts/result-rules?new=1&amp;script_id={{ script.id }}#rmm-result-rule-form">Add a rule</a>{% endif %}
+      </div>
+    </header>
+    <div class="ce-section__body">
+      {% if script.result_rules %}
+      <ul class="rmm-files" aria-label="Rules for {{ script.name }}">
+        {% for rule in script.result_rules %}
+        <li class="rmm-files__item">
+          <div class="rmm-files__paths">
+            <strong>{{ rule.name }}</strong>
+            <span class="text-muted">{{ rule.script_label }} · {{ rule.scope_label }} · <span class="status status--{{ 'success' if rule.is_enabled else 'neutral' }}">{{ "On" if rule.is_enabled else "Off" }}</span></span>
+            <span>When {% for text in rule.conditions_text %}{{ text }}{% if not loop.last %} {{ rule.joiner }} {% endif %}{% endfor %}: {{ rule.action_label | lower if rule.action == "create_ticket" else rule.action_label }}</span>
+          </div>
+          {% if rule.can_edit %}<div class="rmm-files__actions">{{ rmm.result_rule_menu(rule, csrf_token) }}</div>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-muted">Nothing happens after this script finishes beyond recording its result.{% if can_run %} Add a rule to raise a ticket or run another script when, for example, the output contains an error or the exit code is not 0.{% endif %}</p>
+      {% endif %}
+    </div>
+  </section>
+
   <section class="card card--panel ce-section rmm-ai" aria-labelledby="rmm-ai-title" data-rmm-ai="{{ script.id }}"{% if can_run and (not ai.summary or ai.stale) %} data-rmm-ai-auto{% endif %}>
     <header class="ce-section__header">
       <div class="ce-section__heading">

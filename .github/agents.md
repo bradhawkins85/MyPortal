@@ -12,7 +12,7 @@ RMM is an extension of MyPortal's existing product and architecture. Preserve th
 - **Database**: MySQL (primary), SQLite (fallback)
 - **Frontend**: Jinja2 templates, responsive layouts
 - **Testing**: pytest, pytest-asyncio
-- **Key Dependencies**: uvicorn, aiomysql, aiosqlite, pydantic, pydantic-settings, passlib[bcrypt], pyotp, itsdangerous, redis, httpx, apscheduler, loguru, bleach, weasyprint, cryptography, apprise
+- **Key Dependencies**: uvicorn, aiomysql, aiosqlite, pydantic, pydantic-settings, passlib[bcrypt], pyotp, itsdangerous, redis, httpx, apscheduler, loguru, bleach, weasyprint, cryptography, apprise, regex
 
 The authoritative dependency list lives in `pyproject.toml`; update it there and keep this list in sync.
 
