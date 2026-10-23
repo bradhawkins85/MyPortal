@@ -1156,6 +1156,40 @@ def test_status_publication_replaces_planted_symlink_without_following_it(tmp_pa
     assert list(private.iterdir()) == []
 
 
+def test_in_place_deployments_record_the_published_revision(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    private = tmp_path / "private"
+    published = state / "published_revision"
+    serving, first, second = "a" * 40, "b" * 40, "c" * 40
+    program = (
+        "set -Eeuo pipefail\nSERVICE_USER=nobody-such-user\n"
+        f'UPDATER_STATE_DIR="{private}"\nPUBLISHED_REVISION_FILE="{published}"\n'
+        f'INSTANCE_ROOT="{tmp_path}/instances"\nPREVIOUS_RELEASE="{tmp_path}/releases/{serving}"\n'
+        "read_active() { printf blue; }\n"
+        + _status_functions()
+        + f'\nrecord_published_revision {first}\n'
+        # A feature-pack reload or migration moves the current release; the
+        # workers started on the earlier one still carry the new revision.
+        + f'PREVIOUS_RELEASE="{tmp_path}/releases/{first}"\nrecord_published_revision {second}\n'
+        + f'cp "{published}" "{tmp_path}/before-cutover"\n'
+        + "clear_published_revision\n"
+    )
+    result = subprocess.run(["bash", "-c", program], text=True, capture_output=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "before-cutover").read_text() == f"revision={second}\nbases={serving} {first}\n"
+    assert not published.exists()
+    assert list(private.iterdir()) == []
+    main_flow = SCRIPT[SCRIPT.index("validate_required_configuration\ngit fetch") :]
+    for message in ("No production changes", "Versioned static assets", "Templates published",
+                    "Feature packs loaded", "$tray_message", "Additive migration release"):
+        # Recorded within the few lines before each in-place success.
+        preceding = main_flow[: main_flow.index(message)].splitlines()[-3:]
+        assert any("record_published_revision" in line for line in preceding), message
+    assert main_flow.index("clear_published_revision") > main_flow.index('run_rolling_restart "$TARGET_REVISION"')
+
+
 def test_root_only_artifacts_live_outside_service_writable_state():
     assert 'UPDATER_STATE_DIR="${MYPORTAL_UPDATER_STATE_DIR:-/var/lib/myportal-updater}"' in SCRIPT
     assert 'DEPLOYMENT_PLAN_FILE="${UPDATER_STATE_DIR}/deployment_plan.json"' in SCRIPT
