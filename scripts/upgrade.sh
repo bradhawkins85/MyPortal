@@ -73,6 +73,7 @@ READY_REQUEST_TIMEOUT="${MYPORTAL_READY_REQUEST_TIMEOUT:-10}"
 DRAIN_SECONDS="${MYPORTAL_DRAIN_SECONDS:-15}"
 SMOKE_PATH="${MYPORTAL_SMOKE_PATH:-/healthz}"
 SYSTEM_UPDATE_STATUS_FILE="${SHARED_ROOT}/state/system_update.status"
+PUBLISHED_REVISION_FILE="${SHARED_ROOT}/state/published_revision"
 # shared/state is writable by the service account (root:myportal 0770), which
 # can create, rename or symlink any entry in it. Root-only artifacts (the
 # deployment plan, the lock, staged status files) therefore live in this
@@ -171,6 +172,38 @@ EOF
     echo "WARNING: could not publish upgrade status to ${SYSTEM_UPDATE_STATUS_FILE}." >&2
   fi
   rm -f -- "$tmp"
+}
+
+record_published_revision() {
+  # Publishing templates or static files, reloading feature packs, applying an
+  # additive migration or a no-op leaves the serving workers running from an
+  # older release, whose version.txt still names that older revision. Record
+  # which releases' running workers now carry the target so the System updates
+  # page stops offering it again. The list is kept in the root-only state
+  # directory (the service account can rewrite shared/state) and accumulates
+  # until a cutover restarts the workers on a release of their own.
+  local target="$1" record="${UPDATER_STATE_DIR}/published_revision" release revision tmp
+  local bases=()
+  ensure_updater_state_dir
+  if [[ -f "$record" ]]; then
+    read -r -a bases < <(sed -n 's/^bases=//p' "$record") || true
+  fi
+  for release in "$PREVIOUS_RELEASE" "$(readlink -f "$INSTANCE_ROOT/$(read_active)" 2>/dev/null || true)"; do
+    revision="${release##*/}"
+    [[ "$revision" =~ ^[0-9a-f]{40}$ ]] && bases+=("$revision")
+  done
+  ((${#bases[@]})) || return 0
+  tmp="${record}.$$"
+  printf 'revision=%s\nbases=%s\n' "$target" "$(printf '%s\n' "${bases[@]}" | sort -u | tr '\n' ' ' | sed 's/ $//')" >"$tmp"
+  chmod 600 "$tmp"
+  mv -f "$tmp" "$record"
+  publish_state_file "$record" "$PUBLISHED_REVISION_FILE" \
+    || echo "WARNING: could not publish the deployed revision to ${PUBLISHED_REVISION_FILE}." >&2
+}
+
+clear_published_revision() {
+  # A cutover starts the workers on the target's own release.
+  rm -f -- "${UPDATER_STATE_DIR}/published_revision" "$PUBLISHED_REVISION_FILE"
 }
 
 record_step() {
@@ -1296,12 +1329,14 @@ esac
 
 case "$DEPLOYMENT_ACTION" in
   no-op)
+    record_published_revision "$TARGET_REVISION"
     write_upgrade_status succeeded "No production changes were required for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
     cleanup_old_releases
     exit 0
     ;;
   static-publish)
     publish_paths_without_worker_reload "$TARGET_REVISION" static
+    record_published_revision "$TARGET_REVISION"
     write_upgrade_status succeeded "Versioned static assets ${TARGET_REVISION} published without reloading workers." "$DEPLOYMENT_REASON"
     cleanup_old_releases
     exit 0
@@ -1309,6 +1344,7 @@ case "$DEPLOYMENT_ACTION" in
   template-reload)
     publish_paths_without_worker_reload "$TARGET_REVISION" static
     publish_paths_without_worker_reload "$TARGET_REVISION" template
+    record_published_revision "$TARGET_REVISION"
     write_upgrade_status succeeded "Templates published and caches invalidated without reloading workers." "$DEPLOYMENT_REASON"
     cleanup_old_releases
     exit 0
@@ -1377,6 +1413,7 @@ PY
       active_instance=$(read_active)
       atomic_link "$RELEASE_DIR" "$INSTANCE_ROOT/$active_instance"
       atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
+      record_published_revision "$TARGET_REVISION"
       write_upgrade_status succeeded "Feature packs loaded and acknowledged at ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
       cleanup_old_releases
       exit 0
@@ -1395,6 +1432,7 @@ PY
     else
       tray_message="Tray source ${TARGET_REVISION} is delivered through GitHub Releases; no server-side CI bundle was staged."
     fi
+    record_published_revision "$TARGET_REVISION"
     write_upgrade_status succeeded "$tray_message" "$DEPLOYMENT_REASON"
     cleanup_old_releases
     exit 0
@@ -1421,6 +1459,7 @@ if [[ "$redis_env_before" == "$redis_env_after" ]] && is_additive_migration_only
   # explicitly declared compatible and the database lock applied them once.
   atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
   RESTART_MODE="migration-only"
+  record_published_revision "$TARGET_REVISION"
   write_upgrade_status succeeded "Additive migration release ${TARGET_REVISION} applied; application workers were not reloaded." "$DEPLOYMENT_REASON"
   echo "Successfully applied migration-only release ${TARGET_REVISION}."
   cleanup_old_releases
@@ -1429,6 +1468,7 @@ fi
 install_blue_green_service_unit "$RELEASE_DIR"
 install_backup_timer "$RELEASE_DIR"
 run_rolling_restart "$TARGET_REVISION" "$RELEASE_DIR"
+clear_published_revision
 retire_legacy_service
 write_upgrade_status succeeded "Release ${TARGET_REVISION} is serving; previous release retained."
 echo "Successfully deployed ${TARGET_REVISION} from ${RELEASE_DIR}."

@@ -725,6 +725,28 @@ def test_immutable_release_reports_its_recorded_revision(monkeypatch, tmp_path):
     )
 
 
+def test_release_reports_revision_published_without_restart(monkeypatch, tmp_path):
+    from app.services import scheduler as scheduler_module
+
+    serving, published, other = "a" * 40, "c" * 40, "d" * 40
+    release = tmp_path / "releases" / serving
+    (release / "var" / "state").mkdir(parents=True)
+    (release / "version.txt").write_text(f"{serving}\n", encoding="utf-8")
+    state = release / "var" / "state" / "published_revision"
+    monkeypatch.setattr(scheduler_module, "_PROJECT_ROOT", release)
+
+    state.write_text(f"revision={published}\nbases={other} {serving}\n", encoding="utf-8")
+    assert scheduler_module._release_revision() == published
+    assert asyncio.run(SchedulerService()._get_git_ref("HEAD")) == published
+
+    # A record for other releases (for example after a cutover restarted the
+    # workers elsewhere) or a malformed record is ignored.
+    state.write_text(f"revision={published}\nbases={other}\n", encoding="utf-8")
+    assert scheduler_module._release_revision() == serving
+    state.write_text(f"revision=not-a-revision\nbases={serving}\n", encoding="utf-8")
+    assert scheduler_module._release_revision() == serving
+
+
 def test_development_checkout_queries_git_directly(monkeypatch, tmp_path):
     from app.services import scheduler as scheduler_module
 

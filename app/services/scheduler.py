@@ -99,11 +99,40 @@ def _release_revision() -> str | None:
         value = (_PROJECT_ROOT / "version.txt").read_text(encoding="utf-8").strip()
     except OSError:
         value = ""
-    if _GIT_REVISION_RE.fullmatch(value):
-        return value
-    # scripts/upgrade.sh names each release directory after its revision.
-    name = _PROJECT_ROOT.resolve().name
-    return name if _GIT_REVISION_RE.fullmatch(name) else None
+    if not _GIT_REVISION_RE.fullmatch(value):
+        # scripts/upgrade.sh names each release directory after its revision.
+        name = _PROJECT_ROOT.resolve().name
+        value = name if _GIT_REVISION_RE.fullmatch(name) else ""
+    if not value:
+        return None
+    return _published_revision(value) or value
+
+
+def _published_revision(release_revision: str) -> str | None:
+    """Return the revision published into a running release without a restart.
+
+    Template, static, feature-pack and additive-migration upgrades update the
+    serving workers in place, so their release directory and ``version.txt``
+    still name the revision they started from. scripts/upgrade.sh records the
+    newer revision, and the releases whose workers carry it, in
+    ``var/state/published_revision``.
+    """
+
+    try:
+        text = (_PROJECT_ROOT / "var" / "state" / "published_revision").read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            fields[key.strip()] = value.strip()
+    revision = fields.get("revision", "")
+    if not _GIT_REVISION_RE.fullmatch(revision):
+        return None
+    if release_revision not in fields.get("bases", "").split():
+        return None
+    return revision
 
 
 def _git_context() -> tuple[Path, list[str]]:
