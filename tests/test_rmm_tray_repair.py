@@ -81,4 +81,4 @@ def test_asset_rmm_menu_offers_repair_tray_agent():
     assert "Repair tray agent" in html and 'data-rmm-tray-repair="7"' in html
     assert "Repair tray agent" not in menu.render(on=False)
     source = (ROOT / "app/templates/assets/detail.html").read_text()
-    assert "tray_repair=rmm.tray_repair" in source and "rmm_tray_repair.js" in source
+    assert "rmm.tray_repair" in source and "data-rmm-tray-repair" in source and "rmm_tray_repair.js" in source

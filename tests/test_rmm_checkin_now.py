@@ -76,11 +76,14 @@ def test_asset_checkin_action_uses_existing_header_and_csrf_form():
     fragment = source.split("{% block header_actions %}", 1)[1].split("{% endblock %}", 1)[0]
     env = Environment(loader=FileSystemLoader(root))
     template = env.from_string('{% from "macros/header.html" import page_header_actions with context %}' + fragment)
-    values = {"asset": {"id": 10, "company_id": 1}, "rmm": {"can_run": True}, "can_edit": False, "customer_safe": False}
+    agent = {"os": "windows"}
+    values = {"asset": {"id": 10, "company_id": 1}, "rmm": {"can_run": True, "agent": agent}, "can_edit": False, "customer_safe": False}
     html = template.render(**values)
     assert "Check in now" in html and 'form="asset-checkin-form"' in html
     assert "Check in now" not in template.render(**{**values, "customer_safe": True})
-    assert "Check in now" not in template.render(**{**values, "rmm": {"can_run": False}})
+    assert "Check in now" not in template.render(**{**values, "rmm": {"can_run": False, "agent": agent}})
+    # The check-in needs a deployed agent.
+    assert "Check in now" not in template.render(**{**values, "rmm": {"can_run": True, "agent": None}})
     form = source[source.index('<form id="asset-checkin-form"'):].split("</form>", 1)[0] + "</form>"
     rendered = env.from_string(form).render(asset={"id": 10}, csrf_token="test-csrf")
     assert 'method="post"' in rendered and '/rmm/assets/10/checkin' in rendered
