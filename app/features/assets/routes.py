@@ -2014,6 +2014,13 @@ async def asset_detail_page(
         rmm_context["windows_updates"] = await rmm_windows_update_routes.asset_windows_updates_context(
             company_id, asset_id, can_run=can_run_scripts, is_super_admin=bool(is_super_admin),
         )
+    # Health checks belong to their pack; the card disappears with it.
+    health_check_context = None
+    if (not customer_safe and main_module._feature_pack_available("health_check")
+            and await main_module._is_helpdesk_technician(user, request)):
+        from app.features.health_check import routes as health_check_routes
+
+        health_check_context = await health_check_routes.asset_context(dict(record), can_run=True)
     # Tags belong to the tags pack; the card disappears with it.
     tags_context = None
     if not customer_safe and main_module._feature_pack_available("tags"):
@@ -2053,6 +2060,7 @@ async def asset_detail_page(
             "infrastructure_links": infrastructure_links,
             "network_interfaces": network_interfaces,
             "rmm": rmm_context,
+            "health_check": health_check_context,
             "asset_tags": tags_context,
             "can_edit_network_map": can_view_network_map and (is_super_admin or main_module._membership_menu_can(
                 user, membership, "menu.network_map", write=True)),

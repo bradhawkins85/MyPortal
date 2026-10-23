@@ -690,6 +690,11 @@ PawnIO's registered uninstaller silently and fails (exit code 1) if PawnIO is st
 afterwards. It also removes PawnIO that other software installed. An agent released before
 the fix reinstalls PawnIO when its service next starts, so update the agent as well.
 
+The tray app's [Health Check](Health%20Check.md) may install PawnIO on a physical computer for
+the few minutes it takes to read hardware sensors, and removes it before it reports back. If
+the RMM agent starts during that time it removes PawnIO early and the check reports fewer
+sensors.
+
 ### Repairing an asset's agent
 
 Choose **Repair RMM agent** from an asset's Actions menu or its Scripts card.

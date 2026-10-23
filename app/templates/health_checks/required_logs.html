@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% block title %}Required logs{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/health_checks.css') }}">{% endblock %}
+{% block header_title %}
+<div class="page-header-bar">
+  <span class="header__title-text">Required logs</span>
+  <div class="page-header-toolbar">
+    <label class="visually-hidden" for="hc-search">Search required logs</label>
+    <input id="hc-search" type="search" class="form-input page-header-toolbar__search" placeholder="Search logs" autocomplete="off" data-hc-search hidden>
+    <span class="page-header-toolbar__info" data-hc-info aria-live="polite">{{ entries | length }} log{{ '' if entries | length == 1 else 's' }}</span>
+  </div>
+</div>
+{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Health checks", "type": "link", "href": "/health-checks"},
+    {"label": "How the approved list works", "type": "link", "href": "#hc-approved"},
+  ], menu_id="hc-required-actions") }}
+{% endblock %}
+{% block content %}
+<section class="hc-workspace" aria-describedby="hc-required-intro">
+  <p id="hc-required-intro" class="hc-muted">The AI troubleshooter and the health check only read event logs and log files on the approved list. When either asks for a log it cannot have, the log is listed here. Approve a log to add its event log channel, or the folder holding the log file, to the approved list for every later run; dismiss logs you do not want read.</p>
+
+  {{ counter_strip([
+    {"label": "Needs review", "value": counts.open, "variant": "warning", "href": "?view=open"},
+    {"label": "Approved", "value": counts.approved, "variant": "success", "href": "?view=approved"},
+    {"label": "Dismissed", "value": counts.dismissed, "variant": "neutral", "href": "?view=dismissed"},
+  ]) }}
+
+  <nav aria-label="Filter by review status">
+    <ul class="hc-filters">
+      {% for key, label in [("open", "Needs review"), ("approved", "Approved"), ("dismissed", "Dismissed"), ("all", "All")] %}
+        <li><a class="button button--ghost button--compact" href="?view={{ key }}"{% if view == key %} aria-current="page"{% endif %}>{{ label }}</a></li>
+      {% endfor %}
+    </ul>
+  </nav>
+
+  <section aria-labelledby="hc-required-list-title">
+    <h2 class="visually-hidden" id="hc-required-list-title">Logs</h2>
+    {% if entries %}
+    <ul class="hc-cards" role="list">
+      {% for entry in entries %}
+      <li id="required-log-{{ entry.id }}">
+        <article class="hc-card hc-card--{{ 'warning' if entry.status == 'open' else 'ok' if entry.status == 'approved' else 'info' }}" data-hc-item data-hc-search="{{ entry.source }} {{ entry.reason or '' }} {{ entry.detail or '' }} {{ entry.reason_label }}">
+          <div class="hc-card__head">
+            <h3 class="hc-card__title"><code>{{ entry.source }}</code></h3>
+            <span class="hc-actions">
+              <span class="status status--{{ 'warning' if entry.status == 'open' else 'success' if entry.status == 'approved' else 'neutral' }}">{{ entry.status_label }}</span>
+              {% if entry.currently_allowed %}<span class="status status--success" title="The approved list now covers this log">Now allowed</span>{% endif %}
+              {% if entry.seen_since_review %}<span class="status status--info">Requested again since</span>{% endif %}
+            </span>
+          </div>
+          <ul class="scf-item__chips" aria-label="About this log">
+            <li class="scf-chip">{{ entry.kind_label }}</li>
+            <li class="scf-chip{% if entry.reason_code == 'not_allowed' %} scf-chip--logic{% endif %}">{{ entry.reason_label }}</li>
+            <li class="scf-chip scf-chip--muted">{{ {"windows": "Windows", "macos": "macOS"}.get(entry.platform, "Any platform") }}</li>
+            {% for label in entry.feature_labels %}<li class="scf-chip scf-chip--muted">{{ label }}</li>{% endfor %}
+            <li class="scf-chip scf-chip--muted">Asked {{ entry.occurrences }} time{{ '' if entry.occurrences == 1 else 's' }}</li>
+          </ul>
+          {% if entry.reason %}<p><strong>Why it was wanted:</strong> {{ entry.reason }}</p>{% endif %}
+          {% if entry.detail %}<p><strong>What the endpoint reported:</strong> {{ entry.detail }}</p>{% endif %}
+          {% if entry.reason_code == 'unavailable' %}<p class="hc-muted">The log is allowed but the endpoint could not read it. Event log channels that are off by default can be enabled with <code>wevtutil sl "&lt;channel&gt;" /e:true</code> (for example from an RMM script); a missing log file usually means the app is not installed.</p>{% endif %}
+          <p class="hc-card__meta">
+            Last asked <span data-utc="{{ entry.last_seen_at }}">{{ entry.last_seen_at }}</span>, first <span data-utc="{{ entry.first_seen_at }}">{{ entry.first_seen_at }}</span>
+            {%- if entry.last_asset_id %} · <a href="/assets/{{ entry.last_asset_id }}">Asset #{{ entry.last_asset_id }}</a>{% endif %}
+            {%- if entry.last_ticket_id %} · <a href="/tickets/{{ entry.last_ticket_id }}">Ticket #{{ entry.last_ticket_id }}</a>{% endif %}
+            {%- if entry.last_health_check_id %} · <a href="/health-checks/{{ entry.last_health_check_id }}">Health check #{{ entry.last_health_check_id }}</a>{% endif %}
+            {%- if entry.status_note %} · Note: {{ entry.status_note }}{% endif %}
+          </p>
+
+          {% if entry.status == 'open' and entry.can_approve %}
+          <form class="hc-approve" method="post" action="/admin/required-logs/{{ entry.id }}/status">
+            {% include "partials/csrf.html" %}
+            <input type="hidden" name="action" value="approve"><input type="hidden" name="view" value="{{ view }}">
+            <label>{{ entry.approve_label }}
+              <input class="form-input" name="approve_value" value="{{ entry.approve_value or '' }}" required maxlength="512" placeholder="{{ 'Microsoft-Windows-Ntfs/Operational' if entry.approve_kind == 'event_log' else 'C:\\ProgramData\\Vendor\\Logs' }}">
+            </label>
+            <label>Note <span class="hc-muted">optional</span>
+              <input class="form-input" name="note" maxlength="500">
+            </label>
+            <button type="submit" class="button button--primary">Approve</button>
+          </form>
+          {% elif entry.status == 'open' and entry.reason_code == 'not_allowed' %}
+          <p class="hc-muted">This log cannot be approved here ({{ 'macOS sources are fixed' if entry.kind == 'macos_log' else 'it is not a valid event log channel or log file path' }}). Dismiss it, or ask a developer to add it to the built-in list.</p>
+          {% elif entry.status == 'approved' %}
+          <p>Approved as <code>{{ entry.approve_value }}</code>.</p>
+          {% endif %}
+          <div class="hc-actions">
+            {% if entry.status != 'dismissed' %}
+            <form method="post" action="/admin/required-logs/{{ entry.id }}/status">{% include "partials/csrf.html" %}<input type="hidden" name="action" value="dismiss"><input type="hidden" name="view" value="{{ view }}"><button type="submit" class="button button--ghost button--compact">{{ 'Remove approval and dismiss' if entry.status == 'approved' else 'Dismiss' }}</button></form>
+            {% endif %}
+            {% if entry.status != 'open' %}
+            <form method="post" action="/admin/required-logs/{{ entry.id }}/status">{% include "partials/csrf.html" %}<input type="hidden" name="action" value="reopen"><input type="hidden" name="view" value="{{ view }}"><button type="submit" class="button button--ghost button--compact">Reopen</button></form>
+            {% endif %}
+          </div>
+        </article>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="hc-muted" data-hc-empty hidden>No logs match your search.</p>
+    {% else %}
+    <div class="card card--panel">
+      <h2 class="card__title">{{ 'Nothing to review' if view == 'open' else 'No logs here' }}</h2>
+      <p>Logs the AI troubleshooter or a health check asks for but cannot read appear here.</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card card--panel" id="hc-approved" aria-labelledby="hc-approved-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-approved-title">The approved list</h2></div></header>
+    <p>The approved list is the built-in set of event logs and log folders, plus the <code>TROUBLESHOOT_EVENT_LOGS_WINDOWS</code> and <code>TROUBLESHOOT_LOG_FOLDERS_WINDOWS</code> / <code>_MACOS</code> settings, plus every log approved here. Only files with log extensions (.log, .txt, .wer, .lo_, .ips, .crash, .panic, .diag) are read from an approved folder, and the tray app checks every entry again before reading anything.</p>
+    <dl class="hc-facts">
+      <div><dt>Event logs approved here</dt><dd>{% if approved.event_logs %}{{ approved.event_logs | join(', ') }}{% else %}None{% endif %}</dd></div>
+      <div><dt>Folders approved here</dt><dd>{% if approved.folders %}{{ approved.folders | join('; ') }}{% else %}None{% endif %}</dd></div>
+      <div><dt>From settings</dt><dd>{{ 'Event logs' if approved.env_event_logs else '' }}{{ ' and ' if approved.env_event_logs and approved.env_folders else '' }}{{ 'log folders' if approved.env_folders else '' }}{% if not approved.env_event_logs and not approved.env_folders %}None{% endif %}</dd></div>
+    </dl>
+  </section>
+</section>
+<script src="{{ static_url('/static/js/health_checks.js') }}" defer></script>
+{% endblock %}

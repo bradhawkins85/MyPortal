@@ -5,6 +5,7 @@
 {% from "tags/_picker.html" import tag_picker %}
 {% import "rmm/_macros.html" as rmm_agent_ui %}
 {% set asset_tags = asset_tags | default(none) %}
+{% set health_check = health_check | default(none) %}
 {% set asset_display_name = asset.name or ('Asset ' ~ asset.id) %}
 
 {% block header_title %}
@@ -98,6 +99,7 @@
           ("machine-stats", "machine-stats", "Machine stats", "", rmm and rmm.checks),
           ("event-logs", "event-logs", "Event logs", "", rmm and rmm.event_logs),
           ("event-log-rules", "event-log-rules", "Event log automations", rmm.event_logs.rules | length if rmm and rmm.event_logs else "", rmm and rmm.event_logs),
+          ("health-check", "health-check", "Health check", "", health_check),
           ("photos", "asset-photos", "Photos", asset_photos | length, can_view_asset_photos),
         ]),
         ("Connections", [
@@ -406,6 +408,50 @@
       </table></div>
       {% else %}
       <p class="text-muted">No event log rules apply to this device.</p>
+      {% endif %}
+    </div>
+  </section>{% endif %}
+
+  {% if health_check %}{% set hcx = health_check %}<section class="card card--panel ce-section" id="health-check" data-asset-edit-section="health-check" aria-labelledby="asset-health-check-heading">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="asset-health-check-heading">Health check</h2>
+        <p class="card__subtitle">An AI review of this computer's health through its tray app: drives and impending drive failure, chkdsk and defrag state, temperatures, crashes, hardware errors, performance, updates and security, with the steps that bring it back to optimal performance. <a href="/health-checks?asset_id={{ asset.id }}">All health checks for this asset</a></p>
+      </div>
+    </header>
+    <div class="ce-section__body">
+      {% if hcx.can_run %}
+      <form method="post" action="/health-checks/start" class="form">
+        {% include "partials/csrf.html" %}
+        <input type="hidden" name="asset_id" value="{{ asset.id }}">
+        {% if hcx.pawnio_available %}
+        <label class="form-checkbox"><input type="checkbox" name="allow_pawnio" value="1" checked> Read hardware sensors (CPU, GPU and motherboard temperatures, fans and voltages) with PawnIO</label>
+        <p class="form-help">On physical computers only, the tray app installs the PawnIO driver for the length of the check and removes it again before reporting back.</p>
+        {% elif hcx.platform == 'windows' and not hcx.pawnio_enabled %}
+        <p class="form-help">Hardware sensors through PawnIO are turned off (HEALTH_CHECK_PAWNIO_ENABLED); built-in Windows sensors are still read.</p>
+        {% endif %}
+        <div class="form-actions"><button class="button button--primary" type="submit"{% if hcx.checks and hcx.checks[0].is_active %} disabled title="A health check is already running"{% endif %}>Run health check</button></div>
+      </form>
+      {% elif not hcx.device %}
+      <p class="text-muted">This asset has no active tray app, so a health check cannot run on it.</p>
+      {% endif %}
+      {% if hcx.checks %}
+      <div class="table-wrapper"><table class="table">
+        <caption class="visually-hidden">Recent health checks</caption>
+        <thead><tr><th scope="col">Started</th><th scope="col">Status</th><th scope="col">Result</th><th scope="col">Summary</th></tr></thead>
+        <tbody>
+          {% for check in hcx.checks %}
+          <tr>
+            <td data-label="Started"><a href="{{ check.url }}"><span data-utc="{{ check.created_at }}">{{ check.created_at }}</span></a></td>
+            <td data-label="Status"><span class="status status--{{ {'completed': 'success', 'failed': 'error'}.get(check.status, 'processing') }}">{{ check.status_label }}</span></td>
+            <td data-label="Result">{% if check.overall_status %}<span class="status status--{{ {'healthy': 'success', 'attention': 'warning', 'critical': 'error'}.get(check.overall_status, 'neutral') }}">{{ check.overall_label }}</span>{% if check.health_score is not none %} {{ check.health_score }}/100{% endif %}{% else %}—{% endif %}</td>
+            <td data-label="Summary">{{ (check.summary or check.error or check.stage_message or '') | truncate(160) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table></div>
+      {% else %}
+      <p class="text-muted">No health checks yet.</p>
       {% endif %}
     </div>
   </section>{% endif %}

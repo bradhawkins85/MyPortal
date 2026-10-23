@@ -21,6 +21,9 @@
 ##   make build-agent          Build the AI troubleshooting agent CLI
 ##   make test-agent           Run the agent package tests
 ##   make run-agent            Build + run the agent CLI (pass ARGS="...")
+##   make sensor-bundle        Bundle the health check's hardware sensor library
+##                             and PawnIO installer (needs the .NET SDK; run
+##                             before build-windows for release builds)
 ##   make clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
@@ -39,7 +42,7 @@ DIST     := dist
 .PHONY: all build-all build-windows build-darwin-amd64 build-darwin-arm64 \
         build-darwin-universal build-msi build-pkg build-dmg package-all \
         build-macos-icons build-chat-shell-win build-chat-shell-mac \
-        build-agent test-agent run-agent \
+        build-agent test-agent run-agent sensor-bundle \
         test lint clean
 
 all: build-all
@@ -258,3 +261,12 @@ lint:
 # -----------------------------------------------------------------------
 clean:
 	rm -rf $(DIST)
+
+# ---------------------------------------------------------------------------
+# Health check sensor bundle (LibreHardwareMonitor + pinned PawnIO installer).
+# The Windows service embeds internal/healthcheck/sensorbundle/; without it
+# health checks still run but report that sensors are not part of the build.
+# ---------------------------------------------------------------------------
+
+sensor-bundle:
+	python3 sensor-bundle/build.py

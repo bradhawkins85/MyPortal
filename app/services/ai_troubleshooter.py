@@ -52,6 +52,7 @@ from app.repositories import tickets as tickets_repo
 from app.repositories import tray as tray_repo
 from app.services import ai_consent
 from app.services import ai_prompt_security
+from app.services import ai_required_logs
 from app.services import knowledge_base as knowledge_base_service
 from app.services import llm_usage
 from app.services import rmm_event_logs
@@ -86,7 +87,20 @@ WINDOWS_LOG_SOURCES: dict[str, str] = {
     "Microsoft-Windows-User Device Registration/Admin": "Entra ID device join / registration",
     "Microsoft-Windows-Kernel-PnP/Configuration": "Device and driver installation",
     "Microsoft-Windows-Time-Service/Operational": "Time synchronisation",
+    "Microsoft-Windows-Kernel-Power/Thermal-Operational": "Thermal zone events, overheating and thermal throttling",
+    "Microsoft-Windows-Kernel-Boot/Operational": "Boot phases, boot timing and boot failures",
+    "Microsoft-Windows-Kernel-WHEA/Errors": "Hardware errors reported by the CPU, memory and PCIe devices",
+    "Microsoft-Windows-Kernel-WHEA/Operational": "Corrected hardware errors and hardware error sources",
+    "Microsoft-Windows-Ntfs/Operational": "NTFS volume health, corruption and self-healing",
+    "Microsoft-Windows-Storage-Storport/Operational": "Storage controller resets, timeouts and slow disk I/O",
+    "Microsoft-Windows-Storage-Storport/Health": "Storage device health and failure prediction",
+    "Microsoft-Windows-StorageSpaces-Driver/Operational": "Storage Spaces pool and disk health",
+    "Microsoft-Windows-Resource-Exhaustion-Detector/Operational": "Low virtual memory and the processes using it",
+    "Microsoft-Windows-Fault-Tolerant-Heap/Operational": "Applications that keep crashing (heap mitigations applied)",
 }
+# Owner-configured and approved channels are offered with this description.
+_EXTRA_CHANNEL_DESCRIPTION = "Approved by this portal's owner"
+_MAX_EXTRA_EVENT_LOGS = 50
 MACOS_LOG_SOURCES: dict[str, str] = {
     "macos:all": "The whole unified log (large; prefer a narrower source)",
     "macos:wifi": "Wi-Fi subsystem",
@@ -251,12 +265,43 @@ def endpoint_platform(device: Mapping[str, Any] | None, asset: Mapping[str, Any]
     return "unknown"
 
 
+def extra_event_logs(platform: str) -> list[str]:
+    """Windows event log channels allowed on top of the built-in list.
+
+    Combines the owner's ``TROUBLESHOOT_EVENT_LOGS_WINDOWS`` setting (entries
+    separated by ``;`` or new lines) with channels a super admin approved on
+    the required logs page. Invalid names are skipped here and again on the
+    device.
+    """
+
+    if platform == "macos":
+        return []
+    raw = getattr(get_settings(), "troubleshoot_event_logs_windows", None)
+    candidates = [entry.strip().strip('"').strip() for entry in re.split(r"[;\n]", str(raw or ""))]
+    candidates += ai_required_logs.approved_values("windows", ai_required_logs.APPROVE_EVENT_LOG)
+    channels: list[str] = []
+    for channel in candidates:
+        if not channel or channel in WINDOWS_LOG_SOURCES or channel in channels:
+            continue
+        if not ai_required_logs.valid_event_log_channel(channel):
+            log_warning("Ignoring invalid troubleshooter event log channel", channel=channel[:200])
+            continue
+        channels.append(channel)
+        if len(channels) >= _MAX_EXTRA_EVENT_LOGS:
+            break
+    return channels
+
+
 def allowed_log_sources(platform: str) -> dict[str, str]:
     if platform == "windows":
-        return dict(WINDOWS_LOG_SOURCES)
-    if platform == "macos":
+        sources = dict(WINDOWS_LOG_SOURCES)
+    elif platform == "macos":
         return dict(MACOS_LOG_SOURCES)
-    return {**WINDOWS_LOG_SOURCES, **MACOS_LOG_SOURCES}
+    else:
+        sources = {**WINDOWS_LOG_SOURCES, **MACOS_LOG_SOURCES}
+    for channel in extra_event_logs(platform):
+        sources.setdefault(channel, _EXTRA_CHANNEL_DESCRIPTION)
+    return sources
 
 
 def _split_path(path: str, windows: bool) -> list[str] | None:
@@ -366,21 +411,23 @@ def _valid_extra_root(folder: str, windows: bool) -> bool:
 def extra_log_folders(platform: str) -> list[str]:
     """Owner-configured log folders (TROUBLESHOOT_LOG_FOLDERS_WINDOWS/_MACOS).
 
-    Entries are separated by ``;`` or new lines. Invalid entries (a drive,
+    Entries are separated by ``;`` or new lines. Folders a super admin
+    approved on the required logs page are added. Invalid entries (a drive,
     a top-level folder, wildcards inside a name, ``..``) are skipped here and
     again on the device.
     """
 
     settings = get_settings()
-    sources: list[tuple[bool, Any]] = []
+    sources: list[tuple[bool, Any, str]] = []
     if platform in {"windows", "unknown"}:
-        sources.append((True, getattr(settings, "troubleshoot_log_folders_windows", None)))
+        sources.append((True, getattr(settings, "troubleshoot_log_folders_windows", None), "windows"))
     if platform in {"macos", "unknown"}:
-        sources.append((False, getattr(settings, "troubleshoot_log_folders_macos", None)))
+        sources.append((False, getattr(settings, "troubleshoot_log_folders_macos", None), "macos"))
     folders: list[str] = []
-    for windows, raw in sources:
+    for windows, raw, name in sources:
         count = 0
-        for entry in re.split(r"[;\n]", str(raw or "")):
+        approved = ai_required_logs.approved_values(name, ai_required_logs.APPROVE_FOLDER)
+        for entry in [*re.split(r"[;\n]", str(raw or "")), *approved]:
             folder = entry.strip().strip('"').strip()
             if not folder:
                 continue
@@ -542,8 +589,12 @@ async def _chat(
     messages: list[dict[str, str]],
     *,
     json_mode: bool = False,
+    feature: str = LLM_FEATURE,
 ) -> str:
-    """Send one chat request to the troubleshooter's OpenAI-compatible LLM."""
+    """Send one chat request to the troubleshooter's OpenAI-compatible LLM.
+
+    ``feature`` attributes the usage (the health check shares this client).
+    """
 
     messages = [{"role": "system", "content": agent_instructions()}, *messages]
     base_url = str(llm.get("base_url") or "").rstrip("/")
@@ -567,7 +618,7 @@ async def _chat(
         text = _response_text(payload)[:_LLM_RESPONSE_LIMIT_CHARS]
     except Exception:
         await llm_usage.record_usage(
-            feature=LLM_FEATURE,
+            feature=feature,
             provider="openai-compatible",
             model=model,
             status="failed",
@@ -576,7 +627,7 @@ async def _chat(
         )
         raise
     await llm_usage.record_usage(
-        feature=LLM_FEATURE,
+        feature=feature,
         provider="openai-compatible",
         model=model,
         status="succeeded",
@@ -785,7 +836,10 @@ Rules:
   name, e.g. "file:C:\\Windows\\CCM\\Logs\\AppEnforce*.log"; wildcard requests only read
   files changed in the last "hours". %TEMP%, %ProgramData%, %SystemRoot%, %AppData%
   and %LocalAppData% are expanded for you (user folders are read for every profile).
-  Do not request files outside these folders; they will be refused."""
+- If a step needs a log that is not on the allowed lists, still request it: use the
+  exact event log channel name as Event Viewer shows it (for example
+  "Microsoft-Windows-Kernel-EventTracing/Admin") or the log file's full path. It will
+  not be collected this time, but it is listed for an administrator to approve."""
 
 _PLAN_WEB_INSTRUCTIONS = """
 Some records are public web pages (record_id "web-N"). Also return
@@ -809,6 +863,7 @@ def _parse_plan(
             "summary": "",
             "steps": [{"action": fallback, "detail": "", "article": ""}] if fallback else [],
             "log_requests": [],
+            "refused_logs": [],
         }
     steps: list[dict[str, str]] = []
     raw_steps = data.get("steps")
@@ -823,28 +878,111 @@ def _parse_plan(
             steps.append({"action": action, "detail": detail, "article": article})
         if len(steps) >= MAX_STEPS:
             break
+    requests, refused = parse_log_requests(data.get("log_requests"), allowed, platform)
+    return {
+        "summary": _clean(data.get("summary"), 1000),
+        "steps": steps,
+        "log_requests": requests,
+        "refused_logs": refused,
+    }
+
+
+def parse_log_requests(
+    raw_requests: Any,
+    allowed: Mapping[str, str],
+    platform: str,
+    *,
+    default_reason: str = "Requested by the troubleshooting plan.",
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Split the model's log requests into ``(allowed requests, refused sources)``.
+
+    Refused sources are the ones that look like a real event log channel or
+    log file but are not on the approved list; they are recorded for an
+    administrator to review (:mod:`app.services.ai_required_logs`).
+    """
+
     requests: list[dict[str, Any]] = []
+    refused: list[dict[str, str]] = []
     seen: set[str] = set()
-    raw_requests = data.get("log_requests")
     for entry in raw_requests if isinstance(raw_requests, list) else []:
         if not isinstance(entry, Mapping):
             continue
-        source = str(entry.get("source") or "").strip()
+        raw_source = " ".join(str(entry.get("source") or "").split())
+        source = raw_source
         if source not in allowed:
             source = normalise_file_source(source, platform) or ""
-        if not source or source in seen:
+        reason = _clean(entry.get("reason"), 400) or default_reason
+        if not source:
+            key = raw_source.casefold()
+            if (
+                raw_source
+                and key not in seen
+                and len(refused) < MAX_LOG_REQUESTS
+                and ai_required_logs.looks_like_log_source(raw_source, platform)
+            ):
+                refused.append({"source": raw_source[:400], "reason": reason})
+                seen.add(key)
+            continue
+        if source in seen or len(requests) >= MAX_LOG_REQUESTS:
             continue
         try:
             hours = int(entry.get("hours") or DEFAULT_LOG_HOURS)
         except (TypeError, ValueError):
             hours = DEFAULT_LOG_HOURS
         hours = max(1, min(MAX_LOG_HOURS, hours))
-        reason = _clean(entry.get("reason"), 400) or "Requested by the troubleshooting plan."
         requests.append({"source": source, "reason": reason, "hours": hours})
         seen.add(source)
-        if len(requests) >= MAX_LOG_REQUESTS:
-            break
-    return {"summary": _clean(data.get("summary"), 1000), "steps": steps, "log_requests": requests}
+    return requests, refused
+
+
+def refused_logs_html(refused: Sequence[Mapping[str, Any]]) -> str:
+    """A note section listing logs that are not on the approved list."""
+
+    if not refused:
+        return ""
+    items = [
+        f"<strong>{html.escape(str(entry['source']))}</strong>: {html.escape(str(entry.get('reason') or ''))}"
+        for entry in refused
+    ]
+    return (
+        "<p><strong>Logs not on the approved list</strong> (not collected; listed on "
+        '<a href="/admin/required-logs">Required logs</a> for an administrator to review)</p>'
+        + _html_list(items)
+    )
+
+
+def unavailable_log_entries(
+    sections: Mapping[str, str], requests: Sequence[Mapping[str, Any]]
+) -> list[dict[str, str]]:
+    """Requested sources the endpoint could not read, with what it reported."""
+
+    entries: list[dict[str, str]] = []
+    reasons = {str(r.get("source") or ""): str(r.get("reason") or "") for r in requests}
+    for source, body in sections.items():
+        detail = ai_required_logs.unavailable_detail(body)
+        if detail is None:
+            continue
+        reason = reasons.get(source) or next(
+            (text for request, text in reasons.items() if file_source_matches(request, source)), ""
+        )
+        entries.append({
+            "source": source,
+            "reason_code": ai_required_logs.REASON_UNAVAILABLE,
+            "reason": reason,
+            "detail": detail,
+        })
+    for request in requests:
+        source = str(request.get("source") or "")
+        if not source or source in sections or any(file_source_matches(source, key) for key in sections):
+            continue
+        entries.append({
+            "source": source,
+            "reason_code": ai_required_logs.REASON_UNAVAILABLE,
+            "reason": str(request.get("reason") or ""),
+            "detail": "The endpoint agent did not collect this source (it is not on the agent's own "
+            "allowlist, or the agent is out of date).",
+        })
+    return entries
 
 
 def _parse_web_sources(
@@ -918,6 +1056,7 @@ def _plan_note(
         parts.append(f"<p><strong>{heading}</strong></p>" + _html_list(log_items))
     else:
         parts.append("<p>The steps do not call for endpoint logs, so the troubleshooter is finished.</p>")
+    parts.append(refused_logs_html(plan.get("refused_logs") or []))
     return "".join(parts)
 
 
@@ -1366,6 +1505,7 @@ async def run_research_and_plan(
 
     # --- Stage 2: plan ------------------------------------------------------
     platform = endpoint_platform(device, asset)
+    await ai_required_logs.refresh_approvals()
     allowed = allowed_log_sources(platform)
     article_records = [
         ai_prompt_security.UntrustedRecord(
@@ -1429,6 +1569,12 @@ async def run_research_and_plan(
     # Event logs MyPortal already stores are read from its database, not the
     # endpoint, to save bandwidth.
     company_id = ticket.get("company_id") if ticket.get("company_id") is not None else device.get("company_id")
+    if plan["refused_logs"]:
+        await ai_required_logs.record(
+            [{**entry, "reason_code": ai_required_logs.REASON_NOT_ALLOWED} for entry in plan["refused_logs"]],
+            feature=ai_required_logs.FEATURE_TROUBLESHOOTER, platform=platform,
+            company_id=company_id, asset_id=asset.get("asset_id"), ticket_id=ticket_id,
+        )
     stored_requests, remote_requests = (
         await split_stored_log_requests(plan["log_requests"], company_id=company_id, asset_id=asset.get("asset_id"))
         if plan["log_requests"]
@@ -1452,6 +1598,9 @@ async def run_research_and_plan(
         "model": str(llm.get("model") or ""),
         "summary": plan["summary"],
         "steps": [step["action"] for step in plan["steps"]],
+        "platform": platform,
+        "company_id": company_id,
+        "asset_id": asset.get("asset_id"),
     }
     if stored_requests:
         server_context[STORED_LOGS_KEY] = {
@@ -1493,6 +1642,7 @@ async def run_research_and_plan(
         "mode": MODE_COLLECT_LOGS,
         "log_requests": remote_requests,
         "extra_log_folders": extra_log_folders(platform),
+        "extra_event_logs": extra_event_logs(platform),
         tray_service.SERVER_CONTEXT_KEY: server_context,
     }
     try:
@@ -1714,6 +1864,14 @@ async def analyse_collected_logs(
     context = context if isinstance(context, Mapping) else {}
     requests = [r for r in payload.get("log_requests") or [] if isinstance(r, Mapping)]
     sections = split_log_sections(log_text)
+    if requests and log_text.strip():
+        unavailable = unavailable_log_entries(sections, requests)
+        if unavailable:
+            await ai_required_logs.record(
+                unavailable, feature=ai_required_logs.FEATURE_TROUBLESHOOTER,
+                platform=str(context.get("platform") or "unknown"), company_id=context.get("company_id"),
+                asset_id=context.get("asset_id"), ticket_id=ticket_id,
+            )
     stored = context.get(STORED_LOGS_KEY)
     stored_requests = (
         [r for r in stored.get("requests") or [] if isinstance(r, Mapping)] if isinstance(stored, Mapping) else []
@@ -1852,9 +2010,13 @@ __all__ = [
     "MACOS_LOG_SOURCES",
     "allowed_log_sources",
     "allowed_log_file_roots",
+    "extra_event_logs",
     "extra_log_folders",
     "normalise_file_source",
     "file_source_matches",
+    "parse_log_requests",
+    "refused_logs_html",
+    "unavailable_log_entries",
     "analyse_collected_logs",
     "command_payload",
     "decompress_log_bundle",

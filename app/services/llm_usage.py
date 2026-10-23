@@ -56,6 +56,11 @@ FEATURES: tuple[LLMFeature, ...] = (
         module_slugs=("run-troubleshooting-bot",),
     ),
     LLMFeature(
+        "ai_health_check", "Health check",
+        "Reviews a computer's health snapshot and logs and writes the steps back to optimal performance.",
+        callers=(("app.services.ai_health_check", "_chat"),),
+    ),
+    LLMFeature(
         "rmm_findings", "RMM findings",
         "Looks across every company's RMM data for abnormalities technicians should review.",
         callers=(("app.services.rmm_findings", "_chat"),),

@@ -1,0 +1,7 @@
+{
+  "guid": "d8f603c8-22aa-42b5-996f-fb95d990225e",
+  "occurred_at": "2026-10-23T09:00Z",
+  "change_type": "Feature",
+  "summary": "AI health check: review a computer's health from its asset page (drives and impending failure, chkdsk and defrag state, thermals with PawnIO installed only for the check on physical hardware, crashes, performance, updates and security) with steps back to optimal performance; Admin > Required logs lists logs the AI troubleshooter and health check could not read for approval",
+  "content_hash": "e7839d09689d156136a7d641e31128b01fc26d717d68a74351479f714256ea31"
+}

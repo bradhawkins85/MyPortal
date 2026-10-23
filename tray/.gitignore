@@ -1,0 +1,5 @@
+# Sensor bundle written by sensor-bundle/build.py before a Windows release build.
+/internal/healthcheck/sensorbundle/*
+!/internal/healthcheck/sensorbundle/NOTICE.txt
+/sensor-bundle/bin/
+/sensor-bundle/obj/

@@ -13,9 +13,10 @@ var ErrLogsUnsupported = errors.New("endpoint log collection is not supported on
 
 // collectLogs gathers raw endpoint log text from the platform for each spec:
 // event logs from the platform's log tool and "file:" specs from allowlisted
-// log folders. It returns the combined text and a list of the human-readable
-// sources it read. It is strictly read-only.
-func collectLogs(ctx context.Context, specs []LogSpec, fileRoots []string) (string, []string, error) {
+// log folders. extraChannels are owner-approved event log channels allowed on
+// top of the built-in list (Windows only). It returns the combined text and a
+// list of the human-readable sources it read. It is strictly read-only.
+func collectLogs(ctx context.Context, specs []LogSpec, fileRoots, extraChannels []string) (string, []string, error) {
 	var eventSpecs, fileSpecs []LogSpec
 	for _, spec := range specs {
 		if strings.HasPrefix(spec.Source, FileSourcePrefix) {
@@ -25,12 +26,12 @@ func collectLogs(ctx context.Context, specs []LogSpec, fileRoots []string) (stri
 		}
 	}
 	if len(fileSpecs) == 0 {
-		return collectPlatformLogs(ctx, eventSpecs)
+		return collectPlatformLogs(ctx, eventSpecs, extraChannels)
 	}
 	var b strings.Builder
 	var sources []string
 	if len(eventSpecs) > 0 {
-		text, read, err := collectPlatformLogs(ctx, eventSpecs)
+		text, read, err := collectPlatformLogs(ctx, eventSpecs, extraChannels)
 		if err != nil {
 			// Keep the file logs; note why each event source is missing.
 			for _, spec := range eventSpecs {

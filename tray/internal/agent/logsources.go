@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
@@ -61,6 +62,47 @@ var WindowsLogSources = []string{
 	"Microsoft-Windows-User Device Registration/Admin",
 	"Microsoft-Windows-Kernel-PnP/Configuration",
 	"Microsoft-Windows-Time-Service/Operational",
+	"Microsoft-Windows-Kernel-Power/Thermal-Operational",
+	"Microsoft-Windows-Kernel-Boot/Operational",
+	"Microsoft-Windows-Kernel-WHEA/Errors",
+	"Microsoft-Windows-Kernel-WHEA/Operational",
+	"Microsoft-Windows-Ntfs/Operational",
+	"Microsoft-Windows-Storage-Storport/Operational",
+	"Microsoft-Windows-Storage-Storport/Health",
+	"Microsoft-Windows-StorageSpaces-Driver/Operational",
+	"Microsoft-Windows-Resource-Exhaustion-Detector/Operational",
+	"Microsoft-Windows-Fault-Tolerant-Heap/Operational",
+}
+
+// maxExtraEventLogs caps how many extra channels the server may add.
+const maxExtraEventLogs = 50
+
+// extraEventLogRe is the shape of an owner-approved Windows event log
+// channel: a classic log ("Application") or "Provider/Type". It cannot start
+// with "/" so wevtutil never reads it as an option.
+// Keep in sync with _CHANNEL_RE in app/services/ai_required_logs.py.
+var extraEventLogRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,150}(/[A-Za-z0-9][A-Za-z0-9 ._-]{0,60})?$`)
+
+// ExtraEventLogs validates the event log channels the server's owner allowed
+// on top of WindowsLogSources (TROUBLESHOOT_EVENT_LOGS_WINDOWS and channels
+// approved on the required logs page). It returns the channels to allow and
+// the entries that were ignored.
+func ExtraEventLogs(extra []string) ([]string, []string) {
+	var channels, ignored []string
+	seen := map[string]bool{}
+	for _, raw := range extra {
+		name := strings.TrimSpace(raw)
+		if name == "" || seen[name] || isWindowsLogSource(name) {
+			continue
+		}
+		if len(channels) >= maxExtraEventLogs || !extraEventLogRe.MatchString(name) || strings.Contains(name, "  ") {
+			ignored = append(ignored, name)
+			continue
+		}
+		seen[name] = true
+		channels = append(channels, name)
+	}
+	return channels, ignored
 }
 
 // MacOSLogPredicates maps the allowlisted macOS sources to fixed `log show`
