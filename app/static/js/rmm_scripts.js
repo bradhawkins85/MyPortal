@@ -866,6 +866,8 @@
       source = ' · tray menu';
     } else if (run.run_source === 'ticket') {
       source = ' · ticket automation';
+    } else if (run.run_source === 'result_rule') {
+      source = ' · script result rule';
     } else if (run.run_source === 'command') {
       source = ' · command' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     } else if (run.run_source === 'tray_repair') {

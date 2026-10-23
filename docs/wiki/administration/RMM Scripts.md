@@ -556,6 +556,75 @@ adding a step, and **Stop onboarding** cancels the rest of a running sequence.
 Schedules for every company can only use scripts in `Common/` and are added and changed only
 by super admins; everyone else sees them read-only.
 
+## Acting on a script's result
+
+**Script result rules** (Scripts → **Script result rules**, `/rmm/scripts/result-rules`) read
+what a script reports when it finishes on a device, and then raise a ticket or run another
+script. Open a script and use its **When it finishes** section to see the rules that watch it
+or to add one.
+
+Each rule has:
+
+- **When this script finishes**: one script, or **Any script**. Rules apply to every run of the
+  script however it started: manually, on a schedule, during onboarding, from an event log rule,
+  check, ticket automation, the tray menu or another result rule. MyPortal's own jobs (patching,
+  Windows Update scans, remote control, tray repair and **Execute command**) are never watched.
+  Runs that expire or are cancelled never report a result, so they do not trigger rules.
+- **Applies to**: runs on this company's devices, or (super admins only) every company. Rules
+  for every company can only use scripts in `Common/`.
+- **Conditions**, matching **all** or **any** of them:
+
+  | Check | Comparisons |
+  | --- | --- |
+  | Output, Error output, Output or error output | contains, does not contain, is, is not, starts with, ends with, is one of, is not one of, matches the regex, does not match the regex, is less than, is at most, is greater than, is at least, is empty, is not empty |
+  | Exit code | is, is not, is one of, is not one of, is less than, is at most, is greater than, is at least |
+  | Result | is, is not, is one of, is not one of: Completed, Failed or Timed out |
+  | Returned value | as for Output, for a value the script returned (see [Returning values to MyPortal](#returning-values-to-myportal)); enter its name. Values count even when no custom field or variable has that name |
+
+  Text comparisons ignore case. Number comparisons read the whole text as a number, or else the
+  first number in it, so `Free: 12.5 GB` is 12.5. Regular expressions ignore case, `^` and `$`
+  match at each line, and they read the first 200,000 characters. A pattern that takes longer
+  than half a second gives up and does not match, so a slow pattern cannot hold up MyPortal.
+  A timed-out run has no exit code, so only "is not" style exit code checks match it.
+- **Then**:
+  - **Create a ticket** for the device's company with the device linked. The description
+    includes the script, device, result, exit code, output, error output and returned values
+    (each output up to 20,000 characters). Choose the priority and, optionally, a subject using
+    variables such as `{{asset.name}}`, `{{result.exit_code}}` or `{{result.groups.1}}`.
+    **Update the open ticket for the device** (the default) adds later matches as internal
+    updates while the ticket is not closed; **Raise a new ticket every time** does what it says.
+  - **Run another script** on the same device as an ordinary run, shown as **Script result
+    rule** in run history. Save the rule once to see the script's fields, then fill them in with
+    values or variables:
+
+    | Variable | Value |
+    | --- | --- |
+    | `{{result.output}}`, `{{result.errors}}` | The output and error output (first 8,000 characters) |
+    | `{{result.exit_code}}`, `{{result.status}}` | The exit code and result (Completed, Failed or Timed out) |
+    | `{{result.script}}`, `{{result.run_id}}` | The script that finished and its run |
+    | `{{result.values.Name}}` | A value the script returned, such as `{{result.values.BitLocker Status}}` |
+    | `{{result.match}}`, `{{result.groups.1}}` | What the first matching regex condition found, and its groups (named groups work too: `{{result.groups.drive}}`) |
+
+    The asset and company variables work as usual. Tick **Pass the result to the script as
+    environment variables** to also give the script `MYPORTAL_PREVIOUS_OUTPUT`,
+    `MYPORTAL_PREVIOUS_ERRORS`, `MYPORTAL_PREVIOUS_EXIT_CODE`, `MYPORTAL_PREVIOUS_STATUS`,
+    `MYPORTAL_PREVIOUS_SCRIPT`, `MYPORTAL_PREVIOUS_RUN_ID` and `MYPORTAL_PREVIOUS_VALUES` (the
+    returned values as JSON). These are sent encrypted like other values and need no agent
+    update.
+
+    The follow-up run records the run and rule that started it. A chain of result rules stops
+    after five scripts in a row, and the rule's last result then says it was not run, so rules
+    cannot keep running each other.
+
+For example, to clean up a disk when a check script reports less than 10 GB free, watch
+`Check-Disk` with **Output is less than 10**, and run `Cleanup-Disk` with its `Drive` field set
+to `{{result.values.Drive}}`. To raise a ticket whenever any script fails, watch **Any script**
+with **Exit code is not 0**.
+
+Each rule's list entry shows how often it matched and what it last did. Read access shows the
+rules; write access adds, changes, turns off and deletes the company's rules. Every change is
+recorded in the audit trail (`rmm.script_result_rule.*`). Apply migration **518** first.
+
 ## Running scripts from ticket automations
 
 The **My Portal RMM Script** ticket automation action runs a script on the devices linked to a

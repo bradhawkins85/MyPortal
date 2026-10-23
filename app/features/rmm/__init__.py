@@ -14,6 +14,9 @@
 * ``GET /rmm/event-logs/rules`` rules that drop incoming event log entries or
   run an RMM script on the device that sent them
   (:mod:`app.services.rmm_event_log_rules`)
+* ``GET /rmm/scripts/result-rules`` rules that read a script's output, exit
+  code and returned values when it finishes, then raise a ticket or run
+  another script on the device (:mod:`app.services.rmm_script_result_rules`)
 * ``GET /rmm/checks`` checks for disk space, ping, CPU, memory, services,
   network throughput, script results and agents that stop checking in, with
   the same actions as event log rules; the agent reports what they need and
@@ -60,6 +63,7 @@ from .event_log_rule_routes import router as event_log_rule_router
 from .finding_routes import router as finding_router
 from .inventory_routes import router as inventory_router
 from .remote_control_routes import router as remote_control_router
+from .result_rule_routes import router as result_rule_router
 from .patch_routes import router as patch_router
 from .windows_update_routes import router as windows_update_router
 from .routes import router
@@ -81,10 +85,10 @@ rmm_automation.register_package_steps(validate=rmm_software_updates.package_ids,
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.18.0",
+    version="1.19.0",
     routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router,
              event_log_rule_router, inventory_router, check_router, finding_router, patch_router,
-             windows_update_router),
+             windows_update_router, result_rule_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),
 )
 

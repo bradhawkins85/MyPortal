@@ -670,8 +670,8 @@ async def mark_dispatched(run_id: int, agent_id: int, *, expires_at: datetime | 
 
 async def get_agent_run(run_id: int, agent_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        "SELECT id, company_id, asset_id, status, timeout_seconds, onboarding_run_id, run_source FROM rmm_script_runs "
-        "WHERE id = %s AND agent_id = %s",
+        "SELECT id, script_id, script_name, company_id, asset_id, status, timeout_seconds, onboarding_run_id, "
+        "run_source FROM rmm_script_runs WHERE id = %s AND agent_id = %s",
         (run_id, agent_id),
     )
     return dict(row) if row else None

@@ -33,6 +33,7 @@ async def run_script(
     agent: Mapping[str, Any],
     run_source: str,
     extra_context: Mapping[str, Any] | None = None,
+    extra_env: Mapping[str, str] | None = None,
 ) -> tuple[int | None, str, bool]:
     """Queue a Gitea script on the device as an ordinary RMM run.
 
@@ -54,6 +55,7 @@ async def run_script(
             requested_by_user_id=None,
             run_source=run_source,
             extra_context=extra_context,
+            extra_env=extra_env,
         )
     except RunRequestError as exc:
         return None, f"Could not run on {device}: {'; '.join(exc.errors.values())}", True
@@ -86,7 +88,7 @@ async def add_ticket_update(ticket: Mapping[str, Any], *, body: str, reference: 
 
 
 async def raise_ticket(
-    *, agent: Mapping[str, Any], subject: str, description: str, reference: str,
+    *, agent: Mapping[str, Any], subject: str, description: str, reference: str, priority: str = "normal",
 ) -> dict[str, Any]:
     """Raise a ticket for the device's company with the device's asset linked."""
 
@@ -100,7 +102,7 @@ async def raise_ticket(
         requester_id=None,
         company_id=company_id,
         assigned_user_id=None,
-        priority="normal",
+        priority=priority,
         status="open",
         category=None,
         module_slug="rmm",

@@ -101,7 +101,9 @@ _FALSE = {"0", "false", "no", "off", "n", "$false", ""}
 _TOKEN = re.compile(r"\{\{")
 # Custom field and variable names may contain spaces, which the general
 # template engine's tokens do not allow, so these are resolved first.
-_NAMED_VALUE_TOKEN = re.compile(r"\{\{\s*(asset\.custom|asset\.variables|company\.variables)\.([^{}]+?)\s*\}\}")
+_NAMED_VALUE_TOKEN = re.compile(
+    r"\{\{\s*(asset\.custom|asset\.variables|company\.variables|result\.values)\.([^{}]+?)\s*\}\}"
+)
 
 # Wakes an agent's long-poll on this worker when a run is queued for it.
 _agent_events: dict[int, asyncio.Event] = {}
@@ -687,13 +689,16 @@ async def queue_for_agent(
     extra_context: Mapping[str, Any] | None = None,
     run_as: str = "system",
     queue_timeout_seconds: Any = None,
+    extra_env: Mapping[str, str] | None = None,
 ) -> int:
     """Resolve the values for one device and queue the run. Raises
     :class:`RunRequestError` with a ``device`` message when it cannot run there.
 
     ``extra_context`` adds variables for this run only, such as ``event`` for a
-    run started by an event log rule (``{{event.message}}``). ``run_as`` is
-    ``system`` or ``user`` (the user logged in to the device)."""
+    run started by an event log rule (``{{event.message}}``). ``extra_env``
+    adds environment variables the script does not ask for, such as the
+    previous run's result for a script result rule; the script's own values
+    win. ``run_as`` is ``system`` or ``user`` (the user logged in to the device)."""
 
     run_as = clean_run_as(run_as)
     queue_wait = queue_timeout(queue_timeout_seconds, int(script.get("default_queue_timeout_seconds") or 0))
@@ -709,6 +714,8 @@ async def queue_for_agent(
         context.update(extra_context)
     rendered: dict[str, dict[str, str]] = {}
     payload = await resolve_entries(script, entries, context, rendered)
+    for name, value in (extra_env or {}).items():
+        payload["env"].setdefault(name, value)
     inputs = _run_inputs(script, inputs, rendered)
     from app.services import rmm_script_files
 
@@ -1329,4 +1336,13 @@ async def record_result(agent: Mapping[str, Any], run_id: int, payload: Mapping[
         await rmm_ticket_scripts.record_result(
             run_id, status=status, exit_code=exit_code, stdout=stdout, stderr=stderr, error=error,
         )
+    from app.services import rmm_script_result_rules
+
+    try:
+        await rmm_script_result_rules.apply(agent, {**run, "id": run_id}, rmm_script_result_rules.run_result(
+            {**run, "id": run_id}, status=status, exit_code=exit_code, stdout=stdout, stderr=stderr, error=error,
+            custom_values=custom_values,
+        ))
+    except Exception as exc:  # noqa: BLE001 - the result is already stored
+        log_warning("RMM script result rules could not run", run_id=run_id, error=str(exc))
     return {"status": status, "custom_values": custom_values}
