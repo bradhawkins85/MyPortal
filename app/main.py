@@ -9009,6 +9009,8 @@ async def _tray_deployment_links_context(
     portal_url = tray_deployment_service.resolve_portal_url(request)
     rows = await tray_repo.list_deployment_links()
     links = [await tray_deployment_service.serialise_link(row, portal_url) for row in rows]
+    # One active URL per company: hide companies that already have one.
+    linked_company_ids = {link["company_id"] for link in links if link["status"] == "active"}
     hidden_revoked_count = 0
     if not show_revoked:
         hidden_revoked_count = sum(1 for link in links if link["status"] != "active")
@@ -9016,7 +9018,11 @@ async def _tray_deployment_links_context(
     builds = await tray_deployment_builds.latest_build_by_link()
     for link in links:
         link["build"] = builds.get(link["id"])
-    companies = await companies_repo.list_companies(include_archived=False)
+    companies = [
+        company
+        for company in await companies_repo.list_companies(include_archived=False)
+        if int(company["id"]) not in linked_company_ids
+    ]
     return {
         "links": links,
         "companies": companies,
