@@ -15184,6 +15184,32 @@ a.stat-strip__stat:focus-visible {
   height: 1rem;
 }
 
+.header-menu__icon svg,
+.header-menu__icon img {
+  width: 1rem;
+  height: 1rem;
+}
+
+.header-menu__item .header-menu__icon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.header-menu__divider {
+  height: 1px;
+  margin: 0.3rem 0.25rem;
+  background: var(--color-border);
+}
+
+.header-menu__heading {
+  padding: 0.35rem 0.75rem 0.15rem;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .header-menu__form {
   margin: 0;
   padding: 0;

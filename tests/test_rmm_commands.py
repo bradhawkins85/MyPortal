@@ -107,4 +107,4 @@ def test_asset_rmm_menu_offers_execute_command_with_its_modal():
     assert '<option value="cmd">Command Prompt</option>' in modal
     assert '<option value="system">System</option>' in modal and '<option value="user">Logged in user</option>' in modal
     source = (ROOT / "app/templates/assets/detail.html").read_text()
-    assert "run_command=" in source and "rmm/_command_modal.html" in source and "rmm_command.js" in source
+    assert "data-rmm-command-open" in source and "rmm/_command_modal.html" in source and "rmm_command.js" in source

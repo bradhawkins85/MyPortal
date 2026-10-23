@@ -18,6 +18,11 @@
        "confirm": "Are you sure?",          # optional confirmation prompt
        "attrs":   {"data-x": "y", ...},     # extra attributes
      }
+
+   Menu grouping: {"type": "section", "label": "Remote access"} starts a
+   new group in the overflow menu (a divider, plus the label as a small
+   heading when given). Groups left empty by conditional actions are
+   dropped, so callers can append sections unconditionally.
 #}
 
 {% macro _render_attrs(attrs) -%}
@@ -96,14 +101,16 @@
       {%- set _ = menu_actions.append(action) -%}
     {%- endif -%}
   {%- endfor -%}
+  {%- set menu_items = menu_actions | rejectattr('type', 'equalto', 'section') | list -%}
+  {%- set item_count = menu_items | length -%}
   {%- set mid = menu_id or ('page-actions-menu-' ~ (range(1, 999999) | random)) -%}
 
-  {%- if menu_actions | length == 0 and primary.action is none -%}
+  {%- if item_count == 0 and primary.action is none -%}
     {# no actions, render nothing #}
-  {%- elif menu_actions | length == 0 -%}
+  {%- elif item_count == 0 -%}
     {{ render_action(primary.action) }}
-  {%- elif menu_actions | length == 1 and primary.action is none -%}
-    {{ render_action(menu_actions[0]) }}
+  {%- elif item_count == 1 and primary.action is none -%}
+    {{ render_action(menu_items[0]) }}
   {%- else -%}
     <div class="header-actions">
       {%- if primary.action -%}
@@ -134,8 +141,19 @@
          role="menu"
          data-header-menu-panel
          hidden>
+      {%- set group = namespace(section=None, rendered=False) -%}
       {%- for action in actions -%}
-        {{ render_action(action, in_menu=True) }}
+        {%- if action.get('type') == 'section' -%}
+          {%- set group.section = action -%}
+        {%- else -%}
+          {%- if group.section is not none -%}
+            {%- if group.rendered %}<div class="header-menu__divider" role="separator"></div>{% endif -%}
+            {%- if group.section.get('label') %}<div class="header-menu__heading" role="presentation">{{ group.section.label }}</div>{% endif -%}
+            {%- set group.section = None -%}
+          {%- endif -%}
+          {{ render_action(action, in_menu=True) }}
+          {%- set group.rendered = True -%}
+        {%- endif -%}
       {%- endfor -%}
     </div>
   </div>

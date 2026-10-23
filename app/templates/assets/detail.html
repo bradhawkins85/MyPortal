@@ -15,16 +15,48 @@
 {% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if rmm %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endif %}{% if asset_tags is not none %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
 {% block header_actions %}
+    {%- set _svg = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">' -%}
+    {%- set icons = {
+      "process": _svg ~ '<polygon points="6 4 20 12 6 20 6 4"/></svg>',
+      "preview": _svg ~ '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+      "remote": _svg ~ '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
+      "file_transfer": _svg ~ '<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z"/><path d="m9 13 3-3 3 3M12 10v7"/></svg>',
+      "terminal": _svg ~ '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3M12 15h6"/></svg>',
+      "checkin": _svg ~ '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>',
+      "script": _svg ~ '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M10 13l-2 2 2 2M14 13l2 2-2 2"/></svg>',
+      "command": _svg ~ '<path d="m4 17 6-6-6-6M12 19h8"/></svg>',
+      "health": _svg ~ '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+      "package": _svg ~ '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/></svg>',
+      "push": _svg ~ '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>',
+      "repair": _svg ~ '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+      "credentials": _svg ~ '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>',
+      "back": _svg ~ '<path d="M19 12H5M12 19l-7-7 7-7"/></svg>',
+    } -%}
+    {%- set mode_icons = {"remote": icons.remote, "file_transfer": icons.file_transfer, "terminal": icons.terminal} -%}
+    {%- set rmm_staff = rmm and not customer_safe -%}
+    {#- RMM agent actions appear only once the agent is deployed; pushing and
+        repairing go through the tray app so they work without one. -#}
+    {%- set rmm_agent = rmm_staff and rmm.agent -%}
     {% set detail_actions = [] %}
     {% if can_edit and not customer_safe %}{% set _ = detail_actions.append({"label": "Save changes", "type": "submit", "variant": "primary", "form": "asset-settings-form", "attrs": {"data-asset-save": "", "title": "Save the asset profile and editable custom fields"}}) %}{% endif %}
-    {% if rmm and rmm.can_run and not customer_safe %}{% set _ = detail_actions.append({"label": "Check in now", "type": "submit", "form": "asset-checkin-form", "attrs": {"title": "Queue a full agent check-in without changing its normal schedule"}}) %}{% endif %}
-    {% if health_check and health_check.can_manage and not customer_safe %}{% set _ = detail_actions.append({"label": "Run health check", "type": "submit", "form": "asset-health-check-form", "attrs": {"title": "A health check is already running" if health_check.active else ("Review this computer's health with the AI troubleshooter and list the steps back to optimal performance" ~ (". On physical Windows hardware PawnIO is installed briefly to read sensors and removed afterwards." if health_check.pawnio_available else "")) if health_check.can_run else "Needs the tray app connected on this computer", "disabled": true if (health_check.active or not health_check.can_run) else none}}) %}{% endif %}
-    {% if rmm and rmm.can_push_agent and not rmm.agent and not customer_safe %}{% set _ = detail_actions.append({"label": "Push RMM agent", "type": "button", "attrs": {"data-rmm-agent-install": asset.id, "data-rmm-agent-name": asset_display_name}}) %}{% endif %}
-    {% if rmm and rmm.can_push_agent and not customer_safe %}{% set _ = detail_actions.append({"label": "Repair RMM agent", "type": "button", "attrs": {"data-rmm-agent-repair": asset.id, "data-rmm-agent-name": asset_display_name}}) %}{% endif %}
-    {% set _ = detail_actions.append({"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id}) %}
-    {% if not customer_safe %}{% set _ = detail_actions.append({"label": "Company credentials", "type": "link", "href": "/admin/companies/" ~ asset.company_id ~ "/edit#credentials"}) %}{% endif %}
-    {% if is_super_admin and not customer_safe %}{% set _ = detail_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true"}) %}{% endif %}
-    {% set _ = detail_actions.append({"label": "Back to assets", "type": "link", "href": "/assets"}) %}
+    {% set _ = detail_actions.append({"type": "section", "label": "Asset"}) %}
+    {% set _ = detail_actions.append({"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id, "icon": icons.process}) %}
+    {% if is_super_admin and not customer_safe %}{% set _ = detail_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true", "icon": icons.preview}) %}{% endif %}
+    {% set _ = detail_actions.append({"type": "section", "label": "Remote access"}) %}
+    {% if rmm_agent %}{% for session in rmm.remote_control or [] %}{% for mode, mode_label in [("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal")] %}{% set _ = detail_actions.append({"label": session.label ~ " " ~ mode_label, "icon": mode_icons[mode], "attrs": {"data-rmm-remote": session.provider, "data-rmm-remote-mode": mode, "data-rmm-remote-asset": asset.id, "data-rmm-remote-name": asset_display_name}}) %}{% endfor %}{% endfor %}{% endif %}
+    {% set _ = detail_actions.append({"type": "section", "label": "RMM"}) %}
+    {% if rmm_agent and rmm.can_run %}{% set _ = detail_actions.append({"label": "Check in now", "type": "submit", "form": "asset-checkin-form", "icon": icons.checkin, "attrs": {"title": "Queue a full agent check-in without changing its normal schedule"}}) %}{% endif %}
+    {% if rmm_agent and health_check and health_check.can_manage %}{% set _ = detail_actions.append({"label": "Run health check", "type": "submit", "form": "asset-health-check-form", "icon": icons.health, "attrs": {"title": "A health check is already running" if health_check.active else ("Review this computer's health with the AI troubleshooter and list the steps back to optimal performance" ~ (". On physical Windows hardware PawnIO is installed briefly to read sensors and removed afterwards." if health_check.pawnio_available else "")) if health_check.can_run else "Needs the tray app connected on this computer", "disabled": true if (health_check.active or not health_check.can_run) else none}}) %}{% endif %}
+    {% if rmm_agent and rmm.can_run %}{% set _ = detail_actions.append({"label": "Run script", "icon": icons.script, "attrs": {"data-rmm-run-open": "", "aria-haspopup": "dialog", "aria-controls": "rmm-run-modal"}}) %}{% endif %}
+    {% if rmm_agent and rmm.command_languages %}{% set _ = detail_actions.append({"label": "Execute command", "icon": icons.command, "attrs": {"data-rmm-command-open": "", "aria-haspopup": "dialog", "aria-controls": "rmm-command-modal"}}) %}{% endif %}
+    {% if rmm_staff and rmm.can_run and rmm.agent and (rmm.agent.os or '') | lower == 'windows' %}{% set _ = detail_actions.append({"label": "Install Choco package", "icon": icons.package, "attrs": {"data-choco-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "choco-install-modal"}}) %}{% endif %}
+    {% set _ = detail_actions.append({"type": "section", "label": "Agent maintenance"}) %}
+    {% if rmm and rmm.can_push_agent and not rmm.agent and not customer_safe %}{% set _ = detail_actions.append({"label": "Push RMM agent", "type": "button", "icon": icons.push, "attrs": {"data-rmm-agent-install": asset.id, "data-rmm-agent-name": asset_display_name}}) %}{% endif %}
+    {% if rmm and rmm.can_push_agent and not customer_safe %}{% set _ = detail_actions.append({"label": "Repair RMM agent", "type": "button", "icon": icons.repair, "attrs": {"data-rmm-agent-repair": asset.id, "data-rmm-agent-name": asset_display_name}}) %}{% endif %}
+    {% if rmm_agent and rmm.tray_repair %}{% set _ = detail_actions.append({"label": "Repair tray agent", "icon": icons.repair, "attrs": {"data-rmm-tray-repair": asset.id, "data-rmm-tray-repair-name": asset_display_name}}) %}{% endif %}
+    {% set _ = detail_actions.append({"type": "section", "label": "Go to"}) %}
+    {% if not customer_safe %}{% set _ = detail_actions.append({"label": "Company credentials", "type": "link", "href": "/admin/companies/" ~ asset.company_id ~ "/edit#credentials", "icon": icons.credentials}) %}{% endif %}
+    {% set _ = detail_actions.append({"label": "Back to assets", "type": "link", "href": "/assets", "icon": icons.back}) %}
     {{ page_header_actions(detail_actions, menu_id="asset-detail-actions") }}
 {% endblock %}
 
@@ -159,8 +191,6 @@
         <h2 class="card__title" id="asset-scripts-heading">Scripts {{ rmm_ui.agent_indicator(rmm.agent_state) }}</h2>
         <p class="card__subtitle">{% if rmm.agent %}RMM agent {{ rmm.agent.agent_version or '' }} on {{ (rmm.agent.os or 'unknown') | title }}{% if rmm.agent.os_version %} {{ rmm.agent.os_version }}{% endif %}, last seen {% if rmm.agent.last_seen_utc %}<span data-utc="{{ rmm.agent.last_seen_utc }}">{{ rmm.agent.last_seen_utc }}</span>{% else %}never{% endif %}.{% else %}The RMM agent is not installed yet. Queue scripts now to run after it installs and connects.{{ rmm_ui.agent_deploy_status(rmm.deploy) }}{% endif %} <a href="/rmm/scripts">All scripts</a></p>
       </div>
-      {% set choco_install = rmm.can_run and rmm.agent and (rmm.agent.os or '') | lower == 'windows' %}
-      {% if rmm.can_run or rmm.remote_control %}{{ rmm_ui.asset_menu(asset.id, asset_display_name, rmm.remote_control or [], run_script=rmm.can_run, rustdesk_in_menu=true, choco_install=choco_install, run_command=rmm.command_languages | default([]) | length > 0, tray_repair=rmm.tray_repair) }}{% endif %}
     </header>
     <div class="ce-section__body">
       {% if rmm.remote_control %}<div class="rmm-remote__status" data-rmm-remote-status role="status" aria-live="polite" hidden>
