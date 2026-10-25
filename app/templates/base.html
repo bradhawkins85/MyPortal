@@ -616,9 +616,15 @@
               </a>
             </li>{% endif %}
           {% if feature_pack_available('health_check') and can_access_rmm_scripts %}<li class="menu__item">
-              <a href="/health-checks" {% if current_path.startswith('/health-checks') %}aria-current="page"{% endif %}>
+              <a href="/health-checks" {% if current_path.startswith('/health-checks') and not current_path.startswith('/health-checks/detections') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21.4 10.6 20C5.4 15.4 2 12.3 2 8.5 2 5.4 4.4 3 7.5 3c1.7 0 3.4.8 4.5 2.1C13.1 3.8 14.8 3 16.5 3 19.6 3 22 5.4 22 8.5c0 1.2-.3 2.3-.9 3.5h-2.3c.7-1.1 1.2-2.3 1.2-3.5C20 6.5 18.5 5 16.5 5c-1.5 0-3 1-3.6 2.4h-1.8C10.5 6 9 5 7.5 5 5.5 5 4 6.5 4 8.5c0 2.9 3.1 5.7 7.9 10l.1.1.1-.1 1.5-1.4 1.4 1.4zM7 12h3l1.5-3 3 6 1.5-3h4v2h-2.8L15.5 18l-3-6-.5 1.1V14H7z"/></svg></span>
                 <span class="menu__label">Health checks</span>
+              </a>
+            </li>
+            <li class="menu__item">
+              <a href="/health-checks/detections" {% if current_path.startswith('/health-checks/detections') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14.7 2.3a5 5 0 0 0-5.9 6.4L2.3 15.2a2 2 0 0 0 0 2.8l3.7 3.7a2 2 0 0 0 2.8 0l6.5-6.5a5 5 0 0 0 6.4-5.9l-3.1 3.1-2.9-.6-.6-2.9zM6.9 20.3l-2.9-2.9 6.2-6.2a5 5 0 0 0 2.9 2.9z"/></svg></span>
+                <span class="menu__label">Health detections</span>
               </a>
             </li>{% endif %}
           {% if can_access_backups %}<li class="menu__item">

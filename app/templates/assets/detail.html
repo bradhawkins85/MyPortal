@@ -469,6 +469,9 @@
       {% elif hcx.can_manage and not hcx.device %}
       <p class="text-muted">The health check runs through the tray app, which is not connected on this computer.</p>
       {% endif %}
+      {% if hcx.schedule %}
+      <p class="form-help">Monthly health check: next due <span data-utc="{{ hcx.schedule.next_run_at }}">{{ hcx.schedule.next_run_at }}</span> (a random day and time each month, when the tray app is online; set by <a href="/health-checks/monthly">monthly check groups</a>).{% if hcx.schedule.last_result %} Last month: {{ hcx.schedule.last_result }}{% endif %}</p>
+      {% endif %}
       {% if hcx.checks %}
       <div class="table-wrapper"><table class="table">
         <caption class="visually-hidden">Recent health checks</caption>

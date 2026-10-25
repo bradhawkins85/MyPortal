@@ -2,6 +2,11 @@
 {% from "macros/header.html" import page_header_actions %}
 {% import "health_checks/_macros.html" as hc %}
 {% set sections = snapshot.sections %}
+{% set monitors = monitors | default([]) %}
+{% set remediations = remediations | default([]) %}
+{% set remediated = remediated | default([]) %}
+{% set detections = detections | default({}) %}
+{% set can_manage = can_manage | default(false) %}
 {% block title %}Health check #{{ check.id }}{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/health_checks.css') }}">{% endblock %}
 {% block header_title %}
@@ -13,6 +18,7 @@
   {% if can_run_again and not check.is_active %}{% set _ = actions.append({"label": "Run again", "type": "submit", "variant": "primary", "form": "hc-run-again", "attrs": {"title": "Start a new health check on this asset"}}) %}{% endif %}
   {% set _ = actions.append({"label": "Back to asset", "type": "link", "href": "/assets/" ~ check.asset_id ~ "#health-check"}) %}
   {% set _ = actions.append({"label": "Health checks for this asset", "type": "link", "href": "/health-checks?asset_id=" ~ check.asset_id}) %}
+  {% set _ = actions.append({"label": "Detections and fixes", "type": "link", "href": "/health-checks/detections"}) %}
   {% if is_super_admin %}{% set _ = actions.append({"label": "Required logs", "type": "link", "href": "/admin/required-logs"}) %}{% endif %}
   {{ page_header_actions(actions, menu_id="hc-report-actions") }}
 {% endblock %}
@@ -28,6 +34,7 @@
       {% if snapshot.is_virtual is sameas true %}<li class="scf-chip scf-chip--muted">Virtual machine</li>{% elif snapshot.is_virtual is sameas false %}<li class="scf-chip">Physical hardware</li>{% endif %}
       {% if check.model %}<li class="scf-chip scf-chip--muted">Model {{ check.model }}</li>{% endif %}
       {% if check.ticket_id %}<li class="scf-chip"><a href="/tickets/{{ check.ticket_id }}">Ticket #{{ check.ticket_id }}</a></li>{% endif %}
+      {% if check.is_scheduled %}<li class="scf-chip scf-chip--muted">Monthly check</li>{% endif %}
       <li class="scf-chip scf-chip--muted">Started <span data-utc="{{ check.created_at }}">{{ check.created_at }}</span></li>
       {% if check.completed_at %}<li class="scf-chip scf-chip--muted">Finished <span data-utc="{{ check.completed_at }}">{{ check.completed_at }}</span></li>{% endif %}
     </ul>
@@ -119,8 +126,16 @@
       <ul class="hc-cards" role="list">
         {% for signal in signals %}
           <li><article class="hc-card hc-card--{{ hc.tone(signal.severity) }}">
-            <div class="hc-card__head"><h3 class="hc-card__title">{{ signal.title }}</h3><span class="hc-actions">{{ hc.severity_chip(signal.severity) }} <span class="scf-chip scf-chip--muted">{{ areas.get(signal.area, signal.area) }}</span></span></div>
+            <div class="hc-card__head"><h3 class="hc-card__title">{{ signal.title }}</h3><span class="hc-actions">{{ hc.severity_chip(signal.severity) }} <span class="scf-chip scf-chip--muted">{{ areas.get(signal.area, signal.area) }}</span>{% if signal.key in remediated %} <span class="status status--info">Fix script queued</span>{% endif %}</span></div>
             {% if signal.detail %}<p>{{ signal.detail }}</p>{% endif %}
+            {% set detection = detections.get(signal.key) if signal.key else none %}
+            {% if detection and (can_manage or (detection.monitors and monitors)) %}
+            <p class="hc-card__meta">
+              {%- if detection.monitors and monitors %}<a href="#hc-monitors-title">Watch for it in the event logs</a>{% endif %}
+              {%- if detection.monitors and monitors and can_manage %} · {% endif %}
+              {%- if can_manage %}<a href="/health-checks/detections?edit={{ signal.key }}#hc-remediation-modal">{{ 'Change the script that fixes it' if signal.key in remediated else 'Fix it with a script after each health check' }}</a>{% endif %}
+            </p>
+            {% endif %}
           </article></li>
         {% endfor %}
       </ul>
@@ -130,6 +145,31 @@
       <p class="hc-muted">Waiting for the snapshot.</p>
     {% endif %}
   </section>
+
+  {% if remediations %}
+  <section class="card card--panel" aria-labelledby="hc-fixes-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-fixes-title">Automatic fixes</h2><p class="card__subtitle">Scripts linked to what the automatic checks found, queued on the computer's RMM agent when this check completed. <a href="/health-checks/detections">Detections and fixes</a></p></div></header>
+    <ul class="hc-cards" role="list">
+      {% for fix in remediations %}
+        <li><article class="hc-card hc-card--{{ 'ok' if fix.run_id else 'warning' }}">
+          <div class="hc-card__head"><h3 class="hc-card__title">{{ fix.script_name }}</h3><span class="hc-actions">{% if fix.run_id %}<span class="status status--info">Queued</span>{% else %}<span class="status status--warning">Not run</span>{% endif %} <span class="scf-chip scf-chip--muted">{{ 'This company' if fix.scope == 'company' else 'Every company' }}</span></span></div>
+          <p class="hc-card__meta">For: {{ fix.label }}</p>
+          <p>{{ fix.summary }}{% if fix.run_id %} <a href="/assets/{{ check.asset_id }}#scripts">See the run on the asset page</a>{% endif %}</p>
+        </article></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if monitors %}
+  <section class="card card--panel" aria-labelledby="hc-monitors-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-monitors-title">Watch for these problems</h2><p class="card__subtitle">Event log rules that raise a ticket as soon as Windows logs these problems again, instead of waiting for the next health check. Each opens the event log rule form filled in for you to review and save.</p></div></header>
+    <ul class="hc-cards" role="list">
+      {% for monitor in monitors %}<li>{{ hc.monitor_card(monitor, can_create=can_manage) }}</li>{% endfor %}
+    </ul>
+    {% if not can_manage %}<p class="hc-muted">Creating event log rules needs write access to RMM scripts in this company.</p>{% endif %}
+  </section>
+  {% endif %}
 
   {% if sections %}
   <section class="card card--panel" aria-labelledby="hc-snapshot-title">

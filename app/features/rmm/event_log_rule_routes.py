@@ -4,7 +4,10 @@ Company scoped, ``menu.rmm_scripts``; changing rules needs write access, and
 rules for every company need a super admin.
 
 * ``GET /rmm/event-logs/rules`` the rules reaching the company's devices;
-  ``?rule={id}`` edits one, ``?new=1`` (optionally ``&asset_id={id}``) adds one
+  ``?rule={id}`` edits one, ``?new=1`` (optionally ``&asset_id={id}``) adds one.
+  ``&suggest={monitor}`` fills it in from a health check monitor
+  (:data:`app.services.health_check_detections.MONITORS`), and
+  ``&health_check={id}&monitor={n}`` from one the health check's report suggested
 * ``POST /rmm/event-logs/rules`` and ``/rmm/event-logs/rules/{id}`` save a rule
 * ``POST /rmm/event-logs/rules/{id}/enabled`` and ``/delete``
 * ``GET /rmm/event-logs/rules?run={id}`` asks to confirm running a drop rule
@@ -19,10 +22,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app.repositories import ai_health_checks as health_checks_repo
+from app.repositories import assets as assets_repo
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_event_log_rules as rules_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
+from app.services import health_check_detections
 from app.services import rmm_automation
 from app.services import rmm_event_log_rules as event_log_rules
 from app.services import rmm_event_logs as event_logs
@@ -148,6 +154,43 @@ async def _editable_rule(rule_id: int, user: dict[str, Any], company_id: int) ->
     return rule
 
 
+async def _suggested_rule(
+    company_id: int, asset_id: int | None, suggest: str | None, health_check: int | None, monitor: int | None
+) -> tuple[dict[str, Any] | None, str | None]:
+    """A new rule filled in from a health check's event log monitor, or why it cannot be.
+
+    The rule raises a ticket for every device in the company; the device the
+    health check ran on is preselected should the technician narrow it.
+    """
+
+    item = None
+    if suggest:
+        item = health_check_detections.monitor(suggest)
+    elif health_check is not None and monitor is not None:
+        check = await health_checks_repo.get(health_check)
+        if not check or int(check.get("company_id") or 0) != int(company_id):
+            return None, "That health check belongs to another company. Switch to its company to add the rule."
+        monitors = (check.get("report") or {}).get("monitors") or []
+        item = monitors[monitor] if 0 <= monitor < len(monitors) and isinstance(monitors[monitor], dict) else None
+        asset_id = int(check["asset_id"])
+    if not item:
+        return None, "That suggested rule is no longer available."
+    if asset_id is not None:
+        asset = await assets_repo.get_asset_by_id(asset_id)
+        if not asset or int(asset.get("company_id") or 0) != int(company_id):
+            return None, "That device belongs to another company. Switch to its company to add the rule."
+    prefill = health_check_detections.rule_prefill(item)
+    try:
+        collected = await event_logs.logs_for(company_id, asset_id)
+    except Exception:  # noqa: BLE001 - the notice falls back to the default logs
+        collected = event_logs.default_logs()
+    rule = {**_blank_rule(asset_id), "scope": "company", "name": prefill["name"], "action": prefill["action"],
+            "conditions": prefill["conditions"],
+            "suggestion": {"why": str(item.get("why") or ""), "log": prefill["log"],
+                           "log_collected": prefill["log"].casefold() in {name.casefold() for name in collected}}}
+    return rule, None
+
+
 @router.get(RULES_PATH, response_class=HTMLResponse, summary="Event log rules")
 async def rules_page(
     request: Request,
@@ -155,6 +198,9 @@ async def rules_page(
     new: bool = Query(default=False),
     asset_id: int | None = Query(default=None, ge=1),
     run: int | None = Query(default=None, ge=1),
+    suggest: str | None = Query(default=None, pattern="^[a-z0-9_]{1,64}$"),
+    health_check: int | None = Query(default=None, ge=1),
+    monitor: int | None = Query(default=None, ge=0, le=100),
 ):
     context = await _load(request)
     if isinstance(context, RedirectResponse):
@@ -163,6 +209,10 @@ async def rules_page(
     editing = None
     if can_edit and rule is not None:
         editing = _form_rule(await _editable_rule(rule, user, company_id))
+    elif can_edit and new and (suggest or health_check is not None):
+        editing, problem = await _suggested_rule(company_id, asset_id, suggest, health_check, monitor)
+        if problem:
+            return flash_redirect(RULES_PATH, problem, "error")
     elif can_edit and new:
         editing = _blank_rule(asset_id)
     run_now = None

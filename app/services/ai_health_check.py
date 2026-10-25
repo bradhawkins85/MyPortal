@@ -57,6 +57,8 @@ from app.repositories import tray as tray_repo
 from app.services import ai_prompt_security
 from app.services import ai_required_logs
 from app.services import ai_troubleshooter
+from app.services import health_check_detections as detections
+from app.services import health_check_remediation
 from app.services import rmm_agent_deploy
 from app.services import tray as tray_service
 from app.services import troubleshoot_web_search
@@ -83,6 +85,10 @@ STATUS_LABELS = {
     STATUS_COMPLETED: "Completed",
     STATUS_FAILED: "Failed",
 }
+
+RUN_SOURCE_MANUAL = "manual"
+RUN_SOURCE_SCHEDULED = "scheduled"
+RUN_SOURCE_LABELS = {RUN_SOURCE_MANUAL: "Run by a technician", RUN_SOURCE_SCHEDULED: "Monthly check"}
 
 OVERALL_LABELS = {"healthy": "Healthy", "attention": "Needs attention", "critical": "Critical", "unknown": "Unknown"}
 SEVERITY_RANK = {"critical": 0, "warning": 1, "info": 2, "ok": 3}
@@ -341,8 +347,11 @@ def _sections(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _signal(area: str, severity: str, title: str, detail: str = "") -> dict[str, str]:
-    return {"area": area, "severity": severity, "title": title[:300], "detail": detail[:600]}
+def _signal(key: str, severity: str, title: str, detail: str = "") -> dict[str, str]:
+    """A rule flag; ``key`` names its detection in :data:`health_check_detections.DETECTIONS`."""
+
+    area = detections.DETECTIONS[key]["area"]
+    return {"key": key, "area": area, "severity": severity, "title": title[:300], "detail": detail[:600]}
 
 
 def _drive(volume: Mapping[str, Any]) -> str:
@@ -357,18 +366,18 @@ def _disk_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> N
         free_gb = _num(volume.get("free_gb"))
         name = _drive(volume)
         if free is not None and free < 5:
-            signals.append(_signal("storage", "critical", f"{name} is almost full ({free:g}% free)",
+            signals.append(_signal("volume_almost_full", "critical", f"{name} is almost full ({free:g}% free)",
                                    "Windows and apps slow down or fail when a drive has under 5% free."))
         elif free is not None and free < 10:
-            signals.append(_signal("storage", "warning", f"{name} is low on space ({free:g}% free)"))
+            signals.append(_signal("volume_low_space", "warning", f"{name} is low on space ({free:g}% free)"))
         elif free_gb is not None and free_gb < 5 and volume.get("boot_volume"):
-            signals.append(_signal("storage", "warning", f"{name} has only {free_gb:g} GB free"))
+            signals.append(_signal("volume_low_space", "warning", f"{name} has only {free_gb:g} GB free"))
         if volume.get("dirty") is True:
-            signals.append(_signal("chkdsk", "warning", f"{name} is marked dirty",
+            signals.append(_signal("volume_dirty", "warning", f"{name} is marked dirty",
                                    "The file system needs checking; chkdsk runs at the next restart."))
         health = str(volume.get("health") or "")
         if health in {"Warning", "Unhealthy"}:
-            signals.append(_signal("chkdsk", "critical" if health == "Unhealthy" else "warning",
+            signals.append(_signal("volume_unhealthy", "critical" if health == "Unhealthy" else "warning",
                                    f"Windows reports {name} as {health.lower()}"))
     for disk in _list(sections.get("disks")):
         if not isinstance(disk, dict):
@@ -377,43 +386,43 @@ def _disk_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> N
         health = str(disk.get("health") or "")
         statuses = [str(item) for item in _list(disk.get("operational_status"))]
         if health == "Unhealthy" or any(s in {"Predictive Failure", "Error", "Lost Communication"} for s in statuses):
-            signals.append(_signal("storage", "critical", f"{name} is failing or about to fail",
+            signals.append(_signal("disk_failing", "critical", f"{name} is failing or about to fail",
                                    f"Health: {health or 'unknown'}; status: {', '.join(statuses) or 'unknown'}."))
         elif health == "Warning" or "Degraded" in statuses:
-            signals.append(_signal("storage", "warning", f"Windows reports a problem with {name}",
+            signals.append(_signal("disk_degraded", "warning", f"Windows reports a problem with {name}",
                                    f"Health: {health or 'unknown'}; status: {', '.join(statuses) or 'unknown'}."))
         if disk.get("smart_status") == "Failing":
-            signals.append(_signal("storage", "critical", f"SMART reports {name} is failing"))
+            signals.append(_signal("disk_smart_failing", "critical", f"SMART reports {name} is failing"))
         uncorrected = sum(
             _num(disk.get(key)) or 0 for key in ("read_errors_uncorrected", "write_errors_uncorrected")
         )
         if uncorrected > 0:
-            signals.append(_signal("storage", "critical", f"{name} has {int(uncorrected)} uncorrected read/write errors",
+            signals.append(_signal("disk_uncorrected_errors", "critical", f"{name} has {int(uncorrected)} uncorrected read/write errors",
                                    "Uncorrected errors mean data could not be read or written; back up now."))
         wear = _num(disk.get("wear_percent"))
         if wear is not None and wear >= 90:
-            signals.append(_signal("storage", "critical", f"{name} is {wear:g}% worn out"))
+            signals.append(_signal("disk_worn_out", "critical", f"{name} is {wear:g}% worn out"))
         elif wear is not None and wear >= 70:
-            signals.append(_signal("storage", "warning", f"{name} is {wear:g}% worn out"))
+            signals.append(_signal("disk_wearing", "warning", f"{name} is {wear:g}% worn out"))
         temp = _num(disk.get("temperature_c"))
         hot = 55 if str(disk.get("media_type") or "") == "HDD" else 70
         if temp is not None and temp >= hot:
-            signals.append(_signal("thermals", "warning", f"{name} is running hot ({temp:g} °C)"))
+            signals.append(_signal("disk_hot", "warning", f"{name} is running hot ({temp:g} °C)"))
     for prediction in _list(sections.get("smart_predictions")):
         if isinstance(prediction, dict) and prediction.get("predict_failure") is True:
-            signals.append(_signal("storage", "critical", "A drive's SMART data predicts it will fail",
+            signals.append(_signal("disk_smart_prediction", "critical", "A drive's SMART data predicts it will fail",
                                    f"{prediction.get('instance') or ''} reason {prediction.get('reason') or ''}".strip()))
     chkdsk = _dict(sections.get("chkdsk"))
     ntfs = _num(chkdsk.get("ntfs_errors"))
     if ntfs:
-        signals.append(_signal("chkdsk", "warning", f"{int(ntfs)} NTFS file system warnings or errors recently"))
+        signals.append(_signal("ntfs_errors", "warning", f"{int(ntfs)} NTFS file system warnings or errors recently"))
     disk_errors = _num(chkdsk.get("disk_errors"))
     if disk_errors:
-        signals.append(_signal("storage", "critical" if disk_errors >= 10 else "warning",
+        signals.append(_signal("disk_io_errors", "critical" if disk_errors >= 10 else "warning",
                                f"{int(disk_errors)} disk I/O errors recently",
                                "Bad blocks, retried I/O or controller resets often come before a drive fails."))
     if chkdsk.get("scheduled") is True:
-        signals.append(_signal("chkdsk", "info", "A disk check is scheduled for the next restart"))
+        signals.append(_signal("chkdsk_scheduled", "info", "A disk check is scheduled for the next restart"))
 
 
 def _defrag_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> None:
@@ -422,15 +431,15 @@ def _defrag_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) ->
         return
     task = _dict(defrag.get("scheduled_task"))
     if task.get("enabled") is False:
-        signals.append(_signal("defrag", "warning", "Scheduled drive optimisation is turned off"))
+        signals.append(_signal("defrag_task_disabled", "warning", "Scheduled drive optimisation is turned off"))
     if defrag.get("trim_enabled") is False:
-        signals.append(_signal("defrag", "warning", "TRIM is turned off for SSDs"))
+        signals.append(_signal("trim_disabled", "warning", "TRIM is turned off for SSDs"))
     for analysis in _list(defrag.get("analysis")):
         if not isinstance(analysis, dict):
             continue
         fragmentation = _num(analysis.get("total_fragmentation_percent"))
         if analysis.get("defrag_recommended") is True or (fragmentation is not None and fragmentation >= 10):
-            signals.append(_signal("defrag", "warning", f"{_drive(analysis)} is fragmented"
+            signals.append(_signal("volume_fragmented", "warning", f"{_drive(analysis)} is fragmented"
                                    + (f" ({fragmentation:g}%)" if fragmentation is not None else "")))
 
 
@@ -442,18 +451,18 @@ def _thermal_rules(snapshot: Mapping[str, Any], sections: Mapping[str, Any], sig
         celsius = _num(zone.get("celsius"))
         name = str(zone.get("zone") or "A thermal zone")
         if celsius is not None and celsius >= 90:
-            signals.append(_signal("thermals", "critical", f"{name} is at {celsius:g} °C"))
+            signals.append(_signal("thermal_zone_hot", "critical", f"{name} is at {celsius:g} °C"))
         elif celsius is not None and celsius >= 80:
-            signals.append(_signal("thermals", "warning", f"{name} is at {celsius:g} °C"))
+            signals.append(_signal("thermal_zone_hot", "warning", f"{name} is at {celsius:g} °C"))
         limit = _num(zone.get("passive_limit_percent"))
         if limit is not None and 0 < limit < 100:
-            signals.append(_signal("thermals", "warning", f"{name} is throttling the CPU to {limit:g}%"))
+            signals.append(_signal("thermal_throttling", "warning", f"{name} is throttling the CPU to {limit:g}%"))
     events = _num(thermal.get("thermal_events"))
     if events:
-        signals.append(_signal("thermals", "warning", f"{int(events)} thermal events recently"))
+        signals.append(_signal("thermal_events", "warning", f"{int(events)} thermal events recently"))
     speed_limit = _num(thermal.get("cpu_speed_limit"))
     if speed_limit is not None and 0 < speed_limit < 100:
-        signals.append(_signal("thermals", "warning", f"macOS is limiting the CPU to {speed_limit:g}% of its speed",
+        signals.append(_signal("cpu_speed_limited", "warning", f"macOS is limiting the CPU to {speed_limit:g}% of its speed",
                                "The Mac is too hot or its power supply is limited."))
     sensors = _dict(snapshot.get("sensors"))
     hottest: dict[str, float] = {}
@@ -468,14 +477,14 @@ def _thermal_rules(snapshot: Mapping[str, Any], sections: Mapping[str, Any], sig
         hottest[group] = max(hottest.get(group, value), value)
     for group, value in hottest.items():
         if value >= 95:
-            signals.append(_signal("thermals", "critical", f"{group} temperature is {value:g} °C",
+            signals.append(_signal("cpu_temperature_high" if group == "CPU" else "gpu_temperature_high", "critical", f"{group} temperature is {value:g} °C",
                                    "At this temperature the processor throttles hard and may shut down."))
         elif value >= 85:
-            signals.append(_signal("thermals", "warning", f"{group} temperature is {value:g} °C"))
+            signals.append(_signal("cpu_temperature_high" if group == "CPU" else "gpu_temperature_high", "warning", f"{group} temperature is {value:g} °C"))
     for reading in _list(sensors.get("readings")):
         if (isinstance(reading, dict) and str(reading.get("type") or "") == "Fan"
                 and _num(reading.get("value")) == 0 and hottest.get("CPU", 0) >= 70):
-            signals.append(_signal("thermals", "warning", f"{reading.get('name') or 'A fan'} reads 0 RPM while the CPU is hot"))
+            signals.append(_signal("fan_stopped", "warning", f"{reading.get('name') or 'A fan'} reads 0 RPM while the CPU is hot"))
             break
 
 
@@ -483,48 +492,48 @@ def _performance_rules(sections: Mapping[str, Any], signals: list[dict[str, str]
     cpu = _dict(sections.get("cpu"))
     load = _num(cpu.get("load_percent"))
     if load is not None and load >= 90:
-        signals.append(_signal("performance", "warning", f"CPU is busy ({load:g}% used)"))
+        signals.append(_signal("cpu_busy", "warning", f"CPU is busy ({load:g}% used)"))
     limit = _num(cpu.get("percent_performance_limit"))
     if limit is not None and 0 < limit < 90:
-        signals.append(_signal("thermals", "warning", f"CPU performance is limited to {limit:g}%",
+        signals.append(_signal("cpu_performance_limited", "warning", f"CPU performance is limited to {limit:g}%",
                                "Thermal or power limits are holding the processor back."))
     dpc = (_num(cpu.get("dpc_percent")) or 0) + (_num(cpu.get("interrupt_percent")) or 0)
     if dpc >= 10:
-        signals.append(_signal("drivers", "warning", f"Drivers use {dpc:g}% of CPU time in interrupts/DPCs",
+        signals.append(_signal("high_dpc_time", "warning", f"Drivers use {dpc:g}% of CPU time in interrupts/DPCs",
                                "A faulty driver often causes stutter and high DPC time."))
     logical = _num(cpu.get("logical_processors")) or 0
     queue = _num(cpu.get("processor_queue_length"))
     if queue is not None and logical and queue > 2 * logical:
-        signals.append(_signal("performance", "warning", f"{int(queue)} threads are waiting for the CPU"))
+        signals.append(_signal("cpu_queue_long", "warning", f"{int(queue)} threads are waiting for the CPU"))
     memory = _dict(sections.get("memory"))
     used = _num(memory.get("used_percent"))
     commit = _num(memory.get("commit_percent"))
     if commit is not None and commit >= 97:
-        signals.append(_signal("memory", "critical", f"Committed memory is at {commit:g}% of the limit"))
+        signals.append(_signal("memory_commit_high", "critical", f"Committed memory is at {commit:g}% of the limit"))
     elif commit is not None and commit >= 90:
-        signals.append(_signal("memory", "warning", f"Committed memory is at {commit:g}% of the limit"))
+        signals.append(_signal("memory_commit_high", "warning", f"Committed memory is at {commit:g}% of the limit"))
     if used is not None and used >= 90:
-        signals.append(_signal("memory", "warning", f"Memory is {used:g}% used"))
+        signals.append(_signal("memory_used_high", "warning", f"Memory is {used:g}% used"))
     pages = _num(memory.get("pages_per_sec"))
     if pages is not None and pages >= 1000:
-        signals.append(_signal("memory", "warning", f"Heavy paging ({int(pages)} pages/s)"))
+        signals.append(_signal("heavy_paging", "warning", f"Heavy paging ({int(pages)} pages/s)"))
     total = _num(memory.get("total_mb"))
     if total is not None and 0 < total < 7800:
-        signals.append(_signal("memory", "info", f"Only {total / 1024:.1f} GB of memory installed"))
+        signals.append(_signal("low_memory_installed", "info", f"Only {total / 1024:.1f} GB of memory installed"))
     performance = _dict(sections.get("performance"))
     boots = [_num(b.get("boot_ms")) for b in _list(performance.get("boots")) if isinstance(b, dict)]
     boots = [value for value in boots if value]
     if boots and boots[0] >= 120000:
-        signals.append(_signal("performance", "warning", f"Last boot took {boots[0] / 1000:.0f} seconds"))
+        signals.append(_signal("slow_boot", "warning", f"Last boot took {boots[0] / 1000:.0f} seconds"))
     stability_index = _num(performance.get("stability_index"))
     if stability_index is not None and stability_index < 5:
-        signals.append(_signal("stability", "warning", f"Reliability Monitor stability index is {stability_index:g} of 10"))
+        signals.append(_signal("low_stability_index", "warning", f"Reliability Monitor stability index is {stability_index:g} of 10"))
     component = _dict(sections.get("component_store"))
     state = str(component.get("state") or "")
     if state == "repairable":
-        signals.append(_signal("os", "warning", "The Windows component store is damaged but repairable"))
+        signals.append(_signal("component_store_repairable", "warning", "The Windows component store is damaged but repairable"))
     elif state == "not_repairable":
-        signals.append(_signal("os", "critical", "The Windows component store is damaged and cannot be repaired"))
+        signals.append(_signal("component_store_not_repairable", "critical", "The Windows component store is damaged and cannot be repaired"))
 
 
 def _stability_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> None:
@@ -532,41 +541,41 @@ def _stability_rules(sections: Mapping[str, Any], signals: list[dict[str, str]])
     days = int(_num(stability.get("window_days")) or 30)
     bugchecks = _num(stability.get("bugcheck_count"))
     if bugchecks:
-        signals.append(_signal("stability", "critical", f"{int(bugchecks)} blue screen crashes in {days} days"))
+        signals.append(_signal("blue_screens", "critical", f"{int(bugchecks)} blue screen crashes in {days} days"))
     panics = _num(stability.get("panic_count"))
     if panics:
-        signals.append(_signal("stability", "critical", f"{int(panics)} kernel panics in {days} days"))
+        signals.append(_signal("kernel_panics", "critical", f"{int(panics)} kernel panics in {days} days"))
     shutdowns = _num(stability.get("unexpected_shutdowns"))
     if shutdowns:
-        signals.append(_signal("stability", "warning", f"{int(shutdowns)} unexpected shutdowns or power losses in {days} days"))
+        signals.append(_signal("unexpected_shutdowns", "warning", f"{int(shutdowns)} unexpected shutdowns or power losses in {days} days"))
     whea = _num(stability.get("whea_errors"))
     if whea:
-        signals.append(_signal("hardware", "critical", f"{int(whea)} hardware (WHEA) errors in {days} days",
+        signals.append(_signal("whea_errors", "critical", f"{int(whea)} hardware (WHEA) errors in {days} days",
                                "WHEA errors come from the CPU, memory or PCIe devices and often precede hardware failure."))
     crashes = _num(stability.get("app_crashes"))
     if crashes and crashes >= 10:
-        signals.append(_signal("stability", "warning", f"{int(crashes)} application crashes in {days} days"))
+        signals.append(_signal("app_crashes", "warning", f"{int(crashes)} application crashes in {days} days"))
     services = _num(stability.get("service_crashes"))
     if services and services >= 5:
-        signals.append(_signal("services", "warning", f"Services stopped unexpectedly {int(services)} times in {days} days"))
+        signals.append(_signal("service_crashes", "warning", f"Services stopped unexpectedly {int(services)} times in {days} days"))
     drivers = _dict(sections.get("drivers"))
     problems = _num(drivers.get("problem_count"))
     if problems:
-        signals.append(_signal("drivers", "warning", f"{int(problems)} devices have a driver or hardware problem"))
+        signals.append(_signal("device_problems", "warning", f"{int(problems)} devices have a driver or hardware problem"))
     system = _dict(sections.get("system"))
     uptime = _num(system.get("uptime_hours"))
     if uptime is not None and uptime >= 720:
-        signals.append(_signal("updates", "warning", f"Not restarted for {uptime / 24:.0f} days"))
+        signals.append(_signal("long_uptime", "warning", f"Not restarted for {uptime / 24:.0f} days"))
     updates = _dict(sections.get("updates"))
     if any(value is True for value in _dict(updates.get("reboot_pending")).values()):
-        signals.append(_signal("updates", "warning", "A restart is waiting to finish installing updates"))
+        signals.append(_signal("reboot_pending", "warning", "A restart is waiting to finish installing updates"))
     last_hotfix = _dict(updates.get("last_hotfix"))
     installed = ai_troubleshooter._as_naive_utc(last_hotfix.get("installed_on"))
     if installed and _utcnow() - installed > timedelta(days=60):
-        signals.append(_signal("updates", "warning", f"No updates installed for {(_utcnow() - installed).days} days"))
+        signals.append(_signal("updates_stale", "warning", f"No updates installed for {(_utcnow() - installed).days} days"))
     failed = _num(updates.get("failed_updates"))
     if failed:
-        signals.append(_signal("updates", "warning", f"{int(failed)} update installs failed recently"))
+        signals.append(_signal("updates_failed", "warning", f"{int(failed)} update installs failed recently"))
 
 
 def _security_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> None:
@@ -575,23 +584,23 @@ def _security_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) 
     other_av = [p for p in _list(security.get("antivirus_products"))
                 if isinstance(p, dict) and "defender" not in str(p.get("name") or "").lower()]
     if defender and defender.get("realtime") is False and not other_av:
-        signals.append(_signal("security", "critical", "Real-time antivirus protection is off"))
+        signals.append(_signal("av_realtime_off", "critical", "Real-time antivirus protection is off"))
     age = _num(defender.get("signature_age_days"))
     if defender and age is not None and age > 7 and not other_av:
-        signals.append(_signal("security", "warning", f"Antivirus definitions are {int(age)} days old"))
+        signals.append(_signal("av_signatures_old", "warning", f"Antivirus definitions are {int(age)} days old"))
     for profile in _list(security.get("firewall")):
         if isinstance(profile, dict) and profile.get("enabled") is False:
-            signals.append(_signal("security", "warning", f"The {profile.get('profile') or ''} firewall profile is off".replace("  ", " ")))
+            signals.append(_signal("firewall_profile_off", "warning", f"The {profile.get('profile') or ''} firewall profile is off".replace("  ", " ")))
     battery = _dict(sections.get("battery"))
     condition = str(battery.get("condition") or "")
     if battery.get("present") and condition and condition.lower() not in {"good", "normal"}:
-        signals.append(_signal("battery", "warning", f"Battery condition: {condition}"))
+        signals.append(_signal("battery_condition", "warning", f"Battery condition: {condition}"))
     health = _num(battery.get("health_percent"))
     if battery.get("present") and health is not None:
         if health < 50:
-            signals.append(_signal("battery", "critical", f"Battery holds {health:g}% of its design capacity"))
+            signals.append(_signal("battery_worn", "critical", f"Battery holds {health:g}% of its design capacity"))
         elif health < 70:
-            signals.append(_signal("battery", "warning", f"Battery holds {health:g}% of its design capacity"))
+            signals.append(_signal("battery_worn", "warning", f"Battery holds {health:g}% of its design capacity"))
 
 
 def evaluate_snapshot(snapshot: Mapping[str, Any] | None) -> list[dict[str, str]]:
@@ -616,7 +625,7 @@ def evaluate_snapshot(snapshot: Mapping[str, Any] | None) -> list[dict[str, str]
             log_warning("AI health check rule failed", error=str(exc)[:300])
     pawnio = _dict(snapshot.get("pawnio"))
     if pawnio.get("status") == "removal_failed":
-        signals.append(_signal("hardware", "warning", "PawnIO could not be removed after the check",
+        signals.append(_signal("pawnio_not_removed", "warning", "PawnIO could not be removed after the check",
                                "Uninstall PawnIO from Apps & features."))
     signals.sort(key=lambda s: SEVERITY_RANK.get(s["severity"], 9))
     return signals
@@ -678,7 +687,9 @@ Respond with a single JSON object, no other text:
                "evidence": str, "source": str}],
  "steps": [{"action": str, "detail": str, "priority": "now"|"soon"|"routine", "area": str,
             "reference": str}],
- "required_logs": [{"source": str, "reason": str}]}
+ "required_logs": [{"source": str, "reason": str}],
+ "monitors": [{"title": str, "why": str, "log": str, "source": str, "event_ids": [int],
+               "level": "critical"|"error"|"warning"|"", "message_contains": str}]}
 
 Rules:
 - "summary": two to four sentences a technician can read first: overall condition, the
@@ -695,6 +706,13 @@ Rules:
   knowledge base article the step comes from, or "".
 - "required_logs": logs or data you did not have that would confirm or rule out a cause
   (an event log channel name or a full log file path), with why. Return [] if none.
+- "monitors": on Windows only (otherwise []), at most 6 Windows event log entries that would
+  flag the problems you found as soon as they happen again, so a technician can create an
+  event log rule that raises a ticket. "log" is the event log's full name (such as "System"
+  or "Microsoft-Windows-Ntfs/Operational"), "source" the event's provider name exactly as
+  logged, "event_ids" its event IDs; give a source, event IDs or both. Prefer events you saw
+  in the logs. Leave out problems MONITORS_ALREADY_SUGGESTED covers, and never guess an event
+  ID you are not sure of.
 - Never invent readings, log entries or URLs."""
 
 
@@ -820,7 +838,7 @@ def _parse_report(data: Mapping[str, Any] | None, raw_text: str) -> dict[str, An
     if not data:
         text = _clean(raw_text, 4000)
         return {"summary": text, "areas": [], "findings": [], "steps": [], "required_logs": [],
-                "overall_status": None}
+                "monitors": [], "overall_status": None}
     areas = []
     for entry in _list(data.get("areas")):
         if not isinstance(entry, Mapping):
@@ -880,6 +898,7 @@ def _parse_report(data: Mapping[str, Any] | None, raw_text: str) -> dict[str, An
         "findings": findings,
         "steps": steps,
         "required_logs": _list(data.get("required_logs")),
+        "monitors": _list(data.get("monitors")),
     }
 
 
@@ -996,12 +1015,14 @@ async def start_health_check(
     ticket: Mapping[str, Any] | None = None,
     allow_pawnio: bool | None = None,
     model: str | None = None,
+    run_source: str = RUN_SOURCE_MANUAL,
 ) -> dict[str, Any]:
     """Create a health check for ``asset`` and send the snapshot command to its device.
 
     ``asset`` needs ``id`` (or ``asset_id``), ``company_id`` and ``name``;
     ``device`` is the asset's active tray device in the same company. The
     health check is an RMM option: the asset must have the RMM agent deployed.
+    ``run_source`` is ``manual`` or ``scheduled`` (the monthly check).
     """
 
     asset_id = _int_or_none(asset.get("asset_id") or asset.get("id"))
@@ -1028,7 +1049,7 @@ async def start_health_check(
     check_id = await repo.create(
         company_id=company_id, asset_id=asset_id, tray_device_id=_int_or_none(device.get("id")),
         ticket_id=ticket_id, platform=platform, model=llm["model"], allow_pawnio=pawnio,
-        requested_by_user_id=user_id,
+        requested_by_user_id=user_id, run_source=run_source if run_source in RUN_SOURCE_LABELS else RUN_SOURCE_MANUAL,
     )
     await ai_required_logs.refresh_approvals()
     requests = baseline_log_requests(platform)
@@ -1073,7 +1094,7 @@ async def start_health_check(
     log_info(
         "AI health check started",
         health_check_id=check_id, asset_id=asset_id, command_id=command_id, delivered=delivered,
-        pawnio=pawnio, ticket_id=ticket_id,
+        pawnio=pawnio, ticket_id=ticket_id, run_source=run_source,
     )
     return {"id": check_id, "command_id": command_id, "delivered": delivered, "status": status,
             "model": llm["model"], "allow_pawnio": pawnio}
@@ -1294,6 +1315,18 @@ async def _research(check: Mapping[str, Any], terms: Sequence[str]) -> tuple[lis
     return kb_articles, web_pages, web_error
 
 
+async def _remediate(check: Mapping[str, Any], signals: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Queue the scripts admins linked to what the automatic checks found (best-effort)."""
+
+    if not signals:
+        return []
+    try:
+        return await health_check_remediation.run_for_check(check, signals)
+    except Exception as exc:  # noqa: BLE001 - the report is already written
+        log_warning("AI health check remediation failed", health_check_id=check.get("id"), error=str(exc)[:300])
+        return []
+
+
 async def run_report(health_check_id: int) -> None:
     """Write the final report: findings and the steps back to optimal performance."""
 
@@ -1334,10 +1367,14 @@ async def run_report(health_check_id: int) -> None:
         for index, page in enumerate(web_pages, start=1)
     ]
     llm = tray_service.build_troubleshoot_llm_config(str(check.get("model") or "") or None)
+    suggested = detections.monitors_for_signals(signals) if platform == "windows" else []
     ai_error: str | None = None
     try:
         text = await _chat(llm, ai_prompt_security.build_messages(
-            _REPORT_INSTRUCTIONS + _areas_text() + f"\n\nENDPOINT_PLATFORM: {platform}",
+            _REPORT_INSTRUCTIONS + _areas_text() + f"\n\nENDPOINT_PLATFORM: {platform}"
+            + "\nMONITORS_ALREADY_SUGGESTED:\n" + "\n".join(
+                f"- {m['name']}: " + "; ".join(detections.condition_text(c) for c in m["conditions"]) for m in suggested
+            ),
             records,
             task="Write the health report and the steps that bring this computer back to optimal performance.",
         ))
@@ -1345,7 +1382,8 @@ async def run_report(health_check_id: int) -> None:
     except Exception as exc:  # noqa: BLE001 - the rule flags still make a report
         ai_error = str(exc)[:300] or exc.__class__.__name__
         log_warning("AI health check report failed", health_check_id=health_check_id, error=ai_error)
-        parsed = {"summary": "", "overall_status": None, "areas": [], "findings": [], "steps": [], "required_logs": []}
+        parsed = {"summary": "", "overall_status": None, "areas": [], "findings": [], "steps": [], "required_logs": [],
+                  "monitors": []}
     await ai_required_logs.refresh_approvals()
     allowed = ai_troubleshooter.allowed_log_sources(platform)
     wanted, refused = ai_troubleshooter.parse_log_requests(
@@ -1381,6 +1419,7 @@ async def run_report(health_check_id: int) -> None:
         ],
         "web_error": web_error,
         "ai_error": ai_error,
+        "monitors": [*suggested, *detections.parse_model_monitors(parsed.pop("monitors"), platform, known=suggested)],
     })
     await repo.update(
         health_check_id, status=STATUS_COMPLETED, overall_status=overall,
@@ -1388,6 +1427,10 @@ async def run_report(health_check_id: int) -> None:
         stage_message="Report ready." if not ai_error else "Report ready (the AI model could not be reached).",
     )
     log_info("AI health check finished", health_check_id=health_check_id, overall=overall, score=rule_score)
+    remediations = await _remediate(check, signals)
+    if remediations:
+        report["remediations"] = remediations
+        await repo.update(health_check_id, report=report)
     if check.get("ticket_id"):
         await _ticket_note(check.get("ticket_id"), report_note(check, overall, rule_score if snapshot else None, report))
 
@@ -1412,6 +1455,11 @@ def report_note(check: Mapping[str, Any], overall: str, health_score: int | None
             for s in steps
         )
         parts.append(f"<p><strong>Recommended steps</strong></p><ol>{items}</ol>")
+    fixes = [r for r in _list(report.get("remediations")) if isinstance(r, Mapping)]
+    if fixes:
+        items = "".join(f"<li>{html.escape(str(r.get('label') or ''))}: {html.escape(str(r.get('summary') or ''))}</li>"
+                        for r in fixes)
+        parts.append(f"<p><strong>Automatic fixes</strong></p><ul>{items}</ul>")
     if report.get("ai_error"):
         parts.append("<p><em>The AI model could not be reached; the report shows the automatic checks only.</em></p>")
     return "".join(parts)
@@ -1430,6 +1478,7 @@ def present(check: Mapping[str, Any]) -> dict[str, Any]:
     item["overall_label"] = OVERALL_LABELS.get(str(check.get("overall_status") or ""), "")
     item["is_active"] = check.get("status") in ACTIVE_STATUSES
     item["url"] = report_url(int(check["id"]))
+    item["is_scheduled"] = check.get("run_source") == RUN_SOURCE_SCHEDULED
     return item
 
 

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% set company_label = company.name if company else "this company" %}
+{% set errors = errors | default({}) %}
+{% block title %}Monthly health checks{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/health_checks.css') }}"><link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
+{% block header_title %}
+  Monthly health checks
+  {% if company %}<span class="header__title-meta">{{ company.name }}</span>{% endif %}
+{% endblock %}
+{% block header_actions %}
+  {% set actions = [] %}
+  {% if can_edit %}{% set _ = actions.append({"label": "+ Add group", "type": "link", "variant": "primary", "href": "/health-checks/monthly?new=1#hc-group-modal"}) %}{% endif %}
+  {% set _ = actions.append({"label": "Health checks", "type": "link", "href": "/health-checks"}) %}
+  {% set _ = actions.append({"label": "Detections and fixes", "type": "link", "href": "/health-checks/detections"}) %}
+  {{ page_header_actions(actions, menu_id="hc-monthly-actions") }}
+{% endblock %}
+{% block content %}
+<section class="hc-workspace" aria-describedby="hc-monthly-intro">
+  <p id="hc-monthly-intro" class="hc-muted">A computer with the RMM agent gets one health check a month, at a random day and time when its tray app is online, if it matches <strong>any</strong> group that is on. Each group applies to {{ company_label }} or to every company, and can be narrowed with the same advanced device rules as Checks: for example VIP company workstations, or computers whose operating system contains Windows 11. A month in which a technician already ran a health check is skipped.</p>
+  {% if not monthly_enabled %}<div class="alert alert--warning" role="status">Monthly health checks are turned off (<code>HEALTH_CHECK_MONTHLY_ENABLED=false</code>); groups are kept but nothing is scheduled.</div>{% endif %}
+
+  {{ counter_strip([
+    {"label": "Groups on", "value": enabled_groups, "variant": "info"},
+    {"label": "Computers scheduled", "value": scheduled_count, "variant": "success", "title": company_label ~ "'s computers with a monthly health check"},
+  ]) }}
+
+  <section class="card card--panel" aria-labelledby="hc-groups-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-groups-title">Groups</h2><p class="card__subtitle">A computer is checked when it matches at least one group that is on.</p></div></header>
+    {% if groups %}
+    <ul class="hc-cards" role="list">
+      {% for group in groups %}
+      <li><article class="hc-card hc-card--{{ 'ok' if group.is_enabled else 'info' }}" id="group-{{ group.id }}">
+        <div class="hc-card__head">
+          <h3 class="hc-card__title">{{ group.name }}</h3>
+          <span class="hc-actions">
+            <span class="status status--{{ 'success' if group.is_enabled else 'neutral' }}">{{ 'On' if group.is_enabled else 'Off' }}</span>
+            <span class="scf-chip">{{ group.scope_label }}</span>
+            {% if group.has_rules %}<span class="scf-chip">Advanced rules</span>{% endif %}
+            {% if group.is_default %}<span class="scf-chip scf-chip--muted">Default</span>{% endif %}
+            {% if group.can_edit %}
+            <a class="button button--ghost button--small" href="/health-checks/monthly?group={{ group.id }}#hc-group-modal" aria-haspopup="dialog" aria-controls="hc-group-modal">Edit<span class="visually-hidden"> {{ group.name }}</span></a>
+            <form method="post" action="/health-checks/monthly/groups/{{ group.id }}/delete" data-confirm="Delete {{ group.name }}? Computers only in this group stop getting monthly health checks.">{% include "partials/csrf.html" %}<button class="button button--ghost button--small" type="submit">Delete<span class="visually-hidden"> {{ group.name }}</span></button></form>
+            {% endif %}
+          </span>
+        </div>
+        <p><span class="hc-muted">Checks</span> {{ group.rules_text }}{% if group.has_rules or group.scope == 'company' %} <span class="hc-muted">in {{ group.scope_label if group.scope == 'company' else 'every company' }}</span>{% endif %}.</p>
+      </article></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>No groups, so no computers get monthly health checks.{% if can_edit %} <a href="/health-checks/monthly?new=1#hc-group-modal">+ Add your first group</a>{% endif %}</p>
+    {% endif %}
+  </section>
+
+  <section class="card card--panel" aria-labelledby="hc-upcoming-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-upcoming-title">Upcoming checks</h2><p class="card__subtitle">{{ company_label }}'s computers in a group, soonest first{% if scheduled_count > upcoming | length %} (the first {{ upcoming | length }} of {{ scheduled_count }}){% endif %}. New matches are scheduled within ten minutes.</p></div></header>
+    {% if upcoming %}
+    <div class="table-wrapper"><table class="table">
+      <caption class="visually-hidden">Upcoming monthly health checks</caption>
+      <thead><tr><th scope="col">Computer</th><th scope="col">Next due</th><th scope="col">Last month</th></tr></thead>
+      <tbody>
+        {% for item in upcoming %}
+        <tr>
+          <td data-label="Computer"><a href="/assets/{{ item.asset_id }}#health-check">{{ item.asset_name or ('Asset ' ~ item.asset_id) }}</a></td>
+          <td data-label="Next due"><span data-utc="{{ item.next_run_at }}">{{ item.next_run_at }}</span></td>
+          <td data-label="Last month">{% if item.last_health_check_id %}<a href="/health-checks/{{ item.last_health_check_id }}">{{ item.last_result or 'Health check #' ~ item.last_health_check_id }}</a>{% else %}{{ item.last_result or '—' }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}
+    <p class="hc-muted">No computers are scheduled yet.</p>
+    {% endif %}
+  </section>
+</section>
+
+{% if editing %}
+<div class="modal" id="hc-group-modal" role="dialog" aria-modal="true" aria-labelledby="hc-group-modal-title" data-hc-open-modal="{{ 'group-' ~ editing.id if editing.id else 'hc-groups-title' }}">
+  <form class="modal__panel modal__panel--wide rmm-check-form" method="post" action="/health-checks/monthly/groups{% if editing.id %}/{{ editing.id }}{% endif %}" data-hc-group-form novalidate>
+    {% include "partials/csrf.html" %}
+    <input type="hidden" name="target_rules" value="{{ editing.target_rules | default(none) | tojson | forceescape }}">
+    <header class="modal__header">
+      <div>
+        <p class="hc-eyebrow">Monthly health checks</p>
+        <h2 class="modal__title" id="hc-group-modal-title">{{ 'Edit ' ~ editing.name if editing.id else 'Add a group' }}</h2>
+        <p class="text-muted">Computers matching this group get a health check once a month at a random day and time.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close the group editor"></button>
+    </header>
+    <div class="modal__body">
+      {% if errors %}<div class="alert alert--error" role="alert"><ul>{% for message in errors.values() %}<li>{{ message }}</li>{% endfor %}</ul></div>{% endif %}
+      <div class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="hc-group-name">Name</label>
+          <input class="form-input" id="hc-group-name" name="name" maxlength="255" required value="{{ editing.name }}" placeholder="VIP workstations">
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="hc-group-scope">Applies to</label>
+          <select class="form-input" id="hc-group-scope" name="scope">
+            <option value="company" {% if editing.scope == 'company' %}selected{% endif %}>{{ company_label }}</option>
+            {% if is_super_admin or editing.scope == 'global' %}<option value="global" {% if editing.scope == 'global' %}selected{% endif %}>Every company</option>{% endif %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="hc-group-target">Which computers</label>
+          <select class="form-input" id="hc-group-target" name="target_mode">
+            <option value="all" {% if editing.target_mode != 'rules' %}selected{% endif %}>Every computer in scope</option>
+            <option value="rules" {% if editing.target_mode == 'rules' %}selected{% endif %}>Computers matching device rules</option>
+          </select>
+        </div>
+      </div>
+      {% set targeting_id = 'hc-group-device-rules' %}{% include 'rmm/_device_rules.html' %}
+      <label class="form-checkbox"><input type="checkbox" name="is_enabled" value="1" {% if editing.is_enabled %}checked{% endif %}> Group is on</label>
+    </div>
+    <footer class="modal__footer">
+      <span class="hc-modal__spacer" aria-hidden="true"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button button--primary">Save group</button>
+    </footer>
+  </form>
+</div>
+{% endif %}
+<script src="{{ static_url('/static/js/health_checks.js') }}" defer></script>
+{% if editing %}<script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script><script src="{{ static_url('/static/js/health_check_groups.js') }}" defer></script>{% endif %}
+{% endblock %}

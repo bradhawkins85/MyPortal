@@ -138,6 +138,12 @@
       {% if errors %}
       <div class="alert alert--error" role="alert"><ul>{% for message in errors.values() %}<li>{{ message }}</li>{% endfor %}</ul></div>
       {% endif %}
+      {% if editing.suggestion %}
+      <div class="alert alert--info" role="status">
+        <p><strong>Suggested by a health check.</strong> {{ editing.suggestion.why }} The rule raises a ticket when a matching event arrives; review it, narrow it to one device if you prefer, and save.</p>
+        {% if not editing.suggestion.log_collected %}<p>It reads the <code>{{ editing.suggestion.log }}</code> log, which devices do not collect yet. Add it under <a href="/rmm/event-logs">Logs collected</a> on the Event logs page, or the rule never matches.</p>{% endif %}
+      </div>
+      {% endif %}
       <div class="form-grid">
         <div class="form-field">
           <label class="form-label" for="rmm-rule-name">Name</label>
