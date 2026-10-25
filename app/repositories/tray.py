@@ -466,6 +466,29 @@ async def list_devices(
     return [dict(r) for r in rows]
 
 
+async def list_devices_with_company(*, status: str | None = None) -> list[dict[str, Any]]:
+    """Return tray devices with ``company_name`` for the admin device list.
+
+    The company is the one that owns the device's linked asset. Devices with
+    no linked asset yet fall back to the company they enrolled under.
+    """
+    placeholder = "?" if db.is_sqlite() else "%s"
+    clauses: list[str] = ["1=1"]
+    params: list[Any] = []
+    if status:
+        clauses.append(f"td.status = {placeholder}")
+        params.append(status)
+    rows = await db.fetch_all(
+        "SELECT td.*, COALESCE(ac.name, dc.name) AS company_name "
+        "FROM tray_devices AS td "
+        "LEFT JOIN assets AS a ON a.id = td.asset_id "
+        "LEFT JOIN companies AS ac ON ac.id = a.company_id "
+        "LEFT JOIN companies AS dc ON dc.id = td.company_id "
+        f"WHERE {' AND '.join(clauses)} "  # nosec B608
+        "ORDER BY td.last_seen_utc DESC, td.created_at DESC",
+        tuple(params),
+    )
+    return [dict(r) for r in rows]
 
 
 async def list_active_devices_by_asset_ids(asset_ids: list[int]) -> dict[int, dict[str, Any]]:

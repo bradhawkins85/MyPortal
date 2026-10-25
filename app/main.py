@@ -8696,7 +8696,7 @@ async def _tray_devices_context(
     from app.repositories import tray as tray_repo
     from app.services import tray_installer as tray_installer_service
 
-    devices = await tray_repo.list_devices(status=(status or None))
+    devices = await tray_repo.list_devices_with_company(status=(status or None))
     if search:
         needle = search.strip().lower()
         devices = [
@@ -8704,6 +8704,7 @@ async def _tray_devices_context(
             if needle in str(d.get("hostname") or "").lower()
             or needle in str(d.get("device_uid") or "").lower()
             or needle in str(d.get("console_user") or "").lower()
+            or needle in str(d.get("company_name") or "").lower()
         ]
     tray_release = tray_installer_service.get_cached_latest_release_info()
     latest_tray_version = tray_release.get("version") if isinstance(tray_release, dict) else None

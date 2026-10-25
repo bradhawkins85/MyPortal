@@ -1,7 +1,7 @@
 // Health check pages: client-side search on the lists, a running report
-// that reloads when its stage changes, and the Detections page's script
-// editor, which the server renders open, and its lists of the assets that
-// report each detection.
+// that reloads when its stage changes, the modal editors (Detections'
+// script editor, Monthly's group editor), which the server renders open, and
+// the Detections page's lists of the assets that report each detection.
 (function () {
   'use strict';
 
@@ -71,8 +71,21 @@
     if (!modal || modal.hidden) return;
     var field = modal.querySelector('select, input:not([type="hidden"]), textarea');
     if (field) field.focus();
+    // The close button and Cancel hide the modal; main.js turns Escape into a
+    // click on the close button.
+    modal.addEventListener('click', function (event) {
+      if (!event.target.closest('[data-modal-close]')) return;
+      event.preventDefault();
+      modal.hidden = true;
+      var origin = document.getElementById(modal.getAttribute('data-hc-open-modal'));
+      if (origin) {
+        if (!origin.hasAttribute('tabindex')) origin.setAttribute('tabindex', '-1');
+        origin.focus();
+      }
+    });
     if (!window.MutationObserver || !window.history || !window.history.replaceState) return;
-    // Once closed, drop ?edit= so a reload does not open it again.
+    // Once closed, drop the query (?edit=, ?group=, ?new=) so a reload does not
+    // open it again.
     var observer = new MutationObserver(function () {
       if (!modal.hidden) return;
       observer.disconnect();
