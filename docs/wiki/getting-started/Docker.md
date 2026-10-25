@@ -69,11 +69,16 @@ HTTP port and forwards to it. An upgrade:
 3. Backs up the database to `/opt/myportal-docker/backups/`.
 4. Starts the new release in the idle slot while the current one keeps
    serving. Migrations run when it starts, and the upgrade waits until its
-   `/readyz` reports the new release.
+   `/readyz` reports the new release, which it does only once every Uvicorn
+   worker in the container (`WEB_CONCURRENCY`) has started.
 5. Switches the proxy to the new slot with a graceful nginx reload: requests
    already in progress finish on the old slot, new ones go to the new slot.
-6. After a short drain (`MYPORTAL_DRAIN_SECONDS`, 10 by default), stops the
-   old slot. Its container and image are kept for `rollback`.
+6. Waits until Docker reports the new slot healthy (the image's health check
+   runs every 30 seconds), so a reverse proxy that routes by container health,
+   such as Traefik with labels on `app_blue` and `app_green`, has a healthy
+   container to send requests to. Then, after a short drain
+   (`MYPORTAL_DRAIN_SECONDS`, 10 by default), it stops the old slot. Its
+   container and image are kept for `rollback`.
 
 If the new release doesn't become healthy, it is stopped and the proxy is
 never switched, so users see no interruption. The upgrade tells you which

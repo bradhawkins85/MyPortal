@@ -74,3 +74,34 @@ def test_readyz_returns_503_before_startup(monkeypatch):
     resp = client.get("/readyz")
     assert resp.status_code == 503
     assert resp.json()["checks"]["startup"] == "pending"
+
+
+def _ready_without_startup(monkeypatch) -> TestClient:
+    async def _ok(*args, **kwargs):
+        return {"1": 1}
+
+    monkeypatch.setattr(db, "fetch_one", _ok)
+    monkeypatch.setattr(main_module, "_app_ready", True)
+    # The non-context-manager form does not run startup events.
+    return TestClient(app)
+
+
+def test_readyz_waits_for_every_worker(monkeypatch):
+    client = _ready_without_startup(monkeypatch)
+    monkeypatch.setattr(main_module.worker_readiness, "status", lambda: "pending: 1 of 4 workers started")
+    resp = client.get("/readyz")
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["status"] == "not_ready"
+    assert body["checks"]["workers"] == "pending: 1 of 4 workers started"
+
+    monkeypatch.setattr(main_module.worker_readiness, "status", lambda: "ok")
+    resp = client.get("/readyz")
+    assert resp.status_code == 200
+    assert resp.json()["checks"]["workers"] == "ok"
+
+
+def test_readyz_omits_workers_for_a_single_process(monkeypatch):
+    resp = _ready_without_startup(monkeypatch).get("/readyz")
+    assert resp.status_code == 200
+    assert "workers" not in resp.json()["checks"]

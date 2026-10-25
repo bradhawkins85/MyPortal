@@ -158,6 +158,7 @@ from app.repositories import users as user_repo
 from app.services import knowledge_base as knowledge_base_service
 from app.services import system_update_history
 from app.services import system_updates as system_updates_service
+from app.services import worker_readiness
 from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
 from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
 from app.repositories import site_settings as site_settings_repo
@@ -3518,6 +3519,7 @@ async def on_startup() -> None:
 
     global _app_ready
     _app_ready = True
+    worker_readiness.mark_started()
     log_info("Application started", environment=settings.environment)
 
 
@@ -12471,8 +12473,9 @@ async def health_check():
 # before the database is reachable.
 #
 # ``/readyz`` is the deeper "is this instance ready to serve traffic"
-# check.  It returns 503 until startup has finished, the database is
-# reachable, and every registered feature pack is in a healthy state.
+# check.  It returns 503 until startup has finished in every worker of the
+# service, the database is reachable, and every registered feature pack is in
+# a healthy state.
 # nginx uses this to decide when a blue/green instance is back online
 # during a rolling deploy (see ``docs/zero_downtime_upgrades.md``).
 _app_ready: bool = False
@@ -12522,6 +12525,12 @@ async def readiness_probe() -> JSONResponse:
         except Exception as exc:
             checks["database"] = f"error: {exc.__class__.__name__}"
             ok = False
+        # With several Uvicorn workers, this one being ready says nothing about
+        # the rest; deployments must not switch to a service still starting.
+        workers = worker_readiness.status()
+        if workers is not None:
+            checks["workers"] = workers
+            ok = ok and workers == "ok"
 
     if feature_registry.list() and not feature_registry.all_loaded():
         checks["feature_packs"] = "degraded"

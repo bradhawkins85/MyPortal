@@ -30,7 +30,7 @@ Create the initial include before enabling the nginx site:
 ```console
 sudo install -d -m 0755 /etc/nginx/conf.d
 printf '%s\n' \
-  'server 127.0.0.1:8001 max_fails=1 fail_timeout=5s;' \
+  'server 127.0.0.1:8001 max_fails=0;' \
   'server 127.0.0.1:8002 down;' |
   sudo tee /etc/nginx/conf.d/myportal-active.inc
 sudo nginx -t
@@ -96,6 +96,22 @@ release read-only. It points only the inactive slot at that release, starts it,
 and requires both `/readyz` and the smoke endpoint to report the expected Git
 SHA. It then atomically writes the upstream include, runs `nginx -t`, reloads,
 waits `MYPORTAL_DRAIN_SECONDS`, and finally switches `current`.
+
+`/readyz` reports a slot ready only once every one of its Uvicorn workers
+(`WEB_CONCURRENCY`) has finished starting; until then its `workers` check
+reads, for example, `pending: 1 of 4 workers started`. Each worker accepts
+requests as soon as it has started, so a single worker's answer says nothing
+about the others, and if any worker fails to start, Uvicorn stops the whole
+slot, including the workers already serving. Waiting for all of them means
+nginx never switches to a slot that is still starting or about to stop. A
+worker that has still not started three minutes after the first one no
+longer holds the slot back. Once a slot has been ready, a worker restarted
+later does not make it report not ready again.
+
+The active server in the upstream include has `max_fails=0`. The other server
+is `down`, so there is nothing to fail over to, and counting failures would
+turn one failed request into several seconds of 502 responses for every
+request, including the health checks of a load balancer in front of nginx.
 
 An error during startup, version validation, smoke testing, nginx validation,
 or cutover restores the old upstream, inactive-slot link, and `current` link.

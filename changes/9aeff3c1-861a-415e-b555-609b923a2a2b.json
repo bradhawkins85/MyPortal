@@ -1,0 +1,7 @@
+{
+  "guid": "9aeff3c1-861a-415e-b555-609b923a2a2b",
+  "occurred_at": "2026-10-25T10:22Z",
+  "change_type": "Fix",
+  "summary": "Blue/green upgrades (bare-metal and Docker) switch to the new release only after all of its application workers have started, and a single failed request no longer takes the portal offline for several seconds, so a reverse proxy in front no longer reports \"no available server\" while the instances restart.",
+  "content_hash": "5186aab315a1cf04a3f9a518e13fc80d3385b4788b82640173994d6bd5d26eda"
+}
