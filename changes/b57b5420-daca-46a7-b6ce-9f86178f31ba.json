@@ -1,0 +1,7 @@
+{
+  "guid": "b57b5420-daca-46a7-b6ce-9f86178f31ba",
+  "occurred_at": "2026-10-25T07:42Z",
+  "change_type": "Fix",
+  "summary": "A health check started on a computer whose tray app is too old to run it now waits for the tray app to update (and asks it to), then runs automatically, instead of being sent to the old tray app, ignored and never started.",
+  "content_hash": "93c296ee073dcc3668cce2c34da181127efd0a8b59aebe0252fe5f408659aa0e"
+}

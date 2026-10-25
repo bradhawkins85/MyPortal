@@ -1212,6 +1212,14 @@ async def deliver_queued_commands(device: dict[str, Any]) -> dict[str, int]:
             if not await rmm_agent_deploy.ready_for_install(int(device["id"])):
                 continue
 
+        if command.get("command") == "health_check":
+            # Older tray apps ignore the health check too, so it waits until
+            # the device reports a tray version that runs it.
+            from app.services import ai_health_check
+
+            if not await ai_health_check.ready_for_device(int(device["id"])):
+                continue
+
         if await send_to_device(device_uid, payload):
             await tray_repo.mark_command_delivered(int(command["id"]))
             delivered += 1
