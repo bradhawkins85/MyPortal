@@ -1,0 +1,7 @@
+{
+  "guid": "0b2a7eda-7490-4ccd-a8a2-8f1ef0d6f1c0",
+  "occurred_at": "2026-10-25T06:57Z",
+  "change_type": "Fix",
+  "summary": "Fix the mobile menu still failing on phones with the portal app installed: the app now always loads the current navigation scripts and styles instead of an older cached copy, and picks up new releases without being closed.",
+  "content_hash": "3fd90337d5d5b00babeb0f62cc2a548ac1350caae3ba664477822fb03a7ed9c1"
+}
