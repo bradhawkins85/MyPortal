@@ -523,6 +523,42 @@ async def test_offline_device_queues_and_stale_checks_expire(store, monkeypatch)
     assert (await repo.get(check_id))["status"] == "analysing" and ("report", check_id) in store["scheduled"]
 
 
+def test_only_tray_apps_that_handle_the_command_get_it():
+    assert hc.tray_can_run({"agent_version": None})  # not reported yet: benefit of the doubt
+    assert hc.tray_can_run({"agent_version": "v0.9.10"})
+    assert hc.tray_can_run({"agent_version": "0.9.10-3-gabc123"})
+    assert hc.tray_can_run({"agent_version": "v0.10.0"})
+    assert not hc.tray_can_run({"agent_version": "v0.9.9"})
+    assert not hc.tray_can_run({"agent_version": "v0.9.5.3"})
+    assert not hc.tray_can_run({"agent_version": "0.0.0-dev"})
+
+
+@pytest.mark.anyio
+async def test_a_check_started_on_an_old_tray_runs_once_the_tray_app_updates(store):
+    await store["db"].execute("UPDATE tray_devices SET agent_version = 'v0.9.9' WHERE id = 5")
+    device = await _device(5)
+    started = await hc.start_health_check(asset={"id": 10, "company_id": 1, "name": "PC-01"},
+                                          device=device, requested_by={"id": 9})
+    assert started["status"] == "queued" and not started["delivered"]
+    # Only the tray app's own update goes out; the old tray app would ignore the check.
+    assert [payload["type"] for _uid, payload in store["sent"]] == ["update"]
+    check = await repo.get(started["id"])
+    assert "too old" in check["stage_message"] and "0.9.10" in check["stage_message"]
+    assert (await tray_repo.get_command(started["command_id"]))["status"] == "queued"
+
+    # Reconnecting before the update: the check is held back.
+    store["sent"].clear()
+    await tray_service.deliver_queued_commands(device)
+    assert store["sent"] == []
+    # The updated tray app reports its version: the check goes out (the drain
+    # reads the version fresh, not from the device it was handed at connect).
+    await store["db"].execute("UPDATE tray_devices SET agent_version = 'v0.9.10' WHERE id = 5")
+    await tray_service.deliver_queued_commands(device)
+    assert [(uid, payload["type"], payload["command_id"], payload["health_check_id"])
+            for uid, payload in store["sent"]] == [("dev-1", "health_check", started["command_id"], started["id"])]
+    assert (await tray_repo.get_command(started["command_id"]))["status"] == "delivered"
+
+
 @pytest.mark.anyio
 async def test_a_failed_logs_phase_still_writes_the_report(store):
     check_id = await repo.create(company_id=1, asset_id=10, tray_device_id=5, ticket_id=None, platform="windows",

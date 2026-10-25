@@ -28,6 +28,10 @@ Logs the model wanted but could not have (not on the approved list, or
 unreadable on the endpoint) are recorded for admins on ``/admin/required-logs``
 (:mod:`app.services.ai_required_logs`).
 
+Tray apps older than :data:`MIN_TRAY_VERSION` ignore the ``health_check``
+command, so on such a device the command stays queued and the tray app is
+asked to update; it goes out once the updated tray app reports its version.
+
 The model never decides what runs on the endpoint: log requests are checked
 against the approved list here and again on the device, and the snapshot
 script is fixed and read-only.
@@ -53,11 +57,16 @@ from app.repositories import tray as tray_repo
 from app.services import ai_prompt_security
 from app.services import ai_required_logs
 from app.services import ai_troubleshooter
+from app.services import rmm_agent_deploy
 from app.services import tray as tray_service
 from app.services import troubleshoot_web_search
 
 LLM_FEATURE = "ai_health_check"
 COMMAND = "health_check"
+# The first tray release whose service handles the health_check command. An
+# older tray app silently ignores it, so the command stays queued until the
+# device reports this version or later.
+MIN_TRAY_VERSION = (0, 9, 10)
 PHASE_SNAPSHOT = "snapshot"
 PHASE_LOGS = "logs"
 
@@ -918,12 +927,28 @@ async def expire_stale() -> int:
     return len(stale)
 
 
+def tray_can_run(device: Mapping[str, Any]) -> bool:
+    """Whether the device's tray app handles the health_check command."""
+
+    return rmm_agent_deploy.tray_version_at_least(device, MIN_TRAY_VERSION)
+
+
+async def ready_for_device(device_id: int) -> bool:
+    """Whether a queued health check may go to this device now (read fresh from the database,
+    because the tray app reports its new version after it reconnects)."""
+
+    device = await tray_repo.get_device_by_id(device_id)
+    return bool(device) and tray_can_run(device)
+
+
 async def dispatch_command(
     *, device: Mapping[str, Any], payload: dict[str, Any], initiated_by_user_id: int | None
 ) -> tuple[int, bool]:
     """Log a ``health_check`` tray command and deliver it now if the device is connected.
 
-    An offline device receives it from the queue when it reconnects.
+    An offline device receives it from the queue when it reconnects; a device
+    whose tray app is too old receives it once the updated tray app reports
+    its version.
     """
 
     command_id = await tray_repo.log_command(
@@ -934,7 +959,7 @@ async def dispatch_command(
         status="queued",
     )
     device_uid = str(device.get("device_uid") or "").strip()
-    delivered = bool(device_uid) and await tray_service.send_to_device(
+    delivered = bool(device_uid) and tray_can_run(device) and await tray_service.send_to_device(
         device_uid, {"type": COMMAND, "command_id": command_id, **payload}
     )
     if delivered:
@@ -1018,11 +1043,21 @@ async def start_health_check(
     }
     command_id, delivered = await dispatch_command(device=device, payload=payload, initiated_by_user_id=user_id)
     status = STATUS_COLLECTING if delivered else STATUS_QUEUED
-    message = (
-        "The device is collecting the health snapshot."
-        if delivered
-        else "The device is offline; it will run the health check when it reconnects."
-    )
+    if delivered:
+        message = "The device is collecting the health snapshot."
+    elif not tray_can_run(device):
+        message = (
+            f"The tray app on this computer ({device.get('agent_version')}) is too old to run health checks "
+            f"(version {rmm_agent_deploy.version_label(MIN_TRAY_VERSION)} or later is needed). It has been asked "
+            "to update; the health check runs once the updated tray app reports its version."
+        )
+        try:
+            await tray_service.dispatch_update_command(dict(device), initiated_by_user_id=user_id)
+        except Exception as exc:  # noqa: BLE001 - the check still runs once the tray app updates
+            log_warning("Could not ask the tray app to update for a health check",
+                        health_check_id=check_id, error=str(exc)[:300])
+    else:
+        message = "The device is offline; it will run the health check when it reconnects."
     await repo.update(check_id, command_id=command_id, status=status, stage_message=message, log_requests=requests)
     asset_name = str(asset.get("name") or f"asset #{asset_id}")
     if ticket_id:
@@ -1403,6 +1438,7 @@ __all__ = [
     "AREAS",
     "COMMAND",
     "HealthCheckError",
+    "MIN_TRAY_VERSION",
     "PHASE_LOGS",
     "PHASE_SNAPSHOT",
     "baseline_log_requests",
@@ -1411,6 +1447,7 @@ __all__ = [
     "expire_stale",
     "parse_snapshot",
     "present",
+    "ready_for_device",
     "receive_device_result",
     "record_device_status",
     "report_note",
@@ -1419,4 +1456,5 @@ __all__ = [
     "run_triage",
     "score",
     "start_health_check",
+    "tray_can_run",
 ]

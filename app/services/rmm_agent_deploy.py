@@ -36,6 +36,7 @@ import hashlib
 import json
 import re
 import shutil
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -344,8 +345,8 @@ def version_label(version: tuple[int, int, int]) -> str:
     return ".".join(str(part) for part in version)
 
 
-def tray_can_install(device: dict[str, Any]) -> bool:
-    """Whether the device's tray app handles install_rmm_agent.
+def tray_version_at_least(device: Mapping[str, Any], minimum: tuple[int, int, int]) -> bool:
+    """Whether the device's tray app is release ``minimum`` or later.
 
     A tray app that has not reported a version yet gets the benefit of the
     doubt; development builds (``0.0.0-dev``) and older releases do not.
@@ -355,7 +356,13 @@ def tray_can_install(device: dict[str, Any]) -> bool:
     if not reported:
         return True
     version = parse_version(reported)
-    return version is not None and version >= MIN_TRAY_VERSION
+    return version is not None and version >= minimum
+
+
+def tray_can_install(device: dict[str, Any]) -> bool:
+    """Whether the device's tray app handles install_rmm_agent."""
+
+    return tray_version_at_least(device, MIN_TRAY_VERSION)
 
 
 async def _published_tray_version(os_name: str) -> tuple[int, int, int] | None:

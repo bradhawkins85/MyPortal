@@ -12,6 +12,12 @@ asset page's **Actions** menu (**Run health check**, next to **Check in now**) o
 same RMM scripts write access as the other RMM actions; the check itself runs through the
 asset's tray app, which must be connected.
 
+The tray app runs health checks from version **0.9.10**. Started on a computer with an older
+tray app, the check waits (**Waiting for the device**) and MyPortal asks the tray app to update
+itself; the check goes out as soon as the updated tray app reports its new version, so you do
+not need to start it again. A check still waiting after 24 hours fails like any other check
+the device never picks up.
+
 Every check is listed under **Health checks** in the main menu (`/health-checks`). Users with
 RMM scripts access see their company's checks; helpdesk technicians and super admins see every
 company's.
