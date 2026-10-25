@@ -376,12 +376,31 @@
     return separator;
   };
 
+  // Let dropdowns use all the space below their actual position before
+  // scrolling, including nested fly-outs and after the viewport changes.
+  const syncTopMenuHeights = () => {
+    const topNavigation = document.body.classList.contains('navigation--top');
+    sidebarMenuRoot?.querySelectorAll('.menu__submenu--expanded').forEach((submenu) => {
+      if (!topNavigation) {
+        submenu.style.removeProperty('--menu-available-height');
+        return;
+      }
+      if (!submenu.getClientRects().length) return;
+      const availableHeight = Math.max(0, window.innerHeight - submenu.getBoundingClientRect().top - 8);
+      submenu.style.setProperty('--menu-available-height', `${availableHeight}px`);
+    });
+  };
+
+  window.addEventListener('resize', syncTopMenuHeights);
+  document.addEventListener('myportal:sidebar-updated', syncTopMenuHeights);
+
   const setMenuItemExpanded = (menuItem, expanded) => {
     const toggle = menuItem.querySelector(':scope > [data-menu-toggle]');
     const submenu = menuItem.querySelector(':scope > .menu__submenu');
     menuItem.classList.toggle('menu__item--expanded', expanded);
     submenu?.classList.toggle('menu__submenu--expanded', expanded);
     toggle?.setAttribute('aria-expanded', String(expanded));
+    syncTopMenuHeights();
   };
 
   // Returns null when none of the group's links are available to this
