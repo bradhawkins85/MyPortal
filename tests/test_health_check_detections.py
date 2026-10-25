@@ -59,6 +59,15 @@ def test_every_monitor_is_a_valid_event_log_rule():
     healthy = {"log_name": "System", "provider": "Microsoft-Windows-Ntfs", "event_id": 98, "level": 4, "message": "ok"}
     assert not rmm_event_log_rules.rule_matches(detections.MONITORS["ntfs_corruption"], healthy)
     assert rmm_event_log_rules.rule_matches(detections.MONITORS["ntfs_corruption"], {**healthy, "level": 3})
+    memory_test = {"log_name": "System", "provider": "Microsoft-Windows-MemoryDiagnostics-Results", "event_id": 1202,
+                   "level": 2, "message": "detected hardware errors"}
+    assert rmm_event_log_rules.rule_matches(detections.MONITORS["memory_diagnostics"], memory_test)
+    assert not rmm_event_log_rules.rule_matches(detections.MONITORS["memory_diagnostics"], {**memory_test, "level": 4})
+    start_type = {"log_name": "System", "provider": "Service Control Manager", "event_id": 7040, "level": 4,
+                  "message": "The start type of the Windows Update service was changed from demand start to disabled."}
+    assert rmm_event_log_rules.rule_matches(detections.MONITORS["update_service_changed"], start_type)
+    assert not rmm_event_log_rules.rule_matches(
+        detections.MONITORS["update_service_changed"], {**start_type, "message": "The start type of the Print Spooler service was changed."})
 
 
 def test_signals_carry_their_detection_key():

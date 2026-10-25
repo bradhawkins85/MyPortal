@@ -469,6 +469,21 @@ Add-Section 'security' {
         $t = Get-CimInstance -Namespace root/cimv2/Security/MicrosoftTpm -ClassName Win32_Tpm -ErrorAction Stop
         if ($t) { $tpm = [ordered]@{ enabled = $t.IsEnabled_InitialValue; activated = $t.IsActivated_InitialValue; version = Short $t.SpecVersion 40 } }
     } catch { }
+    $uac = $null
+    try { $uac = ([int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name EnableLUA -ErrorAction Stop).EnableLUA -ne 0) } catch { }
+    $smb1 = $null
+    try { $smb1 = [bool](Get-SmbServerConfiguration -ErrorAction Stop).EnableSMB1Protocol } catch { }
+    # Group Policy settings win over the local ones.
+    $rdp = $null; $nla = $null
+    try {
+        $policy = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ErrorAction SilentlyContinue
+        $deny = $policy.fDenyTSConnections
+        if ($null -eq $deny) { $deny = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -ErrorAction Stop).fDenyTSConnections }
+        $rdp = ([int]$deny -eq 0)
+        $auth = $policy.UserAuthentication
+        if ($null -eq $auth) { $auth = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -ErrorAction SilentlyContinue).UserAuthentication }
+        if ($null -ne $auth) { $nla = ([int]$auth -ne 0) }
+    } catch { }
     [ordered]@{
         defender = $defender
         antivirus_products = @(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct -ErrorAction SilentlyContinue | ForEach-Object { [ordered]@{ name = Short $_.displayName 80; state = ('0x{0:X6}' -f [int]$_.productState) } })
@@ -476,6 +491,35 @@ Add-Section 'security' {
         bitlocker = @(Get-CimInstance -Namespace root/cimv2/Security/MicrosoftVolumeEncryption -ClassName Win32_EncryptableVolume -ErrorAction SilentlyContinue | ForEach-Object { [ordered]@{ drive = $_.DriveLetter; protection_on = ([int]$_.ProtectionStatus -eq 1) } })
         secure_boot = $secureBoot
         tpm = $tpm
+        uac_enabled = $uac
+        smb1_enabled = $smb1
+        rdp_enabled = $rdp
+        rdp_nla = $nla
+    }
+}
+
+Add-Section 'activation' {
+    # The Windows product itself, not Office or other licensed applications.
+    $product = Get-CimInstance SoftwareLicensingProduct -Filter "ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL" -ErrorAction Stop | Select-Object -First 1
+    $LicenseNames = @{ 0 = 'Unlicensed'; 1 = 'Licensed'; 2 = 'Initial grace period'; 3 = 'Additional grace period'; 4 = 'Non-genuine grace period'; 5 = 'Notification'; 6 = 'Extended grace period' }
+    [ordered]@{
+        found = [bool]$product
+        license_status = $product.LicenseStatus
+        license_label = Map $LicenseNames $product.LicenseStatus
+        channel = Short $product.ProductKeyChannel 40
+        grace_minutes = $product.GracePeriodRemaining
+    }
+}
+
+Add-Section 'time_sync' {
+    $service = Get-CimInstance Win32_Service -Filter "Name='W32Time'" -ErrorAction SilentlyContinue
+    [ordered]@{
+        service_state = $service.State
+        service_start_mode = $service.StartMode
+        not_synced_events = Count-Events @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Time-Service'; Id = 36; StartTime = $since }
+        warnings = Count-Events @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Time-Service'; Level = @(2, 3); StartTime = $since }
+        recent_events = Recent-Events @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Time-Service'; Level = @(2, 3); StartTime = $since } 3
+        window_days = $days
     }
 }
 

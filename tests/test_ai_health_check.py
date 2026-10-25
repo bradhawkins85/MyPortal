@@ -133,6 +133,90 @@ def test_rules_on_a_healthy_or_empty_snapshot():
     assert hc.evaluate_snapshot({"sections": {"volumes": "x", "disks": [None, 3], "cpu": {"load_percent": "high"}}}) == []
 
 
+def test_rules_flag_security_os_service_and_network_problems(monkeypatch):
+    monkeypatch.setattr(hc, "_utcnow", lambda: datetime(2026, 10, 25, 9, 30))
+    signals = hc.evaluate_snapshot({"sections": {
+        "system": {"os": "Microsoft Windows 10 Pro", "build": "19045", "display_version": "22H2"},
+        "memory": {"total_mb": 16000, "commit_limit_mb": 16100, "page_files": []},
+        "volumes": [{"drive": "C:", "free_percent": 60, "boot_volume": True}, {"drive": "D:", "free_percent": 60}],
+        "disks": [{"name": "Old HDD", "media_type": "HDD", "power_on_hours": 52560}],
+        "stability": {"window_days": 30, "app_hangs": 12, "memory_diagnostics": [
+            {"level": "Error", "message": "The Windows Memory Diagnostic tested the computer's memory and detected hardware errors."},
+        ]},
+        "services": {"stopped_automatic": [
+            {"name": "Spooler", "display_name": "Print Spooler", "exit_code": 1067},
+            {"name": "sppsvc", "display_name": "Software Protection", "exit_code": 0},
+            {"name": "gupdate", "display_name": "Google Update", "exit_code": 1077},
+        ]},
+        "updates": {"windows_update_service": "Disabled"},
+        "security": {"defender": {"realtime": True, "signature_age_days": 0, "tamper_protected": False,
+                                  "quick_scan_age_days": 4294967295},
+                     "antivirus_products": [],
+                     "bitlocker": [{"drive": "C:", "protection_on": False}, {"drive": "D:", "protection_on": False}],
+                     "secure_boot": False, "tpm": {"enabled": True, "activated": False},
+                     "uac_enabled": False, "smb1_enabled": True, "rdp_enabled": True, "rdp_nla": False},
+        "activation": {"found": True, "license_status": 5, "license_label": "Notification"},
+        "time_sync": {"not_synced_events": 2},
+        "network": {"interface_errors": [{"name": "Intel Ethernet", "received_errors": 250, "outbound_errors": 0},
+                                         {"name": "Wi-Fi", "received_errors": 3, "received_discarded": 9000}]},
+    }})
+    by_key = {}
+    for signal in signals:
+        by_key.setdefault(signal["key"], []).append(signal["title"])
+    assert by_key["os_unsupported"] == ["Windows 10 Pro 22H2 has been out of support since 14 October 2025"]
+    assert by_key["no_page_file"] == ["There is no page file"]
+    assert by_key["disk_old"] == ["Old HDD has been powered on for 6.0 years"]
+    assert by_key["app_hangs"] == ["12 programs stopped responding in 30 days"]
+    assert by_key["memory_errors_found"] == ["The latest memory test found errors"]
+    assert by_key["auto_services_stopped"] == ["1 automatic services are stopped with an error"]
+    assert next(s for s in signals if s["key"] == "auto_services_stopped")["detail"] == "Print Spooler"
+    assert by_key["windows_update_disabled"] == ["The Windows Update service is disabled"]
+    assert by_key["tamper_protection_off"] == ["Antivirus tamper protection is off"]
+    assert by_key["av_scan_overdue"] == ["No antivirus quick scan has ever finished"]
+    assert by_key["bitlocker_off"] == ["BitLocker is off on the system drive C:"]
+    for key in ("secure_boot_off", "tpm_not_ready", "uac_disabled", "smb1_enabled", "rdp_without_nla",
+                "windows_not_activated", "time_not_syncing"):
+        assert len(by_key[key]) == 1, key
+    assert by_key["network_errors"] == ["Intel Ethernet has 250 errors since the last restart"]
+
+
+def test_windows_support_dates_follow_the_edition(monkeypatch):
+    monkeypatch.setattr(hc, "_utcnow", lambda: datetime(2026, 10, 25, 9, 30))
+
+    def keys(caption, build):
+        return [s["key"] for s in hc.evaluate_snapshot({"sections": {"system": {"os": caption, "build": build}}})]
+
+    # 23H2: Home and Pro ended in November 2025, Enterprise ends within 90 days.
+    assert keys("Microsoft Windows 11 Pro", "22631") == ["os_unsupported"]
+    assert keys("Microsoft Windows 11 Enterprise", "22631") == ["os_support_ending"]
+    assert keys("Microsoft Windows 11 Enterprise", "26100") == []
+    assert keys("Microsoft Windows 10 Pro", "18363") == ["os_unsupported"]
+    # Long-term servicing, IoT, Server and unknown builds have their own lifecycles.
+    for caption, build in (("Microsoft Windows 10 Enterprise LTSC", "19044"), ("Microsoft Windows 10 IoT Enterprise", "19045"),
+                           ("Microsoft Windows Server 2022 Standard", "20348"), ("Microsoft Windows 11 Pro", "27000"),
+                           ("Microsoft Windows 11 Pro", None)):
+        assert keys(caption, build) == [], caption
+
+
+def test_new_rules_stay_quiet_on_healthy_or_ambiguous_values():
+    assert hc.evaluate_snapshot({"sections": {
+        # An empty page file list with room in the commit limit is a failed query, not no page file.
+        "memory": {"total_mb": 16000, "commit_limit_mb": 24000, "page_files": []},
+        "disks": [{"name": "SSD", "media_type": "SSD", "power_on_hours": 60000}],
+        "stability": {"memory_diagnostics": [{"level": "Information", "message": "detected no errors"},
+                                             {"level": "Error", "message": "detected hardware errors"}]},
+        "security": {"defender": {"realtime": True, "signature_age_days": 0, "tamper_protected": False,
+                                  "quick_scan_age_days": 30},
+                     "antivirus_products": [{"name": "Other AV"}],
+                     "bitlocker": [{"drive": "D:", "protection_on": False}],
+                     "secure_boot": None, "tpm": {"enabled": True, "activated": True},
+                     "uac_enabled": True, "smb1_enabled": False, "rdp_enabled": False, "rdp_nla": False},
+        "activation": {"found": True, "license_status": 1},
+        "updates": {"windows_update_service": "Manual"},
+        "network": {"interface_errors": [{"name": "Wi-Fi", "received_errors": 99}]},
+    }}) == []
+
+
 def test_macos_rules():
     signals = hc.evaluate_snapshot({"sections": {
         "thermal": {"cpu_speed_limit": 70},
@@ -208,7 +292,7 @@ def test_snapshot_script_reports_the_values_the_rules_read():
     assert script.isascii()
     for section in ("system", "cpu", "memory", "volumes", "disks", "smart_predictions", "chkdsk", "defrag",
                     "thermal", "performance", "stability", "drivers", "services", "updates", "security",
-                    "battery", "network", "power", "component_store"):
+                    "battery", "network", "power", "component_store", "activation", "time_sync"):
         assert f"Add-Section '{section}'" in script, section
     for key in ("free_percent", "free_gb", "dirty", "boot_volume", "health", "operational_status", "wear_percent",
                 "temperature_c", "read_errors_uncorrected", "write_errors_uncorrected", "predict_failure",
@@ -218,7 +302,12 @@ def test_snapshot_script_reports_the_values_the_rules_read():
                 "logical_processors", "used_percent", "commit_percent", "pages_per_sec", "total_mb", "boot_ms",
                 "stability_index", "bugcheck_count", "unexpected_shutdowns", "whea_errors", "app_crashes",
                 "service_crashes", "problem_count", "uptime_hours", "reboot_pending", "installed_on",
-                "failed_updates", "realtime", "signature_age_days", "health_percent", "window_days"):
+                "failed_updates", "realtime", "signature_age_days", "health_percent", "window_days",
+                "app_hangs", "memory_diagnostics", "stopped_automatic", "exit_code", "windows_update_service",
+                "power_on_hours", "page_files", "commit_limit_mb", "tamper_protected", "quick_scan_age_days",
+                "bitlocker", "protection_on", "secure_boot", "tpm", "uac_enabled", "smb1_enabled", "rdp_enabled",
+                "rdp_nla", "display_version", "build", "found", "license_status", "license_label",
+                "not_synced_events", "interface_errors", "received_errors", "outbound_errors"):
         assert re.search(r"\b" + key + r" = ", script), key
     macos = (ROOT / "tray/internal/healthcheck/snapshot_darwin.go").read_text(encoding="utf-8")
     for key in ("cpu_speed_limit", "panic_count", "smart_status", "condition", "health_percent", "free_percent"):
