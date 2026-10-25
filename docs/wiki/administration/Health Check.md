@@ -186,6 +186,17 @@ to are found. The report's **Automatic fixes** section, the ticket note (for che
 a ticket) and the asset's script run history (**Health check fix**) show what was queued.
 Linking scripts needs RMM scripts write access; links and their removal are audited.
 
+Tick **Create a ticket** on a link, with or without a script, to raise a ticket for the
+computer's company, with the asset linked, for a technician to investigate when a health check
+finds the detection. The ticket lists what was found and links to the report. While it is open,
+later health checks that find the detection on that asset add an internal update to it instead
+of raising another; once it is closed the next one raises a new ticket. Tickets raised show in
+the report's **Automatic fixes** section too.
+
+Each detection's **Assets** button shows how many of the company's assets report it in their
+latest completed health check, and opens a list of them with what was found, its severity and a
+link to that health check's report.
+
 ## Required logs
 
 The AI troubleshooter and the health check only read event logs and log files on the
@@ -218,8 +229,8 @@ The approved list is the built-in channels and folders, plus
 | `/api/assets/{asset_id}/health-checks` | POST | Helpdesk / super admin | Start a check; body `{"allow_pawnio": bool, "model": str, "ticket_id": int}` (all optional) |
 | `/api/health-checks` | GET | Helpdesk / super admin | Recent checks (`?asset_id=`) |
 | `/api/health-checks/{id}` | GET | Helpdesk / super admin | A check with its snapshot and report |
-| `/api/health-checks/detections` | GET | Helpdesk / super admin | Every detection with its event log rules and linked scripts (`?company_id=` adds that company's) |
-| `/api/health-checks/detections/{key}/remediation` | PUT / DELETE | Helpdesk / super admin | Link a script: `{"company_id": int, "script_id": int, "timeout_seconds": int, "is_enabled": bool, "values": {"param:Name": str}}` (no `company_id` for every company, super admins); `DELETE ?company_id=` removes it |
+| `/api/health-checks/detections` | GET | Helpdesk / super admin | Every detection with its event log rules and linked scripts (`?company_id=` adds that company's links and the assets reporting each detection) |
+| `/api/health-checks/detections/{key}/remediation` | PUT / DELETE | Helpdesk / super admin | Link a script and/or a ticket: `{"company_id": int, "script_id": int, "create_ticket": bool, "timeout_seconds": int, "is_enabled": bool, "values": {"param:Name": str}}` (no `company_id` for every company, super admins); `DELETE ?company_id=` removes it |
 | `/api/health-checks/monthly/groups` | GET / POST | Helpdesk / super admin | Monthly check groups (`?company_id=`); create one with `{"name": str, "company_id": int, "target_rules": {...}, "is_enabled": bool}` |
 | `/api/health-checks/monthly/groups/{id}` | PUT / DELETE | Helpdesk / super admin | Change or delete a group |
 | `/rmm/event-logs/rules?new=1&suggest={monitor}` | GET | RMM scripts write | The event log rule form filled in from a suggestion (`&health_check={id}&monitor={n}` for one a report suggested) |

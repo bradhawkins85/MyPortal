@@ -1,6 +1,7 @@
 // Health check pages: client-side search on the lists, a running report
-// that reloads when its stage changes, and the modal editors (Detections'
-// script editor, Monthly's group editor), which the server renders open.
+// that reloads when its stage changes, the modal editors (Detections'
+// script editor, Monthly's group editor), which the server renders open, and
+// the Detections page's lists of the assets that report each detection.
 (function () {
   'use strict';
 
@@ -93,9 +94,49 @@
     observer.observe(modal, { attributes: true, attributeFilter: ['hidden'] });
   }
 
+  function setupAssetLists() {
+    var open = null;
+    var opener = null;
+
+    function close() {
+      if (!open) return;
+      open.hidden = true;
+      open.setAttribute('aria-hidden', 'true');
+      open = null;
+      if (opener) opener.focus();
+      opener = null;
+    }
+
+    document.addEventListener('click', function (event) {
+      var button = event.target.closest('[data-hc-assets-open]');
+      if (button) {
+        var modal = document.getElementById(button.getAttribute('data-hc-assets-open'));
+        if (!modal) return;
+        event.preventDefault();
+        close();
+        open = modal;
+        opener = button;
+        modal.hidden = false;
+        modal.style.display = '';
+        modal.setAttribute('aria-hidden', 'false');
+        var closeButton = modal.querySelector('[data-modal-close]');
+        if (closeButton) closeButton.focus();
+        return;
+      }
+      if (open && (event.target === open || (open.contains(event.target) && event.target.closest('[data-modal-close]')))) {
+        event.preventDefault();
+        close();
+      }
+    });
+    document.addEventListener('keydown', function (event) {
+      if (open && (event.key === 'Escape' || event.key === 'Esc')) close();
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     setupSearch();
     setupPolling();
     setupOpenModal();
+    setupAssetLists();
   });
 })();
