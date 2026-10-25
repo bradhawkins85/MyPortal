@@ -55,3 +55,25 @@ def test_company_edit_loads_collapsible_section_state_script():
     template = TEMPLATE.read_text()
 
     assert "static/js/company_edit_sections.js" in template
+
+
+def test_overview_chips_split_comma_separated_payment_methods():
+    from jinja2 import Environment
+
+    template = TEMPLATE.read_text()
+    labels = next(line for line in template.splitlines() if "set ce_payment_labels" in line)
+    loop = next(
+        line for line in template.splitlines() if "ce_payment_labels.get(method" in line
+    )
+    rendered = Environment().from_string(labels + loop)
+
+    # payment_method is stored as a comma-separated string, not a list.
+    html = rendered.render(form_data={"payment_method": "invoice_prepay"})
+    assert html.count("<li") == 1
+    assert "Invoice prepay" in html
+
+    html = rendered.render(form_data={"payment_method": "invoice_prepay,stripe"})
+    assert html.count("<li") == 2
+    assert "Invoice prepay" in html and "Stripe" in html
+
+    assert "<li" not in rendered.render(form_data={"payment_method": ""})
