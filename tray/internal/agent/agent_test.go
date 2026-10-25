@@ -365,7 +365,26 @@ func TestAgentAllowsApprovedEventLogsOnlyWhereChannelsApply(t *testing.T) {
 	if got := a.AllowedSource("Microsoft-Windows-Kernel-EventTracing/Admin"); got != platformExtraChannels {
 		t.Fatalf("approved channel allowed=%v on a platform where extra channels apply=%v", got, platformExtraChannels)
 	}
-	if a.AllowedSource("Microsoft-Windows-Something/Else") {
-		t.Fatal("unapproved channel allowed")
+	// Every well-formed event log channel is readable where event logs exist.
+	if got := a.AllowedSource("Microsoft-Windows-Something/Else"); got != platformExtraChannels {
+		t.Fatalf("unlisted channel allowed=%v on a platform where event logs apply=%v", got, platformExtraChannels)
+	}
+	for _, bad := range []string{"/q:evil", "-flag", "Bad  Name", " System"} {
+		if a.AllowedSource(bad) {
+			t.Fatalf("malformed channel %q allowed", bad)
+		}
+	}
+}
+
+func TestValidEventLogChannel(t *testing.T) {
+	for _, name := range []string{"Application", "Microsoft-Windows-Kernel-EventTracing/Admin", "Microsoft-Windows-Windows Defender/Operational"} {
+		if !ValidEventLogChannel(name) {
+			t.Fatalf("%q rejected", name)
+		}
+	}
+	for _, name := range []string{"", "/q:x", "a/b/c", "C:\\Windows\\x.log", "two  spaces", "trail "} {
+		if ValidEventLogChannel(name) {
+			t.Fatalf("%q accepted", name)
+		}
 	}
 }

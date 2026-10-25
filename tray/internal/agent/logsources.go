@@ -35,10 +35,10 @@ type LogSpec struct {
 	Window time.Duration
 }
 
-// WindowsLogSources is the allowlist of Windows Event Log channels the agent
-// may read. The server offers the LLM exactly these names; anything else is
-// refused here, so a request can never name an arbitrary channel. Log files
-// are requested separately with FileSourcePrefix (see logfiles.go).
+// WindowsLogSources are the Windows Event Log channels the server describes
+// to the LLM. Any other well-formed channel name may also be read (see
+// ValidEventLogChannel); only log files, requested separately with
+// FileSourcePrefix (see logfiles.go), are limited to allowlisted folders.
 // Keep in sync with WINDOWS_LOG_SOURCES in app/services/ai_troubleshooter.py.
 var WindowsLogSources = []string{
 	"System",
@@ -83,6 +83,12 @@ const maxExtraEventLogs = 50
 // Keep in sync with _CHANNEL_RE in app/services/ai_required_logs.py.
 var extraEventLogRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,150}(/[A-Za-z0-9][A-Za-z0-9 ._-]{0,60})?$`)
 
+// ValidEventLogChannel reports whether name is a well-formed Windows event
+// log channel name that wevtutil can be asked to read.
+func ValidEventLogChannel(name string) bool {
+	return name == strings.TrimSpace(name) && extraEventLogRe.MatchString(name) && !strings.Contains(name, "  ")
+}
+
 // ExtraEventLogs validates the event log channels the server's owner allowed
 // on top of WindowsLogSources (TROUBLESHOOT_EVENT_LOGS_WINDOWS and channels
 // approved on the required logs page). It returns the channels to allow and
@@ -95,7 +101,7 @@ func ExtraEventLogs(extra []string) ([]string, []string) {
 		if name == "" || seen[name] || isWindowsLogSource(name) {
 			continue
 		}
-		if len(channels) >= maxExtraEventLogs || !extraEventLogRe.MatchString(name) || strings.Contains(name, "  ") {
+		if len(channels) >= maxExtraEventLogs || !ValidEventLogChannel(name) {
 			ignored = append(ignored, name)
 			continue
 		}

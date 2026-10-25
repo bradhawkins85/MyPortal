@@ -667,12 +667,13 @@ Rules:
   overheating throttling"). Never include names, hostnames, serial numbers, IP or email
   addresses.
 - "log_requests": only logs that are not in ALREADY_COLLECTED and would confirm or rule
-  out a cause (at most 6). "source" is one of ALLOWED_LOG_SOURCES exactly, or a log file
+  out a cause (at most 6). "source" is one of ALLOWED_LOG_SOURCES exactly, any other
+  Windows event log by its exact channel name (as Event Viewer shows it), or a log file
   as "file:<absolute path>" inside ALLOWED_LOG_FILE_FOLDERS ending in one of
   ALLOWED_LOG_FILE_EXTENSIONS (a * wildcard may stand for a file or folder name). "hours"
-  is how far back to read (1-72). If you need a log that is not allowed, still request it
-  with its exact event log channel name or full file path: it is not collected but is
-  listed for an administrator to approve. Return [] when no more logs are needed."""
+  is how far back to read (1-72). If you need a log file outside the allowed folders,
+  still request it with its full path: it is not collected but is listed for an
+  administrator to approve. Return [] when no more logs are needed."""
 
 _REPORT_INSTRUCTIONS = """You are a senior IT support engineer at a managed-service provider
 writing a health report for one computer. You have its health snapshot, the problems
@@ -1058,7 +1059,7 @@ async def start_health_check(
         "phase": PHASE_SNAPSHOT,
         "log_requests": requests,
         "extra_log_folders": ai_troubleshooter.extra_log_folders(platform),
-        "extra_event_logs": ai_troubleshooter.extra_event_logs(platform),
+        "extra_event_logs": ai_troubleshooter.job_event_logs(platform, requests),
         "allow_pawnio": pawnio,
         "event_days": DEFAULT_SNAPSHOT_EVENT_DAYS,
     }
@@ -1283,7 +1284,7 @@ async def run_triage(health_check_id: int) -> None:
             "phase": PHASE_LOGS,
             "log_requests": requests,
             "extra_log_folders": ai_troubleshooter.extra_log_folders(platform),
-            "extra_event_logs": ai_troubleshooter.extra_event_logs(platform),
+            "extra_event_logs": ai_troubleshooter.job_event_logs(platform, requests),
             "allow_pawnio": False,
         }
         command_id, delivered = await dispatch_command(

@@ -20,9 +20,10 @@ an internal (staff-only) note:
    solutions.
 
 The LLM never chooses what runs on the endpoint: log sources it suggests are
-validated against a fixed allowlist here and again on the device. Log files an
-article names (``file:<path>``) must sit in an allowlisted log folder and have
-a log file extension.
+validated here and again on the device. Any Windows event log channel may be
+read (it must be a well-formed channel name); log files an article names
+(``file:<path>``) must sit in an allowlisted log folder and have a log file
+extension.
 """
 
 from __future__ import annotations
@@ -277,6 +278,41 @@ def extra_event_logs(platform: str) -> list[str]:
         if len(channels) >= _MAX_EXTRA_EVENT_LOGS:
             break
     return channels
+
+
+def is_event_log_channel(source: str, platform: str) -> bool:
+    """True when ``source`` is a well-formed Windows event log channel name.
+
+    Every Windows event log is readable by the AI agents; only log files are
+    restricted to allowlisted folders. The tray agent repeats the check.
+    """
+
+    return (
+        platform != "macos"
+        and ai_required_logs.source_kind(source) == ai_required_logs.KIND_EVENT_LOG
+        and ai_required_logs.looks_like_log_source(source, platform)
+    )
+
+
+def job_event_logs(platform: str, requests: Sequence[Mapping[str, Any]] = ()) -> list[str]:
+    """The ``extra_event_logs`` for a tray job: requested and approved channels.
+
+    Requested channels outside the built-in list come first so tray agents
+    that still only read allowlisted channels collect them.
+    """
+
+    if platform == "macos":
+        return []
+    channels: list[str] = []
+    for request in requests:
+        source = str(request.get("source") or "")
+        if source in WINDOWS_LOG_SOURCES or source in channels or not is_event_log_channel(source, platform):
+            continue
+        channels.append(source)
+    for channel in extra_event_logs(platform):
+        if channel not in channels:
+            channels.append(channel)
+    return channels[:_MAX_EXTRA_EVENT_LOGS]
 
 
 def allowed_log_sources(platform: str) -> dict[str, str]:
@@ -771,10 +807,12 @@ Rules:
   name, e.g. "file:C:\\Windows\\CCM\\Logs\\AppEnforce*.log"; wildcard requests only read
   files changed in the last "hours". %TEMP%, %ProgramData%, %SystemRoot%, %AppData%
   and %LocalAppData% are expanded for you (user folders are read for every profile).
-- If a step needs a log that is not on the allowed lists, still request it: use the
-  exact event log channel name as Event Viewer shows it (for example
-  "Microsoft-Windows-Kernel-EventTracing/Admin") or the log file's full path. It will
-  not be collected this time, but it is listed for an administrator to approve."""
+- On Windows any event log may be requested, not just ALLOWED_LOG_SOURCES: use the
+  exact channel name as Event Viewer shows it (for example
+  "Microsoft-Windows-Kernel-EventTracing/Admin").
+- If a step needs a log file outside the allowed folders, still request it with its
+  full path. It will not be collected this time, but it is listed for an administrator
+  to approve."""
 
 _PLAN_WEB_INSTRUCTIONS = """
 Some records are public web pages (record_id "web-N"). Also return
@@ -844,7 +882,7 @@ def parse_log_requests(
             continue
         raw_source = " ".join(str(entry.get("source") or "").split())
         source = raw_source
-        if source not in allowed:
+        if source not in allowed and not is_event_log_channel(source, platform):
             source = normalise_file_source(source, platform) or ""
         reason = _clean(entry.get("reason"), 400) or default_reason
         if not source:
@@ -858,7 +896,9 @@ def parse_log_requests(
                 refused.append({"source": raw_source[:400], "reason": reason})
                 seen.add(key)
             continue
-        if source in seen or len(requests) >= MAX_LOG_REQUESTS:
+        # Windows channel names are case-insensitive.
+        key = source.casefold() if is_event_log_channel(source, platform) else source
+        if key in seen or len(requests) >= MAX_LOG_REQUESTS:
             continue
         try:
             hours = int(entry.get("hours") or DEFAULT_LOG_HOURS)
@@ -866,7 +906,7 @@ def parse_log_requests(
             hours = DEFAULT_LOG_HOURS
         hours = max(1, min(MAX_LOG_HOURS, hours))
         requests.append({"source": source, "reason": reason, "hours": hours})
-        seen.add(source)
+        seen.add(key)
     return requests, refused
 
 
@@ -1577,7 +1617,7 @@ async def run_research_and_plan(
         "mode": MODE_COLLECT_LOGS,
         "log_requests": remote_requests,
         "extra_log_folders": extra_log_folders(platform),
-        "extra_event_logs": extra_event_logs(platform),
+        "extra_event_logs": job_event_logs(platform, remote_requests),
         tray_service.SERVER_CONTEXT_KEY: server_context,
     }
     try:
@@ -1947,6 +1987,8 @@ __all__ = [
     "allowed_log_file_roots",
     "extra_event_logs",
     "extra_log_folders",
+    "is_event_log_channel",
+    "job_event_logs",
     "normalise_file_source",
     "file_source_matches",
     "parse_log_requests",

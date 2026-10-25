@@ -435,10 +435,14 @@ async def test_full_health_check_flow(store, monkeypatch):
     assert check["status"] == "collecting" and check["command_id"] != started["command_id"]
     uid, logs_payload = store["sent"][-1]
     assert logs_payload["phase"] == "logs" and logs_payload["allow_pawnio"] is False
-    assert logs_payload["log_requests"] == [{"source": "file:C:\\Windows\\Logs\\CBS\\CBS.log", "reason": "Servicing errors", "hours": 48}]
-    refused = await required_repo.get_by_key(
-        ai_required_logs.source_key("windows", "not_allowed", "Microsoft-Windows-Kernel-EventTracing/Admin"))
-    assert refused["approve_kind"] == "event_log" and refused["approve_value"] == "Microsoft-Windows-Kernel-EventTracing/Admin"
+    # Any event log channel is collected without approval.
+    assert logs_payload["log_requests"] == [
+        {"source": "file:C:\\Windows\\Logs\\CBS\\CBS.log", "reason": "Servicing errors", "hours": 48},
+        {"source": "Microsoft-Windows-Kernel-EventTracing/Admin", "reason": "ETW sessions failing", "hours": 24},
+    ]
+    assert logs_payload["extra_event_logs"] == ["Microsoft-Windows-Kernel-EventTracing/Admin"]
+    assert await required_repo.get_by_key(
+        ai_required_logs.source_key("windows", "not_allowed", "Microsoft-Windows-Kernel-EventTracing/Admin")) is None
 
     # The extra logs arrive and the report is written.
     store["scheduled"].clear()
@@ -454,7 +458,7 @@ async def test_full_health_check_flow(store, monkeypatch):
     assert check["overall_status"] == "critical" and check["health_score"] == 0
     report = check["report"]
     assert report["steps"][0]["action"] == "Back up the data" and report["triage"]["issues"][0]["area"] == "storage"
-    assert report["required_logs"]["not_allowed"][0]["source"] == "Microsoft-Windows-Kernel-EventTracing/Admin"
+    assert report["required_logs"]["not_allowed"][0]["source"] == "file:C:\\Vendor\\app\\trace.log"
     assert {s["phase"] for s in check["logs"]["sources"]} == {"snapshot", "logs"}
     vendor = await required_repo.get_by_key(ai_required_logs.source_key("windows", "not_allowed", "file:C:\\Vendor\\app\\trace.log"))
     assert vendor["approve_kind"] == "folder" and vendor["approve_value"] == "C:\\Vendor\\app"
