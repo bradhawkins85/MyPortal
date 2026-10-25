@@ -365,7 +365,11 @@ instance_port() { [[ "$1" == blue ]] && printf 8001 || printf 8002; }
 write_upstream_file() {
   local active="$1" inactive="$2" tmp="${UPSTREAM_FILE}.new.$$"
   mkdir -p "$(dirname "$UPSTREAM_FILE")"
-  printf 'server 127.0.0.1:%s max_fails=1 fail_timeout=5s;\nserver 127.0.0.1:%s down;\n' \
+  # max_fails=0: the other slot is down, so there is nothing to fail over to.
+  # Counting failures would turn one failed request (a worker restarting, a
+  # slow report) into seconds of 502s for every request, including the health
+  # checks of a load balancer in front, which then drops the whole portal.
+  printf 'server 127.0.0.1:%s max_fails=0;\nserver 127.0.0.1:%s down;\n' \
     "$(instance_port "$active")" "$(instance_port "$inactive")" >"$tmp"
   chmod 644 "$tmp"
   mv -f "$tmp" "$UPSTREAM_FILE"

@@ -1331,3 +1331,24 @@ def test_gitea_provisioning_uses_target_revision_with_dirty_control_checkout(tmp
         assert "stale helper ran" not in result.stderr
     assert stale_helper.read_text() == 'echo "stale helper ran" >&2\nexit 99\n'
     assert (control / "upgrade.sh").read_text() == "local edits\n"
+
+
+def test_upstream_never_marks_the_only_live_slot_failed(tmp_path):
+    """The other slot is down, so failure accounting on the live one would turn
+    one failed request into seconds of 502s for every request (and for the
+    health checks of a load balancer in front)."""
+
+    functions = SCRIPT[SCRIPT.index("instance_port() {") : SCRIPT.index("\nwrite_upstream() {")]
+    functions += SCRIPT[SCRIPT.index("read_active() {") : SCRIPT.index("\nwait_for_version() {")]
+    upstream = tmp_path / "myportal-active.inc"
+    result = subprocess.run(
+        ["bash", "-c", "set -Eeuo pipefail\n" + functions + '\nwrite_upstream_file green blue\nread_active'],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "UPSTREAM_FILE": str(upstream)},
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert upstream.read_text() == "server 127.0.0.1:8002 max_fails=0;\nserver 127.0.0.1:8001 down;\n"
+    assert result.stdout == "green"

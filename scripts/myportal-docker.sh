@@ -929,9 +929,12 @@ refresh_app_trusted_proxies() {
 
 write_active_slot() {
   # Atomically point the proxy's upstream at SLOT; nginx re-reads it on reload.
+  # max_fails=0: with one server there is nothing to fail over to, and
+  # counting failures would turn one failed request into seconds of 502s for
+  # everything, including the health checks of a reverse proxy in front.
   local tmp
   tmp=$(mktemp "${PROXY_DIR}/.active-slot.XXXXXX")
-  printf '# Managed by myportal-docker.\nserver app_%s:8000 resolve;\n' "$1" >"$tmp"
+  printf '# Managed by myportal-docker.\nserver app_%s:8000 resolve max_fails=0;\n' "$1" >"$tmp"
   chmod 0644 "$tmp"
   mv -f "$tmp" "${PROXY_DIR}/active-slot.inc"
 }
@@ -1254,6 +1257,8 @@ deploy_release() {
   set_setting "$PROJECT_ENV" MYPORTAL_VERSION "$tag"
   info "MyPortal ${tag} is now serving from the ${idle} slot."
   if [[ -n "$active" ]]; then
+    wait_for_container_health "app_${idle}" \
+      || warn "Docker does not report the ${idle} slot healthy yet; a reverse proxy that routes by container health may not send it requests until it does."
     info "Letting the ${active} slot finish its requests (${MYPORTAL_DRAIN_SECONDS}s), then stopping it…"
     sleep "$MYPORTAL_DRAIN_SECONDS"
     compose stop "app_${active}" >&2 || warn "could not stop the ${active} slot."
@@ -1322,6 +1327,28 @@ wait_for_proxy() {
   done
   warn "the proxy does not serve MyPortal ${tag} (last response: ${body:-none})."
   compose logs --tail 20 proxy >&2 || true
+  return 1
+}
+
+wait_for_container_health() {
+  # wait_for_container_health SERVICE: wait until Docker reports SERVICE's
+  # container healthy. Reverse proxies that route by container health (such as
+  # Traefik with labels on the slots) send it nothing before then, so the
+  # previous slot must keep running until it is. The image checks every 30s.
+  # A container without a health check counts as healthy.
+  local service="$1" container health="" start=$SECONDS reported=false
+  while ((SECONDS - start < 120)); do
+    container=$(service_container "$service")
+    [[ -n "$container" ]] || return 1
+    health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null) \
+      || health=""
+    case "$health" in healthy|none) return 0 ;; esac
+    if [[ "$reported" != true ]]; then
+      info "Waiting for Docker to report ${service} healthy (currently ${health:-unknown})…"
+      reported=true
+    fi
+    sleep 2
+  done
   return 1
 }
 

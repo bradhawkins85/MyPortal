@@ -32,6 +32,11 @@ def test_live_slot_runs_jobs(slot):
     assert deployment_slot.is_serving_slot() is True
 
 
+def test_upstream_written_by_current_upgrades_is_understood(slot):
+    slot.upstream.write_text("server 127.0.0.1:8002 max_fails=0;\nserver 127.0.0.1:8001 down;\n")
+    assert deployment_slot.active_slot() == "green"
+
+
 def test_standby_slot_skips_jobs(slot):
     slot.upstream.write_text(LIVE_GREEN)
     assert deployment_slot.is_serving_slot() is False

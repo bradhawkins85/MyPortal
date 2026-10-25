@@ -433,7 +433,7 @@ def test_proxy_config_applies_only_valid_trusted_proxies(tmp_path):
     # The application only ever sees the address the proxy determined.
     assert "proxy_set_header X-Forwarded-For $remote_addr;" in config
     assert (proxy_dir / "active-slot.inc").read_text(encoding="utf-8").splitlines()[-1] == (
-        "server app_green:8000 resolve;"
+        "server app_green:8000 resolve max_fails=0;"
     )
     assert (proxy_dir / "myportal-unavailable.html").is_file()
     assert oct(proxy_dir.stat().st_mode & 0o777) == oct(0o755)
@@ -467,6 +467,7 @@ def _deploy_harness(tmp_path, *, ready: bool) -> str:
         f'switch_proxy() {{ echo "switch_proxy $*" >> "{calls}"; }}\n'
         "refresh_app_trusted_proxies() { :; }\n"
         "wait_for_proxy() { :; }\n"
+        f'wait_for_container_health() {{ echo "wait_for_container_health $*" >> "{calls}"; }}\n'
         f"wait_for_service() {{ {'true' if ready else 'false'}; }}\n"
         "service_container() { :; }\n"
     )
@@ -481,7 +482,48 @@ def test_deploy_switches_to_the_idle_slot_once_ready(tmp_path):
         assert line in settings.splitlines()
     calls = (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
     assert "compose up -d --no-deps --force-recreate app_green" in calls
-    assert calls.index("switch_proxy green") < calls.index("compose stop app_blue")
+    # The old slot keeps running until Docker reports the new one healthy, for
+    # reverse proxies that route by container health.
+    assert (
+        calls.index("switch_proxy green")
+        < calls.index("wait_for_container_health app_green")
+        < calls.index("compose stop app_blue")
+    )
+
+
+def _health_harness(tmp_path, *states: str) -> str:
+    """Stub docker inspect to report STATES for the container, one per call."""
+    states_file = tmp_path / "states"
+    states_file.write_text("".join(f"{state}\n" for state in states), encoding="utf-8")
+    return (
+        'service_container() { echo container-id; }\n'
+        "sleep() { :; }\n"
+        f'docker() {{ local state; state=$(head -n1 "{states_file}"); sed -i 1d "{states_file}"; '
+        '[[ $state != fail ]] || return 1; echo "$state"; }\n'
+    )
+
+
+@pytest.mark.parametrize(
+    ("states", "waited"),
+    [(("healthy",), False), (("none",), False), (("starting", "fail", "starting", "healthy"), True)],
+)
+def test_container_health_wait(tmp_path, states, waited):
+    result = _run(_health_harness(tmp_path, *states) + "wait_for_container_health app_green")
+    assert result.returncode == 0, result.stderr
+    assert ("Waiting for Docker to report app_green healthy (currently starting)" in result.stderr) is waited
+
+
+def test_container_health_wait_gives_up(tmp_path):
+    result = _run(
+        _health_harness(tmp_path, *(["unhealthy"] * 3))
+        + "SECONDS=0; sleep() { SECONDS=$((SECONDS + 60)); }\nwait_for_container_health app_green"
+    )
+    assert result.returncode != 0
+
+
+def test_container_health_wait_needs_the_container(tmp_path):
+    result = _run(_health_harness(tmp_path, "healthy") + "service_container() { :; }\nwait_for_container_health app_green")
+    assert result.returncode != 0
 
 
 def test_deploy_leaves_the_serving_slot_alone_when_the_release_fails(tmp_path):

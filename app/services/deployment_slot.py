@@ -8,7 +8,7 @@ code (for example a queued request picked up by the old release).
 ``scripts/upgrade.sh`` records the live slot in the nginx upstream include,
 which it writes world-readable as::
 
-    server 127.0.0.1:8001 max_fails=1 fail_timeout=5s;
+    server 127.0.0.1:8001 max_fails=0;
     server 127.0.0.1:8002 down;
 
 A process whose ``APP_INSTANCE_ID`` slot is not the live one is the standby.

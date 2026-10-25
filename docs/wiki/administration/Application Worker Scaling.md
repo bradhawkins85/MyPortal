@@ -126,3 +126,11 @@ The inactive service is started and validated before an upgrade cutover, so
 sizing only for the active service can make deployments fail even when normal
 request traffic appears healthy.
 
+An upgrade switches to the new service only after all of its workers have
+started. If any worker fails to start (for example because MySQL refuses more
+connections), Uvicorn stops the whole service, and the upgrade waits for
+systemd or Docker to start it again, or times out and leaves the previous
+release serving. When upgrades take a long time to become ready, look for
+`failed to start, stopping the parent process` in the new slot's log
+(`journalctl -u myportal@green.service`, or `myportal-docker logs`).
+
