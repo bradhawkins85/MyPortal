@@ -379,6 +379,42 @@ def test_list_install_tokens_includes_company_name(tray_db, run):
     assert rows[0]["company_name"] == "ACME"
 
 
+def test_list_devices_with_company_prefers_the_asset_company(tray_db, run):
+    from app.repositories import tray as repo
+    from app.services import tray as svc
+
+    run(tray_db.execute(
+        "CREATE TABLE IF NOT EXISTS assets (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER NOT NULL)"
+    ))
+    enrolled_id = int(run(tray_db.execute_returning_lastrowid(
+        "INSERT INTO companies (name, tray_chat_enabled) VALUES (?, ?)", ("Enrolled Co", 0)
+    )))
+    owner_id = int(run(tray_db.execute_returning_lastrowid(
+        "INSERT INTO companies (name, tray_chat_enabled) VALUES (?, ?)", ("Asset Owner Co", 0)
+    )))
+    asset_id = int(run(tray_db.execute_returning_lastrowid(
+        "INSERT INTO assets (company_id) VALUES (?)", (owner_id,)
+    )))
+
+    def _create(uid: str, asset: int | None, status: str) -> None:
+        raw = svc.generate_auth_token()
+        run(repo.create_device(
+            company_id=enrolled_id, asset_id=asset, device_uid=uid, enrolment_token_id=None,
+            auth_token_hash=svc.hash_token(raw), auth_token_prefix=svc.token_prefix(raw),
+            os="windows", os_version="11.0", hostname=uid, serial_number=None,
+            agent_version="0.1.0", console_user=None, status=status,
+        ))
+
+    _create("linked", asset_id, "active")
+    _create("unlinked", None, "pending")
+
+    names = {d["device_uid"]: d["company_name"] for d in run(repo.list_devices_with_company())}
+    assert names == {"linked": "Asset Owner Co", "unlinked": "Enrolled Co"}
+
+    active = run(repo.list_devices_with_company(status="active"))
+    assert [d["device_uid"] for d in active] == ["linked"]
+
+
 def test_device_create_update_revoke(tray_db, run):
     from app.repositories import tray as repo
     from app.services import tray as svc
