@@ -148,14 +148,22 @@
 
   {% if remediations %}
   <section class="card card--panel" aria-labelledby="hc-fixes-title">
-    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-fixes-title">Automatic fixes</h2><p class="card__subtitle">Scripts linked to what the automatic checks found, queued on the computer's RMM agent when this check completed. <a href="/health-checks/detections">Detections and fixes</a></p></div></header>
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-fixes-title">Automatic fixes</h2><p class="card__subtitle">Scripts queued on the computer's RMM agent and tickets raised for what the automatic checks found, when this check completed. <a href="/health-checks/detections">Detections and fixes</a></p></div></header>
     <ul class="hc-cards" role="list">
       {% for fix in remediations %}
+        {% if fix.kind == 'ticket' %}
+        <li><article class="hc-card hc-card--{{ 'ok' if fix.ticket_id else 'warning' }}">
+          <div class="hc-card__head"><h3 class="hc-card__title">Ticket{% if fix.ticket_label %} {{ fix.ticket_label }}{% endif %}</h3><span class="hc-actions">{% if fix.ticket_id %}<span class="status status--info">For a technician</span>{% else %}<span class="status status--warning">Not raised</span>{% endif %} <span class="scf-chip scf-chip--muted">{{ 'This company' if fix.scope == 'company' else 'Every company' }}</span></span></div>
+          <p class="hc-card__meta">For: {{ fix.label }}</p>
+          <p>{{ fix.summary }}{% if fix.ticket_id %} <a href="/admin/tickets/{{ fix.ticket_id }}">Open the ticket</a>{% endif %}</p>
+        </article></li>
+        {% else %}
         <li><article class="hc-card hc-card--{{ 'ok' if fix.run_id else 'warning' }}">
           <div class="hc-card__head"><h3 class="hc-card__title">{{ fix.script_name }}</h3><span class="hc-actions">{% if fix.run_id %}<span class="status status--info">Queued</span>{% else %}<span class="status status--warning">Not run</span>{% endif %} <span class="scf-chip scf-chip--muted">{{ 'This company' if fix.scope == 'company' else 'Every company' }}</span></span></div>
           <p class="hc-card__meta">For: {{ fix.label }}</p>
           <p>{{ fix.summary }}{% if fix.run_id %} <a href="/assets/{{ check.asset_id }}#scripts">See the run on the asset page</a>{% endif %}</p>
         </article></li>
+        {% endif %}
       {% endfor %}
     </ul>
   </section>

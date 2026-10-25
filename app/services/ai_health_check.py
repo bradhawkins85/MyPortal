@@ -1316,7 +1316,7 @@ async def _research(check: Mapping[str, Any], terms: Sequence[str]) -> tuple[lis
 
 
 async def _remediate(check: Mapping[str, Any], signals: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Queue the scripts admins linked to what the automatic checks found (best-effort)."""
+    """Queue the scripts and raise the tickets admins linked to what the automatic checks found (best-effort)."""
 
     if not signals:
         return []

@@ -302,7 +302,8 @@ async def store(monkeypatch):
           (6, 1, NULL, 'dev-2', 'windows', 'pc-02', 'sn2', 'active'),
           (7, 2, 20, 'dev-3', 'windows', 'other', 'SN3', 'revoked');
     """)
-    for migration in ("519_ai_health_checks.sql", "520_ai_health_check_schedules.sql"):
+    for migration in ("519_ai_health_checks.sql", "520_ai_health_check_schedules.sql",
+                      "521_ai_health_check_detection_tickets.sql"):
         await conn.executescript(Database()._adapt_sql_for_sqlite(
             (ROOT / "migrations" / migration).read_text(encoding="utf-8")))
     fake = _SqliteDb(conn)

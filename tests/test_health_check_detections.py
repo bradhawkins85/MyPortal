@@ -390,6 +390,101 @@ async def test_no_scripts_run_without_an_rmm_agent_or_on_other_platforms(store, 
     assert await remediation.run_for_check({"id": 1, "company_id": 1, "asset_id": 10}, []) == []
 
 
+@pytest.mark.anyio
+async def test_links_can_raise_a_ticket_and_update_it_while_open(store, scripts, monkeypatch):
+    await scripts["setup"]()
+    # Every company: a ticket alone is enough, without a script.
+    with pytest.raises(remediation.RemediationError, match="Choose a script, or create a ticket"):
+        await remediation.save_link(detection_key="blue_screens", scope="global", company_id=1,
+                                    form={"is_enabled": "1"}, user_id=9, is_super_admin=True)
+    link_id = await remediation.save_link(detection_key="blue_screens", scope="global", company_id=1,
+                                          form={"create_ticket": "1", "is_enabled": "1"}, user_id=9,
+                                          is_super_admin=True)
+    link = await remediation_repo.get(link_id)
+    assert link["create_ticket"] and link["is_enabled"] and link["script_id"] is None
+    await remediation.save_link(detection_key="volume_almost_full", scope="company", company_id=1,
+                                form={"script_id": "2", "create_ticket": "1", "is_enabled": "1"}, user_id=9,
+                                is_super_admin=True)
+
+    tickets: dict[int, dict] = {}
+    updates: list[tuple[int, str, str]] = []
+
+    async def raise_ticket(*, agent, subject, description, reference, priority="normal"):
+        ticket = {"id": 70 + len(tickets), "ticket_number": None, "status": "open", "agent": agent,
+                  "subject": subject, "description": description, "reference": reference}
+        tickets[ticket["id"]] = ticket
+        return ticket
+
+    async def open_ticket(ticket_id):
+        ticket = tickets.get(ticket_id)
+        return ticket if ticket and ticket["status"] != "closed" else None
+
+    async def add_ticket_update(ticket, *, body, reference):
+        updates.append((ticket["id"], body, reference))
+
+    monkeypatch.setattr(remediation.rmm_actions, "raise_ticket", raise_ticket)
+    monkeypatch.setattr(remediation.rmm_actions, "open_ticket", open_ticket)
+    monkeypatch.setattr(remediation.rmm_actions, "add_ticket_update", add_ticket_update)
+    signals = [{"key": "volume_almost_full", "title": "C: is almost full", "severity": "critical"},
+               {"key": "blue_screens", "title": "3 blue <b>screens</b>", "detail": "in 30 days", "severity": "critical"}]
+    check = {"id": 4, "company_id": 1, "asset_id": 10, "asset_name": "PC-01"}
+    results = await remediation.run_for_check(check, signals)
+    by_kind = [(r["detection"], r.get("kind", "script")) for r in results]
+    assert by_kind == [("volume_almost_full", "script"), ("volume_almost_full", "ticket"), ("blue_screens", "ticket")]
+    assert [r["ticket_id"] for r in results[1:]] == [70, 71]
+    raised = tickets[71]
+    assert raised["subject"] == detections.DETECTIONS["blue_screens"]["label"] + ": PC-01"
+    assert raised["agent"] == {"company_id": 1, "asset_id": 10}
+    assert raised["reference"] == "health-check-detection:blue_screens:10"
+    assert "3 blue &lt;b&gt;screens&lt;/b&gt; — in 30 days" in raised["description"]
+    assert 'href="/health-checks/4"' in raised["description"]
+    assert results[2]["summary"] == "Raised ticket #71 for PC-01."
+    # The ticket-only link counts its runs; a script link counts the script once.
+    assert (await remediation_repo.get(link_id))["run_count"] == 1
+    assert (await remediation_repo.get_for_scope("volume_almost_full", 1))["run_count"] == 1
+
+    # Found again while the ticket is open: an update, not another ticket.
+    results = await remediation.run_for_check({**check, "id": 5}, signals[1:])
+    assert results[0]["ticket_id"] == 71 and results[0]["summary"] == "Updated ticket #71 for PC-01."
+    assert updates[0][0] == 71 and "again" in updates[0][1] and len(tickets) == 2
+    # Once it is closed, a new ticket.
+    tickets[71]["status"] = "closed"
+    results = await remediation.run_for_check({**check, "id": 6}, signals[1:])
+    assert results[0]["ticket_id"] == 72 and await remediation_repo.get_ticket("blue_screens", 10) == 72
+
+    # Turned off, or with neither a script nor a ticket for the company, nothing happens.
+    await remediation.save_link(detection_key="blue_screens", scope="company", company_id=1,
+                                form={"create_ticket": "1"}, user_id=9, is_super_admin=False)
+    assert await remediation.run_for_check({**check, "id": 7}, signals[1:]) == []
+
+
+@pytest.mark.anyio
+async def test_assets_reporting_a_detection_come_from_their_latest_check(store):
+    from app.features.health_check.detection_routes import reporting_assets
+
+    async def check(asset_id, status, signals, company_id=1):
+        check_id = await repo.create(company_id=company_id, asset_id=asset_id, tray_device_id=None, ticket_id=None,
+                                     platform="windows", model="m", allow_pawnio=False, requested_by_user_id=None)
+        await repo.update(check_id, status=status, report={"signals": signals}, completed=status == "completed")
+        return check_id
+
+    full = {"key": "volume_almost_full", "title": "C: is almost full", "severity": "critical"}
+    low = {"key": "volume_low_space", "title": "D: is low on space", "severity": "warning"}
+    await check(10, "completed", [full])
+    latest_10 = await check(10, "completed", [low, {**full, "title": "E: is almost full", "severity": "warning"}, full])
+    await check(10, "queued", [])  # not completed yet: the last completed check still counts
+    await check(11, "completed", [full])
+    await check(11, "completed", [])  # fixed since
+    await check(20, "completed", [full], company_id=2)
+    found = reporting_assets(await repo.latest_completed_for_company(1))
+    assert set(found) == {"volume_almost_full", "volume_low_space"}
+    entry = found["volume_almost_full"][0]
+    assert len(found["volume_almost_full"]) == 1 and entry["asset_id"] == 10 and entry["asset_name"] == "PC-01"
+    assert entry["check_id"] == latest_10 and entry["severity"] == "critical"
+    assert entry["titles"] == ["E: is almost full", "C: is almost full"]
+    assert reporting_assets([{"id": 1, "asset_id": 3, "report": {"signals": ["junk", {"title": "no key"}]}}]) == {}
+
+
 # --------------------------------------------------------------------------- #
 # Event log rules from a health check
 # --------------------------------------------------------------------------- #
@@ -565,13 +660,20 @@ def test_detections_template_renders_the_list_and_editor():
 
     links = [{"id": 1, "detection_key": "component_store_repairable", "company_id": None, "script_id": 1,
               "script_name": "<b>Repair</b>", "script_active": True, "is_enabled": True, "run_count": 2,
-              "last_run_at": "2026-10-20 01:00:00", "last_summary": "Queued"}]
-    groups = catalog_view(links, 1, ["Application", "System"])
+              "last_run_at": "2026-10-20 01:00:00", "last_summary": "Queued"},
+             {"id": 2, "detection_key": "blue_screens", "company_id": 1, "script_id": None, "create_ticket": True,
+              "is_enabled": True}]
+    reporting = {"blue_screens": [{"asset_id": 10, "asset_name": "PC-<i>01</i>", "check_id": 4, "severity": "critical",
+                                   "completed_at": "2026-10-24 01:00:00", "titles": ["3 blue screen crashes"]}]}
+    groups = catalog_view(links, 1, ["Application", "System"], reporting)
+    crashes = next(i for g in groups for i in g["items"] if i["key"] == "blue_screens")
+    assert crashes["raises_ticket"] and not crashes["runs_script"] and crashes["assets"] == reporting["blue_screens"]
     editor = {"key": "component_store_repairable", "detection": detections.detection("component_store_repairable"),
               "scope": "company", "link": None, "script_id": 2, "script": SCRIPTS[1], "timeout_seconds": 600,
               "fields": [{"key": "param:Reason", "name": "Reason", "value": "{{health.title}}", "sensitive": False,
                           "mandatory": False, "default": None, "help": "", "value_set": True}],
-              "is_enabled": True, "scripts": list(SCRIPTS.values())[:2], "errors": {"script": "Choose a script."}}
+              "is_enabled": True, "create_ticket": True, "scripts": list(SCRIPTS.values())[:2],
+              "errors": {"script": "Choose a script."}}
     html = _render("health_checks/detections.html", company={"name": "Contoso"}, groups=groups,
                    counts={"detections": 55, "with_script": 1, "with_remedy": 10, "with_monitors": 40},
                    can_edit=True, editor=editor, variables=[{"group": "Health check", "label": "Detection",
@@ -581,6 +683,10 @@ def test_detections_template_renders_the_list_and_editor():
     assert 'id="hc-remediation-modal"' in html and 'name="entry:param:Reason"' in html
     assert "Choose a script." in html and "DISM /Online /Cleanup-Image /RestoreHealth" in html
     assert "Collect Microsoft-Windows-Diagnostics-Performance/Operational first" in html
+    assert 'name="create_ticket" value="1" checked' in html
+    assert 'data-hc-assets-open="hc-assets-blue_screens"' in html and "Assets (1)" in html and "Assets (0)" in html
+    assert 'id="hc-assets-blue_screens"' in html and 'href="/assets/10">PC-&lt;i&gt;01&lt;/i&gt;</a>' in html
+    assert 'href="/health-checks/4"' in html and "3 blue screen crashes" in html and "Raises a ticket" in html
     listed = _render("health_checks/detections.html", company=None, groups=groups, counts={"detections": 1,
                      "with_script": 0, "with_remedy": 0, "with_monitors": 0}, can_edit=False, editor=None, variables=[])
     assert 'id="hc-remediation-modal"' not in listed and "Link a script" not in listed
