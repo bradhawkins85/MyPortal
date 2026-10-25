@@ -32,7 +32,11 @@ avoids relying on the purge service to expand a tenant-wide scope: a reported
 failure returned a successful tenant-wide estimate with a mailbox hit, followed
 by a purge job with `LocationCount=0` and no items attempted. The explicit
 purge search uses the same query and only the mailboxes with matches in the
-reviewed result.
+reviewed result. Purview requires every search name in the tenant to be unique,
+so each purge attempt names its search after the discovery search plus
+` purge <random suffix>` (recorded as `purge_search_name` in the purge details).
+Reusing the discovery search's name fails with HTTP 409 ("The compliance search
+object ... already exists within your organization").
 
 Source registration is reconciled and read back before a new estimate runs.
 The purge is blocked if the mailbox report is unavailable, any source falls

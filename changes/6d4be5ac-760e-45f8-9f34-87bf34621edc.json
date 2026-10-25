@@ -1,0 +1,7 @@
+{
+  "guid": "6d4be5ac-760e-45f8-9f34-87bf34621edc",
+  "occurred_at": "2026-10-25T07:29Z",
+  "change_type": "Fix",
+  "summary": "Fix M365 Spam Search & Purge failing with a 409 \"compliance search object already exists\" error: the purge now gives its mailbox-scoped search its own unique name instead of reusing the discovery search's name.",
+  "content_hash": "3f26254ea2a3d87c19bfd0a3d63e57268f9a3d5bd0392c269a5a6d07906e7a99"
+}

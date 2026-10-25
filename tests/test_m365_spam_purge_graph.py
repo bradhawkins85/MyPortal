@@ -104,7 +104,8 @@ async def test_run_purge_submits_once_and_reports_remaining_from_reestimate(monk
     monkeypatch.setattr(ediscovery, "start_purge", start)
     operations = [{"status": "running"}, {"status": "succeeded"}]
     monkeypatch.setattr(ediscovery, "get_operation", AsyncMock(side_effect=lambda *_a: operations.pop(0)))
-    monkeypatch.setattr(ediscovery, "create_purge_search", AsyncMock(return_value=PURGE_SEARCH))
+    bind = AsyncMock(return_value=PURGE_SEARCH)
+    monkeypatch.setattr(ediscovery, "create_purge_search", bind)
     monkeypatch.setattr(service, "_estimate", AsyncMock(side_effect=[
         {"status": "succeeded", "indexedItemCount": 12, "mailboxCount": 1},
         *[{"status": "succeeded", "indexedItemCount": 2}] * 3,
@@ -114,8 +115,12 @@ async def test_run_purge_submits_once_and_reports_remaining_from_reestimate(monk
 
     await service._run_purge(8)
 
+    purge_name = bind.await_args.args[2]
+    assert purge_name.startswith("MyPortal spam removal x purge ")
+    assert bind.await_args.args[3:] == ("q", ["alice@example.com"])
     start.assert_awaited_once_with("tok", CASE, PURGE_SEARCH)
     final = repo["updates"][-1]
+    assert final["purge_details"]["purge_search_name"] == purge_name
     assert final["purge_status"] == "needs_review"
     assert final["removed_items"] == 10
     assert final["purge_details"]["remaining_items"] == 2
@@ -504,6 +509,50 @@ async def test_source_binding_error_stops_before_purge_submission(monkeypatch, r
     assert not any(url.endswith("/purgeData") for _, url, _ in _FakeClient.calls)
     assert repo["request"]["purge_status"] == "failed"
     assert "Cannot add mailbox source" in repo["request"]["error_message"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_purge_search_name_never_collides_with_existing_searches(monkeypatch, repo):
+    # Purview rejects a search whose name is already taken, including by the
+    # discovery search and by an earlier attempt's purge search.
+    repo["request"] = {
+        "id": 8, "company_id": 2, "matched_items": 1,
+        "search_name": "MyPortal spam removal x", "content_match_query": "q",
+        "search_details": {"case_id": CASE, "search_id": SEARCH,
+                           "locations": [{"location": "alice@example.com", "count": 1}]},
+    }
+    names = {"MyPortal spam removal x"}
+    source = {"email": "alice@example.com", "includedSources": "mailbox"}
+
+    class PurviewClient(_FakeClient):
+        async def request(self, method, url, *, headers, json=None):
+            if method == "POST" and url.endswith("/searches"):
+                if json["displayName"] in names:
+                    return httpx.Response(409, json={"error": {"code": "Conflict", "message": (
+                        "Unable to create eop entity due to the following reason: The compliance search "
+                        f"object \"{json['displayName']}\" already exists within your organization."
+                    )}})
+                names.add(json["displayName"])
+                return httpx.Response(201, json={"id": PURGE_SEARCH})
+            if method == "GET" and url.endswith("/additionalSources"):
+                return httpx.Response(200, json={"value": [source]})
+            raise AssertionError(f"Unexpected request: {method} {url}")
+
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", PurviewClient)
+    # The reviewed count no longer matches, so each attempt stops after creating its search.
+    monkeypatch.setattr(service, "_estimate", AsyncMock(
+        return_value={"status": "succeeded", "indexedItemCount": 2, "mailboxCount": 1},
+    ))
+    start = AsyncMock()
+    monkeypatch.setattr(ediscovery, "start_purge", start)
+
+    await service._run_purge(8)
+    await service._run_purge(8)
+
+    start.assert_not_awaited()
+    assert len(names) == 3
+    assert repo["request"]["purge_status"] == "failed"
+    assert repo["request"]["error_message"].startswith("The explicit mailbox search no longer matches")
 
 
 @pytest.mark.anyio("asyncio")
