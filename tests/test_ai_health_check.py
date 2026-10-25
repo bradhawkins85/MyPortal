@@ -11,6 +11,9 @@ import aiosqlite
 import pytest
 
 from app.core.database import Database
+from app.repositories import ai_health_check_groups as groups_repo
+from app.repositories import ai_health_check_remediations as remediation_repo
+from app.repositories import ai_health_check_schedules as schedule_repo
 from app.repositories import ai_health_checks as repo
 from app.repositories import ai_required_logs as required_repo
 from app.repositories import tray as tray_repo
@@ -286,6 +289,10 @@ async def store(monkeypatch):
         CREATE TABLE tray_command_log (id INTEGER PRIMARY KEY, device_id INT, command TEXT, payload_json TEXT,
           initiated_by_user_id INT, status TEXT DEFAULT 'queued', error TEXT,
           created_at TEXT DEFAULT CURRENT_TIMESTAMP, delivered_at TEXT);
+        CREATE TABLE rmm_scripts (id INTEGER PRIMARY KEY, name TEXT, path TEXT, company_id INT, is_active INT DEFAULT 1,
+          default_timeout_seconds INT DEFAULT 600);
+        CREATE TABLE rmm_agents (id INTEGER PRIMARY KEY, asset_id INT, company_id INT, status TEXT DEFAULT 'active',
+          os TEXT, last_seen_utc TEXT);
         INSERT INTO companies VALUES (1, 'Contoso'), (2, 'Other');
         INSERT INTO assets (id, company_id, name, serial_number, os_name) VALUES
           (10, 1, 'PC-01', 'SN1', 'Windows 11 Pro'), (11, 1, 'PC-02', 'SN2', 'Windows 11 Pro'),
@@ -295,10 +302,11 @@ async def store(monkeypatch):
           (6, 1, NULL, 'dev-2', 'windows', 'pc-02', 'sn2', 'active'),
           (7, 2, 20, 'dev-3', 'windows', 'other', 'SN3', 'revoked');
     """)
-    await conn.executescript(Database()._adapt_sql_for_sqlite(
-        (ROOT / "migrations" / "519_ai_health_checks.sql").read_text(encoding="utf-8")))
+    for migration in ("519_ai_health_checks.sql", "520_ai_health_check_schedules.sql"):
+        await conn.executescript(Database()._adapt_sql_for_sqlite(
+            (ROOT / "migrations" / migration).read_text(encoding="utf-8")))
     fake = _SqliteDb(conn)
-    for module in (repo, required_repo, tray_repo):
+    for module in (repo, required_repo, tray_repo, remediation_repo, schedule_repo, groups_repo):
         monkeypatch.setattr(module, "db", fake)
     sent: list[tuple[str, dict]] = []
 

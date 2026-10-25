@@ -1,5 +1,6 @@
-// Health check pages: client-side search on the lists, and a running
-// report that reloads when its stage changes.
+// Health check pages: client-side search on the lists, a running report
+// that reloads when its stage changes, and the Detections page's script
+// editor, which the server renders open.
 (function () {
   'use strict';
 
@@ -20,6 +21,10 @@
         var row = item.closest('li') || item;
         row.hidden = !match;
         if (match) shown += 1;
+      });
+      // Areas on the Detections page hide when none of their detections match.
+      Array.prototype.forEach.call(document.querySelectorAll('[data-hc-group]'), function (group) {
+        group.hidden = !group.querySelector('li:not([hidden]) [data-hc-item]');
       });
       if (info) info.textContent = shown + (shown === 1 ? ' match' : ' matches');
       if (empty) empty.hidden = shown !== 0;
@@ -60,8 +65,24 @@
     window.setTimeout(poll, delay);
   }
 
+  function setupOpenModal() {
+    var modal = document.querySelector('[data-hc-open-modal]');
+    if (!modal || modal.hidden) return;
+    var field = modal.querySelector('select, input:not([type="hidden"]), textarea');
+    if (field) field.focus();
+    if (!window.MutationObserver || !window.history || !window.history.replaceState) return;
+    // Once closed, drop ?edit= so a reload does not open it again.
+    var observer = new MutationObserver(function () {
+      if (!modal.hidden) return;
+      observer.disconnect();
+      window.history.replaceState(null, '', window.location.pathname + '#' + modal.getAttribute('data-hc-open-modal'));
+    });
+    observer.observe(modal, { attributes: true, attributeFilter: ['hidden'] });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     setupSearch();
     setupPolling();
+    setupOpenModal();
   });
 })();

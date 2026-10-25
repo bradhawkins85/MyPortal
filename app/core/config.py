@@ -1116,6 +1116,12 @@ class Settings(BaseSettings):
     health_check_pawnio_enabled: bool = Field(
         default=True, validation_alias="HEALTH_CHECK_PAWNIO_ENABLED"
     )
+    # Health check (AI): every computer with the RMM agent runs one health
+    # check a month at a random day and time. Set to false to run them only
+    # when a technician asks.
+    health_check_monthly_enabled: bool = Field(
+        default=True, validation_alias="HEALTH_CHECK_MONTHLY_ENABLED"
+    )
     matrixbot_ai_response_delay_minutes: int = Field(
         default=5, validation_alias="MATRIXBOT_AI_RESPONSE_DELAY_MINUTES", ge=1
     )

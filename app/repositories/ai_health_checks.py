@@ -12,12 +12,12 @@ _COLUMNS = (
     "h.id, h.company_id, h.asset_id, h.tray_device_id, h.ticket_id, h.command_id, h.status, h.stage_message, "
     "h.platform, h.model, h.allow_pawnio, h.pawnio_status, h.overall_status, h.health_score, h.summary, "
     "h.snapshot_json, h.report_json, h.logs_json, h.log_requests_json, h.error, h.requested_by_user_id, "
-    "h.created_at, h.updated_at, h.completed_at"
+    "h.run_source, h.created_at, h.updated_at, h.completed_at"
 )
 _LIST_COLUMNS = (
     "h.id, h.company_id, h.asset_id, h.tray_device_id, h.ticket_id, h.command_id, h.status, h.stage_message, "
     "h.platform, h.model, h.allow_pawnio, h.pawnio_status, h.overall_status, h.health_score, h.summary, "
-    "h.error, h.requested_by_user_id, h.created_at, h.updated_at, h.completed_at"
+    "h.error, h.requested_by_user_id, h.run_source, h.created_at, h.updated_at, h.completed_at"
 )
 _JOINS = (
     " FROM ai_health_checks h LEFT JOIN assets a ON a.id = h.asset_id "
@@ -70,14 +70,15 @@ async def create(
     model: str,
     allow_pawnio: bool,
     requested_by_user_id: int | None,
+    run_source: str = "manual",
 ) -> int:
     now = _utcnow()
     return int(await db.execute_returning_lastrowid(
         "INSERT INTO ai_health_checks (company_id, asset_id, tray_device_id, ticket_id, status, platform, model, "
-        "allow_pawnio, requested_by_user_id, created_at, updated_at) "
-        "VALUES (%s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s)",
+        "allow_pawnio, requested_by_user_id, run_source, created_at, updated_at) "
+        "VALUES (%s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s)",
         (int(company_id), int(asset_id), tray_device_id, ticket_id, platform[:16], model[:255],
-         1 if allow_pawnio else 0, requested_by_user_id, now, now),
+         1 if allow_pawnio else 0, requested_by_user_id, run_source[:16], now, now),
     ))
 
 
@@ -114,6 +115,17 @@ async def get_active_for_asset(asset_id: int) -> dict[str, Any] | None:
         + " WHERE h.asset_id = %s AND h.status IN ('queued', 'collecting', 'analysing') "
         "ORDER BY h.created_at DESC, h.id DESC LIMIT 1",
         (int(asset_id),),
+    ))
+
+
+async def last_completed_since(asset_id: int, since: datetime) -> dict[str, Any] | None:
+    """The asset's latest health check that completed after ``since``."""
+
+    return _row(await db.fetch_one(
+        "SELECT " + _LIST_COLUMNS + _NAMES + _JOINS  # nosec B608 - fixed column list
+        + " WHERE h.asset_id = %s AND h.status = 'completed' AND h.created_at >= %s "
+        "ORDER BY h.created_at DESC, h.id DESC LIMIT 1",
+        (int(asset_id), since),
     ))
 
 

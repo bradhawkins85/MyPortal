@@ -25,7 +25,7 @@
   <article class="hc-card hc-card--{{ check.overall_status or ('critical' if check.status == 'failed' else 'info') }}" data-hc-item data-hc-search="{{ (check.asset_name or '') ~ ' ' ~ (check.company_name or '') ~ ' ' ~ (check.summary or '') ~ ' ' ~ check.status_label }}">
     <div class="hc-card__head">
       <h3 class="hc-card__title"><a href="{{ check.url }}">{% if show_asset %}{{ check.asset_name or ('Asset ' ~ check.asset_id) }}{% else %}Health check #{{ check.id }}{% endif %}</a></h3>
-      <span class="hc-actions">{{ status_chip(check) }} {{ overall_chip(check) }}{% if check.health_score is not none %} <span class="scf-chip">Score {{ check.health_score }}/100</span>{% endif %}</span>
+      <span class="hc-actions">{{ status_chip(check) }} {{ overall_chip(check) }}{% if check.health_score is not none %} <span class="scf-chip">Score {{ check.health_score }}/100</span>{% endif %}{% if check.is_scheduled %} <span class="scf-chip scf-chip--muted">Monthly check</span>{% endif %}</span>
     </div>
     <p class="hc-card__meta">
       {% if show_asset and check.company_name %}{{ check.company_name }} · {% endif %}Started <span data-utc="{{ check.created_at }}">{{ check.created_at }}</span>
@@ -33,5 +33,23 @@
       {%- if check.ticket_id %} · <a href="/tickets/{{ check.ticket_id }}">Ticket #{{ check.ticket_id }}</a>{% endif %}
     </p>
     {% if check.summary %}<p>{{ check.summary }}</p>{% elif check.is_active and check.stage_message %}<p class="hc-muted">{{ check.stage_message }}</p>{% elif check.error %}<p class="hc-muted">{{ check.error }}</p>{% endif %}
+  </article>
+{%- endmacro %}
+
+{# An event log rule that would flag a problem as it happens. ``monitor.url``
+   opens the rule form filled in; ``can_create`` shows its button. #}
+{% macro monitor_card(monitor, can_create=false, anchor="") -%}
+  <article class="hc-card hc-card--info hc-monitor"{% if anchor %} id="{{ anchor }}"{% endif %}>
+    <div class="hc-card__head">
+      <h3 class="hc-card__title">{{ monitor.name }}</h3>
+      <span class="hc-actions">
+        {% if monitor.origin == 'model' %}<span class="scf-chip scf-chip--muted" title="Suggested by the AI model from the logs it read; check the event IDs before relying on it">AI suggestion</span>{% endif %}
+        {% if monitor.log_collected %}<span class="scf-chip">{{ monitor.log }} log collected</span>{% else %}<span class="status status--warning" title="Add this log under Logs collected on the Event logs page first">Collect {{ monitor.log }} first</span>{% endif %}
+        {% if can_create and monitor.url %}<a class="button button--ghost button--small" href="{{ monitor.url }}">Create this rule</a>{% endif %}
+      </span>
+    </div>
+    {% if monitor.why %}<p>{{ monitor.why }}</p>{% endif %}
+    <p class="hc-monitor__when"><span class="hc-muted">Raise a ticket when</span> {% for text in monitor.conditions_text %}{{ text }}{% if not loop.last %} and {% endif %}{% endfor %}.</p>
+    {% if monitor.detections %}<p class="hc-card__meta">For: {{ monitor.detections | join('; ') }}</p>{% endif %}
   </article>
 {%- endmacro %}

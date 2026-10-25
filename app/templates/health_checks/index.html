@@ -17,12 +17,14 @@
 {% block header_actions %}
   {% set actions = [] %}
   {% if filter_asset %}{% set _ = actions.append({"label": "Back to asset", "type": "link", "href": "/assets/" ~ filter_asset.id ~ "#health-check"}) %}{% set _ = actions.append({"label": "All health checks", "type": "link", "href": "/health-checks"}) %}{% endif %}
+  {% set _ = actions.append({"label": "Monthly checks", "type": "link", "href": "/health-checks/monthly"}) %}
+  {% set _ = actions.append({"label": "Detections and fixes", "type": "link", "href": "/health-checks/detections"}) %}
   {% if is_super_admin %}{% set _ = actions.append({"label": "Required logs", "type": "link", "href": "/admin/required-logs"}) %}{% endif %}
   {% if actions %}{{ page_header_actions(actions, menu_id="hc-actions") }}{% endif %}
 {% endblock %}
 {% block content %}
 <section class="hc-workspace" aria-describedby="hc-intro">
-  <p id="hc-intro" class="hc-muted">A health check takes a snapshot of a computer's health through its tray app (drives, chkdsk and defrag state, temperatures, crashes, hardware errors, performance, updates and security), reviews it and its logs with the AI model, and lists the steps that bring the computer back to optimal performance. It is an RMM option: choose <strong>Run health check</strong> in the Actions menu of an asset with the RMM agent deployed.</p>
+  <p id="hc-intro" class="hc-muted">A health check takes a snapshot of a computer's health through its tray app (drives, chkdsk and defrag state, temperatures, crashes, hardware errors, performance, updates and security), reviews it and its logs with the AI model, and lists the steps that bring the computer back to optimal performance. It is an RMM option: choose <strong>Run health check</strong> in the Actions menu of an asset with the RMM agent deployed.{% if monthly_enabled %} Computers in a <a href="/health-checks/monthly">monthly check group</a> also run one a month, at a random day and time.{% endif %} <a href="/health-checks/detections">Detections and fixes</a> lists what the automatic checks find, the event log rules that flag it as it happens and the scripts that fix it.</p>
 
   {{ counter_strip([
     {"label": "Critical", "value": counts.get('critical', 0), "variant": "danger", "title": "Assets whose latest health check is critical"},

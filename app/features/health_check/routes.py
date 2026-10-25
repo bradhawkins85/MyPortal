@@ -9,7 +9,11 @@ company's.
   Actions menu or Health check section (RMM scripts write access, as for
   Check in now)
 * ``GET /health-checks`` recent health checks; ``?asset_id=`` for one asset
-* ``GET /health-checks/{id}`` a health check's report
+* ``GET /health-checks/{id}`` a health check's report, with the event log
+  rules that would flag its problems as they happen and the scripts queued
+  to fix them
+* ``GET /health-checks/detections`` what the automatic checks can find and
+  the scripts linked to fix it (:mod:`.detection_routes`)
 * ``GET /api/health-checks``, ``GET /api/health-checks/{id}`` and
   ``POST /api/assets/{asset_id}/health-checks`` (helpdesk technicians and
   super admins) the same as JSON
@@ -47,8 +51,11 @@ from app.security.flash import flash_redirect
 from app.services import ai_consent
 from app.services import ai_health_check as service
 from app.services import ai_required_logs
+from app.services import ai_health_check_schedule
 from app.services import ai_troubleshooter
 from app.services import audit as audit_service
+from app.services import health_check_detections as detections
+from app.services import rmm_event_logs
 
 router = APIRouter(tags=["Health checks"])
 
@@ -288,6 +295,7 @@ async def list_page(request: Request, asset_id: int | None = Query(default=None,
             "counts": counts,
             "running": sum(1 for check in checks if check["is_active"]),
             "status_labels": service.STATUS_LABELS,
+            "monthly_enabled": ai_health_check_schedule.enabled(),
         },
     )
 
@@ -312,7 +320,31 @@ def _snapshot_view(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@router.get(f"{LIST_PATH}/{{health_check_id}}", response_class=HTMLResponse, summary="A health check report")
+async def _monitor_views(check: dict[str, Any], report: dict[str, Any], signals: list[Any]) -> list[dict[str, Any]]:
+    """Event log rules that would flag the check's problems as they happen, ready to create."""
+
+    if check.get("platform") != "windows" or check.get("status") != service.STATUS_COMPLETED:
+        return []
+    stored = report.get("monitors")
+    monitors = stored if isinstance(stored, list) else detections.monitors_for_signals(signals)
+    try:
+        collected = await rmm_event_logs.logs_for(check.get("company_id"), check.get("asset_id"))
+    except Exception:  # noqa: BLE001 - fall back to the default logs
+        collected = rmm_event_logs.default_logs()
+    views = []
+    for index, monitor in enumerate(monitors):
+        if not isinstance(monitor, dict) or not monitor.get("conditions"):
+            continue
+        if monitor.get("key"):
+            url = f"/rmm/event-logs/rules?new=1&suggest={monitor['key']}&asset_id={int(check['asset_id'])}"
+        else:
+            url = (f"/rmm/event-logs/rules?new=1&health_check={int(check['id'])}&monitor={index}"
+                   f"&asset_id={int(check['asset_id'])}")
+        views.append({**detections.present_monitor(monitor, collected), "url": url})
+    return views
+
+
+@router.get(f"{LIST_PATH}/{{health_check_id:int}}", response_class=HTMLResponse, summary="A health check report")
 async def report_page(request: Request, health_check_id: int):
     check = await repo.get(health_check_id)
     user, scope, redirect = await _viewer(request, asset_id=int(check["asset_id"]) if check else None)
@@ -330,6 +362,8 @@ async def report_page(request: Request, health_check_id: int):
         service.present(item) for item in await repo.list_checks(asset_id=int(check["asset_id"]), limit=10)
         if int(item["id"]) != health_check_id
     ]
+    can_manage = await _can_run_on(request, int(check["asset_id"]), int(check["company_id"]))
+    remediations = [r for r in report.get("remediations") or [] if isinstance(r, dict)]
     return await _main()._render_template(
         "health_checks/report.html", request, user,
         extra={
@@ -342,7 +376,12 @@ async def report_page(request: Request, health_check_id: int):
             "areas": service.AREAS,
             "previous": previous,
             "is_super_admin": bool(user.get("is_super_admin")),
-            "can_run_again": await _can_run_on(request, int(check["asset_id"]), int(check["company_id"])),
+            "can_run_again": can_manage,
+            "can_manage": can_manage,
+            "monitors": await _monitor_views(check, report, signals),
+            "remediations": remediations,
+            "remediated": {str(r.get("detection")) for r in remediations if r.get("run_id")},
+            "detections": detections.DETECTIONS,
         },
     )
 
@@ -357,7 +396,7 @@ async def api_list(
     return JSONResponse({"health_checks": _json([_summary_view(check) for check in checks])})
 
 
-@router.get("/api/health-checks/{health_check_id}", summary="A health check and its report")
+@router.get("/api/health-checks/{health_check_id:int}", summary="A health check and its report")
 async def api_get(health_check_id: int, current_user: dict = Depends(require_helpdesk_technician)):
     check = await repo.get(health_check_id)
     if not check:
@@ -388,6 +427,7 @@ async def asset_context(asset: dict[str, Any], *, can_run: bool) -> dict[str, An
         "platform": platform,
         "pawnio_available": pawnio_enabled and platform == "windows",
         "pawnio_enabled": pawnio_enabled,
+        "schedule": await ai_health_check_schedule.schedule_for(asset_id),
     }
 
 

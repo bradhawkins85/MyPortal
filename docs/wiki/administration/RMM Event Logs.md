@@ -108,6 +108,9 @@ Open **Event log rules** from the Event logs page (`/rmm/event-logs/rules`). A r
     troubleshooter investigate these tickets automatically (see
     [Tray App](../getting-started/Tray%20App.md#multi-stage-troubleshooter-ticket-assets)).
 
+A [health check](Health%20Check.md#watching-for-problems-in-the-event-logs) suggests rules for
+the problems it finds; **Create this rule** opens this form filled in to raise a ticket.
+
 Each rule has an **Action** menu (on the rules page and in the asset page's Event log
 automations) to edit it, turn it on or off, or delete it. Drop rules also have **Run now**, which
 applies the rule to events already stored: MyPortal shows how many stored events in the rule's

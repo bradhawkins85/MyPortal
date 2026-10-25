@@ -1,5 +1,5 @@
-/* Health checks (health_checks/*.html): the list of checks, a check's report
-   and the required logs review page. */
+/* Health checks (health_checks/*.html): the list of checks, a check's report,
+   the detections and their fixes, and the required logs review page. */
 .hc-workspace {
   --hc-critical: var(--hf-danger);
   --hc-warning: var(--hf-warning);
@@ -169,6 +169,49 @@
 
 .hc-facts dt { color: var(--hf-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 .hc-facts dd { margin: 0.15rem 0 0; overflow-wrap: anywhere; }
+
+.hc-monitor__when { font-size: 0.875rem; }
+
+/* ---- Detections --------------------------------------------------------- */
+
+.hc-detection__part {
+  display: grid;
+  gap: var(--space-gap-tight);
+  padding-top: var(--space-gap-tight);
+  border-top: 1px solid var(--hf-line-soft);
+}
+
+.hc-detection__heading {
+  margin: 0;
+  color: var(--hf-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hc-detection__links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-gap-tight) var(--space-gap-roomy);
+  margin: 0;
+}
+
+.hc-detection__links dt { color: var(--hf-muted); font-size: 0.8125rem; }
+.hc-detection__links dd { margin: 0.15rem 0 0; overflow-wrap: anywhere; }
+.hc-detection__remedy { font-size: 0.875rem; }
+
+.hc-detection__monitors {
+  display: grid;
+  gap: var(--space-gap-tight);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.875rem;
+}
+
+.hc-detection__monitors li { overflow-wrap: anywhere; }
+.hc-modal__spacer { flex: 1 1 auto; }
 
 /* ---- Required logs ------------------------------------------------------ */
 

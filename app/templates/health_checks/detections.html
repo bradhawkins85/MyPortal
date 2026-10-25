@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% import "health_checks/_macros.html" as hc %}
+{% set company_label = company.name if company else "this company" %}
+{% block title %}Health check detections{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/health_checks.css') }}">{% endblock %}
+{% block header_title %}
+<div class="page-header-bar">
+  <span class="header__title-text">Health check detections{% if company %}<span class="header__title-meta">{{ company.name }}</span>{% endif %}</span>
+  <div class="page-header-toolbar">
+    <label class="visually-hidden" for="hc-search">Search detections</label>
+    <input id="hc-search" type="search" class="form-input page-header-toolbar__search" placeholder="Search detections" autocomplete="off" data-hc-search hidden>
+    <span class="page-header-toolbar__info" data-hc-info aria-live="polite">{{ counts.detections }} detections</span>
+  </div>
+</div>
+{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Health checks", "type": "link", "href": "/health-checks"},
+    {"label": "Event log rules", "type": "link", "href": "/rmm/event-logs/rules"},
+  ], menu_id="hc-detections-actions") }}
+{% endblock %}
+{% block content %}
+<section class="hc-workspace" aria-describedby="hc-detections-intro">
+  <p id="hc-detections-intro" class="hc-muted">Everything a health check's automatic checks can find, without the AI model. For each one you can <strong>link a script</strong> that runs on the computer through its RMM agent when a health check finds it (once the check completes, at most once per check), and create <strong>event log rules</strong> that raise a ticket as soon as Windows logs the problem, rather than waiting for the next health check.{% if not can_edit %} Linking scripts and creating rules needs write access to RMM scripts.{% endif %}</p>
+
+  {{ counter_strip([
+    {"label": "Detections", "value": counts.detections, "variant": "info"},
+    {"label": "Fixed by a script", "value": counts.with_script, "variant": "success", "title": "Detections that run a script on " ~ company_label ~ "'s computers"},
+    {"label": "Suggested scripts", "value": counts.with_remedy, "variant": "neutral", "title": "Detections with a suggested script to start from"},
+    {"label": "With event log rules", "value": counts.with_monitors, "variant": "neutral", "title": "Detections with event log rules that flag them as they happen"},
+  ]) }}
+
+  {% for group in groups %}
+  <section class="card card--panel" aria-labelledby="hc-area-{{ group.key }}" data-hc-group>
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-area-{{ group.key }}">{{ group.label }}</h2></div></header>
+    <ul class="hc-cards" role="list">
+      {% for item in group['items'] %}
+      <li><article class="hc-card hc-card--{{ hc.tone(item.severity) }} hc-detection" id="detection-{{ item.key }}" data-hc-item data-hc-search="{{ item.search }}">
+        <div class="hc-card__head">
+          <h3 class="hc-card__title">{{ item.label }}</h3>
+          <span class="hc-actions">
+            {{ hc.severity_chip(item.severity) }}
+            {% for platform in item.platforms %}<span class="scf-chip scf-chip--muted">{{ {"windows": "Windows", "macos": "macOS"}.get(platform, platform) }}</span>{% endfor %}
+            {% if item.runs_script %}<span class="status status--success">Fixed by a script</span>{% endif %}
+          </span>
+        </div>
+        <p>{{ item.description }}</p>
+
+        <div class="hc-detection__part">
+          <h4 class="hc-detection__heading">Fix it with a script</h4>
+          <dl class="hc-detection__links">
+            <div>
+              <dt>Every company</dt>
+              <dd>
+                {% set link = item.global_link %}
+                {% if link and link.script_id %}<strong>{{ link.script_name or 'Script' }}</strong>{% if not link.script_active %} <span class="status status--warning">Script no longer in Gitea</span>{% elif not link.is_enabled %} <span class="scf-chip scf-chip--muted">Off</span>{% endif %}
+                {% else %}<span class="hc-muted">No script</span>{% endif %}
+                {% if link and link.run_count %}<span class="hc-muted"> · run {{ link.run_count }} time{{ '' if link.run_count == 1 else 's' }}, last <span data-utc="{{ link.last_run_at }}">{{ link.last_run_at }}</span></span>{% endif %}
+                {% if can_edit and is_super_admin %} <a href="/health-checks/detections?edit={{ item.key }}&amp;scope=global#hc-remediation-modal" aria-haspopup="dialog" aria-controls="hc-remediation-modal">{{ 'Change' if link else 'Link a script' }}<span class="visually-hidden"> for every company: {{ item.label }}</span></a>{% endif %}
+              </dd>
+            </div>
+            <div>
+              <dt>{{ company_label }}</dt>
+              <dd>
+                {% set link = item.company_link %}
+                {% if link and link.script_id %}<strong>{{ link.script_name or 'Script' }}</strong>{% if not link.script_active %} <span class="status status--warning">Script no longer in Gitea</span>{% elif not link.is_enabled %} <span class="scf-chip scf-chip--muted">Off</span>{% endif %}
+                {% elif link %}<span class="hc-muted">No script for this company</span>
+                {% elif item.global_link and item.global_link.script_id %}<span class="hc-muted">Uses the every-company script</span>
+                {% else %}<span class="hc-muted">No script</span>{% endif %}
+                {% if link and link.run_count %}<span class="hc-muted"> · run {{ link.run_count }} time{{ '' if link.run_count == 1 else 's' }}, last <span data-utc="{{ link.last_run_at }}">{{ link.last_run_at }}</span></span>{% endif %}
+                {% if can_edit %} <a href="/health-checks/detections?edit={{ item.key }}&amp;scope=company#hc-remediation-modal" aria-haspopup="dialog" aria-controls="hc-remediation-modal">{{ 'Change' if link else 'Link a script' }}<span class="visually-hidden"> for {{ company_label }}: {{ item.label }}</span></a>{% endif %}
+              </dd>
+            </div>
+          </dl>
+          {% if item.remedy %}<p class="hc-detection__remedy"><span class="hc-muted">Suggested script:</span> {{ item.remedy }}</p>{% endif %}
+        </div>
+
+        {% if item.monitors %}
+        <div class="hc-detection__part">
+          <h4 class="hc-detection__heading">Watch for it in the event logs</h4>
+          <ul class="hc-detection__monitors" role="list">
+            {% for monitor in item.monitors %}
+            <li>
+              <strong>{{ monitor.name }}</strong>{% if not monitor.log_collected %} <span class="status status--warning" title="Add this log under Logs collected on the Event logs page first">Collect {{ monitor.log }} first</span>{% endif %}
+              <span class="hc-muted">— {% for text in monitor.conditions_text %}{{ text }}{% if not loop.last %} and {% endif %}{% endfor %}.</span>
+              {% if can_edit %}<a href="{{ monitor.url }}">Create this rule<span class="visually-hidden">: {{ monitor.name }}</span></a>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+      </article></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endfor %}
+  <p class="hc-muted" data-hc-empty hidden>No detections match your search.</p>
+</section>
+
+{% if editor %}
+{% set detection = editor.detection %}
+<div class="modal" id="hc-remediation-modal" role="dialog" aria-modal="true" aria-labelledby="hc-remediation-modal-title" data-hc-open-modal="detection-{{ editor.key }}">
+  <form class="modal__panel modal__panel--wide" method="post" action="/health-checks/detections/{{ editor.key }}" novalidate>
+    {% include "partials/csrf.html" %}
+    <input type="hidden" name="scope" value="{{ editor.scope }}">
+    <header class="modal__header">
+      <div>
+        <p class="hc-eyebrow">{{ 'Every company' if editor.scope == 'global' else company_label }}</p>
+        <h2 class="modal__title" id="hc-remediation-modal-title">Fix “{{ detection.label }}”</h2>
+        <p class="text-muted">The script runs on the computer through its RMM agent when a health check finds this, once the check has completed.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close the script editor"></button>
+    </header>
+    <div class="modal__body">
+      {% if editor.errors %}
+      <div class="alert alert--error" role="alert"><ul>{% for message in editor.errors.values() %}<li>{{ message }}</li>{% endfor %}</ul></div>
+      {% endif %}
+      <p>{{ detection.description }}</p>
+      {% if detection.remedy %}<div class="alert alert--info"><strong>Suggested script:</strong> {{ detection.remedy }}</div>{% endif %}
+      <div class="form-field">
+        <label class="form-label" for="hc-remediation-script">Script</label>
+        <select class="form-input" id="hc-remediation-script" name="script_id">
+          <option value="">{{ 'Choose a script' if editor.scope == 'global' else 'No script for this company' }}</option>
+          {% for script in editor.scripts %}<option value="{{ script.id }}" {% if editor.script_id == script.id %}selected{% endif %}>{{ script.name }} ({{ script.path }})</option>{% endfor %}
+        </select>
+        {% if editor.scope == 'global' %}
+        <p class="form-help">Runs for every company's computers. Only scripts in <code>Common/</code> can run for every company; a company's own choice replaces it.</p>
+        {% else %}
+        <p class="form-help">Runs for {{ company_label }}'s computers, in place of any script linked for every company. Choose no script to stop the every-company script running here.</p>
+        {% endif %}
+      </div>
+      <div class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="hc-remediation-timeout">Time limit <span class="text-muted">seconds</span></label>
+          <input class="form-input" id="hc-remediation-timeout" name="timeout_seconds" type="number" min="10" max="86400" value="{{ editor.timeout_seconds }}">
+        </div>
+      </div>
+      {% if editor.script %}
+        {% if editor.fields %}
+        <fieldset class="hc-remediation__values">
+          <legend class="form-label">Script values</legend>
+          <p class="form-help">Given to the script each time it runs. Use <code>{% raw %}{{health.title}}{% endraw %}</code>, <code>{% raw %}{{health.detail}}{% endraw %}</code> and the other health check variables to pass on what was found.</p>
+          <div class="form-grid">
+            {% for field in editor.fields %}
+            <div class="form-field">
+              <label class="form-label" for="hc-remediation-entry-{{ loop.index }}">{{ field.name }}{% if field.mandatory %} <span class="text-muted">required</span>{% endif %}</label>
+              <input class="form-input" id="hc-remediation-entry-{{ loop.index }}" name="entry:{{ field.key }}" list="hc-remediation-variables" value="{{ field.value }}" {% if field.sensitive %}type="password" autocomplete="new-password"{% endif %} placeholder="{% if field.sensitive and field.value_set %}Saved: leave blank to keep it{% elif field.default %}Default: {{ field.default }}{% endif %}">
+              {% if field.help %}<p class="form-help">{{ field.help }}</p>{% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </fieldset>
+        {% else %}
+        <p class="form-help">{{ editor.script.name }} has no parameters or environment variables.</p>
+        {% endif %}
+      {% else %}
+      <p class="form-help">After choosing a script and saving, its parameters appear here.</p>
+      {% endif %}
+      <label class="form-checkbox"><input type="checkbox" name="is_enabled" value="1" {% if editor.is_enabled %}checked{% endif %}> Run the script when a health check finds this</label>
+      <datalist id="hc-remediation-variables">{% for variable in variables %}<option value="{{ variable.token }}">{{ variable.group }}: {{ variable.label }}</option>{% endfor %}</datalist>
+    </div>
+    <footer class="modal__footer">
+      {% if editor.link %}<button type="submit" class="button button--danger" form="hc-remediation-remove" data-confirm="Remove this link? Health checks stop running the script{{ ' for every company' if editor.scope == 'global' else '' }}.">Remove</button>{% endif %}
+      <span class="hc-modal__spacer" aria-hidden="true"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button button--primary">Save</button>
+    </footer>
+  </form>
+  {% if editor.link %}
+  <form id="hc-remediation-remove" method="post" action="/health-checks/detections/{{ editor.key }}/remove" hidden>
+    {% include "partials/csrf.html" %}
+    <input type="hidden" name="scope" value="{{ editor.scope }}">
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+<script src="{{ static_url('/static/js/health_checks.js') }}" defer></script>
+{% endblock %}
