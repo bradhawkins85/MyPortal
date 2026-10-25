@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
-from publicsuffix2 import get_sld
 from webauthn import (
     generate_authentication_options,
     generate_registration_options,
@@ -68,24 +67,16 @@ def is_valid_browser_binding_token(token: Any) -> bool:
     return isinstance(token, str) and bool(_BROWSER_BINDING_TOKEN_PATTERN.match(token))
 
 
-def _effective_rp_hostname(hostname: str) -> str:
-    """Use the registrable domain for multi-subdomain passkey sharing when possible.
+def _normalise_hostname(hostname: str) -> str:
+    """Return the exact host as the default RP ID.
 
-    WebAuthn RP IDs must be registrable, not arbitrary subdomains, and iOS
-    Keychain passkeys are especially strict about this. A custom subdomain like
-    "portal.example.com" should register under "example.com" unless there is an
-    explicit configuration override.
+    Passkeys are scoped to the RP ID, and iOS/iPadOS look for credentials
+    (and the associated domain) under exactly that ID. Defaulting to the
+    serving host (for example "portal.example.com") keeps passkeys working
+    on every Apple platform; set PASSKEY_RP_ID to share passkeys across
+    subdomains instead.
     """
-    clean = hostname.rstrip(".").lower()
-    if not clean:
-        return ""
-    if clean in {"localhost", "127.0.0.1"}:
-        return clean
-    try:
-        registrable = get_sld(clean, strict=False)
-    except Exception:
-        registrable = None
-    return registrable or clean
+    return hostname.rstrip(".").lower()
 
 
 def relying_party_id(settings: Settings | None = None) -> str:
@@ -95,7 +86,7 @@ def relying_party_id(settings: Settings | None = None) -> str:
         return explicit.rstrip(".").lower()
     if active_settings.portal_url:
         hostname = urlsplit(active_settings.portal_url.unicode_string()).hostname or "localhost"
-        return _effective_rp_hostname(hostname) or "localhost"
+        return _normalise_hostname(hostname) or "localhost"
     return "localhost"
 
 
@@ -107,7 +98,7 @@ def relying_party_id_for_origin(origin: str, settings: Settings | None = None) -
         raise ValueError("Passkey request origin does not contain a valid hostname")
     explicit = active_settings.passkey_rp_id.strip().rstrip(".").lower()
     if not explicit:
-        return _effective_rp_hostname(hostname) or hostname
+        return _normalise_hostname(hostname) or hostname
     if hostname != explicit and not hostname.endswith(f".{explicit}"):
         raise ValueError("Configured PASSKEY_RP_ID is not valid for this portal hostname")
     return explicit

@@ -28,7 +28,7 @@ The final passkey can be removed as long as another permitted sign-in or recover
 
 Set the following environment variables:
 
-- `PASSKEY_RP_ID` - optional explicit relying party ID. If blank, MyPortal uses the registrable domain derived from `PORTAL_URL` (for example `example.com` for `portal.example.com`).
+- `PASSKEY_RP_ID` - optional explicit relying party ID. If blank, MyPortal uses the exact hostname serving the request (for example `portal.example.com`), falling back to the host from `PORTAL_URL`.
 - `PASSKEY_RP_NAME` - optional relying party display name. If blank, MyPortal uses `APP_NAME`.
 - `PASSKEY_ALLOWED_ORIGINS` - comma-separated list of exact allowed origins for passkey ceremonies.
 

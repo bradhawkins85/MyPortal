@@ -565,7 +565,7 @@ def test_registration_options_derive_rp_from_portal_url():
         PASSKEY_ALLOWED_ORIGINS="",
     )
 
-    assert passkeys_service.relying_party_id(settings) == "example.com"
+    assert passkeys_service.relying_party_id(settings) == "portal.example.com"
     assert passkeys_service.allowed_origins(settings) == ["https://portal.example.com"]
 
 
@@ -584,7 +584,7 @@ def test_passkey_rp_defaults_to_current_request_origin():
     )
     assert passkeys_service.relying_party_id_for_origin(
         "https://portal.customer.example:8443", settings
-    ) == "example"
+    ) == "portal.customer.example"
     assert passkeys_service.allowed_origins_for_origin(
         "https://portal.customer.example:8443", settings
     )[0] == "https://portal.customer.example:8443"
