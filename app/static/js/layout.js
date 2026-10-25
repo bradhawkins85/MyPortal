@@ -479,6 +479,7 @@
       activeSidebarPreferences.top_menu_labels !== 'always' &&
       standardResolutionDisplay;
     document.body.classList.toggle('navigation--top-compact', compactTopMenu);
+    return compactTopMenu;
   };
   mobileMedia.addEventListener('change', syncNavigationPresentation);
 
@@ -498,7 +499,7 @@
       hidden: Array.isArray(preferences?.hidden) ? preferences.hidden : [],
       groups: Array.isArray(preferences?.groups) ? preferences.groups : [],
     };
-    syncNavigationPresentation();
+    const compactTopMenu = syncNavigationPresentation();
     const roleSwitcherContainer = document.querySelector('[data-role-switcher-container]');
     if (roleSwitcherContainer) {
       // While viewing as another role a hidden switcher falls back to the
@@ -580,7 +581,7 @@
     // label to stay visible next to the icon.
     sidebarMenuRoot.querySelectorAll(':scope > .menu__item, :scope > .menu__item--expandable').forEach((item) => {
       const target = item.querySelector(':scope > a, :scope > [data-menu-toggle]');
-      const labelElement = item.querySelector(':scope > .menu__label');
+      const labelElement = target?.querySelector(':scope > .menu__label');
       if (!target || !labelElement) {
         return;
       }

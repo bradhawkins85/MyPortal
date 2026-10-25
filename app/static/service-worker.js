@@ -17,6 +17,9 @@ async function installRelease() {
     `${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(revision)}`
   );
   await cache.addAll(assets);
+  // Soft releases never prompt, so nothing would ever post SKIP_WAITING and
+  // an installed phone app kept the old worker for as long as it stayed open.
+  if (['none', 'soft'].includes(manifest.compatibility)) await self.skipWaiting();
 }
 
 self.addEventListener('install', (event) => event.waitUntil(installRelease()));
@@ -52,13 +55,28 @@ self.addEventListener('fetch', (event) => {
   }
   if (!url.pathname.startsWith('/static/')) return;
   event.respondWith((async () => {
-    const cached = await caches.match(request, { ignoreSearch: true });
+    // Pages request assets as ?v=<content hash>, so only an exact match holds
+    // the right bytes. Ignoring the query here served an old layout.js or
+    // app.css to a new page until the worker was replaced, which on an
+    // installed phone app could be indefinitely.
+    const cached = await caches.match(request);
     if (cached) return cached;
-    const response = await fetch(request);
-    if (response.ok && response.type === 'basic') {
-      const manifest = await loadManifest();
-      const cache = await caches.open(`${CACHE_PREFIX}${manifest.release}`);
-      event.waitUntil(cache.put(request, response.clone()));
+    let response;
+    try {
+      response = await fetch(request);
+    } catch (error) {
+      // Offline: any cached revision beats a broken page.
+      const fallback = await caches.match(request, { ignoreSearch: true });
+      if (fallback) return fallback;
+      throw error;
+    }
+    // Unversioned URLs may change under the same name, so leave them to HTTP.
+    if (response.ok && response.type === 'basic' && url.searchParams.has('v')) {
+      const copy = response.clone();
+      event.waitUntil(loadManifest()
+        .then((manifest) => caches.open(`${CACHE_PREFIX}${manifest.release}`))
+        .then((cache) => cache.put(request, copy))
+        .catch(() => { /* caching is best effort; the page already has its response */ }));
     }
     return response;
   })());

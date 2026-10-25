@@ -95,3 +95,16 @@ def test_update_client_protects_work_and_coordinates_tabs():
     assert "controllerchange" in source
     assert 'requirePageReload' in main_source
     assert 'if (!detail.requirePageReload)' in main_source
+
+
+def test_service_worker_serves_only_the_requested_asset_revision():
+    source = (Path(__file__).parents[1] / 'app/static/service-worker.js').read_text()
+    fetch_handler = source.split("addEventListener('fetch'", 1)[1].split("addEventListener('message'", 1)[0]
+
+    # A ?v= mismatch must reach the network; the old query-blind lookup kept
+    # serving a stale layout.js/app.css to phones with the app installed.
+    assert 'await caches.match(request);' in fetch_handler
+    first_lookup = fetch_handler.split('caches.match', 2)[1]
+    assert 'ignoreSearch' not in first_lookup.split(';', 1)[0]
+    assert "url.searchParams.has('v')" in fetch_handler
+    assert 'skipWaiting' in source.split('async function installRelease', 1)[1].split('\n}\n', 1)[0]
