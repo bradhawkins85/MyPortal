@@ -271,11 +271,15 @@ async def _prepare_purge_scope(token: str, request: dict[str, Any], details: dic
     # narrowing the tenant-wide discovery search in place. Microsoft applies a
     # dataSourceScopes change asynchronously and rejects additionalSources with a
     # 409 until it does, so an in-place narrow can fail the purge indefinitely.
+    # Purview search names are unique tenant-wide, so the purge search can reuse
+    # neither the discovery search's name nor an earlier attempt's purge search.
+    purge_search_name = f"{request['search_name']} purge {uuid.uuid4().hex[:6]}"
     purge_search_id = await ediscovery.create_purge_search(
-        token, case_id, str(request["search_name"]), str(request["content_match_query"]), mailboxes,
+        token, case_id, purge_search_name, str(request["content_match_query"]), mailboxes,
     )
     details["mailboxes"] = mailboxes
     details["purge_search_id"] = purge_search_id
+    details["purge_search_name"] = purge_search_name
     # Estimate the explicit scope afresh; never authorize deletion from the
     # previous tenant-wide run.
     estimate = await _estimate(token, case_id, purge_search_id)

@@ -157,7 +157,9 @@ async def create_purge_search(
     purge bound to the discovery search can fail indefinitely (409 "Cannot add
     additional data sources when using dataSourceScopes"). Instead, create a
     fresh search that is scoped to ``none`` from the outset and attach only the
-    reviewed mailboxes, which never conflicts with a tenant-wide scope.
+    reviewed mailboxes, which never conflicts with a tenant-wide scope. ``name``
+    must not be used by any other search in the tenant, including the discovery
+    search: Purview rejects a duplicate name with HTTP 409.
 
     A tenant-wide estimate can have hits while purgeData expands that scope to
     zero locations. Do not rely on that expansion for the purge. Reconcile the
