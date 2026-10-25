@@ -767,7 +767,7 @@ body.navigation--top .menu__submenu--expanded {
   z-index: 1250;
   display: none;
   min-width: 15rem;
-  max-height: min(70vh, 32rem);
+  max-height: var(--menu-available-height, calc(100dvh - 5rem));
   overflow-y: auto;
   padding: var(--space-gap-tight);
   border: 1px solid var(--hf-line);
