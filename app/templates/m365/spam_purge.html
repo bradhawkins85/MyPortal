@@ -76,7 +76,7 @@
         <div><dt>Service limit</dt><dd>Up to 100 items/mailbox/action</dd></div>
       </dl>
       <p class="form-help">Searches run against all Exchange locations in the selected company tenant. Holds and retention can preserve recoverable copies; this workflow does not bypass them.</p>
-      <p class="form-help"><strong>How it runs:</strong> searches and purges use the Microsoft Graph eDiscovery API under the delegated sign-in of the Microsoft admin who last reconnected this company. That admin needs the eDiscovery Manager role group (search) and the Search And Purge role (purge) in Microsoft Purview. Searches are kept in the Purview eDiscovery case "MyPortal spam removal". If results remain unchanged, use Verify purge and check the job report before submitting another deletion. Confirm whether messages are still visible in Outlook on the web.</p>
+      <p class="form-help"><strong>How it runs:</strong> searches and purges use the Microsoft Graph eDiscovery API under the delegated sign-in of the Microsoft admin who last reconnected this company. That admin needs the eDiscovery Manager role group (search) and the Search And Purge role (purge) in Microsoft Purview. Searches are kept in the Purview eDiscovery case "MyPortal spam removal". If results remain unchanged, check the job report in Microsoft Purview before submitting another deletion. Confirm whether messages are still visible in Outlook on the web.</p>
     </div>
   </aside>
 </div>
@@ -113,12 +113,6 @@
           {% set can_purge = item.search_status == 'completed' and item.matched_items > 0 and item.purge_status in ['not_started','failed'] %}
           <div class="purge-row-actions">
             <button type="button" class="button button--ghost button--small" data-purge-details-open="purge-details-{{ item.id }}" aria-haspopup="dialog" aria-controls="purge-details-{{ item.id }}">Details</button>
-            {% if purge.operation_url and item.purge_status in ['completed','needs_review','partiallysucceeded','failed'] %}
-            <form method="post" action="/m365/spam-purge/{{ item.id }}/verify">
-              {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
-              <button class="button button--ghost button--small" type="submit">Verify purge</button>
-            </form>
-            {% endif %}
             {% if item.search_status == 'failed' %}
             <form method="post" action="/m365/spam-purge/{{ item.id }}/retry">
               {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
@@ -204,7 +198,7 @@
         </dl>
         <p class="form-help">Microsoft job success does not guarantee every match was removed. Removal counts use the purge report when available. Counts marked ~ are estimated from the decrease in search matches after mailbox cleanup; retained copies and indexing delays can affect those estimates.</p>
         {% if purge.report_no_op %}<p class="alert alert--warning" role="status">Microsoft's report confirms an empty purge job: zero locations or zero items attempted. No deletion was performed.</p>{% endif %}
-        {% if needs_review %}<p class="alert alert--warning" role="status">Message removal has not been verified. If messages are still visible in Outlook on the web, review the purge report in Microsoft Purview before another deletion. Verify purge checks the existing job without submitting another purge.</p>{% endif %}
+        {% if needs_review %}<p class="alert alert--warning" role="status">Message removal has not been verified. If messages are still visible in Outlook on the web, review the purge report in Microsoft Purview before another deletion.</p>{% endif %}
         {% if purge.verification_error %}<p class="form-help">Verification unavailable: {{ purge.verification_error }}</p>{% endif %}
         {% if purge.report_error %}<p class="form-help">Purge report unavailable: {{ purge.report_error }}</p>{% endif %}
         {% if purge.reports %}
