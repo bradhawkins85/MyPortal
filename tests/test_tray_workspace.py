@@ -42,7 +42,8 @@ def _tray(**overrides: Any) -> dict[str, Any]:
     tray: dict[str, Any] = {
         "devices": {
             "devices": [
-                {"id": 1, "hostname": "PC-1", "device_uid": "u1", "status": "active"},
+                {"id": 1, "hostname": "PC-1", "device_uid": "u1", "status": "active",
+                 "company_name": "Acme Pty Ltd"},
                 {"id": 2, "hostname": "PC-2", "device_uid": "u2", "status": "revoked"},
             ],
             "filters": {"search": "", "status": ""},
@@ -114,6 +115,15 @@ def test_workspace_toggles_keep_the_section_and_drop_one_time_tokens():
     assert "new_token" not in toggle.group(1)
     assert "search=pc" in toggle.group(1)
     assert "show_revoked_tokens=true" in toggle.group(1)
+
+
+def test_device_list_shows_each_device_company():
+    html = _render()
+
+    assert '<th scope="col" data-sort="string">Company</th>' in html
+    assert '<td data-value="acme pty ltd">Acme Pty Ltd</td>' in html
+    # PC-2 has no company, so its cell shows a dash.
+    assert '<td data-value="">—</td>' in html
 
 
 def test_technicians_see_only_the_device_section():
@@ -204,6 +214,24 @@ async def test_workspace_loads_only_devices_for_technicians(monkeypatch):
     assert captured["template"] == "admin/tray/index.html"
     assert set(captured["extra"]["tray"]) == {"devices"}
     tokens.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_device_search_matches_company_name(monkeypatch):
+    from app.repositories import tray as tray_repo
+    from app.services import tray_installer as tray_installer_service
+
+    list_mock = AsyncMock(return_value=[
+        {"id": 1, "hostname": "PC-1", "device_uid": "u1", "status": "active", "company_name": "Acme"},
+        {"id": 2, "hostname": "PC-2", "device_uid": "u2", "status": "active", "company_name": "Globex"},
+    ])
+    monkeypatch.setattr(tray_repo, "list_devices_with_company", list_mock)
+    monkeypatch.setattr(tray_installer_service, "get_cached_latest_release_info", dict)
+
+    context = await main._tray_devices_context({"id": 1}, search="globex", status="active")
+
+    list_mock.assert_awaited_once_with(status="active")
+    assert [d["id"] for d in context["devices"]] == [2]
 
 
 @pytest.mark.anyio

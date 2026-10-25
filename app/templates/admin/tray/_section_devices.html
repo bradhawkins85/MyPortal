@@ -45,7 +45,7 @@
       <form method="get" action="/admin/tray#devices" class="filter-grid" id="tray-device-filter">
         <div class="form-field">
           <label class="form-label" for="filter-search">Search</label>
-          <input class="form-input" id="filter-search" name="search" value="{{ d.filters.search or '' }}" placeholder="Hostname, console user, or device UID" />
+          <input class="form-input" id="filter-search" name="search" value="{{ d.filters.search or '' }}" placeholder="Hostname, company, console user, or device UID" />
         </div>
         <div class="form-field">
           <label class="form-label" for="filter-status">Status</label>
@@ -68,6 +68,7 @@
           <thead>
             <tr>
               <th scope="col" data-sort="string">Hostname</th>
+              <th scope="col" data-sort="string">Company</th>
               <th scope="col" data-sort="string">Status</th>
               <th scope="col" data-sort="string">OS</th>
               <th scope="col" data-sort="string">Console user</th>
@@ -83,6 +84,7 @@
                   <strong>{{ device.hostname or device.device_uid }}</strong>
                   <div class="data-table__sub">{{ device.device_uid }}</div>
                 </td>
+                <td data-value="{{ (device.company_name or '')|lower }}">{{ device.company_name or '—' }}</td>
                 <td data-value="{{ device.status or '' }}">
                   {% if device.status == 'active' %}
                     <span class="status status--success">Active</span>
