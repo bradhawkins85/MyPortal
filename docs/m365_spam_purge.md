@@ -63,11 +63,6 @@ mailbox in Outlook on the web to establish whether messages remain visible.
 The history also flags older `completed` records with remaining or unknown
 matches as **Needs review**.
 
-Use **Verify purge** on a finished request to inspect its existing Microsoft
-operation, retrieve its purge job report, and refresh verification. This action
-never submits `purgeData`, including when Microsoft reports the original job as
-failed. The normal purge action remains separate and requires confirmation.
-
 The details dialog retains bounded CSV previews of Microsoft's purge job report
 (up to five files and 20 rows per file), including the original status and error
 columns. A missing or inaccessible report is shown explicitly. Download the
