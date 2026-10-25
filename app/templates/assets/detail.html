@@ -96,6 +96,7 @@
           {% if not customer_safe %}
             <li class="scf-chip">{{ 'Manual inventory' if asset.provenance == 'manual' else 'Synced inventory' }}</li>
             {% if asset.serial_number %}<li class="scf-chip">SN {{ asset.serial_number }}</li>{% endif %}
+            {% if logged_on_user %}<li class="scf-chip" title="Currently logged on user">Logged on: {{ logged_on_user }}</li>{% endif %}
             {% if asset.criticality %}<li class="scf-chip scf-chip--logic">{{ asset.criticality | title }} criticality</li>{% endif %}
             <li class="scf-chip{% if asset.review_status != 'reviewed' %} scf-chip--muted{% endif %}">{{ (asset.review_status or 'not_reviewed') | replace('_', ' ') | title }}</li>
             <li class="scf-chip{% if asset.customer_visible %} scf-chip--visibility{% else %} scf-chip--muted{% endif %}">{{ 'Customer portal' if asset.customer_visible else 'Internal asset' }}</li>

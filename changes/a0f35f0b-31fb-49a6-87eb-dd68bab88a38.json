@@ -1,0 +1,7 @@
+{
+  "guid": "a0f35f0b-31fb-49a6-87eb-dd68bab88a38",
+  "occurred_at": "2026-10-25T09:41Z",
+  "change_type": "Feature",
+  "summary": "Show the currently logged on user in the summary chips at the top of an asset's page, using the tray app's live report and falling back to the last user from synced inventory.",
+  "content_hash": "0bd3b444b7ed8938a0af69d48ec93f8303290a6d92d277d3f9ca064a81c9c8bc"
+}
