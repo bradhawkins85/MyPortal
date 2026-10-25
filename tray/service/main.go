@@ -47,6 +47,7 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/config"
 	"github.com/bradhawkins85/myportal-tray/internal/defender"
+	"github.com/bradhawkins85/myportal-tray/internal/healthcheck"
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 	"github.com/bradhawkins85/myportal-tray/internal/notify"
@@ -185,9 +186,11 @@ type daemon struct {
 	rmmInstallMu sync.Mutex
 	// defenderScanMu serialises Defender scans, which run in the background
 	// because Start-MpScan blocks until a (possibly hours-long) scan finishes.
-	defenderScanMu     sync.Mutex
-	defenderStatusMu   sync.Mutex
-	manualCheckinMu    sync.Mutex
+	defenderScanMu   sync.Mutex
+	defenderStatusMu sync.Mutex
+	manualCheckinMu  sync.Mutex
+	// healthCheckMu lets one health check run at a time.
+	healthCheckMu      sync.Mutex
 	configMu           sync.RWMutex
 	configRefreshMu    sync.Mutex
 	cachedConfig       *api.ConfigResponse
@@ -275,6 +278,7 @@ func (d *daemon) run() {
 	go d.rmmVersionLoop(updateCtx)
 
 	// Main WS + heartbeat loop.
+	go cleanupHealthCheckPawnIO()
 	go d.wsLoop()
 	go d.heartbeatLoop()
 	go d.defenderStatusLoop()
@@ -719,6 +723,9 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 	case "troubleshoot":
 		logger.Info("troubleshoot command received")
 		go d.handleTroubleshoot(msg)
+	case "health_check":
+		logger.Info("health_check command received")
+		go d.handleHealthCheck(msg)
 	case "install_rmm_agent":
 		logger.Info("install_rmm_agent command received")
 		go d.handleInstallRMMAgent(msg)
@@ -822,6 +829,9 @@ func (d *daemon) handleTroubleshoot(msg map[string]json.RawMessage) {
 	if t, ok := msg["extra_log_folders"]; ok {
 		_ = json.Unmarshal(t, &req.ExtraLogFolders)
 	}
+	if t, ok := msg["extra_event_logs"]; ok {
+		_ = json.Unmarshal(t, &req.ExtraEventLogs)
+	}
 
 	logger.Info("troubleshoot: running agent (ticket %d, command %d, model %q)",
 		req.TicketID, req.CommandID, llm.Model)
@@ -886,6 +896,114 @@ func (d *daemon) handleTroubleshoot(msg map[string]json.RawMessage) {
 	}
 	logger.Info("troubleshoot: reported ticket %d (guidance=%d bytes, bundle=%d bytes, truncated=%t)",
 		req.TicketID, len(result.Guidance), len(result.LogBundle), result.Truncated)
+}
+
+// handleHealthCheck runs one phase of an AI health check for a
+// "health_check" WebSocket command and uploads the result. Only one health
+// check runs at a time; it may briefly install PawnIO (see package
+// healthcheck), so a panic is recovered and reported rather than taking the
+// service down.
+func (d *daemon) handleHealthCheck(msg map[string]json.RawMessage) {
+	var req healthcheck.Request
+	for _, field := range []struct {
+		key string
+		dst any
+	}{
+		{"command_id", &req.CommandID},
+		{"health_check_id", &req.HealthCheckID},
+		{"phase", &req.Phase},
+		{"log_requests", &req.LogRequests},
+		{"extra_log_folders", &req.ExtraLogFolders},
+		{"extra_event_logs", &req.ExtraEventLogs},
+		{"allow_pawnio", &req.AllowPawnIO},
+		{"event_days", &req.EventDays},
+	} {
+		if t, ok := msg[field.key]; ok {
+			_ = json.Unmarshal(t, field.dst)
+		}
+	}
+	if req.CommandID <= 0 || req.HealthCheckID <= 0 {
+		logger.Warn("health_check: ignoring command with missing ids (check %d, command %d)", req.HealthCheckID, req.CommandID)
+		return
+	}
+	report := func(stage, message string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := d.client.PostHealthCheckStatus(ctx, req.HealthCheckID, req.CommandID, stage, message); err != nil {
+			logger.Warn("health_check: status %q report failed: %v", stage, err)
+		}
+	}
+	if !d.healthCheckMu.TryLock() {
+		report(healthcheck.StageFailed, "Another health check is already running on this device.")
+		return
+	}
+	defer d.healthCheckMu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("health_check: panic: %v", r)
+			report(healthcheck.StageFailed, fmt.Sprintf("The health check stopped unexpectedly: %v", r))
+		}
+	}()
+
+	logger.Info("health_check: running %s phase (check %d, command %d, PawnIO allowed %t)",
+		req.Phase, req.HealthCheckID, req.CommandID, req.AllowPawnIO)
+	report(healthcheck.StageReceived, fmt.Sprintf("Health check agent %s started the %s phase.", updater.AgentVersion, req.Phase))
+
+	runner := healthcheck.NewRunner(stateDir(), updater.AgentVersion)
+	runner.OnProgress = report
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	result, runErr := runner.Run(ctx, req)
+	cancel()
+	errMsg := ""
+	if runErr != nil {
+		logger.Warn("health_check: partial failure: %v", runErr)
+		errMsg = runErr.Error()
+		if r := []rune(errMsg); len(r) > 4000 {
+			errMsg = string(r[:4000])
+		}
+	}
+	if len(result.Snapshot) == 0 && len(result.LogBundle) == 0 {
+		if errMsg == "" {
+			errMsg = "The health check produced nothing to upload."
+		}
+		report(healthcheck.StageFailed, errMsg)
+		return
+	}
+	report(healthcheck.StageUploading, fmt.Sprintf("Uploading %d bytes of health metrics and %d bytes of logs.", len(result.Snapshot), len(result.LogBundle)))
+	var postErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt*5) * time.Second)
+		}
+		postCtx, postCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		postErr = d.client.PostHealthCheckResult(postCtx, req.HealthCheckID, req.CommandID, req.Phase,
+			result.Snapshot, result.LogBundle, errMsg)
+		postCancel()
+		if postErr == nil {
+			break
+		}
+		logger.Warn("health_check: upload failed (attempt %d): %v", attempt+1, postErr)
+	}
+	if postErr != nil {
+		report(healthcheck.StageFailed, fmt.Sprintf("The health check finished but could not upload its result: %v", postErr))
+		return
+	}
+	logger.Info("health_check: uploaded check %d (%s phase, snapshot=%d bytes, logs=%d bytes)",
+		req.HealthCheckID, req.Phase, len(result.Snapshot), len(result.LogBundle))
+}
+
+// cleanupHealthCheckPawnIO removes PawnIO if a health check installed it and
+// the service stopped before removing it.
+func cleanupHealthCheckPawnIO() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	found, err := healthcheck.CleanupPawnIO(ctx, stateDir())
+	switch {
+	case err != nil:
+		logger.Warn("health_check: removing PawnIO left by an interrupted health check failed: %v", err)
+	case found:
+		logger.Info("health_check: removed PawnIO left by an interrupted health check")
+	}
 }
 
 func (d *daemon) deliverUserSessionMessage(msg ipc.Message) {

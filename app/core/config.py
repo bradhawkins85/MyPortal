@@ -1103,6 +1103,19 @@ class Settings(BaseSettings):
     troubleshoot_log_folders_macos: str | None = Field(
         default=None, validation_alias="TROUBLESHOOT_LOG_FOLDERS_MACOS"
     )
+    # Extra Windows event log channels the troubleshooter and health check may
+    # read, on top of the built-in list, separated by ";". Channels approved on
+    # /admin/required-logs are added too. The tray agent re-checks each name.
+    troubleshoot_event_logs_windows: str | None = Field(
+        default=None, validation_alias="TROUBLESHOOT_EVENT_LOGS_WINDOWS"
+    )
+    # Health check (AI): on physical Windows hardware the tray agent may install
+    # the PawnIO driver for the length of the check to read hardware sensors
+    # (CPU/GPU/motherboard temperatures, fans, voltages), removing it again
+    # straight afterwards. Set to false to never install it.
+    health_check_pawnio_enabled: bool = Field(
+        default=True, validation_alias="HEALTH_CHECK_PAWNIO_ENABLED"
+    )
     matrixbot_ai_response_delay_minutes: int = Field(
         default=5, validation_alias="MATRIXBOT_AI_RESPONSE_DELAY_MINUTES", ge=1
     )

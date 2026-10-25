@@ -1,0 +1,7 @@
+{
+  "guid": "d8f603c8-22aa-42b5-996f-fb95d990225e",
+  "occurred_at": "2026-10-23T09:00Z",
+  "change_type": "Feature",
+  "summary": "AI health check, an RMM option in the asset Actions menu once the RMM agent is deployed: reviews the computer's drives and impending failure, chkdsk and defrag state, thermals (PawnIO installed only for the check on physical hardware), crashes, performance, updates and security, with steps back to optimal performance; Admin > Required logs lists logs the AI troubleshooter and health check could not read for approval",
+  "content_hash": "f8fc46f1c65e6dd449710feea23c7d9bdba2d4094d7d6f33eccff90e5347d59a"
+}

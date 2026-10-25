@@ -67,6 +67,9 @@ type Request struct {
 	// ExtraLogFolders are log folders the server's owner allowed on top of
 	// the built-in list (TROUBLESHOOT_LOG_FOLDERS_*). Each is re-validated.
 	ExtraLogFolders []string
+	// ExtraEventLogs are Windows event log channels the server's owner
+	// allowed on top of WindowsLogSources. Each is re-validated.
+	ExtraEventLogs []string
 }
 
 // Result is the finished agent output, ready to be reported to the server. A
@@ -100,6 +103,8 @@ type Agent struct {
 	// fileRoots are the folders "file:" sources may be read from for the
 	// current job: the platform list plus the job's valid extra folders.
 	fileRoots []string
+	// extraChannels are the job's valid owner-approved event log channels.
+	extraChannels []string
 }
 
 // Progress stages reported through Agent.OnProgress. They match the stages
@@ -124,15 +129,49 @@ func NewAgent() *Agent {
 		Window:  DefaultWindow,
 	}
 	a.CollectLogs = func(ctx context.Context, specs []LogSpec) (string, []string, error) {
-		return collectLogs(ctx, specs, a.roots())
+		return collectLogs(ctx, specs, a.roots(), a.extraChannels)
 	}
-	a.AllowedSource = func(source string) bool {
-		if strings.HasPrefix(source, FileSourcePrefix) {
-			return isFileLogSource(source, a.roots())
-		}
-		return isPlatformLogSource(source)
-	}
+	a.AllowedSource = a.allowedSource
 	return a
+}
+
+// allowedSource reports whether a requested source may be collected for the
+// current job: an allowlisted channel, an owner-approved channel, or a log
+// file in an allowlisted folder.
+func (a *Agent) allowedSource(source string) bool {
+	if strings.HasPrefix(source, FileSourcePrefix) {
+		return isFileLogSource(source, a.roots())
+	}
+	return isPlatformLogSource(source) || containsString(a.extraChannels, source)
+}
+
+func containsString(values []string, value string) bool {
+	for _, v := range values {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+// PrepareSources applies the job's owner-approved folders and channels and
+// returns a description of any that are not valid on this endpoint.
+func (a *Agent) PrepareSources(extraFolders, extraEventLogs []string) []string {
+	var errs []string
+	roots, ignored := FileRoots(platformFileRoots, platformPathStyle, extraFolders)
+	a.fileRoots = roots
+	if len(ignored) > 0 {
+		errs = append(errs, fmt.Sprintf("ignored extra log folders that are not valid on this endpoint: %s", strings.Join(ignored, ", ")))
+	}
+	a.extraChannels = nil
+	if platformExtraChannels {
+		channels, ignoredChannels := ExtraEventLogs(extraEventLogs)
+		a.extraChannels = channels
+		if len(ignoredChannels) > 0 {
+			errs = append(errs, fmt.Sprintf("ignored extra event logs that are not valid channel names: %s", strings.Join(ignoredChannels, ", ")))
+		}
+	}
+	return errs
 }
 
 func (a *Agent) roots() []string {
@@ -155,22 +194,14 @@ func (a *Agent) Run(ctx context.Context, req Request) (Result, error) {
 	var result Result
 	result.Endpoint = a.resolveEndpoint(req)
 
-	var errs []string
-
-	roots, ignored := FileRoots(platformFileRoots, platformPathStyle, req.ExtraLogFolders)
-	a.fileRoots = roots
-	if len(ignored) > 0 {
-		errs = append(errs, fmt.Sprintf("ignored extra log folders that are not valid on this endpoint: %s", strings.Join(ignored, ", ")))
-	}
+	errs := a.PrepareSources(req.ExtraLogFolders, req.ExtraEventLogs)
 
 	collectOnly := req.Mode == ModeCollectLogs
 	specs := defaultLogSpecs(window)
 	if collectOnly {
 		allowed := a.AllowedSource
 		if allowed == nil {
-			allowed = func(source string) bool {
-				return isPlatformLogSource(source) || isFileLogSource(source, a.roots())
-			}
+			allowed = a.allowedSource
 		}
 		requested, refused := ResolveLogRequests(req.LogRequests, allowed)
 		if len(refused) > 0 {

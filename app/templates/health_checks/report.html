@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% import "health_checks/_macros.html" as hc %}
+{% set sections = snapshot.sections %}
+{% block title %}Health check #{{ check.id }}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/health_checks.css') }}">{% endblock %}
+{% block header_title %}
+  Health check
+  <span class="header__title-meta">{{ check.asset_name or ('Asset ' ~ check.asset_id) }}</span>
+{% endblock %}
+{% block header_actions %}
+  {% set actions = [] %}
+  {% if can_run_again and not check.is_active %}{% set _ = actions.append({"label": "Run again", "type": "submit", "variant": "primary", "form": "hc-run-again", "attrs": {"title": "Start a new health check on this asset"}}) %}{% endif %}
+  {% set _ = actions.append({"label": "Back to asset", "type": "link", "href": "/assets/" ~ check.asset_id ~ "#health-check"}) %}
+  {% set _ = actions.append({"label": "Health checks for this asset", "type": "link", "href": "/health-checks?asset_id=" ~ check.asset_id}) %}
+  {% if is_super_admin %}{% set _ = actions.append({"label": "Required logs", "type": "link", "href": "/admin/required-logs"}) %}{% endif %}
+  {{ page_header_actions(actions, menu_id="hc-report-actions") }}
+{% endblock %}
+{% block content %}
+<section class="hc-workspace" data-hc-report data-hc-id="{{ check.id }}" data-hc-status="{{ check.status }}">
+  <section class="ce-overview" aria-label="Health check at a glance">
+    <ul class="scf-item__chips" aria-label="Health check summary">
+      <li>{{ hc.status_chip(check) }}</li>
+      {% if check.overall_status %}<li>{{ hc.overall_chip(check) }}</li>{% endif %}
+      {% if check.health_score is not none %}<li class="scf-chip">Score {{ check.health_score }}/100</li>{% endif %}
+      <li class="scf-chip">{{ check.company_name or ('Company ' ~ check.company_id) }}</li>
+      {% if check.platform and check.platform != 'unknown' %}<li class="scf-chip">{{ {"windows": "Windows", "macos": "macOS"}.get(check.platform, check.platform) }}</li>{% endif %}
+      {% if snapshot.is_virtual is sameas true %}<li class="scf-chip scf-chip--muted">Virtual machine</li>{% elif snapshot.is_virtual is sameas false %}<li class="scf-chip">Physical hardware</li>{% endif %}
+      {% if check.model %}<li class="scf-chip scf-chip--muted">Model {{ check.model }}</li>{% endif %}
+      {% if check.ticket_id %}<li class="scf-chip"><a href="/tickets/{{ check.ticket_id }}">Ticket #{{ check.ticket_id }}</a></li>{% endif %}
+      <li class="scf-chip scf-chip--muted">Started <span data-utc="{{ check.created_at }}">{{ check.created_at }}</span></li>
+      {% if check.completed_at %}<li class="scf-chip scf-chip--muted">Finished <span data-utc="{{ check.completed_at }}">{{ check.completed_at }}</span></li>{% endif %}
+    </ul>
+  </section>
+
+  {% if can_run_again %}<form id="hc-run-again" method="post" action="/rmm/assets/{{ check.asset_id }}/health-check" hidden>{% include "partials/csrf.html" %}<input type="hidden" name="pawnio_choice" value="1"><input type="hidden" name="allow_pawnio" value="{{ '1' if check.allow_pawnio else '' }}"></form>{% endif %}
+
+  {% if check.is_active %}
+  <section class="card card--panel" aria-labelledby="hc-progress-title">
+    <div class="hc-progress">
+      <span class="status status--processing">{{ check.status_label }}</span>
+      <div>
+        <h2 class="card__title" id="hc-progress-title">The health check is running</h2>
+        <p role="status" aria-live="polite" data-hc-stage>{{ check.stage_message or 'Waiting for the device.' }}</p>
+        <p class="hc-muted">This page refreshes when the next stage finishes. Collecting the snapshot usually takes a few minutes.</p>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if check.error %}<div class="alert alert--{{ 'error' if check.status == 'failed' else 'warning' }}" role="status">{{ check.error }}</div>{% endif %}
+  {% if check.pawnio_status %}<div class="alert alert--{{ 'warning' if 'could not be removed' in check.pawnio_status else 'info' }}" role="status"><strong>PawnIO:</strong> {{ check.pawnio_status }}</div>{% endif %}
+
+  {% if check.status == 'completed' %}
+  <section class="card card--panel" aria-labelledby="hc-summary-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-summary-title">Summary</h2></div></header>
+    <div class="hc-summary">
+      {% if check.health_score is not none %}<div class="hc-score" title="100 minus 20 per critical, 7 per warning and 1 per informational flag from the automatic checks">{{ check.health_score }}<small>of 100</small></div>{% endif %}
+      <div class="hc-summary__text">
+        <p>{{ report.summary or check.summary or 'No summary was produced.' }}</p>
+        {% if report.ai_error %}<p class="hc-muted">The AI model could not be reached ({{ report.ai_error }}), so this report shows the automatic checks only.</p>{% endif %}
+        {% if report.web_error %}<p class="hc-muted">Public web search failed: {{ report.web_error }}</p>{% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="hc-steps-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-steps-title">Steps to optimal performance</h2><p class="card__subtitle">In order of importance. Review each step before you act on it; the AI model can be wrong.</p></div></header>
+    {% if report.steps %}
+      <ol class="hc-steps">
+        {% for step in report.steps %}
+          <li>
+            <span class="hc-steps__action">{{ step.action }}</span>
+            <span class="scf-chip{% if step.priority != 'now' %} scf-chip--muted{% endif %}">{{ {"now": "Do now", "soon": "Soon", "routine": "Routine"}.get(step.priority, step.priority) }}</span>
+            <span class="scf-chip scf-chip--muted">{{ areas.get(step.area, step.area) }}</span>
+            {% if step.detail %}<p class="hc-steps__detail">{{ step.detail }}</p>{% endif %}
+            {% if step.reference %}<p class="hc-steps__detail hc-muted">Source: {% if step.reference_url %}<a href="{{ step.reference_url }}" rel="noopener noreferrer" target="_blank">{{ step.reference }}</a>{% else %}{{ step.reference }}{% endif %}</p>{% endif %}
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p>No steps were produced.{% if not signals %} The automatic checks found nothing to fix.{% endif %}</p>
+    {% endif %}
+  </section>
+
+  {% if report.findings %}
+  <section class="card card--panel" aria-labelledby="hc-findings-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-findings-title">Findings</h2><p class="card__subtitle">What the AI model found in the snapshot and logs, with the evidence.</p></div></header>
+    <ul class="hc-cards" role="list">
+      {% for finding in report.findings %}
+        <li><article class="hc-card hc-card--{{ hc.tone(finding.severity) }}">
+          <div class="hc-card__head"><h3 class="hc-card__title">{{ finding.title }}</h3><span class="hc-actions">{{ hc.severity_chip(finding.severity) }} <span class="scf-chip scf-chip--muted">{{ areas.get(finding.area, finding.area) }}</span></span></div>
+          {% if finding.source %}<p class="hc-card__meta">From {{ finding.source }}</p>{% endif %}
+          {% if finding.evidence %}<pre class="hc-evidence">{{ finding.evidence }}</pre>{% endif %}
+        </article></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if report.areas %}
+  <section class="card card--panel" aria-labelledby="hc-areas-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-areas-title">By area</h2></div></header>
+    <ul class="hc-areas" role="list">
+      {% for area in report.areas %}
+        <li><article class="hc-card hc-card--{{ hc.tone(area.status) }}">
+          <div class="hc-card__head"><h3 class="hc-card__title">{{ areas.get(area.area, area.area) }}</h3><span class="scf-chip">{{ area.status | title }}</span></div>
+          {% if area.summary %}<p>{{ area.summary }}</p>{% endif %}
+        </article></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  {% endif %}
+
+  <section class="card card--panel" aria-labelledby="hc-signals-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-signals-title">Automatic checks</h2><p class="card__subtitle">Problems MyPortal's fixed rules found in the snapshot, without the AI model.</p></div></header>
+    {% if signals %}
+      <ul class="hc-cards" role="list">
+        {% for signal in signals %}
+          <li><article class="hc-card hc-card--{{ hc.tone(signal.severity) }}">
+            <div class="hc-card__head"><h3 class="hc-card__title">{{ signal.title }}</h3><span class="hc-actions">{{ hc.severity_chip(signal.severity) }} <span class="scf-chip scf-chip--muted">{{ areas.get(signal.area, signal.area) }}</span></span></div>
+            {% if signal.detail %}<p>{{ signal.detail }}</p>{% endif %}
+          </article></li>
+        {% endfor %}
+      </ul>
+    {% elif sections %}
+      <p>No problems flagged.</p>
+    {% else %}
+      <p class="hc-muted">Waiting for the snapshot.</p>
+    {% endif %}
+  </section>
+
+  {% if sections %}
+  <section class="card card--panel" aria-labelledby="hc-snapshot-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-snapshot-title">Snapshot</h2><p class="card__subtitle">Read from the computer{% if snapshot.collected_at %} at <span data-utc="{{ snapshot.collected_at }}">{{ snapshot.collected_at }}</span>{% endif %}{% if snapshot.duration_ms %} in {{ (snapshot.duration_ms / 1000) | round(0) | int }} s{% endif %}.</p></div></header>
+
+    {% set system = sections.get('system') or {} %}
+    {% if system %}
+    <dl class="hc-facts" aria-label="Computer">
+      {% if system.manufacturer or system.model %}<div><dt>Computer</dt><dd>{{ system.manufacturer }} {{ system.model }}</dd></div>{% endif %}
+      {% if system.os %}<div><dt>Operating system</dt><dd>{{ system.os }} {{ system.display_version or '' }} ({{ system.build }})</dd></div>{% endif %}
+      {% if system.uptime_hours is not none %}<div><dt>Up for</dt><dd>{{ (system.uptime_hours / 24) | round(1) }} days</dd></div>{% endif %}
+      {% if system.bios_version %}<div><dt>BIOS</dt><dd>{{ system.bios_version }}</dd></div>{% endif %}
+    </dl>
+    {% endif %}
+
+    {% set disks = sections.get('disks') or [] %}
+    {% if disks %}
+    <div class="hc-table-wrap"><table class="hc-table">
+      <caption>Drives</caption>
+      <thead><tr><th scope="col">Drive</th><th scope="col">Type</th><th scope="col">Size</th><th scope="col">Health</th><th scope="col">Wear</th><th scope="col">Temperature</th><th scope="col">Powered on</th><th scope="col">Uncorrected errors</th></tr></thead>
+      <tbody>
+        {% for disk in disks %}{% if disk is mapping %}
+        {% set errors = (disk.read_errors_uncorrected or 0) + (disk.write_errors_uncorrected or 0) %}
+        <tr>
+          <th scope="row">{{ disk.name or ('Disk ' ~ disk.device_id) }}</th>
+          <td>{{ disk.media_type or '—' }}{% if disk.bus_type %} · {{ disk.bus_type }}{% endif %}</td>
+          <td>{{ disk.size_gb ~ ' GB' if disk.size_gb is not none else '—' }}</td>
+          <td class="{{ 'is-bad' if disk.health == 'Unhealthy' else 'is-warn' if disk.health == 'Warning' else '' }}">{{ disk.health or '—' }}{% if disk.operational_status %} ({{ disk.operational_status | join(', ') }}){% endif %}</td>
+          <td class="{{ 'is-bad' if (disk.wear_percent or 0) >= 90 else 'is-warn' if (disk.wear_percent or 0) >= 70 else '' }}">{{ disk.wear_percent ~ '%' if disk.wear_percent is not none else '—' }}</td>
+          <td>{{ disk.temperature_c ~ ' °C' if disk.temperature_c is not none else '—' }}{% if disk.temperature_max_c %} <span class="hc-muted">(max {{ disk.temperature_max_c }} °C)</span>{% endif %}</td>
+          <td>{{ disk.power_on_hours ~ ' h' if disk.power_on_hours is not none else '—' }}</td>
+          <td class="{{ 'is-bad' if errors else '' }}">{{ errors | int }}</td>
+        </tr>
+        {% endif %}{% endfor %}
+      </tbody>
+    </table></div>
+    {% endif %}
+
+    {% set volumes = sections.get('volumes') or [] %}
+    {% if volumes %}
+    <div class="hc-table-wrap"><table class="hc-table">
+      <caption>Volumes</caption>
+      <thead><tr><th scope="col">Volume</th><th scope="col">File system</th><th scope="col">Size</th><th scope="col">Free</th><th scope="col">Needs chkdsk</th><th scope="col">Health</th></tr></thead>
+      <tbody>
+        {% for volume in volumes %}{% if volume is mapping %}
+        <tr>
+          <th scope="row">{{ volume.drive or volume.mount or volume.name }}{% if volume.label %} <span class="hc-muted">{{ volume.label }}</span>{% endif %}</th>
+          <td>{{ volume.file_system or '—' }}</td>
+          <td>{{ volume.size_gb ~ ' GB' if volume.size_gb is not none else '—' }}</td>
+          <td class="{{ 'is-bad' if (volume.free_percent is not none and volume.free_percent < 5) else 'is-warn' if (volume.free_percent is not none and volume.free_percent < 10) else '' }}">{{ volume.free_gb ~ ' GB' if volume.free_gb is not none else '—' }}{% if volume.free_percent is not none %} ({{ volume.free_percent }}%){% endif %}</td>
+          <td class="{{ 'is-warn' if volume.dirty else '' }}">{{ 'Yes' if volume.dirty else 'No' if volume.dirty is sameas false else '—' }}</td>
+          <td>{{ volume.health or '—' }}</td>
+        </tr>
+        {% endif %}{% endfor %}
+      </tbody>
+    </table></div>
+    {% endif %}
+
+    {% if snapshot.sensor_groups %}
+      {% for type, readings in snapshot.sensor_groups.items() %}
+      <div class="hc-table-wrap"><table class="hc-table">
+        <caption>Hardware sensors: {{ type }}</caption>
+        <thead><tr><th scope="col">Hardware</th><th scope="col">Sensor</th><th scope="col">Value</th><th scope="col">Min</th><th scope="col">Max</th></tr></thead>
+        <tbody>
+          {% for reading in readings[:80] %}
+          <tr><td>{{ reading.hardware }}</td><th scope="row">{{ reading.name }}</th><td>{{ reading.value }} {{ reading.unit or '' }}</td><td>{{ reading.min if reading.min is not none else '—' }}</td><td>{{ reading.max if reading.max is not none else '—' }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table></div>
+      {% endfor %}
+    {% elif snapshot.sensor_status %}
+      <p class="hc-muted">Hardware sensors: {{ snapshot.sensor_status | replace('_', ' ') }}{% if snapshot.sensor_detail %} ({{ snapshot.sensor_detail }}){% endif %}.</p>
+    {% endif %}
+
+    {% set thermal = sections.get('thermal') or {} %}
+    {% if thermal.get('zones') %}
+    <div class="hc-table-wrap"><table class="hc-table">
+      <caption>Built-in thermal zones</caption>
+      <thead><tr><th scope="col">Zone</th><th scope="col">Temperature</th><th scope="col">CPU allowed</th></tr></thead>
+      <tbody>{% for zone in thermal.zones %}{% if zone is mapping %}<tr><th scope="row">{{ zone.zone }}</th><td>{{ zone.celsius ~ ' °C' if zone.celsius is not none else '—' }}</td><td>{{ zone.passive_limit_percent ~ '%' if zone.passive_limit_percent is not none else '—' }}</td></tr>{% endif %}{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+
+    {% set battery = sections.get('battery') or {} %}
+    {% if battery.get('present') %}
+    <dl class="hc-facts" aria-label="Battery">
+      <div><dt>Battery capacity</dt><dd>{{ battery.health_percent ~ '% of design' if battery.health_percent is not none else '—' }}</dd></div>
+      <div><dt>Charge cycles</dt><dd>{{ battery.cycle_count if battery.cycle_count is not none else '—' }}</dd></div>
+      <div><dt>Charge</dt><dd>{{ battery.charge_percent ~ '%' if battery.charge_percent is not none else '—' }}</dd></div>
+    </dl>
+    {% endif %}
+
+    {% if snapshot.errors %}
+    <details class="hc-details"><summary>Parts of the snapshot that could not be read ({{ snapshot.errors | length }})</summary>
+      <ul>{% for name, message in snapshot.errors.items() %}<li><strong>{{ name }}</strong>: {{ message }}</li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+    <details class="hc-details"><summary>Full snapshot (JSON)</summary><pre class="hc-evidence">{{ sections | tojson(indent=2) }}</pre></details>
+  </section>
+  {% endif %}
+
+  {% if logs %}
+  <section class="card card--panel" aria-labelledby="hc-logs-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-logs-title">Logs reviewed</h2><p class="card__subtitle">Redacted samples the AI model read; error and warning lines are kept first when a log is long.</p></div></header>
+    {% for log in logs %}
+      <details class="hc-details">
+        <summary>{{ log.source }}{% if log.unavailable %} <span class="status status--warning">Unavailable</span>{% elif log.truncated %} <span class="scf-chip scf-chip--muted">Sampled</span>{% endif %}{% if log.phase == 'logs' %} <span class="scf-chip scf-chip--muted">Requested after triage</span>{% endif %}</summary>
+        <p class="hc-muted">{{ log.reason }}</p>
+        {% if log.unavailable %}<p>{{ log.unavailable }}</p>{% else %}<pre class="hc-evidence">{{ log.text or '[no entries in this window]' }}</pre>{% endif %}
+      </details>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% set required = report.get('required_logs') or {} %}
+  {% if required.get('not_allowed') or required.get('not_collected') %}
+  <section class="card card--panel" aria-labelledby="hc-required-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-required-title">Logs the AI model wanted</h2><p class="card__subtitle">Logs that would have helped but were not available to this check.</p></div></header>
+    {% if required.get('not_allowed') %}
+      <p><strong>Not on the approved list</strong> — listed on {% if is_super_admin %}<a href="/admin/required-logs">Required logs</a>{% else %}Required logs{% endif %} for an administrator to approve.</p>
+      <ul>{% for item in required.not_allowed %}<li><code>{{ item.source }}</code> — {{ item.reason }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if required.get('not_collected') %}
+      <p><strong>Allowed, but not collected this time</strong> — a follow-up check or the AI troubleshooter can read them.</p>
+      <ul>{% for item in required.not_collected %}<li><code>{{ item.source }}</code> — {{ item.reason }}</li>{% endfor %}</ul>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if report.get('kb_articles') or report.get('web_pages') %}
+  <section class="card card--panel" aria-labelledby="hc-references-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-references-title">References</h2></div></header>
+    {% if report.kb_articles %}<p><strong>Internal knowledge base</strong></p><ul>{% for article in report.kb_articles %}<li><a href="/knowledge-base/articles/{{ article.slug }}">{{ article.title }}</a></li>{% endfor %}</ul>{% endif %}
+    {% if report.web_pages %}<p><strong>Public web pages read</strong> <em>(check the source before relying on it)</em></p><ul>{% for page in report.web_pages %}<li><a href="{{ page.url }}" rel="noopener noreferrer" target="_blank">{{ page.title }}</a></li>{% endfor %}</ul>{% endif %}
+  </section>
+  {% endif %}
+
+  {% if previous %}
+  <section class="card card--panel" aria-labelledby="hc-previous-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-previous-title">Earlier health checks of this asset</h2></div></header>
+    <ul class="hc-cards" role="list">{% for item in previous %}<li>{{ hc.check_card(item, show_asset=false) }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+</section>
+<script src="{{ static_url('/static/js/health_checks.js') }}" defer></script>
+{% endblock %}

@@ -732,6 +732,91 @@ func (c *Client) PostTroubleshootStatus(ctx context.Context, ticketID, commandID
 	return nil
 }
 
+// PostHealthCheckStatus reports progress for a running health check. stage is
+// one of "received", "collecting_snapshot", "reading_sensors",
+// "collecting_logs", "uploading" or "failed".
+func (c *Client) PostHealthCheckStatus(ctx context.Context, healthCheckID, commandID int, stage, message string) error {
+	form := url.Values{}
+	form.Set("command_id", fmt.Sprintf("%d", commandID))
+	form.Set("stage", stage)
+	form.Set("message", message)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/health-checks/%d/device-status", c.baseURL, healthCheckID),
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	c.setAuthHeader(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health-check status: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// PostHealthCheckResult uploads a health check's snapshot (snapshot phase)
+// and redacted log bundle. errMsg describes any partial failure.
+func (c *Client) PostHealthCheckResult(ctx context.Context, healthCheckID, commandID int, phase string, snapshot, logBundle []byte, errMsg string) error {
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	for _, field := range [][2]string{
+		{"command_id", fmt.Sprintf("%d", commandID)},
+		{"phase", phase},
+		{"error", errMsg},
+	} {
+		if err := w.WriteField(field[0], field[1]); err != nil {
+			return err
+		}
+	}
+	files := []struct {
+		field, name string
+		data        []byte
+	}{
+		{"snapshot", fmt.Sprintf("health-check-%d.json", healthCheckID), snapshot},
+		{"log_bundle", fmt.Sprintf("health-check-logs-%d.tar.gz", commandID), logBundle},
+	}
+	for _, file := range files {
+		if len(file.data) == 0 {
+			continue
+		}
+		fw, err := w.CreateFormFile(file.field, file.name)
+		if err != nil {
+			return err
+		}
+		if _, err := fw.Write(file.data); err != nil {
+			return err
+		}
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/health-checks/%d/device-result", c.baseURL, healthCheckID), &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	c.setAuthHeader(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("health-check result: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // ConnectWS dials the WebSocket and returns the connection.
 // The caller is responsible for reading/writing and closing.
 func (c *Client) ConnectWS(ctx context.Context) (*websocket.Conn, error) {
