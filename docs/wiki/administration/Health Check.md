@@ -39,10 +39,16 @@ and the volume fragmentation analysis). Nothing on the computer is changed.
 | Performance | CPU load, DPC/interrupt time, processor queue, memory and commit use, paging, disk busy time, the slowest recent boots and what slowed them (Diagnostics-Performance), the busiest processes, startup items and the Reliability Monitor stability index |
 | Stability and hardware errors | Blue screens, unexpected shutdowns, WHEA hardware errors, application crashes and hangs (and the apps crashing most), service crashes and Windows Memory Diagnostic results |
 | Devices and drivers | Devices with a driver or hardware problem and the versions of display, network, storage and Bluetooth drivers |
-| Updates and restarts | Pending restarts, the last installed update, failed updates and uptime |
-| Security | Defender (real-time protection, signature and scan age, tamper protection), other antivirus, firewall profiles, BitLocker, Secure Boot and TPM |
+| Services | Automatic services that are not running and the exit code they stopped with |
+| Updates and restarts | Pending restarts, the last installed update, failed updates, uptime and whether the Windows Update service is disabled |
+| Security | Defender (real-time protection, signature and scan age, tamper protection), other antivirus, firewall profiles, BitLocker, Secure Boot, TPM, User Account Control, whether the SMB server accepts SMBv1, and whether Remote Desktop is on and requires Network Level Authentication |
+| Windows version, activation and clock | The Windows edition, build and version (checked against Microsoft's end-of-support dates for Home/Pro and Enterprise/Education), the activation status, and the Windows Time service with how often it logged that the clock went a day without synchronising |
 | Battery, network, power | Battery wear (full charge against design capacity) and cycles, network adapter errors, the power plan and fast startup |
 | OS integrity | `DISM /Online /Cleanup-Image /CheckHealth` (component store healthy, repairable or not repairable) |
+
+The UAC, SMBv1, Remote Desktop, activation and clock readings come from tray app builds
+released after the checks were added; older tray apps leave them out and those checks stay
+quiet.
 
 macOS sends a smaller snapshot from `system_profiler`, `pmset`, `sysctl` and
 `memory_pressure`: drive SMART status, volume free space, battery condition and cycles,
@@ -83,8 +89,12 @@ builds without the sensor bundle report that sensors are not part of the build.
 1. **Automatic checks** — fixed rules flag problems in the snapshot without the AI model:
    for example a drive under 5% free, a dirty volume, a failing or worn drive, uncorrected
    read errors, a SMART failure prediction, overheating or throttling, blue screens, WHEA
-   errors, heavy memory pressure, pending restarts, old updates, real-time protection off or
-   a worn battery. They set the **health score** (100, less 20 per critical, 7 per warning and
+   errors, failed memory tests, heavy memory pressure, no page file, stopped automatic
+   services, pending restarts, old updates or a disabled Windows Update service, a Windows
+   release out of support or not activated, a clock that does not synchronise, real-time
+   protection or tamper protection off, no recent antivirus scan, BitLocker off on the system
+   drive, Secure Boot or the TPM off, UAC off, SMBv1 on, Remote Desktop without NLA, network
+   adapter errors or a worn battery. They set the **health score** (100, less 20 per critical, 7 per warning and
    1 per informational flag) and the overall status.
 2. **Triage** — the AI model reviews the snapshot, the flags and the logs, picks search terms
    and may ask the device for more logs from the approved list, which are collected straight

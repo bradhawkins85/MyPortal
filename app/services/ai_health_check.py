@@ -12,7 +12,9 @@ internal knowledge base and approved log list - and works in stages:
    and dirty (chkdsk) bits, defrag/TRIM state and fragmentation of hard
    disks, thermal zones, CPU throttling, memory and paging, boot performance,
    crashes, unexpected shutdowns and hardware (WHEA) errors, problem devices,
-   updates, security and battery wear (macOS sends a smaller snapshot). On
+   updates, services, security settings (BitLocker, Secure Boot, TPM, UAC,
+   SMBv1, Remote Desktop), Windows support and activation, clock sync,
+   network errors and battery wear (macOS sends a smaller snapshot). On
    physical Windows hardware, when allowed, the device installs the PawnIO
    driver for the length of the check to read hardware sensors (CPU, GPU and
    motherboard temperatures, fans, voltages) and removes it again before it
@@ -45,7 +47,7 @@ import json
 import math
 import re
 from collections.abc import Awaitable, Mapping, Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.core.ai_identity import get_agent_name
@@ -404,6 +406,9 @@ def _disk_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> N
             signals.append(_signal("disk_worn_out", "critical", f"{name} is {wear:g}% worn out"))
         elif wear is not None and wear >= 70:
             signals.append(_signal("disk_wearing", "warning", f"{name} is {wear:g}% worn out"))
+        hours = _num(disk.get("power_on_hours"))
+        if str(disk.get("media_type") or "") == "HDD" and hours is not None and hours >= 43800:
+            signals.append(_signal("disk_old", "info", f"{name} has been powered on for {hours / 8760:.1f} years"))
         temp = _num(disk.get("temperature_c"))
         hot = 55 if str(disk.get("media_type") or "") == "HDD" else 70
         if temp is not None and temp >= hot:
@@ -518,6 +523,12 @@ def _performance_rules(sections: Mapping[str, Any], signals: list[dict[str, str]
     if pages is not None and pages >= 1000:
         signals.append(_signal("heavy_paging", "warning", f"Heavy paging ({int(pages)} pages/s)"))
     total = _num(memory.get("total_mb"))
+    commit_limit = _num(memory.get("commit_limit_mb"))
+    # An empty page file list alone may be a failed query; with no page file the
+    # commit limit is only the physical memory.
+    if ("page_files" in memory and not _list(memory.get("page_files")) and total and commit_limit
+            and commit_limit <= total + 256):
+        signals.append(_signal("no_page_file", "info", "There is no page file"))
     if total is not None and 0 < total < 7800:
         signals.append(_signal("low_memory_installed", "info", f"Only {total / 1024:.1f} GB of memory installed"))
     performance = _dict(sections.get("performance"))
@@ -558,6 +569,21 @@ def _stability_rules(sections: Mapping[str, Any], signals: list[dict[str, str]])
     services = _num(stability.get("service_crashes"))
     if services and services >= 5:
         signals.append(_signal("service_crashes", "warning", f"Services stopped unexpectedly {int(services)} times in {days} days"))
+    hangs = _num(stability.get("app_hangs"))
+    if hangs and hangs >= 10:
+        signals.append(_signal("app_hangs", "warning", f"{int(hangs)} programs stopped responding in {days} days"))
+    # The most recent memory test only: an older failure may have been fixed since.
+    latest_test = next((e for e in _list(stability.get("memory_diagnostics")) if isinstance(e, dict)), {})
+    if (str(latest_test.get("level") or "").lower() in {"error", "critical"}
+            or "detected hardware errors" in str(latest_test.get("message") or "").lower()):
+        signals.append(_signal("memory_errors_found", "critical", "The latest memory test found errors",
+                               "Windows Memory Diagnostic found faulty memory; test each module and replace the faulty one."))
+    stopped = [s for s in _list(_dict(sections.get("services")).get("stopped_automatic"))
+               if isinstance(s, dict) and _num(s.get("exit_code")) not in (None, 0, 1077)]
+    if stopped:
+        names = ", ".join(str(s.get("display_name") or s.get("name") or "") for s in stopped[:5])
+        signals.append(_signal("auto_services_stopped", "warning",
+                               f"{len(stopped)} automatic services are stopped with an error", names))
     drivers = _dict(sections.get("drivers"))
     problems = _num(drivers.get("problem_count"))
     if problems:
@@ -576,6 +602,8 @@ def _stability_rules(sections: Mapping[str, Any], signals: list[dict[str, str]])
     failed = _num(updates.get("failed_updates"))
     if failed:
         signals.append(_signal("updates_failed", "warning", f"{int(failed)} update installs failed recently"))
+    if str(updates.get("windows_update_service") or "").lower() == "disabled":
+        signals.append(_signal("windows_update_disabled", "warning", "The Windows Update service is disabled"))
 
 
 def _security_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> None:
@@ -588,9 +616,33 @@ def _security_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) 
     age = _num(defender.get("signature_age_days"))
     if defender and age is not None and age > 7 and not other_av:
         signals.append(_signal("av_signatures_old", "warning", f"Antivirus definitions are {int(age)} days old"))
+    if defender and defender.get("realtime") is True and defender.get("tamper_protected") is False and not other_av:
+        signals.append(_signal("tamper_protection_off", "warning", "Antivirus tamper protection is off"))
+    scan_age = _num(defender.get("quick_scan_age_days"))
+    if defender and defender.get("realtime") is True and scan_age is not None and scan_age > 14 and not other_av:
+        # Defender reports a huge age when it has never run a quick scan.
+        signals.append(_signal("av_scan_overdue", "warning", "No antivirus quick scan has ever finished" if scan_age >= 65535
+                               else f"No antivirus quick scan for {int(scan_age)} days"))
     for profile in _list(security.get("firewall")):
         if isinstance(profile, dict) and profile.get("enabled") is False:
             signals.append(_signal("firewall_profile_off", "warning", f"The {profile.get('profile') or ''} firewall profile is off".replace("  ", " ")))
+    boot_drives = {str(v.get("drive") or "").rstrip(":").upper() for v in _list(sections.get("volumes"))
+                   if isinstance(v, dict) and v.get("boot_volume")}
+    for volume in _list(security.get("bitlocker")):
+        if (isinstance(volume, dict) and volume.get("protection_on") is False
+                and str(volume.get("drive") or "").rstrip(":").upper() in boot_drives - {""}):
+            signals.append(_signal("bitlocker_off", "warning", f"BitLocker is off on the system drive {volume.get('drive')}"))
+    if security.get("secure_boot") is False:
+        signals.append(_signal("secure_boot_off", "warning", "Secure Boot is off"))
+    tpm = _dict(security.get("tpm"))
+    if tpm and (tpm.get("enabled") is False or tpm.get("activated") is False):
+        signals.append(_signal("tpm_not_ready", "warning", "The TPM is not enabled or not activated"))
+    if security.get("uac_enabled") is False:
+        signals.append(_signal("uac_disabled", "warning", "User Account Control is off"))
+    if security.get("smb1_enabled") is True:
+        signals.append(_signal("smb1_enabled", "warning", "The SMB server accepts SMBv1"))
+    if security.get("rdp_enabled") is True and security.get("rdp_nla") is False:
+        signals.append(_signal("rdp_without_nla", "warning", "Remote Desktop is on without Network Level Authentication"))
     battery = _dict(sections.get("battery"))
     condition = str(battery.get("condition") or "")
     if battery.get("present") and condition and condition.lower() not in {"good", "normal"}:
@@ -601,6 +653,69 @@ def _security_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) 
             signals.append(_signal("battery_worn", "critical", f"Battery holds {health:g}% of its design capacity"))
         elif health < 70:
             signals.append(_signal("battery_worn", "warning", f"Battery holds {health:g}% of its design capacity"))
+
+
+# When Microsoft stops security updates for each Windows client release, by
+# build: (Home and Pro, Enterprise and Education). Windows 10 22H2 is the last
+# Windows 10 release; LTSC, IoT and Server editions have their own lifecycles
+# and are not checked.
+WINDOWS_END_OF_SUPPORT: dict[int, tuple[date, date]] = {
+    19045: (date(2025, 10, 14), date(2025, 10, 14)),
+    22000: (date(2023, 10, 10), date(2024, 10, 8)),
+    22621: (date(2024, 10, 8), date(2025, 10, 14)),
+    22631: (date(2025, 11, 11), date(2026, 11, 10)),
+    26100: (date(2026, 10, 13), date(2027, 10, 12)),
+    26200: (date(2027, 10, 12), date(2028, 10, 10)),
+}
+SUPPORT_ENDING_DAYS = 90
+
+
+def _windows_end_of_support(caption: str, build: int | None) -> date | None:
+    text = caption.lower()
+    if not build or not re.search(r"windows 1[01]\b", text) or re.search(r"server|ltsc|ltsb|\biot\b", text):
+        return None
+    if build < 19045 and "windows 10" in text:
+        build = 19045  # every earlier Windows 10 release ended before 22H2
+    dates = WINDOWS_END_OF_SUPPORT.get(build)
+    if not dates:
+        return None
+    return dates[1] if re.search(r"enterprise|education", text) else dates[0]
+
+
+def _os_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> None:
+    system = _dict(sections.get("system"))
+    caption = str(system.get("os") or "")
+    ends = _windows_end_of_support(caption, _int_or_none(system.get("build")))
+    today = _utcnow().date()
+    name = caption.removeprefix("Microsoft ").strip()
+    version = str(system.get("display_version") or "").strip()
+    label = f"{name} {version}".strip()
+    if ends and ends <= today:
+        signals.append(_signal("os_unsupported", "warning", f"{label} has been out of support since {ends:%d %B %Y}",
+                               "It no longer gets security updates unless the computer is enrolled in Extended "
+                               "Security Updates; upgrade to a supported release."))
+    elif ends and (ends - today).days <= SUPPORT_ENDING_DAYS:
+        signals.append(_signal("os_support_ending", "info", f"{label} support ends on {ends:%d %B %Y}"))
+    activation = _dict(sections.get("activation"))
+    status = _num(activation.get("license_status"))
+    if activation.get("found") and status is not None and status != 1:
+        signals.append(_signal("windows_not_activated", "warning",
+                               f"Windows is not activated ({activation.get('license_label') or 'status ' + str(int(status))})"))
+    time_sync = _dict(sections.get("time_sync"))
+    not_synced = _num(time_sync.get("not_synced_events"))
+    if not_synced:
+        signals.append(_signal("time_not_syncing", "warning",
+                               f"The clock went unsynchronised for a day {int(not_synced)} times recently"))
+
+
+def _network_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> None:
+    for interface in _list(_dict(sections.get("network")).get("interface_errors")):
+        if not isinstance(interface, dict):
+            continue
+        errors = (_num(interface.get("received_errors")) or 0) + (_num(interface.get("outbound_errors")) or 0)
+        if errors >= 100:
+            signals.append(_signal("network_errors", "warning",
+                                   f"{interface.get('name') or 'A network adapter'} has {int(errors)} errors since the last restart"))
 
 
 def evaluate_snapshot(snapshot: Mapping[str, Any] | None) -> list[dict[str, str]]:
@@ -618,6 +733,8 @@ def evaluate_snapshot(snapshot: Mapping[str, Any] | None) -> list[dict[str, str]
         lambda: _performance_rules(sections, signals),
         lambda: _stability_rules(sections, signals),
         lambda: _security_rules(sections, signals),
+        lambda: _os_rules(sections, signals),
+        lambda: _network_rules(sections, signals),
     ):
         try:
             rule()

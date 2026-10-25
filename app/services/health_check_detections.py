@@ -170,6 +170,38 @@ MONITORS: dict[str, dict[str, Any]] = {
         "Windows logs 2003 when a firewall profile setting changes, including a profile being turned off; the "
         "message names the setting and its new value.",
     ),
+    "defender_scan_failed": _monitor(
+        "Antivirus scans stopping or failing",
+        [("log_name", "is", "Microsoft-Windows-Windows Defender/Operational"), ("event_id", "one_of", "1002, 1005")],
+        "Microsoft Defender logs 1002 when a scan is stopped before it finishes and 1005 when a scan fails, with "
+        "the error code.",
+    ),
+    "service_start_failures": _monitor(
+        "Services failing to start",
+        [("log_name", "is", "System"), ("provider", "is", "Service Control Manager"),
+         ("event_id", "one_of", "7000, 7001, 7009, 7011, 7023, 7024")],
+        "The Service Control Manager logs these when a service fails to start (7000), a service it depends on "
+        "failed (7001), it timed out starting or answering (7009, 7011) or it stopped with an error (7023, 7024).",
+    ),
+    "update_service_changed": _monitor(
+        "Windows Update service start type changed",
+        [("log_name", "is", "System"), ("provider", "is", "Service Control Manager"), ("event_id", "is", "7040"),
+         ("message", "contains", "Windows Update")],
+        "The Service Control Manager logs 7040 when a service's start type changes, for example when the Windows "
+        "Update service is set to disabled.",
+    ),
+    "memory_diagnostics": _monitor(
+        "Memory test found errors",
+        [("log_name", "is", "System"), ("provider", "is", "Microsoft-Windows-MemoryDiagnostics-Results"),
+         ("level", "at_least", "Error")],
+        "Windows Memory Diagnostic logs an error after a restart when its test found faulty memory.",
+    ),
+    "time_sync": _monitor(
+        "Clock not synchronising",
+        [("log_name", "is", "System"), ("provider", "is", "Microsoft-Windows-Time-Service"), ("event_id", "is", "36")],
+        "The Windows Time service logs 36 when the clock has not been synchronised for a day. A wrong clock breaks "
+        "domain sign-in (Kerberos), certificates and TLS.",
+    ),
 }
 
 
@@ -189,6 +221,11 @@ _FILE_SYSTEM_REPAIR = (
 _WINDOWS_UPDATE_RESET = (
     "Reset Windows Update: stop the wuauserv, bits and cryptsvc services, rename C:\\Windows\\SoftwareDistribution "
     "and C:\\Windows\\System32\\catroot2, start the services again and scan with UsoClient StartScan."
+)
+_START_SERVICES = (
+    "Start the stopped automatic services, for example Get-CimInstance Win32_Service -Filter \"StartMode='Auto' "
+    "AND State<>'Running' AND ExitCode<>0\" | ForEach-Object { Start-Service -Name $_.Name -ErrorAction "
+    "SilentlyContinue }."
 )
 _RESTART = (
     "Restart out of hours, for example shutdown /r /t 600 /c \"Restarting to finish updates\", after warning the "
@@ -433,6 +470,118 @@ DETECTIONS: dict[str, dict[str, Any]] = {
     "battery_worn": _detection(
         "battery", "The battery is worn", "warning",
         "The battery holds under 70% of its design capacity (critical under 50%).", platforms=_BOTH,
+    ),
+    "app_hangs": _detection(
+        "stability", "Applications stop responding often", "warning",
+        "Windows closed ten or more programs that stopped responding in the last 30 days.",
+        monitors=["app_crashes"],
+    ),
+    "memory_errors_found": _detection(
+        "hardware", "The memory test found errors", "critical",
+        "The latest Windows Memory Diagnostic run found faulty memory. Crashes and data corruption follow until "
+        "the faulty module is replaced.",
+        monitors=["memory_diagnostics", "bugcheck", "whea"],
+    ),
+    "disk_old": _detection(
+        "storage", "A hard disk is old", "info",
+        "A hard disk has been powered on for five years (43,800 hours) or more, when failure rates climb.",
+        monitors=["disk_errors"],
+    ),
+    "no_page_file": _detection(
+        "memory", "There is no page file", "info",
+        "The computer has no page file, so its commit limit is its physical memory and Windows cannot save a "
+        "memory dump after a blue screen.",
+        monitors=["low_memory"],
+        remedy="Let Windows manage the page file again with Set-CimInstance -InputObject (Get-CimInstance "
+               "Win32_ComputerSystem) -Property @{AutomaticManagedPagefile = $true}, then restart.",
+    ),
+    "auto_services_stopped": _detection(
+        "services", "Automatic services are stopped", "warning",
+        "Services set to start automatically are not running and stopped with an error code.",
+        monitors=["service_crashes", "service_start_failures"], remedy=_START_SERVICES,
+    ),
+    "windows_update_disabled": _detection(
+        "updates", "The Windows Update service is disabled", "warning",
+        "The Windows Update service (wuauserv) is set to Disabled, so the computer gets no security updates.",
+        monitors=["update_service_changed", "update_failures"],
+        remedy="Set the service back to its default with Set-Service -Name wuauserv -StartupType Manual, then "
+               "start it with Start-Service -Name wuauserv.",
+    ),
+    "os_unsupported": _detection(
+        "os", "Windows is out of support", "warning",
+        "This Windows version and edition no longer gets security updates from Microsoft (unless the computer is "
+        "enrolled in Extended Security Updates).",
+    ),
+    "os_support_ending": _detection(
+        "os", "Windows support ends soon", "info",
+        "This Windows version and edition stops getting security updates within 90 days.",
+    ),
+    "windows_not_activated": _detection(
+        "os", "Windows is not activated", "warning",
+        "Windows is unlicensed or running in a grace period; features are limited until it is activated.",
+        remedy="Try activating again with cscript //B %windir%\\System32\\slmgr.vbs /ato (it needs the internet, "
+               "or the KMS host on volume-licensed networks).",
+    ),
+    "time_not_syncing": _detection(
+        "os", "The clock is not synchronising", "warning",
+        "The Windows Time service logged that it has not synchronised the clock for a day in the last week.",
+        monitors=["time_sync"],
+        remedy="Restart the time service and resynchronise with Restart-Service -Name W32Time; w32tm /resync /force.",
+    ),
+    "bitlocker_off": _detection(
+        "security", "BitLocker is off on the system drive", "warning",
+        "BitLocker protection is off or suspended on the drive Windows starts from, so its data can be read if the "
+        "computer is lost or stolen.",
+        remedy="If the drive is already encrypted and protection is only suspended, resume it with "
+               "Resume-BitLocker -MountPoint $env:SystemDrive. Otherwise turn BitLocker on after backing up the "
+               "recovery key to Entra ID or Active Directory.",
+    ),
+    "secure_boot_off": _detection(
+        "security", "Secure Boot is off", "warning",
+        "The computer starts in UEFI mode but Secure Boot is turned off, so boot-level malware is not blocked.",
+    ),
+    "tpm_not_ready": _detection(
+        "security", "The TPM is turned off", "warning",
+        "The computer has a TPM but it is not enabled or activated, so BitLocker, Windows Hello and device "
+        "attestation cannot use it.",
+    ),
+    "tamper_protection_off": _detection(
+        "security", "Antivirus tamper protection is off", "warning",
+        "Microsoft Defender is the active antivirus but tamper protection is off, so malware or a user can turn "
+        "protection off.",
+        monitors=["defender_disabled"],
+    ),
+    "av_scan_overdue": _detection(
+        "security", "No recent antivirus scan", "warning",
+        "Microsoft Defender has not completed a quick scan for 14 days and no other antivirus is registered.",
+        monitors=["defender_scan_failed"],
+        remedy="Run a quick scan with Start-MpScan -ScanType QuickScan.",
+    ),
+    "uac_disabled": _detection(
+        "security", "User Account Control is off", "warning",
+        "UAC is turned off (EnableLUA is 0), so every program runs with full administrator rights.",
+        remedy="Turn UAC back on with Set-ItemProperty -Path "
+               "'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -Value 1, "
+               "then restart.",
+    ),
+    "smb1_enabled": _detection(
+        "security", "SMBv1 is turned on", "warning",
+        "The SMB server accepts the obsolete SMBv1 protocol, which ransomware such as WannaCry spread through.",
+        remedy="Turn it off with Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force.",
+    ),
+    "rdp_without_nla": _detection(
+        "security", "Remote Desktop allows connections without Network Level Authentication", "warning",
+        "Remote Desktop is on and does not require Network Level Authentication, so anyone who can reach it gets "
+        "a sign-in screen and can try passwords or exploits before authenticating.",
+        remedy="Require NLA with Set-ItemProperty -Path "
+               "'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' -Name "
+               "UserAuthentication -Value 1.",
+    ),
+    "network_errors": _detection(
+        "network", "A network adapter has errors", "warning",
+        "A network interface has 100 or more receive or send errors since the last restart, which usually means a "
+        "faulty cable, port or driver.",
+        monitors=["driver_failures"],
     ),
     "pawnio_not_removed": _detection(
         "hardware", "PawnIO was not removed after a health check", "warning",
