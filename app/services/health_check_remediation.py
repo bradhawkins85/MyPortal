@@ -93,7 +93,7 @@ async def save_link(
         if not is_super_admin:
             errors["scope"] = "Only super admins can link scripts for every company."
         link_company = None
-    elif scope != "company":
+    elif scope not in SCOPES:
         errors["scope"] = "Choose who the script runs for."
     existing = await repo.get_for_scope(detection_key, link_company, with_secrets=True) if not errors else None
     script: dict[str, Any] | None = None

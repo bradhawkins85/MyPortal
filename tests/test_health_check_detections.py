@@ -154,7 +154,7 @@ def scheduled(store, monkeypatch):
     monkeypatch.setattr(tray_service, "is_device_connected", lambda uid: uid in online)
     monkeypatch.setattr(schedule, "get_component_availability",
                         lambda: SimpleNamespace(feature_pack_available=lambda slug: True))
-    monkeypatch.setattr(schedule, "_last_seeded", None)
+    monkeypatch.setitem(schedule._state, "last_seeded", None)
     monkeypatch.setattr(schedule.get_settings(), "health_check_monthly_enabled", True)
     return {"conn": conn, "online": online, "assets": assets, "audits": audits}
 
@@ -678,9 +678,9 @@ async def test_only_computers_in_a_group_get_monthly_checks(store, scheduled, ma
     # A second group adds more computers: groups combine.
     everyone = await schedule.save_group(group_id=None, company_id=1, user_id=9, is_super_admin=True, form={
         "name": "PC-02", "scope": "company", "target_mode": "all", "is_enabled": "1"})
-    monkeypatch_seed = schedule._last_seeded
+    seeded_at = schedule._state["last_seeded"]
     await schedule.resync()
-    assert schedule._last_seeded is None and monkeypatch_seed is not None
+    assert schedule._state["last_seeded"] is None and seeded_at is not None
     await schedule.tick(NOW + timedelta(minutes=1))
     assert await schedule_repo.get(11) is not None
 

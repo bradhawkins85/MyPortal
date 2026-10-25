@@ -69,7 +69,8 @@ OPERATOR_LABELS = {
     "version_lte": "is version at most", "in_subnet": "is in subnet", "not_in_subnet": "is outside subnet",
 }
 
-_last_seeded: datetime | None = None
+# When computers were last checked against the groups (seeding is throttled).
+_state: dict[str, datetime | None] = {"last_seeded": None}
 
 
 def _utcnow() -> datetime:
@@ -196,7 +197,7 @@ async def save_group(
         if not is_super_admin:
             errors["scope"] = "Only super admins can add groups for every company."
         group_company = None
-    elif scope != "company":
+    elif scope not in SCOPES:
         errors["scope"] = "Choose who the group applies to."
     if str(form.get("target_mode") or "all") not in {"all", "rules"}:
         errors["target_mode"] = "Choose every computer or device rules."
@@ -255,8 +256,7 @@ async def resync() -> int:
     Newly matching computers are scheduled on the next tick. Returns how many were dropped.
     """
 
-    global _last_seeded
-    _last_seeded = None
+    _state["last_seeded"] = None
     agents = await repo.list_scheduled_agents()
     eligible = await eligible_agent_ids(agents) if agents else set()
     dropped = 0
@@ -336,14 +336,14 @@ async def _run_due(row: Mapping[str, Any], now: datetime) -> bool:
 async def tick(now: datetime | None = None) -> int:
     """Schedule new computers and start the monthly health checks that are due."""
 
-    global _last_seeded
     if not enabled() or not get_component_availability().feature_pack_available("health_check"):
         return 0
     if not tray_service.build_troubleshoot_llm_config()["model"]:
         return 0
     now = now or _utcnow()
-    if _last_seeded is None or now - _last_seeded >= SEED_INTERVAL or now < _last_seeded:
-        _last_seeded = now
+    last_seeded = _state["last_seeded"]
+    if last_seeded is None or now - last_seeded >= SEED_INTERVAL or now < last_seeded:
+        _state["last_seeded"] = now
         await seed(now)
     started = 0
     for row in await repo.list_due(now, limit=STARTS_PER_TICK * 4):
