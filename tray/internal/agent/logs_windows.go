@@ -22,8 +22,11 @@ var (
 	platformPathStyle = windowsPaths
 )
 
-// isPlatformLogSource reports whether source is an allowlisted channel.
-func isPlatformLogSource(source string) bool { return isWindowsLogSource(source) }
+// isPlatformLogSource reports whether source is a readable event log
+// channel: every well-formed channel name is allowed.
+func isPlatformLogSource(source string) bool {
+	return isWindowsLogSource(source) || ValidEventLogChannel(source)
+}
 
 // platformExtraChannels is true where owner-approved event log channels apply.
 const platformExtraChannels = true
@@ -32,8 +35,8 @@ const platformExtraChannels = true
 // wevtutil, which is built into Windows and read-only. It is used instead of
 // PowerShell's Get-WinEvent because PowerShell module auto-loading on a
 // fresh SYSTEM profile wrote progress records to stderr and failed the query.
-// Only allowlisted channels (and owner-approved extraChannels) are read; the
-// channel is passed as its own argument, never through a shell.
+// Any well-formed channel name is read; the channel is passed as its own
+// argument, never through a shell.
 func collectPlatformLogs(ctx context.Context, specs []LogSpec, extraChannels []string) (string, []string, error) {
 	wevtutil, err := exec.LookPath("wevtutil.exe")
 	if err != nil {
@@ -42,8 +45,8 @@ func collectPlatformLogs(ctx context.Context, specs []LogSpec, extraChannels []s
 	var b strings.Builder
 	var sources []string
 	for _, spec := range specs {
-		if !isWindowsLogSource(spec.Source) && !containsString(extraChannels, spec.Source) {
-			fmt.Fprintf(&b, "### %s Log\n[refused: not an allowlisted channel]\n\n", spec.Source)
+		if !isPlatformLogSource(spec.Source) && !containsString(extraChannels, spec.Source) {
+			fmt.Fprintf(&b, "### %s Log\n[refused: not a valid event log channel name]\n\n", spec.Source)
 			continue
 		}
 		out, err := runWevtutil(ctx, wevtutil, WevtutilQueryArgs(spec))

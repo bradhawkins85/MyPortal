@@ -1,8 +1,8 @@
 """Logs the AI agents need but cannot read, and the approved list built from them.
 
 The AI troubleshooter (:mod:`app.services.ai_troubleshooter`) and the health
-check (:mod:`app.services.ai_health_check`) only collect allowlisted event log
-channels and log files in allowlisted folders. Whenever either asks for a log
+check (:mod:`app.services.ai_health_check`) may read any Windows event log
+channel, but only collect log files in allowlisted folders. Whenever either asks for a log
 it cannot have, the log is recorded here for a super admin to review on
 ``/admin/required-logs``:
 

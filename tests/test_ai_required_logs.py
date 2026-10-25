@@ -181,8 +181,9 @@ def test_plan_splits_allowed_and_refused_logs():
         {"source": "Event Viewer", "reason": "look around"},
         {"source": "microsoft-windows-kernel-eventtracing/admin", "reason": "duplicate"},
     ], allowed, "windows")
-    assert [r["source"] for r in requests] == ["System"]
-    assert [r["source"] for r in refused] == ["Microsoft-Windows-Kernel-EventTracing/Admin", "file:C:\\Vendor\\trace.log"]
+    # Any Windows event log channel is collected; only log files need approval.
+    assert [r["source"] for r in requests] == ["System", "Microsoft-Windows-Kernel-EventTracing/Admin"]
+    assert [r["source"] for r in refused] == ["file:C:\\Vendor\\trace.log"]
     html = ts.refused_logs_html(refused)
     assert 'href="/admin/required-logs"' in html and "vendor" in html
     assert ts.refused_logs_html([]) == ""
@@ -237,6 +238,7 @@ async def test_troubleshooter_records_refused_and_unavailable_logs(monkeypatch):
         json.dumps({"summary": "s", "steps": [{"action": "Check DNS"}], "log_requests": [
             {"source": "Microsoft-Windows-DNS-Client/Operational", "reason": "dns", "hours": 4},
             {"source": "Microsoft-Windows-Kernel-EventTracing/Admin", "reason": "ETW"},
+            {"source": "file:C:\\Vendor\\trace.log", "reason": "vendor"},
         ]}),
     ]
 
@@ -258,13 +260,17 @@ async def test_troubleshooter_records_refused_and_unavailable_logs(monkeypatch):
         device={"id": 5, "device_uid": "dev", "status": "active", "company_id": 3, "os": "windows"},
         problem="DNS fails", llm={"base_url": "http://llm", "model": "m"},
     )
-    assert [r["source"] for r in plan["refused_logs"]] == ["Microsoft-Windows-Kernel-EventTracing/Admin"]
+    assert [r["source"] for r in plan["refused_logs"]] == ["file:C:\\Vendor\\trace.log"]
     entries, kwargs = recorded[0]
     assert entries[0]["reason_code"] == "not_allowed" and kwargs["feature"] == "troubleshooter"
     assert kwargs["ticket_id"] == 77 and kwargs["platform"] == "windows"
     assert any("Logs not on the approved list" in body for body in notes)
     payload = dispatched[0]["payload"]
-    assert payload["extra_event_logs"] == [] and payload["server_context"]["platform"] == "windows"
+    assert [r["source"] for r in payload["log_requests"]] == [
+        "Microsoft-Windows-DNS-Client/Operational", "Microsoft-Windows-Kernel-EventTracing/Admin"]
+    # Unlisted channels are named for tray agents that only read allowlisted ones.
+    assert payload["extra_event_logs"] == ["Microsoft-Windows-Kernel-EventTracing/Admin"]
+    assert payload["server_context"]["platform"] == "windows"
     assert payload["server_context"]["asset_id"] == 1 and payload["server_context"]["company_id"] == 3
 
     # The device could not read the DNS log: recorded as unavailable.
@@ -272,7 +278,8 @@ async def test_troubleshooter_records_refused_and_unavailable_logs(monkeypatch):
     responses.append(json.dumps({"summary": "ok"}))
     await ts.analyse_collected_logs(
         ticket_id=77, command={"payload_json": payload},
-        log_text="### Microsoft-Windows-DNS-Client/Operational Log\n[unavailable: The channel is disabled]\n\n",
+        log_text="### Microsoft-Windows-DNS-Client/Operational Log\n[unavailable: The channel is disabled]\n\n"
+        "### Microsoft-Windows-Kernel-EventTracing/Admin Log\n2026-10-22 [Error] Session failed\n\n",
         endpoint_label="PC", llm={"base_url": "http://llm", "model": "m"},
     )
     entries, kwargs = recorded[0]

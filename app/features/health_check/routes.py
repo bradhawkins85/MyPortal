@@ -526,6 +526,8 @@ def _currently_allowed(entry: dict[str, Any]) -> bool:
     source = str(entry.get("source") or "")
     if source in ai_troubleshooter.allowed_log_sources(platform):
         return True
+    if ai_troubleshooter.is_event_log_channel(source, platform):
+        return True
     return ai_troubleshooter.normalise_file_source(source, platform) is not None
 
 
