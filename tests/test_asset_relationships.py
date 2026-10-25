@@ -92,6 +92,7 @@ async def test_detail_omits_inaccessible_relationship_target(monkeypatch):
     monkeypatch.setattr(routes.audience_repo, "list_role_ids", AsyncMock(return_value=[]))
     monkeypatch.setattr(routes.asset_repo, "list_reconciliation_candidates", AsyncMock(return_value=[]))
     monkeypatch.setattr(routes.asset_repo, "list_asset_sources", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.tray_repo, "list_active_devices_by_asset_ids", AsyncMock(return_value={}))
     monkeypatch.setattr(
         routes, "_asset_type_picker",
         AsyncMock(return_value={"asset_type_mode": "manual", "asset_type_groups": [], "custom_asset_types": []}),

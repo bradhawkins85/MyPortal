@@ -2029,6 +2029,16 @@ async def asset_detail_page(
 
         if await tags_routes.can_edit_tags(request, user, membership):
             tags_context = await tags_routes.asset_tags_context(asset_id, can_edit=True)
+    # The tray app reports who is signed in now; synced inventory only knows
+    # the last user, so it stands in when the device has no tray app.
+    logged_on_user = None
+    if not customer_safe:
+        tray_device = (await tray_repo.list_active_devices_by_asset_ids([asset_id])).get(asset_id) or {}
+        logged_on_user = (
+            str(tray_device.get("console_user") or "").strip()
+            or str(record.get("last_user") or "").strip()
+            or None
+        )
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
             "title": str(record.get("name") or f"Asset {asset_id}"),
@@ -2063,6 +2073,7 @@ async def asset_detail_page(
             "rmm": rmm_context,
             "health_check": health_check_context,
             "asset_tags": tags_context,
+            "logged_on_user": logged_on_user,
             "can_edit_network_map": can_view_network_map and (is_super_admin or main_module._membership_menu_can(
                 user, membership, "menu.network_map", write=True)),
             "asset_photos": (await asset_photo_repo.list_for_asset(
