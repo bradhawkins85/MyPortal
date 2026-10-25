@@ -1,0 +1,7 @@
+{
+  "guid": "eb76e2d0-c218-4308-81c6-bd5444730a14",
+  "occurred_at": "2026-10-25T07:20Z",
+  "change_type": "Fix",
+  "summary": "Upgrading an application from an asset's Software list through Chocolatey now proceeds even when the device has a pending restart, matching other technician-started app actions, instead of being deferred until the device reboots.",
+  "content_hash": "7cdb924371efb26a67c8620c73de53ea8962f4393401e3994d18ebe0ea0ff4a4"
+}

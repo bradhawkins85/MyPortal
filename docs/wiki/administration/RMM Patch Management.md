@@ -134,8 +134,10 @@ the device's local package metadata, so the package need not remain in a feed.
 **Ignore pending reboots** is checked by default: the action proceeds even if the
 device already needs a restart. Untick it to defer the action until the pending
 restart is cleared. Neither choice restarts the device. The mode and options are
-recorded in run history. These options apply to package pushes; scheduled patch
-policies keep their version checks and pending-reboot deferral.
+recorded in run history. These options apply to package pushes. The one-click
+upgrade of an application from an asset's **Software** list also proceeds despite a
+pending restart; scheduled patch policies keep their version checks and
+pending-reboot deferral.
 
 ## Device Windows updates
 

@@ -156,3 +156,40 @@ function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
     assert command[:2] == [mode, 'testapp']
     assert '--ignore-detected-reboot' not in command and '--force' not in command
     assert 'Chocolatey returned 1' in result.stdout
+
+
+@pytest.mark.parametrize('manual', [False, True])
+def test_asset_upgrade_ignores_pending_reboot(tmp_path, manual):
+    """The asset page's one-click upgrade runs despite a pending reboot; scheduled patching still defers."""
+    fake = tmp_path / 'choco.ps1'
+    fake.write_text('''
+$global:LASTEXITCODE = 0
+switch ($args[0]) {
+    '--version' { '2.3.0' }
+    'list' { 'testapp|1.0' }
+    'search' { 'testapp|2.0' }
+    default { ($args -join ' ') | Add-Content $env:TEST_COMMAND_LOG }
+}
+''', encoding='utf-8')
+    harness = tmp_path / 'harness.ps1'
+    harness.write_text(r'''
+function Sync-ChocolateySources { param($sources); $script:choco = $env:TEST_CHOCO }
+function Test-Path { param($Path); $Path -like '*RebootPending' }
+function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
+''' + (ROOT / 'app/services/rmm_builtin/patch.ps1').read_text(), encoding='utf-8')
+    plan = {'sources': [{'name': 'company', 'enabled': True, 'priority': 1}],
+            'apps': [{'package_id': 'testapp', 'display_name': 'Test Application', 'install_missing': False}],
+            'windows': None, 'reboot': {'reboot_mode': 'never'}}
+    if manual:
+        plan['manual_upgrade'] = {'name': 'Test Application', 'package_id': 'testapp'}
+    log = tmp_path / 'commands.txt'
+    result = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(harness)],
+        env={**os.environ, 'TEST_CHOCO': str(fake), 'TEST_COMMAND_LOG': str(log), 'MYPORTAL_PATCH_PLAN': json.dumps(plan)},
+        capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    if manual:
+        command = log.read_text(encoding='utf-8-sig').split()
+        assert command[:2] == ['upgrade', 'testapp'] and '--ignore-detected-reboot' in command
+        assert 'Proceeding despite a pending restart' in result.stdout
+    else:
+        assert not log.exists() and 'Installation deferred' in result.stdout

@@ -70,9 +70,11 @@ try {
             throw 'No Chocolatey sources are enabled.'
         }
     }
-    # Only manually pushed app actions can opt out of the reboot gate.
+    # Only app actions a technician started from an asset can skip the reboot gate:
+    # one-click upgrades always do, and pushed actions unless the option is unticked.
     # Missing options on older queued app jobs use the same default as the UI.
-    $ignorePendingReboots = $plan.manual_apps -and $plan.manual_apps.ignore_pending_reboots -ne $false
+    $ignorePendingReboots = [bool]$plan.manual_upgrade -or
+        ($plan.manual_apps -and $plan.manual_apps.ignore_pending_reboots -ne $false)
     $pendingReboot = Pending-Reboot
     if ($pendingReboot) { $rebootRequired = $true }
     if ($pendingReboot -and -not $ignorePendingReboots) {
