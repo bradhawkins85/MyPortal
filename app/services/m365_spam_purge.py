@@ -263,15 +263,22 @@ def _purge_mailboxes(search: dict[str, Any]) -> list[str]:
     return list(mailboxes.values())
 
 
-async def _prepare_purge_scope(token: str, request: dict[str, Any], details: dict[str, Any]) -> None:
+async def _prepare_purge_scope(token: str, request: dict[str, Any], details: dict[str, Any]) -> str:
     search = _dict(request.get("search_details"))
-    case_id, search_id = str(search["case_id"]), str(search["search_id"])
+    case_id = str(search["case_id"])
     mailboxes = _purge_mailboxes(search)
-    await ediscovery.bind_purge_mailboxes(token, case_id, search_id, mailboxes)
+    # Create a dedicated purge search scoped to the reviewed mailboxes instead of
+    # narrowing the tenant-wide discovery search in place. Microsoft applies a
+    # dataSourceScopes change asynchronously and rejects additionalSources with a
+    # 409 until it does, so an in-place narrow can fail the purge indefinitely.
+    purge_search_id = await ediscovery.create_purge_search(
+        token, case_id, str(request["search_name"]), str(request["content_match_query"]), mailboxes,
+    )
     details["mailboxes"] = mailboxes
-    # Binding sources changes the search configuration. Estimate the explicit
-    # scope afresh; never authorize deletion from the previous tenant-wide run.
-    estimate = await _estimate(token, case_id, search_id)
+    details["purge_search_id"] = purge_search_id
+    # Estimate the explicit scope afresh; never authorize deletion from the
+    # previous tenant-wide run.
+    estimate = await _estimate(token, case_id, purge_search_id)
     details["scope_estimate"] = estimate
     await purge_repo.update_request(int(request["id"]), {"purge_details": details})
     count = _verified_estimate_count(estimate)
@@ -280,6 +287,7 @@ async def _prepare_purge_scope(token: str, request: dict[str, Any], details: dic
         raise ValueError("Microsoft resolved zero mailbox locations for the explicit purge scope; no purge was submitted")
     if count < 1 or count != int(request.get("matched_items") or 0):
         raise ValueError("The explicit mailbox search no longer matches the reviewed item count; run a new search and review it before purging")
+    return purge_search_id
 
 
 async def _run_search(request_id: int, *, retry: bool = False) -> None:
@@ -352,8 +360,8 @@ async def _run_purge(request_id: int) -> None:
                 operation = None
                 details = {}
         if operation is None:
-            await _prepare_purge_scope(token, request, details)
-            operation_url = await ediscovery.start_purge(token, case_id, search_id)
+            purge_search_id = await _prepare_purge_scope(token, request, details)
+            operation_url = await ediscovery.start_purge(token, case_id, purge_search_id)
             details.update({"api": _API, "operation_url": operation_url, "purge_type": "HardDelete"})
             await purge_repo.update_request(request_id, {"purge_status": "running", "purge_details": details})
             operation = {}
@@ -383,12 +391,20 @@ async def _run_purge(request_id: int) -> None:
             details.update(_dict((refreshed or {}).get("purge_details")))
             # Cleanup and search indexing are asynchronous. Retry estimates,
             # never the destructive purge, while allowing changes to propagate.
+            # Verify against the explicit purge search when available, falling
+            # back to the discovery search for operations that predate it.
+            verify_search_id = str(details.get("purge_search_id") or search_id)
+            if not details.get("purge_search_id"):
+                log_info(
+                    "Post-purge verification falling back to the discovery search",
+                    request_id=request_id, company_id=company_id, search_id=verify_search_id,
+                )
             for attempt in range(POST_PURGE_ESTIMATE_ATTEMPTS):
                 if attempt:
                     await asyncio.sleep(POLL_INTERVAL_SECONDS)
                 try:
                     token = await m365_service._acquire_ediscovery_access_token(company_id)
-                    estimate = await _estimate(token, case_id, search_id)
+                    estimate = await _estimate(token, case_id, verify_search_id)
                     remaining = _verified_estimate_count(estimate)
                     details["verification_estimate"] = estimate
                     details.pop("verification_error", None)

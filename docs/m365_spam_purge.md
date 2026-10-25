@@ -18,27 +18,30 @@ mailboxes when available. Known empty jobs skip this cleanup.
 
 ## Verify a purge outcome
 
-Before submitting a purge, MyPortal sets `dataSourceScopes` to `none`, then
-attaches the matched mailboxes from the reviewed search report as explicit
-`additionalSources` with `includedSources` set to `mailbox`. Graph rejects
-source additions with HTTP 409 while a tenant-wide scope is enabled. Microsoft
-acknowledges the scope change before applying it, so a 409 on a source
-addition re-reads the search scope, re-applies `none` when it is still
-tenant-wide, and retries after a short pause (up to six attempts, about 30
-seconds in total). If Microsoft never applies the change, the purge fails with
-that 409 and nothing is deleted. This avoids
-relying on the purge service to expand a tenant-wide scope: a reported failure returned a
-successful tenant-wide estimate with a mailbox hit, followed by a purge job
-with `LocationCount=0` and no items attempted. The explicit scope uses the same
-query and only the mailboxes with matches in the reviewed result.
+Before submitting a purge, MyPortal creates a dedicated purge search scoped to
+`none` and attaches the matched mailboxes from the reviewed search report as
+explicit `additionalSources` with `includedSources` set to `mailbox`. The
+tenant-wide discovery search is never narrowed in place: Microsoft applies a
+`dataSourceScopes` change asynchronously and keeps rejecting source additions
+with HTTP 409 ("Cannot add additional data sources when using
+dataSourceScopes") until it does, so an in-place narrow could fail the purge
+indefinitely. A search created scoped to `none` from the outset never conflicts
+with a tenant-wide scope, so the reviewed mailboxes attach immediately (a
+transient 409 on a freshly created search is retried a few times). This also
+avoids relying on the purge service to expand a tenant-wide scope: a reported
+failure returned a successful tenant-wide estimate with a mailbox hit, followed
+by a purge job with `LocationCount=0` and no items attempted. The explicit
+purge search uses the same query and only the mailboxes with matches in the
+reviewed result.
 
 Source registration is reconciled and read back before a new estimate runs.
 The purge is blocked if the mailbox report is unavailable, any source falls
 outside the reviewed mailbox list, the fresh estimate has no mailbox locations,
 or its item count differs from the reviewed count. In those cases, run a new
-search and review its results before requesting another deletion. Existing
-Microsoft operations are reconciled without changing their search scope or
-automatically repeating the purge.
+search and review its results before requesting another deletion. The purge and
+post-purge verification estimate both run against the dedicated purge search.
+Existing Microsoft operations are reconciled without changing their search
+scope or automatically repeating the purge.
 
 A Microsoft purge operation reporting `succeeded` does not establish that all
 matching messages disappeared. After requesting mailbox cleanup, MyPortal runs

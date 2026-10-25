@@ -28,8 +28,8 @@ CASE_DESCRIPTION = "Created by MyPortal Spam Search & Purge. Searches in this ca
 # Graph ``ediscoveryCaseOperation.status`` values that will not change again.
 TERMINAL_OPERATION_STATUSES = frozenset({"succeeded", "failed", "partiallysucceeded", "submissionfailed"})
 
-# A dataSourceScopes PATCH returns 204 before Purview applies it, so adding a
-# source straight afterwards can still hit the tenant-wide-scope 409.
+# A freshly created search can briefly be unavailable for source additions, so
+# a transient 409 on an additionalSources POST is retried a few times.
 SCOPE_PROPAGATION_ATTEMPTS = 6
 SCOPE_PROPAGATION_DELAY_SECONDS = 5
 
@@ -121,15 +121,22 @@ def _search_url(case_id: str, search_id: str | None = None) -> str:
     return f"{url}/{_segment(search_id)}" if search_id else url
 
 
-async def create_search(token: str, case_id: str, name: str, query: str) -> str:
-    """Create a search over every mailbox in the tenant and return its ID."""
+async def create_search(
+    token: str, case_id: str, name: str, query: str, *, data_source_scopes: str = "allTenantMailboxes",
+) -> str:
+    """Create a search and return its ID.
+
+    The default ``allTenantMailboxes`` scope discovers matches across the whole
+    tenant. A destructive purge instead creates a search scoped to ``none`` and
+    attaches only the reviewed mailboxes as explicit ``additionalSources``.
+    """
     created = _json(await _request(
         token, "POST", _search_url(case_id), "search creation",
         {
             "displayName": name,
             "description": "MyPortal spam removal search",
             "contentQuery": query,
-            "dataSourceScopes": "allTenantMailboxes",
+            "dataSourceScopes": data_source_scopes,
         },
     ))
     return str(created.get("id") or "") or _segment(None)
@@ -139,16 +146,29 @@ async def delete_search(token: str, case_id: str, search_id: str) -> None:
     await _request(token, "DELETE", _search_url(case_id, search_id), "search removal")
 
 
-async def bind_purge_mailboxes(token: str, case_id: str, search_id: str, mailboxes: list[str]) -> None:
-    """Bind an explicit, reviewed mailbox scope before a destructive action.
+async def create_purge_search(
+    token: str, case_id: str, name: str, query: str, mailboxes: list[str],
+) -> str:
+    """Create a dedicated, explicitly-scoped search for a destructive purge.
+
+    A tenant-wide discovery search cannot be narrowed in place reliably:
+    Microsoft applies a ``dataSourceScopes`` change to ``none`` asynchronously
+    and keeps rejecting ``additionalSources`` with HTTP 409 until it does, so a
+    purge bound to the discovery search can fail indefinitely (409 "Cannot add
+    additional data sources when using dataSourceScopes"). Instead, create a
+    fresh search that is scoped to ``none`` from the outset and attach only the
+    reviewed mailboxes, which never conflicts with a tenant-wide scope.
 
     A tenant-wide estimate can have hits while purgeData expands that scope to
     zero locations. Do not rely on that expansion for the purge. Reconcile the
-    sources on retries and refuse any source outside the reviewed mailboxes.
+    sources and refuse any source outside the reviewed mailboxes. Return the new
+    search's ID so the caller estimates, purges, and verifies against it.
     """
     expected = {mailbox.casefold() for mailbox in mailboxes}
     if not expected:
         raise ValueError("Cannot submit a purge without explicit mailbox locations")
+
+    search_id = await create_search(token, case_id, name, query, data_source_scopes="none")
 
     async def sources() -> set[str]:
         found: set[str] = set()
@@ -158,24 +178,12 @@ async def bind_purge_mailboxes(token: str, case_id: str, search_id: str, mailbox
             for source in body.get("value") or []:
                 email = str(source.get("email") or "").strip().casefold() if isinstance(source, dict) else ""
                 if email not in expected:
-                    raise ValueError("The search contains a data source outside the reviewed purge mailboxes; run a new search")
+                    raise ValueError("The purge search contains a data source outside the reviewed purge mailboxes; run a new search")
                 if str(source.get("includedSources") or "").lower() != "mailbox":
                     raise ValueError("The purge search contains a source that is not restricted to a mailbox; run a new search")
                 found.add(email)
             url = body.get("@odata.nextLink")
         return found
-
-    async def narrow_scope() -> None:
-        await _request(
-            token, "PATCH", _search_url(case_id, search_id), "purge scope configuration",
-            {"dataSourceScopes": "none"},
-        )
-
-    async def current_scope() -> str:
-        body = _json(await _request(
-            token, "GET", _search_url(case_id, search_id) + "?$select=id,dataSourceScopes", "purge scope lookup",
-        ))
-        return str(body.get("dataSourceScopes") or "none")
 
     async def add_source(mailbox: str) -> None:
         payload = {"@odata.type": "microsoft.graph.security.userSource", "email": mailbox, "includedSources": "mailbox"}
@@ -187,19 +195,14 @@ async def bind_purge_mailboxes(token: str, case_id: str, search_id: str, mailbox
                 )
                 return
             except m365_service.M365Error as exc:
+                # A search created scoped to ``none`` does not conflict with a
+                # tenant-wide scope, but a freshly created search can briefly be
+                # unavailable; retry a transient 409 after a short pause.
                 if exc.http_status != 409 or attempt == SCOPE_PROPAGATION_ATTEMPTS:
                     raise
-            # Re-apply the scope if Purview still reports a tenant-wide one,
-            # then give the change time to take effect before retrying.
-            if (await current_scope()).lower() != "none":
-                await narrow_scope()
             await asyncio.sleep(SCOPE_PROPAGATION_DELAY_SECONDS)
 
     existing = await sources()
-    # Graph rejects additionalSources with 409 while a tenant-wide scope is
-    # enabled. Narrow the scope first; the caller will not submit purgeData
-    # until source readback and a fresh estimate have both succeeded.
-    await narrow_scope()
     for mailbox in mailboxes:
         if mailbox.casefold() in existing:
             continue
@@ -208,6 +211,7 @@ async def bind_purge_mailboxes(token: str, case_id: str, search_id: str, mailbox
     # Read sources back so a 201 with no usable source cannot authorize purge.
     if await sources() != expected:
         raise ValueError("Microsoft did not retain all reviewed purge mailbox locations; no purge was submitted")
+    return search_id
 
 
 async def start_estimate(token: str, case_id: str, search_id: str) -> None:
