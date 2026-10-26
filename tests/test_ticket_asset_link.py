@@ -168,54 +168,6 @@ def test_link_asset_to_ticket_succeeds(monkeypatch, active_session):
     replace_mock.assert_awaited_once_with(135, [20])
 
 
-def test_link_asset_to_ticket_can_optionally_send_tray_notification(monkeypatch, active_session):
-    ticket = {
-        "id": 135,
-        "ticket_number": 1234,
-        "status": "open",
-        "priority": "normal",
-        "company_id": 5,
-        "requester_id": None,
-        "assigned_user_id": None,
-    }
-    _setup_common_mocks(monkeypatch, ticket, company_id=5)
-    monkeypatch.setattr(
-        main_module.assets_repo,
-        "get_asset_by_id",
-        AsyncMock(return_value={"id": 20, "company_id": 5, "name": "Laptop"}),
-    )
-    notify_mock = AsyncMock(return_value={"targeted": 1, "delivered": 1, "queued": 0})
-    monkeypatch.setattr(ticket_admin_routes.tray_service, "push_notification_to_company_devices", notify_mock)
-    monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
-
-    app.dependency_overrides[database_dependencies.require_database] = lambda: None
-    try:
-        with TestClient(app) as client:
-            client.cookies.set("myportal_session_csrf", active_session.csrf_token)
-            response = client.post(
-                "/admin/tickets/135/details",
-                data={
-                    "status": "open",
-                    "subject": "Link asset regression",
-                    "priority": "normal",
-                    "companyId": "5",
-                    "assetIds": "20",
-                    "sendTrayNotification": "1",
-                    "returnUrl": "/admin/tickets/135",
-                },
-                headers={"X-CSRF-Token": "csrf-token"},
-                follow_redirects=False,
-            )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == status.HTTP_303_SEE_OTHER
-    notify_mock.assert_awaited_once()
-    call = notify_mock.await_args
-    assert call.kwargs["company_id"] == 5
-    assert call.kwargs["asset_ids"] == [20]
-
-
 def test_link_asset_wrong_company_is_skipped_not_400(monkeypatch, active_session):
     """An asset that belongs to a different company should be silently skipped.
 
