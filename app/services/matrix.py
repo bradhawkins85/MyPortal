@@ -75,6 +75,7 @@ async def _request(
     params: dict[str, Any] | None = None,
     timeout: float = _DEFAULT_TIMEOUT,
     max_retries: int = 3,
+    monitor: bool = True,
 ) -> dict[str, Any]:
     if not _SAFE_MATRIX_PATH_RE.fullmatch(path):
         raise MatrixError("M_INVALID_PARAM", "Invalid Matrix API path")
@@ -87,7 +88,12 @@ async def _request(
     for attempt in range(max_retries):
         try:
             client = _get_client(timeout=timeout)
-            resp = await client.request(method, url, headers=headers, json=json, params=params)
+            request_options: dict[str, Any] = {"timeout": timeout}
+            if not monitor:
+                request_options["extensions"] = {"myportal.skip_monitor": True}
+            resp = await client.request(
+                method, url, headers=headers, json=json, params=params, **request_options
+            )
         except httpx.RequestError as exc:
             if attempt >= max_retries - 1:
                 raise MatrixError("M_UNKNOWN", str(exc)) from exc
@@ -228,6 +234,9 @@ async def sync(
         headers=_bot_headers(),
         params=params,
         timeout=timeout_ms / 1000 + 10,
+        # Sync is a persistent receive stream, not a webhook delivery. Failures
+        # are reported by the sync loop in the application log.
+        monitor=False,
     )
 
 
