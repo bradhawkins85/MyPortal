@@ -277,12 +277,74 @@ DETECTIONS: dict[str, dict[str, Any]] = {
         monitors=["disk_errors", "storage_resets"],
     ),
     "disk_worn_out": _detection(
-        "storage", "A drive is worn out", "critical", "An SSD has used 90% or more of its rated write endurance.",
+        "storage", "A drive is worn out", "critical",
+        "An SSD has used 90% or more of its rated write endurance (CrystalDiskInfo's life remaining is 10% or less, "
+        "or Windows' wear counter when CrystalDiskInfo has no figure).",
         monitors=["disk_errors"],
     ),
     "disk_wearing": _detection(
-        "storage", "A drive is wearing out", "warning", "An SSD has used 70% or more of its rated write endurance.",
+        "storage", "A drive is wearing out", "warning",
+        "An SSD has used 70% or more of its rated write endurance (CrystalDiskInfo's life remaining is 30% or less, "
+        "or Windows' wear counter when CrystalDiskInfo has no figure).",
         monitors=["disk_errors"],
+    ),
+    "disk_smart_bad": _detection(
+        "storage", "CrystalDiskInfo rates a drive as Bad", "critical",
+        "CrystalDiskInfo's health assessment is Bad: a SMART attribute has passed the drive's failure threshold. "
+        "Back up the data and replace the drive.",
+        monitors=["disk_errors"],
+    ),
+    "disk_smart_caution": _detection(
+        "storage", "CrystalDiskInfo rates a drive as Caution", "warning",
+        "CrystalDiskInfo's health assessment is Caution for a reason no more specific check covers, such as a "
+        "vendor attribute nearing its limit.",
+        monitors=["disk_errors"],
+    ),
+    "disk_reallocated_sectors": _detection(
+        "storage", "A drive has reallocated sectors", "warning",
+        "SMART attribute 05 (Reallocated Sectors Count) is above zero: the drive replaced failing sectors with spares "
+        "(critical at 100 or more).",
+        monitors=["disk_errors", "storage_resets"],
+    ),
+    "disk_pending_sectors": _detection(
+        "storage", "A drive has unreadable sectors", "warning",
+        "SMART attributes C5 (Current Pending Sector Count) or C6 (Offline Uncorrectable) are above zero: data in "
+        "those sectors could not be read (critical at 10 or more).",
+        monitors=["disk_errors", "storage_resets"],
+    ),
+    "disk_smart_uncorrectable": _detection(
+        "storage", "A drive's SMART data records uncorrectable errors", "critical",
+        "SMART attribute BB (Reported Uncorrectable Errors) or, on NVMe drives, Media and Data Integrity Errors are "
+        "above zero.",
+        monitors=["disk_errors", "storage_resets"],
+    ),
+    "disk_nvme_critical_warning": _detection(
+        "storage", "An NVMe drive reports a critical warning", "critical",
+        "The NVMe Critical Warning field is set: spare capacity low, temperature out of range, reliability degraded, "
+        "media read-only or volatile memory backup failed.",
+        monitors=["disk_errors", "storage_resets"],
+    ),
+    "disk_spare_low": _detection(
+        "storage", "An NVMe drive has used up its spare capacity", "critical",
+        "The NVMe Available Spare is at or below the drive's Available Spare Threshold.",
+        monitors=["disk_errors"],
+    ),
+    "disk_spin_retries": _detection(
+        "storage", "A hard disk needed spin-up retries", "warning",
+        "SMART attribute 0A (Spin Retry Count) is above zero: the motor struggled to spin up.",
+        monitors=["disk_errors"],
+    ),
+    "disk_crc_errors": _detection(
+        "storage", "A drive has interface (CRC) errors", "info",
+        "SMART attribute C7 (UltraDMA CRC Error Count) is above zero: data was corrupted on the cable or connector.",
+        monitors=["storage_resets"],
+        remedy="Reseat or replace the SATA data cable, or move the drive to another port; the count never resets.",
+    ),
+    "disk_smart_unavailable": _detection(
+        "storage", "Drive SMART data could not be read", "info",
+        "CrystalDiskInfo could not be installed with Chocolatey or could not read the drives, so drive wear and "
+        "SMART attributes come from Windows' counters only.",
+        remedy="Install CrystalDiskInfo with choco install crystaldiskinfo -y (Chocolatey first if it is missing).",
     ),
     "disk_hot": _detection(
         "thermals", "A drive is running hot", "warning", "A hard disk is at 55 °C or more, or an SSD at 70 °C or more.",

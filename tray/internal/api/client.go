@@ -733,7 +733,7 @@ func (c *Client) PostTroubleshootStatus(ctx context.Context, ticketID, commandID
 }
 
 // PostHealthCheckStatus reports progress for a running health check. stage is
-// one of "received", "collecting_snapshot", "reading_sensors",
+// one of "received", "collecting_snapshot", "reading_smart", "reading_sensors",
 // "collecting_logs", "uploading" or "failed".
 func (c *Client) PostHealthCheckStatus(ctx context.Context, healthCheckID, commandID int, stage, message string) error {
 	form := url.Values{}

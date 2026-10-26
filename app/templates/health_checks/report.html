@@ -216,6 +216,35 @@
     </table></div>
     {% endif %}
 
+    {% if snapshot.smart_disks %}
+    {% set smart_watch = {'05': 'Reallocated sectors', 'C5': 'Pending sectors', 'C6': 'Offline uncorrectable', 'BB': 'Reported uncorrectable', '0A': 'Spin retries', 'C7': 'CRC errors'} %}
+    {% set nvme_watch = {'01': 'Critical warning', '03': 'Available spare', '0E': 'Media errors'} %}
+    <div class="hc-table-wrap"><table class="hc-table">
+      <caption>Drive SMART data (CrystalDiskInfo{% if snapshot.smart_version %} {{ snapshot.smart_version }}{% endif %}){% if snapshot.smart_installed %} <span class="hc-muted">installed with Chocolatey during this check</span>{% endif %}</caption>
+      <thead><tr><th scope="col">Drive</th><th scope="col">Type</th><th scope="col">Health</th><th scope="col">Life left</th><th scope="col">Temperature</th><th scope="col">Powered on</th><th scope="col">Key attributes</th></tr></thead>
+      <tbody>
+        {% for disk in snapshot.smart_disks %}
+        {% set watch = nvme_watch if disk.get('nvme') else smart_watch %}
+        {% set health = disk.get('health_status') %}
+        {% set life = disk.get('life_percent') %}
+        {% set letters = disk.get('drive_letters') or [] %}
+        {% set picked = (disk.get('attributes') or []) | select('mapping') | selectattr('id', 'in', watch) | list %}
+        <tr>
+          <th scope="row">{{ disk.get('model') or 'Drive' }}{% if letters %} <span class="hc-muted">{{ letters | join(' ') }}</span>{% endif %}</th>
+          <td>{{ disk.get('media_type') or '—' }}{% if disk.get('interface') %} · {{ disk.get('interface') }}{% endif %}</td>
+          <td class="{{ 'is-bad' if health == 'Bad' else 'is-warn' if health == 'Caution' else '' }}">{{ health or '—' }}</td>
+          <td class="{{ 'is-bad' if life is not none and life <= 10 else 'is-warn' if life is not none and life <= 30 else '' }}">{{ life ~ '%' if life is not none else '—' }}</td>
+          <td>{{ disk.get('temperature_c') ~ ' °C' if disk.get('temperature_c') is not none else '—' }}</td>
+          <td>{{ disk.get('power_on_hours') ~ ' h' if disk.get('power_on_hours') is not none else '—' }}</td>
+          <td>{% for attr in picked %}{{ watch[attr.id] }} {{ attr.get('raw_value') if attr.get('raw_value') is not none else attr.get('raw') }}{% if not loop.last %}; {% endif %}{% else %}—{% endfor %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+    {% elif snapshot.smart_status and snapshot.smart_status != 'skipped_virtual' %}
+      <p class="hc-muted">Drive SMART data (CrystalDiskInfo): {{ snapshot.smart_status | replace('_', ' ') }}{% if snapshot.smart_detail %} ({{ snapshot.smart_detail }}){% endif %}.</p>
+    {% endif %}
+
     {% set volumes = sections.get('volumes') or [] %}
     {% if volumes %}
     <div class="hc-table-wrap"><table class="hc-table">

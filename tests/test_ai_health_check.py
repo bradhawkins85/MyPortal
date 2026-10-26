@@ -946,6 +946,109 @@ def test_report_template_renders_and_escapes():
     assert "PawnIO was installed for the check and removed afterwards." in html
 
 
+SMART_SNAPSHOT = {
+    "schema": 1,
+    "platform": "windows",
+    "sections": {
+        "disks": [
+            {"device_id": "0", "name": "Crucial_CT256MX100SSD1", "media_type": "SSD", "health": "Healthy",
+             "operational_status": ["OK"], "wear_percent": 0, "temperature_c": 38, "power_on_hours": 41234},
+            {"device_id": "1", "name": "WDC WD20EZRZ-00Z5HB0", "media_type": "HDD", "health": "Healthy",
+             "operational_status": ["OK"]},
+        ],
+    },
+    "disk_smart": {"status": "available", "source": "CrystalDiskInfo", "version": "9.4.4", "installed": True, "disks": [
+        {"model": "Crucial_CT256MX100SSD1", "media_type": "SSD", "drive_letters": ["C:"], "health_status": "Caution",
+         "life_percent": 25, "temperature_c": 38, "attributes": [
+             {"id": "05", "name": "Reallocated NAND Blocks", "current": 100, "worst": 100, "threshold": 10,
+              "raw": "000000000004", "raw_value": 4},
+             {"id": "C7", "name": "UltraDMA CRC Error Count", "current": 100, "worst": 100, "threshold": 0,
+              "raw": "000000000003", "raw_value": 3}]},
+        {"model": "WDC WD20EZRZ-00Z5HB0", "media_type": "HDD", "drive_letters": ["D:"], "health_status": "Bad",
+         "temperature_c": 58, "power_on_hours": 50000, "attributes": [
+             {"id": "05", "name": "Reallocated Sectors Count", "current": 5, "worst": 5, "threshold": 140,
+              "raw": "000000000BB8", "raw_value": 3000},
+             {"id": "C5", "name": "Current Pending Sector Count", "current": 200, "worst": 200, "threshold": 0,
+              "raw": "00000000000C", "raw_value": 12},
+             {"id": "0A", "name": "Spin Retry Count", "current": 100, "worst": 100, "threshold": 0,
+              "raw": "000000000002", "raw_value": 2}]},
+        {"model": "Samsung SSD 980 PRO 1TB", "media_type": "SSD", "nvme": True, "health_status": "Bad",
+         "life_percent": 4, "attributes": [
+             {"id": "01", "name": "Critical Warning", "raw": "000000000005", "raw_value": 5},
+             {"id": "03", "name": "Available Spare", "raw": "000000000005", "raw_value": 5},
+             {"id": "04", "name": "Available Spare Threshold", "raw": "00000000000A", "raw_value": 10},
+             {"id": "0E", "name": "Media and Data Integrity Errors", "raw": "000000000002", "raw_value": 2}]},
+        {"model": "Kingston SA400S37240G", "media_type": "SSD", "health_status": "Caution", "life_percent": 90,
+         "attributes": []},
+    ]},
+    "errors": {},
+}
+
+
+def test_smart_rules_prefer_crystaldiskinfo_wear_and_flag_attributes():
+    signals = hc.evaluate_snapshot(SMART_SNAPSHOT)
+    by_title = {signal["title"]: signal for signal in signals}
+    # Windows reports 0% wear; CrystalDiskInfo's 25% life left is used instead.
+    assert by_title["Crucial_CT256MX100SSD1 (C:) is 75% worn out"]["key"] == "disk_wearing"
+    assert by_title["Crucial_CT256MX100SSD1 (C:) has 4 reallocated sectors"]["severity"] == "warning"
+    assert by_title["Crucial_CT256MX100SSD1 (C:) has 3 interface (CRC) errors"]["key"] == "disk_crc_errors"
+    # Specific findings replace the generic Caution flag.
+    assert "CrystalDiskInfo rates Crucial_CT256MX100SSD1 (C:) as Caution" not in by_title
+    assert by_title["CrystalDiskInfo rates Kingston SA400S37240G as Caution"]["key"] == "disk_smart_caution"
+    hdd = "WDC WD20EZRZ-00Z5HB0 (D:)"
+    assert by_title[f"{hdd} has 3000 reallocated sectors"]["severity"] == "critical"
+    assert by_title[f"{hdd} has 12 unreadable (pending or uncorrectable) sectors"]["severity"] == "critical"
+    assert by_title[f"{hdd} needed 2 spin-up retries"]["key"] == "disk_spin_retries"
+    bad = by_title[f"CrystalDiskInfo rates {hdd} as Bad"]
+    assert bad["key"] == "disk_smart_bad" and "Reallocated Sectors Count" in bad["detail"]
+    # Windows had no temperature or hours for the HDD, so CrystalDiskInfo's are used.
+    assert by_title[f"{hdd} is running hot (58 °C)"]["key"] == "disk_hot"
+    assert by_title[f"{hdd} has been powered on for 5.7 years"]["key"] == "disk_old"
+    nvme = "Samsung SSD 980 PRO 1TB"
+    assert by_title[f"{nvme} is 96% worn out"]["key"] == "disk_worn_out"
+    warning = by_title[f"{nvme} reports an NVMe critical warning"]
+    assert "spare capacity below its threshold" in warning["detail"] and "reliability degraded" in warning["detail"]
+    assert by_title[f"{nvme} has used up its spare capacity (5% left)"]["key"] == "disk_spare_low"
+    assert by_title[f"{nvme} has 2 media and data integrity errors"]["key"] == "disk_smart_uncorrectable"
+    assert not any("is 0% worn out" in title for title in by_title)
+
+
+def test_smart_rules_fall_back_to_windows_wear_and_note_failures():
+    snapshot = {**SMART_SNAPSHOT, "sections": {"disks": [
+        {"device_id": "0", "name": "NVMe SSD", "media_type": "SSD", "health": "Healthy", "wear_percent": 92}]},
+        "disk_smart": {"status": "error", "source": "CrystalDiskInfo", "detail": "Chocolatey could not be installed.",
+                       "disks": []}}
+    signals = hc.evaluate_snapshot(snapshot)
+    by_key = {signal["key"]: signal for signal in signals}
+    assert by_key["disk_worn_out"]["title"] == "NVMe SSD is 92% worn out"
+    assert by_key["disk_smart_unavailable"]["detail"] == "Chocolatey could not be installed."
+    prompt = hc._snapshot_for_prompt(SMART_SNAPSHOT)
+    rows = prompt["disk_smart"]["disks"][1]["attributes"]
+    assert rows[0] == "05 Reallocated Sectors Count: raw 3000 (current 5, worst 5, threshold 140)"
+
+
+def test_report_template_shows_crystaldiskinfo_smart_data():
+    from app.features.health_check.routes import _snapshot_view
+
+    check = hc.present({
+        "id": 5, "asset_id": 10, "asset_name": "PC-01", "company_id": 1, "company_name": "Contoso",
+        "status": "completed", "overall_status": "critical", "health_score": 12, "platform": "windows",
+        "model": "m", "allow_pawnio": False, "created_at": "2026-10-22 01:00:00",
+        "completed_at": "2026-10-22 01:09:00", "summary": "Replace D:", "error": None, "stage_message": "Report ready.",
+    })
+    signals = hc.evaluate_snapshot(SMART_SNAPSHOT)
+    html = _render("health_checks/report.html", check=check, report={"signals": signals}, signals=signals,
+                   can_run_again=False, snapshot=_snapshot_view(SMART_SNAPSHOT), logs=[], areas=hc.AREAS, previous=[])
+    assert "Drive SMART data (CrystalDiskInfo 9.4.4)" in html and "installed with Chocolatey during this check" in html
+    assert "Reallocated sectors 3000; Pending sectors 12; Spin retries 2" in html
+    assert "Critical warning 5; Available spare 5; Media errors 2" in html
+    failed = _render("health_checks/report.html", check=check, report={"signals": []}, signals=[],
+                     can_run_again=False, logs=[], areas=hc.AREAS, previous=[], snapshot=_snapshot_view(
+                         {"sections": {"volumes": [{"drive": "C:", "free_percent": 40, "free_gb": 90, "size_gb": 225, "dirty": False, "health": "Healthy", "file_system": "NTFS", "label": ""}]},
+                          "disk_smart": {"status": "error", "detail": "No Chocolatey", "disks": []}}))
+    assert "Drive SMART data (CrystalDiskInfo): error (No Chocolatey)." in failed
+
+
 def test_index_and_required_logs_templates_render():
     check = hc.present({"id": 4, "asset_id": 10, "asset_name": "PC-01", "company_name": "Contoso", "status": "collecting",
                         "created_at": "2026-10-22 01:00:00", "stage_message": "Reading hardware sensors"})

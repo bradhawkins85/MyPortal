@@ -15,7 +15,10 @@ internal knowledge base and approved log list - and works in stages:
    updates, services, security settings (BitLocker, Secure Boot, TPM, UAC,
    SMBv1, Remote Desktop), Windows support and activation, clock sync,
    network errors and battery wear (macOS sends a smaller snapshot). On
-   physical Windows hardware, when allowed, the device installs the PawnIO
+   physical Windows hardware the device reads each drive's SMART attributes
+   with CrystalDiskInfo, installing it with Chocolatey when it is missing (it
+   stays installed), since Windows' wear counter reads 0% on many older
+   SSDs. When allowed, the device installs the PawnIO
    driver for the length of the check to read hardware sensors (CPU, GPU and
    motherboard temperatures, fans, voltages) and removes it again before it
    reports back. The device also sends a fixed set of health-related logs.
@@ -360,7 +363,8 @@ def _drive(volume: Mapping[str, Any]) -> str:
     return str(volume.get("drive") or volume.get("mount") or volume.get("name") or "a volume")
 
 
-def _disk_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> None:
+def _disk_rules(sections: Mapping[str, Any], signals: list[dict[str, str]],
+                smart_disks: Sequence[Mapping[str, Any]] = ()) -> None:
     for volume in _list(sections.get("volumes")):
         if not isinstance(volume, dict):
             continue
@@ -402,6 +406,10 @@ def _disk_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> N
             signals.append(_signal("disk_uncorrected_errors", "critical", f"{name} has {int(uncorrected)} uncorrected read/write errors",
                                    "Uncorrected errors mean data could not be read or written; back up now."))
         wear = _num(disk.get("wear_percent"))
+        if _num(_matching_smart_disk(name, smart_disks).get("life_percent")) is not None:
+            # CrystalDiskInfo reads wear from the drive's own attributes; many
+            # older SSDs report 0% to Windows (see _smart_rules).
+            wear = None
         if wear is not None and wear >= 90:
             signals.append(_signal("disk_worn_out", "critical", f"{name} is {wear:g}% worn out"))
         elif wear is not None and wear >= 70:
@@ -428,6 +436,159 @@ def _disk_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> N
                                "Bad blocks, retried I/O or controller resets often come before a drive fails."))
     if chkdsk.get("scheduled") is True:
         signals.append(_signal("chkdsk_scheduled", "info", "A disk check is scheduled for the next restart"))
+
+
+def _smart_disks(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Drives in CrystalDiskInfo's SMART report (``disk_smart``), when it was read."""
+
+    report = _dict(snapshot.get("disk_smart"))
+    if report.get("status") != "available":
+        return []
+    return [disk for disk in _list(report.get("disks")) if isinstance(disk, dict)]
+
+
+def _model_key(value: Any) -> str:
+    return "".join(ch for ch in str(value or "").casefold() if ch.isalnum())
+
+
+def _matching_smart_disk(name: str, smart_disks: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
+    """The CrystalDiskInfo drive with the same model as a Windows physical disk."""
+
+    key = _model_key(name)
+    if len(key) < 6:
+        return {}
+    for disk in smart_disks:
+        model = _model_key(disk.get("model"))
+        if len(model) >= 6 and (model == key or model in key or key in model):
+            return disk
+    return {}
+
+
+def _smart_name(disk: Mapping[str, Any]) -> str:
+    name = str(disk.get("model") or "A drive").strip()
+    letters = [str(letter) for letter in _list(disk.get("drive_letters")) if letter]
+    return f"{name} ({', '.join(letters)})" if letters else name
+
+
+def _smart_raw(attributes: Mapping[str, Mapping[str, Any]], attribute_id: str) -> int | None:
+    """An attribute's raw count. Only the low 32 bits are a count on drives that
+    pack extra fields into the 48-bit raw value."""
+
+    value = _num(attributes.get(attribute_id, {}).get("raw_value"))
+    return None if value is None else int(value) & 0xFFFFFFFF
+
+
+_NVME_CRITICAL_WARNINGS = (
+    (0x01, "spare capacity below its threshold"),
+    (0x02, "temperature outside its limits"),
+    (0x04, "reliability degraded by media or internal errors"),
+    (0x08, "media switched to read-only"),
+    (0x10, "volatile memory backup failed"),
+)
+
+
+def _smart_rules(snapshot: Mapping[str, Any], sections: Mapping[str, Any], signals: list[dict[str, str]]) -> None:
+    """Rules over each drive's SMART attributes as CrystalDiskInfo reads them."""
+
+    report = _dict(snapshot.get("disk_smart"))
+    if report.get("status") == "error":
+        signals.append(_signal("disk_smart_unavailable", "info", "Drive SMART data could not be read with CrystalDiskInfo",
+                               str(report.get("detail") or "")))
+    windows_disks = [disk for disk in _list(sections.get("disks")) if isinstance(disk, dict)]
+    for disk in _smart_disks(snapshot):
+        name = _smart_name(disk)
+        windows = next((w for w in windows_disks
+                        if _matching_smart_disk(str(w.get("name") or ""), [disk])), {})
+        attributes = {
+            str(attr.get("id") or "").upper(): attr for attr in _list(disk.get("attributes")) if isinstance(attr, dict)
+        }
+        nvme = disk.get("nvme") is True
+        specific = False
+
+        life = _num(disk.get("life_percent"))
+        if life is not None and life <= 10:
+            signals.append(_signal("disk_worn_out", "critical", f"{name} is {100 - life:g}% worn out",
+                                   f"CrystalDiskInfo reports {life:g}% life remaining."))
+            specific = True
+        elif life is not None and life <= 30:
+            signals.append(_signal("disk_wearing", "warning", f"{name} is {100 - life:g}% worn out",
+                                   f"CrystalDiskInfo reports {life:g}% life remaining."))
+            specific = True
+
+        if nvme:
+            warning = _smart_raw(attributes, "01")
+            if warning:
+                reasons = [text for bit, text in _NVME_CRITICAL_WARNINGS if warning & bit] or [f"code {warning}"]
+                signals.append(_signal("disk_nvme_critical_warning", "critical",
+                                       f"{name} reports an NVMe critical warning",
+                                       "The drive reports: " + "; ".join(reasons) + "."))
+                specific = True
+            spare = _smart_raw(attributes, "03")
+            spare_threshold = _smart_raw(attributes, "04")
+            if spare is not None and spare_threshold and spare <= spare_threshold:
+                signals.append(_signal("disk_spare_low", "critical",
+                                       f"{name} has used up its spare capacity ({spare}% left)",
+                                       f"Available spare is at or below the drive's threshold of {spare_threshold}%."))
+                specific = True
+            media_errors = _smart_raw(attributes, "0E")
+            if media_errors:
+                signals.append(_signal("disk_smart_uncorrectable", "critical",
+                                       f"{name} has {media_errors} media and data integrity errors",
+                                       "The drive could not correct some data; back up now."))
+                specific = True
+        else:
+            reallocated = _smart_raw(attributes, "05")
+            if reallocated:
+                signals.append(_signal("disk_reallocated_sectors", "critical" if reallocated >= 100 else "warning",
+                                       f"{name} has {reallocated} reallocated sectors",
+                                       "The drive has replaced failing sectors with spares; a growing count means "
+                                       "it is wearing out or failing."))
+                specific = True
+            pending = (_smart_raw(attributes, "C5") or 0) + (_smart_raw(attributes, "C6") or 0)
+            if pending:
+                signals.append(_signal("disk_pending_sectors", "critical" if pending >= 10 else "warning",
+                                       f"{name} has {pending} unreadable (pending or uncorrectable) sectors",
+                                       "Data in these sectors could not be read; back up now and check the drive."))
+                specific = True
+            uncorrectable = _smart_raw(attributes, "BB")
+            if uncorrectable:
+                signals.append(_signal("disk_smart_uncorrectable", "critical",
+                                       f"{name} has {uncorrectable} reported uncorrectable errors",
+                                       "The drive could not correct some data; back up now."))
+                specific = True
+            spin_retries = _smart_raw(attributes, "0A")
+            if spin_retries and str(disk.get("media_type") or "") == "HDD":
+                signals.append(_signal("disk_spin_retries", "warning", f"{name} needed {spin_retries} spin-up retries",
+                                       "The motor struggled to spin the platters up, a sign of mechanical wear or a "
+                                       "weak power supply."))
+                specific = True
+            crc = _smart_raw(attributes, "C7")
+            if crc:
+                signals.append(_signal("disk_crc_errors", "info", f"{name} has {crc} interface (CRC) errors",
+                                       "Data was corrupted between the drive and the computer, usually a loose or "
+                                       "faulty cable; the count never resets, so only a rising count matters."))
+
+        health = str(disk.get("health_status") or "")
+        if health == "Bad":
+            failed = [
+                str(attr.get("name") or key) for key, attr in attributes.items()
+                if (_num(attr.get("threshold")) or 0) > 0 and _num(attr.get("current")) is not None
+                and _num(attr.get("current")) <= _num(attr.get("threshold"))
+            ]
+            signals.append(_signal("disk_smart_bad", "critical", f"CrystalDiskInfo rates {name} as Bad",
+                                   ("Past their failure threshold: " + ", ".join(failed[:6]) + ". ") if failed else
+                                   "Back up the data and replace the drive."))
+        elif health == "Caution" and not specific:
+            signals.append(_signal("disk_smart_caution", "warning", f"CrystalDiskInfo rates {name} as Caution"))
+
+        temp = _num(disk.get("temperature_c"))
+        hot = 55 if str(disk.get("media_type") or "") == "HDD" else 70
+        if temp is not None and temp >= hot and _num(windows.get("temperature_c")) is None:
+            signals.append(_signal("disk_hot", "warning", f"{name} is running hot ({temp:g} °C)"))
+        hours = _num(disk.get("power_on_hours"))
+        if (str(disk.get("media_type") or "") == "HDD" and hours is not None and hours >= 43800
+                and _num(windows.get("power_on_hours")) is None):
+            signals.append(_signal("disk_old", "info", f"{name} has been powered on for {hours / 8760:.1f} years"))
 
 
 def _defrag_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> None:
@@ -727,7 +888,8 @@ def evaluate_snapshot(snapshot: Mapping[str, Any] | None) -> list[dict[str, str]
     if not sections:
         return signals
     for rule in (
-        lambda: _disk_rules(sections, signals),
+        lambda: _disk_rules(sections, signals, _smart_disks(snapshot)),
+        lambda: _smart_rules(snapshot, sections, signals),
         lambda: _defrag_rules(sections, signals),
         lambda: _thermal_rules(snapshot, sections, signals),
         lambda: _performance_rules(sections, signals),
@@ -784,6 +946,9 @@ Rules:
   "max" or "min", sensors named "Warning Temperature" or "Critical Temperature" and a
   zone's "critical_celsius" are limits or past peaks, not the current temperature; never
   report them as the drive or part running hot.
+- Drives: "disk_smart" is CrystalDiskInfo's reading of each drive's own SMART attributes.
+  Prefer its "health_status" and "life_percent" (remaining life; 100 is new) over a disk's
+  "wear_percent", which Windows reports as 0 for many older SSDs.
 - "search_terms": 0-4 short, generic phrases to look up fixes for the most important
   issues (for example "Windows 11 Kernel-Power 41 unexpected restart" or "NVMe SSD
   overheating throttling"). Never include names, hostnames, serial numbers, IP or email
@@ -827,6 +992,9 @@ Rules:
   "max" or "min", sensors named "Warning Temperature" or "Critical Temperature" and a
   zone's "critical_celsius" are limits or past peaks, not the current temperature; never
   report them as the drive or part running hot.
+- Drives: "disk_smart" is CrystalDiskInfo's reading of each drive's own SMART attributes.
+  Prefer its "health_status" and "life_percent" (remaining life; 100 is new) over a disk's
+  "wear_percent", which Windows reports as 0 for many older SSDs.
 - "steps": the ordered troubleshooting steps that bring this computer back to optimal
   performance, most important first (at most 15). Be concrete: what to open, run or
   change. Put "back up the data" before any step on a failing drive, and say when a step
@@ -863,6 +1031,27 @@ def _disk_for_prompt(disk: Any) -> Any:
     return renamed
 
 
+def _smart_for_prompt(report: Mapping[str, Any]) -> dict[str, Any]:
+    """CrystalDiskInfo's report with each SMART table as one short line per attribute."""
+
+    compact = {k: v for k, v in report.items() if k != "disks"}
+    disks = []
+    for disk in _list(report.get("disks"))[:16]:
+        if not isinstance(disk, dict):
+            continue
+        rows = []
+        for attr in _list(disk.get("attributes")):
+            if not isinstance(attr, dict):
+                continue
+            row = f"{attr.get('id')} {attr.get('name')}: raw {attr.get('raw_value', attr.get('raw'))}"
+            if attr.get("current") is not None:
+                row += f" (current {attr.get('current')}, worst {attr.get('worst')}, threshold {attr.get('threshold')})"
+            rows.append(row)
+        disks.append({**{k: v for k, v in disk.items() if k != "attributes"}, "attributes": rows})
+    compact["disks"] = disks
+    return compact
+
+
 def _snapshot_for_prompt(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     """Bound the snapshot for the prompt, trimming the largest sections first."""
 
@@ -871,6 +1060,8 @@ def _snapshot_for_prompt(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     compact["sections"] = sections
     if isinstance(sections.get("disks"), list):
         sections["disks"] = [_disk_for_prompt(disk) for disk in sections["disks"]]
+    if isinstance(compact.get("disk_smart"), dict):
+        compact["disk_smart"] = _smart_for_prompt(compact["disk_smart"])
     encoded = json.dumps(compact, default=str, separators=(",", ":"))
     if len(encoded) <= _SNAPSHOT_PROMPT_CHARS:
         return compact
@@ -1252,6 +1443,7 @@ async def start_health_check(
 DEVICE_STAGES = {
     "received": "The device started the health check",
     "collecting_snapshot": "Reading built-in health metrics",
+    "reading_smart": "Reading drive SMART data",
     "reading_sensors": "Reading hardware sensors",
     "collecting_logs": "Collecting logs",
     "uploading": "Uploading the results",

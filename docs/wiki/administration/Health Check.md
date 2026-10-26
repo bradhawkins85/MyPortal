@@ -30,9 +30,18 @@ On Windows the tray service runs a fixed, read-only PowerShell script as SYSTEM 
 built-in Windows metrics only (CIM/WMI classes, the registry, event logs, `DISM /CheckHealth`
 and the volume fragmentation analysis). Nothing on the computer is changed.
 
+On physical Windows hardware the tray service then reads each drive's SMART attributes with
+[CrystalDiskInfo](https://crystalmark.info/en/software/crystaldiskinfo/) (`DiskInfo64.exe
+/CopyExit`). Windows' reliability counter reports 0% wear for many older SSDs, so the wear
+and health figures come from CrystalDiskInfo when it has them. When CrystalDiskInfo is not
+installed it is installed with Chocolatey (`choco install crystaldiskinfo`), installing
+Chocolatey first from community.chocolatey.org when that is missing; it stays installed so
+later checks do not install it again. Virtual machines are skipped. If it cannot be
+installed or run, the report says so and the drive checks use Windows' counters only.
+
 | Area | What is read |
 | --- | --- |
-| Drives and impending failure | Each physical disk's health and operational status (Predictive Failure, Degraded), its reliability counters (temperature, wear, power-on hours, read/write errors corrected and uncorrected, latency) and the SMART failure prediction (`MSStorageDriver_FailurePredictStatus`); disk, storport and NTFS errors in the System log |
+| Drives and impending failure | Each physical disk's health and operational status (Predictive Failure, Degraded), its reliability counters (temperature, wear, power-on hours, read/write errors corrected and uncorrected, latency) and the SMART failure prediction (`MSStorageDriver_FailurePredictStatus`); disk, storport and NTFS errors in the System log; CrystalDiskInfo's health rating (Good, Caution, Bad), life remaining and SMART table for each drive |
 | chkdsk | Each volume's dirty bit, whether a check is scheduled for the next restart (`BootExecute`) and the latest chkdsk results (Wininit / Chkdsk events) |
 | Defrag and TRIM | The ScheduledDefrag task (on, last run, result), whether TRIM is on, the last optimisation events, and the fragmentation of hard disks (`DefragAnalysis`, read-only, stopped after 3 minutes) |
 | Thermals | Thermal zones and how far they throttle the CPU, CPU performance limit and frequency, thermal events, drive temperatures (the current reading; a drive's rated maximum is shown beside it and never counted as its temperature) and, on physical hardware, hardware sensors (below) |
@@ -88,7 +97,10 @@ builds without the sensor bundle report that sensors are not part of the build.
 
 1. **Automatic checks** — fixed rules flag problems in the snapshot without the AI model:
    for example a drive under 5% free, a dirty volume, a failing or worn drive, uncorrected
-   read errors, a SMART failure prediction, overheating or throttling, blue screens, WHEA
+   read errors, a SMART failure prediction, CrystalDiskInfo rating a drive Bad or Caution,
+   reallocated, pending or uncorrectable sectors (SMART 05, C5/C6, BB), an NVMe critical
+   warning, media errors or spare capacity at its threshold, hard disk spin-up retries (0A),
+   cable CRC errors (C7), overheating or throttling, blue screens, WHEA
    errors, failed memory tests, heavy memory pressure, no page file, stopped automatic
    services, pending restarts, old updates or a disabled Windows Update service, a Windows
    release out of support or not activated, a clock that does not synchronise, real-time

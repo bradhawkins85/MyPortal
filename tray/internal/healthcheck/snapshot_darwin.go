@@ -289,4 +289,10 @@ func platformSensors(context.Context, string, bool, machineIdentity) (SensorRepo
 		PawnIOReport{Status: PawnIOSkippedUnsupported}
 }
 
+// platformDiskSMART is not used on macOS: system_profiler reports each
+// drive's SMART status in the snapshot.
+func platformDiskSMART(context.Context) DiskSMARTReport {
+	return DiskSMARTReport{Status: SMARTUnavailable, Source: smartSource, Detail: "CrystalDiskInfo runs on Windows only", Disks: []SMARTDisk{}}
+}
+
 func platformCleanupPawnIO(context.Context, string) (bool, error) { return false, nil }

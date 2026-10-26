@@ -23,6 +23,9 @@ func testRunner(t *testing.T) (*Runner, *[]string) {
 		OnProgress:   func(stage, _ string) { stages = append(stages, stage) },
 		now:          func() time.Time { now = now.Add(time.Second); return now },
 		identify:     func() (string, string, error) { return "Dell Inc.", "Latitude 7440", nil },
+		diskSMART: func(context.Context) DiskSMARTReport {
+			return DiskSMARTReport{Status: SMARTError, Source: smartSource, Detail: "Chocolatey could not be installed.", Disks: []SMARTDisk{}}
+		},
 		collectSnapshot: func(_ context.Context, days int) (platformSnapshot, error) {
 			if days != DefaultEventDays {
 				t.Errorf("event days %d", days)
@@ -81,12 +84,42 @@ func TestRunSnapshotPhase(t *testing.T) {
 	if snapshot["errors"].(map[string]any)["battery"] != "no battery" {
 		t.Fatalf("errors %v", snapshot["errors"])
 	}
+	if snapshot["disk_smart"].(map[string]any)["status"] != SMARTError ||
+		snapshot["errors"].(map[string]any)["disk_smart"] != "Chocolatey could not be installed." {
+		t.Fatalf("disk_smart %v errors %v", snapshot["disk_smart"], snapshot["errors"])
+	}
 	if len(result.LogBundle) == 0 {
 		t.Fatal("no log bundle")
 	}
 	got := strings.Join(*stages, ",")
-	if got != "collecting_snapshot,reading_sensors,collecting_logs" {
+	if got != "collecting_snapshot,reading_smart,reading_sensors,collecting_logs" {
 		t.Fatalf("stages %s", got)
+	}
+}
+
+func TestRunSkipsCrystalDiskInfoOnVirtualMachines(t *testing.T) {
+	r, stages := testRunner(t)
+	r.identify = func() (string, string, error) { return "Microsoft Corporation", "Virtual Machine", nil }
+	r.diskSMART = func(context.Context) DiskSMARTReport {
+		t.Fatal("CrystalDiskInfo run on a virtual machine")
+		return DiskSMARTReport{}
+	}
+	r.sensors = func(context.Context, bool, machineIdentity) (SensorReport, PawnIOReport) {
+		return SensorReport{Status: "unavailable"}, PawnIOReport{Status: PawnIOSkippedVirtual}
+	}
+	result, err := r.Run(context.Background(), Request{Phase: PhaseSnapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot Snapshot
+	if err := json.Unmarshal(result.Snapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.DiskSMART == nil || snapshot.DiskSMART.Status != SMARTSkippedVirtual {
+		t.Fatalf("disk_smart %+v", snapshot.DiskSMART)
+	}
+	if strings.Contains(strings.Join(*stages, ","), StageReadingSMART) {
+		t.Fatalf("stages %v", *stages)
 	}
 }
 
@@ -95,6 +128,10 @@ func TestRunLogsPhaseSkipsTheSnapshot(t *testing.T) {
 	r.collectSnapshot = func(context.Context, int) (platformSnapshot, error) {
 		t.Fatal("snapshot collected in the logs phase")
 		return platformSnapshot{}, nil
+	}
+	r.diskSMART = func(context.Context) DiskSMARTReport {
+		t.Fatal("SMART data read in the logs phase")
+		return DiskSMARTReport{}
 	}
 	r.sensors = func(context.Context, bool, machineIdentity) (SensorReport, PawnIOReport) {
 		t.Fatal("sensors read in the logs phase")

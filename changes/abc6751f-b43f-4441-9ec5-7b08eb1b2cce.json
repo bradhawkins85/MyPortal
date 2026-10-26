@@ -1,0 +1,7 @@
+{
+  "guid": "abc6751f-b43f-4441-9ec5-7b08eb1b2cce",
+  "occurred_at": "2026-10-26T00:00Z",
+  "change_type": "Feature",
+  "summary": "Windows health checks read each drive's SMART data with CrystalDiskInfo (installed with Chocolatey when missing and left installed), so SSD wear comes from the drive's own attributes instead of Windows' counter, which reads 0% on many older SSDs, and new checks flag reallocated, pending and uncorrectable sectors, NVMe critical warnings and low spare capacity, spin-up retries, cable CRC errors and CrystalDiskInfo's Bad or Caution rating.",
+  "content_hash": "01369c992e308ae633de4630f9c9a4d596d78bdc9c2a5cf49aab855148be795a"
+}
