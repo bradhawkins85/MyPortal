@@ -106,29 +106,44 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
                         await chat_repo.update_invite(invite["id"], status="accepted")
 
 
+async def _sync_once() -> bool:
+    """Poll and checkpoint once, excluding other web workers/deployment slots."""
+    # The in-process guard below cannot coordinate Uvicorn workers. Keep the
+    # database lock through processing and checkpointing, then release it so
+    # another worker can take over using the latest persisted cursor.
+    async with chat_repo.db.acquire_lock("matrix_chat_sync", timeout=0) as acquired:
+        if not acquired:
+            return False
+
+        since = await chat_repo.get_sync_state()
+        sync_data = await matrix_service.sync(since=since, timeout_ms=30_000)
+        next_batch = sync_data.get("next_batch")
+        if not next_batch:
+            raise matrix_service.MatrixError("M_BAD_JSON", "Sync response is missing next_batch")
+
+        # Never advance past messages that failed to process.
+        await process_sync_response(sync_data)
+        await chat_repo.save_sync_state(next_batch)
+        return True
+
+
 async def run_sync_loop() -> None:
-    """Long-poll sync loop. Should be run as a background task."""
+    """Long-poll in one worker at a time. Run as a background task."""
     global _running
     if _running:
         return
     _running = True
 
     try:
-        next_batch = await chat_repo.get_sync_state()
-
         while _running:
             if not _settings.matrix_enabled or not _settings.matrix_bot_access_token:
                 await asyncio.sleep(30)
                 continue
 
             try:
-                sync_data = await matrix_service.sync(since=next_batch, timeout_ms=30_000)
-                next_batch = sync_data.get("next_batch")
-
-                if next_batch:
-                    await chat_repo.save_sync_state(next_batch)
-
-                await process_sync_response(sync_data)
+                if not await _sync_once():
+                    # Standby workers retry without holding a lock-pool slot.
+                    await asyncio.sleep(5)
 
             except Exception as exc:
                 log_error("Matrix sync error", error=str(exc))

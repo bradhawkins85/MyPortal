@@ -1,0 +1,7 @@
+{
+  "guid": "fafd309b-c01f-4b8f-adc0-c60a076b51e8",
+  "occurred_at": "2026-10-26T15:09Z",
+  "change_type": "Fix",
+  "summary": "Coordinate Matrix sync across web workers, exclude routine receive polls from webhook delivery logs, and honour per-request HTTP timeouts.",
+  "content_hash": "96bc3329124ab8af018cb45a2a4e3011b21a94bacfff2fc29c6307fda3f448ea"
+}

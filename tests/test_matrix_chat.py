@@ -6,6 +6,7 @@ import json
 import pathlib
 import sys
 import types
+from unittest.mock import AsyncMock
 
 import pytest
 import respx
@@ -238,6 +239,44 @@ async def test_request_rejects_non_matrix_and_traversal_paths(monkeypatch):
     with pytest.raises(MatrixError) as traversal_exc:
         await _matrix._request("GET", "/_matrix/client/v3/rooms/../admin", headers={})
     assert traversal_exc.value.errcode == "M_INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout_ms", [30_000, 60_000])
+async def test_sync_uses_per_request_timeout_and_skips_delivery_log(monkeypatch, timeout_ms):
+    from app.services import monitored_http
+
+    monkeypatch.setattr(_matrix._settings, "matrix_homeserver_url", "https://matrix.example.com")
+    monkeypatch.setattr(_matrix._settings, "matrix_bot_access_token", "test_token")
+    create_event = AsyncMock(return_value={"id": 42})
+    monkeypatch.setattr(monitored_http.webhook_repo, "create_event", create_event)
+    for name in ("mark_in_progress", "record_attempt", "mark_event_completed", "mark_event_failed"):
+        monkeypatch.setattr(monitored_http.webhook_repo, name, AsyncMock())
+
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.url.path.endswith("/sync"):
+            return httpx.Response(200, json={"next_batch": "batch-2"})
+        return httpx.Response(200, json={"room_id": "!room:example.com"})
+
+    # An ordinary API request may have already created the shared 30s client.
+    async with monitored_http.MonitoredAsyncClient(
+        timeout=30, transport=httpx.MockTransport(handler)
+    ) as client:
+        monkeypatch.setattr(_matrix, "_client", client)
+        await _matrix.sync(since="batch-1", timeout_ms=timeout_ms)
+        create_event.assert_not_awaited()
+        await _matrix.create_room(name="Still monitored")
+
+    sync_request, room_request = requests
+    assert sync_request.url.params["since"] == "batch-1"
+    assert sync_request.url.params["timeout"] == str(timeout_ms)
+    assert sync_request.extensions["timeout"]["read"] == timeout_ms / 1000 + 10
+    assert room_request.extensions["timeout"]["read"] == 30
+    create_event.assert_awaited_once()
+    assert create_event.await_args.kwargs["target_url"].endswith("/createRoom")
 
 
 # ---------------------------------------------------------------------------

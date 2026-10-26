@@ -271,6 +271,7 @@ _ticket_dashboard_reference_cache: dict[str, Any] = {
     "user_lookup": {},
 }
 _ticket_dashboard_reference_lock = asyncio.Lock()
+_matrix_sync_task: asyncio.Task[None] | None = None
 _M365_PROVISION_PKCE_TTL_SECONDS = 600
 _m365_provision_pkce_cache: dict[str, tuple[str, datetime]] = {}
 _m365_provision_pkce_lock = asyncio.Lock()
@@ -3447,7 +3448,8 @@ async def on_startup() -> None:
     if settings.matrix_enabled:
         from app.services import matrix_sync, matrix_ai_waiting_assistant
         import asyncio as _asyncio
-        _asyncio.create_task(matrix_sync.run_sync_loop())
+        global _matrix_sync_task
+        _matrix_sync_task = _asyncio.create_task(matrix_sync.run_sync_loop(), name="matrix-sync")
         _asyncio.create_task(matrix_ai_waiting_assistant.run_worker_loop())
 
     # Load every built-in feature pack discovered under ``app/features/``.
@@ -3531,6 +3533,9 @@ async def on_shutdown() -> None:
     if settings.matrix_enabled:
         from app.services import matrix_sync, matrix_ai_waiting_assistant
         matrix_sync.stop_sync_loop()
+        if _matrix_sync_task is not None:
+            _matrix_sync_task.cancel()
+            await asyncio.gather(_matrix_sync_task, return_exceptions=True)
         matrix_ai_waiting_assistant.stop_worker_loop()
     if globals().get("_rag_relationship_stop") is not None:
         _rag_relationship_stop.set()

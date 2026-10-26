@@ -26,6 +26,24 @@ Set the following environment variables in your `.env` file:
 
 When using `matrix.org`, set `MATRIX_IS_SELF_HOSTED=false`. The portal relays messages through the bot account on behalf of users. External invite generation (provisioning new Matrix accounts) is disabled in this mode.
 
+## Background sync and delivery logs
+
+Matrix receives new messages through a long-running `/_matrix/client/v3/sync`
+request. MyPortal requests a 30-second server wait and allows 40 seconds for the
+HTTP response. Updates can return immediately, so an idle connection is renewed
+roughly twice a minute without delaying incoming messages.
+
+On MySQL deployments, a database advisory lock allows only one portal web worker
+or deployment slot to poll and process sync updates at a time. Standby workers
+retry every five seconds and resume from the last successfully processed cursor.
+SQLite uses the existing single-process development locking behaviour.
+
+Routine sync requests are excluded from Webhook Monitor to avoid continuously
+creating pending delivery records. Sync failures remain visible as `Matrix sync
+error` in the application log. Other Matrix API requests, including outgoing
+messages, continue to appear in Webhook Monitor. Existing sync delivery history
+is retained.
+
 ## Using a self-hosted Synapse server
 
 When `MATRIX_IS_SELF_HOSTED=true`, the portal can:
