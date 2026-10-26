@@ -61,7 +61,7 @@ async def queue_repair(*, agent: Mapping[str, Any], requested_by_user_id: int | 
         raise RunRequestError({"device": "Tray agent repair runs on Windows devices only."})
     if await rmm_repo.has_active_source_run(int(agent["id"]), run_source=RUN_SOURCE):
         raise RunRequestError({"busy": "A tray agent repair is already queued or running on this device."})
-    script = builtin_script()
+    script = rmm_scripts.always_run(builtin_script(), agent)
     run_id = await rmm_repo.create_run(
         script=script,
         content=script["content"],

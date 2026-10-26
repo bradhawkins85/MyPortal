@@ -673,6 +673,18 @@ def _run_inputs(
     return result
 
 
+def always_run(script: Mapping[str, Any], agent: Mapping[str, Any]) -> dict[str, Any]:
+    """``script`` set to Run Anyway, so other runs on the device never hold it up.
+
+    For built-in jobs someone is waiting on, such as remote control activation.
+    Agents too old for Run Anyway queue it in order as before.
+    """
+
+    if not agent.get("run_anyway_supported"):
+        return dict(script)
+    return {**script, "allow_parallel": False, "run_anyway": True}
+
+
 async def queue_for_agent(
     *,
     script: Mapping[str, Any],
