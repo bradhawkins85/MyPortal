@@ -421,6 +421,29 @@ async def update_script_queue_timeout(script_id: int, request: Request):
     return flash_redirect(f"/rmm/scripts?script={script_id}", "Offline wait timeout saved.", "success")
 
 
+@router.post("/rmm/scripts/{script_id:int}/timeout", summary="Save a script's execution timeout")
+async def update_script_timeout(script_id: int, request: Request):
+    user, _company, company_id, _can_run = await _context(request, api=True)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    script = await rmm_repo.get_script(script_id)
+    if not rmm_repo.script_available_to(script, company_id):
+        raise HTTPException(status_code=404, detail="Script not found")
+    form = await request.form()
+    try:
+        minutes = int(str(form.get("timeout_minutes")))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Enter whole minutes") from None
+    if not 1 <= minutes <= rmm_scripts.MAX_TIMEOUT_SECONDS // 60:
+        raise HTTPException(status_code=400, detail="Choose between 1 and 240 minutes")
+    seconds = minutes * 60
+    await rmm_repo.set_script_timeout(script_id, seconds)
+    await audit_service.record(action="rmm.script.timeout.update", request=request, user_id=user.get("id"),
+                               entity_type="rmm_script", entity_id=script_id,
+                               metadata={"timeout_seconds": seconds})
+    return flash_redirect(f"/rmm/scripts?script={script_id}", "Execution timeout saved.", "success")
+
+
 @router.post("/rmm/scripts/{script_id:int}/platforms", summary="Save a script's allowed platforms")
 async def update_script_platforms(script_id: int, request: Request):
     user, _company, company_id, _can_run = await _context(request, api=True)

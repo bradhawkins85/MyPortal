@@ -355,7 +355,9 @@ setting; enter 0 to wait forever even if the script has a finite default. These
 settings survive Gitea sync. Existing queued runs retain the wait selected when
 queued. A schedule does not queue another copy while its previous run is pending.
 
-**Execution timeout** is separate and keeps its existing behavior. It starts when
+**Execution timeout** is separate. Super administrators set each script's default
+(1 to 240 minutes, ten by default) on the script's page; technicians can override it
+when running or scheduling, and the setting survives Gitea sync. It starts when
 the agent collects the script, regardless of how long the script waited offline.
 For example, a script can wait two days and still have a ten-minute execution
 limit. MyPortal allows five extra minutes for the agent to report the result.

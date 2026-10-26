@@ -149,11 +149,16 @@ async def test_device_picker_and_policy_permissions(sqlite_db, monkeypatch):
         assert (await api.get('/api/rmm/scripts?asset_id=999')).status_code == 404
         script = (await repo.list_scripts())[0]
         assert (await api.post(f'/rmm/scripts/{script["id"]}/queue-timeout', data={'queue_timeout_minutes': '0'})).status_code == 403
+        assert (await api.post(f'/rmm/scripts/{script["id"]}/timeout', data={'timeout_minutes': '5'})).status_code == 403
         assert (await api.post(f'/rmm/scripts/{script["id"]}/platforms', data={'platforms': 'linux'})).status_code == 403
         context.return_value = ({'id': 9, 'is_super_admin': True}, {}, 1, True)
         assert (await api.post(f'/rmm/scripts/{script["id"]}/queue-timeout', data={'queue_timeout_minutes': '0'})).status_code == 303
         assert (await repo.get_script(script['id']))['default_queue_timeout_seconds'] == 0
         assert (await api.post(f'/rmm/scripts/{script["id"]}/queue-timeout', data={'queue_timeout_minutes': '-1'})).status_code == 400
+        assert (await api.post(f'/rmm/scripts/{script["id"]}/timeout', data={'timeout_minutes': '45'})).status_code == 303
+        assert (await repo.get_script(script['id']))['default_timeout_seconds'] == 2700
+        assert (await api.post(f'/rmm/scripts/{script["id"]}/timeout', data={'timeout_minutes': '0'})).status_code == 400
+        assert (await api.post(f'/rmm/scripts/{script["id"]}/timeout', data={'timeout_minutes': '241'})).status_code == 400
         assert (await api.post(f'/rmm/scripts/{script["id"]}/platforms', data={'platforms': 'linux'})).status_code == 303
         assert (await repo.get_script(script['id']))['platforms'] == ['linux']
         assert (await api.post(f'/rmm/scripts/{script["id"]}/platforms', data={'platforms': 'invalid'})).status_code == 400
@@ -164,9 +169,10 @@ def test_policy_forms_keep_queue_and_execution_separate():
     assert 'Global script timeout' not in html
     assert 'Save offline wait timeout' in html and 'Save platforms' in html
     assert 'name="queue_timeout_minutes"' in html and 'value="300"' in html
+    assert 'Save execution timeout' in html and 'name="timeout_minutes"' in html
     assert 'data-rmm-queue-timeout' in html and 'max="240"' in html
     html = _render_library(is_super_admin=False, selected_script=_detail())
-    assert 'Save offline wait timeout' not in html and 'Save platforms' not in html
+    assert 'Save offline wait timeout' not in html and 'Save platforms' not in html and 'Save execution timeout' not in html
 
 
 @pytest.mark.anyio
