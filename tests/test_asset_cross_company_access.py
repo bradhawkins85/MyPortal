@@ -119,3 +119,22 @@ async def test_technician_can_save_an_asset_from_another_company(monkeypatch):
 
     assert result == f"/assets/{ASSET_ID}"
     set_type.assert_awaited_once_with(ASSET_COMPANY, ASSET_ID, "laptop")
+
+
+@pytest.mark.anyio
+async def test_asset_page_lists_scripts_from_the_asset_company(monkeypatch):
+    from app.features.rmm import routes as rmm_routes
+
+    membership = {"menu_permissions": {"menu.assets": "write", "menu.rmm_scripts": "write"}}
+    _install(monkeypatch, user={"id": 7, "company_id": ACTIVE_COMPANY},
+             memberships={ACTIVE_COMPANY: membership, ASSET_COMPANY: membership})
+    monkeypatch.setattr(rmm_routes.assets_repo, "get_asset_by_id",
+                        AsyncMock(return_value={"id": ASSET_ID, "company_id": ASSET_COMPANY}))
+    list_scripts = AsyncMock(return_value=[])
+    monkeypatch.setattr(rmm_routes.rmm_repo, "list_scripts", list_scripts)
+    monkeypatch.setattr(rmm_routes.rmm_repo, "get_asset_agent", AsyncMock(return_value=None))
+
+    result = await rmm_routes.list_scripts_api(object(), asset_id=ASSET_ID)
+
+    assert result == {"scripts": []}
+    list_scripts.assert_awaited_once_with(company_id=ASSET_COMPANY)

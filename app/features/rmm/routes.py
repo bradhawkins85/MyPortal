@@ -71,12 +71,18 @@ def _assets_routes():
     return routes
 
 
-async def _context(request: Request, *, write: bool = False, api: bool = False):
-    """Return ``(user, company, company_id, can_run)`` or a redirect / raise."""
+async def _context(request: Request, *, write: bool = False, api: bool = False, asset_id: int | None = None):
+    """Return ``(user, company, company_id, can_run)`` or a redirect / raise.
+
+    Calls made from a device's page pass its ``asset_id`` so they resolve
+    against the device's company even when another company is selected.
+    """
 
     routes = _assets_routes()
     main_module = routes._main()
-    user, membership, company, company_id, redirect = await routes._load_asset_context(request, PERMISSION)
+    user, membership, company, company_id, redirect = await routes._load_asset_context(
+        request, PERMISSION, asset_id=asset_id
+    )
     if redirect:
         if api:
             if user is None:
@@ -341,7 +347,7 @@ async def gitea_identity(request: Request) -> Response:
 
 @router.get("/api/rmm/scripts", summary="List RMM scripts")
 async def list_scripts_api(request: Request, asset_id: int | None = Query(default=None, ge=1)):
-    _user, _company, company_id, _can_run = await _context(request, api=True)
+    _user, _company, company_id, _can_run = await _context(request, api=True, asset_id=asset_id)
     scripts = await rmm_repo.list_scripts(company_id=company_id)
     if asset_id is not None:
         asset = await assets_repo.get_asset_by_id(asset_id)
@@ -356,8 +362,8 @@ async def list_scripts_api(request: Request, asset_id: int | None = Query(defaul
 
 
 @router.get("/api/rmm/scripts/{script_id:int}", summary="Get a script, its fields and the variables techs can use")
-async def get_script_api(script_id: int, request: Request):
-    _user, _company, company_id, can_run = await _context(request, api=True)
+async def get_script_api(script_id: int, request: Request, asset_id: int | None = Query(default=None, ge=1)):
+    _user, _company, company_id, can_run = await _context(request, api=True, asset_id=asset_id)
     script = await rmm_repo.get_script(script_id, with_content=True)
     if not rmm_repo.script_available_to(script, company_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Script not found")
@@ -649,8 +655,10 @@ class RunRequest(BaseModel):
 
 
 @router.post("/api/rmm/scripts/{script_id:int}/runs", summary="Push a script to one or more devices")
-async def run_script_api(script_id: int, payload: RunRequest, request: Request):
-    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+async def run_script_api(
+    script_id: int, payload: RunRequest, request: Request, asset_id: int | None = Query(default=None, ge=1),
+):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
     try:
         result = await rmm_scripts.queue_runs(
             script_id=script_id,
@@ -769,7 +777,7 @@ async def tray_repair_api(asset_id: int, request: Request):
 
 @router.get("/api/rmm/runs", summary="List script runs for the current company")
 async def list_runs_api(request: Request, asset_id: int | None = Query(default=None), limit: int = Query(default=50, ge=1, le=500)):
-    _user, _company, company_id, _can_run = await _context(request, api=True)
+    _user, _company, company_id, _can_run = await _context(request, api=True, asset_id=asset_id)
     await rmm_repo.expire_stale_runs()
     runs = await rmm_repo.list_runs(company_id=company_id, asset_id=asset_id, limit=limit)
     return {"runs": [_serialise(run) for run in runs]}
@@ -783,8 +791,8 @@ async def _company_run(run_id: int, company_id: int) -> dict[str, Any]:
 
 
 @router.get("/api/rmm/runs/{run_id:int}", summary="Get a script run with its output")
-async def get_run_api(run_id: int, request: Request):
-    _user, _company, company_id, _can_run = await _context(request, api=True)
+async def get_run_api(run_id: int, request: Request, asset_id: int | None = Query(default=None, ge=1)):
+    _user, _company, company_id, _can_run = await _context(request, api=True, asset_id=asset_id)
     run = await _company_run(run_id, company_id)
     # Older agents and historical runs may contain redirected PowerShell XML.
     from app.services.rmm_output import readable_output
@@ -795,8 +803,8 @@ async def get_run_api(run_id: int, request: Request):
 
 
 @router.post("/api/rmm/runs/{run_id:int}/cancel", summary="Cancel a run the device has not collected yet")
-async def cancel_run_api(run_id: int, request: Request):
-    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+async def cancel_run_api(run_id: int, request: Request, asset_id: int | None = Query(default=None, ge=1)):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
     await _company_run(run_id, company_id)
     if not await rmm_repo.cancel_run(run_id):
         return JSONResponse({"detail": "The device has already collected this run."}, status_code=409)
@@ -808,8 +816,8 @@ async def cancel_run_api(run_id: int, request: Request):
 
 
 @router.post("/api/rmm/runs/{run_id:int}/abort", summary="Abort a run, stopping the script if the device is running it")
-async def abort_run_api(run_id: int, request: Request):
-    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+async def abort_run_api(run_id: int, request: Request, asset_id: int | None = Query(default=None, ge=1)):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
     run = await _company_run(run_id, company_id)
     # A run the device has not collected yet is simply cancelled.
     if run["status"] == "queued" and await rmm_repo.cancel_run(run_id):
