@@ -94,6 +94,16 @@ async def get_run(company_id: int, run_id: int) -> dict[str, Any] | None:
     return run
 
 
+async def list_relationship_targets(company_id: int) -> list[dict[str, Any]]:
+    """A company's open process runs as the asset relationship picker lists them."""
+
+    return list(await db.fetch_all(
+        "SELECT id, template_name, status FROM process_runs "
+        "WHERE company_id = %s AND status <> 'cancelled' ORDER BY started_at DESC, id DESC",
+        (company_id,),
+    ) or [])
+
+
 async def list_runs(company_id: int, *, assignee_id: int | None = None) -> list[dict[str, Any]]:
     sql = "SELECT pr.*, u.first_name AS assignee_first_name, u.last_name AS assignee_last_name FROM process_runs pr LEFT JOIN users u ON u.id = pr.assignee_id WHERE pr.company_id = %s"
     params: tuple[Any, ...] = (company_id,)

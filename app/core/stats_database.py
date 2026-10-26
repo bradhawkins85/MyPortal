@@ -18,7 +18,7 @@ Tests pass ``sqlite_path`` to use SQLite instead.
 from __future__ import annotations
 
 from .config import get_settings
-from .secondary_database import Connection, SecondaryDatabase
+from .secondary_database import Connection, Index, SecondaryDatabase
 
 SAMPLES_TABLE = "rmm_device_stats"
 
@@ -38,6 +38,7 @@ MYSQL_SCHEMA: tuple[str, ...] = (
       sampled_at DATETIME NOT NULL,
       UNIQUE KEY uq_rmm_device_stats_sample (agent_id, metric, instance, sampled_at),
       KEY idx_rmm_device_stats_asset (asset_id, metric, sampled_at),
+      KEY idx_rmm_device_stats_asset_time (asset_id, sampled_at),
       KEY idx_rmm_device_stats_time (sampled_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
@@ -58,7 +59,14 @@ SQLITE_SCHEMA: tuple[str, ...] = (
     )
     """,
     f"CREATE INDEX IF NOT EXISTS idx_rmm_device_stats_asset ON {SAMPLES_TABLE} (asset_id, metric, sampled_at)",
+    f"CREATE INDEX IF NOT EXISTS idx_rmm_device_stats_asset_time ON {SAMPLES_TABLE} (asset_id, sampled_at)",
     f"CREATE INDEX IF NOT EXISTS idx_rmm_device_stats_time ON {SAMPLES_TABLE} (sampled_at)",
+)
+
+# Added to samples tables created before them. New tables already have them.
+INDEXES: tuple[Index, ...] = (
+    # The asset page reads every metric of one device over a time range.
+    Index(SAMPLES_TABLE, "idx_rmm_device_stats_asset_time", "asset_id, sampled_at"),
 )
 
 
@@ -82,6 +90,7 @@ class StatsDatabase(SecondaryDatabase):
             mysql_schema=MYSQL_SCHEMA,
             sqlite_schema=SQLITE_SCHEMA,
             sqlite_path=sqlite_path,
+            indexes=INDEXES,
         )
 
 

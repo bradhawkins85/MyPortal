@@ -9,7 +9,7 @@ import json
 from urllib.parse import urlparse
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -58,6 +58,31 @@ async def _customer_role_can_view_asset(membership: dict[str, Any] | None, compa
     if not isinstance(permissions, dict) or permissions.get("content.assets") not in {"read", "write"}:
         return False
     return await audience_repo.role_can_access(company_id, "asset", asset_id, int(role_id))
+
+
+async def _customer_visible_assets(
+    membership: dict[str, Any] | None, company_id: int, rows: Iterable[Mapping[str, Any]]
+) -> list[Mapping[str, Any]]:
+    """The published ``rows`` the membership's role may view.
+
+    :func:`_customer_role_can_view_asset` for a whole list, reading the
+    audiences in one query instead of one per asset."""
+
+    published = [row for row in rows if bool(row.get("customer_visible"))]
+    if not published:
+        return []
+    role_id = membership.get("role_id") if membership else None
+    if role_id is not None:
+        permissions = membership.get("menu_permissions") or membership.get("permissions") or {}
+        if not isinstance(permissions, dict) or permissions.get("content.assets") not in {"read", "write"}:
+            return []
+    audiences = await audience_repo.list_role_ids_for_records(
+        company_id, "asset", [int(row["id"]) for row in published])
+    if role_id is None:
+        # The legacy roleless path: only publications without audience rows.
+        return [row for row in published if not audiences.get(int(row["id"]))]
+    return [row for row in published if int(role_id) in audiences.get(int(row["id"]), [])]
+
 
 _RELATIONSHIP_TYPES = {
     "depends_on": "Depends on", "runs_on": "Runs on",
@@ -236,7 +261,7 @@ async def assets_page(request: Request):
 
     rows = await asset_repo.list_company_assets(company_id)
     if not can_write_assets:
-        rows = [_customer_asset(dict(row)) for row in rows if bool(row.get("customer_visible")) and await _customer_role_can_view_asset(membership, company_id, int(row["id"]))]
+        rows = [_customer_asset(dict(row)) for row in await _customer_visible_assets(membership, company_id, rows)]
     field_definitions = (
         await asset_custom_fields_repo.list_field_definitions()
         if user.get("is_super_admin") else []
@@ -1931,7 +1956,7 @@ async def asset_detail_page(
     ]
     company_assets = await asset_repo.list_company_assets(company_id)
     if customer_safe:
-        company_assets = [item for item in company_assets if bool(item.get("customer_visible")) and await _customer_role_can_view_asset(membership, company_id, int(item["id"]))]
+        company_assets = await _customer_visible_assets(membership, company_id, company_assets)
     assets_by_id = {int(item["id"]): item for item in company_assets}
     relationship_targets: list[dict[str, Any]] = []
     target_records: dict[str, dict[int, dict[str, Any]]] = {
@@ -1940,11 +1965,14 @@ async def asset_detail_page(
     if not customer_safe:
         can_view_tickets = bool(user.get("is_super_admin")) or main_module._membership_menu_can(user, membership, "menu.tickets", write=True)
         can_view_infrastructure = bool(user.get("is_super_admin")) or main_module._membership_menu_can(user, membership, "menu.network_devices")
-        tickets = await tickets_repo.list_tickets(company_id=company_id, limit=None) if can_view_tickets else []
-        infrastructure = await infrastructure_repo.overview(company_id) if can_view_infrastructure else {"networks": [], "racks": []}
+        # The picker needs only labels: full ticket records and the IPAM and
+        # rack overview made large companies' asset pages time out.
+        tickets = await tickets_repo.list_relationship_targets(company_id) if can_view_tickets else []
+        infrastructure = (await infrastructure_repo.relationship_targets(company_id) if can_view_infrastructure
+                          else {"networks": [], "racks": []})
         target_records.update({
             "ticket": {int(item["id"]): item for item in tickets},
-            "process_run": {int(item["id"]): item for item in await processes_repo.list_runs(company_id) if item.get("status") != "cancelled"}
+            "process_run": {int(item["id"]): item for item in await processes_repo.list_relationship_targets(company_id)}
                 if main_module._membership_menu_can(user, membership, "menu.processes") else {},
             "website": {int(item["id"]): item for item in await websites_repo.list_websites(company_id)}
                 if main_module._membership_menu_can(user, membership, "menu.websites") else {},
@@ -2436,7 +2464,7 @@ async def export_assets(request: Request) -> Response:
         raise HTTPException(status_code=403, detail="Asset export access denied")
     records = await asset_repo.list_company_assets(company_id)
     if not user.get("is_super_admin"):
-        records = [row for row in records if bool(row.get("customer_visible")) and await _customer_role_can_view_asset(membership, company_id, int(row["id"]))]
+        records = await _customer_visible_assets(membership, company_id, records)
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=list(_CUSTOMER_ASSET_FIELDS), extrasaction="ignore")
     writer.writeheader()
