@@ -971,6 +971,9 @@ upstream myportal_app {
     zone myportal_app 64k;
     include /etc/nginx/conf.d/active-slot.inc;
     keepalive 16;
+    # Shorter than Uvicorn's --timeout-keep-alive (75s), so nginx closes an
+    # idle connection before Uvicorn does and never reuses one being closed.
+    keepalive_timeout 60s;
 }
 
 map $http_upgrade $myportal_connection {

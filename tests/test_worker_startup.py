@@ -35,6 +35,7 @@ def runtime(tmp_path):
         "TRUSTED_PROXIES": "",
     }
     environment.pop("WEB_CONCURRENCY", None)
+    environment.pop("UVICORN_TIMEOUT_KEEP_ALIVE", None)
     return environment, arguments
 
 
@@ -52,7 +53,7 @@ def test_systemd_launches_default_or_configured_workers(runtime, slot, port, con
     subprocess.run(argv, env=environment, capture_output=True, text=True, check=True, timeout=5)
     assert arguments.read_text().splitlines() == [
         "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",
-        "--port", port, "--workers", expected,
+        "--port", port, "--workers", expected, "--timeout-keep-alive", "75",
     ]
 
 
@@ -68,5 +69,27 @@ def test_docker_launches_default_or_configured_workers(runtime, configured, expe
     subprocess.run(["bash", "-c", program], env=environment, capture_output=True, text=True, check=True, timeout=5)
     assert arguments.read_text().splitlines() == [
         "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0",
-        "--port", "8000", "--workers", expected,
+        "--port", "8000", "--workers", expected, "--timeout-keep-alive", "75",
     ]
+
+
+def test_uvicorn_keep_alive_is_configurable(runtime):
+    environment, arguments = runtime
+    environment["UVICORN_TIMEOUT_KEEP_ALIVE"] = "120"
+    unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
+    command = next(line.removeprefix("ExecStart=") for line in unit.splitlines() if line.startswith("ExecStart="))
+    argv = [argument.replace("$$", "$").replace("%i", "blue") for argument in shlex.split(command)]
+    subprocess.run(argv, env=environment, capture_output=True, text=True, check=True, timeout=5)
+    assert arguments.read_text().splitlines()[-2:] == ["--timeout-keep-alive", "120"]
+
+
+def test_nginx_closes_idle_upstream_connections_before_uvicorn():
+    # Uvicorn's own 5 second default closes connections nginx still holds; a
+    # request sent on one fails, and the blue/green include has no live
+    # server to retry on, so nginx serves its upgrade page.
+    for config in (
+        ROOT / "deploy/nginx/myportal-bluegreen.conf",
+        ROOT / "deploy/nginx/myportal.conf",
+        ROOT / "scripts/myportal-docker.sh",
+    ):
+        assert "keepalive_timeout 60s;" in config.read_text(), config
