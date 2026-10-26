@@ -213,6 +213,31 @@ def test_windows_support_dates_follow_the_edition(monkeypatch):
         assert keys(caption, build) == [], caption
 
 
+def test_windows_10_esu_licence_covers_the_end_of_support(monkeypatch):
+    def evaluate(today, licences):
+        monkeypatch.setattr(hc, "_utcnow", lambda: today)
+        return [(s["key"], s["title"]) for s in hc.evaluate_snapshot({"sections": {
+            "system": {"os": "Microsoft Windows 10 Pro", "build": "19045", "display_version": "22H2"},
+            "activation": {"found": True, "license_status": 1, "esu_licenses": licences},
+        }})]
+
+    def esu(year, status=1):
+        return {"name": f"Windows(R), Client-ESU-Year{year} add-on for Education,Enterprise,Professional",
+                "license_status": status}
+
+    may_2026, oct_2026 = datetime(2026, 5, 1, 9), datetime(2026, 10, 25, 9)
+    assert evaluate(may_2026, [esu(1)]) == []
+    assert evaluate(datetime(2026, 8, 1, 9), [esu(1)]) == [
+        ("os_support_ending", "Windows 10 Pro 22H2 Extended Security Updates end on 13 October 2026")]
+    assert evaluate(oct_2026, [esu(1)]) == [
+        ("os_unsupported", "Windows 10 Pro 22H2 Extended Security Updates ended on 13 October 2026")]
+    assert evaluate(oct_2026, [esu(1), esu(2)]) == []
+    # An installed but unactivated licence does not count; one without a year is trusted while activated.
+    assert evaluate(may_2026, [esu(1, status=0)]) == [
+        ("os_unsupported", "Windows 10 Pro 22H2 has been out of support since 14 October 2025")]
+    assert evaluate(oct_2026, [{"name": "Windows(R), Client-ESU add-on", "license_status": 1}]) == []
+
+
 def test_new_rules_stay_quiet_on_healthy_or_ambiguous_values():
     assert hc.evaluate_snapshot({"sections": {
         # An empty page file list with room in the commit limit is a failed query, not no page file.
@@ -321,7 +346,7 @@ def test_snapshot_script_reports_the_values_the_rules_read():
                 "app_hangs", "memory_diagnostics", "stopped_automatic", "exit_code", "windows_update_service",
                 "power_on_hours", "page_files", "commit_limit_mb", "tamper_protected", "quick_scan_age_days",
                 "bitlocker", "protection_on", "secure_boot", "tpm", "uac_enabled", "smb1_enabled", "rdp_enabled",
-                "rdp_nla", "display_version", "build", "found", "license_status", "license_label",
+                "rdp_nla", "display_version", "build", "found", "license_status", "license_label", "esu_licenses",
                 "not_synced_events", "interface_errors", "received_errors", "outbound_errors"):
         assert re.search(r"\b" + key + r" = ", script), key
     macos = (ROOT / "tray/internal/healthcheck/snapshot_darwin.go").read_text(encoding="utf-8")

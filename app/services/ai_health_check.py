@@ -668,6 +668,13 @@ WINDOWS_END_OF_SUPPORT: dict[int, tuple[date, date]] = {
     26200: (date(2027, 10, 12), date(2028, 10, 10)),
 }
 SUPPORT_ENDING_DAYS = 90
+# When each year of Windows 10 Extended Security Updates ends, by the year in
+# the ESU add-on licence's name ("Client-ESU-Year1").
+WINDOWS_ESU_YEAR_ENDS: dict[int, date] = {
+    1: date(2026, 10, 13),
+    2: date(2027, 10, 12),
+    3: date(2028, 10, 10),
+}
 
 
 def _windows_end_of_support(caption: str, build: int | None) -> date | None:
@@ -682,6 +689,30 @@ def _windows_end_of_support(caption: str, build: int | None) -> date | None:
     return dates[1] if re.search(r"enterprise|education", text) else dates[0]
 
 
+def _esu_coverage(activation: Mapping[str, Any]) -> tuple[bool, date | None]:
+    """Whether an activated ESU licence is installed, and when the latest one ends.
+
+    The end date is ``None`` when no licence is activated, or when an activated
+    licence's name does not say which ESU year it covers.
+    """
+
+    ends: list[date] = []
+    licensed = unknown_year = False
+    for item in _list(activation.get("esu_licenses")):
+        if not isinstance(item, dict) or _num(item.get("license_status")) != 1:
+            continue
+        licensed = True
+        match = re.search(r"year\s*(\d+)", str(item.get("name") or ""), re.IGNORECASE)
+        year_end = WINDOWS_ESU_YEAR_ENDS.get(int(match.group(1))) if match else None
+        if year_end:
+            ends.append(year_end)
+        else:
+            unknown_year = True
+    if not licensed or unknown_year:
+        return licensed, None
+    return True, max(ends)
+
+
 def _os_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> None:
     system = _dict(sections.get("system"))
     caption = str(system.get("os") or "")
@@ -690,13 +721,27 @@ def _os_rules(sections: Mapping[str, Any], signals: list[dict[str, str]]) -> Non
     name = caption.removeprefix("Microsoft ").strip()
     version = str(system.get("display_version") or "").strip()
     label = f"{name} {version}".strip()
+    activation = _dict(sections.get("activation"))
     if ends and ends <= today:
-        signals.append(_signal("os_unsupported", "warning", f"{label} has been out of support since {ends:%d %B %Y}",
-                               "It no longer gets security updates unless the computer is enrolled in Extended "
-                               "Security Updates; upgrade to a supported release."))
+        esu, esu_ends = _esu_coverage(activation)
+        if esu and (esu_ends is None or esu_ends > today):
+            if esu_ends and (esu_ends - today).days <= SUPPORT_ENDING_DAYS:
+                signals.append(_signal("os_support_ending", "info",
+                                       f"{label} Extended Security Updates end on {esu_ends:%d %B %Y}",
+                                       "The computer has an activated ESU licence; renew it for the next ESU year "
+                                       "or upgrade to a supported release."))
+        elif esu:
+            signals.append(_signal("os_unsupported", "warning",
+                                   f"{label} Extended Security Updates ended on {esu_ends:%d %B %Y}",
+                                   "The installed ESU licence no longer covers this computer; activate the next "
+                                   "ESU year or upgrade to a supported release."))
+        else:
+            signals.append(_signal("os_unsupported", "warning",
+                                   f"{label} has been out of support since {ends:%d %B %Y}",
+                                   "No activated Extended Security Updates licence was found, so it no longer gets "
+                                   "security updates; upgrade to a supported release or enrol it in ESU."))
     elif ends and (ends - today).days <= SUPPORT_ENDING_DAYS:
         signals.append(_signal("os_support_ending", "info", f"{label} support ends on {ends:%d %B %Y}"))
-    activation = _dict(sections.get("activation"))
     status = _num(activation.get("license_status"))
     if activation.get("found") and status is not None and status != 1:
         signals.append(_signal("windows_not_activated", "warning",

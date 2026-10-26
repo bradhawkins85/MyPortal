@@ -42,7 +42,7 @@ and the volume fragmentation analysis). Nothing on the computer is changed.
 | Services | Automatic services that are not running and the exit code they stopped with |
 | Updates and restarts | Pending restarts, the last installed update, failed updates, uptime and whether the Windows Update service is disabled |
 | Security | Defender (real-time protection, signature and scan age, tamper protection), other antivirus, firewall profiles, BitLocker, Secure Boot, TPM, User Account Control, whether the SMB server accepts SMBv1, and whether Remote Desktop is on and requires Network Level Authentication |
-| Windows version, activation and clock | The Windows edition, build and version (checked against Microsoft's end-of-support dates for Home/Pro and Enterprise/Education), the activation status, and the Windows Time service with how often it logged that the clock went a day without synchronising |
+| Windows version, activation and clock | The Windows edition, build and version (checked against Microsoft's end-of-support dates for Home/Pro and Enterprise/Education), the activation status, any Windows 10 Extended Security Updates (ESU) licences and whether they are activated, and the Windows Time service with how often it logged that the clock went a day without synchronising |
 | Battery, network, power | Battery wear (full charge against design capacity) and cycles, network adapter errors, the power plan and fast startup |
 | OS integrity | `DISM /Online /Cleanup-Image /CheckHealth` (component store healthy, repairable or not repairable) |
 
@@ -91,7 +91,7 @@ builds without the sensor bundle report that sensors are not part of the build.
    read errors, a SMART failure prediction, overheating or throttling, blue screens, WHEA
    errors, failed memory tests, heavy memory pressure, no page file, stopped automatic
    services, pending restarts, old updates or a disabled Windows Update service, a Windows
-   release out of support or not activated, a clock that does not synchronise, real-time
+   release out of support (with no activated ESU licence covering today) or not activated, a clock that does not synchronise, real-time
    protection or tamper protection off, no recent antivirus scan, BitLocker off on the system
    drive, Secure Boot or the TPM off, UAC off, SMBv1 on, Remote Desktop without NLA, network
    adapter errors or a worn battery. They set the **health score** (100, less 20 per critical, 7 per warning and
