@@ -1,0 +1,7 @@
+{
+  "guid": "6ff385f8-f041-4fd2-96fe-c6f7ce120c15",
+  "occurred_at": "2026-10-26T10:45Z",
+  "change_type": "Fix",
+  "summary": "Fix asset pages timing out (HTTP 504) and speed up slow ones: event log and machine stats reads now use per-device indexes, the relationship picker loads only ticket, process, network and rack labels instead of full records, and customer asset visibility is checked in one query instead of one per asset.",
+  "content_hash": "5773376a076953f7b75ce331320c3ce4cb8fd8a38e64d655eeb5ec9256dbbaa3"
+}
