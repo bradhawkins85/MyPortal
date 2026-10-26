@@ -80,6 +80,7 @@ def test_edit_uses_active_company_for_permission_users(monkeypatch):
     )
     monkeypatch.setattr(reporting_handlers, "_list_reporting_eligible_users", fake_eligible)
     monkeypatch.setattr(reporting_repo, "get_query", fake_get_query)
+    monkeypatch.setattr(reporting_repo, "list_categories", _no_categories)
     monkeypatch.setattr(reporting_repo, "list_permission_user_ids", fake_list_permissions)
     monkeypatch.setattr(report_query_builder, "describe_schema", lambda: _empty_schema())
 
@@ -96,3 +97,7 @@ def test_edit_uses_active_company_for_permission_users(monkeypatch):
 
 async def _empty_schema():
     return {"tables": [], "relations": []}
+
+
+async def _no_categories():
+    return []

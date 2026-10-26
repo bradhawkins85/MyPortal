@@ -15,6 +15,17 @@ from app.core.logging import log_error
 from app.security.flash import flash_redirect
 
 _REPORTING_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+UNCATEGORISED = "Uncategorised"
+# Manage reports table columns: tables.js sorts on ``sort`` and offers a
+# multi-select filter for ``filter_options: multiple`` columns.
+REPORT_COLUMNS = (
+    {"key": "name", "label": "Name", "sort": "string"},
+    {"key": "category", "label": "Category", "sort": "string", "filter_options": "multiple"},
+    {"key": "slug", "label": "Slug", "sort": "string", "default_visible": False},
+    {"key": "description", "label": "Description", "sort": "string"},
+    {"key": "system", "label": "System", "sort": "string", "filter_options": "multiple"},
+    {"key": "updated", "label": "Updated", "sort": "date"},
+)
 # Keys are raw module status reasons; values are the client-safe labels we expose.
 _APPROVED_AI_QUERY_MODULE_REASONS = {
     "Module disabled": "Module disabled",
@@ -178,6 +189,7 @@ def _parse_reporting_form(form: FormData) -> dict[str, Any]:
     name = (form.get("name") or "").strip()
     slug = (form.get("slug") or "").strip().lower()
     description = (form.get("description") or "").strip() or None
+    category = " ".join((form.get("category") or "").split()) or None
     sql_query = (form.get("sql_query") or "").strip()
     raw_user_ids = (
         form.getlist("permission_user_ids") if hasattr(form, "getlist") else []
@@ -192,6 +204,7 @@ def _parse_reporting_form(form: FormData) -> dict[str, Any]:
         "name": name,
         "slug": slug,
         "description": description,
+        "category": category,
         "sql_query": sql_query,
         "user_ids": user_ids,
     }
@@ -220,6 +233,8 @@ def _validate_reporting_input(payload: dict[str, Any]) -> str | None:
         return "SQL query is required."
     if payload["description"] and len(payload["description"]) > 1000:
         return "Description must be 1000 characters or fewer."
+    if payload.get("category") and len(payload["category"]) > 64:
+        return "Category must be 64 characters or fewer."
     try:
         reporting_service.validate_select_query(payload["sql_query"])
     except reporting_service.ReportingQueryError as exc:
@@ -435,11 +450,20 @@ async def admin_reporting(
     reports_payload: list[dict[str, Any]] = []
     for record in records:
         prepared = dict(record)
+        prepared["category"] = (record.get("category") or "").strip() or UNCATEGORISED
         prepared["updated_at_iso"] = _main()._to_iso(record.get("updated_at"))
         reports_payload.append(prepared)
+    reports_payload.sort(
+        key=lambda report: (
+            report["category"] == UNCATEGORISED,
+            report["category"].lower(),
+            str(report.get("name") or "").lower(),
+        )
+    )
     extra = {
         "title": "Reporting · Manage reports",
         "reports": reports_payload,
+        "report_columns": REPORT_COLUMNS,
     }
     return await _main()._render_template(
         "admin/reporting.html", request, user, extra=extra
@@ -447,6 +471,7 @@ async def admin_reporting(
 
 
 async def admin_reporting_new(request: Request):
+    from app.repositories import reporting as reporting_repo
     from app.services import report_query_builder
     from app.services import reporting as reporting_service
 
@@ -467,6 +492,7 @@ async def admin_reporting_new(request: Request):
         "max_rows": reporting_service.MAX_RESULT_ROWS,
         "test_action": "/admin/reporting",
         "builder_schema": await report_query_builder.describe_schema(),
+        "report_categories": await reporting_repo.list_categories(),
     }
     return await _main()._render_template(
         "admin/reporting_form.html", request, user, extra=extra
@@ -653,6 +679,7 @@ async def admin_reporting_edit(request: Request, report_id: int):
         "max_rows": reporting_service.MAX_RESULT_ROWS,
         "test_action": f"/admin/reporting/{int(report_id)}",
         "builder_schema": await report_query_builder.describe_schema(),
+        "report_categories": await reporting_repo.list_categories(),
     }
     return await _main()._render_template(
         "admin/reporting_form.html", request, user, extra=extra
@@ -693,6 +720,7 @@ async def admin_reporting_clone(request: Request, report_id: int):
         "max_rows": reporting_service.MAX_RESULT_ROWS,
         "test_action": "/admin/reporting",
         "builder_schema": await report_query_builder.describe_schema(),
+        "report_categories": await reporting_repo.list_categories(),
     }
     return await _main()._render_template(
         "admin/reporting_form.html", request, user, extra=extra
@@ -742,6 +770,7 @@ async def admin_reporting_create(request: Request):
             "granted_user_ids": set(payload["user_ids"]),
             "max_rows": reporting_service.MAX_RESULT_ROWS,
             "builder_schema": await report_query_builder.describe_schema(),
+            "report_categories": await reporting_repo.list_categories(),
             "test_result": preview_result,
             "test_error": preview_error,
         }
@@ -761,6 +790,7 @@ async def admin_reporting_create(request: Request):
         description=payload["description"],
         sql_query=payload["sql_query"],
         created_by=user.get("id"),
+        category=payload["category"],
     )
     await reporting_repo.replace_permissions(int(new_id), payload["user_ids"])
     await audit_service.record(
@@ -773,6 +803,7 @@ async def admin_reporting_create(request: Request):
             "slug": payload["slug"],
             "name": payload["name"],
             "description": payload["description"],
+            "category": payload["category"],
             "permission_user_ids": payload["user_ids"],
         },
     )
@@ -830,6 +861,7 @@ async def admin_reporting_update(request: Request, report_id: int):
             "granted_user_ids": set(payload["user_ids"]),
             "max_rows": reporting_service.MAX_RESULT_ROWS,
             "builder_schema": await report_query_builder.describe_schema(),
+            "report_categories": await reporting_repo.list_categories(),
             "test_result": test_result,
             "test_error": test_error,
         }
@@ -842,6 +874,7 @@ async def admin_reporting_update(request: Request, report_id: int):
         "slug": record.get("slug"),
         "name": record.get("name"),
         "description": record.get("description"),
+        "category": record.get("category"),
         "sql_query": record.get("sql_query"),
     }
     await reporting_repo.update_query(
@@ -849,6 +882,7 @@ async def admin_reporting_update(request: Request, report_id: int):
         name=payload["name"],
         description=payload["description"],
         sql_query=payload["sql_query"],
+        category=payload["category"],
     )
     await reporting_repo.replace_permissions(int(report_id), payload["user_ids"])
     await audit_service.record(
@@ -862,6 +896,7 @@ async def admin_reporting_update(request: Request, report_id: int):
             "slug": payload["slug"],
             "name": payload["name"],
             "description": payload["description"],
+            "category": payload["category"],
             "sql_query": payload["sql_query"],
             "permission_user_ids": payload["user_ids"],
         },

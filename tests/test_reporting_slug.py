@@ -30,6 +30,7 @@ def test_updating_existing_report_does_not_write_its_slug(monkeypatch):
             name="Renamed report",
             description="Updated without changing its existing slug",
             sql_query="SELECT 1",
+            category="Tickets",
         )
     )
 
@@ -37,6 +38,7 @@ def test_updating_existing_report_does_not_write_its_slug(monkeypatch):
     assert captured["params"] == (
         "Renamed report",
         "Updated without changing its existing slug",
+        "Tickets",
         "SELECT 1",
         41,
     )

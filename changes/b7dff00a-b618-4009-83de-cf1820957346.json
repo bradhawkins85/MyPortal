@@ -1,0 +1,7 @@
+{
+  "guid": "b7dff00a-b618-4009-83de-cf1820957346",
+  "occurred_at": "2026-10-26T14:30Z",
+  "change_type": "Improvement",
+  "summary": "Reporting: Manage reports shows each report's category, with every system report filed under one of 24 categories, and the table now has the standard header search, sortable columns, per-column filters (including multi-select Category and System filters), a Columns picker and a Showing X of Y count; each row's Run, Edit, Clone and Delete buttons are now a standard Actions menu, and the report form has a Category field.",
+  "content_hash": "b4a66a0bf6e9d3099fc9dc55707f22b73571cf61dd9f831d64d8814c6779b355"
+}
