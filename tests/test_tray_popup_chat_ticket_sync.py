@@ -72,7 +72,7 @@ async def test_popup_chat_send_message_syncs_linked_ticket(monkeypatch):
 
     assistant_activity: list[tuple[int, object]] = []
 
-    async def fake_handle_user_message(room_id: int, sent_at):
+    async def fake_handle_user_message(room_id: int, sent_at, body=None):
         assistant_activity.append((room_id, sent_at))
 
     monkeypatch.setattr(tray_routes.chat_repo, "get_room", fake_get_room)

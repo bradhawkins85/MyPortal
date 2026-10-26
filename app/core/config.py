@@ -1148,6 +1148,9 @@ class Settings(BaseSettings):
     matrixbot_ai_max_responses: int = Field(
         default=2, validation_alias="MATRIXBOT_AI_MAX_RESPONSES", ge=0
     )
+    matrixbot_ai_idle_close_minutes: int = Field(
+        default=10, validation_alias="MATRIXBOT_AI_IDLE_CLOSE_MINUTES", ge=1
+    )
     matrixbot_ai_kb_confidence_threshold: float = Field(
         default=50.0,
         validation_alias="MATRIXBOT_AI_KB_CONFIDENCE_THRESHOLD",

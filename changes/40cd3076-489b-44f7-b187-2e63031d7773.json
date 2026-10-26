@@ -1,0 +1,7 @@
+{
+  "guid": "40cd3076-489b-44f7-b187-2e63031d7773",
+  "occurred_at": "2026-10-26T23:50Z",
+  "change_type": "Feature",
+  "summary": "Chats opened without a message now get an AI prompt asking if assistance is needed, and close automatically if the customer declines or does not reply.",
+  "content_hash": "840860fa2e5f76b51025b4fd7e0bee5848701cadbc9810bc969d92dadd4e1ae0"
+}

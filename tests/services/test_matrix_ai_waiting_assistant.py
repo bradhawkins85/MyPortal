@@ -47,7 +47,7 @@ def test_scan_waiting_rooms_sends_ack_before_analysis(monkeypatch):
 
     monkeypatch.setattr(assistant, "get_settings", lambda: settings)
     async def fake_list(due_before):
-        return [{"id": 42, "status": "open", "assigned_tech_user_id": None, "ai_bot_response_count": 0}]
+        return [{"id": 42, "status": "open", "assigned_tech_user_id": None, "ai_bot_response_count": 0, "ai_customer_message_at": "2026-01-01T00:00:00"}]
 
     monkeypatch.setattr(assistant.chat_repo, "list_ai_waiting_candidate_rooms", fake_list)
 
@@ -100,7 +100,7 @@ def test_scan_waiting_rooms_skips_ack_when_response_slot_already_reserved(monkey
     monkeypatch.setattr(assistant, "get_settings", lambda: settings)
 
     async def fake_list(due_before):
-        return [{"id": 42, "status": "open", "assigned_tech_user_id": None, "ai_bot_response_count": 0}]
+        return [{"id": 42, "status": "open", "assigned_tech_user_id": None, "ai_bot_response_count": 0, "ai_customer_message_at": "2026-01-01T00:00:00"}]
 
     async def fake_has_technician_message(room_id):
         return False
@@ -143,6 +143,7 @@ def test_scan_waiting_rooms_skips_second_response_when_analysis_is_current(monke
             "status": "open",
             "assigned_tech_user_id": None,
             "ai_bot_response_count": 1,
+            "ai_customer_message_at": "2026-01-01T00:00:00",
             "ai_last_user_message_at": "2026-07-03T10:00:00",
             "ai_last_analysis_at": "2026-07-03T10:01:00",
         }]
@@ -178,7 +179,7 @@ def test_scan_waiting_rooms_queues_second_response_analysis(monkeypatch):
 
     monkeypatch.setattr(assistant, "get_settings", lambda: settings)
     async def fake_list(due_before):
-        return [{"id": 42, "status": "open", "assigned_tech_user_id": None, "ai_bot_response_count": 1}]
+        return [{"id": 42, "status": "open", "assigned_tech_user_id": None, "ai_bot_response_count": 1, "ai_customer_message_at": "2026-01-01T00:00:00"}]
 
     async def fake_active(room_id):
         return None
@@ -590,3 +591,193 @@ def test_matching_tags_uses_configured_synonym_lookup():
     lookup = assistant._build_synonym_lookup([["router", "gateway"], ["monitor", "display"]])
 
     assert assistant._matching_tags(["gateway"], ["router", "screen"], lookup) == ["router"]
+
+
+def _waiting_settings():
+    return SimpleNamespace(
+        matrix_enabled=True,
+        matrixbot_ai_waiting_assistant_enabled=True,
+        matrixbot_ai_ollama_enabled=True,
+        matrixbot_ai_ollama_url="http://ollama.test",
+        matrixbot_ai_ollama_model="llama3",
+        matrixbot_ai_max_responses=2,
+        matrixbot_ai_response_delay_minutes=5,
+        matrixbot_ai_idle_close_minutes=10,
+    )
+
+
+def _patch_silent_room(monkeypatch, room):
+    events: dict[str, list] = {"sent": [], "closed": [], "audit": [], "cancelled": []}
+
+    monkeypatch.setattr(assistant, "get_settings", _waiting_settings)
+
+    async def fake_list(due_before):
+        return [room]
+
+    async def fake_false(room_id):
+        return False
+
+    async def fake_consent(room):
+        return True
+
+    async def fake_send(room, body, **kwargs):
+        events["sent"].append((body, kwargs.get("response_count")))
+        return True
+
+    async def fake_reserve_prompt(room_id, when=None):
+        return True
+
+    async def fake_reserve_response(room_id, expected_count, when=None):
+        raise AssertionError("a silent chat must not get the request acknowledgement")
+
+    async def fake_close_idle(room_id, when=None):
+        events["closed"].append(room_id)
+        return True
+
+    async def fake_cancel(room_id, reason):
+        events["cancelled"].append(reason)
+
+    async def fake_audit(action, room_id, value=None):
+        events["audit"].append(action)
+
+    monkeypatch.setattr(assistant.chat_repo, "list_ai_waiting_candidate_rooms", fake_list)
+    monkeypatch.setattr(assistant.chat_repo, "has_technician_message", fake_false)
+    monkeypatch.setattr(assistant.ai_consent, "is_ai_allowed_for_chat", fake_consent)
+    monkeypatch.setattr(assistant.chat_repo, "reserve_ai_idle_prompt", fake_reserve_prompt)
+    monkeypatch.setattr(assistant.chat_repo, "reserve_ai_bot_response", fake_reserve_response)
+    monkeypatch.setattr(assistant.chat_repo, "close_idle_room", fake_close_idle)
+    monkeypatch.setattr(assistant.chat_repo, "cancel_active_ai_queue_for_room", fake_cancel)
+    monkeypatch.setattr(assistant, "_send_bot_message", fake_send)
+    monkeypatch.setattr(assistant, "_audit", fake_audit)
+    return events
+
+
+def test_scan_waiting_rooms_asks_silent_chat_if_assistance_is_needed(monkeypatch):
+    room = {"id": 42, "status": "open", "ai_bot_response_count": 0, "ai_customer_message_at": None}
+    events = _patch_silent_room(monkeypatch, room)
+
+    asyncio.run(assistant.scan_waiting_rooms_once())
+
+    assert events["sent"] == [
+        (f"Hi, I’m Sophia, your AI support assistant. {assistant._IDLE_PROMPT_MESSAGE}", 0)
+    ]
+    assert assistant._ACK_MESSAGE not in events["sent"][0][0]
+    assert events["closed"] == []
+    assert events["audit"] == ["matrix_ai_waiting_assistant.idle_prompt_sent"]
+
+
+def test_scan_waiting_rooms_waits_for_reply_before_idle_close(monkeypatch):
+    room = {
+        "id": 42, "status": "open", "ai_bot_response_count": 0, "ai_customer_message_at": None,
+        "ai_idle_prompt_sent_at": assistant._utcnow() - assistant.timedelta(minutes=3),
+    }
+    events = _patch_silent_room(monkeypatch, room)
+
+    asyncio.run(assistant.scan_waiting_rooms_once())
+
+    assert events["sent"] == []
+    assert events["closed"] == []
+
+
+def test_scan_waiting_rooms_closes_silent_chat_after_idle_timeout(monkeypatch):
+    room = {
+        "id": 42, "status": "open", "ai_bot_response_count": 0, "ai_customer_message_at": None,
+        "ai_idle_prompt_sent_at": assistant._utcnow() - assistant.timedelta(minutes=11),
+    }
+    events = _patch_silent_room(monkeypatch, room)
+
+    asyncio.run(assistant.scan_waiting_rooms_once())
+
+    assert events["closed"] == [42]
+    assert events["cancelled"] == ["chat_closed"]
+    assert events["sent"] == [(assistant._IDLE_CLOSE_MESSAGE, 0)]
+    assert "matrix_ai_waiting_assistant.chat_auto_closed" in events["audit"]
+
+
+def test_scan_waiting_rooms_skips_intro_in_ack_after_idle_prompt(monkeypatch):
+    room = {
+        "id": 42, "status": "open", "ai_bot_response_count": 0,
+        "ai_customer_message_at": "2026-01-01T00:05:00",
+        "ai_idle_prompt_sent_at": "2026-01-01T00:00:00",
+    }
+    events = _patch_silent_room(monkeypatch, room)
+
+    async def fake_reserve_response(room_id, expected_count, when=None):
+        return True
+
+    monkeypatch.setattr(assistant.chat_repo, "reserve_ai_bot_response", fake_reserve_response)
+
+    asyncio.run(assistant.scan_waiting_rooms_once())
+
+    assert events["sent"] == [(assistant._ACK_MESSAGE, 1)]
+
+
+def _patch_user_message(monkeypatch, room):
+    events: dict[str, list] = {"updated": [], "sent": []}
+
+    async def fake_get_room(room_id):
+        return room
+
+    async def fake_noop(*args, **kwargs):
+        return None
+
+    async def fake_false(room_id):
+        return False
+
+    async def fake_update(room_id, **fields):
+        events["updated"].append(fields.get("status"))
+
+    async def fake_send(room, body, **kwargs):
+        events["sent"].append(body)
+        return True
+
+    monkeypatch.setattr(assistant.chat_repo, "get_room", fake_get_room)
+    monkeypatch.setattr(assistant.chat_repo, "mark_user_activity", fake_noop)
+    monkeypatch.setattr(assistant.chat_repo, "mark_customer_message", fake_noop)
+    monkeypatch.setattr(assistant.chat_repo, "cancel_active_ai_queue_for_room", fake_noop)
+    monkeypatch.setattr(assistant.chat_repo, "has_technician_message", fake_false)
+    monkeypatch.setattr(assistant.chat_repo, "update_room", fake_update)
+    monkeypatch.setattr(assistant, "_send_bot_message", fake_send)
+    monkeypatch.setattr(assistant, "_audit", fake_noop)
+    return events
+
+
+def test_handle_user_message_closes_chat_when_customer_declines_assistance(monkeypatch):
+    room = {"id": 42, "status": "open", "ai_idle_prompt_sent_at": "2026-01-01T00:00:00", "ai_customer_message_at": None}
+    events = _patch_user_message(monkeypatch, room)
+
+    asyncio.run(assistant.handle_user_message(42, body="No thanks, I’m good!"))
+
+    assert events["updated"] == ["closed"]
+    assert events["sent"] == [assistant._DECLINED_CLOSE_MESSAGE]
+
+
+def test_handle_user_message_keeps_chat_open_for_a_real_request(monkeypatch):
+    room = {"id": 42, "status": "open", "ai_idle_prompt_sent_at": "2026-01-01T00:00:00", "ai_customer_message_at": None}
+    events = _patch_user_message(monkeypatch, room)
+
+    asyncio.run(assistant.handle_user_message(42, body="Yes, my printer is not working"))
+
+    assert events["updated"] == []
+    assert events["sent"] == []
+
+
+def test_handle_user_message_ignores_no_without_idle_prompt(monkeypatch):
+    room = {"id": 42, "status": "open", "ai_idle_prompt_sent_at": None, "ai_customer_message_at": "2026-01-01T00:00:00"}
+    events = _patch_user_message(monkeypatch, room)
+
+    asyncio.run(assistant.handle_user_message(42, body="no"))
+
+    assert events["updated"] == []
+
+
+def test_is_decline_matches_only_short_refusals():
+    for text in ["no", "No.", "nope", "no thanks", "I don't need assistance", "all good thanks", "opened by mistake", "I'm fine"]:
+        assert assistant._is_decline(text), text
+    for text in ["", "yes", "no internet on my laptop", "no I need help with email", "help"]:
+        assert not assistant._is_decline(text), text
+
+
+def test_is_decline_rejects_requests_for_help():
+    for text in ["I need help ok", "please help", "help me please", "Yes please"]:
+        assert not assistant._is_decline(text), text

@@ -78,7 +78,7 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
             sender_role = (participant or {}).get("role")
             is_waiting_user = sender != (_settings.matrix_bot_user_id or "") and sender_role not in ("technician", "admin")
             if is_waiting_user:
-                await matrix_ai_waiting_assistant.handle_user_message(room["id"], sent_at)
+                await matrix_ai_waiting_assistant.handle_user_message(room["id"], sent_at, body)
             await tray_chat_notifications.notify_tray_device_of_chat_message(
                 room=room,
                 message=message,

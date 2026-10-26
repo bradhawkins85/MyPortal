@@ -182,7 +182,7 @@ _ROOM_UPDATABLE_FIELDS = frozenset({
     "assigned_tech_user_id",
     "ai_bot_response_count", "ai_last_bot_response_at", "ai_last_analysis_at",
     "ai_last_user_message_at", "ai_extracted_keywords", "ai_matched_articles",
-    "ai_last_confidence",
+    "ai_last_confidence", "ai_customer_message_at", "ai_idle_prompt_sent_at",
 })
 
 _INVITE_UPDATABLE_FIELDS = frozenset({
@@ -613,6 +613,50 @@ async def mark_user_activity(room_id: int, when: datetime | None = None) -> None
            WHERE id = %s""",
         (when, when, when, room_id),
     )
+
+
+async def mark_customer_message(room_id: int, when: datetime | None = None) -> None:
+    when = when or datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        """UPDATE chat_rooms
+           SET ai_customer_message_at = %s
+           WHERE id = %s""",
+        (when, room_id),
+    )
+
+
+async def reserve_ai_idle_prompt(room_id: int, when: datetime | None = None) -> bool:
+    """Atomically claim the "do you need assistance?" prompt for an empty chat."""
+    when = when or datetime.now(timezone.utc).replace(tzinfo=None)
+    rowcount = await db.execute_rowcount(
+        """UPDATE chat_rooms
+           SET ai_idle_prompt_sent_at = %s, updated_at = %s
+           WHERE id = %s
+             AND status = 'open'
+             AND ai_idle_prompt_sent_at IS NULL
+             AND ai_customer_message_at IS NULL""",
+        (when, when, room_id),
+    )
+    return rowcount == 1
+
+
+async def release_ai_idle_prompt(room_id: int) -> None:
+    await db.execute(
+        "UPDATE chat_rooms SET ai_idle_prompt_sent_at = NULL WHERE id = %s",
+        (room_id,),
+    )
+
+
+async def close_idle_room(room_id: int, when: datetime | None = None) -> bool:
+    """Close an open chat only while the customer has still not written."""
+    when = when or datetime.now(timezone.utc).replace(tzinfo=None)
+    rowcount = await db.execute_rowcount(
+        """UPDATE chat_rooms
+           SET status = 'closed', updated_at = %s
+           WHERE id = %s AND status = 'open' AND ai_customer_message_at IS NULL""",
+        (when, room_id),
+    )
+    return rowcount == 1
 
 
 async def increment_ai_bot_response(room_id: int, when: datetime | None = None) -> None:
