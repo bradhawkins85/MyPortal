@@ -10,7 +10,10 @@ from pathlib import Path
 
 import httpx
 import pytest
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
+from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader, select_autoescape
 
 import app.main as main_module
 from app.core.config import Settings
@@ -55,17 +58,17 @@ def test_feature_for_trigger_uses_caller_stack_and_module_slug():
     assert llm_usage.feature_for_trigger("ai-rename-ticket", {}) == "ai_rename_ticket"
     assert llm_usage.feature_for_trigger("ollama", {"usage_feature": "custom"}) == "custom"
     assert llm_usage.feature_for_trigger("smtp", {}) is None
-    assert llm_usage.feature_for_trigger("ollama", {}) is None
+    assert llm_usage.feature_for_trigger("ollama", {}) == llm_usage.DIRECT_LLM_FEATURE
 
 
 def test_current_feature_prefers_context_variable():
-    assert llm_usage.current_feature() == llm_usage.UNATTRIBUTED_FEATURE
+    assert llm_usage.current_feature() == llm_usage.DIRECT_LLM_FEATURE
     token = llm_usage.set_current_feature("agent")
     try:
         assert llm_usage.current_feature() == "agent"
     finally:
         llm_usage.reset_current_feature(token)
-    assert llm_usage.current_feature() == llm_usage.UNATTRIBUTED_FEATURE
+    assert llm_usage.current_feature() == llm_usage.DIRECT_LLM_FEATURE
 
 
 def test_resolve_date_range_defaults_and_swaps():
@@ -119,6 +122,10 @@ def test_build_report_calculates_token_share_and_lists_unused_functions(monkeypa
     assert features["agent"]["last_used_at"] == "2026-10-02T09:30:00Z"
     assert features["legacy_caller"]["share"] == 25.0
     assert features["legacy_caller"]["last_used_at"] == "2026-10-01T08:00:00Z"
+    assert features["legacy_caller"]["failed_webhooks_url"] == (
+        "/admin/webhooks?llm_feature=legacy_caller&llm_start=2026-10-01&llm_end=2026-10-03"
+    )
+    assert features["agent"]["failed_webhooks_url"] is None
     # Every known LLM function is listed even with no usage in the range.
     assert set(llm_usage.FEATURES_BY_KEY) <= set(features)
     assert features["ticket_ai_summary"]["requests"] == 0
@@ -129,6 +136,72 @@ def test_build_report_calculates_token_share_and_lists_unused_functions(monkeypa
     assert [day["day"] for day in report["days"]] == ["2026-10-01", "2026-10-02", "2026-10-03"]
     assert report["days"][1]["input_tokens"] == 500
     assert report["days"][0]["requests"] == 0
+
+
+@pytest.mark.parametrize(("module", "function", "expected"), [
+    ("app.services.rmm_script_summary", "generate_summary", "rmm_script_summaries"),
+    ("app.features.reporting.handlers", "_request_ai_query", "reporting_ai_query"),
+    ("app.services.future_ai", "draft_reply", "app.services.future_ai.draft_reply"),
+    ("app.services.modules", "_invoke_future_ai", "app.services.modules._invoke_future_ai"),
+])
+def test_new_and_detached_callers_keep_their_function(module, function, expected):
+    namespace = {"__name__": module, "llm_usage": llm_usage}
+    exec(
+        f"def {function}():\n"
+        "    return llm_usage.feature_for_trigger('ollama', {'usage_feature': 'other'})\n",
+        namespace,
+    )
+    assert namespace[function]() == expected
+
+
+def test_nested_background_worker_retains_enclosing_feature():
+    namespace = {
+        "__name__": "app.services.rag_relationships",
+        "asyncio": asyncio, "llm_usage": llm_usage,
+    }
+    exec(
+        "async def evaluate_next_batch():\n"
+        "    async def _one():\n"
+        "        return llm_usage.feature_for_trigger('ollama', {})\n"
+        "    return await asyncio.create_task(_one())\n",
+        namespace,
+    )
+    assert asyncio.run(namespace["evaluate_next_batch"]()) == "rag_relationships"
+
+
+def test_record_usage_resolves_legacy_feature_instead_of_writing_other(monkeypatch):
+    recorded = _capture_usage(monkeypatch)
+    namespace = {"__name__": "app.services.future_ai", "llm_usage": llm_usage}
+    exec(
+        "async def draft_reply():\n"
+        "    await llm_usage.record_usage(feature='other', provider='ollama', "
+        "model='qwen', status='succeeded', usage=(10, 5))\n",
+        namespace,
+    )
+    asyncio.run(namespace["draft_reply"]())
+    assert recorded[0]["feature"] == "app.services.future_ai.draft_reply"
+
+
+def test_report_keeps_historical_missing_callers_out_of_function_list(monkeypatch):
+    async def totals(*args):
+        return {"requests": 2, "input_tokens": 100, "output_tokens": 20,
+                "failed_requests": 1, "estimated_requests": 0}
+
+    async def features(*args):
+        return [{"feature": "other", "requests": 2, "input_tokens": 100,
+                 "output_tokens": 20, "failed_requests": 1, "last_used_at": None}]
+
+    async def empty(*args):
+        return []
+
+    monkeypatch.setattr(usage_repo, "summarise", totals)
+    monkeypatch.setattr(usage_repo, "usage_by_feature", features)
+    monkeypatch.setattr(usage_repo, "usage_by_model", empty)
+    monkeypatch.setattr(usage_repo, "usage_by_day", empty)
+    report = asyncio.run(llm_usage.build_report(date(2026, 10, 1), date(2026, 10, 2)))
+    assert all(row["feature"] != "other" and row["label"] != "Other" for row in report["features"])
+    assert report["unattributed"]["total_tokens"] == report["totals"]["total_tokens"] == 120
+    assert report["unattributed"]["failed_requests"] == 1
 
 
 class _FakeResponse:
@@ -233,7 +306,7 @@ def test_invoke_ollama_estimates_tokens_when_provider_omits_usage(monkeypatch):
         )
     )
 
-    assert recorded[0]["feature"] == llm_usage.UNATTRIBUTED_FEATURE
+    assert recorded[0]["feature"] == llm_usage.DIRECT_LLM_FEATURE
     assert recorded[0]["tokens_estimated"] is True
     assert (recorded[0]["input_tokens"], recorded[0]["output_tokens"]) == (10, 2)
 
@@ -260,7 +333,37 @@ def test_trigger_module_attributes_ai_ticket_action(monkeypatch):
 
     assert seen == ["ai_classify_ticket"]
     # The context variable does not leak into the caller after the module returns.
-    assert llm_usage.current_feature() == llm_usage.UNATTRIBUTED_FEATURE
+    assert llm_usage.current_feature() == llm_usage.DIRECT_LLM_FEATURE
+
+
+def test_background_dispatch_keeps_distinct_callers_without_context_leaks(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    seen = []
+
+    async def handler(settings, payload, *, event_future=None):
+        seen.append(llm_usage.current_feature())
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(modules, "_invoke_ollama", handler)
+    monkeypatch.setattr(modules.module_repo, "get_module", AsyncMock(return_value={
+        "slug": "ollama", "enabled": True, "settings": {},
+    }))
+    namespace = {"__name__": "app.services.future_ai", "modules": modules}
+    exec(
+        "async def draft_reply():\n"
+        "    return await modules.trigger_module('ollama', {'prompt': 'reply'})\n"
+        "async def suggest_title():\n"
+        "    return await modules.trigger_module('ollama', {'prompt': 'title'})\n",
+        namespace,
+    )
+
+    async def run():
+        await asyncio.gather(namespace["draft_reply"](), namespace["suggest_title"]())
+        assert llm_usage.current_feature() == llm_usage.DIRECT_LLM_FEATURE
+
+    asyncio.run(run())
+    assert sorted(seen) == ["app.services.future_ai.draft_reply", "app.services.future_ai.suggest_title"]
 
 
 @pytest.mark.anyio
@@ -336,11 +439,12 @@ def page_client(monkeypatch):
             "end_date": end_date.isoformat(),
             "totals": {"requests": 2, "input_tokens": 1500, "output_tokens": 500,
                        "total_tokens": 2000, "failed_requests": 0, "estimated_requests": 1},
+            "unattributed": {"requests": 1, "total_tokens": 25},
             "features": [
                 {"feature": "agent", "label": "Sophia (search)", "description": "Agent chat.",
                  "models": ["llama3", "qwen"],
                  "requests": 2, "input_tokens": 1500, "output_tokens": 500, "total_tokens": 2000,
-                 "failed_requests": 0, "share": 100.0, "last_used_at": "2026-10-02T09:30:00Z"},
+                 "failed_requests": 1, "failed_webhooks_url": "/admin/webhooks?llm_feature=agent&llm_start=2026-10-01&llm_end=2026-10-02", "share": 100.0, "last_used_at": "2026-10-02T09:30:00Z"},
                 {"feature": "ticket_ai_tags", "label": "Ticket AI tags", "description": "Tags.",
                  "models": [],
                  "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
@@ -356,8 +460,22 @@ def page_client(monkeypatch):
         }
 
     monkeypatch.setattr(llm_usage, "build_report", fake_build_report)
-    # Not used as a context manager so the app's startup workers do not run.
-    yield TestClient(main_module.app, follow_redirects=False)
+    # Exercise the real page and template without unrelated navigation DB reads.
+    environment = Environment(
+        loader=ChoiceLoader([
+            DictLoader({"base.html": "{% block header_title %}{% endblock %}{% block content %}{% endblock %}"}),
+            FileSystemLoader(Path(__file__).resolve().parent.parent / "app/templates"),
+        ]),
+        autoescape=select_autoescape(),
+    )
+
+    async def render(template_name, request, user, *, extra):
+        return HTMLResponse(environment.get_template(template_name).render(**extra))
+
+    monkeypatch.setattr(main_module, "_render_template", render)
+    page_app = FastAPI()
+    page_app.add_api_route("/admin/llm-usage", main_module.admin_llm_usage_page)
+    yield TestClient(page_app)
 
 
 def test_llm_usage_page_renders_date_range_and_function_share(page_client):
@@ -375,3 +493,47 @@ def test_llm_usage_page_renders_date_range_and_function_share(page_client):
     assert "100.0%" in body
     assert "1,500" in body
     assert "estimated" in body
+
+    assert 'href="/admin/webhooks?llm_feature=agent&amp;llm_start=2026-10-01&amp;llm_end=2026-10-02"' in body
+    assert 'aria-label="View 1 failed webhook calls for Sophia (search)"' in body
+    assert "historical requests (25 tokens) have no saved caller data" in body
+
+
+@pytest.mark.parametrize("service_name", ["ai_troubleshooter", "marketing_assistant", "rmm_findings", "rag_index"])
+def test_direct_provider_failures_link_the_exact_webhook(monkeypatch, service_name):
+    import importlib
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from app.services import monitored_http
+
+    service = importlib.import_module(f"app.services.{service_name}")
+    recorded = _capture_usage(monkeypatch)
+    monkeypatch.setattr(monitored_http.webhook_repo, "create_event", AsyncMock(return_value={"id": 73}))
+    for method in ("mark_in_progress", "record_attempt", "mark_event_failed"):
+        monkeypatch.setattr(monitored_http.webhook_repo, method, AsyncMock())
+
+    def client(_client_class, **kwargs):
+        return monitored_http.MonitoredAsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(503, text="unavailable")),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(service, "monitored_client", client)
+    if service_name == "rag_index":
+        monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(
+            rag_embedding_provider="ollama", rag_embedding_base_url="https://provider.test",
+            rag_embedding_api_key="", rag_embedding_model="qwen", rag_embedding_dimensions=3,
+            rag_embedding_timeout_seconds=1,
+        ))
+        request = service.embed_text("test input")
+    else:
+        request = service._chat(
+            {"base_url": "https://provider.test", "model": "qwen"},
+            [{"role": "user", "content": "test input"}],
+        )
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(request)
+    assert len(recorded) == 1
+    assert recorded[0]["webhook_event_id"] == 73
+    assert recorded[0]["status"] == "failed"
+    assert recorded[0]["feature"] in {"ai_troubleshooter", "marketing_assistant", "rmm_findings", "rag_embeddings"}

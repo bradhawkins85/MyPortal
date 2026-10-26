@@ -117,3 +117,41 @@ def test_webhook_history_template_exposes_server_side_search_controls():
     assert "Search history" in template
     assert "Increase the history window" in template
     assert "Dead-letter queue" in template
+
+
+def test_llm_drilldown_preserves_dates_and_requires_super_admin(monkeypatch):
+    import asyncio
+    from datetime import datetime
+    from unittest.mock import AsyncMock
+
+    async def run():
+        require_admin = AsyncMock(return_value=({"id": 1}, None))
+        monkeypatch.setattr(main_module, "_require_super_admin_page", require_admin)
+        listing = AsyncMock(return_value=[])
+        monkeypatch.setattr(webhooks_routes.webhook_events_repo, "list_events", listing)
+        monkeypatch.setattr(webhooks_routes.webhook_events_repo, "count_events_by_status", AsyncMock(return_value=0))
+        monkeypatch.setattr(webhooks_routes.deletion_rules_repo, "list_rules", AsyncMock(return_value=[]))
+        monkeypatch.setattr(webhooks_routes.deletion_rules_repo, "get_retention", AsyncMock(return_value={}))
+        render = AsyncMock(return_value="rendered")
+        monkeypatch.setattr(main_module, "_render_template", render)
+        result = await webhooks_routes.admin_webhooks(
+            object(), q="timeout", status="", event_limit=200, llm_feature="rag_relationships",
+            llm_start="2026-10-02", llm_end="2026-10-01",
+        )
+        assert result == "rendered"
+        listing.assert_awaited_once_with(
+            status=None, search="timeout", limit=200, llm_feature="rag_relationships",
+            llm_start=datetime(2026, 10, 1), llm_end=datetime(2026, 10, 3),
+        )
+        context = render.await_args.kwargs["extra"]["llm_context"]
+        assert context == {"feature": "rag_relationships", "label": "RAG relationship evaluation",
+                           "start": "2026-10-01", "end": "2026-10-02"}
+        listing.reset_mock()
+        require_admin.return_value = (None, "login redirect")
+        result = await webhooks_routes.admin_webhooks(
+            object(), event_limit=200, llm_feature="agent", llm_start="2026-10-01", llm_end="2026-10-02",
+        )
+        assert result == "login redirect"
+        listing.assert_not_awaited()
+
+    asyncio.run(run())

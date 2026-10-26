@@ -17,6 +17,11 @@ admins only) shows how much MyPortal uses its LLM providers.
   so on), with the distinct model(s) it used in the selected range, its requests,
   tokens and percentage of total tokens. Missing model names show as *Not reported*. Functions
   that did not run in the range are listed with 0%.
+  Click a function's **failed** count to open its corresponding webhook calls
+  for the same UTC date range. Inspect each call's attempts, errors and response,
+  or retry it from the webhook monitor. Calls that later succeed after a retry
+  still appear in this view because the original LLM request failed. Search,
+  queue state and history-window controls can further narrow the results.
 - **Usage by model** – the same totals per provider and model.
 
 The same data is available as JSON from `GET /api/admin/llm-usage?start=YYYY-MM-DD&end=YYYY-MM-DD`.
@@ -37,6 +42,17 @@ tokens.
 
 Usage is recorded from the time this feature is installed; earlier requests are
 not backfilled.
+
+Known functions include RMM script summaries, reporting queries and RAG
+relationship workers. Newly added callers retain their application function
+name until a friendly label is registered, including when dispatched to a
+background task. They are never grouped into an “Other” function.
+
+Historical requests recorded without a caller cannot be reliably reassigned.
+Their request and token counts remain in the totals and are explained in a
+separate note rather than listed as a function. Older requests may also lack a
+webhook link, and webhook retention rules may have removed the associated
+calls; these cases show no retained webhook calls in the drilldown.
 
 ## Disabling
 

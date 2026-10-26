@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -26,14 +27,34 @@ async def admin_webhooks(
     q: str = "",
     status: str = "",
     event_limit: int = Query(default=1000, ge=1, le=5000),
+    llm_feature: str = "",
+    llm_start: str = "",
+    llm_end: str = "",
 ):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
         return redirect
     status_filter = str(status or "").strip().lower() or None
+    llm_filter: dict[str, Any] = {}
+    llm_context = None
+    if llm_feature:
+        from app.services import llm_usage
+
+        start_date, end_date = llm_usage.resolve_date_range(llm_start, llm_end)
+        llm_filter = {
+            "llm_feature": llm_feature,
+            "llm_start": datetime.combine(start_date, time.min),
+            "llm_end": datetime.combine(end_date + timedelta(days=1), time.min),
+        }
+        llm_context = {
+            "feature": llm_feature,
+            "label": llm_usage.feature_label(llm_feature),
+            "start": start_date.isoformat(),
+            "end": end_date.isoformat(),
+        }
     events = await webhook_events_repo.list_events(
-        status=status_filter, search=q, limit=event_limit
+        status=status_filter, search=q, limit=event_limit, **llm_filter
     )
     prepared_events: list[dict[str, Any]] = []
     for event in events:
@@ -59,6 +80,7 @@ async def admin_webhooks(
         "webhook_search": q,
         "webhook_status": status_filter or "",
         "webhook_event_limit": event_limit,
+        "llm_context": llm_context,
         "webhook_event_limit_options": (200, 500, 1000, 2500, 5000),
         "deletion_rules": prepared_rules,
         "retention": await deletion_rules_repo.get_retention(),

@@ -579,6 +579,7 @@ async def _chat(
         headers["Authorization"] = f"Bearer {api_key}"
     prompt_text = "\n".join(str(m.get("content") or "") for m in messages)
     started = time.monotonic()
+    client = None
     try:
         async with monitored_client(httpx.AsyncClient, timeout=_LLM_TIMEOUT_SECONDS) as client:
             response = await client.post(
@@ -595,6 +596,7 @@ async def _chat(
             status="failed",
             usage=(0, 0),
             duration_ms=int((time.monotonic() - started) * 1000),
+            webhook_event_id=getattr(client, "webhook_event_id", None),
         )
         raise
     await llm_usage.record_usage(
@@ -606,6 +608,7 @@ async def _chat(
         prompt=prompt_text,
         response_text=text,
         duration_ms=int((time.monotonic() - started) * 1000),
+        webhook_event_id=getattr(client, "webhook_event_id", None),
     )
     if not text:
         raise ValueError("The AI model returned an empty response")

@@ -22,6 +22,7 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Iterable, Mapping
+from urllib.parse import urlencode
 
 from loguru import logger
 
@@ -38,7 +39,9 @@ class LLMFeature:
     module_slugs: tuple[str, ...] = ()
 
 
+# Only historical rows may use this key. New requests always keep a caller.
 UNATTRIBUTED_FEATURE = "other"
+DIRECT_LLM_FEATURE = "app.services.modules._invoke_ollama"
 
 # Every MyPortal function that sends requests to the LLM. ``callers`` are the
 # (module, function) frames that identify the feature on the call stack;
@@ -64,6 +67,11 @@ FEATURES: tuple[LLMFeature, ...] = (
         "rmm_findings", "RMM findings",
         "Looks across every company's RMM data for abnormalities technicians should review.",
         callers=(("app.services.rmm_findings", "_chat"),),
+    ),
+    LLMFeature(
+        "rmm_script_summaries", "RMM script summaries",
+        "Explains what an RMM script does before a technician runs it.",
+        callers=(("app.services.rmm_script_summary", "generate_summary"),),
     ),
     LLMFeature(
         "marketing_assistant", "Marketing Assistant",
@@ -176,7 +184,10 @@ FEATURES: tuple[LLMFeature, ...] = (
     LLMFeature(
         "reporting_ai_query", "Reporting AI query",
         "Builds report queries from plain-English questions.",
-        callers=(("app.features.reporting.handlers", "admin_reporting_ai_query"),),
+        callers=(
+            ("app.features.reporting.handlers", "admin_reporting_ai_query"),
+            ("app.features.reporting.handlers", "_request_ai_query"),
+        ),
     ),
     LLMFeature(
         "matrix_waiting_assistant", "Chat waiting assistant",
@@ -209,8 +220,6 @@ def feature_label(key: str) -> str:
     feature = FEATURES_BY_KEY.get(key)
     if feature:
         return feature.label
-    if key == UNATTRIBUTED_FEATURE:
-        return "Other"
     return key
 
 
@@ -219,16 +228,42 @@ def feature_for_module_slug(slug: str) -> str | None:
 
 
 def infer_feature_from_stack() -> str | None:
-    """Return the feature key of the nearest known caller on the stack."""
+    """Resolve known features, retaining the actual caller for new functions.
+
+    A task's stack may start inside a nested worker. Its qualified name still
+    identifies the enclosing function, even when that function isn't awaiting
+    the worker on this stack.
+    """
 
     frame = sys._getframe(1)
-    while frame is not None:
-        key = _FEATURES_BY_CALLER.get(
-            (frame.f_globals.get("__name__", ""), frame.f_code.co_name)
-        )
-        if key:
-            return key
-        frame = frame.f_back
+    fallback = None
+    try:
+        while frame is not None:
+            module = frame.f_globals.get("__name__", "")
+            qualified_name = frame.f_code.co_qualname
+            # Consider each lexical parent for workers nested in other workers.
+            names = qualified_name.split(".<locals>.")
+            for name in reversed(names):
+                key = _FEATURES_BY_CALLER.get((module, name))
+                if key:
+                    return key
+            infrastructure = module in {
+                __name__, "app.services.module_dispatch",
+                "app.services.module_runtime",
+            } or (module == "app.services.modules" and names[0] in {
+                "trigger_module", "_invoke_ollama",
+            })
+            if fallback is None and module.startswith("app.") and not infrastructure:
+                fallback = f"{module}.{names[0]}"
+            frame = frame.f_back
+        return fallback
+    finally:
+        del frame
+
+
+def _usable_feature(key: Any) -> str | None:
+    if isinstance(key, str) and key.strip() and key.strip().lower() != UNATTRIBUTED_FEATURE:
+        return key.strip()
     return None
 
 
@@ -239,21 +274,21 @@ def feature_for_trigger(slug: str, payload: Mapping[str, Any] | None) -> str | N
     still available before the module runs in a background task.
     """
 
-    explicit = (payload or {}).get("usage_feature")
-    if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip()
+    explicit = _usable_feature((payload or {}).get("usage_feature"))
+    if explicit:
+        return explicit
     module_feature = feature_for_module_slug(slug)
     if module_feature:
         return module_feature
     if slug != "ollama":
         return None
-    return infer_feature_from_stack() or _current_feature.get()
+    return infer_feature_from_stack() or _usable_feature(_current_feature.get()) or DIRECT_LLM_FEATURE
 
 
 def current_feature() -> str:
     """Return the feature for an LLM request being sent now."""
 
-    return _current_feature.get() or infer_feature_from_stack() or UNATTRIBUTED_FEATURE
+    return _usable_feature(_current_feature.get()) or infer_feature_from_stack() or DIRECT_LLM_FEATURE
 
 
 def set_current_feature(key: str | None) -> contextvars.Token[str | None]:
@@ -340,7 +375,7 @@ async def record_usage(
     try:
         await usage_repo.record_event(
             occurred_at=datetime.now(timezone.utc),
-            feature=feature or UNATTRIBUTED_FEATURE,
+            feature=_usable_feature(feature) or current_feature(),
             provider=provider,
             model=model,
             status=status,
@@ -403,7 +438,14 @@ async def build_report(start_date: date, end_date: date) -> dict[str, Any]:
     total_tokens = totals["input_tokens"] + totals["output_tokens"]
     totals["total_tokens"] = total_tokens
 
-    used = {row["feature"]: row for row in feature_rows}
+    legacy_rows = [row for row in feature_rows if not _usable_feature(row["feature"])]
+    used = {row["feature"]: row for row in feature_rows if _usable_feature(row["feature"])}
+    # Preserve historical totals without presenting missing caller data as a function.
+    unattributed = {
+        key: sum(row[key] for row in legacy_rows)
+        for key in ("requests", "input_tokens", "output_tokens", "failed_requests")
+    }
+    unattributed["total_tokens"] = unattributed["input_tokens"] + unattributed["output_tokens"]
     features: list[dict[str, Any]] = []
     for key in [feature.key for feature in FEATURES] + sorted(
         key for key in used if key not in FEATURES_BY_KEY
@@ -419,7 +461,12 @@ async def build_report(start_date: date, end_date: date) -> dict[str, Any]:
             "feature": key,
             "models": row.get("models", []),
             "label": feature_label(key),
-            "description": feature.description if feature else "Requests from an unlisted caller.",
+            "description": feature.description if feature else f"LLM requests from {key}.",
+            "failed_webhooks_url": "/admin/webhooks?" + urlencode({
+                "llm_feature": key,
+                "llm_start": start_date.isoformat(),
+                "llm_end": end_date.isoformat(),
+            }) if row["failed_requests"] else None,
             "last_used_at": _iso_utc(row["last_used_at"]),
             "total_tokens": tokens,
             "share": _share(tokens, total_tokens),
@@ -445,6 +492,7 @@ async def build_report(start_date: date, end_date: date) -> dict[str, Any]:
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "totals": totals,
+        "unattributed": unattributed,
         "features": features,
         "models": models,
         "days": days,

@@ -1147,6 +1147,7 @@ async def _chat(llm: Mapping[str, str], messages: list[dict[str, str]]) -> str:
         headers["Authorization"] = f"Bearer {llm['api_key']}"
     prompt_text = "\n".join(str(message.get("content") or "") for message in messages)
     started = time.monotonic()
+    client = None
     try:
         async with monitored_client(httpx.AsyncClient, timeout=_LLM_TIMEOUT_SECONDS) as client:
             response = await client.post(f"{base_url}/v1/chat/completions", json=body, headers=headers)
@@ -1157,12 +1158,14 @@ async def _chat(llm: Mapping[str, str], messages: list[dict[str, str]]) -> str:
         await llm_usage.record_usage(
             feature=LLM_FEATURE, provider="openai-compatible", model=model, status="failed", usage=(0, 0),
             duration_ms=int((time.monotonic() - started) * 1000),
+            webhook_event_id=getattr(client, "webhook_event_id", None),
         )
         raise
     await llm_usage.record_usage(
         feature=LLM_FEATURE, provider="openai-compatible", model=model, status="succeeded",
         usage=llm_usage.extract_token_usage(payload), prompt=prompt_text, response_text=text,
         duration_ms=int((time.monotonic() - started) * 1000),
+        webhook_event_id=getattr(client, "webhook_event_id", None),
     )
     if not text:
         raise ValueError("The AI model returned an empty response")
