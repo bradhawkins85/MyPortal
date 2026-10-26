@@ -293,7 +293,7 @@
           <tbody>
             {% for run in onboarding_runs %}
             {% set item = ONBOARDING_STATUS.get(run.status, ("neutral", run.status)) %}
-            {% set done = run.plan | selectattr("status", "in", ["completed", "failed", "timed_out", "cancelled", "expired", "skipped"]) | list | length %}
+            {% set done = run.plan | selectattr("status", "in", ["completed", "failed", "timed_out", "cancelled", "aborted", "expired", "skipped"]) | list | length %}
             <tr>
               <td data-label="Device" data-column-key="device">{% if run.asset_id %}<a href="/assets/{{ run.asset_id }}">{{ run.asset_name or run.agent_hostname }}</a>{% else %}{{ run.agent_hostname or 'Removed device' }}{% endif %}</td>
               <td data-label="Status" data-column-key="status" data-sort-value="{{ run.status }}"><span class="status status--{{ item[0] }}">{{ item[1] }}</span>{% if run.error_message %}<br><span class="text-muted">{{ run.error_message }}</span>{% endif %}</td>

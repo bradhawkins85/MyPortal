@@ -678,6 +678,67 @@ async def test_long_poll_does_not_reclaim_a_blocked_queue_until_it_changes(sqlit
 
 
 @pytest.mark.anyio
+async def test_runs_the_agent_no_longer_has_fail_and_free_the_queue(sqlite_db, monkeypatch):
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": "Write-Output 1\n"})
+    script = (await rmm_repo.list_scripts())[0]
+    _r, agent = await _enrol(sqlite_db)
+    for _ in range(2):
+        await rmm_scripts.queue_runs(script_id=script["id"], company_id=1, asset_ids=[10], submitted={},
+                                     timeout_seconds=3600, requested_by_user_id=None)
+    first = (await rmm_scripts.poll_jobs(agent, wait_seconds=0, executing=[]))["jobs"][0]
+    assert await rmm_scripts.mark_started(agent, first["id"])
+    await rmm_scripts.record_output(agent, first["id"], {"stdout": "Deployment Image Servicing", "stderr": ""})
+    # Older agents do not list what they execute: nothing is reconciled.
+    assert await rmm_scripts.wait_for_jobs(agent, wait_seconds=0) == []
+    # While the agent still reports the run, the second waits behind it.
+    assert await rmm_scripts.poll_jobs(agent, wait_seconds=0, executing=[first["id"]]) == {"jobs": [], "stop": []}
+    assert (await rmm_repo.get_run(first["id"]))["status"] == "running"
+    # The agent restarted: the run fails at once, keeping its output, and the next one is sent.
+    polled = await rmm_scripts.poll_jobs(agent, wait_seconds=0, executing=[])
+    assert len(polled["jobs"]) == 1 and polled["jobs"][0]["id"] != first["id"] and polled["stop"] == []
+    lost = await rmm_repo.get_run(first["id"])
+    assert lost["status"] == "failed" and lost["error_message"] == rmm_scripts.LOST_RUN_MESSAGE
+    assert lost["stdout"] == "Deployment Image Servicing" and lost["completed_at"] is not None
+    # A late result from the lost run does not reopen it.
+    assert (await rmm_scripts.record_result(agent, first["id"], {"exit_code": 0}))["status"] == "failed"
+
+
+@pytest.mark.anyio
+async def test_abort_stops_the_run_on_the_agent_and_frees_the_queue(sqlite_db, monkeypatch):
+    import asyncio
+
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": "Write-Output 1\n"})
+    script = (await rmm_repo.list_scripts())[0]
+    _r, agent = await _enrol(sqlite_db)
+    for _ in range(2):
+        await rmm_scripts.queue_runs(script_id=script["id"], company_id=1, asset_ids=[10], submitted={},
+                                     timeout_seconds=3600, requested_by_user_id=None)
+    first = (await rmm_scripts.poll_jobs(agent, wait_seconds=0, executing=[]))["jobs"][0]
+    assert await rmm_scripts.mark_started(agent, first["id"])
+    # The agent waits on its next poll; the abort wakes it with the run to stop and the queued run.
+    waiter = asyncio.create_task(rmm_scripts.poll_jobs(agent, wait_seconds=10, executing=[first["id"]]))
+    await asyncio.sleep(0.05)
+    assert await rmm_scripts.abort_run(await rmm_repo.get_run(first["id"]), aborted_by="tech@example.com")
+    polled = await asyncio.wait_for(waiter, timeout=2)
+    assert polled["stop"] == [first["id"]] and len(polled["jobs"]) == 1
+    aborted = await rmm_repo.get_run(first["id"])
+    assert aborted["status"] == "aborted" and "tech@example.com" in aborted["error_message"]
+    # Finished runs cannot be aborted, and the agent's result is ignored.
+    assert not await rmm_scripts.abort_run(aborted, aborted_by=None)
+    assert (await rmm_scripts.record_result(agent, first["id"], {"exit_code": 1}))["status"] == "aborted"
+
+
+def test_executing_runs_are_parsed_strictly():
+    assert rmm_scripts.parse_executing(None) is None
+    assert rmm_scripts.parse_executing("") == []
+    assert rmm_scripts.parse_executing("12, 15,") == [12, 15]
+    assert rmm_scripts.parse_executing("12,abc") is None
+    assert rmm_scripts.parse_executing("-1") is None
+    assert rmm_scripts.parse_executing("\u00b2") is None
+    assert rmm_scripts.parse_executing(",".join(["1"] * (rmm_scripts.MAX_EXECUTING_RUNS + 1))) is None
+
+
+@pytest.mark.anyio
 async def test_job_poll_heartbeat_skips_recent_check_ins(sqlite_db, monkeypatch):
     from datetime import datetime, timedelta, timezone
 

@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bradhawkins85/myportal-rmm/internal/client"
 )
@@ -139,6 +140,26 @@ func TestRunStopsAtTimeout(t *testing.T) {
 	result := New(t.TempDir()).Run(context.Background(), job)
 	if !result.TimedOut {
 		t.Fatalf("expected a timeout, got %#v", result)
+	}
+}
+
+func TestAbortStopsTheScriptAndWhatItStarted(t *testing.T) {
+	requireBash(t)
+	marker := filepath.Join(t.TempDir(), "after-abort")
+	script := "echo started\nsleep 30 & wait\ntouch '" + marker + "'"
+	job := client.Job{ID: 9, Language: "bash", Script: script, SHA256: checksum(script), TimeoutSeconds: 60}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(300*time.Millisecond, cancel)
+	begun := time.Now()
+	result := New(t.TempDir()).Run(ctx, job)
+	if time.Since(begun) > 15*time.Second {
+		t.Fatalf("abort took %s", time.Since(begun))
+	}
+	if result.TimedOut || !strings.Contains(result.Stdout, "started") {
+		t.Fatalf("result = %#v", result)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("the script carried on after it was aborted")
 	}
 }
 

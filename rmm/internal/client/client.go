@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -192,14 +194,28 @@ func (c *Client) Checkin(ctx context.Context, details Details) error {
 	return c.do(ctx, http.MethodPost, "/api/rmm/agent/checkin", details, nil)
 }
 
-// Jobs long-polls for queued runs.
-func (c *Client) Jobs(ctx context.Context, wait time.Duration) ([]Job, error) {
-	var out struct {
-		Jobs []Job `json:"jobs"`
+// Poll is MyPortal's answer to a job poll: runs to start, and runs this agent
+// is executing that MyPortal has aborted or otherwise closed, to stop.
+type Poll struct {
+	Jobs []Job   `json:"jobs"`
+	Stop []int64 `json:"stop"`
+}
+
+// Jobs long-polls for queued runs. executing lists the runs this agent is
+// still running or reporting; MyPortal fails any other run it thinks this
+// agent has, such as one interrupted by a restart, so it stops blocking the
+// device's queue.
+func (c *Client) Jobs(ctx context.Context, wait time.Duration, executing []int64) (Poll, error) {
+	var out Poll
+	ids := make([]string, len(executing))
+	for i, id := range executing {
+		ids[i] = strconv.FormatInt(id, 10)
 	}
-	path := fmt.Sprintf("/api/rmm/agent/jobs?wait=%d", int(wait.Seconds()))
-	err := c.do(ctx, http.MethodGet, path, nil, &out)
-	return out.Jobs, err
+	query := url.Values{}
+	query.Set("wait", strconv.Itoa(int(wait.Seconds())))
+	query.Set("executing", strings.Join(ids, ","))
+	err := c.do(ctx, http.MethodGet, "/api/rmm/agent/jobs?"+query.Encode(), nil, &out)
+	return out, err
 }
 
 // Started marks a run as running.

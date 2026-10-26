@@ -31,7 +31,16 @@ the service.
 ## How it works
 
 The agent long-polls `GET /api/rmm/agent/jobs`, runs up to four scripts at a
-time and reports each result to `/api/rmm/agent/runs/{id}/result`.
+time and reports each result to `/api/rmm/agent/runs/{id}/result`, retrying for
+up to 30 minutes if MyPortal cannot be reached. Each poll sends
+`executing=<run IDs>`: every run it has collected and not yet reported. MyPortal
+fails any other run it thinks the agent has (lost to a service or device restart,
+or an undeliverable result), so it stops blocking the device's queue straight away
+rather than at its timeout. The poll's answer lists runs a technician **Aborted**
+under `stop`; the agent cancels them, which ends the script's process tree, and
+leaves them out of later polls. A panic while running a job is reported as a
+failed run. Deploy MyPortal before updating agents; older agents do not send
+`executing`, so neither applies to them.
 While agents wait, each MyPortal worker checks the run queue once every two
 seconds for all of them, and job polls update the agent's last-seen time at
 most every 45 seconds, so database load stays flat as more agents come online.

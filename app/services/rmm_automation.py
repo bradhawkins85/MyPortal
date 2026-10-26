@@ -54,6 +54,7 @@ _FINISH_WORDS = {
     "failed": "failed",
     "timed_out": "timed out",
     "cancelled": "was cancelled",
+    "aborted": "was aborted",
     "expired": "expired before the device collected it",
 }
 

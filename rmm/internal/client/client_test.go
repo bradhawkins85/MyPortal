@@ -40,11 +40,11 @@ func TestJobsAndReport(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/api/rmm/agent/jobs":
-			if r.URL.Query().Get("wait") != "25" {
+			if r.URL.Query().Get("wait") != "25" || r.URL.Query().Get("executing") != "3,4" {
 				http.Error(w, "wait", http.StatusBadRequest)
 				return
 			}
-			_, _ = w.Write([]byte(`{"jobs":[{"id":5,"language":"bash","script":"echo","run_anyway":true,"parameters":{"A":1}}]}`))
+			_, _ = w.Write([]byte(`{"jobs":[{"id":5,"language":"bash","script":"echo","run_anyway":true,"parameters":{"A":1}}],"stop":[4]}`))
 		case "/api/rmm/agent/runs/5/result":
 			_ = json.NewDecoder(r.Body).Decode(&reported)
 			_, _ = w.Write([]byte(`{"status":"completed"}`))
@@ -54,9 +54,12 @@ func TestJobsAndReport(t *testing.T) {
 	}))
 	defer server.Close()
 	api := New(server.URL, "agent-token")
-	jobs, err := api.Jobs(context.Background(), 25*time.Second)
-	if err != nil || len(jobs) != 1 || jobs[0].ID != 5 || !jobs[0].RunAnyway {
-		t.Fatalf("Jobs = %#v, %v", jobs, err)
+	poll, err := api.Jobs(context.Background(), 25*time.Second, []int64{3, 4})
+	if err != nil || len(poll.Jobs) != 1 || poll.Jobs[0].ID != 5 || !poll.Jobs[0].RunAnyway {
+		t.Fatalf("Jobs = %#v, %v", poll, err)
+	}
+	if len(poll.Stop) != 1 || poll.Stop[0] != 4 {
+		t.Fatalf("Stop = %#v", poll.Stop)
 	}
 	code := 0
 	if err := api.Report(context.Background(), 5, Result{ExitCode: &code, Stdout: "ok"}); err != nil {
@@ -65,7 +68,7 @@ func TestJobsAndReport(t *testing.T) {
 	if reported.Stdout != "ok" || reported.CustomValues == nil {
 		t.Fatalf("reported = %#v", reported)
 	}
-	if _, err := New(server.URL, "wrong").Jobs(context.Background(), 25*time.Second); !errors.Is(err, ErrUnauthorized) {
+	if _, err := New(server.URL, "wrong").Jobs(context.Background(), 25*time.Second, nil); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("expected ErrUnauthorized, got %v", err)
 	}
 }

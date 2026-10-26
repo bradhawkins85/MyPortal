@@ -455,18 +455,30 @@ The panel on the right shows what each device receives. Values are encrypted unt
 collects them and are deleted when the run finishes.
 
 A run is **Waiting for device** until the device collects it, then **Sent**, **Running**, and
-finally **Completed** (exit code 0), **Failed**, or **Timed out**. A run the device has not
+finally **Completed** (exit code 0), **Failed**, **Timed out**, or **Aborted**. A run the device has not
 collected within 24 hours **expires**. Choose **Cancel** in the asset's Scripts list (or in a
-run's details) while it is still **Waiting for device**. Once the agent has picked it up,
-including **Sent** runs that have not started executing yet, it cannot be cancelled.
+run's details) while it is still **Waiting for device**. Once the agent has picked it up
+(**Sent** or **Running**), choose **Abort** instead: the run is marked **Aborted** at once, so
+scripts queued behind it can start, and the agent stops the script, including the programs it
+started, and skips everything it has not done yet. A step it is part-way through (such as a
+DISM cleanup) is not rolled back. The agent normally stops the script within a few seconds;
+agents older than this change keep running it to the end, but its result is ignored.
 Choose **View** on a run to see its output, errors, the values sent, and which custom values
 were updated.
 
-**Retry** is available for **Expired**, **Timed out**, and **Failed** runs. It opens the run
+Each time the agent asks for work it also tells MyPortal which runs it is still executing. A run
+MyPortal shows as **Sent** or **Running** that the agent no longer has (the agent service or
+the device restarted mid-script, or the agent could not deliver the result) is marked
+**Failed** straight away, keeping any output already received, instead of blocking the device's
+queue until the script's timeout runs out. The agent retries sending a result for up to 30
+minutes, so a MyPortal restart does not lose it. This needs the updated agent; with older agents
+such runs still end as **Timed out** once the script's timeout and five minutes have passed.
+
+**Retry** is available for **Expired**, **Timed out**, **Failed**, and **Aborted** runs. It opens the run
 editor with the original device, timeout, run as setting and saved inputs selected. Review the values and
 re-enter any secret values typed directly into the previous run; variable references are
 kept and resolved again. Retrying uses the current script and creates a new manual attempt,
-keeping the original result in history. Run and cancel actions require Scripts write access.
+keeping the original result in history. Run, cancel and abort actions require Scripts write access.
 
 ### Execute a command
 
@@ -528,7 +540,7 @@ survives service restarts.
 Automatic tags are refreshed before tag matching; device rules use current inventory
 just before each step is queued.
 
-If a step fails, times out, expires or is cancelled, the steps after it are not run and the
+If a step fails, times out, expires, is cancelled or aborted, the steps after it are not run and the
 onboarding is marked **Stopped**, unless that step is set to **Carry on with the next step if
 this one fails**. A step whose script has been removed from Gitea fails the same way, and a
 step deleted while a device is part-way through is skipped.
@@ -569,7 +581,8 @@ Each rule has:
   script however it started: manually, on a schedule, during onboarding, from an event log rule,
   check, ticket automation, the tray menu or another result rule. MyPortal's own jobs (patching,
   Windows Update scans, remote control, tray repair and **Execute command**) are never watched.
-  Runs that expire or are cancelled never report a result, so they do not trigger rules.
+  Runs that expire, are cancelled or aborted, or are lost by a restarting agent never report a
+  result, so they do not trigger rules.
 - **Applies to**: runs on this company's devices, or (super admins only) every company. Rules
   for every company can only use scripts in `Common/`.
 - **Conditions**, matching **all** or **any** of them:
@@ -656,7 +669,7 @@ Add the action to an automation (**Automation → Ticket automations**) with a p
 The script is queued as an ordinary RMM run and shows as **Ticket automation** in run history.
 When the device reports back, the outcome, exit code and the end of the output are added to the
 ticket as an internal note. A run that expires before the device collects it (24 hours), never
-reports back or is cancelled gets a note too. Notes and status changes made this way do not fire
+reports back or is cancelled or aborted gets a note too. Notes and status changes made this way do not fire
 further ticket automations.
 
 The action is **skipped** when the ticket has no linked asset, no linked device has the RMM agent,
@@ -669,10 +682,10 @@ Apply migration **509** first.
 ## Who can use it
 
 The **Scripts** permission (RMM group in Roles) controls access per company. Read access shows
-the library, runs, schedules and onboarding; write access also runs and cancels scripts and
+the library, runs, schedules and onboarding; write access also runs, cancels and aborts scripts and
 manages schedules and onboarding steps for the company. Only super admins sync from Gitea and
 manage every-company schedules. Generating an AI summary needs write access. Every sync, run,
-cancel, AI summary and change to a schedule or onboarding step is recorded in the audit trail.
+cancel, abort, AI summary and change to a schedule or onboarding step is recorded in the audit trail.
 
 ## The RMM agent
 
