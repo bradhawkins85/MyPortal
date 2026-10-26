@@ -1159,6 +1159,7 @@ async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
             a.status,
             a.type,
             a.os_name,
+            a.last_user,
             a.tactical_asset_id,
             (
                 SELECT td.device_uid
@@ -1201,6 +1202,7 @@ async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
             "status": str(row.get("status") or "").strip() or None,
             "type": str(row.get("type") or "").strip() or None,
             "os_name": str(row.get("os_name") or "").strip() or None,
+            "last_user": str(row.get("last_user") or "").strip() or None,
             "tactical_asset_id": str(row.get("tactical_asset_id") or "").strip()
             or None,
             "tray_device_uid": str(row.get("tray_device_uid") or "").strip() or None,

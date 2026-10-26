@@ -1126,6 +1126,7 @@
       }
       const serialNumber = typeof option.serial_number === 'string' ? option.serial_number.trim() : '';
       const statusValue = typeof option.status === 'string' ? option.status.trim() : '';
+      const lastUser = typeof option.last_user === 'string' ? option.last_user.trim() : '';
       const tacticalIdRaw = option.tactical_asset_id ?? option.tactical_asset ?? option.tactical_id;
       const tacticalId =
         typeof tacticalIdRaw === 'string' || typeof tacticalIdRaw === 'number'
@@ -1161,6 +1162,7 @@
         name,
         serial_number: serialNumber || null,
         status: statusValue || null,
+        last_user: lastUser || null,
         tactical_asset_id: tacticalId || null,
         tray_device_uid: trayDeviceUid || null,
       };
@@ -1244,6 +1246,10 @@
         }
         item.appendChild(hiddenInput);
 
+        const summary = document.createElement('div');
+        summary.className = 'ticket-assets-linked__summary';
+        item.appendChild(summary);
+
         const label = formatAssetLabel(record);
         const displayName = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : label;
         const tacticalUrl = buildTacticalUrl(displayName);
@@ -1257,16 +1263,13 @@
         if (label && label !== displayName) {
           nameElement.title = label;
         }
-        item.appendChild(nameElement);
         const agentState = Object.prototype.hasOwnProperty.call(rmmAgents, assetIdValue) ? rmmAgents[assetIdValue] : null;
         if (remoteProviders.length && window.MyPortalRmm && window.MyPortalRmm.agentIndicator) {
-          item.appendChild(window.MyPortalRmm.agentIndicator(agentState || 'missing'));
+          summary.appendChild(window.MyPortalRmm.agentIndicator(agentState || 'missing'));
         }
+        summary.appendChild(nameElement);
 
         const metaParts = [];
-        if (record.serial_number) {
-          metaParts.push(`SN ${record.serial_number}`);
-        }
         if (record.status) {
           const cleanedStatus = record.status
             .split('_')
@@ -1274,11 +1277,14 @@
             .join(' ');
           metaParts.push(cleanedStatus);
         }
+        if (record.last_user) {
+          metaParts.push(record.last_user);
+        }
         if (metaParts.length) {
-          const metaElement = document.createElement('p');
+          const metaElement = document.createElement('span');
           metaElement.className = 'ticket-assets-linked__meta';
           metaElement.textContent = metaParts.join(' · ');
-          item.appendChild(metaElement);
+          summary.appendChild(metaElement);
         }
 
         const actions = document.createElement('div');
@@ -1479,6 +1485,7 @@
             name: record.name,
             serial_number: record.serial_number,
             status: record.status,
+            last_user: record.last_user,
             tactical_asset_id: record.tactical_asset_id,
             tray_device_uid: record.tray_device_uid,
           };

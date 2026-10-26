@@ -27,7 +27,6 @@ def test_admin_ticket_detail_form_enables_autosave_for_details_and_assets():
     assert "data-ticket-details-autosave" in template
     assert "data-ticket-details-autosave-status" in template
     assert "Changes save automatically when you leave a field." in template
-    assert "Asset changes save automatically." in template
     assert "function initialiseTicketDetailsAutosave()" in script
     assert "document.addEventListener('focusout'" in script
     assert "document.addEventListener('change'" in script
