@@ -100,6 +100,7 @@ def reporting_assets(checks: list[dict[str, Any]]) -> dict[str, list[dict[str, A
             found.setdefault(key, []).append({
                 "asset_id": check.get("asset_id"),
                 "asset_name": check.get("asset_name") or f"Asset {check.get('asset_id')}",
+                "company_name": check.get("company_name"),
                 "check_id": check.get("id"),
                 "completed_at": check.get("completed_at"),
                 "severity": worst.get("severity"),
@@ -109,9 +110,17 @@ def reporting_assets(checks: list[dict[str, Any]]) -> dict[str, list[dict[str, A
 
 
 async def _reporting_for(company_id: int | None) -> dict[str, list[dict[str, Any]]]:
-    if company_id is None:
-        return {}
-    return reporting_assets(await checks_repo.latest_completed_for_company(int(company_id)))
+    """The assets reporting each detection: ``None`` covers every company."""
+
+    return reporting_assets(await checks_repo.latest_completed_for_company(company_id))
+
+
+async def _reporting_scope(request: Request, user: dict[str, Any], company_id: int) -> int | None:
+    """Helpdesk technicians and super admins see every company's assets; others their own company's."""
+
+    if user.get("is_super_admin") or await hc_routes._main()._is_helpdesk_technician(user, request):
+        return None
+    return company_id
 
 
 def _detection_view(
@@ -188,7 +197,8 @@ async def _render(request: Request, user: dict[str, Any], company_id: int, can_e
                   editor: dict[str, Any] | None = None, status_code: int = 200):
     company = await company_repo.get_company_by_id(company_id)
     links = await remediation_repo.list_for_company(company_id)
-    groups = catalog_view(links, company_id, await _collected_logs(company_id), await _reporting_for(company_id))
+    reporting_company = await _reporting_scope(request, user, company_id)
+    groups = catalog_view(links, company_id, await _collected_logs(company_id), await _reporting_for(reporting_company))
     variables = [{"group": "Health check", "label": label, "token": token}
                  for label, token in remediation.HEALTH_VARIABLES]
     if editor:
@@ -198,6 +208,7 @@ async def _render(request: Request, user: dict[str, Any], company_id: int, can_e
         extra={
             "title": "Health check detections",
             "company": company,
+            "all_companies": reporting_company is None,
             "groups": groups,
             "counts": {
                 "detections": len(detections.DETECTIONS),
@@ -316,7 +327,7 @@ async def api_detections(
     current_user: dict = Depends(require_helpdesk_technician),
 ):
     links = await remediation_repo.list_for_company(company_id)
-    groups = catalog_view(links, company_id, await _collected_logs(company_id), await _reporting_for(company_id))
+    groups = catalog_view(links, company_id, await _collected_logs(company_id), await _reporting_for(None))
     return JSONResponse({"detections": hc_routes._json([item for group in groups for item in group["items"]])})
 
 

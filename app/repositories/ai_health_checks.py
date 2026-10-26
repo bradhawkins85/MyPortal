@@ -129,16 +129,25 @@ async def last_completed_since(asset_id: int, since: datetime) -> dict[str, Any]
     ))
 
 
-async def latest_completed_for_company(company_id: int) -> list[dict[str, Any]]:
-    """Each of the company's current assets' latest completed health check, with its report."""
+async def latest_completed_for_company(company_id: int | None) -> list[dict[str, Any]]:
+    """Each current asset's latest completed health check, with its report.
 
+    ``company_id`` limits it to that company's assets; ``None`` covers every company.
+    """
+
+    scope = "h.company_id = a.company_id"
+    params: tuple[Any, ...] = ()
+    if company_id is not None:
+        scope += " AND a.company_id = %s"
+        params = (int(company_id),)
     rows = await db.fetch_all(
-        "SELECT h.id, h.asset_id, h.platform, h.completed_at, h.report_json, a.name AS asset_name "
-        "FROM ai_health_checks h JOIN assets a ON a.id = h.asset_id "
-        "WHERE h.company_id = %s AND a.company_id = %s AND a.archived_at IS NULL AND h.id = ("
+        "SELECT h.id, h.asset_id, h.platform, h.completed_at, h.report_json, a.name AS asset_name, "  # nosec B608 - fixed SQL
+        "c.name AS company_name "
+        "FROM ai_health_checks h JOIN assets a ON a.id = h.asset_id LEFT JOIN companies c ON c.id = a.company_id "
+        "WHERE " + scope + " AND a.archived_at IS NULL AND h.id = ("
         "SELECT MAX(l.id) FROM ai_health_checks l WHERE l.asset_id = h.asset_id AND l.status = 'completed') "
-        "ORDER BY a.name, h.asset_id",
-        (int(company_id), int(company_id)),
+        "ORDER BY c.name, a.name, h.asset_id",
+        params,
     )
     return [_row(row) for row in rows or []]
 
