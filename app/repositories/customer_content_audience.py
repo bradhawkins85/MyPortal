@@ -23,6 +23,28 @@ async def list_role_ids(company_id: int, content_type: str, record_id: int) -> l
     return [int(row["role_id"]) for row in rows]
 
 
+async def list_role_ids_for_records(
+    company_id: int, content_type: str, record_ids: Iterable[int]
+) -> dict[int, list[int]]:
+    """:func:`list_role_ids` for many records in one query; records without
+    audience rows are left out."""
+
+    ids = sorted({int(value) for value in record_ids})
+    if not ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(ids))
+    # Only "%s" placeholders are concatenated; every value is a bound parameter.
+    rows = await db.fetch_all(
+        "SELECT record_id, role_id FROM customer_content_role_audience "  # nosec B608
+        f"WHERE company_id = %s AND content_type = %s AND record_id IN ({placeholders}) ORDER BY record_id, role_id",
+        (company_id, _content_type(content_type), *ids),
+    )
+    roles: dict[int, list[int]] = {}
+    for row in rows or []:
+        roles.setdefault(int(row["record_id"]), []).append(int(row["role_id"]))
+    return roles
+
+
 async def role_can_access(company_id: int, content_type: str, record_id: int, role_id: int) -> bool:
     row = await db.fetch_one(
         "SELECT 1 AS allowed FROM customer_content_role_audience WHERE company_id = %s AND content_type = %s AND record_id = %s AND role_id = %s",

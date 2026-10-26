@@ -129,6 +129,17 @@ def _number_ports(ports: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return numbered
 
 
+async def relationship_targets(company_id: int) -> dict[str, list[dict[str, Any]]]:
+    """A company's networks and racks as the asset relationship picker lists them,
+    without the addresses, equipment and ports :func:`overview` also loads."""
+
+    networks = list(await db.fetch_all(
+        "SELECT id, name, cidr FROM ip_networks WHERE company_id=%s ORDER BY name", (company_id,)) or [])
+    racks = list(await db.fetch_all(
+        "SELECT id, name, location, unit_count FROM racks WHERE company_id=%s ORDER BY name", (company_id,)) or [])
+    return {"networks": networks, "racks": racks}
+
+
 async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
     networks = list(await db.fetch_all(
         """SELECT n.*, COUNT(i.id) address_count

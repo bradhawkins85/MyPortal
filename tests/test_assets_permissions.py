@@ -159,7 +159,7 @@ async def test_assets_page_adds_tray_agent_sync_column(monkeypatch):
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", fake_list_field_definitions)
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", fake_get_all_asset_field_values)
     monkeypatch.setattr(assets_routes.tray_repo, "list_active_devices_by_asset_ids", fake_list_active_devices_by_asset_ids)
-    monkeypatch.setattr(assets_routes, "_customer_role_can_view_asset", AsyncMock(return_value=True))
+    monkeypatch.setattr(assets_routes, "_customer_visible_assets", AsyncMock(side_effect=lambda _membership, _company_id, rows: [row for row in rows if row.get("customer_visible")]))
     monkeypatch.setattr(main_module, "_render_template", fake_render_template)
 
     response = await assets_routes.assets_page(_request())

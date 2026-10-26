@@ -485,6 +485,21 @@ async def create_ticket(
     return created
 
 
+async def list_relationship_targets(company_id: int) -> list[dict[str, Any]]:
+    """A company's tickets as the asset relationship picker lists them.
+
+    Only the columns the picker shows, so a company with many tickets does
+    not load every ticket's full record on each asset page."""
+
+    rows = await db.fetch_all(
+        "SELECT id, ticket_number, subject, status FROM tickets "
+        "WHERE company_id = %s AND merged_into_ticket_id IS NULL "
+        "ORDER BY updated_at DESC, id DESC",
+        (company_id,),
+    )
+    return [dict(row) for row in rows or []]
+
+
 async def list_tickets(
     *,
     status: str | Sequence[str] | None = None,

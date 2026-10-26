@@ -59,6 +59,7 @@ MYSQL_SCHEMA: tuple[str, ...] = (
       UNIQUE KEY uq_rmm_event_log_record (agent_id, log_name, record_id),
       KEY idx_rmm_event_log_company_time (company_id, time_created),
       KEY idx_rmm_event_log_asset_time (asset_id, log_name, time_created),
+      KEY idx_rmm_event_log_company_asset_time (company_id, asset_id, time_created),
       KEY idx_rmm_event_log_time (time_created),
       KEY idx_rmm_event_log_repeats (agent_id, message_id, time_created)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -116,6 +117,7 @@ SQLITE_SCHEMA: tuple[str, ...] = (
     f"CREATE TABLE IF NOT EXISTS {META_TABLE} (name TEXT NOT NULL PRIMARY KEY, value INTEGER NOT NULL)",
     f"CREATE INDEX IF NOT EXISTS idx_rmm_event_log_company_time ON {ENTRIES_TABLE} (company_id, time_created)",
     f"CREATE INDEX IF NOT EXISTS idx_rmm_event_log_asset_time ON {ENTRIES_TABLE} (asset_id, log_name, time_created)",
+    f"CREATE INDEX IF NOT EXISTS idx_rmm_event_log_company_asset_time ON {ENTRIES_TABLE} (company_id, asset_id, time_created)",
     f"CREATE INDEX IF NOT EXISTS idx_rmm_event_log_time ON {ENTRIES_TABLE} (time_created)",
 )
 
@@ -129,6 +131,9 @@ COLUMNS: tuple[Column, ...] = (
 )
 INDEXES: tuple[Index, ...] = (
     Index(ENTRIES_TABLE, "idx_rmm_event_log_repeats", "agent_id, message_id, time_created"),
+    # The asset page reads a device's newest entries; without it MySQL walks
+    # the whole company's history for a quiet device.
+    Index(ENTRIES_TABLE, "idx_rmm_event_log_company_asset_time", "company_id, asset_id, time_created"),
 )
 
 
