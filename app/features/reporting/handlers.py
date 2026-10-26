@@ -24,6 +24,7 @@ REPORT_COLUMNS = (
     {"key": "slug", "label": "Slug", "sort": "string", "default_visible": False},
     {"key": "description", "label": "Description", "sort": "string"},
     {"key": "system", "label": "System", "sort": "string", "filter_options": "multiple"},
+    {"key": "company_scoped", "label": "Company scoped", "sort": "string", "filter_options": "multiple"},
     {"key": "updated", "label": "Updated", "sort": "date"},
 )
 # Keys are raw module status reasons; values are the client-safe labels we expose.
@@ -442,6 +443,7 @@ async def admin_reporting(
     request: Request,
 ):
     from app.repositories import reporting as reporting_repo
+    from app.services import reporting as reporting_service
 
     user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -452,6 +454,10 @@ async def admin_reporting(
         prepared = dict(record)
         prepared["category"] = (record.get("category") or "").strip() or UNCATEGORISED
         prepared["updated_at_iso"] = _main()._to_iso(record.get("updated_at"))
+        # Worked out from the SQL on every load, so edits are reflected at once.
+        prepared["company_scoped"] = reporting_service.uses_company_context(
+            str(record.get("sql_query") or "")
+        )
         reports_payload.append(prepared)
     reports_payload.sort(
         key=lambda report: (

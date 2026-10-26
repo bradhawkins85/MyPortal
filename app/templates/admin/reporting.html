@@ -59,6 +59,9 @@
               <td data-column-key="slug" data-label="Slug"><code>{{ report.slug }}</code></td>
               <td data-column-key="description" data-label="Description">{{ report.description or '—' }}</td>
               <td data-column-key="system" data-label="System">{% if report.is_system %}Yes{% else %}No{% endif %}</td>
+              <td data-column-key="company_scoped" data-label="Company scoped" data-value="{{ 'Yes' if report.company_scoped else 'No' }}">
+                {% if report.company_scoped %}<span title="Filtered by {{ '{{current.company}}' }}">&#10003;<span class="visually-hidden"> Yes</span></span>{% else %}<span class="text-muted" aria-label="No">&mdash;</span>{% endif %}
+              </td>
               <td data-column-key="updated" data-label="Updated" data-value="{{ report.updated_at_iso or '' }}">
                 {% if report.updated_at_iso %}
                   <span data-utc="{{ report.updated_at_iso }}">{{ report.updated_at_iso }}</span>
