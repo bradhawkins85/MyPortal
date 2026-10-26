@@ -6,6 +6,9 @@
 // it carries on where it left off after a restart. A log never sent before
 // starts from the last InitialLookbackHours. When a log is cleared its record
 // IDs start again from 1, which the agent notices and starts over.
+//
+// Events less severe than MyPortal keeps (Collector.MaxLevel) are read but
+// not sent, and the cursor still moves past them.
 package eventlog
 
 import (
@@ -75,6 +78,26 @@ type Collector struct {
 	Cursors Cursors
 	Path    string
 	Now     func() time.Time
+	// MaxLevel is the least severe level sent: 1 critical, 2 error,
+	// 3 warning, 4 information, 5 or 0 everything. "Log always" events
+	// (level 0) are always sent.
+	MaxLevel int
+}
+
+// Keep reports whether an event at level is sent when maxLevel is the least
+// severe level kept.
+func Keep(level, maxLevel int) bool {
+	return maxLevel <= 0 || maxLevel >= 5 || level == 0 || level <= maxLevel
+}
+
+func (c *Collector) keep(entries []client.EventLogEntry) []client.EventLogEntry {
+	kept := entries[:0]
+	for _, entry := range entries {
+		if Keep(entry.Level, c.MaxLevel) {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
 }
 
 // SyncLog sends everything new in one log, a batch at a time.
@@ -103,7 +126,7 @@ func (c *Collector) SyncLog(ctx context.Context, log string, maxBatch int, lookb
 			}
 			return nil
 		}
-		if len(entries) > 0 {
+		if entries = c.keep(entries); len(entries) > 0 {
 			if err := c.Send(ctx, entries); err != nil {
 				return err
 			}

@@ -5,8 +5,9 @@ stats) lives in its own database so the main database stays small and backups
 stay quick. Each one is configured with its own ``<PREFIX>_DB_*`` settings and
 is off while host, user or name is empty: nothing ever falls back to the main
 database. On connect MyPortal creates the database when it is missing and the
-user may, then any missing tables. A connection failure never stops MyPortal
-starting; :meth:`SecondaryDatabase.ensure_connected` tries again at most once
+user may, then any missing tables, columns (:class:`Column`) and indexes
+(:class:`Index`) added since the tables were first made. A connection failure
+never stops MyPortal starting; :meth:`SecondaryDatabase.ensure_connected` tries again at most once
 a minute.
 
 Tests pass ``sqlite_path`` to use SQLite instead.
@@ -40,8 +41,31 @@ class Connection:
     name: str | None
 
 
+@dataclass(frozen=True)
+class Column:
+    """A column added to ``table`` after it was first created. ``definition``
+    follows the column name in ``ALTER TABLE ... ADD COLUMN`` on both MySQL and
+    SQLite."""
+
+    table: str
+    name: str
+    definition: str
+
+
+@dataclass(frozen=True)
+class Index:
+    """An index added to ``table`` after it was first created (MySQL has no
+    ``CREATE INDEX IF NOT EXISTS``)."""
+
+    table: str
+    name: str
+    columns: str
+
+
 _DATABASE_NAME = re.compile(r"^[A-Za-z0-9_$]{1,64}$")
 _UNKNOWN_DATABASE = 1049
+_DUPLICATE_COLUMN = 1060
+_DUPLICATE_INDEX = 1061
 RETRY_SECONDS = 60
 
 
@@ -58,6 +82,8 @@ class SecondaryDatabase:
         mysql_schema: tuple[str, ...],
         sqlite_schema: tuple[str, ...],
         sqlite_path: str | None = None,
+        columns: tuple[Column, ...] = (),
+        indexes: tuple[Index, ...] = (),
     ) -> None:
         self.label = label
         self.env_prefix = env_prefix
@@ -65,6 +91,9 @@ class SecondaryDatabase:
         self._mysql_schema = mysql_schema
         self._sqlite_schema = sqlite_schema
         self._sqlite_path = sqlite_path
+        self._columns = columns
+        self._indexes = indexes
+        self._index_task: asyncio.Task | None = None
         self._pool: Any | None = None
         self._sqlite_conn: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
@@ -109,6 +138,7 @@ class SecondaryDatabase:
                     conn.row_factory = aiosqlite.Row
                     for statement in self._sqlite_schema:
                         await conn.execute(statement)
+                    await self._upgrade_sqlite(conn)
                     await conn.commit()
                     self._sqlite_conn = conn
                 else:
@@ -117,6 +147,7 @@ class SecondaryDatabase:
                         async with conn.cursor() as cursor:
                             for statement in self._mysql_schema:
                                 await cursor.execute(statement)
+                            await self._upgrade_mysql(cursor)
             except Exception as exc:
                 await self._close()
                 self.last_error = str(exc) or exc.__class__.__name__
@@ -125,6 +156,69 @@ class SecondaryDatabase:
             self.last_error = None
             logger.info("{label} database connected", label=self.label)
             return True
+
+    async def _upgrade_sqlite(self, conn: aiosqlite.Connection) -> None:
+        for column in self._columns:
+            cursor = await conn.execute(f"PRAGMA table_info({column.table})")
+            if column.name not in {row[1] for row in await cursor.fetchall()}:
+                await conn.execute(f"ALTER TABLE {column.table} ADD COLUMN {column.name} {column.definition}")
+        for index in self._indexes:
+            await conn.execute(f"CREATE INDEX IF NOT EXISTS {index.name} ON {index.table} ({index.columns})")
+
+    async def _upgrade_mysql(self, cursor: Any) -> None:
+        """Add missing columns now (instant on MySQL 8 and MariaDB 10.3+), one
+        ALTER per table, and missing indexes in the background, since
+        indexing a large table can take minutes."""
+
+        # Table, column and index names are fixed in code, not user input.
+        missing: dict[str, list[Column]] = {}
+        for column in self._columns:
+            await cursor.execute(
+                "SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+                (column.table, column.name),
+            )
+            if not await cursor.fetchall():
+                missing.setdefault(column.table, []).append(column)
+        for table, columns in missing.items():
+            additions = ", ".join(f"ADD COLUMN {column.name} {column.definition}" for column in columns)
+            await self._alter(cursor, f"ALTER TABLE {table} {additions}")
+            logger.info("Added {columns} to {label} database", columns=", ".join(f"{table}.{c.name}" for c in columns),
+                        label=self.label)
+        indexes = []
+        for index in self._indexes:
+            await cursor.execute(
+                "SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = %s AND INDEX_NAME = %s",
+                (index.table, index.name),
+            )
+            if not await cursor.fetchall():
+                indexes.append(index)
+        if indexes:
+            self._index_task = asyncio.create_task(self._add_indexes(indexes))
+
+    async def _add_indexes(self, indexes: list[Index]) -> None:
+        for index in indexes:
+            logger.info("Adding index {name} to {label} database", name=index.name, label=self.label)
+            try:
+                async with self._pool.acquire() as conn:  # type: ignore[union-attr]
+                    async with conn.cursor() as cursor:
+                        await self._alter(cursor, f"ALTER TABLE {index.table} ADD INDEX {index.name} ({index.columns})")
+            except Exception as exc:  # the database keeps working without it, only slower
+                logger.error("Could not add index {name} to {label} database: {error}",
+                             name=index.name, label=self.label, error=str(exc) or exc.__class__.__name__)
+                continue
+            logger.info("Added index {name} to {label} database", name=index.name, label=self.label)
+
+    @staticmethod
+    async def _alter(cursor: Any, statement: str) -> None:
+        try:
+            await cursor.execute(statement)
+        except Exception as exc:
+            # Another worker added it first.
+            if getattr(exc, "args", None) and exc.args[0] in (_DUPLICATE_COLUMN, _DUPLICATE_INDEX):
+                return
+            raise
 
     async def ensure_connected(self) -> bool:
         """Connect when not yet connected, trying at most once a minute."""
@@ -170,6 +264,9 @@ class SecondaryDatabase:
         return await aiomysql.create_pool(db=name, minsize=1, maxsize=5, pool_recycle=600, **options)
 
     async def _close(self) -> None:
+        if self._index_task is not None and not self._index_task.done():
+            self._index_task.cancel()
+        self._index_task = None
         if self._sqlite_conn is not None:
             await self._sqlite_conn.close()
             self._sqlite_conn = None

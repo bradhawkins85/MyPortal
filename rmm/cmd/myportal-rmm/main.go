@@ -523,6 +523,7 @@ func eventLogLoop(ctx context.Context, api *client.Client) {
 		off := false
 		eventCollectionMu.Lock()
 		collector.Cursors = eventlog.LoadCursors(path)
+		collector.MaxLevel = cfg.MaxLevel
 		for _, name := range cfg.Logs {
 			err := collector.SyncLog(ctx, name, cfg.MaxBatch, lookback)
 			if errors.Is(err, client.ErrUnavailable) {

@@ -389,7 +389,7 @@
         <tbody>
           {% for entry in elog.entries %}
           <tr>
-            <td data-label="Time"><span data-utc="{{ entry.time_created }}">{{ entry.time_created }}</span></td>
+            <td data-label="Time"><span data-utc="{{ entry.time_created }}">{{ entry.time_created }}</span>{% if entry.repeat_count and entry.repeat_count > 1 %}<br><span class="text-muted">{{ entry.repeat_count }} times{% if entry.last_time_created %}, last <span data-utc="{{ entry.last_time_created }}">{{ entry.last_time_created }}</span>{% endif %}</span>{% endif %}</td>
             <td data-label="Log">{{ entry.log_name }}</td>
             <td data-label="Level"><span class="status status--{{ LEVEL_STATUS.get(entry.level_label, 'neutral') }}">{{ entry.level_label }}</span></td>
             <td data-label="Source">{{ entry.provider or "–" }}</td>
@@ -410,6 +410,16 @@
           <textarea class="form-input" id="asset-event-log-extra" name="extra_logs" rows="3" {% if not elog.can_edit %}readonly{% endif %}>{{ elog.extra_logs | join("\n") }}</textarea>
           <p class="form-help">Always collected: {{ (elog.default_logs + elog.company_logs) | join(", ") }}. Use the log's full name from Event Viewer, such as <code>Microsoft-Windows-PowerShell/Operational</code>.</p>
         </div>
+        {% if elog.max_level_choices %}
+        <div class="form-field">
+          <label class="form-label" for="asset-event-log-level">Levels kept for this device</label>
+          <select class="form-input" id="asset-event-log-level" name="max_level" {% if not elog.can_edit %}disabled{% endif %}>
+            <option value="">{{ "Company" if elog.company_max_level else "Default" }}: {{ elog.level_labels[elog.inherited_max_level] }}</option>
+            {% for value, label in elog.max_level_choices %}<option value="{{ value }}" {% if elog.max_level == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+          <p class="form-help">Less severe events are not sent or stored. "Log always" events, such as Security audits, are always kept.</p>
+        </div>
+        {% endif %}
         {% if elog.can_edit %}<div class="form-actions"><button class="button button--primary button--small" type="submit">Save logs</button></div>{% endif %}
       </form>
     </div>

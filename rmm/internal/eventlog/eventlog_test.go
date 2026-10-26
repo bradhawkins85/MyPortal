@@ -3,6 +3,7 @@ package eventlog
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -73,6 +74,7 @@ func TestNewestRecordID(t *testing.T) {
 type fakeSource struct {
 	records []uint64
 	reads   []uint64
+	levels  map[uint64]int // level 4 when missing
 }
 
 func (f *fakeSource) Read(_ context.Context, log string, after uint64, _ time.Time, max int) ([]client.EventLogEntry, uint64, int, error) {
@@ -81,7 +83,11 @@ func (f *fakeSource) Read(_ context.Context, log string, after uint64, _ time.Ti
 	var highest uint64
 	for _, id := range f.records {
 		if id > after && len(entries) < max {
-			entries = append(entries, client.EventLogEntry{LogName: log, RecordID: id})
+			level, ok := f.levels[id]
+			if !ok {
+				level = 4
+			}
+			entries = append(entries, client.EventLogEntry{LogName: log, RecordID: id, Level: level})
 			highest = id
 		}
 	}
@@ -132,6 +138,39 @@ func TestCollectorSendsInBatchesAndRemembersItsPlace(t *testing.T) {
 	}
 	if LoadCursors(path)["system"] != 1 {
 		t.Fatalf("cursors = %v", LoadCursors(path))
+	}
+}
+
+func TestCollectorLeavesOutLessSevereEventsButMovesPastThem(t *testing.T) {
+	// 1 information, 2 warning, 3 error, 4 log always, 5 verbose, 6 information.
+	source := &fakeSource{records: []uint64{1, 2, 3, 4, 5, 6}, levels: map[uint64]int{2: 3, 3: 2, 4: 0, 5: 5}}
+	var sent []uint64
+	path := filepath.Join(t.TempDir(), "cursors.json")
+	collector := &Collector{
+		Source: source,
+		Send: func(_ context.Context, entries []client.EventLogEntry) error {
+			for _, entry := range entries {
+				sent = append(sent, entry.RecordID)
+			}
+			return nil
+		},
+		Cursors:  Cursors{},
+		Path:     path,
+		MaxLevel: 3,
+	}
+	if err := collector.SyncLog(context.Background(), "System", 2, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(sent) != "[2 3 4]" || LoadCursors(path)["system"] != 6 {
+		t.Fatalf("sent=%v cursors=%v", sent, LoadCursors(path))
+	}
+	for _, maxLevel := range []int{0, 5} {
+		if !Keep(5, maxLevel) || !Keep(200, maxLevel) {
+			t.Fatalf("max level %d should keep everything", maxLevel)
+		}
+	}
+	if Keep(4, 3) || !Keep(0, 1) || !Keep(1, 1) || Keep(2, 1) {
+		t.Fatal("Keep compares levels wrongly")
 	}
 }
 
