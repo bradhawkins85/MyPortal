@@ -49,7 +49,10 @@ case "${1:-serve}" in
     if [[ "${MYPORTAL_MIGRATE_ON_START:-true}" != "false" ]]; then
       run_migrations
     fi
-    args=(--host 0.0.0.0 --port "${PORT:-8000}" --workers "${WEB_CONCURRENCY:-4}")
+    # Keep idle connections open longer than the proxy's upstream
+    # keepalive_timeout (60s), or nginx reuses ones Uvicorn has just closed.
+    args=(--host 0.0.0.0 --port "${PORT:-8000}" --workers "${WEB_CONCURRENCY:-4}"
+      --timeout-keep-alive "${UVICORN_TIMEOUT_KEEP_ALIVE:-75}")
     if [[ -n "${TRUSTED_PROXIES:-}" ]]; then
       # Keep Uvicorn's client address handling aligned with MyPortal's
       # TRUSTED_PROXIES boundary when a reverse proxy sits in front.
