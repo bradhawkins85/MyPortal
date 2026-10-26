@@ -11967,6 +11967,7 @@ async def _render_ticket_detail(
                 "name": str(asset.get("name") or "").strip() or (f"Asset {asset_identifier}" if asset_identifier else "Asset"),
                 "serial_number": (str(asset.get("serial_number") or "").strip() or None),
                 "status": (str(asset.get("status") or "").strip() or None),
+                "last_user": (str(asset.get("last_user") or "").strip() or None),
                 "tactical_asset_id": (str(asset.get("tactical_asset_id") or "").strip() or None),
                 "tray_device_uid": (str(asset.get("tray_device_uid") or "").strip() or None),
             }
@@ -12012,6 +12013,7 @@ async def _render_ticket_detail(
                     "name": str(asset_row.get("name") or "").strip() or f"Asset {asset_id_int}",
                     "serial_number": str(asset_row.get("serial_number") or "").strip() or None,
                     "status": str(asset_row.get("status") or "").strip() or None,
+                    "last_user": str(asset_row.get("last_user") or "").strip() or None,
                     "tactical_asset_id": str(asset_row.get("tactical_asset_id") or "").strip() or None,
                     "tray_device_uid": (
                         str((tray_device or {}).get("device_uid") or asset_row.get("tray_device_uid") or "").strip()

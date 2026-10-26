@@ -4226,14 +4226,21 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
   padding-right: var(--space-gap-base);
 }
 
-.ticket-assets-linked__item--actions .ticket-assets-linked__name,
-.ticket-assets-linked__item--actions .ticket-assets-linked__meta {
+.ticket-assets-linked__item--actions .ticket-assets-linked__summary {
   grid-column: 1;
+}
+
+.ticket-assets-linked__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  min-width: 0;
 }
 
 .ticket-assets-linked__actions {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1;
   display: inline-flex;
   flex-wrap: wrap;
   justify-content: flex-end;

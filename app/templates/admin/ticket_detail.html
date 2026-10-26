@@ -1047,12 +1047,14 @@
                       </li>
                     {% endfor %}
                     {% for asset in ticket_assets %}
-                      {% set serial_value = asset.serial_number %}
                       {% set status_value = asset.status %}
                       {% set status_label = status_value.replace('_', ' ').title() if status_value %}
                       {% set meta_parts = [] %}
                       {% if status_label %}
                         {% set _ = meta_parts.append(status_label) %}
+                      {% endif %}
+                      {% if asset.last_user %}
+                        {% set _ = meta_parts.append(asset.last_user) %}
                       {% endif %}
                       {% set base_name = asset.name or ('Asset ' ~ asset.asset_id) %}
                       {% set display_name = base_name | trim %}
@@ -1074,21 +1076,23 @@
                         data-tactical-id="{{ asset.tactical_asset_id or '' }}"
                       >
                         <input type="hidden" name="assetIds" value="{{ asset.asset_id }}" form="ticket-details-form" />
-                        <a
-                          href="/assets/{{ asset.asset_id }}"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="ticket-assets-linked__name"
-                          data-linked-asset-name
-                          title="{{ tooltip_label }}"
-                        >
-                          {{ display_name }}
-                        </a>
                         {% set agent_state = (ticket_rmm_agent_states or {}).get(asset.asset_id | string) %}
-                        {% if remote_control_providers %}{{ rmm_ui.agent_indicator(agent_state or 'missing') }}{% endif %}
-                        {% if meta_parts %}
-                          <p class="ticket-assets-linked__meta">{{ meta_parts | join(' · ') }}</p>
-                        {% endif %}
+                        <div class="ticket-assets-linked__summary">
+                          {% if remote_control_providers %}{{ rmm_ui.agent_indicator(agent_state or 'missing') }}{% endif %}
+                          <a
+                            href="/assets/{{ asset.asset_id }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="ticket-assets-linked__name"
+                            data-linked-asset-name
+                            title="{{ tooltip_label }}"
+                          >
+                            {{ display_name }}
+                          </a>
+                          {% if meta_parts %}
+                            <span class="ticket-assets-linked__meta">{{ meta_parts | join(' · ') }}</span>
+                          {% endif %}
+                        </div>
                         <div class="ticket-assets-linked__actions">
                           <a href="/assets/{{ asset.asset_id }}" class="button button--ghost button--small">Documentation</a>
                           {% if remote_control_providers and agent_state %}{{ rmm_ui.asset_menu(asset.asset_id, display_name, remote_control_providers) }}{% endif %}
@@ -1162,14 +1166,6 @@
                   </p>
                 </div>
               </div>
-              <div class="form-field">
-                <label class="form-label form-label--checkbox">
-                  <input type="checkbox" name="sendTrayNotification" value="1" form="ticket-details-form" />
-                  Send tray push notification
-                </label>
-                <p class="form-help">Optionally notify linked tray devices that this ticket was updated.</p>
-              </div>
-              <p class="form-help" data-ticket-details-autosave-status role="status" aria-live="polite">Asset changes save automatically.</p>
               </div>
             </div>
           </details>
