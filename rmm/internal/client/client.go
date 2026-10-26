@@ -248,6 +248,9 @@ type EventLogConfig struct {
 	IntervalSeconds      int      `json:"interval_seconds"`
 	MaxBatch             int      `json:"max_batch"`
 	InitialLookbackHours int      `json:"initial_lookback_hours"`
+	// MaxLevel is the least severe level to send (1 critical to 5 verbose);
+	// 0, from servers that do not say, sends everything.
+	MaxLevel int `json:"max_level"`
 }
 
 // EventLogEntry is one event log record sent to MyPortal.

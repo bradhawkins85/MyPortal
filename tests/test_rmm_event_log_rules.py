@@ -142,7 +142,7 @@ async def test_ingest_drops_entries_and_runs_scripts_with_a_cooldown(sqlite_db, 
 
     batch = [_entry(1), _entry(2), _entry(3, level=2, event_id=7, message="Bad block"),
              _entry(4, level=1, event_id=41, message="Rebooted")]
-    assert await event_logs.ingest(agent, batch) == {"received": 4, "stored": 2, "skipped": 0, "dropped": 2, "runs": 1, "scheduled": 0, "tickets": 0}
+    assert await event_logs.ingest(agent, batch) == {"received": 4, "stored": 2, "skipped": 0, "dropped": 2, "runs": 1, "scheduled": 0, "tickets": 0, "repeats": 0, "below_level": 0}
     assert sorted(e["record_id"] for e in await event_log_repo.list_entries(company_id=1)) == [3, 4]
 
     runs = await rmm_repo.list_runs(company_id=1)
@@ -270,7 +270,9 @@ async def test_run_now_scans_in_batches(sqlite_db, event_db, monkeypatch):
         is_super_admin=False, conditions=[{"field": "message", "operator": "is", "value": "noise"}])
     monkeypatch.setattr(rules, "RUN_NOW_BATCH", 3)
     assert await rules.drop_stored(await rules_repo.get_rule(rule_id), delete=True) == 6
-    assert sorted(e["record_id"] for e in await event_log_repo.list_entries(company_id=1)) == [2, 4, 6, 8, 10]
+    # The five identical "Keep" events are one entry counting them all.
+    kept = await event_log_repo.list_entries(company_id=1)
+    assert [(e["record_id"], e["repeat_count"]) for e in kept] == [(2, 5)]
 
 
 def test_rules_page_run_now_confirm_and_action_menu():

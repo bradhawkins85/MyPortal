@@ -358,6 +358,8 @@ def parse_security_event(row: Mapping[str, Any]) -> dict[str, Any] | None:
     event: dict[str, Any] = {
         "kind": kind, "agent_id": int(row["agent_id"]), "company_id": row.get("company_id"),
         "time": _as_datetime(row.get("time_created")), "log_name": row.get("log_name"),
+        # One stored entry can stand for repeats of the same event.
+        "repeats": max(1, int(row.get("repeat_count") or 1)),
     }
     if kind == "lockout":
         event["account"] = _account(_field(_section(message, "Locked Out:") or message, "Account Name"))
@@ -391,8 +393,8 @@ def group_lockouts(events: Sequence[Mapping[str, Any]], *, since: datetime) -> l
         key = (event.get("company_id"), event["account"].lower())
         group = groups.setdefault(key, {"account": event["account"], "company_id": event.get("company_id"),
                                         "count": 0, "callers": Counter(), "agents": set()})
-        group["count"] += 1
-        group["callers"][event.get("caller") or "unknown"] += 1
+        group["count"] += event.get("repeats", 1)
+        group["callers"][event.get("caller") or "unknown"] += event.get("repeats", 1)
         group["agents"].add(event["agent_id"])
     return sorted(groups.values(), key=lambda group: group["count"], reverse=True)
 

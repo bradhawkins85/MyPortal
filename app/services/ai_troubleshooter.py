@@ -1128,6 +1128,10 @@ def _format_stored_entry(entry: Mapping[str, Any]) -> str:
     provider = str(entry.get("provider") or "").strip()
     if provider:
         line += " " + provider
+    repeats = int(entry.get("repeat_count") or 1)
+    if repeats > 1:
+        last = _as_naive_utc(entry.get("last_time_created"))
+        line += f" (x{repeats}" + (f", last {last.strftime('%H:%M:%S UTC')})" if last else ")")
     message = " ".join(str(entry.get("message") or "").split())[:_STORED_LOG_MAX_MESSAGE]
     if message:
         line += ": " + message

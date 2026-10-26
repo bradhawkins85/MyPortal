@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence
 
 from app.core.database import db
-from app.core.event_log_database import ENTRIES_TABLE, event_log_db
+from app.core.event_log_database import ENTRIES_TABLE, MESSAGES_TABLE, event_log_db
 from app.core.stats_database import SAMPLES_TABLE, stats_db
 
 _FINDING_COLUMNS = (
@@ -369,10 +369,12 @@ async def list_failing_agents(check_id: int, limit: int = 25) -> list[int]:
 
 
 async def event_counts(*, since: datetime, until: datetime) -> list[dict[str, Any]]:
-    """Entries per log, source and event ID between ``since`` and ``until``."""
+    """Occurrences per log, source and event ID between ``since`` and ``until``
+    (an entry can stand for several repeats, :mod:`app.core.event_log_database`)."""
 
     return await event_log_db.fetch_all(
-        "SELECT log_name, COALESCE(provider, '') AS provider, event_id, MIN(level) AS level, COUNT(*) AS total, "
+        "SELECT log_name, COALESCE(provider, '') AS provider, event_id, MIN(level) AS level, "
+        "SUM(repeat_count) AS total, "
         "COUNT(DISTINCT agent_id) AS devices, COUNT(DISTINCT company_id) AS companies "
         "FROM " + ENTRIES_TABLE + " WHERE time_created >= %s AND time_created < %s "  # nosec B608 - fixed table
         "GROUP BY log_name, COALESCE(provider, ''), event_id",
@@ -384,12 +386,12 @@ async def event_agent_counts(
     *, log_name: str, provider: str, event_id: int, baseline_start: datetime, current_start: datetime,
     until: datetime,
 ) -> list[dict[str, Any]]:
-    """For one event: each device's entries in the current and baseline windows."""
+    """For one event: each device's occurrences in the current and baseline windows."""
 
     return await event_log_db.fetch_all(
         "SELECT agent_id, company_id, asset_id, "
-        "SUM(CASE WHEN time_created >= %s THEN 1 ELSE 0 END) AS current_count, "
-        "SUM(CASE WHEN time_created < %s THEN 1 ELSE 0 END) AS baseline_count, "
+        "SUM(CASE WHEN time_created >= %s THEN repeat_count ELSE 0 END) AS current_count, "
+        "SUM(CASE WHEN time_created < %s THEN repeat_count ELSE 0 END) AS baseline_count, "
         "MIN(CASE WHEN time_created >= %s THEN time_created END) AS first_current "
         "FROM " + ENTRIES_TABLE + " WHERE time_created >= %s AND time_created < %s "  # nosec B608 - fixed table
         "AND log_name = %s AND COALESCE(provider, '') = %s AND event_id = %s "
@@ -400,8 +402,10 @@ async def event_agent_counts(
 
 async def event_sample(*, log_name: str, provider: str, event_id: int, since: datetime) -> str:
     row = await event_log_db.fetch_all(
-        "SELECT message FROM " + ENTRIES_TABLE + " WHERE time_created >= %s AND log_name = %s "  # nosec B608
-        "AND COALESCE(provider, '') = %s AND event_id = %s ORDER BY time_created DESC LIMIT 1",
+        "SELECT COALESCE(m.message, e.message) AS message FROM " + ENTRIES_TABLE + " e "  # nosec B608
+        "LEFT JOIN " + MESSAGES_TABLE + " m ON m.id = e.message_id WHERE e.time_created >= %s "
+        "AND e.log_name = %s AND COALESCE(e.provider, '') = %s AND e.event_id = %s "
+        "ORDER BY e.time_created DESC LIMIT 1",
         (since, log_name, provider, int(event_id)),
     )
     return str((row[0].get("message") if row else "") or "")
@@ -413,10 +417,11 @@ async def security_events(*, event_ids: Sequence[int], since: datetime, limit: i
     if not event_ids:
         return []
     return await event_log_db.fetch_all(
-        "SELECT agent_id, company_id, asset_id, log_name, COALESCE(provider, '') AS provider, event_id, "
-        "computer, message, time_created FROM " + ENTRIES_TABLE + " "  # nosec B608 - fixed table, placeholders
-        "WHERE time_created >= %s AND event_id IN (" + _placeholders(len(event_ids)) + ") "
-        "ORDER BY time_created DESC LIMIT %s",
+        "SELECT e.agent_id, e.company_id, e.asset_id, e.log_name, COALESCE(e.provider, '') AS provider, "
+        "e.event_id, e.computer, COALESCE(m.message, e.message) AS message, e.repeat_count, e.time_created "
+        "FROM " + ENTRIES_TABLE + " e LEFT JOIN " + MESSAGES_TABLE + " m "  # nosec B608 - fixed tables, placeholders
+        "ON m.id = e.message_id WHERE e.time_created >= %s AND e.event_id IN (" + _placeholders(len(event_ids)) + ") "
+        "ORDER BY e.time_created DESC LIMIT %s",
         (since, *(int(event_id) for event_id in event_ids), int(limit)),
     )
 

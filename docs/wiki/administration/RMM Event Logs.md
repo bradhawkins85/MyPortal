@@ -25,6 +25,8 @@ and restart MyPortal:
 | `EVENT_LOG_DB_BACKUP` | `false` | `true` also backs up the event log database (see [Backups](Backups.md)) |
 | `EVENT_LOG_DEFAULT_LOGS` | `Application;System` | Logs every device sends, separated by `;` or `,`, for example `Application;System;Security`. Empty uses Application and System; invalid names are skipped and logged (at most 25) |
 | `EVENT_LOG_RETENTION_DAYS` | `30` | Days of entries to keep; a daily job (03:30) deletes older ones. `0` keeps everything |
+| `EVENT_LOG_MIN_LEVEL` | `verbose` | Least severe level agents send: `critical`, `error`, `warning`, `information` or `verbose` (everything). Companies and devices can choose their own (see [Keeping storage small](#keeping-storage-small)) |
+| `EVENT_LOG_REPEAT_WINDOW_MINUTES` | `60` | An event a device repeats within this many minutes of its first occurrence is stored once with a count. `0` stores every occurrence |
 
 While `EVENT_LOG_DB_HOST`, `EVENT_LOG_DB_USER` or `EVENT_LOG_DB_NAME` is empty, event log
 collection is **off**: agents are told not to send anything, and nothing is written to the main
@@ -38,7 +40,7 @@ database on the same server, with its own user:
 ```sql
 CREATE DATABASE myportal_eventlogs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER 'myportal_events'@'%' IDENTIFIED BY 'a-strong-password';
-GRANT CREATE, ALTER, INDEX, SELECT, INSERT, DELETE ON myportal_eventlogs.* TO 'myportal_events'@'%';
+GRANT CREATE, ALTER, INDEX, SELECT, INSERT, UPDATE, DELETE ON myportal_eventlogs.* TO 'myportal_events'@'%';
 ```
 
 On Docker, run these in the bundled database with `myportal-docker` (or point
@@ -58,13 +60,36 @@ log's full name as shown in Event Viewer → the log's **Properties** → **Full
 `Security`, `Windows PowerShell` or `Microsoft-Windows-PowerShell/Operational`. Changing the logs
 needs write access to Scripts (`menu.rmm_scripts`).
 
+## Keeping storage small
+
+Every device logs many of the same events, so MyPortal keeps event logs small three ways:
+
+- **Levels kept.** On the Event logs page choose **Levels kept** for the whole company, or beside
+  each device (also on the asset page): *Everything (verbose)*, *Information or worse*, *Warning
+  or worse*, *Error or worse* or *Critical only*. A device uses its own choice, else its
+  company's, else `EVENT_LOG_MIN_LEVEL`. Agents leave out less severe events, so they are never
+  sent or stored (MyPortal also drops them from older agents). "Log always" events, such as
+  Security audits, are always kept. Event log rules and health check detections cannot see
+  events that are left out, so keep *Information* where a rule or detection needs it.
+- **Each message stored once.** The text of a message is stored once however many devices
+  and entries share it. Entries stored before this was added are moved over by the daily job
+  (03:30), and message text no entry uses any more is deleted with the entries.
+- **Repeats counted.** When a device logs the same event again (same log, event ID, level,
+  source, computer and message) within `EVENT_LOG_REPEAT_WINDOW_MINUTES` (60) of its first
+  occurrence, the first entry counts it instead of storing another. Lists show how many times it
+  happened and when it last did; health findings and **Run now** count every occurrence. Event
+  log rules still see each occurrence as it arrives.
+
+The event log database user needs `UPDATE` (to count repeats) and `ALTER` and `INDEX` (to add
+the new columns to an existing database on startup).
+
 ## On the asset page
 
 Each device's page (`/assets/{id}`) has two sections for technicians with Scripts access:
 
 - **Event logs**: the latest 25 entries from the device, filters for log, level, event ID,
   source, message text and a date range (up to 100 matching entries), a link to the Event logs
-  page, and the device's extra logs.
+  page, and the device's extra logs and levels kept.
 - **Event log automations**: every rule that applies to the device (its own, its company's and
   those for every company), with **Add a rule for this device**.
 
@@ -145,10 +170,15 @@ has checked in within the last 10 minutes and retention keeps the whole window i
   `log`, `level` (`1` critical, `2` error or worse, `3` warning or worse), `event_id`, `q` (text
   in the message or source), `source` (text in the source), `from` and `to` (UTC dates,
   inclusive) and `limit` (up to 1000). Answers 503 while collection is off.
-- Agents use `GET /api/rmm/agent/event-logs/config` and `POST /api/rmm/agent/event-logs`. An
+- Agents use `GET /api/rmm/agent/event-logs/config` (which logs, and `max_level`, the least
+  severe level to send: `1` critical to `5` verbose) and `POST /api/rmm/agent/event-logs`. An
   entry is stored once: resending a batch is harmless. Entries from logs the device is not set to
-  collect are skipped. The answer counts entries `received`, `stored`, `skipped`, `dropped` by
-  rules, script `runs` the rules started, runs `scheduled` for later and new `tickets` they raised.
+  collect are skipped. The answer counts entries `received`, `stored`, `repeats` (stored as a
+  count on an earlier entry), `skipped`, `below_level` (less severe than the device keeps),
+  `dropped` by rules, script `runs` the rules started, runs `scheduled` for later and new
+  `tickets` they raised.
+- Entries from `GET /api/rmm/event-logs` include `repeat_count` and `last_time_created` (the
+  last occurrence, or null for a single one).
 
 ### Device rules
 

@@ -368,7 +368,8 @@ async def sqlite_db(monkeypatch):
         "ALTER TABLE rmm_onboarding_steps ADD COLUMN package_ids_json TEXT;"
     )
     for name in ("508_rmm_script_run_as.sql", "509_rmm_ticket_script_runs.sql", "512_rmm_onboarding_skip_existing.sql",
-                 "517_rmm_onboarding_inventory_gate.sql", "518_rmm_script_result_rules.sql"):
+                 "517_rmm_onboarding_inventory_gate.sql", "518_rmm_script_result_rules.sql",
+                 "522_rmm_event_log_min_level.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES

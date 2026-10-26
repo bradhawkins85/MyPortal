@@ -649,7 +649,7 @@ def _event_id_prefilter(rule: Mapping[str, Any]) -> list[int] | None:
 
 
 async def drop_stored(rule: Mapping[str, Any], *, delete: bool) -> int:
-    """Count, or delete, the stored entries a drop rule matches in its scope."""
+    """Count, or delete, the stored events a drop rule matches in its scope."""
 
     if rule.get("action") != "drop":
         raise RuleError({"action": "Only drop rules can run now."})
@@ -676,8 +676,10 @@ async def drop_stored(rule: Mapping[str, Any], *, delete: bool) -> int:
         if not rows:
             break
         after_id = int(rows[-1]["id"])
-        ids = [int(row["id"]) for row in rows if (allowed_agents is None or row.get("agent_id") in allowed_agents) and rule_matches(rule, row)]
-        matched += len(ids)
+        hits = [row for row in rows if (allowed_agents is None or row.get("agent_id") in allowed_agents) and rule_matches(rule, row)]
+        ids = [int(row["id"]) for row in hits]
+        # An entry can stand for several repeats of its event.
+        matched += sum(int(row.get("repeat_count") or 1) for row in hits)
         if delete and ids:
             await event_log_repo.delete_entries(ids)
         if len(rows) < RUN_NOW_BATCH:

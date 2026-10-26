@@ -6,7 +6,8 @@ which logs are collected):
 * ``GET /rmm/event-logs`` the company's entries with filters, and the extra
   logs collected for the company and each device
 * ``POST /rmm/event-logs/company`` and ``/rmm/event-logs/assets/{id}`` save
-  extra logs (one per line)
+  extra logs (one per line) and the least severe level kept (``max_level``;
+  blank uses the company's, then ``EVENT_LOG_MIN_LEVEL``)
 * ``GET /api/rmm/event-logs`` the same entries as JSON
 * each asset page's Event logs and Event log automations sections
   (:func:`asset_event_log_context`)
@@ -15,8 +16,9 @@ Event log rules live in :mod:`.event_log_rule_routes`.
 
 Agent side (``Authorization: Bearer`` token):
 
-* ``GET /api/rmm/agent/event-logs/config`` which logs to collect, or
-  ``enabled: false`` without the event log database
+* ``GET /api/rmm/agent/event-logs/config`` which logs to collect and the
+  least severe level to send, or ``enabled: false`` without the event log
+  database
 * ``POST /api/rmm/agent/event-logs`` a batch of entries
 """
 
@@ -72,6 +74,19 @@ async def _filtered_entries(company_id: int, *, asset_id, log, level, event_id, 
         limit=limit,
     )
     return [_entry(row) for row in rows]
+
+
+def _level_context(company_level: int | None) -> dict[str, Any]:
+    """The least severe level choices, and what blank means at each scope."""
+
+    default_level = event_logs.default_max_level()
+    return {
+        "max_level_choices": event_logs.MAX_LEVEL_CHOICES,
+        "default_max_level": default_level,
+        "company_max_level": company_level,
+        "level_labels": dict(event_logs.MAX_LEVEL_CHOICES),
+        "inherited_max_level": company_level or default_level,
+    }
 
 
 def _int_param(value: Any, low: int, high: int) -> int | None:
@@ -152,8 +167,10 @@ async def asset_event_log_context(company_id: int, asset_id: int, *, can_edit: b
             rule, company_id=company_id, is_super_admin=is_super_admin)}
         for rule in await rules_repo.list_rules_for_device(company_id, asset_id)
     ]
-    company_logs = await event_log_repo.get_extra_logs(company_id=company_id)
-    extra_logs = await event_log_repo.get_extra_logs(asset_id=asset_id)
+    company_settings = await event_log_repo.get_settings(company_id=company_id)
+    company_logs = company_settings["extra_logs"]
+    asset_settings = await event_log_repo.get_settings(asset_id=asset_id)
+    extra_logs = asset_settings["extra_logs"]
     return {
         "database": {**database, "error": None},
         "entries": entries,
@@ -162,6 +179,8 @@ async def asset_event_log_context(company_id: int, asset_id: int, *, can_edit: b
         "extra_logs": extra_logs,
         "rules": rules,
         "can_edit": can_edit,
+        **_level_context(company_settings["max_level"]),
+        "max_level": asset_settings["max_level"],
         "filters": {**filters, "date_from": filters["date_from"].isoformat() if filters["date_from"] else "",
                     "date_to": filters["date_to"].isoformat() if filters["date_to"] else "",
                     "level": str(filters["level"] or ""),
@@ -192,8 +211,9 @@ async def event_logs_page(
     database = event_log_db.status()
     agents = await rmm_repo.list_company_agents(company_id)
     asset_ids = [int(agent["asset_id"]) for agent in agents if agent.get("asset_id")]
-    asset_logs = await event_log_repo.list_asset_extra_logs(asset_ids)
-    company_logs = await event_log_repo.get_extra_logs(company_id=company_id)
+    asset_settings = await event_log_repo.list_asset_settings(asset_ids)
+    company_settings = await event_log_repo.get_settings(company_id=company_id)
+    company_logs = company_settings["extra_logs"]
     entries = await _filtered_entries(
         company_id, asset_id=asset_id, log=log, level=level, event_id=event_id, q=q, limit=limit,
         source=source, date_from=date_from, date_to=date_to,
@@ -201,7 +221,10 @@ async def event_logs_page(
     devices = [
         {
             **_serialise(agent),
-            "extra_logs": asset_logs.get(int(agent["asset_id"]), []) if agent.get("asset_id") else [],
+            "extra_logs": asset_settings.get(int(agent["asset_id"]), {}).get("extra_logs", [])
+            if agent.get("asset_id") else [],
+            "max_level": asset_settings.get(int(agent["asset_id"]), {}).get("max_level")
+            if agent.get("asset_id") else None,
         }
         for agent in agents
     ]
@@ -232,6 +255,7 @@ async def event_logs_page(
             "can_edit": can_edit,
             "can_manage_rules": can_edit,
             "retention_days": get_settings().event_log_retention_days,
+            **_level_context(company_settings["max_level"]),
         },
     )
 
@@ -249,13 +273,18 @@ async def _save(request: Request, *, asset_id: int | None = None):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
     form = await request.form()
     back = _back_path(form, asset_id)
+    scope = {"company_id": None if asset_id is not None else company_id, "asset_id": asset_id}
+    metadata: dict[str, Any] = {}
     try:
-        logs = await event_logs.save_extra_logs(
-            str(form.get("extra_logs") or ""),
-            company_id=None if asset_id is not None else company_id,
-            asset_id=asset_id,
-            user_id=user.get("id"),
-        )
+        # Check both before saving either.
+        logs = event_logs.parse_log_names(str(form.get("extra_logs") or ""))
+        level_value = str(form.get("max_level") or "").strip()
+        if "max_level" in form and level_value and event_logs.parse_max_level(level_value) is None:
+            raise event_logs.EventLogSettingsError("Choose a level from the list.")
+        metadata["extra_logs"] = await event_logs.save_extra_logs(logs, **scope, user_id=user.get("id"))
+        # Forms without the field leave the level as it is.
+        if "max_level" in form:
+            metadata["max_level"] = await event_logs.save_max_level(level_value, **scope, user_id=user.get("id"))
     except event_logs.EventLogSettingsError as exc:
         return flash_redirect(back, str(exc), "error")
     await audit_service.record(
@@ -264,18 +293,18 @@ async def _save(request: Request, *, asset_id: int | None = None):
         user_id=user.get("id"),
         entity_type="asset" if asset_id is not None else "company",
         entity_id=asset_id if asset_id is not None else company_id,
-        metadata={"extra_logs": logs},
+        metadata=metadata,
     )
     target = "the device" if asset_id is not None else "every device in the company"
-    return flash_redirect(back, f"Extra event logs saved for {target}.", "success")
+    return flash_redirect(back, f"Event log settings saved for {target}.", "success")
 
 
-@router.post(PAGE_PATH + "/company", response_class=HTMLResponse, summary="Save the company's extra event logs")
+@router.post(PAGE_PATH + "/company", response_class=HTMLResponse, summary="Save the company's event log settings")
 async def save_company_logs(request: Request):
     return await _save(request)
 
 
-@router.post(PAGE_PATH + "/assets/{asset_id:int}", response_class=HTMLResponse, summary="Save a device's extra event logs")
+@router.post(PAGE_PATH + "/assets/{asset_id:int}", response_class=HTMLResponse, summary="Save a device's event log settings")
 async def save_asset_logs(asset_id: int, request: Request):
     return await _save(request, asset_id=asset_id)
 

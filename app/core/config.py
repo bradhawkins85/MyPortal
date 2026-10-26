@@ -215,6 +215,26 @@ class Settings(BaseSettings):
         validation_alias="EVENT_LOG_RETENTION_DAYS",
         description="Days of RMM event log entries to keep. 0 keeps them forever.",
     )
+    event_log_min_level: str = Field(
+        default="verbose",
+        validation_alias="EVENT_LOG_MIN_LEVEL",
+        description=(
+            "Least severe event level RMM agents send: critical, error, warning, "
+            "information or verbose (everything). Companies and devices can "
+            "choose their own. 'Log always' events, such as Security audits, "
+            "are always sent."
+        ),
+    )
+    event_log_repeat_window_minutes: int = Field(
+        default=60,
+        ge=0,
+        le=24 * 60,
+        validation_alias="EVENT_LOG_REPEAT_WINDOW_MINUTES",
+        description=(
+            "An event a device repeats within this many minutes of its first "
+            "occurrence is stored once with a count. 0 stores every occurrence."
+        ),
+    )
     # Secondary MySQL/MariaDB database for RMM device stats (the disk, ping,
     # CPU, memory and network values behind checks). Off until host, user and
     # name are all set; checks still run without it. See

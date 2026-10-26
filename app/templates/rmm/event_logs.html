@@ -19,7 +19,7 @@
   <section class="card card--panel" aria-labelledby="rmm-event-log-entries-heading">
     <header class="card__header card__header--stacked"><div>
       <h2 class="card__title" id="rmm-event-log-entries-heading">Entries</h2>
-      <p class="card__subtitle">Newest first.{% if retention_days %} Entries are kept for {{ retention_days }} day{{ "s" if retention_days != 1 }}.{% endif %}</p>
+      <p class="card__subtitle">Newest first. An event a device repeats is shown once, with how many times it happened.{% if retention_days %} Entries are kept for {{ retention_days }} day{{ "s" if retention_days != 1 }}.{% endif %}</p>
     </div></header>
     <form method="get" action="/rmm/event-logs" class="card__body form" role="search" aria-label="Filter event log entries">
       <div class="form-grid">
@@ -84,7 +84,7 @@
             {% for entry in entries %}
             {% set device = devices | selectattr("asset_id", "equalto", entry.asset_id) | first %}
             <tr>
-              <td data-label="Time" data-column-key="time"><span data-utc="{{ entry.time_created }}">{{ entry.time_created }}</span></td>
+              <td data-label="Time" data-column-key="time"><span data-utc="{{ entry.time_created }}">{{ entry.time_created }}</span>{% if entry.repeat_count and entry.repeat_count > 1 %}<br><span class="text-muted">{{ entry.repeat_count }} times{% if entry.last_time_created %}, last <span data-utc="{{ entry.last_time_created }}">{{ entry.last_time_created }}</span>{% endif %}</span>{% endif %}</td>
               <td data-label="Device" data-column-key="device">{% if entry.asset_id %}<a href="/assets/{{ entry.asset_id }}">{{ (device.asset_name or device.hostname) if device else entry.computer or ("Asset " ~ entry.asset_id) }}</a>{% else %}{{ entry.computer or "–" }}{% endif %}</td>
               <td data-label="Log" data-column-key="log">{{ entry.log_name }}</td>
               <td data-label="Level" data-column-key="level"><span class="status status--{{ LEVEL_STATUS.get(entry.level_label, 'neutral') }}">{{ entry.level_label }}</span></td>
@@ -122,6 +122,16 @@
         <label class="form-label" for="rmm-event-log-company-logs">Extra logs for every device in {{ company.name if company else "this company" }} <span class="text-muted">one per line</span></label>
         <textarea class="form-input" id="rmm-event-log-company-logs" name="extra_logs" rows="4" {% if not can_edit %}readonly{% endif %}>{{ company_logs | join("\n") }}</textarea>
       </div>
+      {% if max_level_choices %}
+      <div class="form-field">
+        <label class="form-label" for="rmm-event-log-company-level">Levels kept for every device in {{ company.name if company else "this company" }}</label>
+        <select class="form-input" id="rmm-event-log-company-level" name="max_level" {% if not can_edit %}disabled{% endif %}>
+          <option value="">Default: {{ level_labels[default_max_level] }}</option>
+          {% for value, label in max_level_choices %}<option value="{{ value }}" {% if company_max_level == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <p class="form-help">Agents leave out less severe events, so they are never sent or stored. "Log always" events, such as Security audits, are always kept. Event log rules and health check detections cannot see events that are left out.</p>
+      </div>
+      {% endif %}
       {% if can_edit %}<div class="form-actions"><button class="button button--primary" type="submit">Save company logs</button></div>{% endif %}
     </form>
     <div class="card__body">
@@ -131,7 +141,7 @@
           <caption class="visually-hidden">Extra logs per device</caption>
           <thead><tr>
             <th scope="col">Device</th>
-            <th scope="col">Extra logs for this device <span class="text-muted">one per line</span></th>
+            <th scope="col">Extra logs for this device <span class="text-muted">one per line</span>{% if max_level_choices %} and levels kept{% endif %}</th>
           </tr></thead>
           <tbody>
             {% for device in devices if device.asset_id %}
@@ -142,6 +152,13 @@
                   {% include "partials/csrf.html" %}
                   <label class="visually-hidden" for="rmm-event-log-device-{{ device.asset_id }}">Extra logs for {{ device.asset_name or device.hostname }}</label>
                   <textarea class="form-input" id="rmm-event-log-device-{{ device.asset_id }}" name="extra_logs" rows="2" {% if not can_edit %}readonly{% endif %}>{{ device.extra_logs | join("\n") }}</textarea>
+                  {% if max_level_choices %}
+                  <label class="visually-hidden" for="rmm-event-log-device-level-{{ device.asset_id }}">Levels kept for {{ device.asset_name or device.hostname }}</label>
+                  <select class="form-input" id="rmm-event-log-device-level-{{ device.asset_id }}" name="max_level" {% if not can_edit %}disabled{% endif %}>
+                    <option value="">{{ "Company" if company_max_level else "Default" }}: {{ level_labels[inherited_max_level] }}</option>
+                    {% for value, label in max_level_choices %}<option value="{{ value }}" {% if device.max_level == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                  </select>
+                  {% endif %}
                   {% if can_edit %}<button class="button button--ghost button--small" type="submit">Save<span class="visually-hidden"> logs for {{ device.asset_name or device.hostname }}</span></button>{% endif %}
                 </form>
               </td>

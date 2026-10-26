@@ -99,7 +99,7 @@ func performFullCheckin(ctx context.Context, api *client.Client, r *runner.Runne
 			defer eventCollectionMu.Unlock()
 			path := filepath.Join(state.Dir(), "eventlog-cursors.json")
 			collector := &eventlog.Collector{Source: eventlog.NewSource(), Send: api.SendEventLogs,
-				Cursors: eventlog.LoadCursors(path), Path: path}
+				Cursors: eventlog.LoadCursors(path), Path: path, MaxLevel: cfg.MaxLevel}
 			var failures []error
 			for _, name := range cfg.Logs {
 				if err := collector.SyncLog(ctx, name, cfg.MaxBatch, time.Duration(cfg.InitialLookbackHours)*time.Hour); err != nil {
