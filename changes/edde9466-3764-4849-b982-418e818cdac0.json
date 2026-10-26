@@ -1,0 +1,7 @@
+{
+  "guid": "edde9466-3764-4849-b982-418e818cdac0",
+  "occurred_at": "2026-10-26T23:57Z",
+  "change_type": "Feature",
+  "summary": "The AI assistant now reads the customer's reply to its \"Do you need any assistance?\" prompt to decide whether they need support, closing the chat when they don't and falling back to keyword matching when AI is unavailable.",
+  "content_hash": "4e7ead84b17b88cc327eec981c0bd5ff58e3fe1eb3592d696f0ce416b2298e62"
+}
