@@ -112,8 +112,10 @@ class MonitoredAsyncClient(httpx.AsyncClient):
     def __init__(self, *args: Any, monitor: bool = True, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._monitor = monitor
+        self.webhook_event_id: int | None = None
 
     async def send(self, request: httpx.Request, *args: Any, **kwargs: Any) -> httpx.Response:
+        self.webhook_event_id = None
         if not self._monitor or request.extensions.get("myportal.skip_monitor"):
             return await super().send(request, *args, **kwargs)
 
@@ -138,6 +140,7 @@ class MonitoredAsyncClient(httpx.AsyncClient):
             )
             if event.get("id") is not None:
                 event_id = int(event["id"])
+                self.webhook_event_id = event_id
                 await webhook_repo.mark_in_progress(event_id)
         except Exception as exc:  # monitoring cannot break integrations
             log_warning("Unable to create outgoing HTTP monitor event", error=type(exc).__name__)

@@ -271,6 +271,7 @@ async def embed_text(text: str) -> list[float]:
             "encoding_format": "float",
         }
     started = time.monotonic()
+    client = None
     body = None
     try:
         async with monitored_client(
@@ -314,6 +315,7 @@ async def embed_text(text: str) -> list[float]:
             status="failed",
             usage=(reported[0], 0) if reported else (0, 0),
             duration_ms=int((time.monotonic() - started) * 1000),
+            webhook_event_id=getattr(client, "webhook_event_id", None),
         )
         # Log only the error class and status, never provider bodies or inputs.
         log_warning(
@@ -333,6 +335,7 @@ async def embed_text(text: str) -> list[float]:
         usage=(reported[0], 0) if reported else None,
         prompt=text,
         duration_ms=int((time.monotonic() - started) * 1000),
+        webhook_event_id=getattr(client, "webhook_event_id", None),
     )
     return result
 

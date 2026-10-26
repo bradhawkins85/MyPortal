@@ -122,3 +122,18 @@ async def test_monitor_database_failure_does_not_change_response(repo):
     ) as client:
         response = await client.get("https://provider.test")
     assert response.text == "ok"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_monitor_exposes_link_on_timeout_and_clears_it_for_unmonitored_request(repo):
+    async def handler(request):
+        if request.url.path == "/timeout":
+            raise httpx.ReadTimeout("provider timed out", request=request)
+        return httpx.Response(200)
+
+    async with monitored_http.MonitoredAsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.ReadTimeout):
+            await client.get("https://provider.test/timeout")
+        assert client.webhook_event_id == 42
+        await client.get("https://provider.test/ok", extensions={"myportal.skip_monitor": True})
+        assert client.webhook_event_id is None

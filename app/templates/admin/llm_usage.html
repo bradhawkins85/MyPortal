@@ -31,6 +31,9 @@
 {% if totals.estimated_requests %}
 <p class="llmu-note" role="note">{{ "{:,}".format(totals.estimated_requests) }} request{{ "s" if totals.estimated_requests != 1 }} came from a provider that did not report token counts; their tokens are estimated at about four characters per token.</p>
 {% endif %}
+{% if report.unattributed and report.unattributed.requests %}
+<p class="llmu-note" role="note">{{ "{:,}".format(report.unattributed.requests) }} historical requests ({{ "{:,}".format(report.unattributed.total_tokens) }} tokens) have no saved caller data. They remain included in the totals above, but cannot be reliably assigned to a function. New requests record their calling function.</p>
+{% endif %}
 
 {% set peak = namespace(value=0) %}
 {% for day in report.days %}{% set peak.value = [peak.value, day.input_tokens + day.output_tokens]|max %}{% endfor %}
@@ -95,7 +98,7 @@
         <td data-value="{{ row.label }}">
           <span class="llmu-feature__name">{{ row.label }}</span>
           <span class="llmu-feature__desc">{{ row.description }}</span>
-          {% if row.failed_requests %}<span class="status status--error">{{ row.failed_requests }} failed</span>{% endif %}
+          {% if row.failed_requests %}<a class="status status--error" href="{{ row.failed_webhooks_url }}" aria-label="View {{ row.failed_requests }} failed webhook calls for {{ row.label }}">{{ row.failed_requests }} failed</a>{% endif %}
         </td>
         <td data-value="{{ row.models|join(', ') }}">{% if row.models %}{{ row.models|join(', ') }}{% else %}<span class="llmu-muted">{{ 'Not reported' if row.requests else 'Not in range' }}</span>{% endif %}</td>
         <td data-value="{{ row.requests }}">{{ "{:,}".format(row.requests) }}</td>

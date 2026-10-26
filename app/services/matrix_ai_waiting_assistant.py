@@ -341,6 +341,7 @@ async def _ollama_generate(prompt: str, *, json_format: bool = False) -> str:
         result = (str(payload.get("response") or "").strip() if provider == "ollama" else _openai_chat_response_text(payload))
         await llm_usage.record_usage(
             feature="matrix_waiting_assistant",
+            webhook_event_id=(monitor_event or {}).get("id"),
             provider=provider,
             model=model,
             status="succeeded",
@@ -364,6 +365,7 @@ async def _ollama_generate(prompt: str, *, json_format: bool = False) -> str:
         )
         await llm_usage.record_usage(
             feature="matrix_waiting_assistant",
+            webhook_event_id=(monitor_event or {}).get("id"),
             provider=provider,
             model=model,
             status="failed",

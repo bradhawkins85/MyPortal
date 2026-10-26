@@ -137,32 +137,52 @@ async def list_events(
     status: str | None = None,
     search: str | None = None,
     limit: int = 100,
+    llm_feature: str | None = None,
+    llm_start: datetime | None = None,
+    llm_end: datetime | None = None,
 ) -> list[dict[str, Any]]:
     params: list[Any] = []
     clauses: list[str] = []
+    if llm_feature:
+        usage_clauses = [
+            "llm.webhook_event_id = webhook_events.id",
+            "llm.feature = ?",
+            "llm.status <> 'succeeded'",
+        ]
+        params.append(llm_feature)
+        if llm_start is not None:
+            usage_clauses.append("llm.occurred_at >= ?")
+            params.append(_ensure_naive_utc(llm_start).strftime("%Y-%m-%d %H:%M:%S"))
+        if llm_end is not None:
+            usage_clauses.append("llm.occurred_at < ?")
+            params.append(_ensure_naive_utc(llm_end).strftime("%Y-%m-%d %H:%M:%S"))
+        clauses.append(
+            "EXISTS (SELECT 1 FROM llm_usage_events AS llm WHERE "
+            + " AND ".join(usage_clauses) + ")"
+        )
     if status:
-        clauses.append("status = %s")
+        clauses.append("status = ?")
         params.append(status)
     search_term = (search or "").strip()
     if search_term:
         like = f"%{search_term}%"
         clauses.append(
             "("
-            "name LIKE %s OR "
-            "target_url LIKE %s OR "
-            "source_url LIKE %s OR "
-            "status LIKE %s OR "
-            "direction LIKE %s OR "
-            "last_error LIKE %s OR "
-            "payload LIKE %s OR "
-            "metadata LIKE %s"
+            "name LIKE ? OR "
+            "target_url LIKE ? OR "
+            "source_url LIKE ? OR "
+            "status LIKE ? OR "
+            "direction LIKE ? OR "
+            "last_error LIKE ? OR "
+            "payload LIKE ? OR "
+            "metadata LIKE ?"
             ")"
         )
         params.extend([like] * 8)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(limit)
     rows = await db.fetch_all(
-        f"SELECT * FROM webhook_events {where} ORDER BY updated_at DESC LIMIT %s",  # nosec B608
+        f"SELECT * FROM webhook_events {where} ORDER BY updated_at DESC LIMIT ?",  # nosec B608
         tuple(params),
     )
     return [_normalise_event(row) for row in rows]

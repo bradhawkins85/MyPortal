@@ -105,3 +105,59 @@ def test_delete_events_by_status_rejects_unsupported_status(monkeypatch):
         assert str(error) == "Unsupported status for bulk webhook deletion"
     else:
         raise AssertionError("Expected ValueError for unsupported status")
+
+
+def test_llm_failure_filter_uses_exact_links_function_and_inclusive_dates(monkeypatch, tmp_path):
+    from app.core.config import Settings
+    from app.core.database import Database
+    from app.repositories import llm_usage
+    from pathlib import Path
+
+    async def run():
+        test_db = Database()
+        test_db._settings = Settings(
+            SESSION_SECRET="test-secret", TOTP_ENCRYPTION_KEY="A" * 64,
+            DB_HOST=None, DB_USER=None, DB_PASSWORD=None, DB_NAME=None,
+        )
+        test_db._use_sqlite = True
+        test_db._get_sqlite_path = lambda: tmp_path / "webhooks.db"
+        await test_db.connect()
+        try:
+            migration = Path("migrations/460_llm_usage_events.sql").read_text()
+            for sql in test_db._split_sql_statements(test_db._adapt_sql_for_sqlite(migration)):
+                await test_db.execute(sql)
+            await test_db.execute("CREATE TABLE webhook_events (id INTEGER PRIMARY KEY, name TEXT, status TEXT, updated_at TEXT)")
+            monkeypatch.setattr(repo, "db", test_db)
+            monkeypatch.setattr(llm_usage, "db", test_db)
+            for event_id in range(1, 8):
+                await test_db.execute(
+                    "INSERT INTO webhook_events VALUES (?, ?, ?, ?)",
+                    (event_id, "same provider and model", "succeeded" if event_id == 1 else "failed", "2026-10-03 00:00:00"),
+                )
+            for feature, status, occurred_at, event_id in (
+                ("rag_relationships", "failed", datetime(2026, 10, 1), 1),
+                ("rag_relationships", "error", datetime(2026, 10, 2, 23, 59, 59), 2),
+                ("agent", "failed", datetime(2026, 10, 2), 3),
+                ("rag_relationships", "succeeded", datetime(2026, 10, 2), 4),
+                ("rag_relationships", "failed", datetime(2026, 9, 30, 23, 59, 59), 5),
+                ("rag_relationships", "failed", datetime(2026, 10, 3), 6),
+                ("rag_relationships", "failed", datetime(2026, 10, 2), 999),
+                ("rag_relationships", "failed", datetime(2026, 10, 2), None),
+                ("rag_relationships", "failed", datetime(2026, 10, 2), 1),
+            ):
+                await llm_usage.record_event(
+                    occurred_at=occurred_at, feature=feature, provider="ollama", model="qwen",
+                    status=status, input_tokens=0, output_tokens=0, tokens_estimated=False,
+                    duration_ms=10, webhook_event_id=event_id,
+                )
+            rows = await repo.list_events(
+                llm_feature="rag_relationships", llm_start=datetime(2026, 10, 1),
+                llm_end=datetime(2026, 10, 3),
+            )
+            assert {row["id"] for row in rows} == {1, 2}
+            assert len(rows) == 2
+            assert await repo.list_events(llm_feature="rag_relationships' OR 1=1 --") == []
+        finally:
+            await test_db.disconnect()
+
+    asyncio.run(run())

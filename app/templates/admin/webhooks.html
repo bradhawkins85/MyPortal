@@ -9,6 +9,11 @@
     <span class="header__title-text">Webhooks</span>
     <div class="page-header-toolbar" data-table-toolbar data-table-toolbar-for="webhooks-table">
       <form class="page-header-toolbar__group" method="get" action="/admin/webhooks" role="search" aria-label="Search webhook history">
+        {% if llm_context %}
+        <input type="hidden" name="llm_feature" value="{{ llm_context.feature }}">
+        <input type="hidden" name="llm_start" value="{{ llm_context.start }}">
+        <input type="hidden" name="llm_end" value="{{ llm_context.end }}">
+        {% endif %}
         <label class="visually-hidden" for="webhook-search">Search history</label>
         <input type="search" class="form-input page-header-toolbar__search" id="webhook-search" name="q" value="{{ webhook_search or '' }}" placeholder="Search history" title="Name, URL, error or payload text" />
         <label class="visually-hidden" for="webhook-status">Queue state</label>
@@ -26,7 +31,7 @@
           {% endfor %}
         </select>
         <button type="submit" class="button button--ghost button--compact">Search</button>
-        {% if webhook_search or webhook_status %}
+        {% if webhook_search or webhook_status or llm_context %}
           <a class="button button--ghost button--compact" href="/admin/webhooks?event_limit={{ webhook_event_limit }}">Clear</a>
         {% endif %}
       </form>
@@ -60,6 +65,9 @@
 {% endblock %}
 
 {% block content %}
+{% if llm_context %}
+<p role="note">Webhook calls for failed <strong>{{ llm_context.label }}</strong> requests from {{ llm_context.start }} to {{ llm_context.end }} (UTC). Calls remain listed if a retry later succeeded. Older calls may have no webhook link, or may have been removed by retention rules. <a href="/admin/llm-usage?start={{ llm_context.start }}&amp;end={{ llm_context.end }}">Back to LLM usage</a></p>
+{% endif %}
 {% set whm_status_labels = {'pending': 'Pending', 'in_progress': 'In progress', 'succeeded': 'Succeeded', 'failed': 'Failed'} %}
 {% set whm_status_variants = {'pending': 'warning', 'in_progress': 'processing', 'succeeded': 'success', 'failed': 'error'} %}
 {% set whm_operator_labels = {
@@ -178,7 +186,9 @@
     </div>
   {% endif %}
   <div class="whm-empty" data-webhook-empty {% if events %}hidden{% endif %}>
-    {% if webhook_search or webhook_status %}
+    {% if llm_context %}
+      {{ empty_state("No retained webhook calls match", "Try a different search or queue state. Older requests may have no webhook link, or retention rules may have removed their webhook calls.") }}
+    {% elif webhook_search or webhook_status %}
       {{ empty_state("No webhook events match", "Try a different search or queue state, or increase the history window to search farther back.") }}
     {% else %}
       {{ empty_state("No webhook activity recorded", "Outgoing deliveries and captured incoming webhooks appear here as they happen.") }}
