@@ -15,23 +15,9 @@
 {% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if rmm %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endif %}{% if asset_tags is not none %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
 {% block header_actions %}
-    {%- set _svg = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">' -%}
-    {%- set icons = {
-      "process": _svg ~ '<polygon points="6 4 20 12 6 20 6 4"/></svg>',
-      "preview": _svg ~ '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
-      "remote": _svg ~ '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
-      "file_transfer": _svg ~ '<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z"/><path d="m9 13 3-3 3 3M12 10v7"/></svg>',
-      "terminal": _svg ~ '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3M12 15h6"/></svg>',
-      "checkin": _svg ~ '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>',
-      "script": _svg ~ '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M10 13l-2 2 2 2M14 13l2 2-2 2"/></svg>',
-      "command": _svg ~ '<path d="m4 17 6-6-6-6M12 19h8"/></svg>',
-      "health": _svg ~ '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
-      "package": _svg ~ '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/></svg>',
-      "push": _svg ~ '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>',
-      "repair": _svg ~ '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
-      "credentials": _svg ~ '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>',
-      "back": _svg ~ '<path d="M19 12H5M12 19l-7-7 7-7"/></svg>',
-    } -%}
+    {% import "assets/_action_icons.html" as action_icons %}
+    {%- set icons = {} -%}
+    {%- for name in action_icons.PATHS %}{% set _ = icons.update({name: action_icons.inline(name)}) %}{% endfor -%}
     {%- set mode_icons = {"remote": icons.remote, "file_transfer": icons.file_transfer, "terminal": icons.terminal} -%}
     {%- set rmm_staff = rmm and not customer_safe -%}
     {#- RMM agent actions appear only once the agent is deployed; pushing and

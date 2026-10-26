@@ -11,8 +11,22 @@
   const runAs = modal.querySelector('[data-rmm-command-run-as]');
   const timeout = modal.querySelector('[data-rmm-command-timeout]');
   const submit = modal.querySelector('[data-rmm-command-submit]');
-  const assetId = modal.getAttribute('data-rmm-command-asset');
+  const device = modal.querySelector('[data-rmm-command-device]');
+  let assetId = modal.getAttribute('data-rmm-command-asset');
   let opener = null;
+
+  // The Assets list shares one modal between its rows: the row's menu item names
+  // its device and the shells that device offers.
+  function useDevice(trigger) {
+    if (!trigger.hasAttribute('data-rmm-command-asset')) return;
+    assetId = trigger.getAttribute('data-rmm-command-asset');
+    if (device) device.textContent = trigger.getAttribute('data-rmm-command-name') || 'this device';
+    const offered = (trigger.getAttribute('data-rmm-command-languages') || '').split(',').filter(Boolean);
+    Array.from(language.options).forEach((option) => {
+      option.hidden = option.disabled = offered.length > 0 && !offered.includes(option.value);
+    });
+    if (offered.length) language.value = offered[0];
+  }
 
   function clearErrors() {
     modal.querySelectorAll('[data-rmm-command-error]').forEach((node) => { node.hidden = true; });
@@ -26,6 +40,7 @@
 
   function open(trigger) {
     opener = trigger;
+    useDevice(trigger);
     const menu = trigger.closest('details');
     if (menu) menu.open = false;
     clearErrors();

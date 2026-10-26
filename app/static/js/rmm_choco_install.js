@@ -17,10 +17,19 @@
     name: 'choco-modal-app',
     onChange: () => { other.value = ''; },
   });
+  const device = modal.querySelector('[data-choco-modal-device]');
   let opener = null;
+
+  // The Assets list shares one modal between its rows: point it at the row's device.
+  function useDevice(trigger) {
+    if (!trigger.hasAttribute('data-choco-modal-asset')) return;
+    form.action = '/rmm/assets/' + encodeURIComponent(trigger.getAttribute('data-choco-modal-asset')) + '/software/install';
+    if (device) device.textContent = trigger.getAttribute('data-choco-modal-name') || 'this device';
+  }
 
   function open(trigger) {
     opener = trigger;
+    useDevice(trigger);
     const menu = trigger.closest('details');
     if (menu) menu.open = false;
     error.hidden = true;
