@@ -500,7 +500,12 @@ Add-Section 'security' {
 
 Add-Section 'activation' {
     # The Windows product itself, not Office or other licensed applications.
-    $product = Get-CimInstance SoftwareLicensingProduct -Filter "ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL" -ErrorAction Stop | Select-Object -First 1
+    $products = @(Get-CimInstance SoftwareLicensingProduct -Filter "ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL" -ErrorAction Stop)
+    # Extended Security Updates keys install as add-on products next to Windows
+    # (named like "Windows(R), Client-ESU-Year1 add-on for ..."); keep them out of
+    # the edition's own status and report them separately.
+    $esuProducts = @($products | Where-Object { $_.Name -match '\bESU\b' })
+    $product = $products | Where-Object { $_.Name -notmatch '\bESU\b' -and -not $_.LicenseIsAddon } | Select-Object -First 1
     $LicenseNames = @{ 0 = 'Unlicensed'; 1 = 'Licensed'; 2 = 'Initial grace period'; 3 = 'Additional grace period'; 4 = 'Non-genuine grace period'; 5 = 'Notification'; 6 = 'Extended grace period' }
     [ordered]@{
         found = [bool]$product
@@ -508,6 +513,7 @@ Add-Section 'activation' {
         license_label = Map $LicenseNames $product.LicenseStatus
         channel = Short $product.ProductKeyChannel 40
         grace_minutes = $product.GracePeriodRemaining
+        esu_licenses = @($esuProducts | ForEach-Object { [ordered]@{ name = Short $_.Name 120; license_status = $_.LicenseStatus } })
     }
 }
 

@@ -509,12 +509,13 @@ DETECTIONS: dict[str, dict[str, Any]] = {
     ),
     "os_unsupported": _detection(
         "os", "Windows is out of support", "warning",
-        "This Windows version and edition no longer gets security updates from Microsoft (unless the computer is "
-        "enrolled in Extended Security Updates).",
+        "This Windows version and edition no longer gets security updates from Microsoft, and the computer has no "
+        "activated Extended Security Updates (ESU) licence covering today.",
     ),
     "os_support_ending": _detection(
         "os", "Windows support ends soon", "info",
-        "This Windows version and edition stops getting security updates within 90 days.",
+        "This Windows version and edition, or the computer's Extended Security Updates licence, stops getting "
+        "security updates within 90 days.",
     ),
     "windows_not_activated": _detection(
         "os", "Windows is not activated", "warning",
