@@ -362,7 +362,7 @@ async def send_message(
 
     await chat_repo.update_room(room_id, last_message_at=now)
     if not await chat_access.is_chat_staff(current_user):
-        await matrix_ai_waiting_assistant.handle_user_message(room_id, now)
+        await matrix_ai_waiting_assistant.handle_user_message(room_id, now, body.body)
 
     try:
         await chat_ticket_sync.sync_chat_message_to_ticket(

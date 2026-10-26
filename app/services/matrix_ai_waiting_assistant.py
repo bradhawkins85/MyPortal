@@ -35,6 +35,23 @@ _running = False
 _stop = False
 _WORD_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._/-]{2,}")
 _ACK_MESSAGE = "Thanks — your request has been received. A technician will be assigned shortly."
+_IDLE_PROMPT_MESSAGE = (
+    "Do you need any assistance today? Just reply with what you need help with. "
+    "If we don't hear from you, this chat will be closed automatically."
+)
+_IDLE_CLOSE_MESSAGE = "As we haven't heard from you, this chat has been closed. Start a new chat any time you need help."
+_DECLINED_CLOSE_MESSAGE = "No problem — this chat has been closed. Start a new chat any time you need help."
+# Short replies to the idle prompt that mean the customer does not need help.
+# Every word of the reply must come from this vocabulary, and it must hold at
+# least one refusal word, so "no internet on my laptop" stays a real request.
+_DECLINE_VOCABULARY = frozenset({
+    "no", "nope", "nah", "not", "dont", "do", "nothing", "thanks", "thank", "you", "cheers",
+    "i", "im", "am", "all", "good", "fine", "ok", "okay", "need", "needed", "any", "help",
+    "assistance", "now", "right", "sorry", "opened", "clicked", "this", "it", "by", "mistake",
+    "accident", "wrong", "button", "click", "close", "the", "chat", "please",
+})
+_DECLINE_WORDS = frozenset({"no", "nope", "nah", "not", "dont", "nothing", "mistake", "accident", "wrong", "close", "good", "fine", "ok", "okay"})
+_NEGATIONS = frozenset({"no", "nope", "nah", "not", "dont"})
 _AI_DISCLAIMER = "This recommendation was generated using AI and may not apply to your specific issue."
 _MONITOR_PROMPT_PREVIEW_LIMIT = 2000
 _MONITOR_RESPONSE_PREVIEW_LIMIT = 2000
@@ -643,10 +660,36 @@ def _build_article_recommendation_message(article: Mapping[str, Any], link: str,
     return body, formatted_body
 
 
-async def handle_user_message(room_id: int, sent_at: datetime | None = None) -> None:
+def _is_decline(body: str | None) -> bool:
+    text = str(body or "").lower().replace("’", "").replace("'", "")
+    words = re.findall(r"[a-z]+", text)
+    if not words or len(words) > 12 or not set(words) <= _DECLINE_VOCABULARY:
+        return False
+    if not set(words) & _DECLINE_WORDS:
+        return False
+    # "I need help, ok?" asks for help; needing it only counts when negated.
+    return "need" not in words or bool(set(words) & _NEGATIONS)
+
+
+async def handle_user_message(room_id: int, sent_at: datetime | None = None, body: str | None = None) -> None:
+    room = await chat_repo.get_room(room_id)
+    awaiting_idle_reply = bool(
+        room
+        and room.get("ai_idle_prompt_sent_at")
+        and not room.get("ai_customer_message_at")
+    )
     await chat_repo.mark_user_activity(room_id, sent_at)
+    await chat_repo.mark_customer_message(room_id, sent_at)
     await chat_repo.cancel_active_ai_queue_for_room(room_id, "new_user_message_timer_reset")
     await _audit("matrix_ai_waiting_assistant.user_activity", room_id)
+    if (
+        room
+        and awaiting_idle_reply
+        and room.get("status") == "open"
+        and _is_decline(body)
+        and not await chat_repo.has_technician_message(room_id)
+    ):
+        await _close_room(room, _DECLINED_CLOSE_MESSAGE, "customer_declined_assistance")
 
 
 async def handle_chat_opened(room_id: int, opened_at: datetime | None = None) -> None:
@@ -674,6 +717,37 @@ async def handle_technician_takeover(room_id: int, user_id: int | None = None) -
 async def handle_chat_closed(room_id: int) -> None:
     await chat_repo.cancel_active_ai_queue_for_room(room_id, "chat_closed")
     await _audit("matrix_ai_waiting_assistant.queue_cancelled", room_id, {"reason": "chat_closed"})
+
+
+async def _close_room(room: Mapping[str, Any], message: str, reason: str) -> None:
+    room_id = int(room["id"])
+    if reason == "idle_no_reply":
+        # Re-checks in the UPDATE that the customer has still not written.
+        if not await chat_repo.close_idle_room(room_id, _utcnow()):
+            return
+    else:
+        await chat_repo.update_room(room_id, status="closed", updated_at=_utcnow())
+    await handle_chat_closed(room_id)
+    await _send_bot_message(room, message, response_count=0)
+    await _audit("matrix_ai_waiting_assistant.chat_auto_closed", room_id, {"reason": reason})
+
+
+async def _handle_silent_room(room: Mapping[str, Any]) -> None:
+    """Ask a chat opened without a message whether help is needed, then close it."""
+    room_id = int(room["id"])
+    prompt_sent_at = _as_datetime(room.get("ai_idle_prompt_sent_at"))
+    if prompt_sent_at is None:
+        if not await chat_repo.reserve_ai_idle_prompt(room_id, _utcnow()):
+            return
+        message = f"Hi, I’m {get_agent_name()}, your AI support assistant. {_IDLE_PROMPT_MESSAGE}"
+        if await _send_bot_message(room, message, response_count=0):
+            await _audit("matrix_ai_waiting_assistant.idle_prompt_sent", room_id)
+        else:
+            await chat_repo.release_ai_idle_prompt(room_id)
+        return
+    close_after = timedelta(minutes=get_settings().matrixbot_ai_idle_close_minutes)
+    if prompt_sent_at + close_after <= _utcnow():
+        await _close_room(room, _IDLE_CLOSE_MESSAGE, "idle_no_reply")
 
 
 def _room_analysis_current(room: Mapping[str, Any]) -> bool:
@@ -713,12 +787,17 @@ async def scan_waiting_rooms_once() -> None:
     for room in rooms:
         if not await _eligible_room(room):
             continue
+        if not room.get("ai_customer_message_at"):
+            await _handle_silent_room(room)
+            continue
         count = int(room.get("ai_bot_response_count") or 0)
         if count == 0:
             reserved = await chat_repo.reserve_ai_bot_response(int(room["id"]), expected_count=0, when=_utcnow())
             if not reserved:
                 continue
-            if await _send_bot_message(room, f"Hi, I’m {get_agent_name()}, your AI support assistant. {_ACK_MESSAGE}", response_count=1):
+            # The idle prompt already introduced the assistant.
+            ack = _ACK_MESSAGE if room.get("ai_idle_prompt_sent_at") else f"Hi, I’m {get_agent_name()}, your AI support assistant. {_ACK_MESSAGE}"
+            if await _send_bot_message(room, ack, response_count=1):
                 await _audit("matrix_ai_waiting_assistant.acknowledgement_sent", int(room["id"]))
             else:
                 await chat_repo.release_ai_bot_response_reservation(int(room["id"]), reserved_count=1)
