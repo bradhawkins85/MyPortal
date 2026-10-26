@@ -1,27 +1,23 @@
-//go:build nowebview && windows
+//go:build nowebview && (windows || linux)
 
-// tray_nowebview_windows.go wires up a real Windows system-tray icon for the
-// CGO=0 (nowebview) build.  getlantern/systray uses pure-Go Win32 syscalls on
-// Windows, so CGO is not required.
+// tray_nowebview_systray.go wires up a real system-tray icon for the CGO=0
+// (nowebview) build on Windows and Linux desktops. internal/systray uses
+// pure-Go Win32 syscalls on Windows and D-Bus on Linux, so CGO is not required.
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync/atomic"
 	"time"
 
-	"github.com/getlantern/systray"
-
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
+	"github.com/bradhawkins85/myportal-tray/internal/systray"
 )
 
 // lastRestartAt is used to prevent rapid restart loops when config_changed
@@ -41,7 +37,7 @@ var hasHandledInitialConfigChanged bool
 
 // runUI starts the systray event loop; it blocks until systray.Quit() is called.
 func runUI() {
-	logger.Info("MyPortal Tray UI (Windows) starting systray")
+	logger.Info("MyPortal Tray UI (%s) starting systray", runtime.GOOS)
 
 	// Wire up the config-changed callback before the event loop starts so
 	// that any IPC message arriving during startup is handled correctly.
@@ -56,7 +52,7 @@ func onTrayReady() {
 	systray.SetTooltip(trayTooltip(gConfig))
 	// Set the default icon immediately so the tray appears without delay,
 	// then fetch the branded icon from the portal in the background.
-	systray.SetIcon(defaultIconICO())
+	systray.SetIcon(defaultTrayIcon())
 	buildMenu(gConfig)
 	go fetchAndSetIcon()
 }
@@ -69,7 +65,7 @@ func fetchAndSetIcon() {
 		logger.Debug("fetchAndSetIcon: skipped — gPortalURL is empty (will retry on next config_changed)")
 		return
 	}
-	data, url, err := fetchFirstTrayIcon(trayIconURLs(gPortalURL, gConfig), downloadTrayIcon, trayIconICOBytes)
+	data, url, err := fetchFirstTrayIcon(trayIconURLs(gPortalURL, gConfig), downloadTrayIcon, trayIconForPlatform)
 	if err != nil {
 		logger.Warn("Tray icon fetch failed, keeping current icon: %v", err)
 		return
@@ -372,49 +368,4 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 	default:
 		logger.Warn("Ignoring unsupported tray menu node type %q (label=%q)", node.Type, node.Label)
 	}
-}
-
-// defaultIconICO generates a minimal PNG-in-ICO icon at runtime so that no
-// binary asset file needs to be committed.  A 16×16 solid MyPortal-blue
-// (#0070C0) square is used as the placeholder until branding is loaded.
-func defaultIconICO() []byte {
-	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
-	blue := color.RGBA{R: 0x00, G: 0x70, B: 0xC0, A: 0xFF}
-	for y := 0; y < 16; y++ {
-		for x := 0; x < 16; x++ {
-			img.Set(x, y, blue)
-		}
-	}
-
-	var pngBuf bytes.Buffer
-	if err := png.Encode(&pngBuf, img); err != nil {
-		logger.Error("defaultIconICO: failed to encode PNG: %v", err)
-		return nil
-	}
-	pngData := pngBuf.Bytes()
-	pngLen := uint32(len(pngData))
-
-	// ICO container: 6-byte ICONDIR + 16-byte ICONDIRENTRY + PNG payload.
-	// Windows Vista+ supports PNG-encoded images inside ICO containers.
-	buf := new(bytes.Buffer)
-
-	// GRPICONDIR
-	buf.Write([]byte{0, 0}) // reserved
-	buf.Write([]byte{1, 0}) // type = 1 (icon)
-	buf.Write([]byte{1, 0}) // count = 1
-
-	// ICONDIRENTRY (16 bytes)
-	buf.WriteByte(16)        // width
-	buf.WriteByte(16)        // height
-	buf.WriteByte(0)         // colorCount (0 = true color)
-	buf.WriteByte(0)         // reserved
-	buf.Write([]byte{1, 0})  // planes
-	buf.Write([]byte{32, 0}) // bitCount
-	// size of image data (4 bytes LE)
-	buf.Write([]byte{byte(pngLen), byte(pngLen >> 8), byte(pngLen >> 16), byte(pngLen >> 24)})
-	// offset to image data = 6 (header) + 16 (entry) = 22 (4 bytes LE)
-	buf.Write([]byte{22, 0, 0, 0})
-
-	buf.Write(pngData)
-	return buf.Bytes()
 }

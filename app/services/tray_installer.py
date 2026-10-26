@@ -35,7 +35,7 @@ from app.services.monitored_http import monitored_client
 from app.core.logging import log_error, log_info, log_warning
 
 _GITHUB_API_BASE = "https://api.github.com"
-_ASSET_NAMES = ("myportal-tray.msi", "myportal-tray.dmg", "myportal-tray.pkg")
+_ASSET_NAMES = ("myportal-tray.msi", "myportal-tray.dmg", "myportal-tray.pkg", "myportal-tray-linux.tar.gz")
 _TRAY_STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "tray"
 _DOWNLOAD_LOCK = asyncio.Lock()
 _DOWNLOAD_CHUNK_SIZE = 65536
@@ -83,7 +83,13 @@ def server_installer_path(asset_name: str) -> str:
     return "/static/tray/" + asset_name
 
 
-_ASSET_PLATFORMS = {"myportal-tray.msi": "windows", "myportal-tray.pkg": "darwin"}
+# The Linux tarball carries the service and desktop tray UI for amd64 and
+# arm64 with install.sh, which tray self-updates run with --upgrade.
+_ASSET_PLATFORMS = {
+    "myportal-tray.msi": "windows",
+    "myportal-tray.pkg": "darwin",
+    "myportal-tray-linux.tar.gz": "linux",
+}
 
 
 def cached_server_installers(portal_url: str) -> list[dict[str, Any]]:

@@ -78,6 +78,10 @@ func TestInstallerCommandPassesSettings(t *testing.T) {
 		if strings.Contains(args, "ENROL_TOKEN") {
 			t.Errorf("installer args %q must not carry the enrolment token", args)
 		}
+	} else if runtime.GOOS == "linux" {
+		if want := "--upgrade myportal-tray-update /tmp/x.msi /logs/update.log"; !strings.Contains(args, want) {
+			t.Errorf("installer args %q missing %q", args, want)
+		}
 	} else {
 		if cmd.Path != "/usr/sbin/installer" {
 			t.Errorf("installer path = %q", cmd.Path)
@@ -169,5 +173,20 @@ func TestDownloadFileWritesInstaller(t *testing.T) {
 	data, _ := os.ReadFile(dest)
 	if string(data) != "installer bytes" {
 		t.Fatalf("downloaded %q", data)
+	}
+}
+
+func TestLinuxUpdateCommandLeavesTheServiceCgroup(t *testing.T) {
+	withSystemd := linuxUpdateCommand("/tmp/u.tar.gz", "/logs/u.log", func(string) (string, error) {
+		return "/usr/bin/systemd-run", nil
+	})
+	if withSystemd.Args[0] != "/usr/bin/systemd-run" || withSystemd.Args[5] != "/bin/sh" {
+		t.Fatalf("update does not run in its own systemd unit: %q", withSystemd.Args)
+	}
+	without := linuxUpdateCommand("/tmp/u.tar.gz", "", func(string) (string, error) {
+		return "", exec.ErrNotFound
+	})
+	if without.Args[0] != "/bin/sh" || without.Args[len(without.Args)-2] != "/tmp/u.tar.gz" {
+		t.Fatalf("unexpected fallback command: %q", without.Args)
 	}
 }

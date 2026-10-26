@@ -10,8 +10,9 @@ import (
 // Config holds the per-install configuration for the tray application.
 // On Windows it is read from the registry key
 // HKLM\Software\MyPortal\Tray; on macOS from
-// /Library/Preferences/io.myportal.tray.env; for development, the
-// CONFIG_FILE env var can point at a JSON file.
+// /Library/Preferences/io.myportal.tray.env; on Linux from
+// /etc/myportal-tray/tray.env; for development, the CONFIG_FILE env var can
+// point at a JSON file.
 type Config struct {
 	PortalURL  string `json:"portal_url"`
 	EnrolToken string `json:"enrol_token"`
@@ -32,9 +33,26 @@ func Load() (*Config, error) {
 		return loadWindows()
 	case "darwin":
 		return loadMacOS()
+	case "linux":
+		return loadEnvFile(LinuxEnvFile)
 	default:
 		return loadEnvFallback(), nil
 	}
+}
+
+// LinuxEnvFile holds MYPORTAL_URL, ENROL_TOKEN and AUTO_UPDATE on Linux,
+// written by tray/installer/linux/install.sh.
+const LinuxEnvFile = "/etc/myportal-tray/tray.env"
+
+// loadEnvFile reads KEY=value settings, falling back to the process
+// environment when the file does not exist.
+func loadEnvFile(path string) (*Config, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return loadEnvFallback(), nil
+	}
+	defer f.Close()
+	return parseEnvConfig(f)
 }
 
 func loadFile(path string) (*Config, error) {

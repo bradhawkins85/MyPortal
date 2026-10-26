@@ -2512,7 +2512,7 @@ async def get_tray_version(request: Request) -> JSONResponse:
     device = await _device_from_auth_header(request)
 
     row = await tray_repo.get_latest_tray_version(agent_os)
-    if not row:
+    if not row and agent_os != "linux":
         row = await tray_repo.get_latest_tray_version("all")
 
     rollout_percent = int(row.get("rollout_percent") or 100) if row else 100
@@ -2525,7 +2525,7 @@ async def get_tray_version(request: Request) -> JSONResponse:
             # This device is outside the current rollout window — serve the
             # most recent fully-rolled-out version instead.
             fallback = await tray_repo.get_stable_tray_version(agent_os)
-            if not fallback:
+            if not fallback and agent_os != "linux":
                 fallback = await tray_repo.get_stable_tray_version("all")
             if fallback:
                 row = fallback

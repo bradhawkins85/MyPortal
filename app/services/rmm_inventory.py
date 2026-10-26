@@ -26,6 +26,7 @@ from typing import Any, Iterable, Mapping
 from app.core.logging import log_info, log_warning
 from app.repositories import rmm_inventory as repo
 from app.repositories import network_map as network_map_repo
+from app.services import rmm_proxmox
 
 REFRESH_INTERVAL = timedelta(hours=24)
 POLL_SECONDS = 120
@@ -205,6 +206,9 @@ def normalise(payload: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any
         ],
         "errors": [str(error)[:500] for error in payload.get("errors") or []][:20],
     }
+    proxmox = rmm_proxmox.normalise(payload.get("proxmox"))
+    if proxmox is not None:
+        details["proxmox"] = proxmox
     software = []
     seen: set[tuple[str, str]] = set()
     for item in payload.get("software") or []:
@@ -307,6 +311,7 @@ async def asset_inventory_context(agent: Mapping[str, Any] | None, *, can_refres
         "can_install_apps": can_refresh and agent.get("status") == "active"
         and str(agent.get("os") or "").lower() == "windows",
         "format_bytes": format_bytes,
+        "format_uptime": rmm_proxmox.format_uptime,
     }
 
 

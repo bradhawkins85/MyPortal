@@ -14,6 +14,7 @@ from app.repositories import rmm_checks as checks_repo
 from app.repositories import rmm_stats as stats_repo
 from app.services import rmm_checks as checks
 from app.services import rmm_event_log_rules as event_log_rules
+from app.services import rmm_proxmox
 from app.services import rmm_scripts
 from app.services import rmm_stats
 from tests.test_rmm_scripts import _enrol, _environment, _sync, anyio_backend, sqlite_db  # noqa: F401 - fixtures
@@ -566,7 +567,8 @@ def test_checks_page_and_asset_sections_render():
         disk_metrics=checks.DISK_METRICS, memory_metrics=checks.MEMORY_METRICS, comparisons=checks.COMPARISONS,
         network_directions=checks.NETWORK_DIRECTIONS, service_states=checks.SERVICE_STATES,
         service_fixes=checks.SERVICE_FIXES, file_states=checks.FILE_STATES, process_states=checks.PROCESS_STATES,
-        program_states=checks.PROGRAM_STATES, version_operators=checks.VERSION_OPERATORS,
+        program_states=checks.PROGRAM_STATES, proxmox_conditions=rmm_proxmox.CONDITIONS,
+        version_operators=checks.VERSION_OPERATORS,
         script_expectations=checks.SCRIPT_EXPECTATIONS, result_examples=checks.RESULT_EXAMPLES, statuses=checks.STATUSES,
         devices=[{"asset_id": 10, "asset_name": "PC-01"}], scripts=[], script=None, script_fields=[],
         check_script=None, check_script_fields=[], variables=[], csrf_token="tok",

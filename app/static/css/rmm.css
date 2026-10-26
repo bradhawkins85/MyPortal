@@ -856,6 +856,13 @@ body.navigation--top .rmm-library {
   font-size: 1rem;
 }
 
+.rmm-inventory__caption {
+  caption-side: top;
+  padding-bottom: 0.25rem;
+  text-align: left;
+  font-weight: 600;
+}
+
 .rmm-inventory__filter { max-width: 24rem; }
 .rmm-inventory__install { max-width: 40rem; }
 .rmm-app-push { display: grid; gap: 1rem; max-width: 48rem; }

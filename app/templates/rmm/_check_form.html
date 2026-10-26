@@ -12,6 +12,7 @@
   "file": ("A file or folder is missing, or exists when it should not.", "M14 3H6v18h12V7zM14 3v4h4M9 13h6M9 17h6"),
   "program": ("Check whether a program is installed, with an optional version requirement.", "M3 4h18v16H3zM3 8h18M7 12h10M7 16h6"),
   "process": ("A program is not running, or is running when it should not be.", "M3 5h18v14H3zM3 9h18M7 13l2 2-2 2M12 17h4"),
+  "proxmox": ("On a Proxmox VE host: a guest stops, storage fills, a ZFS pool degrades, a backup fails or the cluster loses quorum.", "M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01M11 7h6M11 17h6"),
   "script": ("Run a script on a schedule and test its exit code or output.", "M4 17l6-6-6-6M12 19h8"),
   "offline": ("The device's agent stops checking in.", "M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5.2-2.8M19 13a10 10 0 0 0-2.4-1.6M2 9.5a15 15 0 0 1 4.3-2.7M12 20h.01"),
 } %}
@@ -40,6 +41,7 @@
   "process_name": "rmm-check-process-name", "process_expected": "rmm-check-process-expected",
   "program_name": "rmm-check-program-name", "program_expected": "rmm-check-program-expected",
   "program_version_operator": "rmm-check-program-version-operator", "program_version": "rmm-check-program-version",
+  "proxmox_condition": "rmm-check-proxmox-condition", "proxmox_target": "rmm-check-proxmox-target", "proxmox_threshold": "rmm-check-proxmox-threshold",
   "package_id": "rmm-check-package-id",
   "check_script_id": "rmm-check-script", "script_expect": "rmm-check-script-expect", "script_value": "rmm-check-script-value",
   "duration_minutes": "rmm-check-duration", "action": "rmm-check-action-" ~ (e.action or "none"),
@@ -318,6 +320,33 @@
             <input class="form-input" id="rmm-check-program-version" name="program_version" maxlength="255" value="{{ e.program_version }}" placeholder="1.2.3"{{ invalid("program_version", "rmm-check-program-version-help") }}>
             <p class="form-help" id="rmm-check-program-version-help">Numeric versions such as 1.2.3. Every installed version must match. Unreadable versions report Unknown.</p>
             {{ field_error("program_version") }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="rmm-check__settings" data-rmm-check-fields="proxmox">
+        <legend class="visually-hidden">Proxmox VE settings</legend>
+        <div class="rmm-field-row">
+          <div class="form-field rmm-field--grow">
+            <label class="form-label" for="rmm-check-proxmox-condition">Fails when</label>
+            <select class="form-input" id="rmm-check-proxmox-condition" name="proxmox_condition" data-rmm-proxmox-condition{{ invalid("proxmox_condition", "rmm-check-proxmox-condition-help") }}>
+              {% for key, label in proxmox_conditions.items() %}<option value="{{ key }}" {% if e.proxmox_condition == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            <p class="form-help" id="rmm-check-proxmox-condition-help">Read on the host by its RMM agent (installed with the Linux tray). Other devices report “Not a Proxmox VE host”.</p>
+            {{ field_error("proxmox_condition") }}
+          </div>
+        </div>
+        <div class="rmm-field-row">
+          <div class="form-field rmm-field--grow" data-rmm-proxmox-show="guest,storage,zfs,node_offline">
+            <label class="form-label" for="rmm-check-proxmox-target">Name</label>
+            <input class="form-input" id="rmm-check-proxmox-target" name="proxmox_target" maxlength="128" value="{{ e.proxmox_target }}" placeholder="101" autocomplete="off" spellcheck="false"{{ invalid("proxmox_target", "rmm-check-proxmox-target-help") }}>
+            <p class="form-help" id="rmm-check-proxmox-target-help">A guest's VMID or name (anywhere in the cluster, so migrations are followed), or a storage, ZFS pool or node name. Leave blank or use <code>*</code> to watch every storage, pool or node.</p>
+            {{ field_error("proxmox_target") }}
+          </div>
+          <div class="form-field" data-rmm-proxmox-show="storage">
+            <label class="form-label" for="rmm-check-proxmox-threshold">Fails when fuller than</label>
+            <div class="rmm-input-unit"><input class="form-input" id="rmm-check-proxmox-threshold" name="proxmox_threshold" type="number" inputmode="decimal" min="1" max="100" step="any" value="{{ e.proxmox_threshold }}"{{ invalid("proxmox_threshold") }}><span class="rmm-input-unit__suffix" aria-hidden="true">%</span></div>
+            {{ field_error("proxmox_threshold") }}
           </div>
         </div>
       </fieldset>

@@ -2,8 +2,9 @@
 
 // main_nowebview.go provides the shared logic for the tray UI agent when
 // built without the webview library (CGO=0, cross-compiled builds).
-// On Windows a real system-tray icon is shown via getlantern/systray (pure Go).
-// On other platforms the process stays alive headlessly and handles IPC only.
+// On Windows and Linux desktops a real system-tray icon is shown via
+// internal/systray (pure Go). On other platforms the process stays alive
+// headlessly and handles IPC only.
 package main
 
 import (
@@ -29,8 +30,10 @@ func stateDir() string {
 			base = `C:\ProgramData`
 		}
 		return filepath.Join(base, "MyPortal", "tray")
-	default:
+	case "darwin":
 		return "/Library/Application Support/MyPortal/Tray"
+	default:
+		return "/var/lib/myportal-tray"
 	}
 }
 
@@ -113,8 +116,8 @@ func main() {
 	go runOutlookSignatureWorker()
 
 	// runUI is provided by the platform-specific file:
-	//   tray_nowebview_windows.go  – shows a real systray icon on Windows
-	//   tray_nowebview_other.go    – blocks headlessly on macOS/Linux
+	//   tray_nowebview_systray.go  – shows a real systray icon on Windows and Linux
+	//   tray_nowebview_other.go    – blocks headlessly elsewhere
 	runUI()
 }
 

@@ -20,6 +20,7 @@ started and when it was last checked.
 | **File or folder** | A path does not exist (or exists when it should not). Use a full path such as `C:\Program Files\App\app.exe`, `\\server\share\file.txt` or `/etc/app.conf`. `*` and `?` match any name, for example `C:\Users\*\Desktop\App.lnk`, and `%NAME%` is an environment variable on the device, such as `%ProgramData%`. | Agent |
 | **Process** | No process with a name is running (or one is running when it should not be). Use the program's file name, such as `notepad.exe` or `nginx`; case and `.exe` do not matter. | Agent |
 | **Program check** | A program is missing (or installed when it should not be), or an installed version fails an optional numeric comparison. Use its exact installed software name, ignoring case. | Agent |
+| **Proxmox VE** | On a Proxmox VE host: a virtual machine or container (by VMID or name, anywhere in the cluster) is not running, storage is fuller than a percentage, a ZFS pool is not `ONLINE`, the latest backup job on the node failed, the cluster has lost quorum, or a cluster node is offline. | Agent |
 | **Script result** | A Gitea script, run on the device every few minutes, does not return what you expect: an exit code, or output that contains, does not contain or exactly matches some text. | Server queues the script |
 | **Agent offline** | The agent has not checked in for a number of minutes, for example 30 for a server. | Server |
 
@@ -58,6 +59,14 @@ greater than and at least. Numeric components are compared (`1.10` is newer than
 `1.2` equals `1.2.0`), and every installed version must satisfy the requirement.
 Unreadable versions or collection errors report **Unknown**, distinct from **Not installed**.
 Program checks require an updated RMM agent; older agents leave them waiting for measurements.
+
+A **Proxmox VE** check reads the host with `pvesh`, `pveversion` and `zpool` on each measurement,
+so no API token is needed; the agent runs as root on the host. Install the Linux tray on the host
+(see [Linux and Proxmox VE](Linux%20and%20Proxmox%20VE.md)) and it installs the agent. Guest checks
+look across the whole cluster, so a guest that migrates or fails over to another node is still
+found; templates never count as running. Storage, ZFS pool and node checks watch one name, or every
+one with `*` or a blank name. A device that is not a Proxmox VE host reports **Not a Proxmox VE
+host**; older agents leave Proxmox VE checks waiting for measurements.
 
 ## Who a check applies to
 

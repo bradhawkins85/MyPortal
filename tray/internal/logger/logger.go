@@ -8,6 +8,8 @@
 //   - Windows: %LocalAppData%\MyPortal\tray\logs\<name>.log, then
 //     %ProgramData%\MyPortal\tray\logs\<name>.log
 //   - macOS:   /Library/Logs/MyPortal/tray/<name>.log
+//   - Linux:   ~/.local/state/myportal-tray/<name>.log (the desktop UI), then
+//     /var/log/myportal-tray/<name>.log
 //
 // Standard output is also used (captured by systemd / launchd / the
 // service host).
@@ -140,8 +142,18 @@ func platformFallbackDirs() []string {
 			base = `C:\ProgramData`
 		}
 		return append(dirs, filepath.Join(base, "MyPortal", "tray", "logs"))
-	default:
+	case "darwin":
 		return []string{"/Library/Logs/MyPortal/tray"}
+	default:
+		// The Linux tray UI runs as the desktop user, who cannot write to
+		// /opt/myportal-tray/logs or /var/log.
+		var dirs []string
+		if state := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); state != "" {
+			dirs = append(dirs, filepath.Join(state, "myportal-tray"))
+		} else if home, err := os.UserHomeDir(); err == nil {
+			dirs = append(dirs, filepath.Join(home, ".local", "state", "myportal-tray"))
+		}
+		return append(dirs, "/var/log/myportal-tray")
 	}
 }
 

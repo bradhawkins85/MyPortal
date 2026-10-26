@@ -1,6 +1,7 @@
 // Package checks measures what MyPortal's checks watch: CPU load, memory,
-// disk space, network throughput, ping targets, services, files and
-// processes. MyPortal says what to measure (client.CheckConfig) and judges the
+// disk space, network throughput, ping targets, services, files,
+// processes and, on Proxmox VE hosts, the cluster, guests, storage, ZFS pools
+// and backups. MyPortal says what to measure (client.CheckConfig) and judges the
 // results; a service check may also have the agent start, restart or stop the
 // service.
 package checks
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bradhawkins85/myportal-rmm/internal/client"
+	"github.com/bradhawkins85/myportal-rmm/internal/proxmox"
 )
 
 // Collector keeps the previous CPU and network counters so each report
@@ -84,6 +86,10 @@ func (c *Collector) Collect(ctx context.Context, cfg client.CheckConfig) client.
 	}
 	if len(cfg.Programs) > 0 {
 		report.Programs = CheckPrograms(ctx, cfg.Programs)
+	}
+	if cfg.Proxmox {
+		status := proxmox.Collect(ctx, false)
+		report.Proxmox = &status
 	}
 	wg.Wait()
 	return report

@@ -89,10 +89,20 @@ async def test_push_refuses_devices_it_cannot_reach(sqlite_db, storage, sent):
     await _device(sqlite_db, device_id=6, company_id=2, asset_id=20)
     with pytest.raises(deploy.AgentDeployError):
         await deploy.push_to_asset(20, company_id=1, user_id=9)
-    await _device(sqlite_db, device_id=7, asset_id=11, os_name="linux")
-    with pytest.raises(deploy.AgentDeployError, match="Windows and macOS"):
+    await _device(sqlite_db, device_id=7, asset_id=11, os_name="freebsd")
+    with pytest.raises(deploy.AgentDeployError, match="Windows, macOS and Linux"):
         await deploy.push_to_asset(11, company_id=1, user_id=9)
     assert await _commands(sqlite_db) == []
+
+
+@pytest.mark.anyio
+async def test_push_reaches_linux_tray_devices(sqlite_db, storage, sent):
+    # Linux trays, including headless servers such as Proxmox VE, install the agent too.
+    _cache(storage, "linux", "amd64")
+    await _device(sqlite_db, os_name="linux")
+    result = await deploy.push_to_asset(11, company_id=1, user_id=9)
+    assert result["status"] == "queued"
+    assert [row["device_id"] for row in await _commands(sqlite_db)] == [5]
 
 
 @pytest.mark.anyio
@@ -145,7 +155,7 @@ async def test_switching_auto_deploy_on_pushes_to_every_device_without_the_agent
     await _device(sqlite_db, device_id=5, asset_id=10)
     await _enrol(sqlite_db, tray_id=5, asset_id=10)
     await _device(sqlite_db, device_id=6, asset_id=11, os_name="darwin")
-    await _device(sqlite_db, device_id=7, asset_id=None, os_name="linux")
+    await _device(sqlite_db, device_id=7, asset_id=None, os_name="freebsd")
     await _device(sqlite_db, device_id=8, asset_id=None, status="revoked")
     await _device(sqlite_db, device_id=9, company_id=2, asset_id=20)
 
@@ -576,3 +586,22 @@ def test_asset_page_offers_push_only_without_an_agent():
     assert '"label": "Repair RMM agent"' in detail
     script = (root / "app/static/js/rmm_agent_deploy.js").read_text(encoding="utf-8")
     assert "data.status === 'installed'" in script
+
+
+@pytest.mark.anyio
+async def test_linux_trays_are_only_offered_linux_versions(sqlite_db):
+    from app.repositories import tray as tray_repo
+
+    await sqlite_db.execute(
+        "INSERT INTO tray_versions (version, platform, download_url, rollout_percent, published_at) "
+        "VALUES ('0.9.0', 'all', 'https://x/a.msi', 100, '2026-01-02')"
+    )
+    assert await tray_repo.get_latest_tray_version("linux") is None
+    assert await tray_repo.get_stable_tray_version("linux") is None
+    assert (await tray_repo.get_latest_tray_version("windows"))["version"] == "0.9.0"
+    await sqlite_db.execute(
+        "INSERT INTO tray_versions (version, platform, download_url, rollout_percent, published_at) "
+        "VALUES ('0.8.9', 'linux', 'https://x/myportal-tray-linux.tar.gz', 100, '2026-01-01')"
+    )
+    assert (await tray_repo.get_latest_tray_version("linux"))["version"] == "0.8.9"
+    assert (await tray_repo.get_stable_tray_version("linux"))["version"] == "0.8.9"

@@ -9,7 +9,7 @@ the tray app, with its own version, build workflow
 | --- | --- | --- |
 | Windows | `MyPortalRMMAgent` (LocalSystem) | `%ProgramData%\MyPortal RMM` |
 | macOS | LaunchDaemon (root) | `/Library/Application Support/MyPortal RMM` |
-| Linux | systemd unit (root) | `/var/lib/myportal-rmm` |
+| Linux | systemd unit (root), binary in `/opt/myportal-rmm` | `/var/lib/myportal-rmm` |
 
 ## Install
 
@@ -117,6 +117,21 @@ Every platform also sends a hardware and software inventory: once shortly after
 the service starts, then whenever `GET /api/rmm/agent/inventory/config` says one
 is due (daily, or when a technician presses **Refresh now** on the asset page).
 See `internal/inventory` and `docs/wiki/administration/RMM Inventory.md`.
+
+## Proxmox VE
+
+On a Proxmox VE host (it has `/etc/pve` and `pvesh`) the inventory snapshot gets
+a `proxmox` section and, while the device has a **Proxmox VE** check,
+`GET /api/rmm/agent/checks/config` answers `"proxmox": true` and every check
+report carries it too: the pve-manager version, cluster quorum and nodes, every
+guest in the cluster, this node's storage, `zpool list` health and the last ten
+`vzdump` tasks (inventory adds the subscription and the count of pending apt
+updates). Everything is read locally with `pvesh get ... --output-format json`,
+`pveversion` and `zpool`, so no API token is needed. See `internal/proxmox`.
+
+Linux servers, Proxmox VE included, get the agent through the headless Linux
+tray (`tray/installer/linux/install.sh`), which enrols the device and installs
+the agent like the Windows and macOS tray apps.
 
 ## Patch management
 

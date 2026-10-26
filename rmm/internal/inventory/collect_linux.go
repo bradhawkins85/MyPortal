@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bradhawkins85/myportal-rmm/internal/proxmox"
 )
 
 func readText(path string) string {
@@ -57,6 +59,10 @@ func collectPlatform(ctx context.Context, s *Snapshot) {
 
 	s.PhysicalDisks = blockDevices()
 	s.Software = linuxPackages(ctx, s)
+	if proxmox.Detect() {
+		status := proxmox.Collect(ctx, true)
+		s.Proxmox = &status
+	}
 }
 
 // blockDevices lists the drives in /sys/block, leaving out loop, RAM,

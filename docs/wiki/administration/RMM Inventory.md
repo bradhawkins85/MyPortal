@@ -25,6 +25,12 @@ left out; installed and missing Windows updates have their own **Windows updates
 sent and the section lists what failed under **Some details could not be read**. At most 5000
 programs are kept per device.
 
+On a Proxmox VE host the Hardware page also has a **Proxmox VE** section: the pve-manager version
+and node, cluster name, quorum and nodes online, subscription status, pending package updates,
+every virtual machine and container in the cluster (with its node, status, CPUs, memory, disk and
+uptime), this node's storage and how full it is, ZFS pool health and the last ten backup jobs. To be
+alerted on any of these, add a **Proxmox VE** check (see [RMM Checks](RMM%20Checks.md)).
+
 ## When devices send it
 
 The agent sends a snapshot shortly after its service starts, then asks MyPortal every two minutes

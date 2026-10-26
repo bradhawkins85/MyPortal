@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,9 @@ func TestServiceChangesDefenderPreferencesOnlyThroughTamperAwarePolicy(t *testin
 
 func TestDeliverUserSessionMessageQueuesAndLaunchesUIWhenNoIPCClient(t *testing.T) {
 	d := &daemon{}
+	previousDesktop := linuxDesktopInstalled
+	linuxDesktopInstalled = func() bool { return true }
+	t.Cleanup(func() { linuxDesktopInstalled = previousDesktop })
 
 	previousLaunch := launchTrayUIForActiveUserFunc
 	launches := 0
@@ -213,5 +217,37 @@ func TestRetryEnrolmentRecoversAndStops(t *testing.T) {
 	}, func(int) time.Duration { return time.Hour })
 	if ok || attempts != 1 {
 		t.Fatalf("result=%v attempts=%d", ok, attempts)
+	}
+}
+
+func TestHeadlessLinuxDropsUserSessionMessages(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("only Linux installs can be headless")
+	}
+	d := &daemon{}
+	previousDesktop := linuxDesktopInstalled
+	linuxDesktopInstalled = func() bool { return false }
+	previousLaunch := launchTrayUIForActiveUserFunc
+	launches := 0
+	launchTrayUIForActiveUserFunc = func() error {
+		launches++
+		return nil
+	}
+	t.Cleanup(func() {
+		linuxDesktopInstalled = previousDesktop
+		launchTrayUIForActiveUserFunc = previousLaunch
+	})
+
+	d.deliverUserSessionMessage(ipc.Message{Type: "chat_open"})
+
+	if launches != 0 || d.consumePendingUIMessage() != nil {
+		t.Fatalf("a headless install must not queue or launch a UI (launches = %d)", launches)
+	}
+	if !headless() || uiReadsState("linux") {
+		t.Fatal("a Linux install without the UI must be headless and keep its state private")
+	}
+	linuxDesktopInstalled = func() bool { return true }
+	if headless() || !uiReadsState("linux") {
+		t.Fatal("a Linux desktop install must share its state with the UI")
 	}
 }
