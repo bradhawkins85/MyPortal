@@ -1,0 +1,7 @@
+{
+  "guid": "87481ff7-6fbe-40ef-ac5f-cbd176ce3bb2",
+  "occurred_at": "2026-10-26T13:40Z",
+  "change_type": "Feature",
+  "summary": "Reporting: add 119 catalogue entries for recently added features, covering RMM agents, deployment, hardware and software inventory, Windows Updates, scripts, checks, event log and script result rules, findings, remote control and onboarding; AI health checks; tray devices and deployment URLs; asset warranties, tags and network map coverage; AI usage, feedback and privacy requests; marketing campaigns; custom forms; client onboarding; application and backup registers; plus company report sections, stat strips and dashboard widgets for RMM devices, Windows Updates, device health and warranty.",
+  "content_hash": "32e49bfd643dc0850274b361b06dfe4fe149239d92f7fe85f348db11f9ba89b2"
+}
