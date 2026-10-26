@@ -1137,11 +1137,7 @@ func collectFacts() facts {
 		OS:       runtime.GOOS,
 		Hostname: h,
 	}
-	if u := os.Getenv("USER"); u != "" {
-		f.ConsoleUser = u
-	} else if u := os.Getenv("USERNAME"); u != "" {
-		f.ConsoleUser = u
-	}
+	f.ConsoleUser = consoleUserName()
 	return f
 }
 

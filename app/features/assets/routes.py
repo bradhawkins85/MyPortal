@@ -2034,8 +2034,13 @@ async def asset_detail_page(
     logged_on_user = None
     if not customer_safe:
         tray_device = (await tray_repo.list_active_devices_by_asset_ids([asset_id])).get(asset_id) or {}
+        console_user = str(tray_device.get("console_user") or "").strip()
+        # Older tray services reported their own SYSTEM identity, which is the
+        # machine account (COMPUTERNAME$), not a person.
+        if console_user.endswith("$") or console_user.upper() in {"SYSTEM", "ROOT"}:
+            console_user = ""
         logged_on_user = (
-            str(tray_device.get("console_user") or "").strip()
+            console_user
             or str(record.get("last_user") or "").strip()
             or None
         )

@@ -120,3 +120,16 @@ def test_logged_on_chip_sits_in_the_technician_only_summary():
     assert chip in template
     technician_block = template.index("{% if not customer_safe %}", template.index('aria-label="Asset summary"'))
     assert technician_block < template.index(chip) < template.index("{% endif %}\n        </ul>", technician_block)
+
+
+@pytest.mark.anyio
+async def test_machine_account_from_the_tray_falls_back_to_the_last_user(monkeypatch):
+    renderer, _tray_lookup = _patch_detail(
+        monkeypatch,
+        record={"id": 10, "company_id": 3, "last_user": "bob"},
+        tray_devices={10: {"id": 5, "console_user": "DESKTOP-01$"}},
+    )
+
+    await routes.asset_detail_page(_request(), 10, customer_preview=False)
+
+    assert renderer.await_args.kwargs["extra"]["logged_on_user"] == "bob"
