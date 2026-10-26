@@ -27,6 +27,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -46,10 +47,13 @@ import (
 var Version = "0.0.0-dev"
 
 const (
-	pollWait       = 25 * time.Second
-	maxConcurrent  = 4
-	checkinEvery   = 2 * time.Hour
-	reportAttempts = 5
+	pollWait      = 25 * time.Second
+	maxConcurrent = 4
+	checkinEvery  = 2 * time.Hour
+	// A result is retried for this long (MyPortal may be restarting) before
+	// the run is given up; MyPortal then marks it failed on the next poll.
+	reportFor      = 30 * time.Minute
+	reportMaxDelay = time.Minute
 
 	eventLogStartDelay = 30 * time.Second
 	eventLogsOffWait   = 15 * time.Minute
@@ -324,6 +328,7 @@ func loop(ctx context.Context) {
 	api := client.New(st.PortalURL, st.AuthToken)
 	r.DownloadFile = api.DownloadRunFile
 	slots := make(chan struct{}, maxConcurrent)
+	runs := newRunTracker()
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	wg.Add(1)
@@ -364,7 +369,7 @@ func loop(ctx context.Context) {
 
 	backoff := 5 * time.Second
 	for ctx.Err() == nil {
-		jobs, err := api.Jobs(ctx, pollWait)
+		poll, err := api.Jobs(ctx, pollWait, runs.executing())
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -380,9 +385,19 @@ func loop(ctx context.Context) {
 			continue
 		}
 		backoff = 5 * time.Second
-		for _, job := range jobs {
+		for _, id := range runs.stop(poll.Stop) {
+			log.Printf("run %d: aborted in MyPortal; stopping the script", id)
+		}
+		for _, job := range poll.Jobs {
+			// Registered before the next poll, so MyPortal never sees a
+			// collected run missing from the executing list.
+			runCtx, ok := runs.add(ctx, job.ID)
+			if !ok {
+				continue
+			}
 			if !startJob(ctx, slots, &wg, job, func(job client.Job) {
-				execute(ctx, api, r, job)
+				defer runs.done(job.ID)
+				execute(runCtx, api, r, job)
 			}) {
 				return
 			}
@@ -413,12 +428,46 @@ func startJob(ctx context.Context, slots chan struct{}, wg *sync.WaitGroup, job 
 	return true
 }
 
+// execute runs a job and reports its result. ctx is cancelled when the service
+// stops or MyPortal aborts the run.
 func execute(ctx context.Context, api *client.Client, r *runner.Runner, job client.Job) {
 	log.Printf("run %d: starting %s", job.ID, job.Path)
+	result := runJob(ctx, api, r, job)
+	if ctx.Err() != nil && result.Error == "" && !result.TimedOut {
+		result.Error = "The script was stopped before it finished."
+	}
+	// Report even if the service is stopping, so the run is not left open.
+	reportCtx, cancel := context.WithTimeout(context.Background(), reportFor)
+	defer cancel()
+	delay := 2 * time.Second
+	for attempt := 1; ; attempt++ {
+		err := api.Report(reportCtx, job.ID, result)
+		if err == nil {
+			log.Printf("run %d: reported", job.ID)
+			return
+		}
+		log.Printf("run %d: report attempt %d failed: %v", job.ID, attempt, err)
+		sleep(reportCtx, delay)
+		if reportCtx.Err() != nil {
+			log.Printf("run %d: giving up reporting the result", job.ID)
+			return
+		}
+		delay = min(delay*2, reportMaxDelay)
+	}
+}
+
+// runJob runs the script. A panic becomes a failed result, so the run is
+// still reported rather than taking the service down with it.
+func runJob(ctx context.Context, api *client.Client, r *runner.Runner, job client.Job) (result client.Result) {
+	defer func() {
+		if p := recover(); p != nil {
+			log.Printf("run %d: agent error: %v\n%s", job.ID, p, debug.Stack())
+			result = client.Result{Error: fmt.Sprintf("The RMM agent hit an internal error running the script: %v", p)}
+		}
+	}()
 	if err := api.Started(ctx, job.ID); err != nil {
 		log.Printf("run %d: could not mark as started: %v", job.ID, err)
 	}
-	var result client.Result
 	if job.Path == "agent/checkin" {
 		result = performFullCheckin(ctx, api, r)
 	} else if !refreshChocolateyPlan(ctx, api, &job) {
@@ -434,20 +483,7 @@ func execute(ctx context.Context, api *client.Client, r *runner.Runner, job clie
 			return true
 		})
 	}
-	// Report even if the service is stopping, so the run is not left open.
-	reportCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	delay := 2 * time.Second
-	for attempt := 1; attempt <= reportAttempts; attempt++ {
-		err := api.Report(reportCtx, job.ID, result)
-		if err == nil {
-			log.Printf("run %d: reported", job.ID)
-			return
-		}
-		log.Printf("run %d: report attempt %d failed: %v", job.ID, attempt, err)
-		sleep(reportCtx, delay)
-		delay *= 2
-	}
+	return result
 }
 
 // eventLogLoop sends the Windows event logs MyPortal asks for, once a

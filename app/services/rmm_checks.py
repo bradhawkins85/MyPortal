@@ -1272,9 +1272,9 @@ def script_outcome(check: Mapping[str, Any], run: Mapping[str, Any]) -> tuple[bo
     output = str(run.get("stdout") or "").strip()
     first_line = output.splitlines()[0][:200] if output else ""
     status = str(run.get("status") or "")
-    if status in ("timed_out", "expired", "cancelled") or (run.get("exit_code") is None and status != "completed"):
+    if status in ("timed_out", "expired", "cancelled", "aborted") or (run.get("exit_code") is None and status != "completed"):
         reason = {"timed_out": "timed out", "expired": "did not reach the device in time",
-                  "cancelled": "was cancelled"}.get(status, "did not finish")
+                  "cancelled": "was cancelled", "aborted": "was aborted"}.get(status, "did not finish")
         return True, f"The script {reason}" + (f": {run['error_message']}"[:300] if run.get("error_message") else "")
     code = run.get("exit_code")
     text = f"Exit code {code}" + (f": {first_line}" if first_line else "")

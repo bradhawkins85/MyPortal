@@ -24,6 +24,7 @@
     failed: ['error', 'Failed'],
     timed_out: ['error', 'Timed out'],
     cancelled: ['neutral', 'Cancelled'],
+    aborted: ['neutral', 'Aborted'],
     expired: ['neutral', 'Expired'],
     skipped: ['neutral', 'Skipped'],
     not_run: ['neutral', 'Not run'],

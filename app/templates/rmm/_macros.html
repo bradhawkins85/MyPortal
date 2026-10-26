@@ -6,6 +6,7 @@
   "failed": ("error", "Failed"),
   "timed_out": ("error", "Timed out"),
   "cancelled": ("neutral", "Cancelled"),
+  "aborted": ("neutral", "Aborted"),
   "expired": ("neutral", "Expired"),
 } %}
 
@@ -105,7 +106,8 @@
     <td class="table__actions" data-column-key="actions">
       <button type="button" class="button button--ghost button--small" data-rmm-view-run="{{ run.id }}" aria-haspopup="dialog" aria-controls="rmm-result-modal">View<span class="visually-hidden"> run of {{ run.script_name }}</span></button>
       {% if can_run and run.status == 'queued' %}<button type="button" class="button button--ghost button--small" data-rmm-cancel-run-id="{{ run.id }}" title="Cancel before the agent picks up this script">Cancel<span class="visually-hidden"> run of {{ run.script_name }}</span></button>{% endif %}
-      {% if can_run and run.status in ['expired', 'timed_out', 'failed'] and run.script_id and run.asset_id %}<button type="button" class="button button--ghost button--small" data-rmm-retry-run-id="{{ run.id }}" aria-haspopup="dialog" aria-controls="rmm-run-modal">Retry<span class="visually-hidden"> run of {{ run.script_name }}</span></button>{% endif %}
+      {% if can_run and run.status in ['dispatched', 'running'] %}<button type="button" class="button button--ghost button--small" data-rmm-abort-run-id="{{ run.id }}" title="Stop the script on the device and let queued scripts run">Abort<span class="visually-hidden"> run of {{ run.script_name }}</span></button>{% endif %}
+      {% if can_run and run.status in ['expired', 'timed_out', 'failed', 'aborted'] and run.script_id and run.asset_id %}<button type="button" class="button button--ghost button--small" data-rmm-retry-run-id="{{ run.id }}" aria-haspopup="dialog" aria-controls="rmm-run-modal">Retry<span class="visually-hidden"> run of {{ run.script_name }}</span></button>{% endif %}
     </td>
   </tr>
   {%- endfor %}

@@ -14,7 +14,7 @@ from app.core.database import db
 ACTIVE_RUN_STATUSES = ("queued", "dispatched", "running")
 _dispatch_locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
 
-FINISHED_RUN_STATUSES = ("completed", "failed", "timed_out", "cancelled", "expired")
+FINISHED_RUN_STATUSES = ("completed", "failed", "timed_out", "cancelled", "expired", "aborted")
 
 # Fixed SQL fragments naming what queued a run (manual, schedule or onboarding).
 _RUN_SOURCE_COLUMNS = "r.run_source, r.schedule_id, r.onboarding_run_id, r.run_as, s.name AS schedule_name"
@@ -599,10 +599,11 @@ async def queue_states() -> dict[int, tuple[int, int, int]]:
         "FROM rmm_script_runs WHERE status IN ('queued', 'dispatched', 'running') AND agent_id IS NOT NULL "
         "GROUP BY agent_id",
     )
+    # Agents with only executing runs are included too, so an aborted run
+    # wakes the agent's poll on every worker and the agent stops it.
     return {
         int(row["agent_id"]): (int(row["queued"] or 0), int(row["newest"] or 0), int(row["active"] or 0))
         for row in rows or []
-        if int(row["queued"] or 0)
     }
 
 
@@ -647,11 +648,14 @@ async def mark_dispatched(run_id: int, agent_id: int, *, expires_at: datetime | 
             )
             if not first or int(first["id"]) != run_id:
                 return False
+            # A run past its result deadline no longer holds the queue, even
+            # before the periodic sweep marks it timed out.
             active = await db.fetch_all(
                 "SELECT allow_parallel, run_source FROM rmm_script_runs "
                 "WHERE agent_id = %s AND status IN ('dispatched', 'running') "
-                "AND (run_anyway = 0 OR run_source = 'onboarding')",
-                (agent_id,),
+                "AND (run_anyway = 0 OR run_source = 'onboarding') "
+                "AND (expires_at IS NULL OR expires_at >= %s)",
+                (agent_id, _utcnow()),
             )
             parallel = bool(candidate.get("allow_parallel")) and candidate.get("run_source") != "onboarding"
             exclusive_active = any(
@@ -748,11 +752,11 @@ async def claim_ticket_run_report(run_id: int) -> bool:
 
 async def unreported_ticket_runs(*, limit: int = 50) -> list[int]:
     """Ticket automation runs that finished without the agent reporting back
-    (expired, cancelled or timed out by the server) and are not yet posted."""
+    (expired, cancelled, aborted or timed out by the server) and are not yet posted."""
 
     rows = await db.fetch_all(
         "SELECT t.run_id FROM rmm_ticket_script_runs t JOIN rmm_script_runs r ON r.id = t.run_id "
-        "WHERE t.reported_at IS NULL AND r.status IN ('expired', 'cancelled', 'timed_out') "
+        "WHERE t.reported_at IS NULL AND r.status IN ('expired', 'cancelled', 'timed_out', 'aborted') "
         "ORDER BY t.run_id LIMIT %s",
         (limit,),
     )
@@ -779,6 +783,54 @@ async def cancel_run(run_id: int) -> bool:
         (_utcnow(), run_id),
     )
     return cancelled > 0
+
+
+async def abort_run(run_id: int, *, error_message: str) -> bool:
+    """Stop a run the device collected; its agent is told to stop the script."""
+
+    aborted = await db.execute_rowcount(
+        "UPDATE rmm_script_runs SET status = 'aborted', error_message = %s, completed_at = %s, "
+        "payload_encrypted = NULL WHERE id = %s AND status IN ('dispatched', 'running')",
+        (error_message, _utcnow(), run_id),
+    )
+    return aborted > 0
+
+
+async def stopped_agent_runs(agent_id: int, run_ids: Iterable[int]) -> list[int]:
+    """Which of the runs the agent is executing MyPortal has already finished
+    (aborted, or timed out by the server), so the agent stops them."""
+
+    stopped: list[int] = []
+    # An agent executes at most a handful of runs, so these are few key lookups.
+    for run_id in sorted({int(run_id) for run_id in run_ids}):
+        row = await db.fetch_one(
+            "SELECT status FROM rmm_script_runs WHERE id = %s AND agent_id = %s", (run_id, agent_id)
+        )
+        if row and row["status"] not in ACTIVE_RUN_STATUSES:
+            stopped.append(run_id)
+    return stopped
+
+
+async def lost_agent_runs(agent_id: int, executing: Iterable[int]) -> list[int]:
+    """Runs MyPortal thinks the agent is executing that the agent says it is not."""
+
+    rows = await db.fetch_all(
+        "SELECT id FROM rmm_script_runs WHERE agent_id = %s AND status IN ('dispatched', 'running')",
+        (agent_id,),
+    )
+    keep = {int(run_id) for run_id in executing}
+    return [int(row["id"]) for row in rows or [] if int(row["id"]) not in keep]
+
+
+async def fail_lost_run(run_id: int, *, error_message: str) -> bool:
+    """Close a run its agent no longer has, keeping any live output it sent."""
+
+    failed = await db.execute_rowcount(
+        "UPDATE rmm_script_runs SET status = 'failed', error_message = %s, completed_at = %s, "
+        "payload_encrypted = NULL WHERE id = %s AND status IN ('dispatched', 'running')",
+        (error_message, _utcnow(), run_id),
+    )
+    return failed > 0
 
 
 async def expire_stale_runs(now: datetime | None = None) -> int:

@@ -42,6 +42,7 @@ _FINISH_WORDS = {
     "failed": "failed",
     "timed_out": "timed out",
     "cancelled": "was cancelled",
+    "aborted": "was aborted",
     "expired": "expired before the device collected it",
 }
 
@@ -336,7 +337,7 @@ async def record_result(
 async def tick() -> None:
     """Post the outcome of ticket runs that ended without a result from the
     device: it never collected the script, it never reported back, or a
-    technician cancelled the run."""
+    technician cancelled or aborted the run."""
 
     for run_id in await rmm_repo.unreported_ticket_runs():
         try:

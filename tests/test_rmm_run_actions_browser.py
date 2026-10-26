@@ -35,7 +35,7 @@ def mount(browser):
     contexts = []
     errors = []
 
-    def create(status="failed", *, can_run=True, picked_up=False, width=1280, result_status=None):
+    def create(status="failed", *, can_run=True, picked_up=False, width=1280, result_status=None, finished=False):
         run = {
             "id": 4, "script_id": 7, "asset_id": 10, "script_name": "Check disk",
             "script_path": "Common/check.ps1", "asset_name": "PC-01", "status": status,
@@ -92,6 +92,11 @@ def mount(browser):
                 run["status"] = "dispatched" if picked_up else "cancelled"
                 code = 409 if picked_up else 200
                 response = {"detail": "The device has already collected this run."} if picked_up else {"run": run}
+            elif path == "/api/rmm/runs/4/abort":
+                posts.append((path, route.request.headers, None))
+                run["status"] = "completed" if finished else "aborted"
+                code = 409 if finished else 200
+                response = {"detail": "This run has already finished."} if finished else {"run": run}
             elif path == "/api/rmm/runs/4":
                 if result_status:
                     run["status"] = result_status
@@ -169,10 +174,54 @@ def test_active_and_ineligible_runs_have_no_actions(mount, status):
     assert page.locator('[data-rmm-cancel-run-id], [data-rmm-retry-run-id]').count() == 0
 
 
-@pytest.mark.parametrize("status", ["queued", "failed"])
+@pytest.mark.parametrize("status", ["queued", "failed", "running"])
 def test_read_only_runs_have_no_write_actions(mount, status):
     page, _ = mount(status, can_run=False)
-    assert page.locator('[data-rmm-cancel-run-id], [data-rmm-retry-run-id]').count() == 0
+    assert page.locator('[data-rmm-cancel-run-id], [data-rmm-abort-run-id], [data-rmm-retry-run-id]').count() == 0
+
+
+@pytest.mark.parametrize("status", ["queued", "completed", "failed", "aborted"])
+def test_only_collected_runs_can_be_aborted(mount, status):
+    page, _ = mount(status)
+    assert page.locator('[data-rmm-abort-run-id]').count() == 0
+
+
+@pytest.mark.parametrize("finished", [False, True])
+@pytest.mark.parametrize("status", ["dispatched", "running"])
+def test_abort_confirms_then_updates_list_and_handles_a_finished_run(mount, status, finished):
+    from playwright.sync_api import expect
+
+    page, posts = mount(status, finished=finished)
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    page.locator('[data-rmm-abort-run-id="4"]').click()
+    expect(page.locator('[data-rmm-abort-run-id="4"]')).to_be_visible()
+    assert posts == []
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator('[data-rmm-abort-run-id="4"]').click()
+    expect(page.locator('[data-rmm-run-row="4"] [data-column-key="status"]')).to_contain_text("Completed" if finished else "Aborted")
+    expect(page.locator('[data-rmm-abort-run-id="4"]')).to_be_hidden()
+    if finished:
+        expect(page.locator('[data-rmm-action-error]')).to_contain_text("already finished")
+    else:
+        # An aborted run can be tried again.
+        expect(page.locator('[data-rmm-retry-run-id="4"]')).to_be_visible()
+    assert len(posts) == 1 and posts[0][0] == "/api/rmm/runs/4/abort"
+    assert posts[0][1]["x-csrf-token"] == "test-csrf"
+
+
+def test_result_abort_keeps_the_list_in_sync(mount):
+    from playwright.sync_api import expect
+
+    page, posts = mount("running")
+    page.locator('[data-rmm-view-run="4"]').click()
+    expect(page.locator('[data-rmm-cancel-run]')).to_be_hidden()
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator('[data-rmm-abort-run]').click()
+    expect(page.locator('[data-rmm-result-stats]')).to_contain_text("Aborted")
+    expect(page.locator('[data-rmm-run-row="4"] [data-column-key="status"]')).to_contain_text("Aborted")
+    expect(page.locator('[data-rmm-abort-run]')).to_be_hidden()
+    expect(page.locator('[data-rmm-retry-run]')).to_be_visible()
+    assert len(posts) == 1
 
 
 def test_result_refresh_exposes_retry_when_a_queued_run_fails(mount):

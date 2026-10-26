@@ -13,6 +13,13 @@ The flow for a manual run:
 3. The device's RMM agent collects the run (:func:`claim_jobs`), executes it and
    reports back (:func:`record_result`). Custom values the script returns update
    the asset's custom fields and the company's variables.
+
+Each job poll also lists the runs the agent is still executing
+(:func:`poll_jobs`). Runs MyPortal thinks are executing but the agent does not
+have (the agent or device restarted, or the result was lost) fail at once
+instead of holding the device's queue until their deadline, and runs a
+technician aborted (:func:`abort_run`) come back in the poll's ``stop`` list so
+the agent ends the script.
 """
 
 from __future__ import annotations
@@ -71,6 +78,12 @@ POLL_WAIT_SECONDS = 25
 # few polls has lost its connection.
 AGENT_CONNECTED_WINDOW = timedelta(seconds=POLL_WAIT_SECONDS * 4)
 SENSITIVE_MASK = "••••••"
+# An agent executes at most four ordinary runs plus any Run Anyway runs.
+MAX_EXECUTING_RUNS = 64
+LOST_RUN_MESSAGE = (
+    "The RMM agent stopped running this script without reporting a result, for example because the "
+    "agent service or the device restarted. Output sent before then is shown."
+)
 # rmm_script_runs.run_source for a run started from a tray menu item.
 TRAY_RUN_SOURCE = "tray"
 # Who a script runs as on the device: the agent's own account (LocalSystem on
@@ -1112,8 +1125,8 @@ async def _watch_queue() -> None:
             log_warning("RMM job queue check failed", error=str(exc))
         else:
             for agent_id, event in list(_agent_events.items()):
-                state = _queue_states.get(agent_id)
-                if state is not None and state != _queue_seen.get(agent_id):
+                # A run queued, finished or aborted: claim again and send stops.
+                if _queue_states.get(agent_id) != _queue_seen.get(agent_id):
                     event.set()
         await asyncio.sleep(QUEUE_WATCH_SECONDS)
 
@@ -1139,10 +1152,82 @@ async def heartbeat(agent: Mapping[str, Any]) -> None:
     await rmm_repo.record_agent_checkin(int(agent["id"]), {})
 
 
-async def wait_for_jobs(agent: Mapping[str, Any], *, wait_seconds: float) -> list[dict[str, Any]]:
-    """Long-poll: return queued jobs as soon as there are any, or ``[]`` after ``wait_seconds``."""
+def parse_executing(raw: str | None) -> list[int] | None:
+    """The run IDs a job poll says the agent is executing (``executing=12,15``).
+
+    ``None`` when the agent did not say (older agents) or sent something
+    unreadable: then nothing is reconciled, rather than failing live runs."""
+
+    if raw is None:
+        return None
+    ids: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not (part.isascii() and part.isdigit()) or len(part) > 12:
+            return None
+        ids.append(int(part))
+    return ids if len(ids) <= MAX_EXECUTING_RUNS else None
+
+
+async def _finished_by_server(run_id: int) -> None:
+    """What a result from the agent would have triggered, for a run MyPortal
+    closed itself: post it to its ticket and move onboarding and checks on."""
+
+    from app.services import rmm_automation, rmm_checks, rmm_ticket_scripts
+
+    try:
+        run = await rmm_repo.get_run(run_id)
+        if run and run.get("run_source") == "ticket":
+            await rmm_ticket_scripts.record_result(
+                run_id, status=str(run["status"]), exit_code=None, stdout=str(run.get("stdout") or ""),
+                stderr=str(run.get("stderr") or ""), error=run.get("error_message"),
+            )
+        await rmm_automation.run_finished(run_id)
+        await rmm_checks.run_finished(run_id)
+    except Exception as exc:  # noqa: BLE001 - the run is already closed
+        log_warning("RMM run follow-up failed", run_id=run_id, error=str(exc))
+
+
+async def reconcile_runs(agent: Mapping[str, Any], executing: Iterable[int]) -> list[int]:
+    """Fail the runs MyPortal thinks the agent is executing but the agent does
+    not have, so they stop holding the device's queue. Returns their IDs."""
+
+    lost: list[int] = []
+    for run_id in await rmm_repo.lost_agent_runs(int(agent["id"]), executing):
+        if await rmm_repo.fail_lost_run(run_id, error_message=LOST_RUN_MESSAGE):
+            log_warning("RMM agent no longer has a run it was executing", run_id=run_id, agent_id=agent["id"])
+            lost.append(run_id)
+            await _finished_by_server(run_id)
+    return lost
+
+
+async def abort_run(run: Mapping[str, Any], *, aborted_by: str | None) -> bool:
+    """Stop a collected run now. The run is closed straight away, so the
+    device's queue moves on, and its agent is told to end the script."""
+
+    who = f" by {aborted_by}" if aborted_by else ""
+    if not await rmm_repo.abort_run(int(run["id"]), error_message=f"Aborted{who} before the script finished."):
+        return False
+    if run.get("agent_id") is not None:
+        notify_agent(int(run["agent_id"]))
+    await _finished_by_server(int(run["id"]))
+    return True
+
+
+async def poll_jobs(
+    agent: Mapping[str, Any], *, wait_seconds: float, executing: list[int] | None = None,
+) -> dict[str, list[Any]]:
+    """Long-poll: return queued jobs, and the executing runs to stop, as soon
+    as there are any, or nothing after ``wait_seconds``.
+
+    ``executing`` is what the agent is running; ``None`` (older agents) skips
+    reconciling lost runs and stopping aborted ones."""
 
     agent_id = int(agent["id"])
+    if executing is not None:
+        await reconcile_runs(agent, executing)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max(0.0, min(float(wait_seconds), POLL_WAIT_SECONDS))
     event = _agent_events.setdefault(agent_id, asyncio.Event())
@@ -1153,9 +1238,10 @@ async def wait_for_jobs(agent: Mapping[str, Any], *, wait_seconds: float) -> lis
             # this poll again only when the agent's queue changes.
             _queue_seen[agent_id] = _queue_states.get(agent_id)
             jobs = await claim_jobs(agent)
+            stop = await rmm_repo.stopped_agent_runs(agent_id, executing) if executing else []
             remaining = deadline - loop.time()
-            if jobs or remaining <= 0:
-                return jobs
+            if jobs or stop or remaining <= 0:
+                return {"jobs": jobs, "stop": stop}
             _ensure_queue_watcher()
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(event.wait(), timeout=remaining)
@@ -1163,6 +1249,12 @@ async def wait_for_jobs(agent: Mapping[str, Any], *, wait_seconds: float) -> lis
         if _agent_events.get(agent_id) is event and not event.is_set():
             _agent_events.pop(agent_id, None)
             _queue_seen.pop(agent_id, None)
+
+
+async def wait_for_jobs(agent: Mapping[str, Any], *, wait_seconds: float) -> list[dict[str, Any]]:
+    """Long-poll: return queued jobs as soon as there are any, or ``[]`` after ``wait_seconds``."""
+
+    return (await poll_jobs(agent, wait_seconds=wait_seconds))["jobs"]
 
 
 async def mark_started(agent: Mapping[str, Any], run_id: int) -> bool:

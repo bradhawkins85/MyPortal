@@ -10,6 +10,7 @@ Technician side (company scoped, ``menu.rmm_scripts``; write access runs scripts
 * ``POST /api/rmm/scripts/{id}/runs`` push a script to devices
 * ``POST /api/rmm/assets/{id}/tray-repair`` repair the device's tray agent
 * ``GET /api/rmm/runs`` / ``/api/rmm/runs/{id}``, ``POST /api/rmm/runs/{id}/cancel``
+  (not yet collected) and ``/abort`` (stop a run the device is executing)
 * ``POST /rmm/scripts/sync`` load scripts from Gitea (super admin)
 * ``GET /api/rmm/gitea/identity`` who to sign in to Gitea as (asked by nginx
   for every ``/gitea/`` request; ``menu.rmm_script_editing``)
@@ -19,7 +20,8 @@ Schedules and onboarding live in :mod:`.automation_routes`.
 Agent side (``Authorization: Bearer`` token):
 
 * ``POST /api/rmm/agent/enrol`` with the tray device's token
-* ``POST /api/rmm/agent/checkin``, ``GET /api/rmm/agent/jobs`` (long poll)
+* ``POST /api/rmm/agent/checkin``, ``GET /api/rmm/agent/jobs`` (long poll; the
+  agent lists the runs it is executing and is told which of them to stop)
 * ``POST /api/rmm/agent/runs/{id}/started`` and ``/result``
 * ``GET /api/rmm/agent/runs/{id}/files/{index}`` assigned immutable file downloads
 """
@@ -253,7 +255,7 @@ async def scripts_page(request: Request, script: int | None = Query(default=None
         "scripts": len(scripts),
         "agents": len(agents),
         "running": sum(1 for run in runs if run["status"] in rmm_repo.ACTIVE_RUN_STATUSES),
-        "failed": sum(1 for run in runs if run["status"] in {"failed", "timed_out", "expired"}),
+        "failed": sum(1 for run in runs if run["status"] in {"failed", "timed_out", "expired", "aborted"}),
     }
     return await _assets_routes()._main()._render_template(
         "rmm/scripts.html",
@@ -775,6 +777,24 @@ async def cancel_run_api(run_id: int, request: Request):
     return {"run": _serialise(await rmm_repo.get_run(run_id))}
 
 
+@router.post("/api/rmm/runs/{run_id:int}/abort", summary="Abort a run, stopping the script if the device is running it")
+async def abort_run_api(run_id: int, request: Request):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    run = await _company_run(run_id, company_id)
+    # A run the device has not collected yet is simply cancelled.
+    if run["status"] == "queued" and await rmm_repo.cancel_run(run_id):
+        action = "rmm.script.cancel"
+        await rmm_automation.run_finished(run_id)
+    elif await rmm_scripts.abort_run(run, aborted_by=user.get("email")):
+        action = "rmm.script.abort"
+    else:
+        return JSONResponse({"detail": "This run has already finished."}, status_code=409)
+    await audit_service.record(
+        action=action, request=request, user_id=user.get("id"), entity_type="rmm_script_run", entity_id=run_id,
+    )
+    return {"run": _serialise(await rmm_repo.get_run(run_id))}
+
+
 # --------------------------------------------------------------------------- #
 # Agent API
 # --------------------------------------------------------------------------- #
@@ -858,10 +878,11 @@ async def agent_checkin(payload: AgentDetails, request: Request, agent: dict = D
 @router.get("/api/rmm/agent/jobs", summary="Collect queued script runs (long poll)")
 async def agent_jobs(
     wait: int = Query(default=rmm_scripts.POLL_WAIT_SECONDS, ge=0, le=rmm_scripts.POLL_WAIT_SECONDS),
+    executing: str | None = Query(default=None, max_length=16384, description="Comma-separated IDs of the runs the agent is executing"),
     agent: dict = Depends(get_current_rmm_agent),
 ):
     await rmm_scripts.heartbeat(agent)
-    return {"jobs": await rmm_scripts.wait_for_jobs(agent, wait_seconds=wait)}
+    return await rmm_scripts.poll_jobs(agent, wait_seconds=wait, executing=rmm_scripts.parse_executing(executing))
 
 
 @router.post("/api/rmm/agent/runs/{run_id:int}/started", summary="Mark a run as started")

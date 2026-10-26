@@ -23,10 +23,13 @@
     failed: ['error', 'Failed'],
     timed_out: ['error', 'Timed out'],
     cancelled: ['neutral', 'Cancelled'],
+    aborted: ['neutral', 'Aborted'],
     expired: ['neutral', 'Expired'],
   };
   const ACTIVE = new Set(['queued', 'dispatched', 'running']);
-  const RETRYABLE = new Set(['expired', 'timed_out', 'failed']);
+  // Collected by the device: Abort stops the script there; queued runs are cancelled instead.
+  const ABORTABLE = new Set(['dispatched', 'running']);
+  const RETRYABLE = new Set(['expired', 'timed_out', 'failed', 'aborted']);
   const TYPE_LABELS = {
     string: 'Text', integer: 'Whole number', number: 'Number', boolean: 'Yes / no', switch: 'Switch',
     choice: 'Choice', list: 'List', secret: 'Secret',
@@ -630,11 +633,13 @@
   }
 
   document.addEventListener('click', (event) => {
-    const action = event.target.closest('[data-rmm-cancel-run-id], [data-rmm-retry-run-id]');
+    const action = event.target.closest('[data-rmm-cancel-run-id], [data-rmm-abort-run-id], [data-rmm-retry-run-id]');
     if (action && config.can_run) {
       event.preventDefault();
       if (action.hasAttribute('data-rmm-cancel-run-id')) {
         cancelRun(action.getAttribute('data-rmm-cancel-run-id'), action);
+      } else if (action.hasAttribute('data-rmm-abort-run-id')) {
+        abortRun(action.getAttribute('data-rmm-abort-run-id'), action);
       } else {
         retryRun(action.getAttribute('data-rmm-retry-run-id'), action);
       }
@@ -934,6 +939,7 @@
     });
     resultModal.querySelector('[data-rmm-result-inputs-section]').hidden = inputs.length === 0;
     resultModal.querySelector('[data-rmm-cancel-run]').hidden = !(config.can_run && run.status === 'queued');
+    resultModal.querySelector('[data-rmm-abort-run]').hidden = !(config.can_run && ABORTABLE.has(run.status));
     resultModal.querySelector('[data-rmm-retry-run]').hidden = !(config.can_run && RETRYABLE.has(run.status) && run.script_id && run.asset_id);
     updateRunRow(run);
   }
@@ -951,8 +957,20 @@
         'aria-label': 'Retry run of ' + run.script_name, 'aria-haspopup': 'dialog', 'aria-controls': 'rmm-run-modal',
       }, 'Retry'));
     }
-    row.querySelectorAll('[data-rmm-cancel-run-id], [data-rmm-retry-run-id]').forEach((button) => {
-      button.hidden = button.hasAttribute('data-rmm-cancel-run-id') ? run.status !== 'queued' : !(RETRYABLE.has(run.status) && run.script_id && run.asset_id);
+    if (config.can_run && ABORTABLE.has(run.status) && !actions.querySelector('[data-rmm-abort-run-id]')) {
+      actions.append(el('button', {
+        type: 'button', className: 'button button--ghost button--small', 'data-rmm-abort-run-id': run.id,
+        'aria-label': 'Abort run of ' + run.script_name, title: 'Stop the script on the device and let queued scripts run',
+      }, 'Abort'));
+    }
+    row.querySelectorAll('[data-rmm-cancel-run-id], [data-rmm-abort-run-id], [data-rmm-retry-run-id]').forEach((button) => {
+      if (button.hasAttribute('data-rmm-cancel-run-id')) {
+        button.hidden = run.status !== 'queued';
+      } else if (button.hasAttribute('data-rmm-abort-run-id')) {
+        button.hidden = !ABORTABLE.has(run.status);
+      } else {
+        button.hidden = !(RETRYABLE.has(run.status) && run.script_id && run.asset_id);
+      }
     });
   }
 
@@ -976,7 +994,7 @@
       const run = data.run;
       updateRunRow(run);
       if (!RETRYABLE.has(run.status) || !run.script_id || !run.asset_id) {
-        throw new Error('Only expired, timed out or failed runs with an available script and device can be retried.');
+        throw new Error('Only expired, timed out, failed or aborted runs with an available script and device can be retried.');
       }
       const values = {};
       const secretKeys = [];
@@ -1030,6 +1048,35 @@
     }
   }
 
+  async function abortRun(runId, button) {
+    if (button.disabled) return;
+    if (!window.confirm('Abort this script? The device stops it straight away and skips anything it has not done yet, and the next queued script can start.')) {
+      return;
+    }
+    button.disabled = true;
+    actionError(button, '');
+    try {
+      const data = await api('/api/rmm/runs/' + encodeURIComponent(runId) + '/abort', { method: 'POST' });
+      updateRunRow(data.run);
+      if (currentRun && Number(currentRun.id) === Number(runId) && !resultModal.hidden) {
+        stopPolling();
+        renderRun(data.run);
+      }
+    } catch (error) {
+      // The script may have finished since the list was rendered.
+      try {
+        const data = await api('/api/rmm/runs/' + encodeURIComponent(runId));
+        updateRunRow(data.run);
+        if (currentRun && Number(currentRun.id) === Number(runId) && !resultModal.hidden) renderRun(data.run);
+      } catch (refreshError) {
+        // Keep the original action failure visible when refresh also fails.
+      }
+      actionError(button, error.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   let pollGeneration = 0;
 
   function stopPolling() {
@@ -1062,6 +1109,7 @@
     stopPolling();
     currentRun = null;
     resultModal.querySelector('[data-rmm-cancel-run]').hidden = true;
+    resultModal.querySelector('[data-rmm-abort-run]').hidden = true;
     resultModal.querySelector('[data-rmm-retry-run]').hidden = true;
     reloadOnClose = Boolean(reload) || reloadOnClose;
     openModal(resultModal);
@@ -1079,6 +1127,9 @@
 
   resultModal.querySelector('[data-rmm-cancel-run]').addEventListener('click', (event) => {
     if (currentRun) cancelRun(currentRun.id, event.currentTarget);
+  });
+  resultModal.querySelector('[data-rmm-abort-run]').addEventListener('click', (event) => {
+    if (currentRun) abortRun(currentRun.id, event.currentTarget);
   });
   resultModal.querySelector('[data-rmm-retry-run]').addEventListener('click', (event) => {
     if (currentRun) retryRun(currentRun.id, event.currentTarget);
