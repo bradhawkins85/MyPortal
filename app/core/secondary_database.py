@@ -67,6 +67,12 @@ _UNKNOWN_DATABASE = 1049
 _DUPLICATE_COLUMN = 1060
 _DUPLICATE_INDEX = 1061
 RETRY_SECONDS = 60
+# How long startup and index DDL wait for a table's metadata lock. MySQL's
+# default is a year, so a worker whose ALTER queued behind a sibling's index
+# build, or behind a long query of the serving release, never finished
+# starting and the deployment's readiness check rolled the upgrade back.
+LOCK_WAIT_SECONDS = 10
+_CREATE_TABLE = re.compile(r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+`?(\w+)`?", re.IGNORECASE)
 
 
 class SecondaryDatabase:
@@ -145,9 +151,12 @@ class SecondaryDatabase:
                     self._pool = await self._create_mysql_pool()
                     async with self._pool.acquire() as conn:
                         async with conn.cursor() as cursor:
-                            for statement in self._mysql_schema:
-                                await cursor.execute(statement)
-                            await self._upgrade_mysql(cursor)
+                            await cursor.execute(f"SET SESSION lock_wait_timeout = {LOCK_WAIT_SECONDS}")
+                            try:
+                                await self._create_missing_tables(cursor)
+                                await self._upgrade_mysql(cursor)
+                            finally:
+                                await cursor.execute("SET SESSION lock_wait_timeout = DEFAULT")
             except Exception as exc:
                 await self._close()
                 self.last_error = str(exc) or exc.__class__.__name__
@@ -164,6 +173,21 @@ class SecondaryDatabase:
                 await conn.execute(f"ALTER TABLE {column.table} ADD COLUMN {column.name} {column.definition}")
         for index in self._indexes:
             await conn.execute(f"CREATE INDEX IF NOT EXISTS {index.name} ON {index.table} ({index.columns})")
+
+    async def _create_missing_tables(self, cursor: Any) -> None:
+        """Run only the CREATE TABLE statements whose table is missing. Even
+        with IF NOT EXISTS, creating a table that exists takes its metadata
+        lock, which waits behind another worker's index build."""
+
+        await cursor.execute(
+            "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()"
+        )
+        existing = {str(row[0]).lower() for row in await cursor.fetchall()}
+        for statement in self._mysql_schema:
+            match = _CREATE_TABLE.search(statement)
+            if match and match.group(1).lower() in existing:
+                continue
+            await cursor.execute(statement)
 
     async def _upgrade_mysql(self, cursor: Any) -> None:
         """Add missing columns now (instant on MySQL 8 and MariaDB 10.3+), one
@@ -198,17 +222,51 @@ class SecondaryDatabase:
             self._index_task = asyncio.create_task(self._add_indexes(indexes))
 
     async def _add_indexes(self, indexes: list[Index]) -> None:
-        for index in indexes:
-            logger.info("Adding index {name} to {label} database", name=index.name, label=self.label)
-            try:
-                async with self._pool.acquire() as conn:  # type: ignore[union-attr]
-                    async with conn.cursor() as cursor:
-                        await self._alter(cursor, f"ALTER TABLE {index.table} ADD INDEX {index.name} ({index.columns})")
-            except Exception as exc:  # the database keeps working without it, only slower
-                logger.error("Could not add index {name} to {label} database: {error}",
-                             name=index.name, label=self.label, error=str(exc) or exc.__class__.__name__)
-                continue
-            logger.info("Added index {name} to {label} database", name=index.name, label=self.label)
+        """Build missing indexes in one worker at a time. Every worker of both
+        deployment slots connects on startup; without the named lock each one
+        queued its own ALTER on the same large table."""
+
+        try:
+            async with self._pool.acquire() as conn:  # type: ignore[union-attr]
+                async with conn.cursor() as cursor:
+                    await cursor.execute(
+                        "SELECT GET_LOCK(LEFT(CONCAT('myportal_indexes_', DATABASE()), 64), 0)"
+                    )
+                    row = await cursor.fetchone()
+                    if not row or row[0] != 1:
+                        return  # another worker is building them
+                    try:
+                        await cursor.execute(f"SET SESSION lock_wait_timeout = {LOCK_WAIT_SECONDS}")
+                        for index in indexes:
+                            await self._add_index(cursor, index)
+                    finally:
+                        await cursor.execute("SET SESSION lock_wait_timeout = DEFAULT")
+                        await cursor.execute(
+                            "SELECT RELEASE_LOCK(LEFT(CONCAT('myportal_indexes_', DATABASE()), 64))"
+                        )
+        except Exception as exc:  # the database keeps working without them, only slower
+            logger.error("Could not add indexes to {label} database: {error}",
+                         label=self.label, error=str(exc) or exc.__class__.__name__)
+
+    async def _add_index(self, cursor: Any, index: Index) -> None:
+        # A worker that held the lock before this one may have added it.
+        await cursor.execute(
+            "SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() "
+            "AND TABLE_NAME = %s AND INDEX_NAME = %s",
+            (index.table, index.name),
+        )
+        if await cursor.fetchall():
+            return
+        logger.info("Adding index {name} to {label} database", name=index.name, label=self.label)
+        try:
+            # Online, so agents keep writing to the table while it builds.
+            await self._alter(cursor, f"ALTER TABLE {index.table} ADD INDEX {index.name} ({index.columns}), "
+                                      "ALGORITHM=INPLACE, LOCK=NONE")
+        except Exception as exc:
+            logger.error("Could not add index {name} to {label} database: {error}",
+                         name=index.name, label=self.label, error=str(exc) or exc.__class__.__name__)
+            return
+        logger.info("Added index {name} to {label} database", name=index.name, label=self.label)
 
     @staticmethod
     async def _alter(cursor: Any, statement: str) -> None:
