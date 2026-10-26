@@ -67,7 +67,8 @@ from app.repositories import rmm_checks as repo
 from app.repositories import rmm_stats as stats_repo
 from app.repositories import rmm_targeting as targeting_repo
 from app.security.encryption import encrypt_secret
-from app.services import rmm_actions, rmm_automation, rmm_event_log_rules, rmm_proxmox, rmm_scripts, rmm_targeting
+from app.services import rmm_actions, rmm_automation, rmm_event_log_rules, rmm_scripts, rmm_targeting
+from app.services import rmm_proxmox
 from app.services.rmm_scripts import RunRequestError
 
 RUN_SOURCE = "check"
