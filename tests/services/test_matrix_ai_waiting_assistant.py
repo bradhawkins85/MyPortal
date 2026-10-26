@@ -739,14 +739,24 @@ def _patch_user_message(monkeypatch, room):
     monkeypatch.setattr(assistant.chat_repo, "update_room", fake_update)
     monkeypatch.setattr(assistant, "_send_bot_message", fake_send)
     monkeypatch.setattr(assistant, "_audit", fake_noop)
+    monkeypatch.setattr(assistant, "_enabled", lambda: False)
     return events
+
+
+def _handle_and_drain(*args, **kwargs):
+    async def run():
+        await assistant.handle_user_message(*args, **kwargs)
+        while assistant._background_tasks:
+            await asyncio.gather(*list(assistant._background_tasks))
+
+    asyncio.run(run())
 
 
 def test_handle_user_message_closes_chat_when_customer_declines_assistance(monkeypatch):
     room = {"id": 42, "status": "open", "ai_idle_prompt_sent_at": "2026-01-01T00:00:00", "ai_customer_message_at": None}
     events = _patch_user_message(monkeypatch, room)
 
-    asyncio.run(assistant.handle_user_message(42, body="No thanks, I’m good!"))
+    _handle_and_drain(42, body="No thanks, I’m good!")
 
     assert events["updated"] == ["closed"]
     assert events["sent"] == [assistant._DECLINED_CLOSE_MESSAGE]
@@ -756,7 +766,7 @@ def test_handle_user_message_keeps_chat_open_for_a_real_request(monkeypatch):
     room = {"id": 42, "status": "open", "ai_idle_prompt_sent_at": "2026-01-01T00:00:00", "ai_customer_message_at": None}
     events = _patch_user_message(monkeypatch, room)
 
-    asyncio.run(assistant.handle_user_message(42, body="Yes, my printer is not working"))
+    _handle_and_drain(42, body="Yes, my printer is not working")
 
     assert events["updated"] == []
     assert events["sent"] == []
@@ -766,7 +776,7 @@ def test_handle_user_message_ignores_no_without_idle_prompt(monkeypatch):
     room = {"id": 42, "status": "open", "ai_idle_prompt_sent_at": None, "ai_customer_message_at": "2026-01-01T00:00:00"}
     events = _patch_user_message(monkeypatch, room)
 
-    asyncio.run(assistant.handle_user_message(42, body="no"))
+    _handle_and_drain(42, body="no")
 
     assert events["updated"] == []
 
@@ -781,3 +791,90 @@ def test_is_decline_matches_only_short_refusals():
 def test_is_decline_rejects_requests_for_help():
     for text in ["I need help ok", "please help", "help me please", "Yes please"]:
         assert not assistant._is_decline(text), text
+
+
+def _patch_ai_classifier(monkeypatch, answer, *, allowed=True):
+    prompts: list[str] = []
+
+    async def fake_generate(prompt, *, json_format=False):
+        prompts.append(prompt)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    async def fake_consent(room):
+        return allowed
+
+    monkeypatch.setattr(assistant, "_enabled", lambda: True)
+    monkeypatch.setattr(assistant, "_ollama_generate", fake_generate)
+    monkeypatch.setattr(assistant.ai_consent, "is_ai_allowed_for_chat", fake_consent)
+    return prompts
+
+
+_IDLE_ROOM = {"id": 42, "status": "open", "ai_idle_prompt_sent_at": "2026-01-01T00:00:00", "ai_customer_message_at": None}
+
+
+def test_idle_reply_closes_chat_when_ai_says_no_support_needed(monkeypatch):
+    events = _patch_user_message(monkeypatch, dict(_IDLE_ROOM))
+    prompts = _patch_ai_classifier(monkeypatch, '{"needs_support": false}')
+
+    _handle_and_drain(42, body="Sorted it out myself in the end, cheers")
+
+    assert len(prompts) == 1
+    assert "Sorted it out myself" in prompts[0]
+    assert events["updated"] == ["closed"]
+    assert events["sent"] == [assistant._DECLINED_CLOSE_MESSAGE]
+
+
+def test_idle_reply_stays_open_when_ai_says_support_needed(monkeypatch):
+    events = _patch_user_message(monkeypatch, dict(_IDLE_ROOM))
+    _patch_ai_classifier(monkeypatch, '{"needs_support": true}')
+
+    _handle_and_drain(42, body="no, the printer still won't print")
+
+    assert events["updated"] == []
+    assert events["sent"] == []
+
+
+def test_idle_reply_falls_back_to_keywords_when_ai_fails(monkeypatch):
+    events = _patch_user_message(monkeypatch, dict(_IDLE_ROOM))
+    _patch_ai_classifier(monkeypatch, RuntimeError("model offline"))
+
+    _handle_and_drain(42, body="no thanks")
+
+    assert events["updated"] == ["closed"]
+
+
+def test_idle_reply_falls_back_to_keywords_on_unusable_ai_answer(monkeypatch):
+    events = _patch_user_message(monkeypatch, dict(_IDLE_ROOM))
+    _patch_ai_classifier(monkeypatch, '{"answer": "maybe"}')
+
+    _handle_and_drain(42, body="Sorted it out myself in the end, cheers")
+
+    assert events["updated"] == []
+
+
+def test_idle_reply_skips_ai_when_customer_opted_out(monkeypatch):
+    events = _patch_user_message(monkeypatch, dict(_IDLE_ROOM))
+    prompts = _patch_ai_classifier(monkeypatch, '{"needs_support": false}', allowed=False)
+
+    _handle_and_drain(42, body="Sorted it out myself in the end, cheers")
+
+    assert prompts == []
+    assert events["updated"] == []
+
+
+def test_idle_reply_not_closed_when_customer_wrote_again(monkeypatch):
+    room = dict(_IDLE_ROOM)
+    events = _patch_user_message(monkeypatch, room)
+    _patch_ai_classifier(monkeypatch, '{"needs_support": false}')
+
+    async def fake_mark(room_id, when=None):
+        # A later message lands while the model is still deciding.
+        room["ai_last_user_message_at"] = (when + assistant.timedelta(seconds=30)).isoformat()
+
+    monkeypatch.setattr(assistant.chat_repo, "mark_user_activity", fake_mark)
+
+    _handle_and_drain(42, sent_at=assistant._utcnow(), body="no thanks")
+
+    assert events["updated"] == []

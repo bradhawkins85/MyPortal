@@ -56,6 +56,7 @@ _AI_DISCLAIMER = "This recommendation was generated using AI and may not apply t
 _MONITOR_PROMPT_PREVIEW_LIMIT = 2000
 _MONITOR_RESPONSE_PREVIEW_LIMIT = 2000
 _queue_semaphores: dict[tuple[str, int], asyncio.Semaphore] = {}
+_background_tasks: set[asyncio.Task[None]] = set()
 
 
 def _utcnow() -> datetime:
@@ -671,7 +672,78 @@ def _is_decline(body: str | None) -> bool:
     return "need" not in words or bool(set(words) & _NEGATIONS)
 
 
+async def _ai_needs_support(body: str) -> bool | None:
+    """Ask the configured model whether a reply to the idle prompt wants help.
+
+    Returns None when the model is unavailable or its answer is unusable, so
+    the caller can fall back to the keyword check.
+    """
+    prompt = build_prompt(
+        "A customer opened a support chat without writing anything and was asked whether they need any assistance. "
+        "Decide from their reply whether they want help from support. Treat any question, problem description, "
+        "or request as needing support; treat refusals, thanks, or saying the chat was opened by mistake as not needing support. "
+        "Return JSON only with exactly {\"needs_support\": true|false}.",
+        [UntrustedRecord("customer-reply", "customer reply to the assistance prompt", body[:2000], "Use only to decide whether the customer wants support")],
+    )
+    try:
+        text = await _ollama_generate(prompt, json_format=True)
+        data = validate_object(text, {"needs_support": lambda value: isinstance(value, bool)})
+    except Exception as exc:
+        log_error("AI idle reply classification failed", error=str(exc))
+        return None
+    return data.get("needs_support") if isinstance(data, dict) else None
+
+
+async def _customer_needs_support(room: Mapping[str, Any], body: str | None) -> tuple[bool, str]:
+    """Decide whether a reply to the idle prompt asks for help, and how it was decided."""
+    text = str(body or "").strip()
+    if not text:
+        return True, "empty"
+    if _enabled() and await ai_consent.is_ai_allowed_for_chat(room):
+        decision = await _ai_needs_support(text)
+        if decision is not None:
+            return decision, "ai"
+    return not _is_decline(text), "keyword"
+
+
+async def _resolve_idle_reply(room_id: int, body: str | None, sent_at: datetime) -> None:
+    """Close the chat when the customer's reply to the idle prompt declines help."""
+    try:
+        room = await chat_repo.get_room(room_id)
+        if not room or room.get("status") != "open":
+            return
+        needs_support, method = await _customer_needs_support(room, body)
+        await _audit(
+            "matrix_ai_waiting_assistant.idle_reply_classified",
+            room_id,
+            {"needs_support": needs_support, "method": method},
+        )
+        if needs_support:
+            return
+        # The AI call can take a while; re-check before closing in case the
+        # customer wrote again or a technician joined in the meantime.
+        latest = await chat_repo.get_room(room_id)
+        last_activity = _as_datetime((latest or {}).get("ai_last_user_message_at"))
+        if (
+            not latest
+            or latest.get("status") != "open"
+            or (last_activity and last_activity > sent_at)
+            or await chat_repo.has_technician_message(room_id)
+        ):
+            return
+        await _close_room(latest, _DECLINED_CLOSE_MESSAGE, "customer_declined_assistance")
+    except Exception as exc:
+        log_error("AI waiting assistant idle reply handling failed", room_id=room_id, error=str(exc))
+
+
+def _spawn(coro: Any) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 async def handle_user_message(room_id: int, sent_at: datetime | None = None, body: str | None = None) -> None:
+    sent_at = sent_at or _utcnow()
     room = await chat_repo.get_room(room_id)
     awaiting_idle_reply = bool(
         room
@@ -682,14 +754,10 @@ async def handle_user_message(room_id: int, sent_at: datetime | None = None, bod
     await chat_repo.mark_customer_message(room_id, sent_at)
     await chat_repo.cancel_active_ai_queue_for_room(room_id, "new_user_message_timer_reset")
     await _audit("matrix_ai_waiting_assistant.user_activity", room_id)
-    if (
-        room
-        and awaiting_idle_reply
-        and room.get("status") == "open"
-        and _is_decline(body)
-        and not await chat_repo.has_technician_message(room_id)
-    ):
-        await _close_room(room, _DECLINED_CLOSE_MESSAGE, "customer_declined_assistance")
+    if room and awaiting_idle_reply and room.get("status") == "open":
+        # Classify in the background so a slow model never holds up the
+        # request or sync loop that delivered the message.
+        _spawn(_resolve_idle_reply(room_id, body, sent_at))
 
 
 async def handle_chat_opened(room_id: int, opened_at: datetime | None = None) -> None:
