@@ -122,6 +122,21 @@ def test_rules_flag_drive_failure_chkdsk_defrag_thermals_and_crashes():
     assert overall == "critical" and value == 0
 
 
+def test_drive_rated_max_temperature_is_not_a_reading():
+    disk = {"name": "NVMe SSD", "media_type": "SSD", "health": "Healthy", "operational_status": ["OK"],
+            "temperature_c": 38, "temperature_max_c": 84}
+    snapshot = {"sections": {"disks": [disk, None]}}
+    # The fixed rules only look at the current temperature.
+    assert hc.evaluate_snapshot(snapshot) == []
+    # The model sees the limit under a name it cannot mistake for the drive's temperature.
+    prompt_disk = hc._snapshot_for_prompt(snapshot)["sections"]["disks"][0]
+    assert "temperature_max_c" not in prompt_disk
+    assert prompt_disk["rated_max_temperature_c"] == 84 and prompt_disk["temperature_c"] == 38
+    assert snapshot["sections"]["disks"][0]["temperature_max_c"] == 84  # the stored snapshot is unchanged
+    for instructions in (hc._TRIAGE_INSTRUCTIONS, hc._REPORT_INSTRUCTIONS):
+        assert "rated_max_temperature_c" in instructions
+
+
 def test_rules_on_a_healthy_or_empty_snapshot():
     healthy = {"sections": {"volumes": [{"drive": "C:", "free_percent": 60, "dirty": False, "health": "Healthy"}],
                             "disks": [{"name": "SSD", "health": "Healthy", "operational_status": ["OK"], "wear_percent": 3}],
