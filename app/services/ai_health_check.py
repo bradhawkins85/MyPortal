@@ -779,6 +779,11 @@ Rules:
 - Look especially for impending drive failure, file system errors, overheating and
   throttling, crashes and unexpected shutdowns, hardware (WHEA) errors, slow boot,
   memory pressure, problem drivers, missing updates and security gaps.
+- Temperatures: judge only current readings (a drive's "temperature_c", a sensor's
+  "value", a thermal zone's "celsius"). A drive's "rated_max_temperature_c", a sensor's
+  "max" or "min", sensors named "Warning Temperature" or "Critical Temperature" and a
+  zone's "critical_celsius" are limits or past peaks, not the current temperature; never
+  report them as the drive or part running hot.
 - "search_terms": 0-4 short, generic phrases to look up fixes for the most important
   issues (for example "Windows 11 Kernel-Power 41 unexpected restart" or "NVMe SSD
   overheating throttling"). Never include names, hostnames, serial numbers, IP or email
@@ -817,6 +822,11 @@ Rules:
   when the data is missing; never guess.
 - "findings": at most 15, most severe first. Quote exact values or log lines in
   "evidence"; "source" names the snapshot section or log.
+- Temperatures: judge only current readings (a drive's "temperature_c", a sensor's
+  "value", a thermal zone's "celsius"). A drive's "rated_max_temperature_c", a sensor's
+  "max" or "min", sensors named "Warning Temperature" or "Critical Temperature" and a
+  zone's "critical_celsius" are limits or past peaks, not the current temperature; never
+  report them as the drive or part running hot.
 - "steps": the ordered troubleshooting steps that bring this computer back to optimal
   performance, most important first (at most 15). Be concrete: what to open, run or
   change. Put "back up the data" before any step on a failing drive, and say when a step
@@ -838,12 +848,29 @@ def _areas_text() -> str:
     return "\nAREAS: " + ", ".join(AREAS)
 
 
+def _disk_for_prompt(disk: Any) -> Any:
+    """Name a drive's temperature limit so it is not read as its current temperature.
+
+    Windows reports the drive's rated maximum (MSFT_StorageReliabilityCounter
+    TemperatureMax) next to its current temperature; the model took the bare
+    "temperature_max_c" for a reading and flagged healthy drives as overheating.
+    """
+
+    if not isinstance(disk, dict) or "temperature_max_c" not in disk:
+        return disk
+    renamed = {k: v for k, v in disk.items() if k != "temperature_max_c"}
+    renamed["rated_max_temperature_c"] = disk["temperature_max_c"]
+    return renamed
+
+
 def _snapshot_for_prompt(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     """Bound the snapshot for the prompt, trimming the largest sections first."""
 
     compact = dict(snapshot)
     sections = dict(_sections(snapshot))
     compact["sections"] = sections
+    if isinstance(sections.get("disks"), list):
+        sections["disks"] = [_disk_for_prompt(disk) for disk in sections["disks"]]
     encoded = json.dumps(compact, default=str, separators=(",", ":"))
     if len(encoded) <= _SNAPSHOT_PROMPT_CHARS:
         return compact
