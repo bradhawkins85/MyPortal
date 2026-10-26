@@ -491,6 +491,8 @@ async def test_assets_reporting_a_detection_come_from_their_latest_check(store):
     assert len(found["volume_almost_full"]) == 1 and entry["asset_id"] == 10 and entry["asset_name"] == "PC-01"
     assert entry["check_id"] == latest_10 and entry["severity"] == "critical"
     assert entry["titles"] == ["E: is almost full", "C: is almost full"]
+    everywhere = reporting_assets(await repo.latest_completed_for_company(None))["volume_almost_full"]
+    assert sorted(entry["asset_id"] for entry in everywhere) == [10, 20]
     assert reporting_assets([{"id": 1, "asset_id": 3, "report": {"signals": ["junk", {"title": "no key"}]}}]) == {}
 
 
@@ -693,12 +695,20 @@ def test_detections_template_renders_the_list_and_editor():
     assert "Choose a script." in html and "DISM /Online /Cleanup-Image /RestoreHealth" in html
     assert "Collect Microsoft-Windows-Diagnostics-Performance/Operational first" in html
     assert 'name="create_ticket" value="1" checked' in html
-    assert 'data-hc-assets-open="hc-assets-blue_screens"' in html and "Assets (1)" in html and "Assets (0)" in html
+    assert 'data-hc-assets-open="hc-assets-blue_screens"' in html and "Assets (1)" in html and "Assets (0)" not in html
+    assert 'data-hc-assets-open="hc-assets-component_store_repairable"' not in html
+    assert 'id="hc-assets-component_store_repairable"' not in html and '<th scope="col">Company</th>' not in html
     assert 'id="hc-assets-blue_screens"' in html and 'href="/assets/10">PC-&lt;i&gt;01&lt;/i&gt;</a>' in html
     assert 'href="/health-checks/4"' in html and "3 blue screen crashes" in html and "Raises a ticket" in html
     listed = _render("health_checks/detections.html", company=None, groups=groups, counts={"detections": 1,
                      "with_script": 0, "with_remedy": 0, "with_monitors": 0}, can_edit=False, editor=None, variables=[])
     assert 'id="hc-remediation-modal"' not in listed and "Link a script" not in listed
+    every = _render("health_checks/detections.html", company={"name": "Contoso"}, all_companies=True,
+                    groups=catalog_view(links, 1, [], {"blue_screens": [{**reporting["blue_screens"][0],
+                                                                        "company_name": "Fabrikam"}]}),
+                    counts={"detections": 1, "with_script": 0, "with_remedy": 0, "with_monitors": 0},
+                    can_edit=False, editor=None, variables=[])
+    assert '<th scope="col">Company</th>' in every and "<td>Fabrikam</td>" in every and "Every company" in every
 
 
 # --------------------------------------------------------------------------- #

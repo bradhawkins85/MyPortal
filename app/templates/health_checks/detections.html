@@ -29,7 +29,7 @@
     {"label": "Detections", "value": counts.detections, "variant": "info"},
     {"label": "Fixed by a script", "value": counts.with_script, "variant": "success", "title": "Detections that run a script on " ~ company_label ~ "'s computers"},
     {"label": "Raise a ticket", "value": counts.get('with_ticket', 0), "variant": "neutral", "title": "Detections that raise a ticket for " ~ company_label ~ "'s computers"},
-    {"label": "Reported by assets", "value": counts.get('reported', 0), "variant": "warning", "title": "Detections that " ~ company_label ~ "'s computers report in their latest health check"},
+    {"label": "Reported by assets", "value": counts.get('reported', 0), "variant": "warning", "title": ("Detections that computers in every company report in their latest health check" if all_companies else "Detections that " ~ company_label ~ "'s computers report in their latest health check")},
     {"label": "Suggested scripts", "value": counts.with_remedy, "variant": "neutral", "title": "Detections with a suggested script to start from"},
     {"label": "With event log rules", "value": counts.with_monitors, "variant": "neutral", "title": "Detections with event log rules that flag them as they happen"},
   ]) }}
@@ -48,7 +48,7 @@
             {% if item.runs_script %}<span class="status status--success">Fixed by a script</span>{% endif %}
             {% if item.raises_ticket %}<span class="status status--info">Raises a ticket</span>{% endif %}
             {% set reporting = item.assets | default([]) %}
-            <button type="button" class="button button--ghost button--small" data-hc-assets-open="hc-assets-{{ item.key }}" aria-haspopup="dialog" aria-controls="hc-assets-{{ item.key }}" title="Assets whose latest health check reports this">Assets ({{ reporting | length }})<span class="visually-hidden"> reporting {{ item.label }}</span></button>
+            {% if reporting %}<button type="button" class="button button--ghost button--small" data-hc-assets-open="hc-assets-{{ item.key }}" aria-haspopup="dialog" aria-controls="hc-assets-{{ item.key }}" title="Assets whose latest health check reports this">Assets ({{ reporting | length }})<span class="visually-hidden"> reporting {{ item.label }}</span></button>{% endif %}
           </span>
         </div>
         <p>{{ item.description }}</p>
@@ -103,24 +103,25 @@
         </div>
         {% endif %}
       </article>
+      {% if reporting %}
       <div class="modal" id="hc-assets-{{ item.key }}" role="dialog" aria-modal="true" aria-labelledby="hc-assets-{{ item.key }}-title" hidden>
         <div class="modal__panel modal__panel--wide">
           <header class="modal__header">
             <div>
-              <p class="hc-eyebrow">{{ company_label }}</p>
+              <p class="hc-eyebrow">{{ "Every company" if all_companies else company_label }}</p>
               <h2 class="modal__title" id="hc-assets-{{ item.key }}-title">Assets reporting “{{ item.label }}”</h2>
               <p class="text-muted">Assets whose latest completed health check found this.</p>
             </div>
             <button type="button" class="modal__close" data-modal-close aria-label="Close the asset list"></button>
           </header>
           <div class="modal__body">
-            {% if reporting %}
             <div class="hc-table-wrap"><table class="hc-table">
-              <thead><tr><th scope="col">Asset</th><th scope="col">Found</th><th scope="col">Severity</th><th scope="col">Health check</th></tr></thead>
+              <thead><tr><th scope="col">Asset</th>{% if all_companies %}<th scope="col">Company</th>{% endif %}<th scope="col">Found</th><th scope="col">Severity</th><th scope="col">Health check</th></tr></thead>
               <tbody>
                 {% for asset in reporting %}
                 <tr>
                   <th scope="row"><a href="/assets/{{ asset.asset_id }}">{{ asset.asset_name }}</a></th>
+                  {% if all_companies %}<td>{{ asset.company_name or '—' }}</td>{% endif %}
                   <td>{% for title in asset.titles %}{{ title }}{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td>
                   <td>{{ hc.severity_chip(asset.severity) if asset.severity else '—' }}</td>
                   <td><a href="/health-checks/{{ asset.check_id }}">{% if asset.completed_at %}<span data-utc="{{ asset.completed_at }}">{{ asset.completed_at }}</span>{% else %}Report{% endif %}</a></td>
@@ -128,16 +129,14 @@
                 {% endfor %}
               </tbody>
             </table></div>
-            {% else %}
-            <p class="hc-muted">No assets in {{ company_label }} report this in their latest health check.</p>
-            {% endif %}
           </div>
           <footer class="modal__footer">
             <span class="hc-modal__spacer" aria-hidden="true"></span>
             <button type="button" class="button button--ghost" data-modal-close>Close</button>
           </footer>
         </div>
-      </div></li>
+      </div>
+      {% endif %}</li>
       {% endfor %}
     </ul>
   </section>
