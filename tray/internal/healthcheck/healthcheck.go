@@ -9,16 +9,20 @@
 //     dirty bits, defrag and TRIM state, thermal zones, CPU throttling,
 //     memory, boot performance, crashes, WHEA errors, drivers, updates,
 //     security and battery); macOS uses system_profiler, pmset and sysctl;
-//  2. on physical Windows hardware, when the server allows it, installs the
+//  2. on physical Windows hardware reads each drive's SMART attributes with
+//     CrystalDiskInfo, which is installed with Chocolatey when it is missing
+//     and stays installed afterwards;
+//  3. on physical Windows hardware, when the server allows it, installs the
 //     PawnIO driver for the length of the check, reads hardware sensors with
 //     the bundled LibreHardwareMonitor library and removes PawnIO again
 //     before reporting back (a marker file makes the next service start
 //     remove it if the service stops part-way);
-//  3. collects the allowlisted logs the server asked for, redacted, through
+//  4. collects the allowlisted logs the server asked for, redacted, through
 //     the troubleshooting agent (package agent).
 //
 // The server reviews the result with its language model; nothing here
-// changes the computer apart from the temporary PawnIO driver.
+// changes the computer apart from the temporary PawnIO driver and installing
+// CrystalDiskInfo (and Chocolatey) when they are missing.
 package healthcheck
 
 import (
@@ -42,6 +46,7 @@ const (
 const (
 	StageReceived           = "received"
 	StageCollectingSnapshot = "collecting_snapshot"
+	StageReadingSMART       = "reading_smart"
 	StageReadingSensors     = "reading_sensors"
 	StageCollectingLogs     = "collecting_logs"
 	StageUploading          = "uploading"
@@ -85,6 +90,7 @@ type Snapshot struct {
 	HardwareIdentity map[string]string `json:"hardware_identity,omitempty"`
 	Sections         json.RawMessage   `json:"sections"`
 	Errors           map[string]string `json:"errors"`
+	DiskSMART        *DiskSMARTReport  `json:"disk_smart,omitempty"`
 	Sensors          *SensorReport     `json:"sensors,omitempty"`
 	PawnIO           *PawnIOReport     `json:"pawnio,omitempty"`
 }
@@ -148,6 +154,7 @@ type Runner struct {
 
 	collectSnapshot func(ctx context.Context, eventDays int) (platformSnapshot, error)
 	identify        func() (string, string, error)
+	diskSMART       func(ctx context.Context) DiskSMARTReport
 	sensors         func(ctx context.Context, allowPawnIO bool, identity machineIdentity) (SensorReport, PawnIOReport)
 	newAgent        func() *agent.Agent
 	now             func() time.Time
@@ -169,6 +176,7 @@ func NewRunner(stateDir, agentVersion string) *Runner {
 		AgentVersion:    agentVersion,
 		collectSnapshot: collectPlatformSnapshot,
 		identify:        platformIdentity,
+		diskSMART:       platformDiskSMART,
 		newAgent:        agent.NewAgent,
 		now:             time.Now,
 		platform:        platformName,
@@ -258,6 +266,19 @@ func (r *Runner) snapshot(ctx context.Context, req Request) (Snapshot, error) {
 	}
 	for name, message := range raw.Errors {
 		snapshot.Errors[name] = truncate(message, 500)
+	}
+
+	if ctx.Err() == nil && r.platform == "windows" {
+		if snapshot.IsVirtual != nil && *snapshot.IsVirtual {
+			snapshot.DiskSMART = &DiskSMARTReport{Status: SMARTSkippedVirtual, Source: smartSource, Disks: []SMARTDisk{}}
+		} else {
+			r.progress(StageReadingSMART, "Reading drive SMART data with CrystalDiskInfo (installed with Chocolatey when missing; it stays installed).")
+			report := r.diskSMART(ctx)
+			snapshot.DiskSMART = &report
+			if report.Status == SMARTError {
+				snapshot.Errors["disk_smart"] = truncate(report.Detail, 500)
+			}
+		}
 	}
 
 	if ctx.Err() == nil {

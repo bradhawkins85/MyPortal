@@ -34,11 +34,19 @@ var healthScript string
 //go:embed sensors_windows.ps1
 var sensorsScript string
 
+//go:embed diskinfo_windows.ps1
+var diskInfoScript string
+
 // Output caps for the PowerShell scripts.
 const (
 	maxSnapshotOutput = 8 << 20
 	maxSensorOutput   = 2 << 20
+	maxDiskInfoOutput = 4 << 20
 )
+
+// diskInfoTimeout bounds installing Chocolatey and CrystalDiskInfo when they
+// are missing and reading the drives.
+const diskInfoTimeout = 8 * time.Minute
 
 // protectedDirSDDL gives only SYSTEM and Administrators access, so nobody
 // else can replace a bundled DLL or the installer before they are used.
@@ -116,6 +124,25 @@ func collectPlatformSnapshot(ctx context.Context, eventDays int) (platformSnapsh
 		return snapshot, fmt.Errorf("reading the health metrics: %w", err)
 	}
 	return snapshot, nil
+}
+
+// platformDiskSMART reads the drives' SMART data with CrystalDiskInfo,
+// installing it with Chocolatey first when it is missing.
+func platformDiskSMART(ctx context.Context) DiskSMARTReport {
+	ctx, cancel := context.WithTimeout(ctx, diskInfoTimeout)
+	defer cancel()
+	out, err := runPowerShell(ctx, diskInfoScript, nil, maxDiskInfoOutput)
+	if err != nil {
+		return smartReport(diskInfoOutput{Status: SMARTError, Detail: err.Error()})
+	}
+	if i := bytes.LastIndex(out, []byte("\n{")); i >= 0 {
+		out = out[i+1:]
+	}
+	var result diskInfoOutput
+	if err := json.Unmarshal(out, &result); err != nil {
+		return smartReport(diskInfoOutput{Status: SMARTError, Detail: fmt.Sprintf("reading CrystalDiskInfo's output: %v", err)})
+	}
+	return smartReport(result)
 }
 
 func platformIdentity() (string, string, error) {

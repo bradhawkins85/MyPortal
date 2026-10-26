@@ -22,4 +22,8 @@ func platformSensors(context.Context, string, bool, machineIdentity) (SensorRepo
 		PawnIOReport{Status: PawnIOSkippedUnsupported}
 }
 
+func platformDiskSMART(context.Context) DiskSMARTReport {
+	return DiskSMARTReport{Status: SMARTUnavailable, Source: smartSource, Detail: errUnsupported.Error(), Disks: []SMARTDisk{}}
+}
+
 func platformCleanupPawnIO(context.Context, string) (bool, error) { return false, nil }

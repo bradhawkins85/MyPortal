@@ -307,8 +307,14 @@ def _snapshot_view(snapshot: dict[str, Any]) -> dict[str, Any]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for reading in readings:
         grouped.setdefault(str(reading.get("type") or "Other"), []).append(reading)
+    smart = snapshot.get("disk_smart") if isinstance(snapshot.get("disk_smart"), dict) else {}
     return {
         "sections": sections,
+        "smart_disks": [d for d in smart.get("disks") or [] if isinstance(d, dict)],
+        "smart_status": str(smart.get("status") or ""),
+        "smart_detail": str(smart.get("detail") or ""),
+        "smart_version": str(smart.get("version") or ""),
+        "smart_installed": smart.get("installed") is True,
         "errors": snapshot.get("errors") if isinstance(snapshot.get("errors"), dict) else {},
         "sensor_groups": grouped,
         "sensor_status": str(sensors.get("status") or ""),
