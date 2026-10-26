@@ -87,3 +87,14 @@ func TestUninstallServicePreservesRealErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestSafeBootKeys(t *testing.T) {
+	got := safeBootKeys("MyPortalRMMAgent")
+	want := []string{
+		`SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\MyPortalRMMAgent`,
+		`SYSTEM\CurrentControlSet\Control\SafeBoot\Network\MyPortalRMMAgent`,
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("safeBootKeys = %v, want %v", got, want)
+	}
+}

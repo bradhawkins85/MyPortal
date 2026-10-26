@@ -137,6 +137,21 @@
           Stop="both"
           Remove="uninstall"
           Wait="yes" />
+        <!--
+          Start the service in Safe Mode and Safe Mode with Networking. The
+          service also sets its restart-on-failure recovery actions, and
+          rewrites these keys, every time it starts.
+        -->
+        <RegistryValue
+          Root="HKLM"
+          Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\MyPortalTrayService"
+          Type="string"
+          Value="Service" />
+        <RegistryValue
+          Root="HKLM"
+          Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Network\MyPortalTrayService"
+          Type="string"
+          Value="Service" />
       </Component>
       <Component Id="UIExeComponent" Guid="D3E4F5A6-B7C8-9012-DEF0-123456789012">
         <File Id="UIExe"

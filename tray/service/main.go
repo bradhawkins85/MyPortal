@@ -1209,6 +1209,10 @@ func main() {
 
 	// When not running interactively, run as a proper service.
 	if !service.Interactive() {
+		// Also repairs services installed by the MSI or older versions.
+		if err := configureServiceResilience(svcCfg.Name); err != nil {
+			logger.Warn("Configure service recovery: %v", err)
+		}
 		if err := svc.Run(); err != nil {
 			logger.Fatal("Service run: %v", err)
 		}
@@ -1258,6 +1262,14 @@ func handleServiceCommand(cmd string) {
 	if err := service.Control(svc, cmd); err != nil {
 		logger.Error("%s failed: %v", cmd, err)
 		os.Exit(1)
+	}
+	if cmd == "install" {
+		if err := configureServiceResilience(svcCfg.Name); err != nil {
+			logger.Error("Configure service recovery: %v", err)
+			os.Exit(1)
+		}
+	} else if err := removeSafeBootRegistration(svcCfg.Name); err != nil {
+		logger.Warn("Remove Safe Mode registration: %v", err)
 	}
 	logger.Info("%s succeeded", cmd)
 }
