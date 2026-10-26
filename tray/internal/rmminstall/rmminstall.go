@@ -9,6 +9,7 @@
 //
 //   - Windows: %ProgramFiles%\MyPortal RMM\myportal-rmm.exe
 //   - macOS:   /Library/Application Support/MyPortal RMM/myportal-rmm
+//   - Linux:   /opt/myportal-rmm/myportal-rmm
 package rmminstall
 
 import (
@@ -80,6 +81,9 @@ func DefaultDir() string {
 		}
 		return filepath.Join(base, "MyPortal RMM")
 	}
+	if runtime.GOOS == "linux" {
+		return "/opt/myportal-rmm"
+	}
 	return "/Library/Application Support/MyPortal RMM"
 }
 
@@ -90,6 +94,10 @@ func defaultStateFile() string {
 			base = `C:\ProgramData`
 		}
 		return filepath.Join(base, "MyPortal RMM", "rmm-state.json")
+	}
+	if runtime.GOOS == "linux" {
+		// Matches the agent's own state folder (rmm/internal/state).
+		return "/var/lib/myportal-rmm/rmm-state.json"
 	}
 	return filepath.Join(DefaultDir(), "rmm-state.json")
 }

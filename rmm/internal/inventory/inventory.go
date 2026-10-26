@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/bradhawkins85/myportal-rmm/internal/proxmox"
 )
 
 // Limits keep one snapshot small enough for a single request.
@@ -91,6 +93,7 @@ type Snapshot struct {
 	GPUs          []string         `json:"gpus"`
 	Network       []NetworkAdapter `json:"network_adapters"`
 	Software      []Program        `json:"software"`
+	Proxmox       *proxmox.Status  `json:"proxmox,omitempty"`
 	Errors        []string         `json:"errors"`
 }
 

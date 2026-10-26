@@ -11,7 +11,7 @@ replacing check that is off switches that thing off for its scope
 
 How each type is checked:
 
-* **Disk space, ping, CPU, memory, service, network, file, process and program** checks are measured
+* **Disk space, ping, CPU, memory, service, network, file, process, program and Proxmox VE** checks are measured
   by the device's RMM agent. It asks which to collect (:func:`agent_config`)
   and reports every :data:`REPORT_INTERVAL_SECONDS` (:func:`ingest_report`).
   A service check tests that a service is running, stopped, exists or does
@@ -19,7 +19,9 @@ How each type is checked:
   is not running or stopped as expected. A file check passes when a
   path exists (or does not); ``*`` and ``?`` match any name and ``%NAME%`` is
   an environment variable on the device. A process check counts the processes
-  running with a name.
+  running with a name. A Proxmox VE check watches a Proxmox VE host: a guest
+  that should be running, storage filling up, ZFS pool health, the latest
+  backup job, cluster quorum or an offline node (:mod:`app.services.rmm_proxmox`).
 * **Script** checks queue a Gitea script on the device every
   ``interval_minutes`` and compare its exit code or output with what is
   expected when it finishes (:func:`run_due_script_checks`, :func:`run_finished`).
@@ -65,7 +67,7 @@ from app.repositories import rmm_checks as repo
 from app.repositories import rmm_stats as stats_repo
 from app.repositories import rmm_targeting as targeting_repo
 from app.security.encryption import encrypt_secret
-from app.services import rmm_actions, rmm_automation, rmm_event_log_rules, rmm_scripts, rmm_targeting
+from app.services import rmm_actions, rmm_automation, rmm_event_log_rules, rmm_proxmox, rmm_scripts, rmm_targeting
 from app.services.rmm_scripts import RunRequestError
 
 RUN_SOURCE = "check"
@@ -79,10 +81,11 @@ CHECK_TYPES = {
     "file": "File or folder",
     "process": "Process",
     "program": "Program check",
+    "proxmox": "Proxmox VE",
     "script": "Script result",
     "offline": "Agent offline",
 }
-AGENT_TYPES = ("disk", "ping", "cpu", "memory", "service", "network", "file", "process", "program")
+AGENT_TYPES = ("disk", "ping", "cpu", "memory", "service", "network", "file", "process", "program", "proxmox")
 STATS_TYPES = ("disk", "ping", "cpu", "memory", "network")
 ACTIONS = {
     "none": "Show the result only",
@@ -144,6 +147,7 @@ RESULT_EXAMPLES = {
     "file": ("Not found", "Found", "Could not check it"),
     "process": ("Not running", "Running", "Could not list processes"),
     "program": ("Not installed", "Installed", "Version mismatch", "Unknown"),
+    "proxmox": rmm_proxmox.RESULT_EXAMPLES,
     "script": ("Exit code 1", "The script timed out"),
     "offline": ("Has never checked in",),
 }
@@ -217,7 +221,11 @@ def normalise_drive(value: Any) -> str:
 
 
 def override_key(check: Mapping[str, Any]) -> tuple[str, str]:
-    return str(check.get("check_type")), str(check.get("target") or "").casefold()
+    kind, target = str(check.get("check_type")), str(check.get("target") or "").casefold()
+    if kind == "proxmox":
+        # Different conditions on the same name (storage "local", guest "local") are different things.
+        target = f"{(check.get('settings') or {}).get('condition') or ''}:{target}"
+    return kind, target
 
 
 def _specificity(check: Mapping[str, Any]) -> int:
@@ -376,6 +384,8 @@ def describe(check: Mapping[str, Any]) -> str:
         requirement = (f" or its version fails the requirement: {VERSION_OPERATORS.get(operator, operator).lower()} {version}"
                        if operator != "none" else "")
         return f"{target} is not installed{requirement}{lasting}"
+    if kind == "proxmox":
+        return rmm_proxmox.describe(str(settings.get("condition") or ""), target, settings) + lasting
     if kind == "network":
         where = f"{target}" if target else "All interfaces"
         return (f"{where}: data {NETWORK_DIRECTIONS.get(settings.get('direction'), 'received and sent')} "
@@ -543,6 +553,18 @@ def parse_settings(check_type: str, form: Mapping[str, Any]) -> tuple[str, dict[
         if operator != "none" and (len(version) > 255 or not re.fullmatch(r"[vV]?\d+(?:\.\d+)*", version)):
             errors["program_version"] = "Enter a numeric version such as 1.2.3."
         settings = {"expected": expected, "version_operator": operator, "version": version}
+    elif check_type == "proxmox":
+        condition = str(form.get("proxmox_condition") or "guest")
+        if condition not in rmm_proxmox.CONDITIONS:
+            errors["proxmox_condition"] = "Choose what to watch on the Proxmox VE host."
+        target = str(form.get("proxmox_target") or "").strip() if condition in rmm_proxmox.TARGETED else ""
+        if len(target) > 128 or re.search(r"[\x00-\x1f]", target):
+            errors["proxmox_target"] = "Keep the name to 128 characters on one line."
+        elif condition == "guest" and target in ("", "*"):
+            errors["proxmox_target"] = "Enter the VMID or name of the virtual machine or container, such as 101."
+        settings = {"condition": condition}
+        if condition == "storage":
+            settings["threshold"] = threshold("proxmox_threshold", low=1, high=100, label="a percentage")
     elif check_type == "network":
         target = str(form.get("network_interface") or "").strip()
         if not _INTERFACE.match(target):
@@ -961,6 +983,7 @@ def agent_config_for(checks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "files": files,
         "processes": list(processes.values()),
         "programs": list(programs.values()),
+        "proxmox": "proxmox" in kinds,
     }
 
 
@@ -1125,6 +1148,8 @@ def evaluate(check: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[bool,
         # Every installed instance must satisfy the requirement.
         bad = operator not in matches or not all(matches[operator](version) for version in found)
         return bad, f"Version mismatch: {text}" if bad else text
+    if kind == "proxmox":
+        return rmm_proxmox.evaluate(str(settings.get("condition") or ""), target, settings, report.get("proxmox"))
     if kind == "network":
         interfaces = report.get("network")
         if interfaces is None:

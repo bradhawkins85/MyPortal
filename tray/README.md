@@ -1,6 +1,6 @@
 # MyPortal Tray App — Go Client
 
-Cross-platform (Windows + macOS) tray application for the MyPortal helpdesk portal. Deployed via RMM; provides a server-driven system-tray menu, environment-variable display, and a push-to-device chat channel.
+Cross-platform (Windows, macOS and Linux) tray application for the MyPortal helpdesk portal. On Linux it runs on desktops (with the tray icon) and on headless servers such as Proxmox VE (service only). Deployed via RMM; provides a server-driven system-tray menu, environment-variable display, and a push-to-device chat channel.
 
 ## Reporting and urgent work
 
@@ -280,11 +280,52 @@ ENROL_TOKEN=<token>
 AUTO_UPDATE=true
 ```
 
+### Linux
+
+File: `/etc/myportal-tray/tray.env` (root only), written by `install.sh`:
+
+```
+MYPORTAL_URL=https://portal.example.com
+ENROL_TOKEN=<token>
+AUTO_UPDATE=true
+```
+
+The service is installed in `/opt/myportal-tray` as the `MyPortalTrayService`
+systemd unit and keeps its state in `/var/lib/myportal-tray`. A computer with a
+desktop also gets `myportal-tray-ui`, which `/etc/xdg/autostart/myportal-tray.desktop`
+opens in each user's session. It is pure Go (no CGO): the icon is shown through
+the StatusNotifierItem D-Bus protocol, which KDE, Cinnamon, XFCE, MATE and
+Budgie show; GNOME needs the AppIndicator extension. Notifications use
+`notify-send` and dialogs `zenity` or `kdialog`. Without the UI the install is
+headless: check-ins, configuration, commands, network scans, self-updates and
+the RMM agent install all work, and chat or notifications are logged instead of
+shown.
+
 ## Architecture
 
 See [docs/tray_app.md](../docs/tray_app.md) for the full architecture document.
 
 ## Deployment
+
+### Linux (desktops and servers such as Proxmox VE)
+
+`make package-linux` (or the **Build Linux Tray** workflow on each release)
+builds `myportal-tray-linux.tar.gz` with amd64 and arm64 binaries and the
+install scripts. MyPortal serves the cached copy at
+`/static/tray/myportal-tray-linux.tar.gz`:
+
+```sh
+curl -fsSL https://portal.example.com/static/tray/myportal-tray-linux.tar.gz | tar -xz -C /tmp
+sudo /tmp/myportal-tray/install.sh --url https://portal.example.com --token TOKEN
+```
+
+`install.sh` adds the tray icon when the computer boots to a graphical login
+and installs only the service otherwise; `--desktop` or `--headless` decides
+instead, and `--no-auto-update` turns off self-updates. Self-updates download
+the same tarball and run `install.sh --upgrade` in its own transient systemd
+unit, keeping the settings, the enrolment and the headless or desktop choice.
+Remove it with `sudo /opt/myportal-tray/uninstall.sh` (`--purge` also forgets
+the enrolment, `--with-rmm` also removes the RMM agent).
 
 ### Windows (PowerShell, RMM one-liner)
 

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bradhawkins85/myportal-rmm/internal/proxmox"
 	"github.com/bradhawkins85/myportal-rmm/internal/thermal"
 )
 
@@ -302,6 +303,9 @@ type CheckConfig struct {
 	Files           []string       `json:"files"`
 	Processes       []string       `json:"processes"`
 	Programs        []string       `json:"programs"`
+	// Proxmox asks a Proxmox VE host for its cluster, guest, storage, ZFS and
+	// backup state.
+	Proxmox bool `json:"proxmox"`
 }
 
 // DiskUsage is one fixed drive or mounted filesystem.
@@ -379,6 +383,7 @@ type CheckReport struct {
 	Files      []FileStatus    `json:"files"`
 	Processes  []ProcessStatus `json:"processes"`
 	Programs   []ProgramStatus `json:"programs"`
+	Proxmox    *proxmox.Status `json:"proxmox,omitempty"`
 }
 
 // GetCheckConfig asks what to measure for checks.

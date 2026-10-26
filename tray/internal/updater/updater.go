@@ -160,6 +160,8 @@ func (c *Checker) downloadAndInstall(ctx context.Context, resp *api.VersionRespo
 	switch runtime.GOOS {
 	case "windows":
 		ext = ".msi"
+	case "linux":
+		ext = ".tar.gz"
 	default:
 		ext = ".pkg"
 	}
@@ -204,7 +206,11 @@ func (c *Checker) downloadAndInstall(ctx context.Context, resp *api.VersionRespo
 		if err != nil {
 			logger.Error("Installer for version %s failed: %v", resp.Version, err)
 		}
-		os.Remove(tmpPath)
+		// On Linux, systemd-run returns once the update has started; the
+		// update script removes the download itself.
+		if runtime.GOOS != "linux" {
+			os.Remove(tmpPath)
+		}
 	}()
 	return nil
 }
@@ -233,6 +239,8 @@ func installerCommand(path, portalURL string, autoUpdate bool, logPath string) *
 		}
 		args = append(args, "AUTO_UPDATE="+strconv.FormatBool(autoUpdate))
 		cmd = exec.Command(msiexec, args...)
+	case "linux":
+		cmd = linuxUpdateCommand(path, logPath, exec.LookPath)
 	default:
 		// -dumplog adds the detailed install log, including the package
 		// scripts' output, to the captured output.
@@ -240,6 +248,26 @@ func installerCommand(path, portalURL string, autoUpdate bool, logPath string) *
 	}
 	detach(cmd)
 	return cmd
+}
+
+// linuxUpdateScript unpacks the release tarball ($1) and runs its installer in
+// upgrade mode, which keeps /etc/myportal-tray/tray.env and the enrolment,
+// replaces the binaries and restarts the service. Output goes to $2.
+const linuxUpdateScript = `[ -n "$2" ] && exec >>"$2" 2>&1
+dir="$(mktemp -d)" || exit 1
+trap 'rm -rf "$dir" "$1"' EXIT
+tar -xzf "$1" -C "$dir" && "$dir/myportal-tray/install.sh" --upgrade`
+
+// linuxUpdateCommand runs the update in its own transient systemd unit when
+// systemd is present: stopping the service for the upgrade stops every
+// process in its cgroup, which would otherwise include the installer.
+func linuxUpdateCommand(path, logPath string, lookPath func(string) (string, error)) *exec.Cmd {
+	args := []string{"/bin/sh", "-c", linuxUpdateScript, "myportal-tray-update", path, logPath}
+	if run, err := lookPath("systemd-run"); err == nil {
+		unit := "myportal-tray-update-" + strconv.FormatInt(time.Now().Unix(), 10)
+		args = append([]string{run, "--collect", "--quiet", "--unit", unit}, args...)
+	}
+	return exec.Command(args[0], args[1:]...)
 }
 
 // captureInstallerOutput sends the macOS installer's output to logPath, as

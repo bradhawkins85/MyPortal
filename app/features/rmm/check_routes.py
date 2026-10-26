@@ -38,7 +38,7 @@ from app.repositories import rmm_automation as automation_repo
 from app.repositories import rmm_targeting as targeting_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
-from app.services import rmm_automation, rmm_checks
+from app.services import rmm_automation, rmm_checks, rmm_proxmox
 from app.services import rmm_event_log_rules as event_log_rules
 from app.services import rmm_scripts
 from app.services import rmm_stats
@@ -61,6 +61,7 @@ FORM_DEFAULTS: dict[str, Any] = {
     "file_path": "", "file_expected": "exists",
     "process_name": "", "process_expected": "running",
     "program_name": "", "program_expected": "installed", "program_version_operator": "none", "program_version": "",
+    "proxmox_condition": "guest", "proxmox_target": "", "proxmox_threshold": "85",
     "package_id": "",
     "script_expect": "exit_code", "script_value": "0", "script_interval": str(rmm_checks.DEFAULT_SCRIPT_INTERVAL),
 }
@@ -124,6 +125,9 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
     elif kind == "program":
         values.update(program_name=target, program_expected=settings.get("expected", "installed"),
                       program_version_operator=settings.get("version_operator", "none"), program_version=settings.get("version", ""))
+    elif kind == "proxmox":
+        values.update(proxmox_condition=settings.get("condition") or "guest", proxmox_target=target,
+                      proxmox_threshold=rmm_checks._round(float(settings.get("threshold") or 85)))
     elif kind == "network":
         values.update(network_interface=target, network_direction=settings.get("direction"),
                       network_operator=settings.get("operator"),
@@ -277,6 +281,7 @@ async def _render(
             "file_states": rmm_checks.FILE_STATES,
             "process_states": rmm_checks.PROCESS_STATES,
             "program_states": rmm_checks.PROGRAM_STATES,
+            "proxmox_conditions": rmm_proxmox.CONDITIONS,
             "version_operators": rmm_checks.VERSION_OPERATORS,
             "script_expectations": rmm_checks.SCRIPT_EXPECTATIONS,
             "result_examples": rmm_checks.RESULT_EXAMPLES,
@@ -656,6 +661,8 @@ class AgentCheckReport(BaseModel):
     files: list[AgentFile] = Field(default_factory=list, max_length=rmm_checks.MAX_FILES)
     processes: list[AgentProcess] = Field(default_factory=list, max_length=rmm_checks.MAX_PROCESSES)
     programs: list[AgentProgram] = Field(default_factory=list, max_length=rmm_checks.MAX_PROGRAMS)
+    # Cleaned and capped by rmm_proxmox.normalise when a check reads it.
+    proxmox: dict[str, Any] | None = None
 
 
 @router.post("/api/rmm/agent/checks/report", summary="Send the RMM agent's measurements for checks")

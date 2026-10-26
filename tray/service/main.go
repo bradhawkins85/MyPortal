@@ -19,6 +19,11 @@
 //
 //   - Windows: installed as a Windows Service running as LocalSystem.
 //   - macOS:   installed as a LaunchDaemon running as root.
+//   - Linux:   installed as a systemd unit running as root. On a desktop the
+//     installer adds the tray UI, which XDG autostart opens in each user's
+//     session. Servers (Proxmox VE and other headless Linux) get the service
+//     only: chat and notifications are not shown, but check-ins, configuration,
+//     commands, network scans, updates and the RMM agent install all work.
 //
 // Both use github.com/kardianos/service for the lifecycle abstraction.
 package main
@@ -87,8 +92,10 @@ var stateDir = func() string {
 			base = `C:\ProgramData`
 		}
 		return filepath.Join(base, "MyPortal", "tray")
-	default:
+	case "darwin":
 		return "/Library/Application Support/MyPortal/Tray"
+	default:
+		return "/var/lib/myportal-tray"
 	}
 }
 
@@ -118,13 +125,13 @@ func saveStateFile(s persistedState, name string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	if runtime.GOOS == "darwin" {
+	if uiReadsState(runtime.GOOS) {
 		_ = os.Chmod(dir, 0755)
 	}
 	data, _ := json.Marshal(s)
 	path := filepath.Join(dir, name)
 	mode := os.FileMode(0600)
-	if runtime.GOOS == "darwin" {
+	if uiReadsState(runtime.GOOS) {
 		// The LaunchDaemon runs as root while the LaunchAgent runs as the
 		// interactive user. The UI needs the device token to request the
 		// short-lived chat and ticket-form URLs. macOS has no shared private
@@ -164,7 +171,7 @@ func persistedStateNeedsRewrite(s *persistedState, portalURL string, mode os.Fil
 	if portalURL != "" && s.PortalURL != portalURL {
 		return true
 	}
-	return goos == "darwin" && mode != 0644
+	return uiReadsState(goos) && mode != 0644
 }
 
 // -----------------------------------------------------------------
@@ -230,10 +237,11 @@ func (d *daemon) Stop(s service.Service) error {
 func (d *daemon) run() {
 	logger.Info("MyPortal Tray Service starting (version %s)", updater.AgentVersion)
 
-	// Start IPC server for the UI agent.
+	// Start IPC server for the UI agent. A headless Linux install has no UI.
 	var err error
-	d.ipcSrv, err = ipc.NewServer()
-	if err != nil {
+	if headless() {
+		logger.Info("Headless install: no tray UI, so chat and notifications are not shown on this device")
+	} else if d.ipcSrv, err = ipc.NewServer(); err != nil {
 		logger.Error("IPC server: %v — chat delivery disabled", err)
 	} else {
 		d.ipcSrv.On("refresh_config", func(msg ipc.Message) {
@@ -596,6 +604,7 @@ func (d *daemon) ensureEnrolled() error {
 		OS:           facts.OS,
 		OSVersion:    facts.OSVersion,
 		Hostname:     facts.Hostname,
+		SerialNumber: facts.SerialNumber,
 		AgentVersion: updater.AgentVersion,
 	})
 	if err != nil {
@@ -735,7 +744,7 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 // rmmVersionLoop runs after every tray restart (including installer updates).
 // Retry while offline or while release assets are still being published.
 func (d *daemon) rmmVersionLoop(ctx context.Context) {
-	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		return
 	}
 	ticker := time.NewTicker(2 * time.Hour)
@@ -1007,6 +1016,10 @@ func cleanupHealthCheckPawnIO() {
 }
 
 func (d *daemon) deliverUserSessionMessage(msg ipc.Message) {
+	if headless() {
+		logger.Info("%s received, but this headless install has no tray UI to show it", msg.Type)
+		return
+	}
 	delivered := 0
 	if d.ipcSrv != nil {
 		delivered = d.ipcSrv.Broadcast(msg)
@@ -1125,10 +1138,11 @@ func (d *daemon) refreshConfig() bool {
 // -----------------------------------------------------------------
 
 type facts struct {
-	OS          string
-	OSVersion   string
-	Hostname    string
-	ConsoleUser string
+	OS           string
+	OSVersion    string
+	Hostname     string
+	SerialNumber string
+	ConsoleUser  string
 }
 
 func collectFacts() facts {
@@ -1138,6 +1152,7 @@ func collectFacts() facts {
 		Hostname: h,
 	}
 	f.ConsoleUser = consoleUserName()
+	platformFacts(&f)
 	return f
 }
 

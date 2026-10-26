@@ -88,6 +88,11 @@
       case 'file': return value('file_path') ? (value('file_expected') === 'missing' ? 'No ' : '') + value('file_path') : 'File check';
       case 'program': return value('program_name') ? value('program_name') + ' installation' : 'Program check';
       case 'process': return value('process_name') ? value('process_name') + (value('process_expected') === 'not_running' ? ' not running' : ' process') : 'Process';
+      case 'proxmox': {
+        const target = value('proxmox_target') && value('proxmox_target') !== '*' ? ' ' + value('proxmox_target') : '';
+        const names = { guest: 'Proxmox guest', storage: 'Proxmox storage', zfs: 'ZFS pool', backup: 'Proxmox backups', quorum: 'Proxmox quorum', node_offline: 'Proxmox node' };
+        return (names[value('proxmox_condition')] || 'Proxmox VE') + (value('proxmox_condition') === 'guest' || value('proxmox_condition') === 'storage' || value('proxmox_condition') === 'zfs' || value('proxmox_condition') === 'node_offline' ? target : '');
+      }
       case 'network': return 'Network throughput' + (value('network_interface') ? ' on ' + value('network_interface') : '');
       case 'script': return selectedText('check_script_id') || 'Script check';
       case 'offline': return 'Agent offline';
@@ -133,6 +138,19 @@
         const requirement = operator && operator !== 'none'
           ? ' or its version fails the requirement: ' + selectedText('program_version_operator').toLowerCase() + ' ' + (value('program_version') || 'the required version') : '';
         return name + ' is not installed' + requirement + lasting + '.';
+      }
+      case 'proxmox': {
+        const target = value('proxmox_target');
+        const every = !target || target === '*';
+        switch (value('proxmox_condition')) {
+          case 'guest': return 'Guest ' + (target || '?') + ' is not running' + lasting + '.';
+          case 'storage': return (every ? 'Any storage' : 'Storage ' + target) + ' is over ' + (value('proxmox_threshold') || '85') + '% full' + lasting + '.';
+          case 'zfs': return (every ? 'A ZFS pool' : 'ZFS pool ' + target) + ' is not ONLINE' + lasting + '.';
+          case 'backup': return 'The latest backup job on the node failed' + lasting + '.';
+          case 'quorum': return 'The Proxmox VE cluster has lost quorum' + lasting + '.';
+          case 'node_offline': return (every ? 'A cluster node' : 'Node ' + target) + ' is offline' + lasting + '.';
+          default: return '';
+        }
       }
       case 'network': {
         const where = value('network_interface') || 'All interfaces together';
@@ -195,6 +213,9 @@
     if (programVersion) programVersion.hidden = value('program_expected') === 'missing';
     const programValue = form.querySelector('[data-rmm-program-version-value]');
     if (programValue) programValue.hidden = value('program_version_operator') === 'none';
+    form.querySelectorAll('[data-rmm-proxmox-show]').forEach((element) => {
+      element.hidden = element.getAttribute('data-rmm-proxmox-show').split(',').indexOf(value('proxmox_condition')) === -1;
+    });
     const mode = scheduleMode ? scheduleMode.value : 'delay';
     form.querySelectorAll('[data-rmm-show-schedule]').forEach((element) => {
       element.hidden = element.getAttribute('data-rmm-show-schedule') !== mode;
@@ -237,7 +258,7 @@
 
   form.addEventListener('change', (event) => {
     const target = event.target;
-    if (target.matches('[data-rmm-check-type], [data-rmm-check-action], [data-rmm-check-schedule-mode], [data-rmm-service-expected], [data-rmm-program-expected], [data-rmm-program-operator]')) update();
+    if (target.matches('[data-rmm-check-type], [data-rmm-check-action], [data-rmm-check-schedule-mode], [data-rmm-service-expected], [data-rmm-program-expected], [data-rmm-program-operator], [data-rmm-proxmox-condition]')) update();
     if (target.matches('[data-rmm-check-target-mode]')) updateSelection();
     if (target.matches('[data-rmm-check-scope]')) {
       updateSelection();

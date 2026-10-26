@@ -25,8 +25,22 @@ func openBrowser(url string) {
 	_ = cmd.Start()
 }
 
+// showTextWindow shows text in a zenity or kdialog window, falling back to a
+// desktop notification.
 func showTextWindow(title, text string) {
-	fmt.Printf("[%s] %s\n", title, text)
+	for _, args := range [][]string{
+		{"zenity", "--info", "--no-markup", "--title", title, "--text", text},
+		{"kdialog", "--title", title, "--msgbox", text},
+	} {
+		if _, err := exec.LookPath(args[0]); err == nil {
+			cmd := exec.Command(args[0], args[1:]...)
+			if err := cmd.Start(); err == nil {
+				go cmd.Wait()
+				return
+			}
+		}
+	}
+	showOSNotification(title, text)
 }
 
 func openChatWindow(chatURL string, _ *api.ConfigResponse) {
@@ -45,6 +59,13 @@ func openChatWindow(chatURL string, _ *api.ConfigResponse) {
 	openBrowser(chatURL)
 }
 
+// showOSNotification uses notify-send (libnotify), which every common Linux
+// desktop provides.
 func showOSNotification(title, body string) {
+	if _, err := exec.LookPath("notify-send"); err == nil {
+		if err := exec.Command("notify-send", "--app-name=MyPortal", "--", title, body).Run(); err == nil {
+			return
+		}
+	}
 	fmt.Printf("[notification] %s: %s\n", title, body)
 }

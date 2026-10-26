@@ -1,0 +1,68 @@
+# Build the MyPortal Tray Linux package (service + desktop tray UI for amd64
+# and arm64, with install.sh/uninstall.sh) and upload it to the GitHub release
+# that triggered this workflow, or the release selected manually. MyPortal's
+# "Update Tray Icon Installer" task caches it under /static/tray/ for installs
+# and tray self-updates.
+#
+# Triggered by: publishing a new GitHub release (any tag), or manually via workflow_dispatch.
+# Runner:       ubuntu-latest (every binary is pure Go, CGO=0).
+
+name: Build Linux Tray
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to build the package for (defaults to current ref)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-tray:
+    name: Build Linux tray package
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: tray
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: tray/go.mod
+          cache-dependency-path: tray/go.sum
+
+      - name: Test
+        run: |
+          go vet ./service ./internal/...
+          go vet -tags nowebview ./ui
+          go test ./service ./internal/...
+
+      - name: Check install scripts
+        run: |
+          sh -n installer/linux/install.sh
+          sh -n installer/linux/uninstall.sh
+
+      - name: Build Linux package
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
+        run: |
+          # make expands $(...) in command-line variables; accept plain tags only.
+          [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._/+-]{0,127}$ ]] || { echo "Invalid tag: $RELEASE_TAG" >&2; exit 1; }
+          make package-linux VERSION="$RELEASE_TAG"
+
+      - name: Upload Linux package to release
+        if: github.event_name == 'release' || inputs.tag_name != ''
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ github.event.release.tag_name || inputs.tag_name }}
+          files: tray/dist/linux/myportal-tray-linux.tar.gz

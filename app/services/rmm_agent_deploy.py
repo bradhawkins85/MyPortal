@@ -1,7 +1,7 @@
 """Push the RMM agent to devices from MyPortal.
 
 The tray app is the channel: it already runs as LocalSystem/root on every
-managed Windows and macOS device and holds the device token the agent enrols
+managed Windows, macOS and Linux device (Linux servers run its service only) and holds the device token the agent enrols
 with. A push queues an ``install_rmm_agent`` tray command (see
 :mod:`app.repositories.rmm_agent_deploy`); the tray app then
 
@@ -54,8 +54,8 @@ from app.services import tray_installer
 from app.services.monitored_http import monitored_client
 
 INSTALL_COMMAND = deploy_repo.INSTALL_COMMAND
-# The tray app runs on Windows and macOS only.
-TRAY_PLATFORMS = ("windows", "darwin")
+# Platforms the tray app runs on (Linux includes headless servers).
+TRAY_PLATFORMS = ("windows", "darwin", "linux")
 PLATFORMS = (
     ("windows", "amd64"),
     ("windows", "arm64"),
@@ -476,7 +476,7 @@ async def _push_to_device(device: dict[str, Any], *, user_id: int | None, send: 
         raise AgentDeployError("The tray app on this device is not active.")
     os_name = str(device.get("os") or "").lower()
     if os_name not in TRAY_PLATFORMS:
-        raise AgentDeployError("The RMM agent can only be pushed to Windows and macOS devices.")
+        raise AgentDeployError("The RMM agent can only be pushed to Windows, macOS and Linux devices.")
     if not repair and await deploy_repo.device_has_agent(device):
         return {"status": "installed", "command_id": None}
     if not has_any_package(os_name):

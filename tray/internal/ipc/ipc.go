@@ -8,7 +8,7 @@
 //
 // On other platforms a Unix domain socket is used
 //
-//	/tmp/myportal-tray.sock (macOS: /var/run/myportal-tray.sock)
+//	/run/myportal-tray.sock (macOS: /var/run/myportal-tray.sock)
 //
 // The service listens; the UI agent connects.  Only a single UI agent
 // per socket is expected at any time (multi-user / RDP is handled by
@@ -52,6 +52,9 @@ func SocketPath() string {
 		return `\\.\pipe\myportal-tray`
 	case "darwin":
 		return "/var/run/myportal-tray.sock"
+	case "linux":
+		// Not /tmp: any user could create that path before the service does.
+		return "/run/myportal-tray.sock"
 	default:
 		return "/tmp/myportal-tray.sock"
 	}

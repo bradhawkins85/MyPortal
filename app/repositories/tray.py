@@ -916,10 +916,16 @@ async def get_diagnostic(diagnostic_id: int) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
+# "All platforms" versions carry one installer URL (an MSI or pkg); a Linux
+# tray can only install the Linux package, so it is offered Linux versions only.
+_OWN_PLATFORM_ONLY = ("linux",)
+
+
 async def get_latest_tray_version(platform: str = "all") -> dict[str, Any] | None:
     p = "?" if db.is_sqlite() else "%s"
+    any_platform = "" if platform in _OWN_PLATFORM_ONLY else " OR platform = 'all'"
     row = await db.fetch_one(
-        f"SELECT * FROM tray_versions WHERE enabled = 1 AND (platform = {p} OR platform = 'all') "  # nosec B608
+        f"SELECT * FROM tray_versions WHERE enabled = 1 AND (platform = {p}{any_platform}) "  # nosec B608
         f"ORDER BY published_at DESC LIMIT 1",
         (platform,),
     )
@@ -933,10 +939,11 @@ async def get_stable_tray_version(platform: str = "all") -> dict[str, Any] | Non
     ``rollout_percent`` of the newest version record.
     """
     p = "?" if db.is_sqlite() else "%s"
+    any_platform = "" if platform in _OWN_PLATFORM_ONLY else " OR platform = 'all'"
     row = await db.fetch_one(
         f"SELECT * FROM tray_versions "  # nosec B608
         f"WHERE enabled = 1 AND rollout_percent = 100 "
-        f"AND (platform = {p} OR platform = 'all') "
+        f"AND (platform = {p}{any_platform}) "
         f"ORDER BY published_at DESC LIMIT 1",
         (platform,),
     )

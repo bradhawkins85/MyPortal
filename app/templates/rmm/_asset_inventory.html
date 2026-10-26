@@ -81,6 +81,74 @@
     </table></div>
     {% endif %}
 
+    {% set pve = inv.details.proxmox %}
+    {% if pve %}
+    <h3 class="rmm-inventory__heading" id="asset-proxmox-heading">Proxmox VE</h3>
+    <dl class="definition-list" aria-labelledby="asset-proxmox-heading">
+      <dt>Version</dt><dd>{{ pve.version or '—' }}{% if pve.node %} <span class="text-muted">(node {{ pve.node }})</span>{% endif %}</dd>
+      <dt>Cluster</dt><dd>{% if pve.cluster %}{{ pve.cluster.name }} <span class="status {{ 'status--success' if pve.cluster.quorate else 'status--error' }}">{{ 'Quorate' if pve.cluster.quorate else 'No quorum' }}</span> <span class="text-muted">{{ pve.nodes | selectattr('online') | list | length }} of {{ pve.nodes | length }} nodes online</span>{% else %}Standalone host{% endif %}</dd>
+      <dt>Subscription</dt><dd>{{ pve.subscription | capitalize if pve.subscription else '—' }}</dd>
+      <dt>Pending updates</dt><dd>{{ pve.pending_updates if pve.pending_updates is not none else '—' }}</dd>
+    </dl>
+
+    {% if pve.guests %}
+    <div class="table-wrapper"><table class="table">
+      <caption class="rmm-inventory__caption">Virtual machines and containers{% if pve.cluster %} in the cluster{% endif %}</caption>
+      <thead><tr><th scope="col">VMID</th><th scope="col">Name</th><th scope="col">Type</th>{% if pve.cluster %}<th scope="col">Node</th>{% endif %}<th scope="col">Status</th><th scope="col">CPUs</th><th scope="col">Memory</th><th scope="col">Disk</th><th scope="col">Uptime</th></tr></thead>
+      <tbody>{% for guest in pve.guests %}<tr>
+        <td data-label="VMID">{{ guest.vmid }}</td>
+        <td data-label="Name">{{ guest.name or '—' }}{% if guest.template %} <span class="text-muted">template</span>{% endif %}{% if guest.ha_state %} <span class="text-muted">HA {{ guest.ha_state }}</span>{% endif %}</td>
+        <td data-label="Type">{{ 'Container' if guest.type == 'lxc' else 'VM' }}</td>
+        {% if pve.cluster %}<td data-label="Node">{{ guest.node or '—' }}</td>{% endif %}
+        <td data-label="Status">{% if guest.template %}—{% else %}<span class="status {{ 'status--success' if guest.status == 'running' else 'status--warning' }}">{{ guest.status | capitalize or 'Unknown' }}</span>{% endif %}</td>
+        <td data-label="CPUs">{{ guest.cpus | round(1) | replace('.0', '') if guest.cpus else '—' }}</td>
+        <td data-label="Memory">{{ size(guest.max_mem_bytes) or '—' }}</td>
+        <td data-label="Disk">{{ size(guest.max_disk_bytes) or '—' }}</td>
+        <td data-label="Uptime">{{ hw.format_uptime(guest.uptime_seconds) or '—' }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+
+    {% if pve.storage %}
+    <div class="table-wrapper"><table class="table">
+      <caption class="rmm-inventory__caption">Storage on this node</caption>
+      <thead><tr><th scope="col">Storage</th><th scope="col">Type</th><th scope="col">Size</th><th scope="col">Used</th><th scope="col">Status</th></tr></thead>
+      <tbody>{% for item in pve.storage %}<tr>
+        <td data-label="Storage">{{ item.name }}{% if item.shared %} <span class="text-muted">shared</span>{% endif %}</td>
+        <td data-label="Type">{{ item.type or '—' }}</td>
+        <td data-label="Size">{{ size(item.total_bytes) or '—' }}</td>
+        <td data-label="Used">{{ size(item.used_bytes) or '0 B' }}{% if item.total_bytes %} <span class="text-muted">({{ ((item.used_bytes / item.total_bytes) * 100) | round | int }}%)</span>{% endif %}</td>
+        <td data-label="Status">{{ item.status | capitalize or '—' }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+
+    {% if pve.zfs_pools %}
+    <div class="table-wrapper"><table class="table">
+      <caption class="rmm-inventory__caption">ZFS pools</caption>
+      <thead><tr><th scope="col">Pool</th><th scope="col">Health</th><th scope="col">Size</th><th scope="col">Free</th></tr></thead>
+      <tbody>{% for pool in pve.zfs_pools %}<tr>
+        <td data-label="Pool">{{ pool.name }}</td>
+        <td data-label="Health"><span class="status {{ 'status--success' if pool.health == 'ONLINE' else 'status--error' }}">{{ pool.health or 'UNKNOWN' }}</span></td>
+        <td data-label="Size">{{ size(pool.size_bytes) or '—' }}</td>
+        <td data-label="Free">{{ size(pool.free_bytes) or '0 B' }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+
+    {% if pve.backups %}
+    <div class="table-wrapper"><table class="table">
+      <caption class="rmm-inventory__caption">Recent backup jobs on this node</caption>
+      <thead><tr><th scope="col">Started</th><th scope="col">Guest</th><th scope="col">Result</th></tr></thead>
+      <tbody>{% for backup in pve.backups %}<tr>
+        <td data-label="Started"><span data-utc="{{ backup.started_at }}">{{ backup.started_at }}</span></td>
+        <td data-label="Guest">{{ backup.guest or 'All selected guests' }}</td>
+        <td data-label="Result"><span class="status {{ 'status--processing' if backup.running else ('status--success' if backup.ok else 'status--error') }}">{{ 'Running' if backup.running else backup.status }}</span></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+    {% endif %}
+
     {% if inv.details.errors %}
     <details class="rmm-inventory__errors"><summary>Some details could not be read ({{ inv.details.errors | length }})</summary>
       <ul>{% for error in inv.details.errors %}<li><code>{{ error }}</code></li>{% endfor %}</ul>

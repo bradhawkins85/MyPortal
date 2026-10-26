@@ -15,6 +15,8 @@
 ##   make build-windows        Build Windows (amd64)
 ##   make build-darwin-amd64
 ##   make build-darwin-arm64
+##   make build-linux          Build Linux (amd64 + arm64) service and tray UI
+##   make package-linux        Build dist/myportal-tray-linux.tar.gz
 ##   make build-chat-shell-win Build Electron chat shell for Windows (Windows host only)
 ##   make build-chat-shell-mac Build Electron chat shell for macOS (macOS host only)
 ##   make test                 Run Go tests
@@ -41,6 +43,7 @@ DIST     := dist
 
 .PHONY: all build-all build-windows build-darwin-amd64 build-darwin-arm64 \
         build-darwin-universal build-msi build-pkg build-dmg package-all \
+        build-linux package-linux \
         build-macos-icons build-chat-shell-win build-chat-shell-mac \
         build-agent test-agent run-agent sensor-bundle \
         test lint clean
@@ -60,6 +63,28 @@ build-windows:
 	@echo "Building Windows amd64 UI (no-CGO, no webview)..."
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 GOFLAGS="-tags=nowebview" \
 	  go build -ldflags "$(LDFLAGS) -H windowsgui" -o $(DIST)/windows/myportal-tray-ui.exe ./ui
+
+# -----------------------------------------------------------------------
+# Linux amd64 + arm64. Both binaries are pure Go (CGO=0): the tray UI talks to
+# the desktop's StatusNotifierItem host over D-Bus. Servers get the service
+# only; install.sh adds the UI on desktops.
+# -----------------------------------------------------------------------
+LINUX_ARCHES := amd64 arm64
+
+build-linux:
+	@for arch in $(LINUX_ARCHES); do \
+	  mkdir -p $(DIST)/linux/myportal-tray/$$arch || exit 1; \
+	  echo "Building Linux $$arch service and UI..."; \
+	  GOOS=linux GOARCH=$$arch CGO_ENABLED=0 \
+	    go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/linux/myportal-tray/$$arch/myportal-tray-service ./service || exit 1; \
+	  GOOS=linux GOARCH=$$arch CGO_ENABLED=0 GOFLAGS="-tags=nowebview" \
+	    go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/linux/myportal-tray/$$arch/myportal-tray-ui ./ui || exit 1; \
+	done
+
+package-linux: build-linux
+	install -m 0755 installer/linux/install.sh installer/linux/uninstall.sh $(DIST)/linux/myportal-tray/
+	tar -C $(DIST)/linux --owner=0 --group=0 -czf $(DIST)/linux/myportal-tray-linux.tar.gz myportal-tray
+	@echo "Linux package: $(DIST)/linux/myportal-tray-linux.tar.gz"
 
 # -----------------------------------------------------------------------
 # macOS amd64 (Intel)

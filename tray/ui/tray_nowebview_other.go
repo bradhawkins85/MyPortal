@@ -1,4 +1,4 @@
-//go:build nowebview && !windows
+//go:build nowebview && !windows && !linux
 
 // tray_nowebview_other.go provides the headless runUI for non-Windows platforms
 // in the CGO=0 (nowebview) build.  A system-tray icon on macOS/Linux requires
