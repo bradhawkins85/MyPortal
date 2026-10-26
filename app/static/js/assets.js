@@ -287,7 +287,7 @@
 
 
   function initialiseDeletion(table) {
-    const buttons = document.querySelectorAll('.asset-delete-button');
+    const buttons = document.querySelectorAll('[data-asset-delete]');
     buttons.forEach((button) => {
       button.addEventListener('click', async () => {
         const assetId = button.getAttribute('data-asset-id');

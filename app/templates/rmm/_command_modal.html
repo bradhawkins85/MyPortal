@@ -1,13 +1,14 @@
 {# Run an ad hoc command on this device, opened from the asset page's RMM menu.
    rmm_command.js posts it to /api/rmm/assets/{id}/commands and opens the run in the
-   shared result viewer (rmm/_run_modal.html). #}
-<div class="modal rmm-modal" id="rmm-command-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-command-title" hidden data-rmm-command-modal data-rmm-command-asset="{{ asset.id }}">
+   shared result viewer (rmm/_run_modal.html). The Assets list has no `asset`: each
+   row's menu item names its device and shells, and every shell is listed here. #}
+<div class="modal rmm-modal" id="rmm-command-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-command-title" hidden data-rmm-command-modal data-rmm-command-asset="{{ asset.id if asset else '' }}">
   <form class="modal__panel modal__panel--wide" data-rmm-command-form novalidate>
     <header class="modal__header">
       <div>
         <p class="rmm-editor__eyebrow">RMM</p>
         <h2 class="modal__title" id="rmm-command-title">Execute command</h2>
-        <p class="rmm-editor__subtitle">Run a one-off command on {{ asset_display_name }}. Its output appears as it runs, and the run is kept in the device's script history.</p>
+        <p class="rmm-editor__subtitle">Run a one-off command on <span data-rmm-command-device>{{ asset_display_name or 'this device' }}</span>. Its output appears as it runs, and the run is kept in the device's script history.</p>
       </div>
       <button type="button" class="modal__close" data-rmm-command-close aria-label="Close command runner"></button>
     </header>
@@ -15,7 +16,7 @@
       <div class="form-field">
         <label class="form-label" for="rmm-command-language">Shell</label>
         <select class="form-input" id="rmm-command-language" data-rmm-command-language>
-          {% for language in rmm.command_languages %}<option value="{{ language.value }}">{{ language.label }}</option>{% endfor %}
+          {% for language in (rmm.command_languages if rmm else rmm_command_languages) %}<option value="{{ language.value }}">{{ language.label }}</option>{% endfor %}
         </select>
         <p class="form-help form-help--error" data-rmm-command-error="language" hidden></p>
       </div>

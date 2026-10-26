@@ -1,15 +1,16 @@
 {# Manage one Chocolatey package on this device without a script, opened from the
    asset page's RMM menu. rmm_choco_install.js searches the downloaded app list; the form posts
-   to the same endpoint as the Software section's install form. #}
+   to the same endpoint as the Software section's install form. On the Assets list
+   each row's menu item points the form at its own device. #}
 <div class="modal rmm-modal" id="choco-install-modal" role="dialog" aria-modal="true" aria-labelledby="choco-install-title" hidden data-choco-modal>
-  <form class="modal__panel" method="post" action="/rmm/assets/{{ asset.id }}/software/install" data-choco-modal-form>
+  <form class="modal__panel" method="post" action="{{ '/rmm/assets/' ~ asset.id ~ '/software/install' if asset else '' }}" data-choco-modal-form>
     {% include "partials/csrf.html" %}
     <input type="hidden" name="package_id" data-choco-modal-package>
     <header class="modal__header">
       <div>
         <p class="rmm-editor__eyebrow">Chocolatey</p>
         <h2 class="modal__title" id="choco-install-title">Manage Choco Package</h2>
-        <p class="rmm-editor__subtitle">Install, upgrade or uninstall a package on {{ asset_display_name }} using the company's enabled Chocolatey sources.</p>
+        <p class="rmm-editor__subtitle">Install, upgrade or uninstall a package on <span data-choco-modal-device>{{ asset_display_name or 'this device' }}</span> using the company's enabled Chocolatey sources.</p>
       </div>
       <button type="button" class="modal__close" data-choco-modal-close aria-label="Close Chocolatey package action"></button>
     </header>

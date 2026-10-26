@@ -194,11 +194,18 @@ async def company_agent_states(company_id: int) -> dict[int, str]:
 
 
 async def company_agent_details(company_id: int) -> dict[int, dict[str, Any]]:
-    """State and reported version of each of a company's assets with an RMM agent."""
+    """State, reported version and operating system of each of a company's assets
+    with an RMM agent, plus the shells and tray repair the Assets list offers for it."""
 
     agents = await rmm_repo.list_company_asset_agents(company_id)
     return {
-        asset_id: {"state": rmm_scripts.agent_state(agent), "version": agent.get("agent_version")}
+        asset_id: {
+            "state": rmm_scripts.agent_state(agent),
+            "version": agent.get("agent_version"),
+            "os": str(agent.get("os") or "").lower(),
+            "command_languages": rmm_commands.languages_for(agent),
+            "tray_repair": rmm_tray_repair.supported(agent),
+        }
         for asset_id, agent in agents.items()
     }
 

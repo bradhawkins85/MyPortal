@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% from "tags/_picker.html" import tag_list %}
 {% import "rmm/_macros.html" as rmm_ui %}
+{% from "macros/header.html" import page_header_overflow with context %}
+{% import "assets/_action_icons.html" as action_icons %}
 
 {% block title %}Assets{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if show_tags %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% if rmm_actions %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endif %}{% endblock %}
@@ -106,9 +108,7 @@
                 {{ column.label }}
               </th>
             {% endfor %}
-            {% if has_asset_actions %}
-              <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
-            {% endif %}
+            <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -239,72 +239,38 @@
                   </td>
                 {% endif %}
               {% endfor %}
-              {% if has_asset_actions %}
-                <td class="table__actions" data-mobile-priority="essential">
-                  <details class="header-title-menu__dropdown" data-header-menu>
-                    <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
-                      Actions
-                      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
-                        <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
-                      </svg>
-                      <span class="visually-hidden">Toggle row actions menu</span>
-                    </summary>
-                    <ul class="header-title-menu__list" role="menu">
-                      {% if asset.can_open_chat %}
-                        <li class="header-title-menu__item" role="none">
-                          <button
-                            type="button"
-                            class="header-title-menu__link"
-                            role="menuitem"
-                            data-tray-chat
-                            data-device-uid="{{ asset.tray_device_uid }}"
-                            data-asset-name="{{ (asset.name or asset.hostname or ('Asset ' ~ asset.id)) | e }}"
-                          >Open Chat</button>
-                        </li>
-                      {% endif %}
-                      {% if asset.rmm_actions %}
-                        {% set rmm_name = asset.name or asset.hostname or ('Asset ' ~ asset.id) %}
-                        <li class="header-title-menu__item" role="none">
-                          <button type="button" class="header-title-menu__link" role="menuitem" data-rmm-run-open data-rmm-run-asset="{{ asset.id }}" aria-haspopup="dialog" aria-controls="rmm-run-modal">Run script</button>
-                        </li>
-                        {% for provider, provider_label in [("rustdesk", "RustDesk"), ("meshcentral", "MeshCentral")] if provider in rmm_remote_providers %}
-                          {% for mode, mode_label in rmm_ui.REMOTE_MODES %}
-                            <li class="header-title-menu__item" role="none">
-                              <button type="button" class="header-title-menu__link" role="menuitem" data-rmm-remote="{{ provider }}" data-rmm-remote-mode="{{ mode }}" data-rmm-remote-asset="{{ asset.id }}" data-rmm-remote-name="{{ rmm_name }}">{{ provider_label }}: {{ mode_label | lower }}</button>
-                            </li>
-                          {% endfor %}
-                        {% endfor %}
-                      {% endif %}
-                      {% if asset.rmm_install or asset.rmm_actions %}
-                        <li class="header-title-menu__item" role="none">
-                          <a class="header-title-menu__link" role="menuitem" href="/assets/{{ asset.id }}#scripts">RMM agent and install history</a>
-                        </li>
-                      {% endif %}
-                      {% if asset.can_push_rmm_agent %}
-                        <li class="header-title-menu__item" role="none">
-                          <button
-                            type="button"
-                            class="header-title-menu__link"
-                            role="menuitem"
-                            data-rmm-agent-repair="{{ asset.id }}"
-                            data-rmm-agent-name="{{ asset.name or ('Asset ' ~ asset.id) }}"
-                          >Repair RMM agent</button>
-                        </li>
-                      {% endif %}
-                      {% if is_super_admin %}
-                        <li class="header-title-menu__item" role="none">
-                          <button
-                            type="button"
-                            class="header-title-menu__link header-title-menu__link--danger asset-delete-button"
-                            role="menuitem"
-                            data-asset-id="{{ asset.id }}"
-                          >Delete</button>
-                        </li>
-                      {% endif %}
-                    </ul>
-                  </details>
-                </td>
-              {% endif %}
+              <td class="table__actions" data-mobile-priority="essential">
+                {#- The same groups, options and icons as the asset page's Actions menu. -#}
+                {%- set row_name = asset.name or asset.hostname or ('Asset ' ~ asset.id) -%}
+                {%- set row_actions = [] -%}
+                {%- set _ = row_actions.append({"type": "section", "label": "Asset"}) -%}
+                {%- set _ = row_actions.append({"label": "Open asset", "type": "link", "href": "/assets/" ~ asset.id, "icon": action_icons.ref("open")}) -%}
+                {%- set _ = row_actions.append({"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id, "icon": action_icons.ref("process")}) -%}
+                {%- if is_super_admin and can_write_assets %}{% set _ = row_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true", "icon": action_icons.ref("preview")}) %}{% endif -%}
+                {%- set _ = row_actions.append({"type": "section", "label": "Remote access"}) -%}
+                {%- if asset.can_open_chat %}{% set _ = row_actions.append({"label": "Open chat", "icon": action_icons.ref("chat"), "attrs": {"data-tray-chat": true, "data-device-uid": asset.tray_device_uid, "data-asset-name": row_name}}) %}{% endif -%}
+                {%- if asset.rmm_actions %}{% for session in rmm_remote_providers %}{% for mode, mode_label in [("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal")] %}{% set _ = row_actions.append({"label": session.label ~ " " ~ mode_label, "icon": action_icons.ref(mode), "attrs": {"data-rmm-remote": session.provider, "data-rmm-remote-mode": mode, "data-rmm-remote-asset": asset.id, "data-rmm-remote-name": row_name}}) %}{% endfor %}{% endfor %}{% endif -%}
+                {%- set _ = row_actions.append({"type": "section", "label": "RMM"}) -%}
+                {%- if asset.rmm_actions -%}
+                  {%- set _ = row_actions.append({"label": "Check in now", "type": "form", "action": "/rmm/assets/" ~ asset.id ~ "/checkin", "icon": action_icons.ref("checkin"), "attrs": {"title": "Queue a full agent check-in without changing its normal schedule"}}) -%}
+                  {%- if asset.can_health_check %}{% set _ = row_actions.append({"label": "Run health check", "type": "form", "action": "/rmm/assets/" ~ asset.id ~ "/health-check", "icon": action_icons.ref("health"), "attrs": {"title": "Review this computer's health with the AI troubleshooter and list the steps back to optimal performance" if asset.health_check_ready else "Needs the tray app connected on this computer", "disabled": none if asset.health_check_ready else true}}) %}{% endif -%}
+                  {%- set _ = row_actions.append({"label": "Run script", "icon": action_icons.ref("script"), "attrs": {"data-rmm-run-open": true, "data-rmm-run-asset": asset.id, "aria-haspopup": "dialog", "aria-controls": "rmm-run-modal"}}) -%}
+                  {%- if asset.rmm_command_languages %}{% set _ = row_actions.append({"label": "Execute command", "icon": action_icons.ref("command"), "attrs": {"data-rmm-command-open": true, "data-rmm-command-asset": asset.id, "data-rmm-command-name": row_name, "data-rmm-command-languages": asset.rmm_command_languages, "aria-haspopup": "dialog", "aria-controls": "rmm-command-modal"}}) %}{% endif -%}
+                  {%- if asset.rmm_windows %}{% set _ = row_actions.append({"label": "Install Choco package", "icon": action_icons.ref("package"), "attrs": {"data-choco-modal-open": true, "data-choco-modal-asset": asset.id, "data-choco-modal-name": row_name, "aria-haspopup": "dialog", "aria-controls": "choco-install-modal"}}) %}{% endif -%}
+                {%- endif -%}
+                {%- set _ = row_actions.append({"type": "section", "label": "Agent maintenance"}) -%}
+                {%- if asset.can_push_rmm_agent and not asset.rmm_actions %}{% set _ = row_actions.append({"label": "Push RMM agent", "icon": action_icons.ref("push"), "attrs": {"data-rmm-agent-install": asset.id, "data-rmm-agent-name": row_name}}) %}{% endif -%}
+                {%- if asset.can_push_rmm_agent %}{% set _ = row_actions.append({"label": "Repair RMM agent", "icon": action_icons.ref("repair"), "attrs": {"data-rmm-agent-repair": asset.id, "data-rmm-agent-name": row_name}}) %}{% endif -%}
+                {%- if asset.rmm_tray_repair %}{% set _ = row_actions.append({"label": "Repair tray agent", "icon": action_icons.ref("repair"), "attrs": {"data-rmm-tray-repair": asset.id, "data-rmm-tray-repair-name": row_name}}) %}{% endif -%}
+                {%- set _ = row_actions.append({"type": "section", "label": "Go to"}) -%}
+                {%- if asset.rmm_install or asset.rmm_actions %}{% set _ = row_actions.append({"label": "RMM agent and install history", "type": "link", "href": "/assets/" ~ asset.id ~ "#scripts", "icon": action_icons.ref("history")}) %}{% endif -%}
+                {%- if can_write_assets and asset.company_id %}{% set _ = row_actions.append({"label": "Company credentials", "type": "link", "href": "/admin/companies/" ~ asset.company_id ~ "/edit#credentials", "icon": action_icons.ref("credentials")}) %}{% endif -%}
+                {%- if is_super_admin -%}
+                  {%- set _ = row_actions.append({"type": "section"}) -%}
+                  {%- set _ = row_actions.append({"label": "Delete", "variant": "danger", "icon": action_icons.ref("delete"), "attrs": {"data-asset-delete": true, "data-asset-id": asset.id}}) -%}
+                {%- endif %}
+                {{ page_header_overflow("asset-actions-" ~ asset.id, "Actions", row_actions) }}
+              </td>
             </tr>
           {% endfor %}
         </tbody>
@@ -350,7 +316,10 @@
   <script type="application/json" id="rmm-config">{{ {"can_run": true, "asset_id": None} | tojson }}</script>
 </div>
 {% include "rmm/_run_modal.html" %}
+{% include "rmm/_command_modal.html" %}
+{% include "rmm/_choco_install_modal.html" %}
 {% endif %}
+{% if has_assets %}{{ action_icons.sprite() }}{% endif %}
 {% include "partials/csrf.html" %}
 {% endblock %}
 
@@ -359,17 +328,5 @@
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/assets.js') }}" defer></script>
   {% if can_push_rmm_agent %}<script src="{{ static_url('/static/js/rmm_agent_deploy.js') }}" defer></script>{% endif %}
-  {% if rmm_actions %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script>{% endif %}
-  <script>
-    // Allow row-level action dropdowns to overflow the table wrapper.
-    document.addEventListener('DOMContentLoaded', function () {
-      document.querySelectorAll('#assets-table [data-header-menu]').forEach(function (menu) {
-        const wrapper = menu.closest('.table-wrapper');
-        if (!wrapper) return;
-        menu.addEventListener('toggle', function () {
-          wrapper.style.overflow = menu.open ? 'visible' : '';
-        });
-      });
-    });
-  </script>
+  {% if rmm_actions %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_command.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_tray_repair.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_choco_picker.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_choco_install.js') }}" defer></script>{% endif %}
 {% endblock %}

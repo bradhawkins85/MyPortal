@@ -433,7 +433,7 @@ async def list_company_asset_agents(company_id: int) -> dict[int, dict[str, Any]
     """Each of a company's assets with an active RMM agent, keyed by asset ID (latest check-in)."""
 
     rows = await db.fetch_all(
-        "SELECT asset_id, last_seen_utc, agent_version FROM rmm_agents "
+        "SELECT asset_id, last_seen_utc, agent_version, os, shells FROM rmm_agents "
         "WHERE company_id = %s AND status = 'active' AND asset_id IS NOT NULL "
         "ORDER BY last_seen_utc DESC, id DESC",
         (company_id,),

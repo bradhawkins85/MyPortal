@@ -1,0 +1,7 @@
+{
+  "guid": "12dcbd4d-739b-468e-a89a-1c36191d40d5",
+  "occurred_at": "2026-10-26T00:00Z",
+  "change_type": "Feature",
+  "summary": "The Actions button on each row of the Assets list now has the same grouped options and icons as the asset page's Actions menu, including Check in now, Run health check, Execute command, Install Choco package, Repair tray agent, Customer preview and Company credentials.",
+  "content_hash": "d327c7f17f4cea09ac10886ad3fa72326d2fe8600d0e02cab33f8f18c667bf02"
+}
