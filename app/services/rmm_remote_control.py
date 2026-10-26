@@ -323,7 +323,7 @@ def builtin_rustdesk_script(agent: Mapping[str, Any]) -> dict[str, Any]:
 
 
 async def _queue_builtin_rustdesk(agent: Mapping[str, Any], password: str, user_id: int | None) -> int:
-    script = builtin_rustdesk_script(agent)
+    script = rmm_scripts.always_run(builtin_rustdesk_script(agent), agent)
     problem = rmm_scripts.device_problem(script, agent)
     if problem:
         raise RemoteControlError(problem)
@@ -410,8 +410,9 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
             rmm_scripts.clamp_timeout(script.get("default_timeout_seconds"), MAX_ACTIVATION_TIMEOUT_SECONDS),
         )
         try:
+            # Activation never waits behind other scripts running on the device.
             run_id = await rmm_scripts.queue_for_agent(
-                script=script,
+                script=rmm_scripts.always_run(script, agent),
                 agent=agent,
                 entries=entries,
                 inputs=rmm_scripts.stored_inputs(script, entries),

@@ -359,6 +359,29 @@ async def test_builtin_rustdesk_sends_each_platform_its_own_installer(sqlite_db,
     assert ready["launch_url"].startswith("rustdesk://connection/new/123456789?password=")
 
 
+@pytest.mark.anyio
+async def test_activation_is_not_held_up_by_other_running_scripts(sqlite_db, monkeypatch):
+    await remote.save_settings("rustdesk", {"is_enabled": "1"}, user_id=9)
+    _r, agent = await _enrol(sqlite_db)
+    content = "Start-Sleep 3600"
+    busy = {"id": None, "name": "DISM Cleanup", "path": "Common/dism.ps1", "language": "powershell",
+            "content": content, "content_sha256": "x"}
+    await rmm_scripts.queue_for_agent(script=busy, agent=agent, entries={}, inputs=[], timeout_seconds=600,
+                                      requested_by_user_id=None)
+    assert [job["path"] for job in await rmm_scripts.claim_jobs(agent)] == ["Common/dism.ps1"]
+
+    # An agent too old for Run Anyway keeps activation in the queue.
+    waiting = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9)
+    assert await rmm_scripts.claim_jobs(agent) == []
+    assert (await rmm_repo.get_run(waiting["run_id"]))["status"] == "queued"
+
+    await sqlite_db.execute("UPDATE rmm_agents SET run_anyway_supported = 1")
+    agent = await rmm_repo.get_agent(agent["id"])
+    session = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9)
+    jobs = await rmm_scripts.claim_jobs(agent)
+    assert [(job["id"], job["run_anyway"]) for job in jobs] == [(session["run_id"], True)]
+
+
 def test_agent_state_follows_the_agents_last_poll():
     from datetime import datetime, timedelta
 
