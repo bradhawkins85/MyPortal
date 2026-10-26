@@ -206,9 +206,15 @@ func control(action string) error {
 		if err := service.Control(svc, "install"); err != nil && !strings.Contains(err.Error(), "already exists") {
 			return err
 		}
+		if err := configureServiceResilience(serviceConfig().Name); err != nil {
+			return err
+		}
 		return service.Control(svc, "start")
 	}
-	return uninstallService(svc.Status, func(action string) error { return service.Control(svc, action) })
+	if err := uninstallService(svc.Status, func(action string) error { return service.Control(svc, action) }); err != nil {
+		return err
+	}
+	return removeSafeBootRegistration(serviceConfig().Name)
 }
 
 // Uninstall is idempotent, including when the service disappears between the
@@ -285,6 +291,11 @@ func runService() error {
 		return err
 	}
 	if !service.Interactive() {
+		// Repairs recovery and Safe Mode settings on agents installed before
+		// they were applied at install time.
+		if err := configureServiceResilience(serviceConfig().Name); err != nil {
+			log.Printf("configure service recovery: %v", err)
+		}
 		return svc.Run()
 	}
 	if err := prg.Start(svc); err != nil {
