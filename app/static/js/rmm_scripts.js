@@ -65,6 +65,12 @@
     return data;
   }
 
+  // On a device's page the calls carry its ID so they resolve against the
+  // device's company, even when another company is selected.
+  function forAsset(url) {
+    return config.asset_id ? url + (url.includes('?') ? '&' : '?') + 'asset_id=' + encodeURIComponent(config.asset_id) : url;
+  }
+
   function el(tag, attrs, text) {
     const node = document.createElement(tag);
     Object.entries(attrs || {}).forEach(([key, value]) => {
@@ -513,7 +519,7 @@
     }
     let detail;
     try {
-      detail = await api('/api/rmm/scripts/' + encodeURIComponent(scriptId));
+      detail = await api(forAsset('/api/rmm/scripts/' + encodeURIComponent(scriptId)));
     } catch (error) {
       formError.textContent = error.message;
       formError.hidden = false;
@@ -573,7 +579,7 @@
     if (state.scriptsLoaded && state.scriptsAsset === config.asset_id) {
       return;
     }
-    const data = await api('/api/rmm/scripts' + (config.asset_id ? '?asset_id=' + encodeURIComponent(config.asset_id) : ''));
+    const data = await api(forAsset('/api/rmm/scripts'));
     Array.from(scriptSelect.options).forEach((option) => { if (option.value) { option.remove(); } });
     (data.scripts || []).forEach((script) => {
       const label = (script.folder ? script.folder + ' / ' : '') + script.name + ' (' + script.language_label + ')';
@@ -733,7 +739,7 @@
       return;
     }
     try {
-      const result = await api('/api/rmm/scripts/' + state.detail.script.id + '/runs', {
+      const result = await api(forAsset('/api/rmm/scripts/' + state.detail.script.id + '/runs'), {
         method: 'POST',
         body: {
           asset_ids: selectedAssets(), values: collectValues(), timeout_seconds: Math.round(minutes * 60), queue_timeout_seconds: queueTimeoutInput.value === '' ? null : Math.round(Number(queueTimeoutInput.value) * 60), run_as: runAsSelect.value,
@@ -990,7 +996,7 @@
     button.disabled = true;
     actionError(button, '');
     try {
-      const data = await api('/api/rmm/runs/' + encodeURIComponent(runId));
+      const data = await api(forAsset('/api/rmm/runs/' + encodeURIComponent(runId)));
       const run = data.run;
       updateRunRow(run);
       if (!RETRYABLE.has(run.status) || !run.script_id || !run.asset_id) {
@@ -1027,7 +1033,7 @@
     button.disabled = true;
     actionError(button, '');
     try {
-      const data = await api('/api/rmm/runs/' + encodeURIComponent(runId) + '/cancel', { method: 'POST' });
+      const data = await api(forAsset('/api/rmm/runs/' + encodeURIComponent(runId) + '/cancel'), { method: 'POST' });
       updateRunRow(data.run);
       if (currentRun && Number(currentRun.id) === Number(runId) && !resultModal.hidden) {
         stopPolling();
@@ -1036,7 +1042,7 @@
     } catch (error) {
       // An agent may have picked it up since the list was rendered.
       try {
-        const data = await api('/api/rmm/runs/' + encodeURIComponent(runId));
+        const data = await api(forAsset('/api/rmm/runs/' + encodeURIComponent(runId)));
         updateRunRow(data.run);
         if (currentRun && Number(currentRun.id) === Number(runId) && !resultModal.hidden) renderRun(data.run);
       } catch (refreshError) {
@@ -1056,7 +1062,7 @@
     button.disabled = true;
     actionError(button, '');
     try {
-      const data = await api('/api/rmm/runs/' + encodeURIComponent(runId) + '/abort', { method: 'POST' });
+      const data = await api(forAsset('/api/rmm/runs/' + encodeURIComponent(runId) + '/abort'), { method: 'POST' });
       updateRunRow(data.run);
       if (currentRun && Number(currentRun.id) === Number(runId) && !resultModal.hidden) {
         stopPolling();
@@ -1065,7 +1071,7 @@
     } catch (error) {
       // The script may have finished since the list was rendered.
       try {
-        const data = await api('/api/rmm/runs/' + encodeURIComponent(runId));
+        const data = await api(forAsset('/api/rmm/runs/' + encodeURIComponent(runId)));
         updateRunRow(data.run);
         if (currentRun && Number(currentRun.id) === Number(runId) && !resultModal.hidden) renderRun(data.run);
       } catch (refreshError) {
@@ -1090,7 +1096,7 @@
   async function refreshRun(runId) {
     const generation = pollGeneration;
     try {
-      const data = await api('/api/rmm/runs/' + encodeURIComponent(runId));
+      const data = await api(forAsset('/api/rmm/runs/' + encodeURIComponent(runId)));
       if (generation !== pollGeneration || resultModal.hidden) return;
       renderRun(data.run);
       if (ACTIVE.has(data.run.status) && !resultModal.hidden) {
