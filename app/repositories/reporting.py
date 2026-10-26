@@ -30,7 +30,7 @@ def _normalise_query(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 async def list_queries() -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        "SELECT id, slug, name, description, sql_query, is_system, created_by, "
+        "SELECT id, slug, name, description, category, sql_query, is_system, created_by, "
         "created_at, updated_at FROM reporting_queries ORDER BY name ASC"
     )
     return [_normalise_query(row) for row in (rows or []) if row]
@@ -38,7 +38,7 @@ async def list_queries() -> list[dict[str, Any]]:
 
 async def get_query(query_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        "SELECT id, slug, name, description, sql_query, is_system, created_by, "
+        "SELECT id, slug, name, description, category, sql_query, is_system, created_by, "
         "created_at, updated_at FROM reporting_queries WHERE id = %s",
         (int(query_id),),
     )
@@ -47,7 +47,7 @@ async def get_query(query_id: int) -> dict[str, Any] | None:
 
 async def get_query_by_slug(slug: str) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        "SELECT id, slug, name, description, sql_query, is_system, created_by, "
+        "SELECT id, slug, name, description, category, sql_query, is_system, created_by, "
         "created_at, updated_at FROM reporting_queries WHERE slug = %s",
         (slug,),
     )
@@ -61,11 +61,12 @@ async def create_query(
     description: str | None,
     sql_query: str,
     created_by: int | None,
+    category: str | None = None,
 ) -> int:
     return await db.execute_returning_lastrowid(
-        "INSERT INTO reporting_queries (slug, name, description, sql_query, is_system, created_by) "
-        "VALUES (%s, %s, %s, %s, 0, %s)",
-        (slug, name, description, sql_query, created_by),
+        "INSERT INTO reporting_queries (slug, name, description, category, sql_query, is_system, created_by) "
+        "VALUES (%s, %s, %s, %s, %s, 0, %s)",
+        (slug, name, description, category, sql_query, created_by),
     )
 
 
@@ -75,13 +76,23 @@ async def update_query(
     name: str,
     description: str | None,
     sql_query: str,
+    category: str | None = None,
 ) -> None:
     """Update editable fields while leaving the report's existing slug intact."""
     await db.execute(
-        "UPDATE reporting_queries SET name = %s, description = %s, "
+        "UPDATE reporting_queries SET name = %s, description = %s, category = %s, "
         "sql_query = %s WHERE id = %s",
-        (name, description, sql_query, int(query_id)),
+        (name, description, category, sql_query, int(query_id)),
     )
+
+
+async def list_categories() -> list[str]:
+    """Distinct report categories, for suggesting one when a report is edited."""
+    rows = await db.fetch_all(
+        "SELECT DISTINCT category FROM reporting_queries "
+        "WHERE category IS NOT NULL AND category <> '' ORDER BY category ASC"
+    )
+    return [str(row["category"]) for row in (rows or []) if row and row["category"]]
 
 
 async def delete_query(query_id: int) -> None:
@@ -154,7 +165,7 @@ async def list_queries_for_user(
     if include_all:
         return await list_queries()
     rows = await db.fetch_all(
-        "SELECT q.id, q.slug, q.name, q.description, q.sql_query, q.is_system, "
+        "SELECT q.id, q.slug, q.name, q.description, q.category, q.sql_query, q.is_system, "
         "q.created_by, q.created_at, q.updated_at "
         "FROM reporting_queries q "
         "JOIN reporting_query_permissions p ON p.query_id = q.id "

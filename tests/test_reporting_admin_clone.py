@@ -50,6 +50,7 @@ def test_admin_reporting_clone_prefills_create_form(monkeypatch):
         lambda _company_id: _eligible_users(),
     )
     monkeypatch.setattr(reporting_repo, "get_query", fake_get_query)
+    monkeypatch.setattr(reporting_repo, "list_categories", _no_categories)
     monkeypatch.setattr(
         reporting_repo, "list_permission_user_ids", fake_list_permissions
     )
@@ -94,6 +95,7 @@ def test_admin_reporting_clone_redirects_when_source_is_missing(monkeypatch):
         ),
     )
     monkeypatch.setattr(reporting_repo, "get_query", fake_get_query)
+    monkeypatch.setattr(reporting_repo, "list_categories", _no_categories)
 
     response = asyncio.run(
         reporting_handlers.admin_reporting_clone(SimpleNamespace(), 404)
@@ -109,3 +111,7 @@ async def _eligible_users():
 
 async def _empty_schema():
     return {"tables": [], "relations": []}
+
+
+async def _no_categories():
+    return []

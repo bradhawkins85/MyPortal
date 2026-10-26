@@ -41,7 +41,9 @@ def _entries() -> list[tuple[str, str, str, str, int]]:
 def _existing_slugs() -> set[str]:
     slugs: set[str] = set()
     for path in MIGRATION.parent.glob("*.sql"):
-        if path != MIGRATION and "reporting_queries" in path.read_text(encoding="utf-8"):
+        if int(path.name.split("_", 1)[0]) >= 523:
+            continue
+        if "reporting_queries" in path.read_text(encoding="utf-8"):
             slugs.update(re.findall(r"'([a-z0-9]+(?:-[a-z0-9]+)+)'", path.read_text(encoding="utf-8")))
     return slugs
 

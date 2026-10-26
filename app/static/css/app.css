@@ -15100,6 +15100,11 @@ a.stat-strip__stat:focus-visible {
   gap: 0.35rem;
 }
 
+/* Row Actions menus keep their label on one line when a narrow table squeezes the column. */
+.table__actions .header-menu__button {
+  white-space: nowrap;
+}
+
 .header-menu__chevron {
   transition: transform 0.15s ease;
 }

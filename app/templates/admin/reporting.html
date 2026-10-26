@@ -1,9 +1,25 @@
 {% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
-
-{% block header_title %}<span class="header__title-text">Reporting · Manage reports</span>{% endblock %}
+{% block header_title %}
+  {% from "macros/tables.html" import table_column_picker %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Manage reports</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="reporting-reports-search">Search reports</label>
+      <input
+        type="search"
+        id="reporting-reports-search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search reports"
+        data-table-filter="reporting-reports"
+      />
+      {{ table_column_picker("reporting-reports", report_columns | default([])) }}
+      <span class="page-header-toolbar__info" data-table-info data-table-info-for="reporting-reports" aria-live="polite">{{ reports | length }} reports</span>
+    </div>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
+  {% from "macros/header.html" import page_header_actions %}
   {{ page_header_actions([
     {"label": "Back to Reporting", "type": "link", "variant": "ghost", "href": "/reporting"},
     {"label": "New report", "type": "link", "variant": "primary", "href": "/admin/reporting/new"}
@@ -11,6 +27,8 @@
 {% endblock %}
 
 {% block content %}
+  {% from "macros/header.html" import page_header_overflow with context %}
+  {% import "assets/_action_icons.html" as action_icons %}
   {% if success_message %}
     <div class="card card--panel"><p class="form-success">{{ success_message }}</p></div>
   {% endif %}
@@ -18,53 +36,66 @@
     <div class="card card--panel"><p class="form-error">{{ error_message }}</p></div>
   {% endif %}
   <section class="card card--panel">
-    <header class="card__header">
-      <h2 class="card__title">Saved reports</h2>
-      <p class="card__description">SELECT-only SQL queries that super admins and granted technicians can run from the Reporting menu.</p>
-    </header>
-    <div class="table-container">
-      <table class="data-table" role="table" aria-label="Saved reports">
+    {% if reports %}
+    <div class="table-wrapper">
+      <table class="table" id="reporting-reports" role="table" aria-label="Saved reports"
+             data-table data-table-id="reporting-reports" data-table-empty-label="No reports match the current filters.">
         <thead>
           <tr>
-            <th scope="col">Name</th>
-            <th scope="col">Slug</th>
-            <th scope="col">Description</th>
-            <th scope="col">System</th>
-            <th scope="col">Updated</th>
-            <th scope="col" class="table__actions">Actions</th>
+            {% for column in report_columns | default([]) %}
+              <th scope="col" data-column-key="{{ column.key }}" data-sort="{{ column.sort }}"
+                  {% if column.filter_options %}data-filter-options="{{ column.filter_options }}"{% endif %}
+                  data-mobile-priority="{{ 'essential' if column.key == 'name' else 'supporting' }}">{{ column.label }}</th>
+            {% endfor %}
+            <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for report in reports %}
-            <tr>
-              <td>{{ report.name }}</td>
-              <td><code>{{ report.slug }}</code></td>
-              <td>{{ report.description or '—' }}</td>
-              <td>{% if report.is_system %}Yes{% else %}No{% endif %}</td>
-              <td>
+            {% set delete_form_id = "report-delete-" ~ report.id %}
+            <tr data-report-id="{{ report.id }}">
+              <td data-column-key="name" data-label="Name"><a href="/reporting?report={{ report.id }}">{{ report.name }}</a></td>
+              <td data-column-key="category" data-label="Category">{{ report.category }}</td>
+              <td data-column-key="slug" data-label="Slug"><code>{{ report.slug }}</code></td>
+              <td data-column-key="description" data-label="Description">{{ report.description or '—' }}</td>
+              <td data-column-key="system" data-label="System">{% if report.is_system %}Yes{% else %}No{% endif %}</td>
+              <td data-column-key="updated" data-label="Updated" data-value="{{ report.updated_at_iso or '' }}">
                 {% if report.updated_at_iso %}
                   <span data-utc="{{ report.updated_at_iso }}">{{ report.updated_at_iso }}</span>
                 {% else %}
                   <span class="text-muted">—</span>
                 {% endif %}
               </td>
-              <td class="table__actions">
-                <div class="table__action-buttons">
-                  <a class="button button--ghost" href="/reporting?report={{ report.id }}">Run</a>
-                  <a class="button button--ghost" href="/admin/reporting/{{ report.id }}/edit">Edit</a>
-                  <a class="button button--ghost" href="/admin/reporting/{{ report.id }}/clone">Clone</a>
-                  <form method="post" action="/admin/reporting/{{ report.id }}/delete" data-confirm="{{ ('Delete report \"' ~ report.name ~ '\"?') | e }}" style="display:inline;">
-                    {% include "partials/csrf.html" %}
-                    <button type="submit" class="button button--danger">Delete</button>
-                  </form>
-                </div>
+              <td class="table__actions" data-label="Actions">
+                <form id="{{ delete_form_id }}" method="post" action="/admin/reporting/{{ report.id }}/delete" data-confirm="{{ ('Delete report \"' ~ report.name ~ '\"?') | e }}" hidden>
+                  {% include "partials/csrf.html" %}
+                </form>
+                {{ page_header_overflow("report-actions-" ~ report.id, "Actions", [
+                  {"type": "section", "label": "Report"},
+                  {"label": "Run", "type": "link", "href": "/reporting?report=" ~ report.id, "icon": action_icons.ref("process")},
+                  {"label": "Edit", "type": "link", "href": "/admin/reporting/" ~ report.id ~ "/edit", "icon": action_icons.ref("edit")},
+                  {"label": "Clone", "type": "link", "href": "/admin/reporting/" ~ report.id ~ "/clone", "icon": action_icons.ref("clone")},
+                  {"type": "section"},
+                  {"label": "Delete", "type": "submit", "form": delete_form_id, "variant": "danger", "icon": action_icons.ref("delete")},
+                ]) }}
               </td>
             </tr>
-          {% else %}
-            <tr><td colspan="6" class="table__empty">No reports yet. Click <a href="/admin/reporting/new">New report</a> to add one.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+    {{ action_icons.sprite() }}
+    {% else %}
+    <div class="empty-state">
+      <h3 class="empty-state__title">No reports yet</h3>
+      <p class="empty-state__subtitle">Saved SELECT-only queries appear here. Use <strong>New report</strong> to add one.</p>
+    </div>
+    {% endif %}
   </section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/reporting_admin.js') }}" defer></script>
 {% endblock %}

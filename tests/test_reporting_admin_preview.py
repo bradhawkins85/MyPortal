@@ -77,6 +77,7 @@ def test_admin_reporting_test_renders_unsaved_query_without_updating(monkeypatch
     )
     monkeypatch.setattr(reporting_repo, "get_query", fake_get_query)
     monkeypatch.setattr(reporting_repo, "update_query", fail_update)
+    monkeypatch.setattr(reporting_repo, "list_categories", _no_categories)
     monkeypatch.setattr(reporting_service, "run_query_with_context", fake_run_query)
     monkeypatch.setattr(
         report_query_builder, "describe_schema", lambda: _empty_schema()
@@ -147,6 +148,7 @@ def test_admin_reporting_create_previews_unsaved_query_without_creating(monkeypa
         reporting_handlers, "_list_reporting_eligible_users", lambda _company_id: _empty_users()
     )
     monkeypatch.setattr(reporting_repo, "create_query", fail_create)
+    monkeypatch.setattr(reporting_repo, "list_categories", _no_categories)
     monkeypatch.setattr(reporting_service, "run_query_with_context", fake_run_query)
     monkeypatch.setattr(
         report_query_builder, "describe_schema", lambda: _empty_schema()
@@ -168,3 +170,7 @@ async def _empty_users():
 
 async def _empty_schema():
     return {"tables": [], "relations": []}
+
+
+async def _no_categories():
+    return []

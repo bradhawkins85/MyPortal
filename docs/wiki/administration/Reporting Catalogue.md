@@ -11,6 +11,28 @@ campaign, custom form, client onboarding and register features. Entries are
 inserted with `INSERT IGNORE` on the slug, so an administrator's edits to an
 existing entry are never overwritten.
 
+## Manage reports
+
+**Reporting → Manage reports** (`/admin/reporting`) lists every report with
+its **Category**, sorted by category and then name. Use the header search to
+match any column, click a column heading to sort, or use a heading's filter
+(for example *Category* or *System*) to show only some values. **Columns**
+hides columns such as *Slug*; searches, filters, sort order and column choices
+are remembered per browser. Each row's **Actions** menu has *Run*, *Edit*,
+*Clone* and *Delete* (which asks for confirmation).
+
+Migration `524_reporting_query_categories.sql` files every system report under
+one category: Tickets, Billing, Shop and Orders, Licenses and Subscriptions,
+Assets, Network and Discovery, RMM, RMM Scripts, RMM Inventory and Software,
+Patching and Windows Updates, Health Checks, Tray, Security, Microsoft 365,
+Compliance, Backups and Continuity, Users and Staff, Companies and Onboarding,
+Knowledge and Documentation, AI, Automation and Integrations, Calls and Chat,
+Marketing, and Forms and Feedback. It only fills in empty categories, so a
+category chosen on the report form is kept. Reports without one show as
+*Uncategorised*. Set a report's category on its edit form, either by picking
+an existing one or typing a new one. Migrations that add system reports
+should set `category` in their `INSERT`.
+
 ## Conventions
 
 - **Global reports** are named `<Area>: <Report>` and cover every company.

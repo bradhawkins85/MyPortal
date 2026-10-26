@@ -34,6 +34,15 @@
         <label class="form-label" for="report-description">Description</label>
         <textarea class="form-input" id="report-description" name="description" rows="3" maxlength="1000">{{ report.description or '' }}</textarea>
       </div>
+      <div class="form-field">
+        <label class="form-label" for="report-category">Category</label>
+        <input class="form-input" id="report-category" name="category" maxlength="64"
+               list="report-category-options" value="{{ report.category or '' }}" />
+        <datalist id="report-category-options">
+          {% for category in report_categories | default([]) %}<option value="{{ category }}"></option>{% endfor %}
+        </datalist>
+        <p class="form-hint">Groups the report on Manage reports. Pick an existing category or type a new one.</p>
+      </div>
       {% if builder_schema is defined %}
       <section class="query-designer" id="report-query-designer" data-schema='{{ builder_schema | tojson }}'>
         <div class="query-designer__heading">
