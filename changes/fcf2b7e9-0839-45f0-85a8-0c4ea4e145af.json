@@ -1,0 +1,7 @@
+{
+  "guid": "fcf2b7e9-0839-45f0-85a8-0c4ea4e145af",
+  "occurred_at": "2026-10-27T11:39Z",
+  "change_type": "Fix",
+  "summary": "Reset collected RMM event-entry history in maintenance mode and add the repeat-event lookup index through a tracked event-log database migration.",
+  "content_hash": "91dacd302aaa7ca1a22772c5f050126aa1b5ecc7ed13cd8435e7c91d57d2bb7c"
+}

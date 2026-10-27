@@ -289,6 +289,38 @@ class SecondaryDatabase:
             return False
         return await self.connect()
 
+    async def run_sql_migration(self, statements: list[str]) -> None:
+        """Run deployment DDL synchronously; failures must stop the upgrade.
+
+        Use a dedicated pool and the startup index lock so serving workers
+        cannot race this migration. The caller owns the deployment ledger.
+        """
+        if not self.is_configured() or self.is_sqlite:
+            raise RuntimeError(f"{self.label} SQL migrations require a configured MariaDB database")
+        pool = await self._create_mysql_pool()
+        try:
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(
+                        "SELECT GET_LOCK(LEFT(CONCAT('myportal_indexes_', DATABASE()), 64), 60)"
+                    )
+                    row = await cursor.fetchone()
+                    if not row or row[0] != 1:
+                        raise RuntimeError(f"Could not obtain {self.label} migration lock")
+                    try:
+                        await cursor.execute(f"SET SESSION lock_wait_timeout = {LOCK_WAIT_SECONDS}")
+                        # A fresh installation may not have started any workers yet.
+                        await self._create_missing_tables(cursor)
+                        for statement in statements:
+                            await cursor.execute(statement)
+                    finally:
+                        await cursor.execute(
+                            "SELECT RELEASE_LOCK(LEFT(CONCAT('myportal_indexes_', DATABASE()), 64))"
+                        )
+        finally:
+            pool.close()
+            await pool.wait_closed()
+
     async def _create_mysql_pool(self) -> Any:
         if aiomysql is None:
             raise RuntimeError("MySQL support requires aiomysql")

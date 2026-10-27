@@ -120,3 +120,25 @@ async def test_other_workers_skip_the_index_build(monkeypatch):
 
     assert not [sql for sql in server.statements if sql.startswith("ALTER TABLE")]
     assert not any("RELEASE_LOCK" in sql for sql in server.statements)
+
+
+@pytest.mark.anyio
+async def test_sql_migration_waits_for_index_lock_and_propagates_failure(monkeypatch):
+    server = FakeServer(lock_free=False)
+    database = _database(server, monkeypatch)
+    with pytest.raises(RuntimeError, match="migration lock"):
+        await database.run_sql_migration(["ALTER TABLE existing_table ADD INDEX idx_new (id)"])
+    assert not any(sql.startswith("ALTER TABLE") for sql in server.statements)
+
+    server.lock_free = True
+    original_execute = FakeCursor.execute
+
+    async def fail_ddl(self, sql, params=()):
+        if sql.startswith("ALTER TABLE"):
+            raise RuntimeError("disk full")
+        await original_execute(self, sql, params)
+
+    monkeypatch.setattr(FakeCursor, "execute", fail_ddl)
+    with pytest.raises(RuntimeError, match="disk full"):
+        await database.run_sql_migration(["ALTER TABLE existing_table ADD INDEX idx_new (id)"])
+    assert any("RELEASE_LOCK" in sql for sql in server.statements)
