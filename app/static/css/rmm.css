@@ -755,8 +755,8 @@ body.navigation--top .rmm-library {
 
 .rmm-remote__status.is-error { border-color: color-mix(in srgb, var(--hf-danger) 55%, transparent); }
 
-/* The Assets list starts sessions from each row's Actions menu, so its status
-   floats above the table instead of sitting in a card. */
+/* Asset headers and table rows start sessions outside the Scripts card. Keep
+   progress, errors and the launch link visible from either entry point. */
 .rmm-remote__status--floating {
   position: fixed;
   inset-inline-end: 1rem;

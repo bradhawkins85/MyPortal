@@ -49,10 +49,19 @@
       {% if rmm_agent and rmm.uninstall %}{% set _ = detail_actions.append({"label": "Uninstall agents", "variant": "danger", "icon": icons.uninstall, "attrs": {"data-asset-uninstall": asset.id, "data-asset-uninstall-name": asset_display_name, "aria-haspopup": "dialog", "aria-controls": "asset-uninstall-modal", "title": "Remove the MyPortal Tray Agent and RMM agent from this device, after an optional offboarding script"}}) %}{% endif %}
       {% set _ = detail_actions.append({"label": "Delete", "variant": "danger", "icon": icons.delete, "attrs": {"data-asset-delete": "", "data-asset-id": asset.id, "data-asset-name": asset_display_name, "data-asset-delete-redirect": "/assets", "title": "Remove this asset from MyPortal. Its agents stay installed and register the device again when they next check in."}}) %}
     {% endif %}
+    {% if rmm_agent and 'meshcentral' in (rmm.remote_control | map(attribute='provider') | list) %}
+      {{ rmm_agent_ui.meshcentral_connect(asset.id, asset_display_name) }}
+    {% endif %}
     {{ page_header_actions(detail_actions, menu_id="asset-detail-actions") }}
 {% endblock %}
 
 {% block content %}
+{% if rmm and rmm.remote_control and not customer_safe %}
+<div class="rmm-remote__status rmm-remote__status--floating" data-rmm-remote-status role="status" aria-live="polite" hidden>
+  <span data-rmm-remote-message></span>
+  <a class="button button--primary button--small" data-rmm-remote-link href="#" target="_blank" rel="noopener noreferrer" hidden>Open</a>
+</div>
+{% endif %}
 <div class="asset-edit-page ce-workspace" data-asset-id="{{ asset.id }}" data-asset-edit>
   {% if rmm and rmm.can_run and not customer_safe %}
     <form id="asset-checkin-form" method="post" action="/rmm/assets/{{ asset.id }}/checkin">{% include "partials/csrf.html" %}</form>
@@ -187,10 +196,6 @@
       </div>
     </header>
     <div class="ce-section__body">
-      {% if rmm.remote_control %}<div class="rmm-remote__status" data-rmm-remote-status role="status" aria-live="polite" hidden>
-        <span data-rmm-remote-message></span>
-        <a class="button button--primary button--small" data-rmm-remote-link href="#" target="_blank" rel="noopener noreferrer" hidden>Open</a>
-      </div>{% endif %}
       {% if rmm.agent and rmm.agent.thermal and rmm.agent.os != 'windows' %}{% set thermal = rmm.agent.thermal %}
       <details>
         <summary>Temperatures — {{ thermal.sensors | length }} sensor{{ 's' if thermal.sensors | length != 1 }}</summary>

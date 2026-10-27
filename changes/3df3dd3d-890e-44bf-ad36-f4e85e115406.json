@@ -1,0 +1,7 @@
+{
+  "guid": "3df3dd3d-890e-44bf-ad36-f4e85e115406",
+  "occurred_at": "2026-10-27T10:30Z",
+  "change_type": "Improvement",
+  "summary": "Add visible Connect with MeshCentral shortcuts to the asset edit page and Assets table, keep session progress visible outside Scripts, and add a super-admin Remote control navigation entry for provider settings.",
+  "content_hash": "f026a11cb378edf8b16af4a08bff8d5bd3772b8b27fe8301b4589d2c08a9f651"
+}

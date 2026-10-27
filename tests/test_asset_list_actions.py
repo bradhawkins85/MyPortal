@@ -84,3 +84,18 @@ def test_customer_rows_keep_only_the_asset_options(page):
     labels = re.findall(r"<span>([^<]+)</span>", _menu(html, 12))
     assert labels == ["Open asset", "Start process"]
     assert "header-menu__divider" not in _menu(html, 12)
+
+
+def test_meshcentral_shortcut_is_visible_only_for_eligible_rows(page):
+    providers = [{"provider": "meshcentral", "label": "MeshCentral"}]
+    html = _render(page, AGENT, {"id": 11, "name": "No agent"}, rmm_remote_providers=providers)
+    cell = html.split('<td class="table__actions"', 1)[1].split("</td>", 1)[0]
+    shortcut = cell.split('data-header-menu', 1)[0]
+    assert 'data-rmm-remote="meshcentral"' in shortcut
+    assert 'data-rmm-remote-asset="10"' in shortcut
+    assert 'data-rmm-remote-mode="remote"' in shortcut
+    assert ">Connect with MeshCentral</button>" in shortcut
+    assert html.count(">Connect with MeshCentral</button>") == 1
+    assert "MeshCentral file transfer" in _menu(html, 10)
+    assert "MeshCentral terminal" in _menu(html, 10)
+    assert "Connect with MeshCentral" not in _render(page, AGENT)

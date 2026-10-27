@@ -586,9 +586,15 @@
               </a>
             </li>{% endif %}
           {% if can_access_rmm_scripts %}<li class="menu__item">
-              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') and not current_path.startswith('/rmm/event-logs') and not current_path.startswith('/rmm/checks') and not current_path.startswith('/rmm/findings') and not current_path.startswith('/rmm/patching') %}aria-current="page"{% endif %}>
+              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') and not current_path.startswith('/rmm/event-logs') and not current_path.startswith('/rmm/checks') and not current_path.startswith('/rmm/findings') and not current_path.startswith('/rmm/patching') and not current_path.startswith('/rmm/remote-control') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 4h18v16H3zm2 4v10h14V8zm1.5 2.5 1-1L11 13l-3.5 3.5-1-1L9 13zM12 15h5v1.5h-5z"/></svg></span>
                 <span class="menu__label">Scripts</span>
+              </a>
+            </li>{% endif %}
+          {% if can_access_rmm_scripts and is_super_admin %}<li class="menu__item">
+              <a href="/rmm/remote-control" {% if current_path.startswith('/rmm/remote-control') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M2 3h20v14h-9v3h5v2H6v-2h5v-3H2zm2 2v10h16V5zm3 4h7l-2-2 1.4-1.4L17.8 10l-4.4 4.4L12 13l2-2H7z"/></svg></span>
+                <span class="menu__label">Remote control</span>
               </a>
             </li>{% endif %}
           {% if can_access_rmm_scripts %}<li class="menu__item">
