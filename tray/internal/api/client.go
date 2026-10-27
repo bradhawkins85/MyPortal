@@ -575,6 +575,31 @@ func (c *Client) RequestChatToken(ctx context.Context, roomID int) (*ChatTokenRe
 	return &out, nil
 }
 
+// PostWolSent tells MyPortal that this agent broadcast a Wake-on-LAN magic
+// packet for the attempt. ``errMsg`` is non-empty when the broadcast failed.
+func (c *Client) PostWolSent(ctx context.Context, attemptID int, errMsg string) error {
+	if attemptID <= 0 {
+		return fmt.Errorf("wol: attempt id is required")
+	}
+	body := map[string]string{}
+	if errMsg != "" {
+		body["error"] = errMsg
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, "/api/tray/wol/attempts/"+fmt.Sprint(attemptID)+"/sent", raw, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("wol: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // RunTRMMScript asks MyPortal to run a configured Tactical RMM script on this device.
 func (c *Client) RunTRMMScript(ctx context.Context, scriptID int) error {
 	if scriptID <= 0 {

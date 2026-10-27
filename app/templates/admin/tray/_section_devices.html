@@ -112,6 +112,10 @@
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <button type="submit" class="button button--small button--danger">Revoke</button>
                     </form>
+                    <form method="post" action="/api/wol/devices/{{ device.id }}/wake" class="inline-form" data-confirm="Wake this device? A WoL magic packet will be broadcast by other online agents on its network. The result is tracked for about 2 minutes.">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small">Wake</button>
+                    </form>
                   {% else %}
                     <form method="post" action="/admin/tray/devices/{{ device.id }}/reactivate" class="inline-form" data-confirm="Reactivate this tray device?">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

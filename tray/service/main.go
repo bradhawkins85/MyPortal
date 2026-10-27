@@ -37,10 +37,12 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -738,6 +740,9 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 	case "install_rmm_agent":
 		logger.Info("install_rmm_agent command received")
 		go d.handleInstallRMMAgent(msg)
+	case "wol":
+		logger.Info("wol command received")
+		go d.handleWOL(msg)
 	}
 }
 
@@ -797,6 +802,94 @@ func (d *daemon) handleInstallRMMAgent(msg map[string]json.RawMessage) {
 	if postErr := d.client.PostRMMAgentInstallResult(reportCtx, commandID, err == nil, message); postErr != nil {
 		logger.Warn("install_rmm_agent: reporting the result failed: %v", postErr)
 	}
+}
+
+// handleWOL broadcasts a Wake-on-LAN magic packet for the target MAC on behalf
+// of the server, then reports the send outcome back for the attempt row.
+func (d *daemon) handleWOL(msg map[string]json.RawMessage) {
+	var attemptID, commandID int
+	var targetMAC string
+	if t, ok := msg["attempt_id"]; ok {
+		_ = json.Unmarshal(t, &attemptID)
+	}
+	if t, ok := msg["command_id"]; ok {
+		_ = json.Unmarshal(t, &commandID)
+	}
+	if t, ok := msg["target_mac"]; ok {
+		_ = json.Unmarshal(t, &targetMAC)
+	}
+
+	logger.Info("wol: broadcasting for MAC %q (attempt %d, command %d)", targetMAC, attemptID, commandID)
+
+	broadcastErr := ""
+	if mac, perr := net.ParseMAC(strings.ToUpper(strings.TrimSpace(targetMAC))); perr != nil {
+		// Fall back to a plain limited broadcast even if the MAC is malformed,
+		// but record the problem so the attempt surfaces diagnostics.
+		logger.Warn("wol: invalid MAC %q: %v", targetMAC, perr)
+		broadcastErr = perr.Error()
+	} else {
+		if _, err := wolBroadcast(mac); err != nil {
+			broadcastErr = err.Error()
+		}
+	}
+
+	if attemptID > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if perr := d.client.PostWolSent(ctx, attemptID, broadcastErr); perr != nil {
+			logger.Warn("wol: sent report failed: %v", perr)
+		}
+	}
+	if broadcastErr == "" {
+		logger.Info("wol: magic packet broadcast complete for %q", targetMAC)
+	}
+}
+
+// wolMagicPacket builds the standard 102-byte WoL magic packet: 6x 0xFF followed
+// by the MAC address repeated 16 times.
+func wolMagicPacket(mac net.HardwareAddr) []byte {
+	pkt := make([]byte, 0, 102)
+	for i := 0; i < 6; i++ {
+		pkt = append(pkt, 0xFF)
+	}
+	for i := 0; i < 16; i++ {
+		pkt = append(pkt, mac...)
+	}
+	return pkt
+}
+
+// wolBroadcast transmits the standard 102-byte WoL magic packet (6x 0xFF followed
+// by the MAC address repeated 16 times) to the common broadcast and multicast
+// targets. A packet is considered delivered once any target accepts it.
+func wolBroadcast(mac net.HardwareAddr) (int, error) {
+	pkt := wolMagicPacket(mac)
+
+	// Limited broadcast plus the dedicated WoL multicast address (ports 7 and 9
+	// are the conventional WoL ports). At least one is expected to be honoured
+	// by an on-network device with WoL enabled.
+	targets := []string{"255.255.255.255:9", "255.255.255.255:7", "224.0.0.251:7"}
+	var errs []string
+	sent := 0
+	for _, target := range targets {
+		conn, err := net.Dial("udp", target)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", target, err))
+			continue
+		}
+		n, werr := conn.Write(pkt)
+		_ = conn.Close()
+		if werr != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", target, werr))
+			continue
+		}
+		if n == len(pkt) {
+			sent++
+		}
+	}
+	if sent == 0 {
+		return 0, fmt.Errorf("wol: no target accepted the magic packet: %s", strings.Join(errs, "; "))
+	}
+	return sent, nil
 }
 
 // handleTroubleshoot runs the AI troubleshooting agent for a "troubleshoot"

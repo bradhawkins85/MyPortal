@@ -106,6 +106,7 @@ from app.api.routes import (
     tray_deployment as tray_deployment_api,
     users,
     vault as vault_api,
+    wol as wol_api,
     system,
     chat as chat_api,
     features as features_api,
@@ -1490,6 +1491,7 @@ app.include_router(tag_synonyms.router)
 app.include_router(chat_api.router)
 app.include_router(tray_api.router)
 app.include_router(tray_deployment_api.router)
+app.include_router(wol_api.router)
 app.include_router(defender_api.router)
 app.include_router(features_api.router)
 app.include_router(plugins_api.router)

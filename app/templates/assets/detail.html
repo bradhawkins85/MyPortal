@@ -133,6 +133,7 @@
         ]),
         ("Connections", [
           ("assignments", "asset-assignments", "Network & racks", "", not customer_safe),
+          ("wake-on-lan", "wake-on-lan", "Wake on LAN", "", can_wake),
           ("interfaces", "interfaces", "Network interfaces", network_interfaces.interfaces | length if network_interfaces is not none else "", network_interfaces is not none),
           ("relationships", "asset-relationships", "Relationships", relationships | length, can_view_asset_relationships),
         ]),
@@ -612,6 +613,20 @@
     </dl></div>
   </section>{% endif %}
 
+  {% if can_wake %}<section class="card card--panel ce-section" id="wake-on-lan" aria-labelledby="wake-on-lan-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="wake-on-lan-title">Wake on LAN</h2><p class="card__subtitle">Broadcast a WoL magic packet from another online agent on this asset's network. Each attempt is tracked so you can see how reliable waking is for this asset.</p></div></header>
+    <div class="ce-section__body">
+      <dl class="definition-list">
+        <dt>Wake history</dt><dd data-wol-stat="summary">{% if wol_stats.total %}{{ wol_stats.success }}/{{ wol_stats.total }} attempts woke the device{% else %}No WoL attempts yet{% endif %}</dd>
+        <dt>Last successful wake</dt><dd data-wol-stat="last-success">{% if wol_stats.last_success_at %}<span data-wol-utc="{{ wol_stats.last_success_at }}">{{ wol_stats.last_success_at }}</span>{% else %}—{% endif %}</dd>
+      </dl>
+      <div class="form-field">
+        <button type="button" class="button button--primary" data-wol-asset-id="{{ asset.id }}" data-confirm="Wake this asset? A WoL magic packet will be broadcast by online agents on its network. The result is tracked for about 2 minutes.">Wake device</button>
+        <span class="form-help" data-wol-status aria-live="polite"></span>
+      </div>
+    </div>
+  </section>{% endif %}
+
   {% if network_interfaces is not none %}{% set ni = network_interfaces %}{% set own_endpoints = [] %}{% for interface in ni.interfaces %}{% set _ = own_endpoints.append('interface:' ~ interface.id) %}{% endfor %}<section class="card card--panel ce-section" id="interfaces" data-asset-edit-section="interfaces" aria-labelledby="interfaces-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="interfaces-title">Network interfaces</h2><p class="card__subtitle">Ports and radios on this device and what they connect to. They draw this device on the <a href="/network-map">network map</a>, including when it is not in a rack.</p></div></header>
     <div class="ce-section__body">
@@ -816,4 +831,4 @@
 {% include "partials/csrf.html" %}
 {% if rmm %}{% include "rmm/_run_modal.html" %}{% if rmm.command_languages %}{% include "rmm/_command_modal.html" %}{% endif %}{% if rmm.can_run and rmm.agent and (rmm.agent.os or '') | lower == 'windows' %}{% include "rmm/_choco_install_modal.html" %}{% endif %}{% if rmm.uninstall and is_super_admin and not customer_safe %}{% include "assets/_uninstall_modal.html" %}{% endif %}{% endif %}
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>{% if is_super_admin and not customer_safe %}<script src="{{ static_url('/static/js/asset_delete.js') }}" defer></script>{% endif %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if asset_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}{% if rmm %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>{% if rmm.command_languages %}<script src="{{ static_url('/static/js/rmm_command.js') }}" defer></script>{% endif %}{% if rmm.tray_repair %}<script src="{{ static_url('/static/js/rmm_tray_repair.js') }}" defer></script>{% endif %}{% if rmm.uninstall and is_super_admin and not customer_safe %}<script src="{{ static_url('/static/js/asset_uninstall.js') }}" defer></script>{% endif %}<script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_choco_picker.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_choco_install.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_stats.js') }}" defer></script>{% if rmm.inventory %}<script src="{{ static_url('/static/js/rmm_inventory.js') }}" defer></script>{% endif %}{% if rmm.windows_updates %}<script src="{{ static_url('/static/js/rmm_windows_updates.js') }}" defer></script>{% endif %}{% if rmm.can_push_agent %}<script src="{{ static_url('/static/js/rmm_agent_deploy.js') }}" defer></script>{% endif %}{% endif %}{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>{% if is_super_admin and not customer_safe %}<script src="{{ static_url('/static/js/asset_delete.js') }}" defer></script>{% endif %}<script src="{{ static_url('/static/js/wol.js') }}" defer></script><script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if asset_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}{% if rmm %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>{% if rmm.command_languages %}<script src="{{ static_url('/static/js/rmm_command.js') }}" defer></script>{% endif %}{% if rmm.tray_repair %}<script src="{{ static_url('/static/js/rmm_tray_repair.js') }}" defer></script>{% endif %}{% if rmm.uninstall and is_super_admin and not customer_safe %}<script src="{{ static_url('/static/js/asset_uninstall.js') }}" defer></script>{% endif %}<script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_choco_picker.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_choco_install.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_stats.js') }}" defer></script>{% if rmm.inventory %}<script src="{{ static_url('/static/js/rmm_inventory.js') }}" defer></script>{% endif %}{% if rmm.windows_updates %}<script src="{{ static_url('/static/js/rmm_windows_updates.js') }}" defer></script>{% endif %}{% if rmm.can_push_agent %}<script src="{{ static_url('/static/js/rmm_agent_deploy.js') }}" defer></script>{% endif %}{% endif %}{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
