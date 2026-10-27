@@ -792,10 +792,12 @@ REMINDER
 
 if is_root; then
   "${SCRIPT_DIR}/provision_mysql.sh" "$ENV_FILE"
-  python3 "${SCRIPT_DIR}/configure_mariadb.py" "$ENV_FILE"
+  python3 "${SCRIPT_DIR}/configure_mariadb.py" "$ENV_FILE" \
+    || echo "Warning: MariaDB buffer pool tuning failed; continuing installation with existing settings. Review the MariaDB diagnostic above." >&2
 else
   sudo "${SCRIPT_DIR}/provision_mysql.sh" "$ENV_FILE"
-  sudo python3 "${SCRIPT_DIR}/configure_mariadb.py" "$ENV_FILE"
+  sudo python3 "${SCRIPT_DIR}/configure_mariadb.py" "$ENV_FILE" \
+    || echo "Warning: MariaDB buffer pool tuning failed; continuing installation with existing settings. Review the MariaDB diagnostic above." >&2
 fi
 
 install_pwsh

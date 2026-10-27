@@ -41,6 +41,12 @@ the database. The default is one quarter of host/container memory, rounded down
 to 128 MiB increments and capped at 4 GiB (4 GiB on a 16 GiB server). Existing
 larger configured or running values are preserved. Remote database servers are
 not changed; their administrators manage database memory settings separately.
+Tuning first tries the local root socket account, then the configured application
+database account over TCP using a temporary private client option file. Passwords
+are not passed on the command line. If neither account can apply the setting,
+the installer/upgrader reports the MariaDB diagnostic and continues with the
+existing buffer pool configuration. Tuning failure does not bypass database
+migration or readiness checks.
 
 PowerShell Core and the ExchangeOnlineManagement module are installed when
 Microsoft's repositories are reachable. They are optional: without them only
