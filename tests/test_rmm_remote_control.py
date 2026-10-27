@@ -12,7 +12,7 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_remote_control as remote_repo
 from app.core.config import get_settings
 from app.services import rmm_remote_control as remote
-from app.services import rmm_scripts
+from app.services import rmm_scripts, rmm_script_files
 from tests.test_rmm_scripts import _enrol, _environment, _sync, anyio_backend, sqlite_db  # noqa: F401 - fixtures
 
 KEY = "ab" * 48
@@ -216,10 +216,19 @@ async def test_built_in_meshcentral_installs_into_the_companies_group(sqlite_db,
         assert group_id == "grp123"
         return "node//abc$def@"
 
+    async def fake_download(server_url, login_token, group_id, arch_id):
+        assert server_url == "https://mesh.example.com" and group_id == "grp123" and arch_id == 4
+        assert _decode_mesh_token(login_token)["u"] == "user//tactical"
+        return b"MZ\x00\xffinstaller"
+
+    monkeypatch.setattr(remote.meshcentral, "download_installer", fake_download)
     monkeypatch.setattr(remote.meshcentral, "ensure_group", fake_ensure_group)
     monkeypatch.setattr(remote.meshcentral, "find_node", fake_find_node)
 
     _r, agent = await _enrol(sqlite_db)  # hostname "PC", company 1 (Contoso)
+    await rmm_repo.record_agent_checkin(agent["id"], {"script_files_supported": True})
+    await sqlite_db.execute("UPDATE rmm_agents SET arch = 'amd64' WHERE id = ?", (agent["id"],))
+    agent = await rmm_scripts.authenticate_agent(_r["auth_token"])
     session = await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9)
     assert session["status"] == "activating" and session["launch_url"] is None
     # The group is named after the device's company, not one shared group.
@@ -227,11 +236,19 @@ async def test_built_in_meshcentral_installs_into_the_companies_group(sqlite_db,
 
     jobs = await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
     assert len(jobs) == 1 and jobs[0]["path"] == "builtin/meshcentral_activate.ps1"
-    # The activation script is handed the site and the company's group id.
-    assert jobs[0]["env"]["MESH_SITE"] == "https://mesh.example.com"
+    # Only the local path and group reach the endpoint; credentials stay on MyPortal.
+    assert set(jobs[0]["env"]) == {"MESH_INSTALLER_PATH", "MESH_GROUP_ID"}
+    descriptor = jobs[0]["files"][0]
+    assert jobs[0]["env"]["MESH_INSTALLER_PATH"] == descriptor["destination"]
+    assert "content_base64" not in descriptor
+    run_id = session["run_id"]
+    assert await rmm_script_files.download_file({"id": agent["id"] + 1}, run_id, 0) is None
+    assert await rmm_script_files.download_file(agent, run_id, 1) is None
+    assert (await rmm_script_files.download_file(agent, run_id, 0))[0] == b"MZ\x00\xffinstaller"
     assert jobs[0]["env"]["MESH_GROUP_ID"] == "grp123"
 
     await rmm_scripts.record_result(agent, session["run_id"], {"exit_code": 0, "stdout": "installed"})
+    assert await rmm_script_files.download_file(agent, run_id, 0) is None
     ready = await remote.session_status(session["id"], company_id=1, user_id=9, is_super_admin=False)
     assert ready["status"] == "ready"
     query = parse_qs(urlsplit(ready["launch_url"]).query)
@@ -474,3 +491,41 @@ def test_agent_indicator_shows_a_tick_an_o_or_a_cross():
     assert "rmm-agent-indicator--connected" in connected and "✓" in connected and 'aria-label="RMM agent connected"' in connected
     assert ">O<" in str(macros.agent_indicator("offline"))
     assert "✗" in str(macros.agent_indicator("missing")) and "--missing" in str(macros.agent_indicator("bogus"))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('os_name,arch,expected', [
+    ('windows', 'amd64', 4), ('windows', 'ARM64', 43), ('windows', '386', 3),
+    ('linux', 'x86_64', 6), ('linux', 'aarch64', 32), ('linux', 'i686', 5),
+    ('darwin', 'arm64', 10005), ('macos', 'amd64', 10005),
+])
+async def test_mesh_installer_is_selected_and_snapshotted(monkeypatch, os_name, arch, expected):
+    _meshcentral_env(monkeypatch)
+    agent = {'id': 1, 'company_id': 2, 'os': os_name, 'arch': arch,
+             'shells': ['powershell', 'bash'], 'script_files_supported': True}
+    async def download(site, token, group, arch_id):
+        assert arch_id == expected and group == 'company-group'
+        return b'MZinstaller'
+    async def create_run(**kwargs):
+        payload = json.loads(remote.decrypt_secret(kwargs['payload_encrypted']))
+        item = payload['files'][0]
+        assert base64.b64decode(item['content_base64']) == b'MZinstaller'
+        assert item['destination'] == payload['env']['MESH_INSTALLER_PATH']
+        assert item['destination'].startswith('C:\\' if os_name == 'windows' else '/')
+        assert 'MESH_SITE' not in payload['env'] and 'token' not in payload['env']
+        return 123
+    monkeypatch.setattr(remote.meshcentral, 'download_installer', download)
+    monkeypatch.setattr(remote.rmm_repo, 'create_run', create_run)
+    assert await remote._queue_builtin_meshcentral(agent, 'company-group', 9) == 123
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('supported,arch,message', [
+    (False, 'amd64', 'Update the RMM agent'), (True, '', 'supported architecture'),
+    (True, 'unknown', 'supported architecture'),
+])
+async def test_mesh_rejects_incompatible_agent_before_downloading(monkeypatch, supported, arch, message):
+    agent = {'id': 1, 'company_id': 2, 'os': 'windows', 'arch': arch,
+             'shells': ['powershell'], 'script_files_supported': supported}
+    with pytest.raises(remote.RemoteControlError, match=message):
+        await remote._queue_builtin_meshcentral(agent, 'group', 9)
