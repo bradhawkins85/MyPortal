@@ -49,7 +49,7 @@ def _menu(html, asset_id):
 
 AGENT = {
     "id": 10, "company_id": 1, "name": "PC", "rmm_actions": True, "can_push_rmm_agent": True,
-    "rmm_windows": True, "rmm_command_languages": "powershell,cmd", "rmm_tray_repair": True,
+    "rmm_windows": True, "rmm_command_languages": "powershell,cmd", "rmm_tray_repair": True, "rmm_uninstall": True,
     "can_health_check": True, "health_check_ready": True,
 }
 
@@ -61,7 +61,7 @@ def test_row_menu_groups_the_asset_page_options_with_icons(page):
     labels = re.findall(r"<span>([^<]+)</span>", menu)
     for label in ("Open asset", "Start process", "Customer preview", "RustDesk remote desktop", "Check in now",
                   "Run health check", "Run script", "Execute command", "Install Choco package",
-                  "Repair RMM agent", "Repair tray agent", "Company credentials", "Delete"):
+                  "Repair RMM agent", "Repair tray agent", "Company credentials", "Uninstall agents", "Delete"):
         assert label in labels
     assert "Push RMM agent" not in labels
     assert menu.count('class="header-menu__icon"') == menu.count('class="header-menu__item')
@@ -75,6 +75,8 @@ def test_row_without_an_agent_offers_the_push(page):
     labels = re.findall(r"<span>([^<]+)</span>", _menu(html, 11))
     assert "Push RMM agent" in labels and "Repair RMM agent" in labels
     assert "Run script" not in labels and "Check in now" not in labels
+    # Uninstalling goes through the RMM agent; deleting does not.
+    assert "Uninstall agents" not in labels and "Delete" in labels
 
 
 def test_customer_rows_keep_only_the_asset_options(page):

@@ -582,7 +582,8 @@ Each rule has:
 - **When this script finishes**: one script, or **Any script**. Rules apply to every run of the
   script however it started: manually, on a schedule, during onboarding, from an event log rule,
   check, ticket automation, the tray menu or another result rule. MyPortal's own jobs (patching,
-  Windows Update scans, remote control, tray repair and **Execute command**) are never watched.
+  Windows Update scans, remote control, tray repair, agent uninstall and **Execute command**) are
+  never watched. An offboarding script run before an uninstall is watched like any other run.
   Runs that expire, are cancelled or aborted, or are lost by a restarting agent never report a
   result, so they do not trigger rules.
 - **Applies to**: runs on this company's devices, or (super admins only) every company. Rules
@@ -742,6 +743,38 @@ The new tray build provides refreshed enrolment and verification; the matching R
 build provides the `verify` command. Older tray builds perform their existing install
 behavior until updated. Publish matching RMM assets and checksums alongside the tray
 installers; unavailable or mismatched releases are rejected and retried.
+
+### Uninstalling the agents
+
+Super admins choose **Uninstall agents** from a device's **Actions** menu on **Assets** or on its
+asset page to remove both the MyPortal Tray Agent and the RMM agent, with their services, files,
+settings and enrolment. It runs through the RMM agent on Windows, Linux and macOS, so the device
+needs one; an offline device collects it when it next connects (within 24 hours).
+
+- **Offboarding script** (optional): any script the device can run, from the script library. It
+  runs first, with its default values, to clean up whatever else MyPortal put on the device. The
+  agents are removed only when it finishes with exit code 0; when it fails, times out, expires or
+  is aborted, both agents stay installed and the uninstall stops there. A script with required
+  inputs and no defaults cannot be chosen.
+- The removal is the built-in **Uninstall MyPortal agents** run. It hands the removal to a
+  process outside the RMM agent (a SYSTEM scheduled task on Windows, a transient systemd unit on
+  Linux, a one-off LaunchDaemon on macOS) and finishes. About 30 seconds later that process
+  removes the tray (its MSI on Windows) and then the RMM agent, and deletes itself. Its log stays
+  at `%WINDIR%\Temp\myportal-uninstall.log` or `/var/tmp/myportal-uninstall.log`.
+- When the run completes, MyPortal retires the device's RMM agent and revokes its tray
+  registration, so neither is accepted again. The asset and its history stay; delete it
+  afterwards if it is no longer needed. Reinstalling the tray app registers the device again.
+
+Both runs appear in the device's script history (**Offboarding before uninstall** and **Agent
+uninstall**) and the request is in the audit trail (`rmm.agent_uninstall.run`). The API is
+`POST /api/rmm/assets/{id}/uninstall` with `{"offboarding_script_id": 12}` or `null`.
+
+### Deleting an asset
+
+**Delete**, in the same menus (super admins), removes the asset from MyPortal and leaves the
+device alone. Its tray and RMM agent stay installed and enrolled but forget the asset, so the next
+time they check in MyPortal registers the device again as a new asset. Use **Uninstall agents**
+first to keep a device out of MyPortal.
 
 ### Pushing the agent from MyPortal
 
