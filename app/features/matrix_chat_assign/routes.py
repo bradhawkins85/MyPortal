@@ -175,7 +175,7 @@ async def chat_create_auto_assign_rule(request: Request):
         return await _render_dashboard(
             request, current_user,
             error_message="Rule name is required.",
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
 
     try:
@@ -237,7 +237,7 @@ async def chat_update_auto_assign_rule(rule_id: int, request: Request):
             request, current_user,
             editing_rule_id=rule_id,
             error_message="Rule name is required.",
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
 
     try:
@@ -328,7 +328,7 @@ async def chat_create_synonym_group(request: Request):
             request,
             current_user,
             error_message=str(exc),
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
     except Exception as exc:
         log_error("Failed to create chat synonym group", error=str(exc))
@@ -356,7 +356,7 @@ async def chat_update_synonym_group(group_id: int, request: Request):
             request,
             current_user,
             error_message=str(exc),
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
     except Exception as exc:
         log_error("Failed to update chat synonym group", group_id=group_id, error=str(exc))

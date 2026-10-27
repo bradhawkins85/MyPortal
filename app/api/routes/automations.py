@@ -33,7 +33,7 @@ def _reject_unavailable_action_modules(data: dict) -> None:
                          if not get_component_availability().module_available(slug))
     if unavailable:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Automation references module(s) unavailable in this deployment: "
             + ", ".join(unavailable),
         )

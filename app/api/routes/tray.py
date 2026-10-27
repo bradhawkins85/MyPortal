@@ -2687,12 +2687,12 @@ async def admin_publish_version(
 
     if not version or not download_url:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="version and download_url are required.",
         )
     if sha256 is not None and not re.fullmatch(r"[0-9a-f]{64}", sha256):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="sha256 must be a 64-character hex digest.",
         )
     # When the published installer is one the server downloaded and cached

@@ -2263,7 +2263,7 @@ async def handle_request_validation_error(request: Request, exc: RequestValidati
         )
     response = JSONResponse(
         content=jsonable_encoder({"detail": errors}),
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
     return _apply_request_id_header(response, request_id)
 
@@ -7588,7 +7588,7 @@ async def attach_ticket_requester_mobile(request: Request, ticket_id: int):
     phone = str(payload.get("phone") or "").strip() if isinstance(payload, dict) else ""
     normalized = re.sub(r"[^0-9+]", "", phone)
     if not re.fullmatch(r"\+?[0-9]{3,15}", normalized):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid phone number")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid phone number")
 
     staff_id = int(ticket["requester_staff_id"])
     if not await staff_repo.get_staff_by_id(staff_id):

@@ -107,7 +107,7 @@ async def update_settings(
     has_password = bool(payload.password or (existing or {}).get("password_encrypted"))
     if payload.enabled and not (payload.phone_ip and payload.login_username and has_password):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Phone IP, login username, and password are required when click to call is enabled",
         )
     saved = await click_to_call_repo.upsert_settings(
@@ -128,7 +128,7 @@ async def make_call(
 ):
     number = re.sub(r"[^0-9+]", "", payload.phone_number)
     if not re.fullmatch(r"\+?[0-9]{3,15}", number):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid phone number")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid phone number")
 
     settings = await click_to_call_repo.get_settings(int(current_user["id"]))
     if not settings or not settings.get("enabled"):

@@ -340,7 +340,7 @@ async def create_external_subscription(request: Request):
             company,
             values=values,
             errors=errors,
-            response_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            response_status=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
 
     try:

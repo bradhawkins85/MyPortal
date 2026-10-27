@@ -75,7 +75,7 @@ def _parse_sms_datetime(
         parsed = parsed.astimezone(timezone.utc)
         return parsed, parsed.date()
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid SMS date/time") from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid SMS date/time") from exc
 
 
 def _decode_message(value: str) -> str:
@@ -83,7 +83,7 @@ def _decode_message(value: str) -> str:
         decoded = base64.b64decode(value, validate=True)
         return decoded.decode("utf-8")
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Message must be valid base64 encoded UTF-8") from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Message must be valid base64 encoded UTF-8") from exc
 
 
 async def _find_contact(phone: str) -> dict[str, Any]:
@@ -154,11 +154,11 @@ async def receive_sms(payload: ReceiveSMSPayload, request: Request, api_key_reco
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported SMS webhook type")
     message_text = _decode_message(payload.message).strip()
     if not message_text:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Decoded message cannot be empty")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Decoded message cannot be empty")
     sms_at, sms_day = _parse_sms_datetime(payload.date, payload.time)
     normalised_phone = _normalise_phone(payload.from_number)
     if not normalised_phone:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Sender phone number is required")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Sender phone number is required")
 
     body = sanitize_rich_text(message_text).html
     ticket = await _find_sms_ticket(normalised_phone, sms_day)
