@@ -45,6 +45,7 @@ def test_rustdesk_links_strip_spaces_and_quote_the_password():
         remote.rustdesk_url("123/../evil")
     assert remote.rustdesk_url("42", "pw", "file_transfer") == "rustdesk://file-transfer/42?password=pw"
     assert remote.rustdesk_url("42", None, "terminal") == "rustdesk://terminal/42"
+    assert remote.rustdesk_url("123 456", "stored-secret", "remote_prompt") == "rustdesk://connection/new/123456"
 
 
 def test_meshcentral_modes_pick_the_device_view():
@@ -84,7 +85,8 @@ async def _setup(sqlite_db, monkeypatch, **form):
 
 
 @pytest.mark.anyio
-async def test_activation_script_runs_and_session_returns_the_launch_link(sqlite_db, monkeypatch):
+@pytest.mark.parametrize("mode", ["remote", "remote_prompt"])
+async def test_activation_script_runs_and_session_returns_the_launch_link(sqlite_db, monkeypatch, mode):
     script = await _setup(sqlite_db, monkeypatch)
     # Values for the script are read once the script's fields are on the page.
     await remote.save_settings("rustdesk", {
@@ -103,7 +105,7 @@ async def test_activation_script_runs_and_session_returns_the_launch_link(sqlite
     assert await remote.enabled_providers() == [{"provider": "rustdesk", "label": "RustDesk"}]
 
     _r, agent = await _enrol(sqlite_db)
-    session = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9)
+    session = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9, mode=mode)
     assert session["status"] == "activating" and session["launch_url"] is None
     run = await rmm_repo.get_run(session["run_id"])
     assert run["run_source"] == "remote_control" and run["timeout_seconds"] <= remote.MAX_ACTIVATION_TIMEOUT_SECONDS
@@ -123,7 +125,8 @@ async def test_activation_script_runs_and_session_returns_the_launch_link(sqlite
 
     ready = await remote.session_status(session["id"], company_id=1, user_id=9, is_super_admin=False)
     assert ready["status"] == "ready"
-    assert ready["launch_url"] == "rustdesk://connection/new/123456789?password=one-time"
+    assert ready["launch_url"] == "rustdesk://connection/new/123456789" + ("?password=one-time" if mode == "remote" else "")
+    assert ready["mode"] == mode
     # Only the technician who started it (or a super admin) sees the link.
     assert await remote.session_status(session["id"], company_id=1, user_id=5, is_super_admin=False) is None
     assert await remote.session_status(session["id"], company_id=2, user_id=9, is_super_admin=True) is None
@@ -338,21 +341,24 @@ def test_asset_menu_has_a_rustdesk_icon_button_and_an_rmm_menu():
     )
     providers = [{"provider": "rustdesk", "label": "RustDesk"}, {"provider": "meshcentral", "label": "MeshCentral"}]
     html = template.render(providers=providers, run=True)
-    # RustDesk: one icon button that starts a remote desktop session, no menu.
+    # RustDesk keeps its desktop shortcut and offers a prompt option in the menu.
     assert 'class="button button--ghost button--icon rmm-rustdesk" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote"' in html
     assert 'src="/static/images/rustdesk.svg"' in html and 'aria-label="Start a RustDesk remote session for &lt;PC&gt;"' in html
-    assert html.count('data-rmm-remote="rustdesk"') == 1
+    assert html.count('data-rmm-remote="rustdesk"') == 2
     for mode in ("remote", "file_transfer", "terminal"):
         assert f'data-rmm-remote="meshcentral" data-rmm-remote-mode="{mode}"' in html
-    assert html.count('role="menuitem"') == 4 and html.count("data-rmm-menu") == 1
+    assert html.count('role="menuitem"') == 5 and html.count("data-rmm-menu") == 1
     assert 'data-rmm-remote-name="&lt;PC&gt;"' in html and "<PC>" not in html
     assert "data-rmm-run-open" in html
     rustdesk_only = template.render(providers=providers[:1], run=False)
-    assert "rmm-rustdesk" in rustdesk_only and "RMM actions" not in rustdesk_only and "data-rmm-menu" not in rustdesk_only
+    assert "rmm-rustdesk" in rustdesk_only and "RustDesk remote desktop (Prompt)" in rustdesk_only
+    assert 'data-rmm-remote-mode="remote_prompt"' in rustdesk_only
+    assert 'data-rmm-remote="meshcentral" data-rmm-remote-mode="remote_prompt"' not in html
 
 
 @pytest.mark.anyio
-async def test_builtin_rustdesk_applies_the_config_and_its_own_password(sqlite_db, monkeypatch):
+@pytest.mark.parametrize("mode", ["file_transfer", "remote_prompt"])
+async def test_builtin_rustdesk_applies_the_config_and_its_own_password(sqlite_db, monkeypatch, mode):
     from app.core.config import get_settings
 
     monkeypatch.setattr(get_settings(), "rustdesk_cfg", "=0nI9cfgString")
@@ -361,8 +367,8 @@ async def test_builtin_rustdesk_applies_the_config_and_its_own_password(sqlite_d
     assert (await remote.load_settings())[0]["builtin"] is True
     _r, agent = await _enrol(sqlite_db)
 
-    session = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9, mode="file_transfer")
-    assert session["status"] == "activating" and session["mode"] == "file_transfer"
+    session = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9, mode=mode)
+    assert session["status"] == "activating" and session["mode"] == mode
     run = await rmm_repo.get_run(session["run_id"])
     assert run["script_name"] == "RustDesk (built-in)" and run["run_source"] == "remote_control"
     assert run["script_id"] is None and run["inputs"] == []
@@ -375,7 +381,8 @@ async def test_builtin_rustdesk_applies_the_config_and_its_own_password(sqlite_d
     await rmm_scripts.record_result(agent, session["run_id"], {"exit_code": 0, "stdout": "##myportal[session.id]=987 654 321\n"})
     ready = await remote.session_status(session["id"], company_id=1, user_id=9, is_super_admin=False)
     assert ready["status"] == "ready"
-    assert ready["launch_url"] == f"rustdesk://file-transfer/987654321?password={password}"
+    assert ready["launch_url"] == (f"rustdesk://file-transfer/987654321?password={password}"
+                                    if mode == "file_transfer" else "rustdesk://connection/new/987654321")
     # The password never reaches run history.
     stored = await rmm_repo.get_run(session["run_id"])
     assert password not in json.dumps({k: str(v) for k, v in stored.items()})
@@ -491,6 +498,12 @@ def test_agent_indicator_shows_a_tick_an_o_or_a_cross():
     assert "rmm-agent-indicator--connected" in connected and "✓" in connected and 'aria-label="RMM agent connected"' in connected
     assert ">O<" in str(macros.agent_indicator("offline"))
     assert "✗" in str(macros.agent_indicator("missing")) and "--missing" in str(macros.agent_indicator("bogus"))
+
+
+@pytest.mark.anyio
+async def test_prompt_mode_is_rustdesk_only():
+    with pytest.raises(remote.RemoteControlError, match="only available for RustDesk"):
+        await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9, mode="remote_prompt")
 
 
 @pytest.mark.anyio

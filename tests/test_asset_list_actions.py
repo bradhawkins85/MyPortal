@@ -59,7 +59,7 @@ def test_row_menu_groups_the_asset_page_options_with_icons(page):
     headings = [part.split("<", 1)[0] for part in menu.split('class="header-menu__heading" role="presentation">')[1:]]
     assert headings == ["Asset", "Remote access", "RMM", "Agent maintenance", "Go to"]
     labels = re.findall(r"<span>([^<]+)</span>", menu)
-    for label in ("Open asset", "Start process", "Customer preview", "RustDesk remote desktop", "Check in now",
+    for label in ("Open asset", "Start process", "Customer preview", "RustDesk remote desktop", "RustDesk remote desktop (Prompt)", "Check in now",
                   "Run health check", "Run script", "Execute command", "Install Choco package",
                   "Repair RMM agent", "Repair tray agent", "Company credentials", "Uninstall agents", "Delete"):
         assert label in labels

@@ -68,12 +68,17 @@
       button.append(icon);
       wrapper.append(button);
     }
-    if (names.indexOf('meshcentral') !== -1) {
+    if (names.indexOf('rustdesk') !== -1 || names.indexOf('meshcentral') !== -1) {
       const rmm = dropdown('RMM', 'RMM actions for ' + assetName, 'RMM actions for ' + assetName, '');
       rmm.menu.querySelector('summary').title = 'RMM actions';
-      MODES.forEach(function (entry) {
-        rmm.panel.append(menuItem('meshcentral', entry[0], 'MeshCentral: ' + entry[1].toLowerCase(), String(assetId), assetName));
-      });
+      if (names.indexOf('rustdesk') !== -1) {
+        rmm.panel.append(menuItem('rustdesk', 'remote_prompt', 'RustDesk remote desktop (Prompt)', String(assetId), assetName));
+      }
+      if (names.indexOf('meshcentral') !== -1) {
+        MODES.forEach(function (entry) {
+          rmm.panel.append(menuItem('meshcentral', entry[0], 'MeshCentral: ' + entry[1].toLowerCase(), String(assetId), assetName));
+        });
+      }
       wrapper.append(rmm.menu);
     }
     return wrapper;

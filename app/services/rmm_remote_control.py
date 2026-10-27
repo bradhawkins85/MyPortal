@@ -71,9 +71,9 @@ from app.services import meshcentral
 PROVIDERS = remote_repo.PROVIDERS
 PROVIDER_LABELS = {"rustdesk": "RustDesk", "meshcentral": "MeshCentral"}
 MODES = remote_repo.MODES
-MODE_LABELS = {"remote": "Remote desktop", "file_transfer": "File transfer", "terminal": "Terminal"}
+MODE_LABELS = {"remote": "Remote desktop", "remote_prompt": "Remote desktop (Prompt)", "file_transfer": "File transfer", "terminal": "Terminal"}
 # rustdesk://<action>/<id> per session type (RustDesk 1.4.1 or later for terminal).
-_RUSTDESK_ACTIONS = {"remote": "connection/new", "file_transfer": "file-transfer", "terminal": "terminal"}
+_RUSTDESK_ACTIONS = {"remote": "connection/new", "remote_prompt": "connection/new", "file_transfer": "file-transfer", "terminal": "terminal"}
 # MeshCentral's device view: 11 desktop, 12 terminal, 13 files.
 _MESH_VIEWMODES = {"remote": "11", "file_transfer": "13", "terminal": "12"}
 _BUILTIN_DIR = Path(__file__).resolve().parent / "rmm_builtin"
@@ -116,7 +116,8 @@ def rustdesk_url(remote_id: str, password: str | None = None, mode: str = "remot
     if not _RUSTDESK_ID.match(cleaned):
         raise RemoteControlError("The RustDesk ID reported for this device is not valid.")
     url = f"rustdesk://{_RUSTDESK_ACTIONS.get(mode, _RUSTDESK_ACTIONS['remote'])}/{cleaned}"
-    if password:
+    # Prompt sessions never pass a generated or script-provided password to the client.
+    if password and mode != "remote_prompt":
         url += "?password=" + quote(password, safe="")
     return url
 
@@ -495,6 +496,8 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
 
     if mode not in MODES:
         raise RemoteControlError("Choose a remote desktop, file transfer or terminal session.")
+    if mode == "remote_prompt" and provider != "rustdesk":
+        raise RemoteControlError("Prompt sessions are only available for RustDesk.")
     settings = await _provider(provider)
     label = PROVIDER_LABELS[provider]
     agent = await rmm_repo.get_asset_agent(asset_id)

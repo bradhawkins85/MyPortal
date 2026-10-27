@@ -9,7 +9,7 @@ from typing import Any
 from app.core.database import db
 
 PROVIDERS = ("rustdesk", "meshcentral")
-MODES = ("remote", "file_transfer", "terminal")
+MODES = ("remote", "remote_prompt", "file_transfer", "terminal")
 
 
 def _utcnow() -> datetime:

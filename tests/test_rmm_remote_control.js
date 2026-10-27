@@ -18,6 +18,7 @@ function setup(responses) {
   button.dataset = {rmmRemote: 'meshcentral', rmmRemoteAsset: '10', rmmRemoteName: 'PC'};
   const clicks = [];
   const opened = [];
+  const requests = [];
   const timers = [];
   const window = {location: {}, open: (...args) => { opened.push(args); return null; }};
   const document = {
@@ -27,7 +28,8 @@ function setup(responses) {
   };
   vm.runInNewContext(fs.readFileSync('app/static/js/rmm_remote_control.js', 'utf8'), {
     window, document, Element,
-    fetch: async () => {
+    fetch: async (url, options) => {
+      requests.push({url, options});
       const next = responses.shift();
       if (next instanceof Error) throw next;
       return {ok: true, json: async () => ({session: next})};
@@ -35,7 +37,7 @@ function setup(responses) {
     setTimeout: callback => { timers.push(callback); return timers.length; },
     clearTimeout() {},
   });
-  return {message, link, button, opened, window,
+  return {message, link, button, opened, window, requests,
     click: async () => { for (const click of clicks) await click({target: button, preventDefault() {}}); },
     poll: async () => { timers.shift()(); await new Promise(resolve => setImmediate(resolve)); },
   };
@@ -88,4 +90,16 @@ test('RustDesk continues to launch through its protocol handler', async () => {
   await app.click();
   assert.equal(app.opened.length, 0);
   assert.equal(app.window.location.href, 'rustdesk://connection/new/123');
+});
+
+
+test('RustDesk prompt option sends its mode and launches without a password', async () => {
+  const app = setup([{label: 'RustDesk', mode: 'remote_prompt', mode_label: 'Remote desktop (Prompt)',
+    status: 'ready', launch_url: 'rustdesk://connection/new/123'}]);
+  app.button.dataset.rmmRemote = 'rustdesk';
+  app.button.dataset.rmmRemoteMode = 'remote_prompt';
+  await app.click();
+  assert.deepEqual(JSON.parse(app.requests[0].options.body), {provider: 'rustdesk', mode: 'remote_prompt'});
+  assert.equal(app.window.location.href, 'rustdesk://connection/new/123');
+  assert.match(app.message.textContent, /remote desktop \(prompt\)/);
 });
