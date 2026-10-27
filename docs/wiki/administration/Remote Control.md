@@ -63,8 +63,9 @@ Super admins set it up under **Scripts → Remote control** (`/rmm/remote-contro
 provider:
 
 1. Turn it on. RustDesk and MeshCentral both use MyPortal's **built-in script** unless you
-   choose another. The built-in MeshCentral script downloads the self-installing MeshCentral
-   agent scoped to a device group named after the device's company, so the device lands in its
+   choose another. MyPortal downloads the authenticated self-installing MeshCentral
+   agent and sends it through RMM associated files, scoped to a device group named after the
+   device's company, so the device lands in its
    company's group (a device already in the generic Tactical RMM group is moved here too); the
    node ID is then looked up in that group by the device's host name. Without the RMM agent,
    MeshCentral falls back to the ID custom field below, opening MeshCentral signed in.
@@ -87,11 +88,15 @@ RustDesk):
   work here. The settings page shows whether each is set, but only the `.env` file holds the
   values.
 
-The built-in script has the device download the agent straight from the MeshCentral server
-(`…/meshagents?id=…&meshid=…`), so the server must **allow agent downloads**: if the
-"Require login for agent downloads" setting is on (MeshCentral's `lockagentdownload`), the
-device's anonymous download is rejected and installation fails. Leave it off, or the built-in
-path is not usable; a custom activation script that authenticates first can still be used.
+MyPortal signs in to MeshCentral using the configured login token, then downloads the
+company-scoped installer for the endpoint's reported architecture. The installer is kept in
+the encrypted run payload and delivered through the authenticated RMM file endpoint, with
+size and checksum verification before execution. MeshCentral credentials stay on MyPortal.
+The endpoint runs the delivered installer and removes it afterwards; it does not need to
+access MeshCentral's download URL. **Require login for agent downloads** (`lockagentdownload`)
+can stay enabled. The configured MeshCentral user must have access to the company's group.
+The RMM agent must support associated files and report a supported architecture; update older
+agents before starting a session.
 
 ## Connecting
 
@@ -107,7 +112,7 @@ MyPortal shows the activation script's progress, then opens the session as soon 
 reports back: RustDesk through a `rustdesk://` link carrying the ID and password (the browser may
 ask to open RustDesk the first time), MeshCentral in a new tab already signed in on the device.
 The built-in scripts install the tool on first use: the RustDesk script applies `RUSTDESK_CFG`
-and sets a one-time password, and the MeshCentral script downloads and runs the agent into the
+and sets a one-time password, and the MeshCentral script runs the installer delivered by MyPortal into the
 device's company group. An **Open … again** button stays in case the browser blocked it.
 
 The device must be online: an activation script the device has not collected within 10 minutes

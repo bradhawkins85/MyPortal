@@ -1,17 +1,17 @@
 # MyPortal built-in: switch MeshCentral on for a remote session (Windows).
 #
 # MyPortal sets these for each run:
-#   MESH_SITE     the MeshCentral server address (https://...)
+#   MESH_INSTALLER_PATH the installer delivered by MyPortal through the RMM
 #   MESH_GROUP_ID the device group to install into (the device's company group)
 #
-# Downloads the self-installing MeshCentral agent scoped to that group and runs
+# Runs the self-installing MeshCentral agent delivered for that group,
 # it, so the device joins its company's group. The node id is resolved by
 # MyPortal afterwards (the agent has no command-line that prints it).
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $activationDeadline = (Get-Date).AddSeconds(280)
 
-if (-not $env:MESH_SITE) { throw 'The MeshCentral server address is missing.' }
+if (-not $env:MESH_INSTALLER_PATH -or -not (Test-Path -LiteralPath $env:MESH_INSTALLER_PATH -PathType Leaf)) { throw 'The MeshCentral installer was not delivered by the RMM.' }
 if (-not $env:MESH_GROUP_ID) { throw 'The MeshCentral device group is missing.' }
 
 function Invoke-MeshCommand {
@@ -48,23 +48,12 @@ function Invoke-MeshCommand {
     }
 }
 
-# MeshCentral's Windows agent type ids.
-$architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
-$archId = switch ($architecture.ToUpperInvariant()) {
-    'AMD64' { 4 }
-    'ARM64' { 43 }
-    'X86'   { 3 }
-    default { throw "Unsupported Windows architecture: $architecture." }
-}
-
 # Always re-run the self-installing agent: it is idempotent, and re-running it
 # scoped to this group is what moves the device into its company's group (a
 # device that was in the generic TacticalRMM group is moved here, too).
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-$installer = Join-Path $env:TEMP (([IO.Path]::GetRandomFileName()) + '.exe')
+$installer = $env:MESH_INSTALLER_PATH
 try {
-    Write-Output "Installing the MeshCentral agent (Windows $($architecture.ToLowerInvariant()), into group $env:MESH_GROUP_ID)"
-    Invoke-WebRequest -Uri "$env:MESH_SITE/meshagents?id=$archId&meshid=$env:MESH_GROUP_ID&installflags=2" -OutFile $installer -UseBasicParsing -TimeoutSec 120
+    Write-Output "Installing the MeshCentral agent (Windows, into group $env:MESH_GROUP_ID)"
     # The downloaded artifact is a self-installing, background installer.
     Invoke-MeshCommand -File $installer -Arguments @() -Step 'installation' -TimeoutSeconds 120 | Out-Null
     $deadline = (Get-Date).AddSeconds(60)

@@ -2,29 +2,22 @@
 # MyPortal built-in: switch MeshCentral on for a remote session (Linux).
 #
 # MyPortal sets these for each run:
-#   MESH_SITE     the MeshCentral server address (https://...)
+#   MESH_INSTALLER_PATH the installer delivered by MyPortal through the RMM
 #   MESH_GROUP_ID the device group to install into (the device's company group)
 #
-# Downloads the self-installing MeshCentral agent scoped to that group and runs
+# Runs the self-installing MeshCentral agent delivered for that group,
 # it, so the device joins its company's group. The node id is resolved by
 # MyPortal afterwards (the agent has no command-line that prints it).
 set -euo pipefail
 
-if [ -z "${MESH_SITE:-}" ]; then
-  echo "The MeshCentral server address is missing." >&2
+if [ -z "${MESH_INSTALLER_PATH:-}" ] || [ ! -f "$MESH_INSTALLER_PATH" ]; then
+  echo "The MeshCentral installer was not delivered by the RMM." >&2
   exit 1
 fi
 if [ -z "${MESH_GROUP_ID:-}" ]; then
   echo "The MeshCentral device group is missing." >&2
   exit 1
 fi
-
-# MeshCentral's Linux agent type ids.
-case "$(uname -m)" in
-  x86_64|amd64) ARCH_ID=6 ;;
-  arm64|aarch64) ARCH_ID=32 ;;
-  *) ARCH_ID=5 ;;
-esac
 
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
@@ -37,11 +30,10 @@ fi
 # Always re-run the self-installing agent: it is idempotent, and re-running it
 # scoped to this group is what moves the device into its company's group (a
 # device that was in the generic TacticalRMM group is moved here, too).
-INSTALLER="$(mktemp).sh"
+INSTALLER="$MESH_INSTALLER_PATH"
 trap 'rm -f "$INSTALLER"' EXIT
 echo "Installing the MeshCentral agent ($(uname -m), into group $MESH_GROUP_ID)"
 # The downloaded artifact is a self-installing, background installer.
-curl -fsSL --max-time 180 -o "$INSTALLER" "$MESH_SITE/meshagents?id=${ARCH_ID}&meshid=${MESH_GROUP_ID}&installflags=2"
 chmod +x "$INSTALLER"
 $SUDO "$INSTALLER"
 for _ in $(seq 1 20); do

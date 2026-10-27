@@ -1,18 +1,18 @@
 #!/bin/bash
 # MyPortal built-in: switch MeshCentral on for a remote session (macOS).
-# Detect an existing installation, otherwise download and run the self-installing
+# Run the delivered self-installing
 # MeshCentral agent scoped to the device's company group (MESH_GROUP_ID), then
 # make sure the launch daemon is running. Runs as root through the RMM agent.
 # The node id is resolved by MyPortal afterwards (the agent has no command-line
 # that prints it).
 #
 # MyPortal sets these for each run:
-#   MESH_SITE     the MeshCentral server address (https://...)
+#   MESH_INSTALLER_PATH the installer delivered by MyPortal through the RMM
 #   MESH_GROUP_ID the device group to install into (the device's company group)
 set -euo pipefail
 
-if [ -z "${MESH_SITE:-}" ]; then
-  echo "The MeshCentral server address is missing." >&2
+if [ -z "${MESH_INSTALLER_PATH:-}" ] || [ ! -f "$MESH_INSTALLER_PATH" ]; then
+  echo "The MeshCentral installer was not delivered by the RMM." >&2
   exit 1
 fi
 if [ -z "${MESH_GROUP_ID:-}" ]; then
@@ -20,8 +20,6 @@ if [ -z "${MESH_GROUP_ID:-}" ]; then
   exit 1
 fi
 
-# MeshCentral's macOS agent type id (universal: Apple Silicon and Intel).
-ARCH_ID=10005
 # The launch daemon the installer registers.
 PLIST="/Library/LaunchDaemons/meshagent.plist"
 LABEL="meshagent"
@@ -36,11 +34,10 @@ is_active() {
 # Always re-run the self-installing agent: it is idempotent, and re-running it
 # scoped to this group is what moves the device into its company's group (a
 # device that was in the generic TacticalRMM group is moved here, too).
-INSTALLER="$(mktemp).sh"
+INSTALLER="$MESH_INSTALLER_PATH"
 trap 'rm -f "$INSTALLER"' EXIT
 echo "Installing the MeshCentral agent (macOS, into group $MESH_GROUP_ID)"
 # The downloaded artifact is a self-installing, background installer.
-curl -fsSL --max-time 180 -o "$INSTALLER" "$MESH_SITE/meshagents?id=${ARCH_ID}&meshid=${MESH_GROUP_ID}&installflags=2"
 chmod +x "$INSTALLER"
 "$INSTALLER"
 for _ in $(seq 1 20); do
