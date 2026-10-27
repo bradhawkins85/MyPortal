@@ -46,6 +46,7 @@ import httpx
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import companies as companies_repo
+from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_agent_deploy as deploy_repo
 from app.repositories import tray as tray_repo
 from app.services import tray as tray_service
@@ -535,6 +536,70 @@ async def push_to_asset(asset_id: int, *, company_id: int, user_id: int | None, 
     return await push_to_device(device, user_id=user_id, repair=repair, source="repair" if repair else "manual")
 
 
+async def latest_agent_version(os_name: str) -> tuple[int, int, int] | None:
+    """The newest release a pushed tray ``update`` installs on this platform.
+
+    That is the newer of the version published under Admin > Tray > Versions
+    and the tray release cached on this server (see ``GET /api/tray/version``).
+    The RMM agent follows the tray app's version.
+    """
+
+    row = await tray_repo.get_latest_tray_version(os_name)
+    if not row and os_name != "linux":
+        row = await tray_repo.get_latest_tray_version("all")
+    candidates = [parse_version(row.get("version")) if row else None]
+    cached = tray_installer.get_cached_latest_release_info()
+    if isinstance(cached, dict):
+        candidates.append(parse_version(cached.get("version")))
+    found = [version for version in candidates if version is not None]
+    return max(found) if found else None
+
+
+async def upgrade_asset(asset_id: int, *, company_id: int, user_id: int | None) -> dict[str, Any]:
+    """Bring a device's tray app and RMM agent up to the latest release.
+
+    Returns ``{"status": ..., "command_id": ..., "latest_version": ...}`` where
+    status is ``current`` (both already on the latest release), ``updating_tray``
+    (the tray app was asked to update itself; on restart it brings the RMM
+    agent to its own version), ``already_queued`` (a tray update is waiting for
+    the device) or, when only the RMM agent lags, ``sent``/``queued`` for its
+    reinstall at the tray app's version.
+    """
+
+    device = await deploy_repo.get_asset_tray_device(asset_id)
+    if not device or device.get("company_id") is None or int(device["company_id"]) != int(company_id):
+        raise AgentDeployError("This device has no MyPortal tray app, which upgrades the RMM agent.")
+    os_name = str(device.get("os") or "").lower()
+    if os_name not in TRAY_PLATFORMS:
+        raise AgentDeployError("The RMM agent can only be upgraded on Windows, macOS and Linux devices.")
+    latest = await latest_agent_version(os_name)
+    if latest is None:
+        raise AgentDeployError(
+            "MyPortal does not know the latest release yet. Publish a tray version under Admin > Tray > Versions "
+            "or let the tray installer download finish, then try again."
+        )
+    label = version_label(latest)
+    tray_version = parse_version(device.get("agent_version"))
+    if tray_version is None or tray_version < latest:
+        command_id, delivered = await tray_service.dispatch_update_command(
+            device,
+            initiated_by_user_id=user_id,
+            extra_payload={"latest_tray_version": label, "current_agent_version": device.get("agent_version")},
+        )
+        if command_id is None:
+            return {"status": "already_queued", "command_id": None, "latest_version": label}
+        log_info("Requested an agent upgrade through a tray update", device_id=device.get("id"), delivered=delivered)
+        return {"status": "updating_tray", "command_id": command_id, "latest_version": label, "delivered": delivered}
+
+    agent = await rmm_repo.get_asset_agent(asset_id)
+    agent_version = parse_version(agent.get("agent_version")) if agent else None
+    if agent is None or (agent_version is not None and agent_version >= tray_version):
+        return {"status": "current", "command_id": None, "latest_version": label}
+    # The tray app is current but its RMM agent lags: reinstalling installs the tray's version.
+    result = await push_to_device(device, user_id=user_id, repair=True, source="upgrade")
+    return {**result, "latest_version": label}
+
+
 async def _auto_enabled(company_id: Any) -> bool:
     if company_id is None:
         return False
@@ -671,7 +736,7 @@ async def record_result(device: dict[str, Any], command_id: int, *, ok: bool, me
 # A tray app that was sent the install but has not reported back by then
 # probably lost it (restarted, or an older build that ignores the command).
 NO_REPORT_HOURS = 2
-SOURCE_LABELS = {"manual": "Technician", "company": "Company-wide push", "auto": "Automatic install", "repair": "Technician repair"}
+SOURCE_LABELS = {"manual": "Technician", "company": "Company-wide push", "auto": "Automatic install", "repair": "Technician repair", "upgrade": "Technician upgrade"}
 
 
 def describe_attempt(attempt: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
@@ -713,6 +778,9 @@ def describe_attempt(attempt: dict[str, Any], *, now: datetime | None = None) ->
     if attempt.get("source") == "repair" and state == "completed":
         label = "Repaired"
         reason = "The tray app reinstalled the RMM agent and verified its connection."
+    elif attempt.get("source") == "upgrade" and state == "completed":
+        label = "Upgraded"
+        reason = "The tray app upgraded the RMM agent and verified its connection."
     return {
         "id": attempt.get("id"),
         "created_at": attempt.get("created_at"),

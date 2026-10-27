@@ -718,6 +718,21 @@ Once the agent is deployed, **Run health check** in an asset's Actions menu runs
 defrag state, temperatures, crashes, performance, updates and security, with the steps that
 bring it back to optimal performance. It needs RMM scripts write access, like **Check in now**.
 
+### Upgrading an asset's agent
+
+Choose **Upgrade agent** under **Agent maintenance** in an asset's Actions menu (on the asset
+page or the Assets list). MyPortal compares the device with the latest release: the newer of the
+version published under **Admin > Tray > Versions** and the tray release cached on the server.
+
+- When the tray app is behind, it is sent an update. After restarting it upgrades the RMM agent to
+  its own version.
+- When the tray app is current but the RMM agent is behind, the RMM agent is reinstalled at the
+  tray app's version, the same way as a repair.
+- When both are current, nothing is sent and MyPortal says so.
+
+Offline devices collect the queued upgrade when their tray app reconnects. Upgrades appear in the
+audit trail, and RMM agent reinstalls also appear in the asset's install history.
+
 ### Repairing an asset's agent
 
 Choose **Repair RMM agent** from an asset's Actions menu or its Scripts card.

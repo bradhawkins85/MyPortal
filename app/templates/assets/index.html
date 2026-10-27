@@ -260,6 +260,7 @@
                 {%- endif -%}
                 {%- set _ = row_actions.append({"type": "section", "label": "Agent maintenance"}) -%}
                 {%- if asset.can_push_rmm_agent and not asset.rmm_actions %}{% set _ = row_actions.append({"label": "Push RMM agent", "icon": action_icons.ref("push"), "attrs": {"data-rmm-agent-install": asset.id, "data-rmm-agent-name": row_name}}) %}{% endif -%}
+                {%- if asset.can_push_rmm_agent and asset.rmm_actions %}{% set _ = row_actions.append({"label": "Upgrade agent", "icon": action_icons.ref("upgrade"), "attrs": {"data-rmm-agent-upgrade": asset.id, "data-rmm-agent-name": row_name, "title": "Update the tray app and RMM agent to the latest release if either is behind"}}) %}{% endif -%}
                 {%- if asset.can_push_rmm_agent %}{% set _ = row_actions.append({"label": "Repair RMM agent", "icon": action_icons.ref("repair"), "attrs": {"data-rmm-agent-repair": asset.id, "data-rmm-agent-name": row_name}}) %}{% endif -%}
                 {%- if asset.rmm_tray_repair %}{% set _ = row_actions.append({"label": "Repair tray agent", "icon": action_icons.ref("repair"), "attrs": {"data-rmm-tray-repair": asset.id, "data-rmm-tray-repair-name": row_name}}) %}{% endif -%}
                 {%- set _ = row_actions.append({"type": "section", "label": "Go to"}) -%}
