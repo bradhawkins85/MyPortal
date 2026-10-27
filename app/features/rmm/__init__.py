@@ -85,7 +85,7 @@ rmm_automation.register_package_steps(validate=rmm_software_updates.package_ids,
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.19.0",
+    version="1.20.0",
     routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router,
              event_log_rule_router, inventory_router, check_router, finding_router, patch_router,
              windows_update_router, result_rule_router),

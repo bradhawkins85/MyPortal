@@ -92,6 +92,40 @@ async def repair_agent(asset_id: int, request: Request):
     return {**result, "message": messages[result["status"]]}
 
 
+@router.post("/api/rmm/assets/{asset_id:int}/agent-upgrade", summary="Upgrade a device's agents to the latest release")
+async def upgrade_agent(asset_id: int, request: Request):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    asset = await assets_repo.get_asset_by_id(asset_id)
+    if not asset or asset.get("company_id") is None or int(asset["company_id"]) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    try:
+        result = await deploy.upgrade_asset(asset_id, company_id=company_id, user_id=user.get("id"))
+    except deploy.AgentDeployError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    latest = result["latest_version"]
+    if result["command_id"]:
+        await audit_service.record(
+            action="rmm.agent.upgrade", request=request, user_id=user.get("id"),
+            entity_type="asset", entity_id=asset_id,
+            metadata={"company_id": company_id, "command_id": result["command_id"], "status": result["status"],
+                      "latest_version": latest},
+        )
+    if result["status"] == "updating_tray":
+        message = (
+            f"Sent to the device. Its tray app is updating to {latest} and then upgrades the RMM agent to match."
+            if result.get("delivered")
+            else f"Upgrade to {latest} queued until the device's tray app connects."
+        )
+    else:
+        message = {
+            "current": f"The agents on this device are already on the latest release ({latest}).",
+            "already_queued": "An upgrade is already queued for this device; it is sent when the tray app reconnects.",
+            "sent": f"Sent to the device. Its tray app is upgrading the RMM agent to {latest}.",
+            "queued": f"RMM agent upgrade to {latest} queued until the device's tray app connects.",
+        }[result["status"]]
+    return {**result, "message": message}
+
+
 @router.get("/api/rmm/assets/{asset_id:int}/agent-installs", summary="List a device's RMM agent install attempts")
 async def list_agent_installs(asset_id: int, request: Request, limit: int = Query(default=20, ge=1, le=100)):
     _user, _company, company_id, _can_run = await _context(request, api=True)

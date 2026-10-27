@@ -1,0 +1,7 @@
+{
+  "guid": "2663ce08-d2b9-4d7c-beb1-e57b120be3b3",
+  "occurred_at": "2026-10-27T03:49Z",
+  "change_type": "Feature",
+  "summary": "Assets: add Upgrade agent to the Agent maintenance actions, updating the tray app and RMM agent to the latest release when either is behind",
+  "content_hash": "f30ce89248bc8f3c2bbe213655c97397d96f0c1c3ac0827b5cdf1ef12c382be2"
+}

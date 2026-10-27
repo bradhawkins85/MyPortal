@@ -605,3 +605,80 @@ async def test_linux_trays_are_only_offered_linux_versions(sqlite_db):
     )
     assert (await tray_repo.get_latest_tray_version("linux"))["version"] == "0.8.9"
     assert (await tray_repo.get_stable_tray_version("linux"))["version"] == "0.8.9"
+
+
+@pytest.fixture
+def no_cached_release(monkeypatch):
+    monkeypatch.setattr(deploy.tray_installer, "get_cached_latest_release_info", lambda: {})
+
+
+@pytest.mark.anyio
+async def test_upgrade_updates_an_outdated_tray_app_once(sqlite_db, storage, sent, no_cached_release):
+    messages, live = sent
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('1.3.0', 'https://x/a.msi')")
+    await _device(sqlite_db, asset_id=10, version="1.2.0")
+    await _enrol(sqlite_db, tray_id=5, asset_id=10)
+    live["on"] = True
+
+    result = await deploy.upgrade_asset(10, company_id=1, user_id=9)
+    assert result["status"] == "updating_tray" and result["latest_version"] == "1.3.0" and result["delivered"]
+    assert messages[0][1]["type"] == "update"
+    rows = await _commands(sqlite_db)
+    assert [row["command"] for row in rows] == ["update"] and rows[0]["initiated_by_user_id"] == 9
+
+
+@pytest.mark.anyio
+async def test_upgrade_queues_behind_an_offline_device_without_stacking(sqlite_db, storage, sent, no_cached_release):
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('1.3.0', 'https://x/a.msi')")
+    await _device(sqlite_db, asset_id=10, version="1.2.0")
+    assert (await deploy.upgrade_asset(10, company_id=1, user_id=9))["status"] == "updating_tray"
+    assert (await deploy.upgrade_asset(10, company_id=1, user_id=9))["status"] == "already_queued"
+    assert len(await _commands(sqlite_db)) == 1
+
+
+@pytest.mark.anyio
+async def test_upgrade_uses_the_newer_cached_release(sqlite_db, storage, sent, monkeypatch):
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('1.2.0', 'https://x/a.msi')")
+    monkeypatch.setattr(deploy.tray_installer, "get_cached_latest_release_info", lambda: {"version": "v1.4.0"})
+    await _device(sqlite_db, asset_id=10, version="1.2.0")
+    assert await deploy.latest_agent_version("windows") == (1, 4, 0)
+    result = await deploy.upgrade_asset(10, company_id=1, user_id=9)
+    assert result["status"] == "updating_tray" and result["latest_version"] == "1.4.0"
+
+
+@pytest.mark.anyio
+async def test_upgrade_reinstalls_a_lagging_rmm_agent(sqlite_db, storage, sent, no_cached_release):
+    _cache(storage)
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('1.3.0', 'https://x/a.msi')")
+    await _device(sqlite_db, asset_id=10, version="1.3.0")
+    await _enrol(sqlite_db, tray_id=5, asset_id=10)
+    await sqlite_db.execute("UPDATE rmm_agents SET agent_version = '1.2.0'")
+
+    result = await deploy.upgrade_asset(10, company_id=1, user_id=9)
+    assert result["status"] == "queued" and result["command_id"]
+    rows = await _commands(sqlite_db)
+    assert [row["command"] for row in rows] == ["install_rmm_agent"]
+    history = await deploy.asset_install_history(10)
+    assert history[0]["source"] == "upgrade" and history[0]["source_label"] == "Technician upgrade"
+
+
+@pytest.mark.anyio
+async def test_upgrade_leaves_current_agents_alone(sqlite_db, storage, sent, no_cached_release):
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('1.3.0', 'https://x/a.msi')")
+    await _device(sqlite_db, asset_id=10, version="v1.3.0")
+    await _enrol(sqlite_db, tray_id=5, asset_id=10)
+    await sqlite_db.execute("UPDATE rmm_agents SET agent_version = '1.3.0'")
+    assert await deploy.upgrade_asset(10, company_id=1, user_id=9) == {
+        "status": "current", "command_id": None, "latest_version": "1.3.0"
+    }
+    assert await _commands(sqlite_db) == []
+
+
+@pytest.mark.anyio
+async def test_upgrade_refuses_without_a_tray_app_or_a_known_release(sqlite_db, storage, sent, no_cached_release):
+    with pytest.raises(deploy.AgentDeployError, match="tray app"):
+        await deploy.upgrade_asset(10, company_id=1, user_id=9)
+    await _device(sqlite_db, asset_id=10, version="1.2.0")
+    with pytest.raises(deploy.AgentDeployError, match="latest release"):
+        await deploy.upgrade_asset(10, company_id=1, user_id=9)
+    assert await _commands(sqlite_db) == []
