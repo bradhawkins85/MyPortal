@@ -1,8 +1,8 @@
 (function () {
   'use strict';
 
-  // "Delete" in the asset page's Actions menu. The Assets list has its own
-  // handler in assets.js, which removes the row instead of leaving the page.
+  // "Delete" in the asset page's Actions menu, which returns to the Assets list.
+  // The list has its own handler in assets.js, which removes the row instead.
   document.querySelectorAll('[data-asset-delete-redirect]').forEach((button) => button.addEventListener('click', async () => {
     const assetId = button.getAttribute('data-asset-id');
     const name = button.getAttribute('data-asset-name') || 'this asset';
@@ -21,7 +21,8 @@
       if (!response.ok) {
         throw new Error('Request failed with status ' + response.status);
       }
-      window.location.assign(button.getAttribute('data-asset-delete-redirect'));
+      // A fixed destination: navigating to an attribute's value would run a javascript: URL.
+      window.location.assign('/assets');
     } catch (error) {
       console.error('Failed to delete asset', error);
       window.alert('Unable to delete asset. Please try again.');
