@@ -33,6 +33,10 @@ fi
 clear_update_flag_on_failure() {
   local status=$?
   trap - EXIT
+  if ((status != 0)) && [[ "${MIGRATION_MAINTENANCE_ACTIVE:-false}" == true ]]; then
+    write_migration_maintenance_state failed true \
+      "Upgrade failed during maintenance. Workers remain paused; repair the error and retry the upgrade." || true
+  fi
   if ((status != 0)) && [[ -e "$SYSTEM_UPDATE_FLAG_FILE" || -L "$SYSTEM_UPDATE_FLAG_FILE" ]]; then
     rm -f -- "$SYSTEM_UPDATE_FLAG_FILE"
     echo "Upgrade aborted with status ${status}; cleared pending update flag ${SYSTEM_UPDATE_FLAG_FILE}." >&2
@@ -93,6 +97,7 @@ STEP_REPORT=""
 TRAY_ARTIFACT_ROOT="${MYPORTAL_TRAY_ARTIFACT_ROOT:-${SHARED_ROOT}/artifacts/tray}"
 TRAY_ARTIFACTS_AVAILABLE=false
 FEATURE_PACK_RELOAD_TIMEOUT="${MYPORTAL_FEATURE_PACK_RELOAD_TIMEOUT:-60}"
+MIGRATION_MAINTENANCE_ACTIVE=false
 
 usage() {
   cat <<'EOF'
@@ -900,7 +905,10 @@ PY
 rollback() {
   local old_active="$1" new_instance="$2" old_instance_release="$3" upstream_switched="$4"
   echo "Deployment failed; restoring ${old_active}." >&2
-  if [[ -n "$old_instance_release" && -d "$old_instance_release" ]]; then
+  if [[ "${MIGRATION_MAINTENANCE_ACTIVE:-false}" == true ]]; then
+    # Do not restart an older worker against a partially changed schema.
+    systemctl stop "myportal@${new_instance}.service" >/dev/null 2>&1 || true
+  elif [[ -n "$old_instance_release" && -d "$old_instance_release" ]]; then
     atomic_link "$old_instance_release" "$INSTANCE_ROOT/$new_instance"
     systemctl restart "myportal@${new_instance}.service" >/dev/null 2>&1 || true
   fi
@@ -941,9 +949,67 @@ run_rolling_restart() {
   trap - ERR
 }
 
+write_migration_maintenance_state() {
+  local phase="$1" enabled="$2" message="$3" staged
+  ensure_updater_state_dir || return 1
+  staged="${UPDATER_STATE_DIR}/migration-maintenance.$$"
+  python3 - "$phase" "$enabled" "$message" "$TARGET_REVISION" "$UPGRADE_STARTED_AT" >"$staged" <<'PY' || return 1
+import datetime, json, sys
+phase, enabled, message, revision, started = sys.argv[1:]
+now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+print(json.dumps({
+    "schema_version": 1, "upgrade_id": "migration-" + revision,
+    "target_revision": revision, "phase": phase, "mode": "rolling",
+    "maintenance": enabled == "true", "message": message,
+    "started_at": started, "updated_at": now,
+    "finished_at": now if phase in {"failed", "succeeded"} else None,
+    "outcome": phase if phase in {"failed", "succeeded"} else None,
+}))
+PY
+  publish_state_file "$staged" "${SHARED_ROOT}/state/upgrade-state.json" || return 1
+  rm -f -- "$staged"
+}
+
+enter_migration_maintenance() {
+  local unit
+  ensure_updater_state_dir || return 1
+  # Persist across retries, including a successful schema phase followed by
+  # a failed cutover (when no maintenance-only migrations remain pending).
+  touch "${UPDATER_STATE_DIR}/migration-maintenance.active" || return 1
+  MIGRATION_MAINTENANCE_ACTIVE=true
+  write_migration_maintenance_state draining true "Pausing application workers for required database maintenance." || return 1
+  # Stop both slots and the legacy service: HTTP gating alone does not stop
+  # schedulers, WebSockets, or in-flight agent collection from writing.
+  for unit in myportal@blue.service myportal@green.service myportal.service; do
+    if systemctl is-active --quiet "$unit"; then
+      systemctl stop "$unit" || return 1
+    fi
+  done
+  write_migration_maintenance_state migrating true "Applying required database maintenance; event collection is paused."
+}
+
+leave_migration_maintenance() {
+  [[ "$MIGRATION_MAINTENANCE_ACTIVE" == true ]] || return 0
+  write_migration_maintenance_state succeeded false "Database maintenance completed; the new release is serving."
+  rm -f -- "${UPDATER_STATE_DIR}/migration-maintenance.active"
+  MIGRATION_MAINTENANCE_ACTIVE=false
+}
+
 run_migration_phase() {
-  local release="$1" serving="$2" target="$3" args=()
-  [[ "${UPG01_MAINTENANCE_MODE:-false}" == "true" ]] && args+=(--maintenance)
+  local release="$1" serving="$2" target="$3" required args=()
+  if ! required=$(run_release_manage "$release" migration-maintenance-required); then
+    write_upgrade_status failed "Could not inspect pending migrations; no schema changes were applied."
+    return 1
+  fi
+  case "$required" in
+    true|false) ;;
+    *) echo "Invalid migration maintenance preflight result: ${required}" >&2; return 1 ;;
+  esac
+  if [[ "$required" == true || "${UPG01_MAINTENANCE_MODE:-false}" == true \
+    || -f "${UPDATER_STATE_DIR}/migration-maintenance.active" ]]; then
+    enter_migration_maintenance || return 1
+    args+=(--maintenance)
+  fi
   write_upgrade_status migrating "Applying and validating schema changes before cutover."
   if ! run_release_manage "$release" migrate \
     --serving-release "${serving:-none}" --target-release "$target" "${args[@]}"; then
@@ -1460,7 +1526,7 @@ fi
 repair_assigned_release_uploads
 run_pre_upgrade_backup || exit 1
 run_migration_phase "$RELEASE_DIR" "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"
-if [[ "$redis_env_before" == "$redis_env_after" ]] && is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
+if [[ "$MIGRATION_MAINTENANCE_ACTIVE" != true && "$redis_env_before" == "$redis_env_after" ]] && is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
   # Schema-only expands need no worker signal: the serving revision was
   # explicitly declared compatible and the database lock applied them once.
   atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
@@ -1476,6 +1542,7 @@ install_backup_timer "$RELEASE_DIR"
 run_rolling_restart "$TARGET_REVISION" "$RELEASE_DIR"
 clear_published_revision
 retire_legacy_service
+leave_migration_maintenance
 write_upgrade_status succeeded "Release ${TARGET_REVISION} is serving; previous release retained."
 echo "Successfully deployed ${TARGET_REVISION} from ${RELEASE_DIR}."
 cleanup_old_releases

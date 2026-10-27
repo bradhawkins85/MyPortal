@@ -28,6 +28,16 @@ settings. The truncation runs even if the index already exists. Keep event-log
 collection stopped until migration completion; retrying after partial DDL
 truncates the entries again. The index addition skips an existing index.
 
+The production upgrade coordinator automatically checks pending migrations
+using `manage.py migration-maintenance-required`. When maintenance is required,
+it publishes the maintenance state, stops both application slots and any
+legacy application service, and passes `--maintenance` to the schema phase.
+It clears maintenance only after the new release passes readiness and cutover.
+If migration or cutover fails, workers remain paused and maintenance stays
+enabled; fix the reported error and rerun the upgrade. A persistent updater
+marker keeps retries in maintenance even when the schema phase already
+completed. Ordinary migrations keep the rolling upgrade path.
+
 `expand` adds backwards-compatible schema, `data`/`backfill` changes data while
 both releases remain compatible, and `contract` removes or changes an old
 contract. An online contract must name compatible serving and target release

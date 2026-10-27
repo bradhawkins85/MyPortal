@@ -784,6 +784,29 @@ class Database:
                 else:
                     await cursor.execute("UPDATE migrations SET state=%s, completed_at=UTC_TIMESTAMP(6), error_details=NULL WHERE name=%s", ("completed", path.name))
 
+    async def migrations_require_maintenance(self) -> bool:
+        """Inspect pending deployment migrations before pausing serving workers."""
+        await self.connect()
+        async with self.acquire() as conn:
+            await self._ensure_migrations_table(conn)
+            if self._use_sqlite:
+                cursor = await conn.execute("SELECT name, state FROM migrations")
+                rows = await cursor.fetchall()
+            else:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT name, state FROM migrations")
+                    rows = await cursor.fetchall()
+        completed = {row[0] for row in rows if row[1] == "completed"}
+        for path in sorted(self._get_migrations_dir().glob("*.sql")):
+            if path.name in completed:
+                continue
+            secondary = self._migration_database(path)
+            if secondary is not None and not secondary.is_configured():
+                continue
+            if self._migration_metadata(path)["maintenance"]:
+                return True
+        return False
+
     async def run_migrations(self, *, serving_release: str | None = None,
                              target_release: str | None = None,
                              maintenance: bool = False) -> None:
