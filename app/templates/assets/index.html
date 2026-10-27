@@ -267,7 +267,8 @@
                 {%- if can_write_assets and asset.company_id %}{% set _ = row_actions.append({"label": "Company credentials", "type": "link", "href": "/admin/companies/" ~ asset.company_id ~ "/edit#credentials", "icon": action_icons.ref("credentials")}) %}{% endif -%}
                 {%- if is_super_admin -%}
                   {%- set _ = row_actions.append({"type": "section"}) -%}
-                  {%- set _ = row_actions.append({"label": "Delete", "variant": "danger", "icon": action_icons.ref("delete"), "attrs": {"data-asset-delete": true, "data-asset-id": asset.id}}) -%}
+                  {%- if asset.rmm_uninstall %}{% set _ = row_actions.append({"label": "Uninstall agents", "variant": "danger", "icon": action_icons.ref("uninstall"), "attrs": {"data-asset-uninstall": asset.id, "data-asset-uninstall-name": row_name, "aria-haspopup": "dialog", "aria-controls": "asset-uninstall-modal", "title": "Remove the MyPortal Tray Agent and RMM agent from this device, after an optional offboarding script"}}) %}{% endif -%}
+                  {%- set _ = row_actions.append({"label": "Delete", "variant": "danger", "icon": action_icons.ref("delete"), "attrs": {"data-asset-delete": true, "data-asset-id": asset.id, "data-asset-name": row_name, "title": "Remove this asset from MyPortal. Its agents stay installed and register the device again when they next check in."}}) -%}
                 {%- endif %}
                 {{ page_header_overflow("asset-actions-" ~ asset.id, "Actions", row_actions) }}
               </td>
@@ -318,6 +319,7 @@
 {% include "rmm/_run_modal.html" %}
 {% include "rmm/_command_modal.html" %}
 {% include "rmm/_choco_install_modal.html" %}
+{% if is_super_admin %}{% include "assets/_uninstall_modal.html" %}{% endif %}
 {% endif %}
 {% if has_assets %}{{ action_icons.sprite() }}{% endif %}
 {% include "partials/csrf.html" %}
@@ -328,5 +330,5 @@
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/assets.js') }}" defer></script>
   {% if can_push_rmm_agent %}<script src="{{ static_url('/static/js/rmm_agent_deploy.js') }}" defer></script>{% endif %}
-  {% if rmm_actions %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_command.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_tray_repair.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_choco_picker.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_choco_install.js') }}" defer></script>{% endif %}
+  {% if rmm_actions %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_command.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_tray_repair.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_choco_picker.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_choco_install.js') }}" defer></script>{% if is_super_admin %}<script src="{{ static_url('/static/js/asset_uninstall.js') }}" defer></script>{% endif %}{% endif %}
 {% endblock %}

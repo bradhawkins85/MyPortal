@@ -374,6 +374,10 @@ async def delete_asset(asset_id: int) -> None:
         "DELETE FROM asset_relationships WHERE target_type = 'asset' AND target_id = %s",
         (asset_id,),
     )
+    # The device's agents stay enrolled but forget the asset, so the next time
+    # they check in MyPortal registers the device again as a new asset.
+    await db.execute("UPDATE tray_devices SET asset_id = NULL WHERE asset_id = %s", (asset_id,))
+    await db.execute("UPDATE rmm_agents SET asset_id = NULL WHERE asset_id = %s", (asset_id,))
     await db.execute("DELETE FROM assets WHERE id = %s", (asset_id,))
 
 

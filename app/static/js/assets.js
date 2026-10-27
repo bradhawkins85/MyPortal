@@ -294,12 +294,19 @@
         if (!assetId) {
           return;
         }
-        if (!window.confirm('Delete asset?')) {
+        const name = button.getAttribute('data-asset-name') || 'this asset';
+        if (!window.confirm(`Delete ${name} from MyPortal?\n\nIf the tray or RMM agent is still installed, `
+          + 'the device is registered again as a new asset the next time it checks in. Use "Uninstall agents" to remove them.')) {
           return;
         }
+        const csrf = document.querySelector('meta[name="csrf-token"]');
         button.disabled = true;
         try {
-          const response = await fetch(`/assets/${assetId}`, { method: 'DELETE' });
+          const response = await fetch(`/assets/${assetId}`, {
+            method: 'DELETE',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-CSRF-Token': csrf ? csrf.getAttribute('content') : '' },
+          });
           if (!response.ok) {
             throw new Error(`Request failed with status ${response.status}`);
           }

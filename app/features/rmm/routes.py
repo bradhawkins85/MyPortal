@@ -9,6 +9,8 @@ Technician side (company scoped, ``menu.rmm_scripts``; write access runs scripts
 * ``GET/PUT /api/rmm/scripts/{id}/files`` list/set associated Gitea files
 * ``POST /api/rmm/scripts/{id}/runs`` push a script to devices
 * ``POST /api/rmm/assets/{id}/tray-repair`` repair the device's tray agent
+* ``POST /api/rmm/assets/{id}/uninstall`` remove the tray and RMM agent from the
+  device, after an optional offboarding script (super admin)
 * ``GET /api/rmm/runs`` / ``/api/rmm/runs/{id}``, ``POST /api/rmm/runs/{id}/cancel``
   (not yet collected) and ``/abort`` (stop a run the device is executing)
 * ``POST /rmm/scripts/sync`` load scripts from Gitea (super admin)
@@ -47,6 +49,7 @@ from app.services import audit as audit_service
 from app.services import gitea
 from app.services import gitea_sign_in
 from app.services import rmm_agent_deploy
+from app.services import rmm_agent_uninstall
 from app.services import rmm_automation
 from app.services import rmm_checks
 from app.services import rmm_commands
@@ -187,6 +190,7 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
         "remote_control": await rmm_remote_control.enabled_providers() if can_run and agent else [],
         "command_languages": rmm_commands.languages_for(agent) if can_run and agent else [],
         "tray_repair": bool(can_run and rmm_tray_repair.supported(agent)),
+        "uninstall": bool(can_run and rmm_agent_uninstall.supported(agent)),
     }
 
 
@@ -211,6 +215,7 @@ async def company_agent_details(company_id: int) -> dict[int, dict[str, Any]]:
             "os": str(agent.get("os") or "").lower(),
             "command_languages": rmm_commands.languages_for(agent),
             "tray_repair": rmm_tray_repair.supported(agent),
+            "uninstall": rmm_agent_uninstall.supported(agent),
         }
         for asset_id, agent in agents.items()
     }
@@ -775,6 +780,40 @@ async def tray_repair_api(asset_id: int, request: Request):
     return {"run_id": run_id}
 
 
+class UninstallRequest(BaseModel):
+    offboarding_script_id: int | None = Field(default=None, ge=1)
+
+
+@router.post("/api/rmm/assets/{asset_id:int}/uninstall", summary="Uninstall the tray and RMM agent from a device")
+async def uninstall_agents_api(asset_id: int, payload: UninstallRequest, request: Request):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    agent = await rmm_repo.get_asset_agent(asset_id)
+    if not agent or int(agent.get("company_id") or 0) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No RMM agent is installed on this device.")
+    try:
+        queued = await rmm_agent_uninstall.queue_uninstall(
+            agent={**agent, "company_id": int(company_id), "asset_id": asset_id},
+            requested_by_user_id=user.get("id"),
+            offboarding_script_id=payload.offboarding_script_id,
+        )
+    except rmm_scripts.RunRequestError as exc:
+        return JSONResponse({"detail": "; ".join(exc.errors.values()), "errors": exc.errors}, status_code=400)
+    await audit_service.record(
+        action="rmm.agent_uninstall.run",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="asset",
+        entity_id=asset_id,
+        metadata={
+            "company_id": company_id, "run_id": queued["run_id"], "stage": queued["stage"],
+            "offboarding_script_id": payload.offboarding_script_id,
+        },
+    )
+    return queued
+
+
 @router.get("/api/rmm/runs", summary="List script runs for the current company")
 async def list_runs_api(request: Request, asset_id: int | None = Query(default=None), limit: int = Query(default=50, ge=1, le=500)):
     _user, _company, company_id, _can_run = await _context(request, api=True, asset_id=asset_id)
@@ -976,4 +1015,5 @@ async def agent_run_result(run_id: int, payload: AgentResult, agent: dict = Depe
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     await rmm_automation.run_finished(run_id)
     await rmm_checks.run_finished(run_id)
+    await rmm_agent_uninstall.run_finished(run_id)
     return result

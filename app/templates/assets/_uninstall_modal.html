@@ -1,0 +1,37 @@
+{# Uninstall the MyPortal agents from a device, opened from the asset page's and
+   each Assets list row's Actions menu (super admins). asset_uninstall.js lists
+   the device's scripts as offboarding choices, posts to
+   /api/rmm/assets/{id}/uninstall and opens the run in the shared result viewer
+   (rmm/_run_modal.html). #}
+<div class="modal rmm-modal" id="asset-uninstall-modal" role="dialog" aria-modal="true" aria-labelledby="asset-uninstall-title" hidden data-asset-uninstall-modal>
+  <form class="modal__panel" data-asset-uninstall-form novalidate>
+    <header class="modal__header">
+      <div>
+        <p class="rmm-editor__eyebrow">Agent maintenance</p>
+        <h2 class="modal__title" id="asset-uninstall-title">Uninstall agents</h2>
+        <p class="rmm-editor__subtitle">Remove the MyPortal Tray Agent and the MyPortal RMM agent from <span data-asset-uninstall-device>this device</span>, with their services, files, settings and enrolment.</p>
+      </div>
+      <button type="button" class="modal__close" data-asset-uninstall-close aria-label="Close uninstall"></button>
+    </header>
+    <div class="modal__body">
+      <div class="form-field">
+        <label class="form-label" for="asset-uninstall-script">Offboarding script</label>
+        <select class="form-input" id="asset-uninstall-script" data-asset-uninstall-script>
+          <option value="">None – uninstall straight away</option>
+        </select>
+        <p class="form-help">Runs first, with its default values, to clean up anything else on the device. The agents are removed only if it finishes with exit code 0; if it fails, times out or is aborted they stay installed.</p>
+        <p class="form-help form-help--error" data-asset-uninstall-error="offboarding_script_id" hidden></p>
+      </div>
+      <div class="form-field">
+        <label class="form-checkbox"><span><input type="checkbox" data-asset-uninstall-confirm /> I understand MyPortal loses contact with this device. Reinstalling the tray app is the only way back.</span></label>
+      </div>
+      <p class="form-help">The asset and its history stay in MyPortal; delete it afterwards if you no longer need it.</p>
+      <p class="alert alert--warning" role="alert" data-asset-uninstall-error="form" hidden></p>
+    </div>
+    <footer class="modal__footer">
+      <span class="rmm-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-asset-uninstall-close>Cancel</button>
+      <button type="submit" class="button button--danger" data-asset-uninstall-submit disabled>Uninstall agents</button>
+    </footer>
+  </form>
+</div>

@@ -108,7 +108,7 @@ RESULT_VARIABLES = (
     ("Returned value", "{{result.values.NAME}}"),
 )
 # Runs MyPortal starts for its own jobs, not technicians' scripts.
-BUILT_IN_SOURCES = frozenset({"remote_control", "patch", "update_scan", "tray_repair", "command"})
+BUILT_IN_SOURCES = frozenset({"remote_control", "patch", "update_scan", "tray_repair", "agent_uninstall", "command"})
 MAX_CONDITIONS = 10
 MAX_VALUE_LENGTH = 1024
 MAX_PATTERN_LENGTH = 500

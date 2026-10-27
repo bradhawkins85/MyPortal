@@ -475,6 +475,7 @@ async def assets_page(request: Request):
                 language["value"] for language in rmm_agent.get("command_languages") or []
             )
             record["rmm_tray_repair"] = bool(rmm_agent.get("tray_repair"))
+            record["rmm_uninstall"] = bool(rmm_agent.get("uninstall"))
             record["can_health_check"] = can_health_check
             record["health_check_ready"] = bool(tray_device)
         if show_rmm_agent and record.get("id"):
@@ -2847,7 +2848,15 @@ async def delete_asset(request: Request, asset_id: int):
             status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
         )
 
+    # Agents on the device stay installed and register it again when they next
+    # check in; uninstalling them is the asset's "Uninstall agents" action.
     await asset_repo.delete_asset(asset_id)
+    await audit_service.record(
+        action="asset.delete", request=request, user_id=int(user["id"]),
+        entity_type="asset", entity_id=asset_id,
+        before={"name": record.get("name"), "serial_number": record.get("serial_number")},
+        metadata={"company_id": company_id},
+    )
     log_info(
         "Asset deleted",
         asset_id=asset_id,

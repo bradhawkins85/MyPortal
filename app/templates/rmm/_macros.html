@@ -85,6 +85,10 @@
     Ticket automation
   {%- elif run.run_source == 'tray_repair' -%}
     Tray agent repair{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
+  {%- elif run.run_source == 'agent_uninstall' -%}
+    Agent uninstall{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
+  {%- elif run.run_source == 'offboarding' -%}
+    Offboarding before uninstall{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'command' -%}
     Command{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'onboarding' -%}

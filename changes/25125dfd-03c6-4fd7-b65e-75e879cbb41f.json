@@ -1,0 +1,7 @@
+{
+  "guid": "25125dfd-03c6-4fd7-b65e-75e879cbb41f",
+  "occurred_at": "2026-10-27T01:30Z",
+  "change_type": "Feature",
+  "summary": "Assets: super admins can uninstall the MyPortal Tray Agent and RMM agent from a device, after an optional offboarding script that must succeed first, and delete an asset from its page; deleted devices with agents register again when they next check in",
+  "content_hash": "12ee07766d6220e06c9d1627d80f3a8da96d9a34ba79a2d825cc039239cdb0e7"
+}

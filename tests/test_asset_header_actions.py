@@ -25,6 +25,7 @@ def _values(**rmm):
         "remote_control": [{"provider": "rustdesk", "label": "RustDesk"}],
         "command_languages": [{"value": "powershell", "label": "PowerShell"}],
         "tray_repair": True,
+        "uninstall": True,
         "can_push_agent": True,
     }
     return {
@@ -48,9 +49,21 @@ def test_rmm_actions_join_the_grouped_actions_menu_with_icons(header):
     assert "RustDesk remote desktop" in menu and 'data-rmm-remote-mode="terminal"' in menu
     headings = [part.split("<", 1)[0] for part in menu.split('class="header-menu__heading" role="presentation">')[1:]]
     assert headings == ["Asset", "Remote access", "RMM", "Agent maintenance", "Go to"]
-    assert menu.count("header-menu__divider") == len(headings) - 1
+    # The super admin's destructive actions close the menu in an unlabelled group.
+    assert menu.count("header-menu__divider") == len(headings)
     assert menu.count('class="header-menu__icon"') == menu.count('class="header-menu__item')
     assert "Push RMM agent" not in menu
+    tail = menu.rsplit("header-menu__divider", 1)[1]
+    assert "Uninstall agents" in tail and 'data-asset-uninstall="10"' in tail
+    assert "Delete" in tail and 'data-asset-delete-redirect="/assets"' in tail
+
+
+def test_only_super_admins_get_uninstall_and_delete(header):
+    html = header.render(**{**_values(), "is_super_admin": False})
+    assert "Uninstall agents" not in html and "data-asset-delete" not in html
+    # Without an agent there is nothing to uninstall, but the asset can still be deleted.
+    html = header.render(**_values(agent=None, uninstall=False))
+    assert "Uninstall agents" not in html and "data-asset-delete" in html
 
 
 def test_rmm_actions_wait_for_the_agent(header):
