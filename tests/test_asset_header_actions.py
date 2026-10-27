@@ -85,20 +85,21 @@ def test_customer_view_hides_rmm_actions(header):
     assert "Agent maintenance" not in html
 
 
-def test_meshcentral_has_a_visible_connect_shortcut(header):
+def test_meshcentral_functions_stay_in_actions_without_a_connect_shortcut(header):
     providers = [{"provider": "meshcentral", "label": "MeshCentral"}]
     html = header.render(**_values(remote_control=providers))
-    shortcut = html.split('id="asset-detail-actions"', 1)[0]
-    assert 'data-rmm-remote="meshcentral"' in shortcut
-    assert 'data-rmm-remote-mode="remote"' in shortcut
-    assert 'data-rmm-remote-asset="10"' in shortcut
-    assert ">Connect with MeshCentral</button>" in shortcut
-    for mode in ("remote", "file_transfer", "terminal"):
-        assert f'data-rmm-remote-mode="{mode}"' in html.split('id="asset-detail-actions"', 1)[1]
+    assert "Connect with MeshCentral" not in html
+    assert 'data-rmm-remote="meshcentral"' not in html.split('id="asset-detail-actions"', 1)[0]
+    menu = html.split('id="asset-detail-actions"', 1)[1]
+    assert menu.count('data-rmm-remote="meshcentral"') == 3
+    assert menu.count('data-rmm-remote-asset="10"') == 3
+    for mode, label in (("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal")):
+        assert f'data-rmm-remote-mode="{mode}"' in menu
+        assert f"MeshCentral {label}" in menu
 
-    assert "Connect with MeshCentral" not in header.render(**_values())
-    assert "Connect with MeshCentral" not in header.render(**_values(agent=None, remote_control=providers))
-    assert "Connect with MeshCentral" not in header.render(**{**_values(remote_control=providers), "customer_safe": True})
+    for values in (_values(agent=None, remote_control=providers),
+                   {**_values(remote_control=providers), "customer_safe": True}):
+        assert 'data-rmm-remote="meshcentral"' not in header.render(**values)
 
 
 @pytest.mark.parametrize("can_wake,customer_safe,visible", [(True, False, True), (False, False, False), (True, True, False)])
