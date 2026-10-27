@@ -77,13 +77,15 @@ provider:
 3. Optionally name an **ID custom field**. MyPortal uses that asset custom field when the
    script does not report an ID.
 
-MeshCentral also needs:
+MeshCentral is configured once, in the `.env` file (one MeshCentral server per deployment, like
+RustDesk):
 
-- **MeshCentral address**, such as `https://mesh.example.com`.
-- **MeshCentral user** that technicians sign in as.
-- **Login token key**, printed by `node node_modules/meshcentral --logintokenkey` on the
-  MeshCentral server. When moving from Tactical RMM, the same user and key Tactical uses work
-  here.
+- `MESHCENTRAL_SERVER_URL`, the site address, such as `https://mesh.example.com`.
+- `MESHCENTRAL_USERNAME`, the user that technicians sign in as.
+- `MESHCENTRAL_LOGIN_TOKEN_KEY`, printed by `node node_modules/meshcentral --logintokenkey` on
+  the MeshCentral server. When moving from Tactical RMM, the same user and key Tactical uses
+  work here. The settings page shows whether each is set, but only the `.env` file holds the
+  values.
 
 ## Connecting
 

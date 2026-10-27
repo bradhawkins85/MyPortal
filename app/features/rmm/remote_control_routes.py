@@ -57,6 +57,7 @@ async def settings_page(request: Request):
             "title": "Remote control",
             "providers": await remote_control.load_settings(),
             "rustdesk_env": remote_control.rustdesk_environment(),
+            "mesh_env": remote_control.meshcentral_environment(),
             "scripts": [{"id": script["id"], "name": script["name"], "path": script["path"]} for script in scripts],
             "variables": await rmm_scripts.available_variables(),
         },
