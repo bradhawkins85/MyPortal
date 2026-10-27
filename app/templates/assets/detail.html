@@ -29,6 +29,7 @@
     {% set _ = detail_actions.append({"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id, "icon": icons.process}) %}
     {% if is_super_admin and not customer_safe %}{% set _ = detail_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true", "icon": icons.preview}) %}{% endif %}
     {% set _ = detail_actions.append({"type": "section", "label": "Remote access"}) %}
+    {% if can_wake and not customer_safe %}{% set _ = detail_actions.append({"label": "Wake on LAN", "icon": icons.wake, "attrs": {"data-wol-asset-id": asset.id, "data-confirm": "Wake this asset? A WoL magic packet will be broadcast by online agents on its network. The result is tracked for about 2 minutes."}}) %}{% endif %}
     {% if rmm_agent %}{% for session in rmm.remote_control or [] %}{% for mode, mode_label in [("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal")] %}{% set _ = detail_actions.append({"label": session.label ~ " " ~ mode_label, "icon": mode_icons[mode], "attrs": {"data-rmm-remote": session.provider, "data-rmm-remote-mode": mode, "data-rmm-remote-asset": asset.id, "data-rmm-remote-name": asset_display_name}}) %}{% endfor %}{% endfor %}{% endif %}
     {% set _ = detail_actions.append({"type": "section", "label": "RMM"}) %}
     {% if rmm_agent and rmm.can_run %}{% set _ = detail_actions.append({"label": "Check in now", "type": "submit", "form": "asset-checkin-form", "icon": icons.checkin, "attrs": {"title": "Queue a full agent check-in without changing its normal schedule"}}) %}{% endif %}
@@ -53,6 +54,7 @@
 {% endblock %}
 
 {% block content %}
+  {% if can_wake and not customer_safe %}<p class="form-help" id="wol-status-{{ asset.id }}" data-wol-status aria-live="polite"></p>{% endif %}
 <div class="asset-edit-page ce-workspace" data-asset-id="{{ asset.id }}" data-asset-edit>
   {% if rmm and rmm.can_run and not customer_safe %}
     <form id="asset-checkin-form" method="post" action="/rmm/assets/{{ asset.id }}/checkin">{% include "partials/csrf.html" %}</form>

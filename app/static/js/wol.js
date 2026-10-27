@@ -3,13 +3,16 @@
   if (!buttons.length) return;
 
   const statusFor = (button) => {
-    const scope = button.closest('td, .card__body');
+    const assetId = button.getAttribute('data-wol-asset-id');
+    const assetStatus = assetId && document.getElementById(`wol-status-${assetId}`);
+    if (assetStatus) return assetStatus;
+    const scope = button.closest('td, .card__body, .ce-section__body');
     return scope ? scope.querySelector('[data-wol-status]') : null;
   };
 
-  const setButtonState = (button, busy, label) => {
+  const setButtonState = (button, busy) => {
     button.disabled = busy;
-    if (!busy && label) button.textContent = label;
+    button.setAttribute('aria-busy', String(busy));
   };
 
   const formatTimestamp = (value) => {
@@ -52,7 +55,6 @@
   };
 
   buttons.forEach((button) => {
-    const originalLabel = button.textContent;
     button.addEventListener('click', () => {
       const message = button.getAttribute('data-confirm');
       if (message && !window.confirm(message)) return;
@@ -62,7 +64,7 @@
         ? `/api/wol/assets/${assetId}/wake`
         : `/api/wol/devices/${deviceId}/wake`;
       const status = statusFor(button);
-      setButtonState(button, true, 'Waking…');
+      setButtonState(button, true);
       if (status) status.textContent = 'Dispatching WoL magic packet…';
       fetch(endpoint, {
         method: 'POST',
@@ -89,7 +91,7 @@
         .catch((error) => {
           if (status) status.textContent = error.message || 'Wake request failed. Check your connection.';
         })
-        .finally(() => setButtonState(button, false, originalLabel));
+        .finally(() => setButtonState(button, false));
     });
   });
 })();
