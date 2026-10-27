@@ -31,7 +31,7 @@ func checkinLoop(ctx context.Context, api *client.Client, r *runner.Runner) {
 		wait := checkinEvery
 		if err := api.Checkin(ctx, report); err != nil {
 			log.Printf("check-in failed: %v", err)
-			wait = 15 * time.Minute
+			wait = jitter(15 * time.Minute)
 		}
 		sleep(ctx, wait)
 	}

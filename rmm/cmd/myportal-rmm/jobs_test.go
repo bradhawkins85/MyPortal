@@ -54,3 +54,17 @@ func TestOrdinaryJobWaitsForSlotAndCancellationStopsWaiting(t *testing.T) {
 		t.Fatal("ordinary job did not release its slot")
 	}
 }
+
+func TestJitterSpreadsWaits(t *testing.T) {
+	seen := map[time.Duration]bool{}
+	for i := 0; i < 200; i++ {
+		got := jitter(15 * time.Minute)
+		if got < 15*time.Minute*3/4 || got > 15*time.Minute*5/4 {
+			t.Fatalf("jitter(15m) = %v, want 11m15s to 18m45s", got)
+		}
+		seen[got] = true
+	}
+	if len(seen) < 100 {
+		t.Fatalf("jitter returned only %d distinct waits; agents would retry together", len(seen))
+	}
+}

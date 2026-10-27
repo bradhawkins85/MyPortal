@@ -57,7 +57,7 @@ def test_upgrade_repairs_control_checkout_permissions_before_fast_forward(tmp_pa
         )
     ]
 
-    assert 'chown -R "$owner:$owner" "$repo_root"' in function
+    assert 'chown -R "$owner:$(stat -c %G "$repo_root")" "$repo_root"' in function
     assert 'find "$git_dir" -type d -exec chmod u+rwx,go+rx {} +' in function
     assert 'find "$repo_root" -type f -exec chmod u+rw,go+r {} +' in function
     assert 'repair_control_checkout_permissions "$owner"' in SCRIPT
