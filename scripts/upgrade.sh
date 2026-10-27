@@ -5,7 +5,7 @@ set -Eeuo pipefail
 umask 027
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+PROJECT_ROOT=${MYPORTAL_CONTROL_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}
 SERVICE_USER="myportal"
 # shellcheck source=lib/python_runtime.sh
 source "${SCRIPT_DIR}/lib/python_runtime.sh"
@@ -33,6 +33,10 @@ fi
 clear_update_flag_on_failure() {
   local status=$?
   trap - EXIT
+  if ((status != 0)) && [[ "${MIGRATION_MAINTENANCE_ACTIVE:-false}" == true ]]; then
+    write_migration_maintenance_state failed true \
+      "Upgrade failed during maintenance. Workers remain paused; repair the error and retry the upgrade." || true
+  fi
   if ((status != 0)) && [[ -e "$SYSTEM_UPDATE_FLAG_FILE" || -L "$SYSTEM_UPDATE_FLAG_FILE" ]]; then
     rm -f -- "$SYSTEM_UPDATE_FLAG_FILE"
     echo "Upgrade aborted with status ${status}; cleared pending update flag ${SYSTEM_UPDATE_FLAG_FILE}." >&2
@@ -93,6 +97,7 @@ STEP_REPORT=""
 TRAY_ARTIFACT_ROOT="${MYPORTAL_TRAY_ARTIFACT_ROOT:-${SHARED_ROOT}/artifacts/tray}"
 TRAY_ARTIFACTS_AVAILABLE=false
 FEATURE_PACK_RELOAD_TIMEOUT="${MYPORTAL_FEATURE_PACK_RELOAD_TIMEOUT:-60}"
+MIGRATION_MAINTENANCE_ACTIVE=false
 
 usage() {
   cat <<'EOF'
@@ -219,7 +224,7 @@ cleanup_old_releases() {
   # Feature-pack and migration-only deployments move links without restarting
   # workers, so the script also keeps every slot's target and any release a
   # running process still works from.
-  if ! python3 "${PROJECT_ROOT}/scripts/cleanup_releases.py" "$RELEASE_ROOT" "$CURRENT_LINK" --retain 3 \
+  if ! python3 "${SCRIPT_DIR}/cleanup_releases.py" "$RELEASE_ROOT" "$CURRENT_LINK" --retain 3 \
       --protect "$INSTANCE_ROOT/blue" --protect "$INSTANCE_ROOT/green"; then
     echo "WARNING: post-deployment release cleanup failed; deployment remains successful." >&2
   fi
@@ -240,7 +245,7 @@ generate_deployment_plan() {
   ensure_updater_state_dir
   DEPLOYMENT_PLAN_FILE="${UPDATER_STATE_DIR}/deployment_plan.json"
   rm -f -- "${SHARED_ROOT}/state/deployment_plan.json"  # legacy location
-  PYTHONPATH="$PROJECT_ROOT" python3 -m app.services.deployment_plan "$base" "$target" >"$DEPLOYMENT_PLAN_FILE"
+  python3 "${SCRIPT_DIR}/../app/services/deployment_plan.py" "$base" "$target" >"$DEPLOYMENT_PLAN_FILE"
   DEPLOYMENT_PLAN=$(<"$DEPLOYMENT_PLAN_FILE")
   DEPLOYMENT_ACTION=$(plan_field action)
   DEPLOYMENT_REASON=$(plan_field reason)
@@ -900,7 +905,10 @@ PY
 rollback() {
   local old_active="$1" new_instance="$2" old_instance_release="$3" upstream_switched="$4"
   echo "Deployment failed; restoring ${old_active}." >&2
-  if [[ -n "$old_instance_release" && -d "$old_instance_release" ]]; then
+  if [[ "${MIGRATION_MAINTENANCE_ACTIVE:-false}" == true ]]; then
+    # Do not restart an older worker against a partially changed schema.
+    systemctl stop "myportal@${new_instance}.service" >/dev/null 2>&1 || true
+  elif [[ -n "$old_instance_release" && -d "$old_instance_release" ]]; then
     atomic_link "$old_instance_release" "$INSTANCE_ROOT/$new_instance"
     systemctl restart "myportal@${new_instance}.service" >/dev/null 2>&1 || true
   fi
@@ -941,9 +949,67 @@ run_rolling_restart() {
   trap - ERR
 }
 
+write_migration_maintenance_state() {
+  local phase="$1" enabled="$2" message="$3" staged
+  ensure_updater_state_dir || return 1
+  staged="${UPDATER_STATE_DIR}/migration-maintenance.$$"
+  python3 - "$phase" "$enabled" "$message" "$TARGET_REVISION" "$UPGRADE_STARTED_AT" >"$staged" <<'PY' || return 1
+import datetime, json, sys
+phase, enabled, message, revision, started = sys.argv[1:]
+now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+print(json.dumps({
+    "schema_version": 1, "upgrade_id": "migration-" + revision,
+    "target_revision": revision, "phase": phase, "mode": "rolling",
+    "maintenance": enabled == "true", "message": message,
+    "started_at": started, "updated_at": now,
+    "finished_at": now if phase in {"failed", "succeeded"} else None,
+    "outcome": phase if phase in {"failed", "succeeded"} else None,
+}))
+PY
+  publish_state_file "$staged" "${SHARED_ROOT}/state/upgrade-state.json" || return 1
+  rm -f -- "$staged"
+}
+
+enter_migration_maintenance() {
+  local unit
+  ensure_updater_state_dir || return 1
+  # Persist across retries, including a successful schema phase followed by
+  # a failed cutover (when no maintenance-only migrations remain pending).
+  touch "${UPDATER_STATE_DIR}/migration-maintenance.active" || return 1
+  MIGRATION_MAINTENANCE_ACTIVE=true
+  write_migration_maintenance_state draining true "Pausing application workers for required database maintenance." || return 1
+  # Stop both slots and the legacy service: HTTP gating alone does not stop
+  # schedulers, WebSockets, or in-flight agent collection from writing.
+  for unit in myportal@blue.service myportal@green.service myportal.service; do
+    if systemctl is-active --quiet "$unit"; then
+      systemctl stop "$unit" || return 1
+    fi
+  done
+  write_migration_maintenance_state migrating true "Applying required database maintenance; event collection is paused."
+}
+
+leave_migration_maintenance() {
+  [[ "$MIGRATION_MAINTENANCE_ACTIVE" == true ]] || return 0
+  write_migration_maintenance_state succeeded false "Database maintenance completed; the new release is serving."
+  rm -f -- "${UPDATER_STATE_DIR}/migration-maintenance.active"
+  MIGRATION_MAINTENANCE_ACTIVE=false
+}
+
 run_migration_phase() {
-  local release="$1" serving="$2" target="$3" args=()
-  [[ "${UPG01_MAINTENANCE_MODE:-false}" == "true" ]] && args+=(--maintenance)
+  local release="$1" serving="$2" target="$3" required args=()
+  if ! required=$(run_release_manage "$release" migration-maintenance-required); then
+    write_upgrade_status failed "Could not inspect pending migrations; no schema changes were applied."
+    return 1
+  fi
+  case "$required" in
+    true|false) ;;
+    *) echo "Invalid migration maintenance preflight result: ${required}" >&2; return 1 ;;
+  esac
+  if [[ "$required" == true || "${UPG01_MAINTENANCE_MODE:-false}" == true \
+    || -f "${UPDATER_STATE_DIR}/migration-maintenance.active" ]]; then
+    enter_migration_maintenance || return 1
+    args+=(--maintenance)
+  fi
   write_upgrade_status migrating "Applying and validating schema changes before cutover."
   if ! run_release_manage "$release" migrate \
     --serving-release "${serving:-none}" --target-release "$target" "${args[@]}"; then
@@ -1089,6 +1155,24 @@ update_control_checkout() {
   echo "Updated the control checkout at ${PROJECT_ROOT} to ${target}." >&2
 }
 
+run_target_upgrade_coordinator() {
+  # Serving code and deployment logic must come from the same fetched commit,
+  # even when local edits/branches prevent fast-forwarding the control tree.
+  local revision="$1" staged
+  [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+  staged=$(mktemp -d "${UPDATER_STATE_DIR}/coordinator-${revision}.XXXXXX") || return 1
+  if ! git archive "$revision" scripts app/services/deployment_plan.py | tar -x -C "$staged"; then
+    rm -rf -- "$staged"
+    return 1
+  fi
+  echo "Executing fetched upgrade coordinator ${revision}; control checkout: ${PROJECT_ROOT}." >&2
+  # Release the old coordinator's lock before replacing it. The new process
+  # reacquires it and fetches again, repeating the handoff if origin advanced.
+  exec 9>&-
+  MYPORTAL_CONTROL_ROOT="$PROJECT_ROOT" MYPORTAL_ENV_FILE="$ENV_FILE" \
+    MYPORTAL_UPGRADE_REEXEC="$revision" exec bash "$staged/scripts/upgrade.sh" "${UPGRADE_ARGS[@]}"
+}
+
 provision_gitea_for_revision() {
   # The control checkout may be pinned or locally edited. Use the same
   # fetched revision as the application, without modifying those local files.
@@ -1099,6 +1183,19 @@ provision_gitea_for_revision() {
     return 1
   fi
   bash "$helper" "$ENV_FILE" || status=$?
+  rm -f "$helper"
+  return "$status"
+}
+
+configure_mariadb_for_revision() {
+  # Apply the target release's tuning even if the control checkout is pinned.
+  local revision="$1" helper status=0
+  helper=$(mktemp "${UPDATER_STATE_DIR}/configure-mariadb.XXXXXX") || return 1
+  if ! git show "${revision}:scripts/configure_mariadb.py" >"$helper"; then
+    rm -f "$helper"
+    return 1
+  fi
+  python3 "$helper" "$ENV_FILE" || status=$?
   rm -f "$helper"
   return "$status"
 }
@@ -1144,6 +1241,8 @@ install_upgrade_command() {
     printf '#!/usr/bin/env bash\n'
     printf '# Installed by scripts/upgrade.sh: deploy the latest origin/main from the\n'
     printf '# MyPortal control checkout at %s.\n' "$PROJECT_ROOT"
+    printf 'export MYPORTAL_CONTROL_ROOT=%q\n' "$PROJECT_ROOT"
+    printf 'export MYPORTAL_ENV_FILE=%q\n' "$ENV_FILE"
     printf 'exec %q "$@"\n' "${SCRIPT_DIR}/upgrade.sh"
   } >"$staging"
   chmod 0755 "$staging"
@@ -1268,10 +1367,11 @@ validate_origin_remote "$(git config --get remote.origin.url)"
 validate_required_configuration
 git fetch --quiet origin main
 TARGET_REVISION=$(git rev-parse 'origin/main^{commit}')
-if [[ -z "${MYPORTAL_UPGRADE_REEXEC:-}" ]] && update_control_checkout "$TARGET_REVISION"; then
-  # Run the updated upgrade script, which takes the lock itself.
-  exec 9>&-
-  MYPORTAL_UPGRADE_REEXEC=1 exec bash "${SCRIPT_DIR}/upgrade.sh" "${UPGRADE_ARGS[@]}"
+if [[ "${MYPORTAL_UPGRADE_REEXEC:-}" != "$TARGET_REVISION" ]]; then
+  update_control_checkout "$TARGET_REVISION" || true
+  run_target_upgrade_coordinator "$TARGET_REVISION"
+  # exec must succeed: never continue with stale deployment logic.
+  exit 1
 fi
 # Releases run on MYPORTAL_PYTHON_VERSION, not whatever python3 the host has.
 # Hosts installed on an older Python are moved over here; the interpreter
@@ -1282,6 +1382,8 @@ RUNTIME_PYTHON=$(ensure_runtime_python "${SHARED_ROOT}/python") || {
   exit 1
 }
 echo "Release runtime: ${RUNTIME_PYTHON} ($("$RUNTIME_PYTHON" -V 2>&1))." >&2
+configure_mariadb_for_revision "$TARGET_REVISION" \
+  || echo "Warning: optional MariaDB buffer pool tuning failed; continuing upgrade with existing settings. Review the MariaDB diagnostic above." >&2
 redis_env_before=$(sha256sum "$ENV_FILE")
 bash "${SCRIPT_DIR}/provision_redis.sh" "$ENV_FILE"
 # Gitea for the RMM script library is optional: a failure is reported and
@@ -1460,7 +1562,7 @@ fi
 repair_assigned_release_uploads
 run_pre_upgrade_backup || exit 1
 run_migration_phase "$RELEASE_DIR" "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"
-if [[ "$redis_env_before" == "$redis_env_after" ]] && is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
+if [[ "$MIGRATION_MAINTENANCE_ACTIVE" != true && "$redis_env_before" == "$redis_env_after" ]] && is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
   # Schema-only expands need no worker signal: the serving revision was
   # explicitly declared compatible and the database lock applied them once.
   atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
@@ -1476,6 +1578,7 @@ install_backup_timer "$RELEASE_DIR"
 run_rolling_restart "$TARGET_REVISION" "$RELEASE_DIR"
 clear_published_revision
 retire_legacy_service
+leave_migration_maintenance
 write_upgrade_status succeeded "Release ${TARGET_REVISION} is serving; previous release retained."
 echo "Successfully deployed ${TARGET_REVISION} from ${RELEASE_DIR}."
 cleanup_old_releases

@@ -718,15 +718,35 @@ class Database:
             if release and declared and declared != "*" and release not in {v.strip() for v in declared.split(",")}:
                 raise RuntimeError(f"Migration {path.name} is not compatible with {release} ({key})")
 
+    def _migration_database(self, path: Path) -> Any | None:
+        """Resolve an optional secondary target without hard-coding database names."""
+        for line in path.read_text(encoding="utf-8").splitlines():
+            match = re.match(r"\s*--\s*database\s*:\s*(.*?)\s*$", line, re.I)
+            if match:
+                if match.group(1) != "event-log":
+                    raise RuntimeError(f"Unknown migration database in {path.name}")
+                from .event_log_database import event_log_db
+
+                return event_log_db
+            if line.strip() and not line.lstrip().startswith("--"):
+                break
+        return None
+
     async def _apply_migration_file(self, conn: Any, path: Path, metadata: dict[str, Any] | None = None) -> None:
         """Apply a migration file to the database."""
         sql = path.read_text(encoding="utf-8")
+        secondary = self._migration_database(path)
         
         # Adapt SQL for SQLite if necessary
-        if self._use_sqlite:
+        if self._use_sqlite and secondary is None:
             sql = self._adapt_sql_for_sqlite(sql)
         
         statements = self._split_sql_statements(sql)
+        if secondary is not None:
+            await secondary.run_sql_migration(statements)
+            # Completion is recorded in the main deployment ledger only after
+            # the secondary DDL succeeds. Never run it against the main DB.
+            statements = []
         
         if self._use_sqlite:
             for statement in statements:
@@ -763,6 +783,29 @@ class Database:
                     await cursor.execute("INSERT INTO migrations (name) VALUES (%s)", (path.name,))
                 else:
                     await cursor.execute("UPDATE migrations SET state=%s, completed_at=UTC_TIMESTAMP(6), error_details=NULL WHERE name=%s", ("completed", path.name))
+
+    async def migrations_require_maintenance(self) -> bool:
+        """Inspect pending deployment migrations before pausing serving workers."""
+        await self.connect()
+        async with self.acquire() as conn:
+            await self._ensure_migrations_table(conn)
+            if self._use_sqlite:
+                cursor = await conn.execute("SELECT name, state FROM migrations")
+                rows = await cursor.fetchall()
+            else:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT name, state FROM migrations")
+                    rows = await cursor.fetchall()
+        completed = {row[0] for row in rows if row[1] == "completed"}
+        for path in sorted(self._get_migrations_dir().glob("*.sql")):
+            if path.name in completed:
+                continue
+            secondary = self._migration_database(path)
+            if secondary is not None and not secondary.is_configured():
+                continue
+            if self._migration_metadata(path)["maintenance"]:
+                return True
+        return False
 
     async def run_migrations(self, *, serving_release: str | None = None,
                              target_release: str | None = None,
@@ -851,6 +894,11 @@ class Database:
                                 async with conn.cursor() as cursor: await cursor.execute("UPDATE migrations SET checksum=%s WHERE name=%s", (checksum, path.name))
                         continue
                     metadata = self._migration_metadata(path)
+                    secondary = self._migration_database(path)
+                    if secondary is not None and not secondary.is_configured():
+                        logger.info("Leaving migration {name} pending: secondary database is not configured",
+                                    name=path.name)
+                        continue
                     # A brand-new empty schema has no concurrently serving old
                     # release, so maintenance-only contract steps are safe as
                     # part of bootstrap. Upgrades must explicitly enter UPG01.
@@ -950,6 +998,11 @@ class Database:
                 await self._ensure_migrations_table(conn)
 
                 for path in target_paths:
+                    secondary = self._migration_database(path)
+                    if secondary is not None and not secondary.is_configured():
+                        logger.info("Skipping reprocess of {name}: secondary database is not configured",
+                                    name=path.name)
+                        continue
                     if self._use_sqlite:
                         await conn.execute("DELETE FROM migrations WHERE name = ?", (path.name,))
                         await conn.commit()
