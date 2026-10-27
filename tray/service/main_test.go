@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -249,5 +251,35 @@ func TestHeadlessLinuxDropsUserSessionMessages(t *testing.T) {
 	linuxDesktopInstalled = func() bool { return true }
 	if headless() || !uiReadsState("linux") {
 		t.Fatal("a Linux desktop install must share its state with the UI")
+	}
+}
+
+func TestWolMagicPacketIsStandard102ByteFormat(t *testing.T) {
+	mac, err := net.ParseMAC("AA:BB:CC:DD:EE:FF")
+	if err != nil {
+		t.Fatalf("parse MAC: %v", err)
+	}
+	pkt := wolMagicPacket(mac)
+	if len(pkt) != 102 {
+		t.Fatalf("magic packet is %d bytes, want 102", len(pkt))
+	}
+	for i := 0; i < 6; i++ {
+		if pkt[i] != 0xFF {
+			t.Fatalf("byte %d is 0x%02x, want 0xFF", i, pkt[i])
+		}
+	}
+}
+
+func TestWolMagicPacketRepeatsMACSixteenTimes(t *testing.T) {
+	mac, err := net.ParseMAC("0A:1B:2C:3D:4E:5F")
+	if err != nil {
+		t.Fatalf("parse MAC: %v", err)
+	}
+	pkt := wolMagicPacket(mac)
+	for i := 0; i < 16; i++ {
+		start := 6 + i*6
+		if !bytes.Equal(pkt[start:start+6], []byte(mac)) {
+			t.Fatalf("block %d = %v, want %v", i, pkt[start:start+6], mac)
+		}
 	}
 }

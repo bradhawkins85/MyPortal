@@ -270,6 +270,7 @@ class SchedulerService:
             next_run_time=datetime.now(timezone.utc), replace_existing=True,
         )
         self._register_spam_purge_job()
+        self._register_wol_job()
         await self._ensure_monitoring_jobs()
         self._start_refresh_task()
         log_info("Scheduler started")
@@ -324,6 +325,40 @@ class SchedulerService:
             replace_existing=True,
         )
         log_info("M365 spam purge in-app poller registered", interval_seconds=poll_seconds)
+
+    def _register_wol_job(self) -> None:
+        """Register the Wake-on-LAN outcome checker.
+
+        Polls ``wol.check_pending_attempts()`` on a short interval so a WoL
+        attempt's pending/awaiting state is resolved (awake / timeout) without
+        a separate worker. The ``singleton_run`` lease keeps one blue/green
+        instance processing at a time.
+        """
+
+        from app.services.singleton_jobs import singleton_run
+
+        @singleton_run("wol_outcome_check", ttl_seconds=60)
+        async def _check_wol() -> None:
+            from app.services import wol as wol_service
+
+            try:
+                resolved = await wol_service.check_pending_attempts()
+                if resolved:
+                    log_info("WoL outcome checker: resolved attempts", count=resolved)
+            except Exception as exc:  # noqa: BLE001 - keep the poller alive
+                log_error("WoL outcome checker error", error=str(exc))
+
+        self._scheduler.add_job(
+            _check_wol,
+            "interval",
+            seconds=20,
+            id="wol-outcome-checker",
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(timezone.utc),
+            replace_existing=True,
+        )
+        log_info("WoL outcome checker registered", interval_seconds=20)
 
     async def refresh(self) -> None:
         if not self._started:

@@ -1923,6 +1923,12 @@ async def asset_detail_page(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
         )
+    can_wake = (not customer_safe) and await main_module._is_helpdesk_technician(user, request)
+    wol_stats: dict = {}
+    if can_wake:
+        from app.repositories import wol as wol_repo
+
+        wol_stats = await wol_repo.asset_stats(asset_id)
 
     if customer_safe:
         record = _customer_asset(dict(record))
@@ -2100,6 +2106,8 @@ async def asset_detail_page(
             "linked_runbooks": linked_runbooks,
             "linked_websites": [] if customer_safe else await websites_repo.list_for_asset(company_id, asset_id),
             "can_edit": not customer_safe and can_write,
+            "can_wake": can_wake,
+            "wol_stats": wol_stats,
             "asset_type": asset_types.get(asset_types.effective(record)),
             "asset_type_label": asset_types.display_label(record),
             "derived_asset_type": asset_types.get(asset_types.derive(
