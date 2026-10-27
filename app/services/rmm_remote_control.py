@@ -19,7 +19,9 @@ When a technician clicks Connect on an asset:
    the session; run history shows them masked and the output has them blanked.
 3. :func:`session_status` builds the launch link once the run finishes: a
    ``rustdesk://`` link, or a MeshCentral address carrying a login token made
-   from the server's login token key (``meshcentral --logintokenkey``).
+   from the server's login token key. Both ``RUSTDESK_CFG`` and the MeshCentral
+   address, user and login token key come from the .env file (see
+   :func:`rustdesk_environment` / :func:`meshcentral_environment`).
 
 Without a chosen script, RustDesk uses MyPortal's built-in one
 (``rmm_builtin/rustdesk_activate*``): on Windows and macOS it installs RustDesk
@@ -192,9 +194,6 @@ def _public_provider(row: Mapping[str, Any], script: Mapping[str, Any] | None = 
         "activation_script_id": row.get("activation_script_id"),
         "activation_script_name": row.get("activation_script_name"),
         "activation_script_active": row.get("activation_script_active"),
-        "server_url": row.get("server_url") or "",
-        "username": row.get("username") or "",
-        "secret_set": bool(row.get("secret_encrypted")),
         "id_field": row.get("id_field") or "",
         "fields": _script_values(script, _stored_entries(row)),
         "builtin": row["provider"] in {"rustdesk", "meshcentral"} and not row.get("activation_script_id"),
@@ -211,6 +210,44 @@ def rustdesk_environment() -> dict[str, bool]:
         "installer_set": bool((settings.rustdesk_installer_url or "").strip()),
         "macos_installer_set": bool((settings.rustdesk_macos_installer_url or "").strip()),
     }
+
+
+def meshcentral_environment() -> dict[str, bool]:
+    """Whether the MeshCentral .env settings are present (never their values)."""
+
+    settings = get_settings()
+    return {
+        "server_set": bool((settings.meshcentral_server_url or "").strip()),
+        "username_set": bool((settings.meshcentral_username or "").strip()),
+        "token_key_set": bool((settings.meshcentral_login_token_key or "").strip()),
+    }
+
+
+def _meshcentral_config() -> tuple[str, str, str]:
+    """The MeshCentral site, sign-in user and login token key from the .env file."""
+
+    settings = get_settings()
+    site = (settings.meshcentral_server_url or "").strip().rstrip("/")
+    username = (settings.meshcentral_username or "").strip()
+    key = re.sub(r"\s+", "", settings.meshcentral_login_token_key or "")
+    missing = [
+        name
+        for name, value in (
+            ("MESHCENTRAL_SERVER_URL", site),
+            ("MESHCENTRAL_USERNAME", username),
+            ("MESHCENTRAL_LOGIN_TOKEN_KEY", key),
+        )
+        if not value
+    ]
+    if missing:
+        raise RemoteControlError(
+            "MeshCentral is not configured. Set " + ", ".join(missing) + " in the .env file."
+        )
+    if not _HEX.match(key) or len(key) < 64 or len(key) % 2:
+        raise RemoteControlError(
+            "MESHCENTRAL_LOGIN_TOKEN_KEY is the long hex value printed by meshcentral --logintokenkey."
+        )
+    return site, username, key
 
 
 async def load_settings() -> list[dict[str, Any]]:
@@ -230,16 +267,6 @@ async def enabled_providers() -> list[dict[str, str]]:
         for name in PROVIDERS
         if providers[name]["is_enabled"]
     ]
-
-
-def _clean_server_url(value: str) -> str:
-    value = (value or "").strip().rstrip("/")
-    if not value:
-        return ""
-    parts = urlsplit(value)
-    if parts.scheme not in {"https", "http"} or not parts.hostname or parts.query or parts.fragment:
-        raise RemoteControlError("Enter the MeshCentral address, for example https://mesh.example.com.")
-    return value
 
 
 async def save_settings(provider: str, form: Mapping[str, Any], *, user_id: int | None) -> None:
@@ -270,26 +297,15 @@ async def save_settings(provider: str, form: Mapping[str, Any], *, user_id: int 
             if text.strip():
                 entries[key] = text
     id_field = str(form.get("id_field") or "").strip()[:255] or None
-    server_url = username = secret = None
-    if provider == "meshcentral":
-        server_url = _clean_server_url(str(form.get("server_url") or "")) or None
-        username = str(form.get("username") or "").strip()[:255] or None
-        key = re.sub(r"\s+", "", str(form.get("secret") or ""))
-        if key:
-            if not _HEX.match(key) or len(key) < 64 or len(key) % 2:
-                raise RemoteControlError(
-                    "The login token key is the long hex value printed by meshcentral --logintokenkey."
-                )
-            secret = encrypt_secret(key)
-        if enabled and not (server_url and username and (secret or current.get("secret_encrypted"))):
-            raise RemoteControlError("MeshCentral needs its address, a user name and the login token key.")
     await remote_repo.save_provider(
         provider,
         is_enabled=enabled,
         activation_script_id=script_id,
-        server_url=server_url,
-        username=username,
-        secret_encrypted=secret,
+        # MeshCentral's address, user and login token key live in the .env file
+        # (see _meshcentral_config), so these provider columns stay empty.
+        server_url=None,
+        username=None,
+        secret_encrypted=None,
         id_field=id_field,
         entries_encrypted=encrypt_secret(json.dumps(entries)) if entries else None,
         user_id=user_id,
@@ -390,7 +406,7 @@ async def _queue_builtin_rustdesk(agent: Mapping[str, Any], password: str, user_
 
 
 async def _prepare_builtin_meshcentral(
-    agent: Mapping[str, Any], settings: Mapping[str, Any], company_id: int
+    agent: Mapping[str, Any], company_id: int
 ) -> tuple[str, list[str]]:
     """The company's MeshCentral group id and the host name to match the node by.
 
@@ -401,11 +417,7 @@ async def _prepare_builtin_meshcentral(
     the agent has no command-line that prints it.
     """
 
-    site = (settings.get("server_url") or "").strip().rstrip("/")
-    username = (settings.get("username") or "").strip()
-    if not (site and username and settings.get("secret_encrypted")):
-        raise RemoteControlError("MeshCentral needs its address, a user name and the login token key.")
-    key = decrypt_secret(str(settings["secret_encrypted"]), allow_plaintext=False)
+    site, username, key = _meshcentral_config()
     token = meshcentral_login_token(key, username)
     company = await companies_repo.get_company_by_id(int(company_id))
     group_name = str((company or {}).get("name") or "").strip()
@@ -420,7 +432,7 @@ async def _prepare_builtin_meshcentral(
 
 
 async def _queue_builtin_meshcentral(
-    agent: Mapping[str, Any], group_id: str, user_id: int | None, settings: Mapping[str, Any]
+    agent: Mapping[str, Any], group_id: str, user_id: int | None
 ) -> int:
     """Queue the built-in MeshCentral script, pointing it at the company's group."""
 
@@ -428,8 +440,9 @@ async def _queue_builtin_meshcentral(
     problem = rmm_scripts.device_problem(script, agent)
     if problem:
         raise RemoteControlError(problem)
+    site, _username, _key = _meshcentral_config()
     env = {
-        "MESH_SITE": (settings.get("server_url") or "").strip().rstrip("/"),
+        "MESH_SITE": site,
         "MESH_GROUP_ID": group_id,
     }
     return await rmm_repo.create_run(
@@ -476,7 +489,7 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
     mesh_group_id: str | None = None
     mesh_hosts: list[str] = []
     if builtin_mesh:
-        mesh_group_id, mesh_hosts = await _prepare_builtin_meshcentral(agent, settings, company_id)
+        mesh_group_id, mesh_hosts = await _prepare_builtin_meshcentral(agent, company_id)
     session_values: dict[str, Any] = {}
     if builtin:
         # The built-in script sets this password, so MyPortal knows it up front.
@@ -504,7 +517,7 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
         rmm_scripts.notify_agent(int(agent["id"]))
     elif builtin_mesh:
         try:
-            run_id = await _queue_builtin_meshcentral(agent, mesh_group_id, user_id, settings)
+            run_id = await _queue_builtin_meshcentral(agent, mesh_group_id, user_id)
         except RemoteControlError as exc:
             await remote_repo.finish_session(session_id, status="failed", error_message=exc.message)
             raise
@@ -620,12 +633,9 @@ async def _launch_url(session: Mapping[str, Any], settings: Mapping[str, Any], v
                 + (f", or fill in the {settings['id_field']} field." if settings.get("id_field") else ".")
             )
         return rustdesk_url(remote_id, values.get("password"), session.get("mode") or "remote")
-    if not (settings.get("server_url") and settings.get("username") and settings.get("secret_encrypted")):
-        raise RemoteControlError("MeshCentral is missing its address, user name or login token key.")
-    key = decrypt_secret(str(settings["secret_encrypted"]), allow_plaintext=False)
+    # MeshCentral's address, user and login token key come from the .env file.
+    site, username, key = _meshcentral_config()
     mode = session.get("mode") or "remote"
-    site = str(settings["server_url"]).strip().rstrip("/")
-    username = str(settings["username"])
     group_id = values.get("mesh_group_id")
     if group_id:
         # Built-in: the agent was installed into the company's group, so ask

@@ -46,17 +46,8 @@
         </div>
         {% if provider.provider == "meshcentral" %}
         <div class="form-field">
-          <label class="form-label" for="rmm-remote-mesh-url">MeshCentral address</label>
-          <input class="form-input" id="rmm-remote-mesh-url" name="server_url" type="url" maxlength="512" value="{{ provider.server_url }}" placeholder="https://mesh.example.com">
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="rmm-remote-mesh-user">MeshCentral user</label>
-          <input class="form-input" id="rmm-remote-mesh-user" name="username" maxlength="255" value="{{ provider.username }}" autocomplete="off" placeholder="tactical">
-          <p class="form-help">Technicians sign in to MeshCentral as this user.</p>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="rmm-remote-mesh-key">Login token key</label>
-          <input class="form-input" id="rmm-remote-mesh-key" name="secret" type="password" autocomplete="new-password" placeholder="{{ 'Saved: leave blank to keep it' if provider.secret_set else 'Output of meshcentral --logintokenkey' }}">
+          <label class="form-label">MeshCentral server</label>
+          <p class="form-help">Configured in the <code>.env</code> file: <code>MESHCENTRAL_SERVER_URL</code> is {{ "set" if mesh_env.server_set else "not set" }}, <code>MESHCENTRAL_USERNAME</code> is {{ "set" if mesh_env.username_set else "not set" }}, and <code>MESHCENTRAL_LOGIN_TOKEN_KEY</code> is {{ "set" if mesh_env.token_key_set else "not set" }}. Technicians sign in to MeshCentral as this user.</p>
         </div>
         {% endif %}
       </div>
