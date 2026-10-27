@@ -78,9 +78,14 @@
         {% if linux_ready %}
           <details class="tray-deploy__option">
             <summary>Install on Linux</summary>
-            <p class="tray-deploy__help">Open a terminal and run this command. Enter your password if asked. It adds the tray icon on a desktop computer and installs only the background service on a server.</p>
+            <p class="tray-deploy__help">Open a terminal and run this command. Enter your password if asked. It automatically detects an installed desktop environment, adding the tray icon on desktops and installing only the background service on headless servers such as Proxmox VE.</p>
             <pre class="code-block"><code>curl -fsSL '{{ deploy_base }}/install.sh' | sudo bash</code></pre>
-            <p class="tray-deploy__help">For a server without a desktop, such as Proxmox VE, add <code>-s -- --headless</code> after <code>bash</code>. Needs systemd on an amd64 or arm64 computer.</p>
+            <p class="tray-deploy__help">Optional Linux arguments override automatic detection. Most computers do not need either argument:</p>
+            <ul class="tray-deploy__help">
+              <li><code>--headless</code>: Install only the background service, even if a desktop is installed. Add <code>-s -- --headless</code> after <code>bash</code>.</li>
+              <li><code>--desktop</code>: Install the tray icon as well as the background service. Use this if your installed desktop is not detected. Add <code>-s -- --desktop</code> after <code>bash</code>.</li>
+            </ul>
+            <p class="tray-deploy__help">Choose at most one override. Needs systemd on an amd64 or arm64 computer. The tray icon appears the next time you sign in to the desktop.</p>
           </details>
         {% endif %}
         {% if not windows_ready %}

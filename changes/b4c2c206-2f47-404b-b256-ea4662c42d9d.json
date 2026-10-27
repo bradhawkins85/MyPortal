@@ -1,0 +1,7 @@
+{
+  "guid": "b4c2c206-2f47-404b-b256-ea4662c42d9d",
+  "occurred_at": "2026-10-27T13:21Z",
+  "change_type": "Fix",
+  "summary": "Linux agent installer automatically detects installed X11 and Wayland desktop sessions, choosing service-only installation on headless servers without requiring --headless, including servers using graphical.target.",
+  "content_hash": "68adf7b6a05fd1fad8a090e437807bdd1630408bd09716bfb6a81ce4ef6580a9"
+}
