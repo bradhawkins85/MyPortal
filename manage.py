@@ -57,6 +57,14 @@ async def rebuild(args: argparse.Namespace) -> None:
         await db.disconnect()
 
 
+async def migration_maintenance_required(args: argparse.Namespace) -> None:
+    """Print a machine-readable preflight result for the upgrade coordinator."""
+    try:
+        print("true" if await db.migrations_require_maintenance() else "false")
+    finally:
+        await db.disconnect()
+
+
 async def migrate(args: argparse.Namespace) -> None:
     """Run the deployment's single, locked schema phase."""
     await db.connect()
@@ -181,6 +189,7 @@ def main() -> None:
     migrate_parser.add_argument("--serving-release")
     migrate_parser.add_argument("--target-release", required=True)
     migrate_parser.add_argument("--maintenance", action="store_true")
+    sub.add_parser("migration-maintenance-required", help="check pending migrations for maintenance requirements")
     rebuild_parser = sub.add_parser("rebuild-rag-relationships")
     rebuild_parser.add_argument("--all", action="store_true")
     rebuild_parser.add_argument("--tickets", action="store_true")
@@ -226,6 +235,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "migrate":
         asyncio.run(migrate(args))
+    elif args.command == "migration-maintenance-required":
+        asyncio.run(migration_maintenance_required(args))
     elif args.command == "rebuild-rag-relationships":
         asyncio.run(rebuild(args))
     elif args.command == "migrate-legacy-ticket-attachments":

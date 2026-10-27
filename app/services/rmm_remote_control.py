@@ -30,9 +30,9 @@ starts the RustDesk service, sets a one-time password MyPortal generates and
 reports the ID. A device without the RMM agent falls back to an
 asset custom field holding its ID.
 
-MeshCentral has a matching built-in (``rmm_builtin/meshcentral_activate*``): on
-first use it downloads the self-installing MeshCentral agent scoped to a device
-group named after the device's company, so the device lands in its company's
+MeshCentral has a matching built-in (``rmm_builtin/meshcentral_activate*``).
+MyPortal downloads the authenticated installer and delivers it through RMM
+associated files, scoped to a device group named after the device's company, so the device lands in its company's
 group rather than one shared group. The agent has no command-line that prints
 its node id, so once the run finishes MyPortal asks the MeshCentral control
 channel (``app.services.meshcentral``) for the node matching the device's host
@@ -65,7 +65,7 @@ from app.repositories import rmm_remote_control as remote_repo
 from app.repositories import companies as companies_repo
 from app.core.config import get_settings
 from app.security.encryption import decrypt_secret, encrypt_secret
-from app.services import rmm_scripts
+from app.services import rmm_scripts, rmm_script_files
 from app.services import meshcentral
 
 PROVIDERS = remote_repo.PROVIDERS
@@ -435,16 +435,45 @@ async def _prepare_builtin_meshcentral(
 async def _queue_builtin_meshcentral(
     agent: Mapping[str, Any], group_id: str, user_id: int | None
 ) -> int:
-    """Queue the built-in MeshCentral script, pointing it at the company's group."""
+    """Download an authenticated installer and deliver it as an RMM run file."""
 
     script = rmm_scripts.always_run(builtin_meshcentral_script(agent), agent)
     problem = rmm_scripts.device_problem(script, agent)
     if problem:
         raise RemoteControlError(problem)
-    site, _username, _key = _meshcentral_config()
+    if not agent.get("script_files_supported"):
+        raise RemoteControlError("Update the RMM agent before installing MeshCentral through MyPortal.")
+    os_name = str(agent.get("os") or "windows").lower()
+    arch = str(agent.get("arch") or "").lower()
+    arch = {"x86_64": "amd64", "x64": "amd64", "aarch64": "arm64",
+            "x86": "386", "i386": "386", "i686": "386"}.get(arch, arch)
+    windows = os_name == "windows"
+    if os_name in {"darwin", "macos"}:
+        arch_id = 10005
+    else:
+        arch_id = ({"amd64": 4, "arm64": 43, "386": 3} if windows else
+                   {"amd64": 6, "arm64": 32, "386": 5}).get(arch)
+        if arch_id is None:
+            raise RemoteControlError("The device must report a supported architecture before installing MeshCentral.")
+    site, username, key = _meshcentral_config()
+    try:
+        token = meshcentral_login_token(key, username)
+        raw = await meshcentral.download_installer(site, token, group_id, arch_id)
+        # Only Windows downloads embed the company's .msh in the executable.
+        configuration = await meshcentral.download_settings(site, token, group_id) if not windows else None
+    except meshcentral.MeshCentralError as exc:
+        raise RemoteControlError(exc.message) from exc
+    filename = "meshcentral-" + secrets.token_hex(16) + (".exe" if windows else "")
+    destination = ("C:\\ProgramData\\MyPortal\\" if windows else "/var/tmp/") + filename
+    installer = rmm_script_files.inline_file(raw, source_path="MeshCentral/" + filename, destination=destination)
+    files = [installer]
+    if configuration is not None:
+        files.append(rmm_script_files.inline_file(
+            configuration, source_path="MeshCentral/" + filename + ".msh", destination=destination + ".msh",
+        ))
     env = {
-        "MESH_SITE": site,
         "MESH_GROUP_ID": group_id,
+        "MESH_INSTALLER_PATH": destination,
     }
     return await rmm_repo.create_run(
         script=script,
@@ -454,7 +483,7 @@ async def _queue_builtin_meshcentral(
         asset_id=int(agent["asset_id"]) if agent.get("asset_id") is not None else None,
         requested_by_user_id=user_id,
         inputs=[],
-        payload_encrypted=encrypt_secret(json.dumps({"parameters": {}, "parameter_order": [], "env": env})),
+        payload_encrypted=encrypt_secret(json.dumps({"parameters": {}, "parameter_order": [], "env": env, "files": files})),
         timeout_seconds=MAX_ACTIVATION_TIMEOUT_SECONDS,
         expires_at=_utcnow() + ACTIVATION_QUEUE_LIFETIME,
         run_source=RUN_SOURCE,

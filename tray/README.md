@@ -319,9 +319,11 @@ curl -fsSL https://portal.example.com/static/tray/myportal-tray-linux.tar.gz | t
 sudo /tmp/myportal-tray/install.sh --url https://portal.example.com --token TOKEN
 ```
 
-`install.sh` adds the tray icon when the computer boots to a graphical login
-and installs only the service otherwise; `--desktop` or `--headless` decides
-instead, and `--no-auto-update` turns off self-updates. Self-updates download
+`install.sh` automatically adds the tray icon when an X11 or Wayland desktop
+session is installed and installs only the service on headless servers. Detection
+also works over SSH and does not require `--headless` on servers, even if their
+default systemd target is `graphical.target`. Use `--desktop` or `--headless` to
+override detection, and `--no-auto-update` to turn off self-updates. Self-updates download
 the same tarball and run `install.sh --upgrade` in its own transient systemd
 unit, keeping the settings, the enrolment and the headless or desktop choice.
 Remove it with `sudo /opt/myportal-tray/uninstall.sh` (`--purge` also forgets

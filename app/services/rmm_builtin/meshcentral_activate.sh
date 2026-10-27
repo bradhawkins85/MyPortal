@@ -2,29 +2,22 @@
 # MyPortal built-in: switch MeshCentral on for a remote session (Linux).
 #
 # MyPortal sets these for each run:
-#   MESH_SITE     the MeshCentral server address (https://...)
+#   MESH_INSTALLER_PATH the installer delivered by MyPortal through the RMM
 #   MESH_GROUP_ID the device group to install into (the device's company group)
 #
-# Downloads the self-installing MeshCentral agent scoped to that group and runs
-# it, so the device joins its company's group. The node id is resolved by
+# Installs the delivered MeshCentral agent as a background service so the device
+# joins its company's group. The node id is resolved by
 # MyPortal afterwards (the agent has no command-line that prints it).
 set -euo pipefail
 
-if [ -z "${MESH_SITE:-}" ]; then
-  echo "The MeshCentral server address is missing." >&2
+if [ -z "${MESH_INSTALLER_PATH:-}" ] || [ ! -f "$MESH_INSTALLER_PATH" ]; then
+  echo "The MeshCentral installer was not delivered by the RMM." >&2
   exit 1
 fi
 if [ -z "${MESH_GROUP_ID:-}" ]; then
   echo "The MeshCentral device group is missing." >&2
   exit 1
 fi
-
-# MeshCentral's Linux agent type ids.
-case "$(uname -m)" in
-  x86_64|amd64) ARCH_ID=6 ;;
-  arm64|aarch64) ARCH_ID=32 ;;
-  *) ARCH_ID=5 ;;
-esac
 
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
@@ -34,16 +27,30 @@ if [ "$(id -u)" -ne 0 ]; then
   fi
 fi
 
-# Always re-run the self-installing agent: it is idempotent, and re-running it
+# Always re-run the full installer: re-running it
 # scoped to this group is what moves the device into its company's group (a
 # device that was in the generic TacticalRMM group is moved here, too).
-INSTALLER="$(mktemp).sh"
-trap 'rm -f "$INSTALLER"' EXIT
+INSTALLER="$MESH_INSTALLER_PATH"
+trap 'rm -f "$INSTALLER" "$INSTALLER.msh"' EXIT
+if [ ! -s "$INSTALLER.msh" ]; then
+  echo "The MeshCentral agent configuration was not delivered by the RMM." >&2
+  exit 1
+fi
 echo "Installing the MeshCentral agent ($(uname -m), into group $MESH_GROUP_ID)"
-# The downloaded artifact is a self-installing, background installer.
-curl -fsSL --max-time 180 -o "$INSTALLER" "$MESH_SITE/meshagents?id=${ARCH_ID}&meshid=${MESH_GROUP_ID}&installflags=2"
+# Install the service and copy the company configuration alongside its binary.
 chmod +x "$INSTALLER"
-$SUDO "$INSTALLER"
+INSTALL_EXIT=0
+INSTALL_OUTPUT=$($SUDO "$INSTALLER" -fullinstall --copy-msh=1 2>&1) || INSTALL_EXIT=$?
+printf '%s\n' "$INSTALL_OUTPUT"
+if [ "$INSTALL_EXIT" -ne 0 ]; then exit "$INSTALL_EXIT"; fi
+# MeshAgent can report an installer error but still exit with status zero.
+if [[ "$INSTALL_OUTPUT" == *"[ERROR]"* ]]; then
+  echo "The MeshCentral service installation failed." >&2
+  exit 1
+fi
+# Enable and start the installed service before checking that it is running.
+$SUDO systemctl enable meshagent
+$SUDO systemctl restart meshagent
 for _ in $(seq 1 20); do
   if systemctl is-active --quiet meshagent 2>/dev/null; then break; fi
   sleep 3
@@ -53,9 +60,4 @@ if ! systemctl is-active --quiet meshagent 2>/dev/null; then
   exit 1
 fi
 
-# Make sure the service is running so the agent checks in.
-if command -v systemctl >/dev/null 2>&1; then
-  $SUDO systemctl enable meshagent >/dev/null 2>&1 || true
-  $SUDO systemctl restart meshagent >/dev/null 2>&1 || true
-fi
 echo "The MeshCentral agent is installed and running."

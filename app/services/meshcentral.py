@@ -22,6 +22,7 @@ import asyncio
 import json
 from typing import Any, Sequence
 
+import httpx
 import websockets
 
 # How long a single control-channel round trip may take.
@@ -38,6 +39,60 @@ class MeshCentralError(Exception):
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
+
+
+async def download_installer(server_url: str, login_token: str, group_id: str, arch_id: int) -> bytes:
+    """Fetch a group-scoped installer with server-side authentication only."""
+    return await _download_agent_file(
+        server_url, login_token, "meshagents",
+        {"id": arch_id, "meshid": group_id, "installflags": 2},
+    )
+
+
+async def download_settings(server_url: str, login_token: str, group_id: str) -> bytes:
+    """Non-Windows meshagents downloads are bare binaries; deploy their .msh too."""
+    raw = await _download_agent_file(server_url, login_token, "meshsettings", {"id": group_id})
+    try:
+        values = dict(line.split("=", 1) for line in raw.decode("utf-8-sig").splitlines() if "=" in line)
+    except UnicodeError:
+        raise MeshCentralError("MeshCentral returned an invalid agent configuration.") from None
+    if not all(values.get(key) for key in ("MeshID", "ServerID", "MeshServer")):
+        raise MeshCentralError("MeshCentral returned an incomplete agent configuration.")
+    return raw
+
+
+async def _download_agent_file(
+    server_url: str, login_token: str, endpoint: str, params: dict[str, Any],
+) -> bytes:
+    from app.services.rmm_script_files import MAX_FILE_BYTES
+
+    try:
+        # Do not follow sign-in redirects or include HTTP exceptions in errors:
+        # their request URLs contain the short-lived authentication token.
+        async with httpx.AsyncClient(timeout=120, follow_redirects=False) as client:
+            # meshagents checks req.session.userid when lockagentdownload is on;
+            # an auth query token alone does not establish that HTTP session.
+            login = await client.get(server_url.rstrip("/") + "/", params={"login": login_token})
+            if login.status_code not in (200, 302, 303) or not client.cookies:
+                raise MeshCentralError("MyPortal could not sign in to MeshCentral to download the installer.")
+            async with client.stream(
+                "GET", server_url.rstrip("/") + "/" + endpoint, params=params,
+            ) as response:
+                if response.status_code != 200:
+                    raise MeshCentralError(f"MeshCentral agent file download failed (HTTP {response.status_code}).")
+                content_type = response.headers.get("content-type", "").lower()
+                if any(value in content_type for value in ("text/html", "application/json")):
+                    raise MeshCentralError("MeshCentral returned a sign-in page or error instead of an agent file.")
+                raw = bytearray()
+                async for chunk in response.aiter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > MAX_FILE_BYTES:
+                        raise MeshCentralError("The MeshCentral agent file is larger than 50 MB.")
+    except httpx.HTTPError:
+        raise MeshCentralError("Could not download the MeshCentral agent file. Check MyPortal's connection to MeshCentral.") from None
+    if not raw or raw.lstrip().lower().startswith((b"<", b"{")):
+        raise MeshCentralError("MeshCentral did not return a valid agent file.")
+    return bytes(raw)
 
 
 def _control_url(server_url: str, login_token: str) -> str:

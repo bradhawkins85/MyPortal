@@ -1,0 +1,7 @@
+{
+  "guid": "fa803615-90f5-4c25-bd01-6fe9be5bc34c",
+  "occurred_at": "2026-10-27T13:23Z",
+  "change_type": "Improvement",
+  "summary": "Deployment pages explain automatic Linux desktop detection and when to use the optional --headless and --desktop overrides, with shell command syntax for each.",
+  "content_hash": "c7ddb5c0cdb3c3db99c6c92c0f0e3149e4fbfeb91026a621e5fd3a079692b7c6"
+}

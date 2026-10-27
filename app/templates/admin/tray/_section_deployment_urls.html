@@ -169,8 +169,12 @@
                       <pre class="code-block"><code>irm '{{ link.url }}/install.ps1' | iex</code></pre>
                       <p class="form-help">macOS and Linux (as root)</p>
                       <pre class="code-block"><code>curl -fsSL '{{ link.url }}/install.sh' | sudo bash</code></pre>
-                      <p class="form-help">Linux servers without a desktop, such as Proxmox VE</p>
-                      <pre class="code-block"><code>curl -fsSL '{{ link.url }}/install.sh' | sudo bash -s -- --headless</code></pre>
+                      <p class="form-help">Linux automatically detects an installed desktop environment. Headless servers such as Proxmox VE need no extra arguments. Optional Linux arguments override automatic detection:</p>
+                      <ul class="form-help">
+                        <li><code>--headless</code>: Install only the background service, even if a desktop is installed. Add <code>-s -- --headless</code> after <code>bash</code>.</li>
+                        <li><code>--desktop</code>: Install the tray icon as well as the background service. Use this if your installed desktop is not detected. Add <code>-s -- --desktop</code> after <code>bash</code>.</li>
+                      </ul>
+                      <p class="form-help">Choose at most one override. The tray icon appears the next time the user signs in to the desktop.</p>
                     </details>
                     {% if link.build and link.build.status == "ready" %}
                       <details>

@@ -1,17 +1,17 @@
 # MyPortal built-in: switch MeshCentral on for a remote session (Windows).
 #
 # MyPortal sets these for each run:
-#   MESH_SITE     the MeshCentral server address (https://...)
+#   MESH_INSTALLER_PATH the installer delivered by MyPortal through the RMM
 #   MESH_GROUP_ID the device group to install into (the device's company group)
 #
-# Downloads the self-installing MeshCentral agent scoped to that group and runs
-# it, so the device joins its company's group. The node id is resolved by
+# Installs the delivered MeshCentral agent as a background service so the device
+# joins its company's group. The node id is resolved by
 # MyPortal afterwards (the agent has no command-line that prints it).
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $activationDeadline = (Get-Date).AddSeconds(280)
 
-if (-not $env:MESH_SITE) { throw 'The MeshCentral server address is missing.' }
+if (-not $env:MESH_INSTALLER_PATH -or -not (Test-Path -LiteralPath $env:MESH_INSTALLER_PATH -PathType Leaf)) { throw 'The MeshCentral installer was not delivered by the RMM.' }
 if (-not $env:MESH_GROUP_ID) { throw 'The MeshCentral device group is missing.' }
 
 function Invoke-MeshCommand {
@@ -32,8 +32,7 @@ function Invoke-MeshCommand {
             RedirectStandardOutput = $stdout
             RedirectStandardError = $stderr
         }
-        # The self-installing agent takes no arguments. Start-Process rejects an
-        # empty ArgumentList, so leave that parameter out for this invocation.
+        # Start-Process rejects an empty ArgumentList; omit it when unused.
         if ($quoted.Count -gt 0) { $startParameters.ArgumentList = $quoted }
         $process = Start-Process @startParameters
         $null = $process.Handle
@@ -41,32 +40,26 @@ function Invoke-MeshCommand {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             throw "MeshCentral timed out during: $Step."
         }
-        if ($process.ExitCode -ne 0) { throw "MeshCentral failed during: $Step (exit code $($process.ExitCode))." }
+        $details = (Get-Content -LiteralPath $stdout, $stderr -Raw -ErrorAction SilentlyContinue) -join "`n"
+        # Some MeshAgent installer failures print [ERROR] but return exit code 0.
+        if ($process.ExitCode -ne 0 -or $details -match '\[ERROR\]') {
+            throw "MeshCentral failed during: $Step (exit code $($process.ExitCode)). $details"
+        }
         return Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue
     } finally {
         Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
     }
 }
 
-# MeshCentral's Windows agent type ids.
-$architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
-$archId = switch ($architecture.ToUpperInvariant()) {
-    'AMD64' { 4 }
-    'ARM64' { 43 }
-    'X86'   { 3 }
-    default { throw "Unsupported Windows architecture: $architecture." }
-}
-
-# Always re-run the self-installing agent: it is idempotent, and re-running it
+# Always re-run the full installer: re-running it
 # scoped to this group is what moves the device into its company's group (a
 # device that was in the generic TacticalRMM group is moved here, too).
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-$installer = Join-Path $env:TEMP (([IO.Path]::GetRandomFileName()) + '.exe')
+$installer = $env:MESH_INSTALLER_PATH
 try {
-    Write-Output "Installing the MeshCentral agent (Windows $($architecture.ToLowerInvariant()), into group $env:MESH_GROUP_ID)"
-    Invoke-WebRequest -Uri "$env:MESH_SITE/meshagents?id=$archId&meshid=$env:MESH_GROUP_ID&installflags=2" -OutFile $installer -UseBasicParsing -TimeoutSec 120
-    # The downloaded artifact is a self-installing, background installer.
-    Invoke-MeshCommand -File $installer -Arguments @() -Step 'installation' -TimeoutSeconds 120 | Out-Null
+    Write-Output "Installing the MeshCentral agent (Windows, into group $env:MESH_GROUP_ID)"
+    # A bare launch opens the interactive agent in session 0 and never installs.
+    # -fullinstall copies the configured executable, registers and starts the service.
+    Invoke-MeshCommand -File $installer -Arguments @('-fullinstall') -Step 'service installation' -TimeoutSeconds 120
     $deadline = (Get-Date).AddSeconds(60)
     do {
         if (Get-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue) { break }
@@ -78,6 +71,7 @@ try {
 }
 
 # Make sure the service is running so the agent checks in.
+Set-Service -Name 'Mesh Agent' -StartupType Automatic
 $service = Get-Service -Name 'Mesh Agent'
 if ($service.Status -ne 'Running') {
     $service.Start()

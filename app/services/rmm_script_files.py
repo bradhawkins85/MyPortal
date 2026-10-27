@@ -8,6 +8,7 @@ the scripts repository's earlier ``Files/`` folder there.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import ntpath
@@ -27,6 +28,7 @@ MAX_FILES = 20
 MAX_FILE_BYTES = 50 * 1024 * 1024
 # Stands for the company folder of the company a Common script runs for.
 COMPANY_TOKEN = "{company}"
+
 # Raw bytes copied to Private-Files per commit while moving the old Files/ folder.
 _MOVE_BATCH_BYTES = 20 * 1024 * 1024
 
@@ -37,6 +39,18 @@ class ScriptFileError(ValueError):
     def __init__(self, message: str, code: str = "invalid") -> None:
         super().__init__(message)
         self.code = code
+
+
+def inline_file(raw: bytes, *, source_path: str, destination: str) -> dict[str, Any]:
+    """Snapshot a server-fetched file inside the run's encrypted payload."""
+    if not raw or len(raw) > MAX_FILE_BYTES:
+        raise ScriptFileError("The associated file is empty or larger than 50 MB.")
+    return {
+        "source_path": source_path, "destination": destination, "size": len(raw),
+        "md5": hashlib.md5(raw, usedforsecurity=False).hexdigest(),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "content_base64": base64.b64encode(raw).decode("ascii"),
+    }
 
 
 def validate_associations(files: list[Mapping[str, Any]]) -> list[dict[str, str]]:
@@ -214,13 +228,21 @@ async def download_file(agent: Mapping[str, Any], run_id: int, index: int) -> tu
         item = files[index]
     except (IndexError, KeyError, TypeError, ValueError):
         return None
-    settings = await _settings()
-    if settings.base_url != item["base_url"] or f"{settings.owner}/{settings.repo}" != item["repository"]:
-        raise ScriptFileError("The Gitea repository configuration has changed. Queue a new run.")
-    raw = await gitea.fetch_blob(settings, item["blob_sha"], max_bytes=MAX_FILE_BYTES,
-                                 path=item["source_path"], ref=item.get("commit_sha"))
+    if "content_base64" in item:
+        try:
+            raw = base64.b64decode(item["content_base64"], validate=True)
+        except (ValueError, TypeError):
+            raise ScriptFileError("The queued file could not be decoded.") from None
+        if len(raw) > MAX_FILE_BYTES:
+            raise ScriptFileError("The queued file is larger than 50 MB.")
+    else:
+        settings = await _settings()
+        if settings.base_url != item["base_url"] or f"{settings.owner}/{settings.repo}" != item["repository"]:
+            raise ScriptFileError("The Gitea repository configuration has changed. Queue a new run.")
+        raw = await gitea.fetch_blob(settings, item["blob_sha"], max_bytes=MAX_FILE_BYTES,
+                                     path=item["source_path"], ref=item.get("commit_sha"))
     if len(raw) != item["size"] or hashlib.md5(raw, usedforsecurity=False).hexdigest() != item["md5"] or hashlib.sha256(raw).hexdigest() != item["sha256"]:
-        raise ScriptFileError("The Gitea file failed download verification.")
+        raise ScriptFileError("The associated file failed download verification.")
     return raw, item["source_path"].rsplit("/", 1)[-1]
 
 
