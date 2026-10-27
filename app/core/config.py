@@ -1295,6 +1295,17 @@ class Settings(BaseSettings):
     rustdesk_installer_url: str = Field(default="", validation_alias="RUSTDESK_INSTALLER_URL")
     # The same for Macs (a .dmg holding RustDesk.app).
     rustdesk_macos_installer_url: str = Field(default="", validation_alias="RUSTDESK_MACOS_INSTALLER_URL")
+    # MeshCentral (Scripts > Remote control). One MeshCentral server per deployment,
+    # so these are global like RUSTDESK_CFG. When a technician starts a MeshCentral
+    # session, the RMM agent installs the MeshCentral agent into a device group
+    # named after the device's company, so the device lands in its company's group
+    # rather than one shared group. MESHCENTRAL_SERVER_URL is the site address,
+    # MESHCENTRAL_USERNAME the user technicians sign in as, and
+    # MESHCENTRAL_LOGIN_TOKEN_KEY the long hex printed by
+    # `node node_modules/meshcentral --logintokenkey` on the server.
+    meshcentral_server_url: str = Field(default="", validation_alias="MESHCENTRAL_SERVER_URL")
+    meshcentral_username: str = Field(default="", validation_alias="MESHCENTRAL_USERNAME")
+    meshcentral_login_token_key: str = Field(default="", validation_alias="MESHCENTRAL_LOGIN_TOKEN_KEY")
 
     @model_validator(mode="after")
     def _enforce_production_secret_strength(self) -> "Settings":

@@ -258,6 +258,7 @@ async def assets_page(request: Request):
         user, membership, "menu.assets", write=True
     )
     can_write_assets = bool(user.get("is_super_admin")) or can_export_assets
+    can_wake = can_write_assets and await main_module._is_helpdesk_technician(user, request)
 
     rows = await asset_repo.list_company_assets(company_id)
     if not can_write_assets:
@@ -543,6 +544,7 @@ async def assets_page(request: Request):
         "has_assets": bool(prepared),
         "can_export_assets": can_export_assets,
         "can_write_assets": can_write_assets,
+        "can_wake": can_wake,
         "is_super_admin": bool(user.get("is_super_admin")),
         "can_push_rmm_agent": any(bool(asset.get("can_push_rmm_agent")) for asset in prepared),
         "rmm_actions": rmm_actions,

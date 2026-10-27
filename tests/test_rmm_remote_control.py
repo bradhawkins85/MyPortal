@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_remote_control as remote_repo
+from app.core.config import get_settings
 from app.services import rmm_remote_control as remote
 from app.services import rmm_scripts
 from tests.test_rmm_scripts import _enrol, _environment, _sync, anyio_backend, sqlite_db  # noqa: F401 - fixtures
@@ -26,6 +27,15 @@ def _decode_mesh_token(token: str) -> dict:
     raw = base64.b64decode(token, altchars=b"@$")
     iv, tag, ciphertext = raw[:12], raw[12:28], raw[28:]
     return json.loads(AESGCM(bytes.fromhex(KEY)[:32]).decrypt(iv, ciphertext + tag, None))
+
+
+def _meshcentral_env(monkeypatch) -> None:
+    """Point MeshCentral at a known site, user and token key (via the .env)."""
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "meshcentral_server_url", "https://mesh.example.com/")
+    monkeypatch.setattr(settings, "meshcentral_username", "tactical")
+    monkeypatch.setattr(settings, "meshcentral_login_token_key", KEY)
 
 
 def test_rustdesk_links_strip_spaces_and_quote_the_password():
@@ -167,23 +177,8 @@ async def test_without_a_script_the_id_comes_from_a_custom_field(sqlite_db, monk
         return {"MeshCentral Node": "node//abc"} if asset_id == 10 else {}
 
     monkeypatch.setattr(rmm_scripts, "_asset_custom_values", custom_values)
-    with pytest.raises(remote.RemoteControlError, match="address, a user name"):
-        await remote.save_settings("meshcentral", {"is_enabled": "1", "server_url": "https://mesh.example.com"}, user_id=9)
-    with pytest.raises(remote.RemoteControlError, match="logintokenkey"):
-        await remote.save_settings("meshcentral", {"is_enabled": "1", "secret": "not-hex"}, user_id=9)
-    with pytest.raises(remote.RemoteControlError, match="MeshCentral address"):
-        await remote.save_settings("meshcentral", {"server_url": "javascript:alert(1)"}, user_id=9)
-    await remote.save_settings("meshcentral", {
-        "is_enabled": "on", "server_url": "https://mesh.example.com/", "username": "tactical",
-        "secret": KEY, "id_field": "meshcentral node",
-    }, user_id=9)
-    settings = {item["provider"]: item for item in await remote.load_settings()}
-    assert settings["meshcentral"]["secret_set"] and "secret_encrypted" not in settings["meshcentral"]
-    # Saving again with a blank key keeps it.
-    await remote.save_settings("meshcentral", {
-        "is_enabled": "on", "server_url": "https://mesh.example.com", "username": "tactical", "id_field": "MeshCentral Node",
-    }, user_id=9)
-
+    _meshcentral_env(monkeypatch)
+    await remote.save_settings("meshcentral", {"is_enabled": "on", "id_field": "MeshCentral Node"}, user_id=9)
     session = await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9)
     assert session["status"] == "ready" and session["run_id"] is None
     query = parse_qs(urlsplit(session["launch_url"]).query)
@@ -207,10 +202,9 @@ def test_built_in_meshcentral_script_picks_the_os_file():
 
 @pytest.mark.anyio
 async def test_built_in_meshcentral_installs_into_the_companies_group(sqlite_db, monkeypatch):
-    # The built-in MeshCentral needs the address, user and token key, but no script.
-    await remote.save_settings("meshcentral", {
-        "is_enabled": "on", "server_url": "https://mesh.example.com/", "username": "tactical", "secret": KEY,
-    }, user_id=9)
+    # The built-in MeshCentral needs the .env settings, but no script.
+    _meshcentral_env(monkeypatch)
+    await remote.save_settings("meshcentral", {"is_enabled": "on"}, user_id=9)
     # Group is resolved (created if missing) up front; the node is found afterwards.
     group_names = []
 
@@ -258,20 +252,21 @@ def test_settings_page_renders_providers_and_script_values():
     html = env.get_template("rmm/remote_control.html").render(
         providers=[
             {"provider": "rustdesk", "label": "RustDesk", "is_enabled": True, "activation_script_id": 1,
-             "activation_script_active": True, "server_url": "", "username": "", "secret_set": False, "id_field": "",
+             "activation_script_active": True, "id_field": "",
              "fields": [{"key": "param:Password", "name": "Password", "mandatory": False, "sensitive": True,
                          "value": "", "value_set": True, "default": None, "help": ""}]},
             {"provider": "meshcentral", "label": "MeshCentral", "is_enabled": False, "activation_script_id": None,
-             "server_url": "https://mesh.example.com", "username": "<b>t</b>", "secret_set": True, "id_field": "",
+             "id_field": "", "builtin": True,
              "fields": []},
         ],
         scripts=[{"id": 1, "name": "Activate", "path": "rmm/Common/Activate.ps1"}],
-        rustdesk_env={"cfg_set": True, "installer_set": False},
+        rustdesk_env={"cfg_set": True, "installer_set": False, "macos_installer_set": True},
+        mesh_env={"server_set": True, "username_set": False, "token_key_set": True},
         variables=[{"group": "Company variables", "label": "Key", "token": "{{company.variables.Key}}"}],
     )
     assert 'action="/rmm/remote-control/rustdesk"' in html and 'action="/rmm/remote-control/meshcentral"' in html
     assert 'name="entry:param:Password"' in html and "Saved: leave blank to keep it" in html
-    assert "&lt;b&gt;t&lt;/b&gt;" in html and "{{company.variables.RustDeskKey}}" in html
+    assert "MESHCENTRAL_USERNAME" in html and "not set" in html and "{{company.variables.RustDeskKey}}" in html
     assert '<option value="1" selected>' in html
 
 
