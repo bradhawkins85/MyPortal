@@ -15,7 +15,10 @@ def header():
     source = (ROOT / "assets/detail.html").read_text()
     fragment = source.split("{% block header_actions %}", 1)[1].split("{% endblock %}", 1)[0]
     env = Environment(loader=FileSystemLoader(ROOT))
-    return env.from_string('{% from "macros/header.html" import page_header_actions with context %}' + fragment)
+    return env.from_string(
+        '{% from "macros/header.html" import page_header_actions with context %}'
+        '{% import "rmm/_macros.html" as rmm_agent_ui %}' + fragment
+    )
 
 
 def _values(**rmm):
@@ -80,6 +83,22 @@ def test_customer_view_hides_rmm_actions(header):
     for item in RMM_ITEMS:
         assert item not in html
     assert "Agent maintenance" not in html
+
+
+def test_meshcentral_has_a_visible_connect_shortcut(header):
+    providers = [{"provider": "meshcentral", "label": "MeshCentral"}]
+    html = header.render(**_values(remote_control=providers))
+    shortcut = html.split('id="asset-detail-actions"', 1)[0]
+    assert 'data-rmm-remote="meshcentral"' in shortcut
+    assert 'data-rmm-remote-mode="remote"' in shortcut
+    assert 'data-rmm-remote-asset="10"' in shortcut
+    assert ">Connect with MeshCentral</button>" in shortcut
+    for mode in ("remote", "file_transfer", "terminal"):
+        assert f'data-rmm-remote-mode="{mode}"' in html.split('id="asset-detail-actions"', 1)[1]
+
+    assert "Connect with MeshCentral" not in header.render(**_values())
+    assert "Connect with MeshCentral" not in header.render(**_values(agent=None, remote_control=providers))
+    assert "Connect with MeshCentral" not in header.render(**{**_values(remote_control=providers), "customer_safe": True})
 
 
 @pytest.mark.parametrize("can_wake,customer_safe,visible", [(True, False, True), (False, False, False), (True, True, False)])

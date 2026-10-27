@@ -272,6 +272,9 @@
                   {%- if asset.rmm_uninstall %}{% set _ = row_actions.append({"label": "Uninstall agents", "variant": "danger", "icon": action_icons.ref("uninstall"), "attrs": {"data-asset-uninstall": asset.id, "data-asset-uninstall-name": row_name, "aria-haspopup": "dialog", "aria-controls": "asset-uninstall-modal", "title": "Remove the MyPortal Tray Agent and RMM agent from this device, after an optional offboarding script"}}) %}{% endif -%}
                   {%- set _ = row_actions.append({"label": "Delete", "variant": "danger", "icon": action_icons.ref("delete"), "attrs": {"data-asset-delete": true, "data-asset-id": asset.id, "data-asset-name": row_name, "title": "Remove this asset from MyPortal. Its agents stay installed and register the device again when they next check in."}}) -%}
                 {%- endif %}
+                {% if asset.rmm_actions and 'meshcentral' in (rmm_remote_providers | map(attribute='provider') | list) %}
+                  {{ rmm_ui.meshcentral_connect(asset.id, row_name, small=true) }}
+                {% endif %}
                 {{ page_header_overflow("asset-actions-" ~ asset.id, "Actions", row_actions) }}
                 {% if can_wake and can_write_assets %}<p class="form-help" id="wol-status-{{ asset.id }}" data-wol-status aria-live="polite"></p>{% endif %}
               </td>
