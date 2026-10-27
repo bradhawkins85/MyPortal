@@ -79,18 +79,32 @@ def test_supported_upgrade_window_has_explicit_deployment_metadata():
         if 376 <= int(path.name.split("_", 1)[0]) <= 382
     }
 
-    assert set(manifest) == expected
-    for name in expected:
+    # The manifest also covers later released migrations that shipped without
+    # inline metadata; their SQL must stay byte-for-byte stable for checksums.
+    assert expected <= set(manifest)
+    for name in manifest:
+        assert (migrations_dir / name).is_file(), f"{name} is not a migration"
         metadata = Database()._migration_metadata(migrations_dir / name)
-        assert metadata["legacy"] is True
+        assert metadata["legacy"] is (int(name.split("_", 1)[0]) <= 382)
         assert metadata["compatible_from"] == "*"
         assert metadata["compatible_to"] == "*"
 
 
-def test_current_migrations_have_inline_metadata():
+def test_current_migrations_have_deployment_metadata():
     migrations_dir = Path(__file__).parent.parent / "migrations"
+    manifest = json.loads(
+        (migrations_dir / "deployment_metadata.json").read_text(encoding="utf-8")
+    )["migrations"]
     for path in migrations_dir.glob("*.sql"):
         if int(path.name.split("_", 1)[0]) > 382:
-            assert "-- phase:" in "\n".join(
-                path.read_text(encoding="utf-8").splitlines()[:5]
-            ), f"{path.name} is missing inline deployment metadata"
+            leading = []
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip() and not line.lstrip().startswith("--"):
+                    break
+                leading.append(line)
+            assert path.name in manifest or any(
+                line.lstrip().lower().startswith("-- phase:") for line in leading
+            ), f"{path.name} is missing deployment metadata"
+            assert Database()._migration_metadata(path)["phase"] in {
+                "expand", "data", "contract",
+            }
