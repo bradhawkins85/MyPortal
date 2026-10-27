@@ -38,6 +38,16 @@ enabled; fix the reported error and rerun the upgrade. A persistent updater
 marker keeps retries in maintenance even when the schema phase already
 completed. Ordinary migrations keep the rolling upgrade path.
 
+The coordinator executes deployment scripts from the fetched target commit,
+staged in the root-only updater directory. Local edits or a non-main control
+branch do not force it to use stale deployment logic. The control checkout
+and protected environment file remain authoritative for repository access and
+configuration; local checkout files are not overwritten by this handoff.
+If an older installed updater still reports the maintenance-mode error,
+refresh its `scripts/upgrade.sh` from `origin/main` once (retain a backup of any
+local edits), then retry System Updates. Updating application releases alone
+does not replace the root cron coordinator in an un-updatable control checkout.
+
 `expand` adds backwards-compatible schema, `data`/`backfill` changes data while
 both releases remain compatible, and `contract` removes or changes an old
 contract. An online contract must name compatible serving and target release

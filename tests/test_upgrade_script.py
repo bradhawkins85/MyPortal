@@ -1292,7 +1292,8 @@ def test_control_checkout_fast_forwards_so_new_upgrade_steps_run(tmp_path):
     assert _update_control_checkout(control, target).returncode == 1
     main_flow = SCRIPT[SCRIPT.index("validate_required_configuration\ngit fetch") :]
     assert main_flow.index("update_control_checkout") < main_flow.index('provision_gitea_for_revision "$TARGET_REVISION"')
-    assert 'MYPORTAL_UPGRADE_REEXEC=1 exec bash "${SCRIPT_DIR}/upgrade.sh" "${UPGRADE_ARGS[@]}"' in main_flow
+    assert 'run_target_upgrade_coordinator "$TARGET_REVISION"' in main_flow
+    assert '"${MYPORTAL_UPGRADE_REEXEC:-}" != "$TARGET_REVISION"' in main_flow
 
 
 def test_control_checkout_with_local_changes_is_left_alone(tmp_path):
