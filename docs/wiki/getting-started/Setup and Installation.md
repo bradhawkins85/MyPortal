@@ -35,6 +35,13 @@ The installers also install these packages:
 - the `baresip` SIP client
 - nginx and cron (production only)
 
+Local MariaDB installs and production upgrades set `innodb_buffer_pool_size`
+in `/etc/mysql/mariadb.conf.d/50-server.cnf` and apply it live without restarting
+the database. The default is one quarter of host/container memory, rounded down
+to 128 MiB increments and capped at 4 GiB (4 GiB on a 16 GiB server). Existing
+larger configured or running values are preserved. Remote database servers are
+not changed; their administrators manage database memory settings separately.
+
 PowerShell Core and the ExchangeOnlineManagement module are installed when
 Microsoft's repositories are reachable. They are optional: without them only
 the Exchange Online PowerShell fallback is unavailable.
