@@ -18,7 +18,7 @@
     {% import "assets/_action_icons.html" as action_icons %}
     {%- set icons = {} -%}
     {%- for name in action_icons.PATHS %}{% set _ = icons.update({name: action_icons.inline(name)}) %}{% endfor -%}
-    {%- set mode_icons = {"remote": icons.remote, "file_transfer": icons.file_transfer, "terminal": icons.terminal} -%}
+    {%- set mode_icons = {"remote": icons.remote, "remote_prompt": icons.remote, "file_transfer": icons.file_transfer, "terminal": icons.terminal} -%}
     {%- set rmm_staff = rmm and not customer_safe -%}
     {#- RMM agent actions appear only once the agent is deployed; pushing and
         repairing go through the tray app so they work without one. -#}
@@ -30,7 +30,7 @@
     {% if is_super_admin and not customer_safe %}{% set _ = detail_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true", "icon": icons.preview}) %}{% endif %}
     {% set _ = detail_actions.append({"type": "section", "label": "Remote access"}) %}
     {% if can_wake and not customer_safe %}{% set _ = detail_actions.append({"label": "Wake on LAN", "icon": icons.wake, "attrs": {"data-wol-asset-id": asset.id, "data-confirm": "Wake this asset? A WoL magic packet will be broadcast by online agents on its network. The result is tracked for about 2 minutes."}}) %}{% endif %}
-    {% if rmm_agent %}{% for session in rmm.remote_control or [] %}{% for mode, mode_label in [("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal")] %}{% set _ = detail_actions.append({"label": session.label ~ " " ~ mode_label, "icon": mode_icons[mode], "attrs": {"data-rmm-remote": session.provider, "data-rmm-remote-mode": mode, "data-rmm-remote-asset": asset.id, "data-rmm-remote-name": asset_display_name}}) %}{% endfor %}{% endfor %}{% endif %}
+    {% if rmm_agent %}{% for session in rmm.remote_control or [] %}{% for mode, mode_label in ([("remote", "remote desktop"), ("remote_prompt", "remote desktop (Prompt)"), ("file_transfer", "file transfer"), ("terminal", "terminal")] if session.provider == "rustdesk" else [("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal")]) %}{% set _ = detail_actions.append({"label": session.label ~ " " ~ mode_label, "icon": mode_icons[mode], "attrs": {"data-rmm-remote": session.provider, "data-rmm-remote-mode": mode, "data-rmm-remote-asset": asset.id, "data-rmm-remote-name": asset_display_name}}) %}{% endfor %}{% endfor %}{% endif %}
     {% set _ = detail_actions.append({"type": "section", "label": "RMM"}) %}
     {% if rmm_agent and rmm.can_run %}{% set _ = detail_actions.append({"label": "Check in now", "type": "submit", "form": "asset-checkin-form", "icon": icons.checkin, "attrs": {"title": "Queue a full agent check-in without changing its normal schedule"}}) %}{% endif %}
     {% if rmm_agent and health_check and health_check.can_manage %}{% set _ = detail_actions.append({"label": "Run health check", "type": "submit", "form": "asset-health-check-form", "icon": icons.health, "attrs": {"title": "A health check is already running" if health_check.active else ("Review this computer's health with the AI troubleshooter and list the steps back to optimal performance" ~ (". On physical Windows hardware PawnIO is installed briefly to read sensors and removed afterwards." if health_check.pawnio_available else "")) if health_check.can_run else "Needs the tray app connected on this computer", "disabled": true if (health_check.active or not health_check.can_run) else none}}) %}{% endif %}

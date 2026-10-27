@@ -49,6 +49,7 @@ def test_rmm_actions_join_the_grouped_actions_menu_with_icons(header):
     menu = html.split('id="asset-detail-actions"', 1)[1]
     for item in RMM_ITEMS:
         assert item in menu
+    assert "RustDesk remote desktop (Prompt)" in menu and 'data-rmm-remote-mode="remote_prompt"' in menu
     assert "RustDesk remote desktop" in menu and 'data-rmm-remote-mode="terminal"' in menu
     headings = [part.split("<", 1)[0] for part in menu.split('class="header-menu__heading" role="presentation">')[1:]]
     assert headings == ["Asset", "Remote access", "RMM", "Agent maintenance", "Go to"]
