@@ -102,7 +102,9 @@ func performFullCheckin(ctx context.Context, api *client.Client, r *runner.Runne
 				Cursors: eventlog.LoadCursors(path), Path: path, MaxLevel: cfg.MaxLevel}
 			var failures []error
 			for _, name := range cfg.Logs {
-				if err := collector.SyncLog(ctx, name, cfg.MaxBatch, time.Duration(cfg.InitialLookbackHours)*time.Hour); err != nil {
+				err := collector.SyncLog(ctx, name, cfg.MaxBatch, time.Duration(cfg.InitialLookbackHours)*time.Hour)
+				// A log the device does not have is not a failed check-in.
+				if err != nil && !errors.Is(err, eventlog.ErrNoLog) {
 					failures = append(failures, err)
 				}
 			}

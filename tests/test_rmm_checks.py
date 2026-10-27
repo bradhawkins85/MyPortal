@@ -934,3 +934,11 @@ async def test_check_creates_real_chocolatey_job_and_records_rejection(sqlite_db
     assert "active Windows device" in saved["last_summary"]
     state = (await checks_repo.list_states_for_agent(linux["id"]))[check_id]
     assert state["status"] == "failing" and state["last_action_at"] is not None
+
+
+def test_check_report_accepts_null_lists_from_go_agents():
+    # Go encodes an empty slice it never filled as null.
+    report = check_routes.AgentCheckReport.model_validate(
+        {"pings": [], "services": None, "files": None, "processes": None, "programs": None}
+    )
+    assert report.services == report.files == report.processes == report.programs == []

@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"os"
 	"regexp"
 	"strconv"
@@ -33,6 +34,10 @@ const (
 	// does not hold up the others.
 	batchesPerCycle = 20
 )
+
+// ErrNoLog means the device has no event log with that name, such as an
+// event source entered as a log or a log for a feature not installed.
+var ErrNoLog = errors.New("this device has no event log with that name")
 
 // Source reads one Windows event log.
 type Source interface {

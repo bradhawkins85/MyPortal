@@ -265,6 +265,9 @@ async def _collapse(
             agent_id=int(agent["id"]),
             message_ids={row["message_id"] for row in rows if row.get("message_id") is not None},
             since=min(row["time_created"] for row in rows) - window,
+            # An entry created after the batch's newest occurrence can join none of it.
+            until=max(row["time_created"] for row in rows),
+            without_message=any(row.get("message_id") is None for row in rows),
         )
         for entry in stored:
             first = _as_naive(entry.get("time_created"))

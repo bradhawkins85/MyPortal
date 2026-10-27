@@ -28,7 +28,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from loguru import logger
 
@@ -663,6 +663,12 @@ class AgentCheckReport(BaseModel):
     programs: list[AgentProgram] = Field(default_factory=list, max_length=rmm_checks.MAX_PROGRAMS)
     # Cleaned and capped by rmm_proxmox.normalise when a check reads it.
     proxmox: dict[str, Any] | None = None
+
+    @field_validator("pings", "services", "files", "processes", "programs", mode="before")
+    @classmethod
+    def _null_is_empty(cls, value: Any) -> Any:
+        # Go agents send an empty list as null when nothing was measured.
+        return [] if value is None else value
 
 
 @router.post("/api/rmm/agent/checks/report", summary="Send the RMM agent's measurements for checks")
