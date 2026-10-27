@@ -9038,6 +9038,7 @@ async def _tray_deployment_links_context(
         "hidden_revoked_count": hidden_revoked_count,
         "release_tag": tray_deployment_builds.current_release_tag(),
         "macos_available": tray_deployment_service.installer_path("macos") is not None,
+        "linux_available": tray_deployment_service.installer_path("linux") is not None,
         "expiry_choices": tray_deployment_service.EXPIRY_CHOICES,
         "default_expiry": tray_deployment_service.DEFAULT_EXPIRY_DAYS,
     }

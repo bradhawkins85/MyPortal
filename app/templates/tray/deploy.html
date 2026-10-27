@@ -42,7 +42,7 @@
     {% if state != "open" %}
       <div class="alert alert--warning" role="status">{{ message or "This deployment link is not valid." }}</div>
       <p class="form-help">Ask your IT support team for a new link.</p>
-    {% elif not windows_ready and not macos_ready and not ppkg_ready %}
+    {% elif not windows_ready and not macos_ready and not linux_ready and not ppkg_ready %}
       <div class="alert alert--warning" role="status">The installers for this link are still being prepared. Please try again later.</div>
     {% else %}
       <div class="tray-deploy__options">
@@ -74,6 +74,14 @@
             <a class="button {% if windows_ready %}button--secondary {% endif %}auth-card__wide" href="{{ deploy_base }}/macos.zip" rel="noreferrer">Download for macOS</a>
             <p class="tray-deploy__help">Open the zip file, then double-click <strong>myportal-tray.pkg</strong> and follow the installer. Keep <strong>myportal-tray.env</strong> in the same folder. If macOS says the package cannot be verified, open System Settings &gt; Privacy &amp; Security and click Open Anyway.</p>
           </div>
+        {% endif %}
+        {% if linux_ready %}
+          <details class="tray-deploy__option">
+            <summary>Install on Linux</summary>
+            <p class="tray-deploy__help">Open a terminal and run this command. Enter your password if asked. It adds the tray icon on a desktop computer and installs only the background service on a server.</p>
+            <pre class="code-block"><code>curl -fsSL '{{ deploy_base }}/install.sh' | sudo bash</code></pre>
+            <p class="tray-deploy__help">For a server without a desktop, such as Proxmox VE, add <code>-s -- --headless</code> after <code>bash</code>. Needs systemd on an amd64 or arm64 computer.</p>
+          </details>
         {% endif %}
         {% if not windows_ready %}
           <p class="tray-deploy__help">The Windows installer is still being prepared. Please check back shortly.</p>

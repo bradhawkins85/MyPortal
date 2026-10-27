@@ -53,6 +53,7 @@ def _request(path: str = "/") -> Request:
 def installers(tmp_path, monkeypatch) -> Path:
     (tmp_path / "myportal-tray.msi").write_bytes(b"MSI-BYTES")
     (tmp_path / "myportal-tray.pkg").write_bytes(b"PKG-BYTES")
+    (tmp_path / "myportal-tray-linux.tar.gz").write_bytes(b"TGZ-BYTES")
     monkeypatch.setattr(tray_deployment.tray_installer, "_TRAY_STATIC_DIR", tmp_path)
     return tmp_path
 
@@ -83,12 +84,34 @@ def test_scripts_reject_unsafe_portal_urls(bad_url):
     with pytest.raises(ValueError):
         tray_deployment.windows_script(bad_url, TOKEN)
     with pytest.raises(ValueError):
-        tray_deployment.macos_script(bad_url, TOKEN)
+        tray_deployment.shell_script(bad_url, TOKEN)
 
 
 def test_scripts_reject_unexpected_token():
     with pytest.raises(ValueError):
         tray_deployment.windows_script(PORTAL, "tok'en; rm -rf /")
+
+
+def test_shell_script_installs_on_macos_and_linux():
+    script = tray_deployment.shell_script(PORTAL, TOKEN)
+    assert f"PORTAL_URL='{PORTAL}'" in script
+    assert f"ENROL_TOKEN='{TOKEN}'" in script
+    assert "Darwin)" in script and "Linux)" in script
+    assert '"$PORTAL_URL/static/tray/myportal-tray.pkg"' in script
+    assert '"$PORTAL_URL/static/tray/myportal-tray-linux.tar.gz"' in script
+    assert '"$WORK_DIR/myportal-tray/install.sh" --url "$PORTAL_URL" --token "$ENROL_TOKEN"' in script
+
+
+def test_shell_script_is_valid_bash():
+    import shutil
+    import subprocess
+
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is not installed")
+    subprocess.run(
+        [bash, "-n"], input=tray_deployment.shell_script(PORTAL, TOKEN), text=True, check=True
+    )
 
 
 def test_macos_bundle_contents(installers):
@@ -389,7 +412,7 @@ async def test_download_for_unknown_slug_is_404(monkeypatch):
         AsyncMock(side_effect=tray_deployment.DeploymentLinkUnavailable("nope")),
     )
     with pytest.raises(HTTPException) as excinfo:
-        await deploy_routes.deployment_macos_script(SLUG, _request())
+        await deploy_routes.deployment_shell_script(SLUG, _request())
     assert excinfo.value.status_code == 404
 
 
@@ -418,6 +441,8 @@ async def test_public_page_renders_for_active_link(monkeypatch, installers):
     assert f"{PORTAL}/deploy/{SLUG}/windows.msi" in body
     assert f"{PORTAL}/deploy/{SLUG}/windows.intunewin" in body
     assert f"{PORTAL}/deploy/{SLUG}/macos.zip" in body
+    assert f"curl -fsSL '{PORTAL}/deploy/{SLUG}/install.sh' | sudo bash" in body
+    assert "Install on Linux" in body
     assert "Acme Pty Ltd" in body
     assert TOKEN not in body
     assert response.headers["referrer-policy"] == "no-referrer"
@@ -508,6 +533,7 @@ async def test_download_help_absent_without_an_available_windows_download(
         resolve = AsyncMock(return_value=(_link(), TOKEN))
     if availability == "pending":
         (installers / "myportal-tray.pkg").unlink()
+        (installers / "myportal-tray-linux.tar.gz").unlink()
     monkeypatch.setattr(tray_deployment, "resolve_active_link", resolve)
     artifact = AsyncMock(return_value=None)
     monkeypatch.setattr(builds, "ready_artifact", artifact)

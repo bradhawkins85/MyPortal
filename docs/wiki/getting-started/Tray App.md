@@ -421,8 +421,13 @@ release installers (MSI, pkg, DMG) are built exactly as before.
 * **macOS** downloads a zip with the cached `myportal-tray.pkg`, its
   `myportal-tray.env` settings and `Install MyPortal Tray.command`, which
   writes the settings and runs the pkg after asking for the Mac password.
+* **Linux** computers run `curl -fsSL '<link>/install.sh' | sudo bash` in a
+  terminal; the page shows this command when the server has the Linux package
+  cached. It adds the tray icon on desktops and installs only the background
+  service on servers. Add `-s -- --headless` after `bash` to skip the icon.
 * **RMM tools** can use the one-liners shown on the admin page:
-  `irm '<link>/install.ps1' | iex` or `curl -fsSL '<link>/install.sh' | sudo bash`.
+  `irm '<link>/install.ps1' | iex` on Windows, or
+  `curl -fsSL '<link>/install.sh' | sudo bash` on macOS and Linux.
 
 Each link owns its own company install token, and both expire together after
 the period chosen when the link is created: 1, 7, 30 or 90 days, 1 year, or
