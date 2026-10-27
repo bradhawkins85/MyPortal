@@ -48,7 +48,7 @@ def test_meshcentral_link_carries_a_token_meshcentral_can_decrypt():
     parts = urlsplit(url)
     assert f"{parts.scheme}://{parts.netloc}{parts.path}" == "https://mesh.example.com/"
     query = parse_qs(parts.query)
-    assert query["gotonode"] == ["node//abc$def@"] and query["viewmode"] == ["11"] and query["hide"] == ["31"]
+    assert query["gotonode"] == ["abc$def@"] and query["viewmode"] == ["11"] and query["hide"] == ["31"]
     assert _decode_mesh_token(query["login"][0]) == {"a": 3, "u": "user//tactical", "time": 1_700_000_000}
     signed_in_only = parse_qs(urlsplit(remote.meshcentral_url("https://mesh.example.com", "user/acme/Bob", KEY)).query)
     assert "gotonode" not in signed_in_only and _decode_mesh_token(signed_in_only["login"][0])["u"] == "user/acme/bob"
@@ -187,13 +187,69 @@ async def test_without_a_script_the_id_comes_from_a_custom_field(sqlite_db, monk
     session = await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9)
     assert session["status"] == "ready" and session["run_id"] is None
     query = parse_qs(urlsplit(session["launch_url"]).query)
-    assert query["gotonode"] == ["node//abc"] and _decode_mesh_token(query["login"][0])["u"] == "user//tactical"
+    assert query["gotonode"] == ["abc"] and _decode_mesh_token(query["login"][0])["u"] == "user//tactical"
     # A device without a node ID opens MeshCentral signed in.
     other = await remote.start(provider="meshcentral", company_id=1, asset_id=11, user_id=9)
     assert other["status"] == "ready" and "gotonode" not in other["launch_url"]
 
     with pytest.raises(remote.RemoteControlError, match="turned off"):
         await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9)
+
+
+def test_built_in_meshcentral_script_picks_the_os_file():
+    assert remote.builtin_meshcentral_script({"os": "windows"})["path"] == "builtin/meshcentral_activate.ps1"
+    assert remote.builtin_meshcentral_script({"os": "windows"})["language"] == "powershell"
+    assert remote.builtin_meshcentral_script({"os": ""})["path"] == "builtin/meshcentral_activate.ps1"
+    assert remote.builtin_meshcentral_script({"os": "darwin"})["path"] == "builtin/meshcentral_activate_macos.sh"
+    assert remote.builtin_meshcentral_script({"os": "linux"})["path"] == "builtin/meshcentral_activate.sh"
+    assert remote.builtin_meshcentral_script({"os": "linux"})["language"] == "bash"
+
+
+@pytest.mark.anyio
+async def test_built_in_meshcentral_installs_into_the_companies_group(sqlite_db, monkeypatch):
+    # The built-in MeshCentral needs the address, user and token key, but no script.
+    await remote.save_settings("meshcentral", {
+        "is_enabled": "on", "server_url": "https://mesh.example.com/", "username": "tactical", "secret": KEY,
+    }, user_id=9)
+    # Group is resolved (created if missing) up front; the node is found afterwards.
+    group_names = []
+
+    async def fake_ensure_group(server_url, login_token, name):
+        group_names.append(name)
+        return "grp123"
+
+    async def fake_find_node(server_url, login_token, group_id, names, **kwargs):
+        assert group_id == "grp123"
+        return "node//abc$def@"
+
+    monkeypatch.setattr(remote.meshcentral, "ensure_group", fake_ensure_group)
+    monkeypatch.setattr(remote.meshcentral, "find_node", fake_find_node)
+
+    _r, agent = await _enrol(sqlite_db)  # hostname "PC", company 1 (Contoso)
+    session = await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9)
+    assert session["status"] == "activating" and session["launch_url"] is None
+    # The group is named after the device's company, not one shared group.
+    assert group_names == ["Contoso"]
+
+    jobs = await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
+    assert len(jobs) == 1 and jobs[0]["path"] == "builtin/meshcentral_activate.ps1"
+    # The activation script is handed the site and the company's group id.
+    assert jobs[0]["env"]["MESH_SITE"] == "https://mesh.example.com"
+    assert jobs[0]["env"]["MESH_GROUP_ID"] == "grp123"
+
+    await rmm_scripts.record_result(agent, session["run_id"], {"exit_code": 0, "stdout": "installed"})
+    ready = await remote.session_status(session["id"], company_id=1, user_id=9, is_super_admin=False)
+    assert ready["status"] == "ready"
+    query = parse_qs(urlsplit(ready["launch_url"]).query)
+    assert query["gotonode"] == ["abc$def@"] and _decode_mesh_token(query["login"][0])["u"] == "user//tactical"
+
+    # If the device has not checked in yet, fall back to a signed-in link.
+    async def no_node(server_url, login_token, group_id, names, **kwargs):
+        return None
+
+    monkeypatch.setattr(remote.meshcentral, "find_node", no_node)
+    fallback = await remote.session_status(session["id"], company_id=1, user_id=9, is_super_admin=False)
+    assert fallback["status"] == "ready" and "gotonode" not in fallback["launch_url"]
 
 
 def test_settings_page_renders_providers_and_script_values():

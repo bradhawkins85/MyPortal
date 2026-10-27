@@ -18,7 +18,7 @@
       <pre class="rmm-remote__example"><code>##myportal[session.id]=123456789        # RustDesk ID
 ##myportal[session.password]=one-time   # RustDesk password (optional)
 ##myportal[session.node_id]=node//abc   # MeshCentral node ID</code></pre>
-      <p class="form-help">RustDesk works without a script of your own: MyPortal's built-in script applies <code>RUSTDESK_CFG</code> from the .env file, starts the RustDesk service, sets a new one-time password and reports the ID. Choose your own script to replace it. Without the RMM agent, the device's ID is read from the asset custom field named below. Only scripts in the <code>Common</code> folder are offered, as they run on every company's devices.</p>
+      <p class="form-help">RustDesk works without a script of your own: MyPortal's built-in script applies <code>RUSTDESK_CFG</code> from the .env file, starts the RustDesk service, sets a new one-time password and reports the ID. Choose your own script to replace it. Without the RMM agent, the device's ID is read from the asset custom field named below. MeshCentral also works without a script of your own: its built-in script installs the agent on first use into a device group named after the device's company (so each company's devices sit in their own group, not one shared group), then finds the device's node by its host name and opens a signed-in link straight to it. Only scripts in the <code>Common</code> folder are offered, as they run on every company's devices.</p>
     </div>
   </section>
 
@@ -26,7 +26,7 @@
   <section class="card card--panel" aria-labelledby="rmm-remote-{{ provider.provider }}-heading">
     <header class="card__header card__header--stacked"><div>
       <h2 class="card__title" id="rmm-remote-{{ provider.provider }}-heading">{{ provider.label }}</h2>
-      <p class="card__subtitle">{% if provider.is_enabled %}On: technicians can connect with {{ provider.label }}.{% else %}Off.{% endif %}{% if provider.builtin %} Built-in script: <code>RUSTDESK_CFG</code> is {{ "set" if rustdesk_env.cfg_set else "not set, so the device keeps its current RustDesk server" }}; <code>RUSTDESK_INSTALLER_URL</code> is {{ "set" if rustdesk_env.installer_set else "not set, so Windows devices download the latest GitHub release" }}; <code>RUSTDESK_MACOS_INSTALLER_URL</code> is {{ "set" if rustdesk_env.macos_installer_set else "not set, so Macs download the latest GitHub release" }}.{% endif %}{% if provider.activation_script_id and not provider.activation_script_active %} <strong>The activation script was removed from Gitea.</strong>{% endif %}</p>
+      <p class="card__subtitle">{% if provider.is_enabled %}On: technicians can connect with {{ provider.label }}.{% else %}Off.{% endif %}{% if provider.builtin %}{% if provider.provider == "rustdesk" %} Built-in script: <code>RUSTDESK_CFG</code> is {{ "set" if rustdesk_env.cfg_set else "not set, so the device keeps its current RustDesk server" }}; <code>RUSTDESK_INSTALLER_URL</code> is {{ "set" if rustdesk_env.installer_set else "not set, so Windows devices download the latest GitHub release" }}; <code>RUSTDESK_MACOS_INSTALLER_URL</code> is {{ "set" if rustdesk_env.macos_installer_set else "not set, so Macs download the latest GitHub release" }}.{% else %} Built-in script: on first use it installs the MeshCentral agent into a device group named after the device's company, then jumps straight to that device once it checks in.{% endif %}{% endif %}{% if provider.activation_script_id and not provider.activation_script_active %} <strong>The activation script was removed from Gitea.</strong>{% endif %}</p>
     </div></header>
     <form method="post" action="/rmm/remote-control/{{ provider.provider }}" class="card__body form">
       {% include "partials/csrf.html" %}
@@ -35,7 +35,7 @@
         <div class="form-field">
           <label class="form-label" for="rmm-remote-{{ provider.provider }}-script">Activation script</label>
           <select class="form-input" id="rmm-remote-{{ provider.provider }}-script" name="activation_script_id">
-            <option value="">{{ "Built-in: applies RUSTDESK_CFG and sets a one-time password" if provider.provider == "rustdesk" else "None: read the node ID from a custom field" }}</option>
+            <option value="">{{ "Built-in: installs MeshCentral into the device's company group" if provider.provider == "meshcentral" else "Built-in: applies RUSTDESK_CFG and sets a one-time password" }}</option>
             {% for script in scripts %}<option value="{{ script.id }}" {% if provider.activation_script_id == script.id %}selected{% endif %}>{{ script.name }} ({{ script.path }})</option>{% endfor %}
           </select>
         </div>

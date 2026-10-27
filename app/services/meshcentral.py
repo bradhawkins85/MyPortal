@@ -1,0 +1,157 @@
+"""Minimal client for a MeshCentral server's control channel.
+
+MeshCentral manages its device groups (internally "meshes") and nodes over a
+WebSocket at ``<site>/control.ashx?auth=<token>``. The token is the same
+login-cookie a web sign-in uses, so MyPortal reuses the one built by
+:func:`app.services.rmm_remote_control.meshcentral_login_token` and hands the
+finished string in to the helpers here (kept separate so this module stays
+independent of the remote control service).
+
+Why it exists: MeshCentral's agent installers are built *per device group*
+(``/meshagents?id=<arch>&meshid=<group>&installflags=2``). Installing with a
+company's group therefore drops the device straight into that group instead of
+a single shared group, and re-running the installer is how a device is moved to
+its company's group. These helpers find-or-create that group and locate the
+device's node id once it has checked in, so a session can build its sign-in
+link.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any, Sequence
+
+import websockets
+
+# How long a single control-channel round trip may take.
+_REQUEST_TIMEOUT_SECONDS = 10
+# Group/node lookups can miss a freshly installed agent that has not checked in
+# yet, so find_node retries for roughly this long.
+_NODE_WAIT_ATTEMPTS = 6
+_NODE_WAIT_DELAY_SECONDS = 3.0
+
+
+class MeshCentralError(Exception):
+    """The control channel is unreachable, or the answer was not what we asked for."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+def _control_url(server_url: str, login_token: str) -> str:
+    url = (server_url or "").strip().rstrip("/")
+    if not url:
+        raise MeshCentralError("The MeshCentral address is missing.")
+    if url.lower().startswith("https://"):
+        url = "wss://" + url[len("https://"):]
+    elif url.lower().startswith("http://"):
+        url = "ws://" + url[len("http://"):]
+    return url + "/control.ashx?auth=" + login_token
+
+
+async def _request(
+    server_url: str,
+    login_token: str,
+    action: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    response_action: str | None = None,
+    timeout_seconds: float = _REQUEST_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """One request/response exchange on the control channel."""
+
+    message = {"action": action, "responseid": "myportal"}
+    if payload:
+        message.update(payload)
+    uri = _control_url(server_url, login_token)
+    try:
+        async with websockets.connect(uri, max_size=64 * 1024 * 1024) as websocket:
+            await websocket.send(json.dumps(message))
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout_seconds
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise MeshCentralError(f"Timed out waiting for MeshCentral to answer '{action}'.")
+                raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
+                data = json.loads(raw)
+                if data.get("action") == (response_action or action):
+                    return data
+    except MeshCentralError:
+        raise
+    except OSError as exc:
+        raise MeshCentralError(f"Could not reach the MeshCentral control channel: {exc}") from exc
+    except ValueError as exc:
+        raise MeshCentralError("The MeshCentral control channel sent an unreadable reply.") from exc
+
+
+async def list_meshes(server_url: str, login_token: str) -> list[dict[str, Any]]:
+    """Every device group the user can see (``_id`` looks like ``mesh//abc``)."""
+
+    data = await _request(server_url, login_token, "meshes", response_action="meshes")
+    meshes = data.get("meshes")
+    return meshes if isinstance(meshes, list) else []
+
+
+async def ensure_group(server_url: str, login_token: str, name: str) -> str:
+    """Return the id (without the ``mesh//`` prefix) of a named group, creating it if needed."""
+
+    name = (name or "").strip()
+    if not name:
+        raise MeshCentralError("A device group name is needed for MeshCentral.")
+    for mesh in await list_meshes(server_url, login_token):
+        if str(mesh.get("name", "")).lower() == name.lower():
+            return str(mesh.get("_id", "")).removeprefix("mesh//")
+    data = await _request(
+        server_url, login_token, "createmesh", {"meshname": name, "meshtype": 2}, response_action="createmesh"
+    )
+    mesh_id = str(data.get("meshid") or "").removeprefix("mesh//")
+    if not mesh_id:
+        raise MeshCentralError(f"MeshCentral created the '{name}' group but did not return its id.")
+    return mesh_id
+
+
+async def find_node(
+    server_url: str,
+    login_token: str,
+    group_id: str,
+    names: Sequence[str],
+    *,
+    attempts: int = _NODE_WAIT_ATTEMPTS,
+    delay_seconds: float = _NODE_WAIT_DELAY_SECONDS,
+) -> str | None:
+    """The node id (``node//...``) of a device in a group, matched by name.
+
+    A freshly installed agent takes a few seconds to check in, so the lookup is
+    retried a handful of times. ``group_id`` is the id without the ``mesh//``
+    prefix; matches are verified against it so a same-named device in another
+    group is never picked.
+    """
+
+    wanted = {n.strip().lower() for n in names if n and n.strip()}
+    if not wanted:
+        return None
+    for attempt in range(attempts):
+        if attempt:
+            await asyncio.sleep(delay_seconds)
+        try:
+            data = await _request(
+                server_url,
+                login_token,
+                "nodes",
+                {"meshid": "mesh//" + group_id, "limit": 1000},
+                response_action="nodes",
+            )
+        except MeshCentralError:
+            return None
+        nodes = data.get("nodes") if isinstance(data.get("nodes"), list) else []
+        for node in nodes:
+            if str(node.get("mesh", "")).removeprefix("mesh//") != group_id:
+                continue
+            # The node's display name defaults to the machine's hostname, which is
+            # the same hostname the RMM agent reports; match either field.
+            if str(node.get("name", "")).lower() in wanted or str(node.get("hostname", "")).lower() in wanted:
+                return str(node.get("_id", ""))
+    return None
