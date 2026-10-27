@@ -5,7 +5,7 @@ set -Eeuo pipefail
 umask 027
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+PROJECT_ROOT=${MYPORTAL_CONTROL_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}
 SERVICE_USER="myportal"
 # shellcheck source=lib/python_runtime.sh
 source "${SCRIPT_DIR}/lib/python_runtime.sh"
@@ -224,7 +224,7 @@ cleanup_old_releases() {
   # Feature-pack and migration-only deployments move links without restarting
   # workers, so the script also keeps every slot's target and any release a
   # running process still works from.
-  if ! python3 "${PROJECT_ROOT}/scripts/cleanup_releases.py" "$RELEASE_ROOT" "$CURRENT_LINK" --retain 3 \
+  if ! python3 "${SCRIPT_DIR}/cleanup_releases.py" "$RELEASE_ROOT" "$CURRENT_LINK" --retain 3 \
       --protect "$INSTANCE_ROOT/blue" --protect "$INSTANCE_ROOT/green"; then
     echo "WARNING: post-deployment release cleanup failed; deployment remains successful." >&2
   fi
@@ -245,7 +245,7 @@ generate_deployment_plan() {
   ensure_updater_state_dir
   DEPLOYMENT_PLAN_FILE="${UPDATER_STATE_DIR}/deployment_plan.json"
   rm -f -- "${SHARED_ROOT}/state/deployment_plan.json"  # legacy location
-  PYTHONPATH="$PROJECT_ROOT" python3 -m app.services.deployment_plan "$base" "$target" >"$DEPLOYMENT_PLAN_FILE"
+  python3 "${SCRIPT_DIR}/../app/services/deployment_plan.py" "$base" "$target" >"$DEPLOYMENT_PLAN_FILE"
   DEPLOYMENT_PLAN=$(<"$DEPLOYMENT_PLAN_FILE")
   DEPLOYMENT_ACTION=$(plan_field action)
   DEPLOYMENT_REASON=$(plan_field reason)
@@ -1155,6 +1155,24 @@ update_control_checkout() {
   echo "Updated the control checkout at ${PROJECT_ROOT} to ${target}." >&2
 }
 
+run_target_upgrade_coordinator() {
+  # Serving code and deployment logic must come from the same fetched commit,
+  # even when local edits/branches prevent fast-forwarding the control tree.
+  local revision="$1" staged
+  [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+  staged=$(mktemp -d "${UPDATER_STATE_DIR}/coordinator-${revision}.XXXXXX") || return 1
+  if ! git archive "$revision" scripts app/services/deployment_plan.py | tar -x -C "$staged"; then
+    rm -rf -- "$staged"
+    return 1
+  fi
+  echo "Executing fetched upgrade coordinator ${revision}; control checkout: ${PROJECT_ROOT}." >&2
+  # Release the old coordinator's lock before replacing it. The new process
+  # reacquires it and fetches again, repeating the handoff if origin advanced.
+  exec 9>&-
+  MYPORTAL_CONTROL_ROOT="$PROJECT_ROOT" MYPORTAL_ENV_FILE="$ENV_FILE" \
+    MYPORTAL_UPGRADE_REEXEC="$revision" exec bash "$staged/scripts/upgrade.sh" "${UPGRADE_ARGS[@]}"
+}
+
 provision_gitea_for_revision() {
   # The control checkout may be pinned or locally edited. Use the same
   # fetched revision as the application, without modifying those local files.
@@ -1223,6 +1241,8 @@ install_upgrade_command() {
     printf '#!/usr/bin/env bash\n'
     printf '# Installed by scripts/upgrade.sh: deploy the latest origin/main from the\n'
     printf '# MyPortal control checkout at %s.\n' "$PROJECT_ROOT"
+    printf 'export MYPORTAL_CONTROL_ROOT=%q\n' "$PROJECT_ROOT"
+    printf 'export MYPORTAL_ENV_FILE=%q\n' "$ENV_FILE"
     printf 'exec %q "$@"\n' "${SCRIPT_DIR}/upgrade.sh"
   } >"$staging"
   chmod 0755 "$staging"
@@ -1347,10 +1367,11 @@ validate_origin_remote "$(git config --get remote.origin.url)"
 validate_required_configuration
 git fetch --quiet origin main
 TARGET_REVISION=$(git rev-parse 'origin/main^{commit}')
-if [[ -z "${MYPORTAL_UPGRADE_REEXEC:-}" ]] && update_control_checkout "$TARGET_REVISION"; then
-  # Run the updated upgrade script, which takes the lock itself.
-  exec 9>&-
-  MYPORTAL_UPGRADE_REEXEC=1 exec bash "${SCRIPT_DIR}/upgrade.sh" "${UPGRADE_ARGS[@]}"
+if [[ "${MYPORTAL_UPGRADE_REEXEC:-}" != "$TARGET_REVISION" ]]; then
+  update_control_checkout "$TARGET_REVISION" || true
+  run_target_upgrade_coordinator "$TARGET_REVISION"
+  # exec must succeed: never continue with stale deployment logic.
+  exit 1
 fi
 # Releases run on MYPORTAL_PYTHON_VERSION, not whatever python3 the host has.
 # Hosts installed on an older Python are moved over here; the interpreter

@@ -1,0 +1,7 @@
+{
+  "guid": "4ef47da7-1d5b-440c-9ae2-0c334455ae67",
+  "occurred_at": "2026-10-27T12:16Z",
+  "change_type": "Fix",
+  "summary": "Run production upgrade coordination from the fetched target revision even when the control checkout is pinned or locally modified, so required maintenance steps cannot be skipped by stale scripts.",
+  "content_hash": "9b42a43bd4d62e0c0091aa4797e1eec0f5d1e13423971dc07130f91330cef0ad"
+}
