@@ -1169,6 +1169,19 @@ provision_gitea_for_revision() {
   return "$status"
 }
 
+configure_mariadb_for_revision() {
+  # Apply the target release's tuning even if the control checkout is pinned.
+  local revision="$1" helper status=0
+  helper=$(mktemp "${UPDATER_STATE_DIR}/configure-mariadb.XXXXXX") || return 1
+  if ! git show "${revision}:scripts/configure_mariadb.py" >"$helper"; then
+    rm -f "$helper"
+    return 1
+  fi
+  python3 "$helper" "$ENV_FILE" || status=$?
+  rm -f "$helper"
+  return "$status"
+}
+
 verify_release_sources() {
   # Refuse a release whose Python does not even parse (for example a stray
   # "continue" outside a loop) before migrations run or any slot restarts.
@@ -1348,6 +1361,7 @@ RUNTIME_PYTHON=$(ensure_runtime_python "${SHARED_ROOT}/python") || {
   exit 1
 }
 echo "Release runtime: ${RUNTIME_PYTHON} ($("$RUNTIME_PYTHON" -V 2>&1))." >&2
+configure_mariadb_for_revision "$TARGET_REVISION"
 redis_env_before=$(sha256sum "$ENV_FILE")
 bash "${SCRIPT_DIR}/provision_redis.sh" "$ENV_FILE"
 # Gitea for the RMM script library is optional: a failure is reported and

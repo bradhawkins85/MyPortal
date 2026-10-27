@@ -792,8 +792,10 @@ REMINDER
 
 if is_root; then
   "${SCRIPT_DIR}/provision_mysql.sh" "$ENV_FILE"
+  python3 "${SCRIPT_DIR}/configure_mariadb.py" "$ENV_FILE"
 else
   sudo "${SCRIPT_DIR}/provision_mysql.sh" "$ENV_FILE"
+  sudo python3 "${SCRIPT_DIR}/configure_mariadb.py" "$ENV_FILE"
 fi
 
 install_pwsh
