@@ -137,8 +137,6 @@
   let timer = null;
   let busy = false;
   let target = '';
-  // MeshCentral opens in a tab reserved on the click, so pop-up blockers allow it.
-  let pendingTab = null;
 
   function csrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -177,13 +175,6 @@
     });
   }
 
-  function closePendingTab() {
-    if (pendingTab && !pendingTab.closed) {
-      pendingTab.close();
-    }
-    pendingTab = null;
-  }
-
   function finish() {
     if (timer) {
       clearTimeout(timer);
@@ -199,7 +190,6 @@
   function launch(session) {
     const url = String(session.launch_url || '');
     if (!/^(rustdesk:\/\/|https?:\/\/)/i.test(url)) {
-      closePendingTab();
       show('MyPortal returned a link it cannot open.', true);
       return;
     }
@@ -208,16 +198,15 @@
     if (url.indexOf('rustdesk:') === 0) {
       // Hands the link to the RustDesk app; the page stays where it is.
       link.removeAttribute('target');
-      closePendingTab();
       window.location.href = url;
+      show(sessionName(session) + ' is opening' + target + '.', false);
     } else {
       link.setAttribute('target', '_blank');
-      if (pendingTab && !pendingTab.closed) {
-        pendingTab.location.href = url;
-        pendingTab = null;
-      } else {
-        link.textContent = 'Open ' + sessionName(session);
-      }
+      // Open only once activation succeeds. The visible link also works when
+      // the browser blocks a tab opened after an asynchronous request.
+      window.open(url, '_blank', 'noopener,noreferrer');
+      link.textContent = 'Open ' + sessionName(session);
+      show(sessionName(session) + ' is ready' + target + '. If it did not open, use the link.', false);
     }
     link.hidden = false;
   }
@@ -225,19 +214,16 @@
   function render(session, startedAt) {
     if (session.status === 'ready' && session.launch_url) {
       finish();
-      show(sessionName(session) + ' is opening' + target + '.', false);
       launch(session);
       return;
     }
     if (session.status !== 'activating') {
       finish();
-      closePendingTab();
       show(session.error || (session.label + ' could not be switched on.'), true);
       return;
     }
     if (Date.now() - startedAt > GIVE_UP_MS) {
       finish();
-      closePendingTab();
       show('The device has not reported back. Check its script runs.', true);
       return;
     }
@@ -253,7 +239,6 @@
       render(data.session, startedAt);
     } catch (error) {
       finish();
-      closePendingTab();
       show(error.message, true);
     }
   }
@@ -265,14 +250,7 @@
     }
     event.preventDefault();
     finish();
-    closePendingTab();
     const provider = button.dataset.rmmRemote;
-    if (provider !== 'rustdesk') {
-      pendingTab = window.open('about:blank', '_blank');
-      if (pendingTab) {
-        pendingTab.opener = null;
-      }
-    }
     setBusy(true);
     target = button.dataset.rmmRemoteName ? ' on ' + button.dataset.rmmRemoteName : '';
     link.hidden = true;
@@ -286,7 +264,6 @@
       render(data.session, Date.now());
     } catch (error) {
       finish();
-      closePendingTab();
       show(error.message, true);
     }
   });

@@ -25,7 +25,17 @@ function Invoke-MeshCommand {
             if ($_ -match '["\r\n]') { throw "Invalid argument for: $Step." }
             '"' + $_ + '"'
         })
-        $process = Start-Process -FilePath $File -ArgumentList $quoted -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        $startParameters = @{
+            FilePath = $File
+            PassThru = $true
+            WindowStyle = 'Hidden'
+            RedirectStandardOutput = $stdout
+            RedirectStandardError = $stderr
+        }
+        # The self-installing agent takes no arguments. Start-Process rejects an
+        # empty ArgumentList, so leave that parameter out for this invocation.
+        if ($quoted.Count -gt 0) { $startParameters.ArgumentList = $quoted }
+        $process = Start-Process @startParameters
         $null = $process.Handle
         if (-not $process.WaitForExit([Math]::Min($TimeoutSeconds, $remaining) * 1000)) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
