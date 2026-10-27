@@ -13,6 +13,46 @@ For integration-specific guidance refer to the dedicated documentation under
 `docs/`. For example, [docs/xero.md](xero.md) outlines the callback URL and
 credential requirements for the Xero module.
 
+## Changing settings without a restart
+
+On bare metal, every MyPortal worker watches `/etc/myportal.env` (and its
+slot's `/etc/myportal.blue.env` or `/etc/myportal.green.env`). Save the file
+and both blue/green slots apply the change within about 10 seconds, with no
+restart and no dropped requests. For example, adding a log to
+`EVENT_LOG_DEFAULT_LOGS` or changing the `SMTP_*` settings takes effect for the
+next agent check-in or email.
+
+- A change is applied once the file has been unchanged for one check (5
+  seconds), so a save in progress is never half applied.
+- The whole file must still be valid. If it is not (for example
+  `SMTP_PORT=abc`), the change is ignored, the error is logged, and the portal
+  keeps its current settings until the file is fixed.
+- Settings read only at startup are not applied live: database and Redis
+  connections (`DB_*`, `EVENT_LOG_DB_*` and `STATS_DB_*` connection settings,
+  `REDIS_*`), secrets and encryption keys, `ENVIRONMENT`, `ALLOWED_ORIGINS`,
+  the IP allow list, rate limits, `MCP_ENABLED`, `MATRIX_ENABLED`, feature
+  packs and plugins, logging, `CRON_TIMEZONE`, and the worker and port
+  settings. They take effect at the next deployment or restart.
+
+Check that every worker has the current file, and see which saved settings
+still need a restart (run from the MyPortal checkout, usually `/opt/myportal`):
+
+```bash
+sudo scripts/myportal-baremetal.sh reload
+```
+
+It lists each worker as `current`, `pending` (not loaded yet) or `rejected`
+(the file did not validate), and exits non-zero unless every worker is
+current. Only key names are reported, never values. A per-slot file must be
+readable by the service account (`root:myportal`, mode `0640`, like
+`/etc/myportal.env`); if a worker cannot read it, live reload stays off for
+that worker and a warning is logged. Set `MYPORTAL_ENV_RELOAD_SECONDS=0` to turn
+live reload off.
+
+Docker installations do not reread `myportal.env` while running; apply changes
+there with `myportal-docker restart`, which already swaps slots without
+downtime.
+
 ## Application workers
 
 Production systemd services and Docker containers start four Uvicorn workers

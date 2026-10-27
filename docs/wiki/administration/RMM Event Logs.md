@@ -54,8 +54,11 @@ On the Event logs page, **Logs collected** lists extra logs, one per line:
 - **Extra logs for this device**, beside each device with the RMM agent.
 
 A device collects the default logs (`EVENT_LOG_DEFAULT_LOGS`), then its company's extra logs,
-then its own. Agents pick up a changed `EVENT_LOG_DEFAULT_LOGS` within a minute of MyPortal
-restarting; each new log starts from the last 24 hours. Use the
+then its own. Save a changed `EVENT_LOG_DEFAULT_LOGS` in `/etc/myportal.env` and the running
+portal loads it within about 10 seconds, without a restart (see
+[Changing settings without a restart](../getting-started/Configuration.md#changing-settings-without-a-restart));
+agents pick it up within a minute after that. On Docker, apply it with `myportal-docker restart`.
+Each new log starts from the last 24 hours. Use the
 log's full name as shown in Event Viewer → the log's **Properties** → **Full Name**, for example
 `Security`, `Windows PowerShell` or `Microsoft-Windows-PowerShell/Operational`. Changing the logs
 needs write access to Scripts (`menu.rmm_scripts`).
