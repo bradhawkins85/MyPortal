@@ -321,7 +321,7 @@ async def exclude_notification_event_type(
     event_type = str(record.get("event_type") or "").strip()
     if not event_type:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Notification does not have a valid event type",
         )
     try:
@@ -356,7 +356,7 @@ async def undo_exclude_notification_event_type(
     event_type = str(record.get("event_type") or "").strip()
     if not event_type:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Notification does not have a valid event type",
         )
     try:

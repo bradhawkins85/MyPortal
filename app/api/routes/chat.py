@@ -91,7 +91,7 @@ async def create_ai_tag_synonym_group(
     try:
         return await synonyms_repo.create_group(body.terms)
     except synonyms_repo.InvalidSynonymGroup as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
 
 
 @router.get(
@@ -124,7 +124,7 @@ async def update_ai_tag_synonym_group(
     try:
         group = await synonyms_repo.update_group(group_id, body.terms)
     except synonyms_repo.InvalidSynonymGroup as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Synonym group not found")
     return group

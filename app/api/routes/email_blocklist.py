@@ -33,7 +33,7 @@ async def create_email_blocklist_entry(payload: EmailBlocklistCreate, current_us
             created_by_user_id=current_user.get("id"),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     return EmailBlocklistEntry(**row)
 
 

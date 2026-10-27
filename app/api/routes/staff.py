@@ -366,7 +366,7 @@ async def create_staff_request(
         )
         if validation_errors:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=validation_errors,
             )
         payload_data.update(standard_values)
@@ -376,7 +376,7 @@ async def create_staff_request(
         )
         if custom_field_errors:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=custom_field_errors,
             )
     if custom_fields and current_user is not None and not await _can_submit_group_mapped_custom_fields(current_user, company_id):

@@ -155,7 +155,7 @@ async def admin_create_subscription(request: Request):
             current_user,
             values=values,
             errors=errors,
-            response_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            response_status=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
 
     try:

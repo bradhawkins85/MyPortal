@@ -786,7 +786,7 @@ async def admin_suggest_ticket_reply(ticket_id: int, request: Request):
         )
         return JSONResponse(
             {"detail": "Could not generate a reply suggestion for this ticket."},
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
     return JSONResponse(result)
 
@@ -823,7 +823,7 @@ async def admin_ticket_related_feedback(ticket_id: int, relationship_id: int, re
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a JSON object")
     rating = payload.get("rating")
     if rating is not None and rating not in rag_relationship_repo.FEEDBACK_RATINGS:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Rating must be up, down or null")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Rating must be up, down or null")
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")

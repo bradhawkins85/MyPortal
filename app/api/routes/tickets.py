@@ -897,13 +897,13 @@ async def create_tacticalrmm_ticket(
     alert_id = str(payload.alert_id).strip()
     if not alert_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Tactical RMM alert_id is required.",
         )
     external_reference = f"tacticalrmm:alert:{alert_id}"
     if len(external_reference) > 128:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Tactical RMM alert_id is too long.",
         )
 
@@ -1009,13 +1009,13 @@ async def resolve_tacticalrmm_ticket(
     alert_id = str(payload.alert_id).strip()
     if not alert_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Tactical RMM alert_id is required.",
         )
     external_reference = f"tacticalrmm:alert:{alert_id}"
     if len(external_reference) > 128:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Tactical RMM alert_id is too long.",
         )
 

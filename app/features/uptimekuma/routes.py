@@ -112,11 +112,11 @@ async def receive_alert(
             source_url=source_url,
             payload=payload_for_log,
             headers=request_headers,
-            response_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            response_status=status.HTTP_422_UNPROCESSABLE_CONTENT,
             response_body="Validation failed",
             error_message="Invalid Uptime Kuma payload schema",
         )
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid Uptime Kuma payload schema") from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid Uptime Kuma payload schema") from exc
 
     logger.debug(
         "Uptime Kuma webhook request received",

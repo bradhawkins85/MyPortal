@@ -115,14 +115,14 @@ async def list_issues(
                 if candidate >= 1:
                     resolved_company_id = candidate
             except ValueError as exc:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid company filter") from exc
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid company filter") from exc
     resolved_company_id = await _resolve_company_filter(resolved_company_id, company_name)
     if resolved_company_id is not None and resolved_company_id not in allowed_company_ids:
         return IssueListResponse(items=[], total=0)
     try:
         status_value = issues_service.normalise_status(status_filter) if status_filter else None
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid status filter") from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid status filter") from exc
 
     if search:
         search_value = search.strip()
