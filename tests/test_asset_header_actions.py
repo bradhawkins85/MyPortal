@@ -80,3 +80,11 @@ def test_customer_view_hides_rmm_actions(header):
     for item in RMM_ITEMS:
         assert item not in html
     assert "Agent maintenance" not in html
+
+
+@pytest.mark.parametrize("can_wake,customer_safe,visible", [(True, False, True), (False, False, False), (True, True, False)])
+def test_wake_available_without_an_agent_only_to_authorised_staff(header, can_wake, customer_safe, visible):
+    html = header.render(**{**_values(agent=None), "can_wake": can_wake, "customer_safe": customer_safe})
+    assert ('data-wol-asset-id="10"' in html) is visible
+    if visible:
+        assert "Wake on LAN" in html and "data-confirm=" in html

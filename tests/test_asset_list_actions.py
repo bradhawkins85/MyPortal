@@ -84,3 +84,14 @@ def test_customer_rows_keep_only_the_asset_options(page):
     labels = re.findall(r"<span>([^<]+)</span>", _menu(html, 12))
     assert labels == ["Open asset", "Start process"]
     assert "header-menu__divider" not in _menu(html, 12)
+
+
+@pytest.mark.parametrize("can_wake,can_write,visible", [(True, True, True), (False, True, False), (True, False, False)])
+def test_wake_available_without_an_agent_only_to_authorised_staff(page, can_wake, can_write, visible):
+    html = _render(page, {"id": 11, "company_id": 1, "name": "Offline PC"},
+                   can_wake=can_wake, can_write_assets=can_write)
+    menu = _menu(html, 11)
+    assert ('data-wol-asset-id="11"' in menu) is visible
+    assert ('id="wol-status-11"' in menu) is visible
+    if visible:
+        assert "Wake on LAN" in menu and "data-confirm=" in menu
