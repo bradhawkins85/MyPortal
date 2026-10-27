@@ -6,11 +6,12 @@ import argparse
 import os
 from pathlib import Path
 import re
-import shlex
 import shutil
 import stat
 import subprocess
 import tempfile
+import sys
+from typing import Callable
 
 
 MIB = 1024 ** 2
@@ -20,13 +21,48 @@ POOL_SETTING = re.compile(r"^\s*innodb[-_]buffer[-_]pool[-_]size\s*=\s*([^#;]+)"
 
 
 def read_database_settings(path: Path) -> dict[str, str]:
+    # Match dotenv quoting without evaluating shell code or interpolating $.
+    pattern = re.compile(
+        r'''^[ \t]*(?:export[ \t]+)?(DB_HOST|DB_PORT|DB_USER|DB_PASSWORD)[ \t]*=[ \t]*'''
+        r'''('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|[^\r\n]*)''', re.M | re.S,
+    )
+    escapes = {"\\": "\\", "'": "'", '"': '"', "a": "\a", "b": "\b",
+               "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v"}
     settings = {}
-    for line in path.read_text().splitlines():
-        name, sep, value = line.strip().removeprefix("export ").partition("=")
-        if sep and name.strip() in {"DB_HOST", "DB_PORT"}:
-            words = shlex.split(value, comments=True)
-            settings[name.strip()] = words[0] if words else ""
+    for match in pattern.finditer(path.read_text()):
+        name, value = match.groups()
+        value = value.strip()
+        if value.startswith(("'", '"')):
+            if len(value) < 2 or value[-1] != value[0]:
+                raise ValueError("Invalid quoted " + name + " in environment file")
+            quote, value = value[0], value[1:-1]
+            value = re.sub(r"\\([\\'])", lambda m: m[1], value) if quote == "'" else re.sub(
+                r'''\\([\\'"abfnrtv])''', lambda m: escapes[m[1]], value,
+            )
+        else:
+            value = re.sub(r"\s+#.*$", "", value).rstrip()
+        settings[name] = value
     return settings
+
+
+def option_value(value: str) -> str:
+    """Quote a client option-file value without allowing extra options/lines."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace(
+        "\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
+
+
+def run_sql(command: list[str], statement: str, password: str) -> str:
+    try:
+        return subprocess.run(
+            command, input=statement, text=True, capture_output=True, check=True, timeout=120,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or "MariaDB client returned no diagnostic").strip()
+        if password:
+            detail = detail.replace(password, "[redacted]")
+        raise RuntimeError("MariaDB client failed: " + detail[:1000]) from None
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("MariaDB client timed out after 120 seconds") from None
 
 
 def default_pool_size(proc: Path = Path("/proc"), cgroup: Path = Path("/sys/fs/cgroup")) -> int:
@@ -114,13 +150,41 @@ def configure(env_file: Path, config: Path) -> None:
     if not client:
         raise RuntimeError("The local MariaDB client is required for buffer pool tuning")
 
-    def sql(statement: str) -> str:
-        return subprocess.run(
-            [client, "--protocol=socket", "--batch", "--skip-column-names"],
-            input=statement, text=True, capture_output=True, check=True, timeout=120,
-        ).stdout.strip()
+    # Prefer the distro's root socket login, then use the same configured TCP
+    # account as the application on hosts where root requires a password.
+    # Credentials never appear in argv or logs; the private file is removed
+    # even if probing or resizing fails.
+    with tempfile.TemporaryDirectory(prefix="myportal-mariadb-") as private:
+        commands = [[client, "--protocol=socket", "--user=root", "--batch", "--skip-column-names"]]
+        password = settings.get("DB_PASSWORD", "")
+        if settings.get("DB_USER"):
+            options = Path(private) / "client.cnf"
+            descriptor = os.open(options, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w") as handle:
+                handle.write("[client]\nprotocol=tcp\nhost=" + option_value(settings["DB_HOST"]) +
+                             "\nport=" + str(int(settings.get("DB_PORT") or "3306")) +
+                             "\nuser=" + option_value(settings["DB_USER"]) +
+                             "\npassword=" + option_value(password) + "\n")
+            commands.append([client, "--defaults-file=" + str(options), "--batch", "--skip-column-names"])
+        errors = []
+        for command in commands:
+            try:
+                result = run_sql(command, "SELECT @@version, @@port, @@innodb_buffer_pool_size;\n", password)
+                break
+            except RuntimeError as exc:
+                errors.append(str(exc))
+        else:
+            raise RuntimeError("; ".join(errors))
 
-    version, port, running = sql("SELECT @@version, @@port, @@innodb_buffer_pool_size;\n").split("\t")
+        def sql(statement: str) -> str:
+            return run_sql(command, statement, password)
+
+        apply_configuration(config, settings, result, sql)
+
+
+def apply_configuration(config: Path, settings: dict[str, str], result: str, sql: Callable[[str], str]) -> None:
+
+    version, port, running = result.split("\t")
     if "mariadb" not in version.lower():
         raise RuntimeError("Buffer pool tuning requires a local MariaDB server")
     if int(port) != int(settings.get("DB_PORT") or "3306"):
@@ -146,7 +210,11 @@ def main() -> None:
     parser.add_argument("env_file", type=Path)
     parser.add_argument("--config", type=Path, default=Path("/etc/mysql/mariadb.conf.d/50-server.cnf"))
     args = parser.parse_args()
-    configure(args.env_file, args.config)
+    try:
+        configure(args.env_file, args.config)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print("MariaDB buffer pool tuning was not applied: " + str(exc), file=sys.stderr)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

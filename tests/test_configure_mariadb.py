@@ -1,5 +1,6 @@
 """Local database tuning must respect memory limits and preserve server settings."""
 import importlib.util
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -107,3 +108,77 @@ def test_install_and_upgrade_apply_tuning_before_migrations():
     upgrade = (ROOT / "scripts/upgrade.sh").read_text()
     assert 'git show "${revision}:scripts/configure_mariadb.py"' in upgrade
     assert upgrade.index('configure_mariadb_for_revision "$TARGET_REVISION"') < upgrade.index('run_migration_phase "$RELEASE_DIR"')
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("plain#hash", "plain#hash"), ("plain # comment", "plain"),
+    ('"space $dollar #hash !bang"', "space $dollar #hash !bang"),
+    ("'single\\'quote\\\\slash'", "single'quote\\slash"),
+    ('"line\\nquote\\\"slash\\\\end"', 'line\nquote"slash\\end'),
+])
+def test_credentials_keep_dotenv_special_characters(tmp_path, raw, expected):
+    path = tmp_path / "application.env"
+    path.write_text("DB_PASSWORD=" + raw + "\nDB_HOST=localhost\n")
+    settings = tuning.read_database_settings(path)
+    assert settings["DB_PASSWORD"] == expected
+    assert settings["DB_HOST"] == "localhost"
+
+
+def test_root_login_failure_uses_private_configured_credentials(tmp_path, monkeypatch):
+    env, config, calls = _environment(tmp_path, monkeypatch)
+    secret = 'space $dollar #hash !bang "quote" \\slash'
+    env.write_text("DB_HOST=localhost\nDB_PORT=3306\nDB_USER=portal_admin\nDB_PASSWORD='" + secret + "'\n")
+    original_run = tuning.subprocess.run
+    private_files = []
+
+    def run(command, **kwargs):
+        if "--protocol=socket" in command:
+            raise subprocess.CalledProcessError(1, command, stderr="ERROR 1045: Access denied for root")
+        assert command[1].startswith("--defaults-file=")
+        path = Path(command[1].split("=", 1)[1])
+        private_files.append(path)
+        assert path.stat().st_mode & 0o777 == 0o600
+        text = path.read_text()
+        assert 'user="portal_admin"' in text
+        assert "password=" + tuning.option_value(secret) in text
+        assert secret not in " ".join(command)
+        return original_run(command, **kwargs)
+
+    monkeypatch.setattr(tuning.subprocess, "run", run)
+    tuning.configure(env, config)
+    assert private_files and all(not path.exists() for path in private_files)
+    assert tuning.pool_settings(config.read_text())[0][1] == 4 * tuning.GIB
+
+
+def test_failed_authentication_reports_redacted_diagnostic_and_keeps_config(tmp_path, monkeypatch):
+    env, config, _ = _environment(tmp_path, monkeypatch)
+    env.write_text("DB_HOST=localhost\nDB_USER=portal_admin\nDB_PASSWORD=private-secret\n")
+    original = config.read_bytes()
+    private_files = []
+
+    def fail(command, **kwargs):
+        if command[1].startswith("--defaults-file="):
+            private_files.append(Path(command[1].split("=", 1)[1]))
+        raise subprocess.CalledProcessError(1, command, stderr="ERROR 1045: Access denied private-secret")
+
+    monkeypatch.setattr(tuning.subprocess, "run", fail)
+    with pytest.raises(RuntimeError, match="ERROR 1045") as error:
+        tuning.configure(env, config)
+    assert "private-secret" not in str(error.value)
+    assert config.read_bytes() == original
+    assert private_files and all(not path.exists() for path in private_files)
+
+
+def test_optional_tuning_failure_does_not_abort_the_upgrade(tmp_path):
+    upgrade = (ROOT / "scripts/upgrade.sh").read_text()
+    invocation = upgrade[upgrade.index('\nconfigure_mariadb_for_revision "$TARGET_REVISION"'):]
+    invocation = invocation[:invocation.index("\nredis_env_before=")]
+    result = subprocess.run(
+        ["bash", "-c", 'set -Eeuo pipefail\nTARGET_REVISION=test\n'
+         'configure_mariadb_for_revision() { echo "ERROR 1045: Access denied" >&2; return 1; }\n'
+         + invocation + '\nprintf "upgrade-continued\\n"\n'],
+        text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0
+    assert "upgrade-continued" in result.stdout
+    assert "ERROR 1045" in result.stderr and "continuing upgrade" in result.stderr

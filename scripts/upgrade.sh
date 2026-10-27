@@ -1382,7 +1382,8 @@ RUNTIME_PYTHON=$(ensure_runtime_python "${SHARED_ROOT}/python") || {
   exit 1
 }
 echo "Release runtime: ${RUNTIME_PYTHON} ($("$RUNTIME_PYTHON" -V 2>&1))." >&2
-configure_mariadb_for_revision "$TARGET_REVISION"
+configure_mariadb_for_revision "$TARGET_REVISION" \
+  || echo "Warning: optional MariaDB buffer pool tuning failed; continuing upgrade with existing settings. Review the MariaDB diagnostic above." >&2
 redis_env_before=$(sha256sum "$ENV_FILE")
 bash "${SCRIPT_DIR}/provision_redis.sh" "$ENV_FILE"
 # Gitea for the RMM script library is optional: a failure is reported and
