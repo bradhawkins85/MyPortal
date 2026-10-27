@@ -113,6 +113,14 @@ is `down`, so there is nothing to fail over to, and counting failures would
 turn one failed request into several seconds of 502 responses for every
 request, including the health checks of a load balancer in front of nginx.
 
+The database check in `/readyz` answers within 3 seconds, so a slow database
+never makes a load balancer's health check time out. Once the database check
+has passed, a failure reports `"status":"degraded"` with HTTP 200, and the slot
+reports not ready (503) only when the database has stayed unreachable for 30
+seconds. Load balancers drop a server on a single failed check, and with one
+serving slot that leaves them nothing to route to ("no available server").
+Upgrades still wait for `"status":"ok"` before switching to a slot.
+
 An error during startup, version validation, smoke testing, nginx validation,
 or cutover restores the old upstream, inactive-slot link, and `current` link.
 The former active process continues serving throughout preparation and

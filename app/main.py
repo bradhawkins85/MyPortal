@@ -12484,10 +12484,22 @@ async def health_check():
 # ``/readyz`` is the deeper "is this instance ready to serve traffic"
 # check.  It returns 503 until startup has finished in every worker of the
 # service, the database is reachable, and every registered feature pack is in
-# a healthy state.
+# a healthy state.  A brief database outage after that reports "degraded"
+# with 200 rather than taking the instance out of rotation.
 # nginx uses this to decide when a blue/green instance is back online
 # during a rolling deploy (see ``docs/zero_downtime_upgrades.md``).
 _app_ready: bool = False
+
+# Load balancers drop a server on one failed or slow health check, and with a
+# single serving instance that leaves nothing to route to ("no available
+# server") although every other request would have succeeded. The database
+# check therefore answers within a few seconds, well inside typical probe
+# timeouts, and once it has passed, failures only make the instance unready
+# after the database has stayed unreachable for the grace period.
+_READYZ_DATABASE_TIMEOUT = 3.0
+_READYZ_DATABASE_GRACE = 30.0
+# Event loop time of this worker's last successful database check.
+_database_last_ok: float | None = None
 
 # Optional dev-only file watcher; started in ``on_startup`` when the
 # ``FEATURE_PACK_WATCH`` setting is true.  Held module-level so the
@@ -12524,16 +12536,31 @@ async def upgrade_status_endpoint() -> JSONResponse:
 async def readiness_probe() -> JSONResponse:
     """Readiness: startup has finished, DB is reachable, packs healthy."""
 
+    global _database_last_ok
+
     checks: dict[str, str] = {"startup": "ok" if _app_ready else "pending"}
     ok = _app_ready
+    degraded = False
 
     if _app_ready:
+        now = asyncio.get_running_loop().time()
         try:
-            await db.fetch_one("SELECT 1")
+            await asyncio.wait_for(db.fetch_one("SELECT 1"), timeout=_READYZ_DATABASE_TIMEOUT)
             checks["database"] = "ok"
+            _database_last_ok = now
         except Exception as exc:
-            checks["database"] = f"error: {exc.__class__.__name__}"
-            ok = False
+            name = "Timeout" if isinstance(exc, asyncio.TimeoutError) else exc.__class__.__name__
+            checks["database"] = f"error: {name}"
+            if _database_last_ok is not None and now - _database_last_ok < _READYZ_DATABASE_GRACE:
+                degraded = True
+            else:
+                ok = False
+            log_warning(
+                "Readiness database check failed",
+                error=name,
+                seconds_since_last_success=None if _database_last_ok is None else round(now - _database_last_ok, 1),
+                reported_unready=not degraded,
+            )
         # With several Uvicorn workers, this one being ready says nothing about
         # the rest; deployments must not switch to a service still starting.
         workers = worker_readiness.status()
@@ -12547,11 +12574,13 @@ async def readiness_probe() -> JSONResponse:
     else:
         checks["feature_packs"] = "ok"
 
+    # "degraded" still answers 200 so load balancers keep routing, but is not
+    # "ok", so upgrades do not switch to an instance in that state.
     status_code = HTTPStatus.OK if ok else HTTPStatus.SERVICE_UNAVAILABLE
     return JSONResponse(
         status_code=status_code,
         content={
-            "status": "ok" if ok else "not_ready",
+            "status": ("degraded" if degraded else "ok") if ok else "not_ready",
             "version": _APP_VERSION,
             "checks": checks,
         },
