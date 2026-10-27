@@ -81,5 +81,8 @@ and restores the previous configuration.
 - The previous file is copied to `<file>.bak-<timestamp>` first, and the file
   keeps its permissions and owner.
 
-Restart MyPortal to apply changes (`sudo myportal-docker restart` or
-`sudo systemctl restart myportal`).
+On Docker, apply changes with `sudo myportal-docker restart`. On bare metal,
+most changes apply on their own within about 10 seconds; run
+`sudo scripts/myportal-baremetal.sh reload` to confirm and to list settings
+that need a restart (see
+[Changing settings without a restart](Configuration.md#changing-settings-without-a-restart)).

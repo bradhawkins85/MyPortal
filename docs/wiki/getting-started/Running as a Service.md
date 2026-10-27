@@ -54,7 +54,13 @@ cat /etc/nginx/conf.d/myportal-active.inc
 systemctl status 'myportal@*'
 journalctl -u 'myportal@*' -f
 
-# Apply configuration changes made in /etc/myportal.env
+# Configuration changes made in /etc/myportal.env apply on their own within
+# about 10 seconds, without a restart. Confirm every worker loaded them and
+# list any setting that is read only at startup:
+sudo scripts/myportal-baremetal.sh reload
+
+# Settings read only at startup (database, Redis, secrets, workers, logging)
+# need a restart, which briefly interrupts the portal:
 sudo systemctl restart myportal@blue.service myportal@green.service
 
 # Deploy the latest origin/main (runs scripts/upgrade.sh from the control

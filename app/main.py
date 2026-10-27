@@ -117,6 +117,7 @@ from uuid import uuid4
 from app.core.ai_identity import get_agent_name
 from app.core.config import get_settings, get_templates_config
 from app.core.database import DatabaseTimeoutError, db
+from app.core.env_reload import EnvReloader, poll_seconds_from_env
 from app.core.event_log_database import event_log_db
 from app.core.stats_database import stats_db
 from app.core.static_assets import CompressedStaticFiles, content_hash, content_hash_for, release_files
@@ -3519,6 +3520,15 @@ async def on_startup() -> None:
         _feature_pack_watcher = FeaturePackWatcher(feature_registry)
         await _feature_pack_watcher.start()
 
+    # Apply /etc/myportal.env edits to this worker without a restart; see
+    # app/core/env_reload.py. MYPORTAL_ENV_RELOAD_SECONDS=0 turns it off.
+    global _env_reloader
+    _env_reloader = None
+    env_reload_seconds = poll_seconds_from_env()
+    if env_reload_seconds > 0:
+        _env_reloader = EnvReloader(poll_seconds=env_reload_seconds)
+        _env_reloader.start()
+
     global _app_ready
     _app_ready = True
     worker_readiness.mark_started()
@@ -3545,6 +3555,8 @@ async def on_shutdown() -> None:
         await asyncio.gather(*_rag_relationship_tasks, return_exceptions=True)
     if _feature_pack_watcher is not None:
         await _feature_pack_watcher.stop()
+    if _env_reloader is not None:
+        await _env_reloader.stop()
     await feature_registry.unload_all()
     await modules_service.stop_xero_token_keepalive()
     await scheduler_service.stop()
@@ -12505,6 +12517,7 @@ _database_last_ok: float | None = None
 # ``FEATURE_PACK_WATCH`` setting is true.  Held module-level so the
 # shutdown hook can cancel it.
 _feature_pack_watcher: Any = None
+_env_reloader: EnvReloader | None = None
 
 
 @app.get("/healthz")
