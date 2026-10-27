@@ -2,8 +2,10 @@ package checks
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -211,5 +213,17 @@ func TestProcesses(t *testing.T) {
 	statuses := CheckProcesses([]string{filepath.Base(os.Args[0])})
 	if len(statuses) != 1 || (statuses[0].Error == "" && statuses[0].Count < 1) {
 		t.Fatalf("self: got %+v", statuses)
+	}
+}
+
+func TestCollectSendsEmptyListsNotNull(t *testing.T) {
+	data, err := json.Marshal(NewCollector().Collect(context.Background(), client.CheckConfig{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"pings", "services", "files", "processes", "programs"} {
+		if !strings.Contains(string(data), `"`+field+`":[]`) {
+			t.Errorf("%s is not an empty list in %s", field, data)
+		}
 	}
 }

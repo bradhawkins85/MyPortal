@@ -213,20 +213,41 @@ async def insert_entries(entries: list[dict[str, Any]]) -> int:
     )
 
 
-async def recent_repeats(*, agent_id: int, message_ids: Iterable[int], since: datetime) -> list[dict[str, Any]]:
-    """A device's entries created since ``since`` with one of ``message_ids``
-    or no message, which later occurrences of the same event can join."""
+async def recent_repeats(
+    *,
+    agent_id: int,
+    message_ids: Iterable[int],
+    since: datetime,
+    until: datetime | None = None,
+    without_message: bool = True,
+) -> list[dict[str, Any]]:
+    """A device's entries created between ``since`` and ``until`` with one of
+    ``message_ids`` (or, with ``without_message``, no message), which later
+    occurrences of the same event can join."""
 
     ids = sorted({int(message_id) for message_id in message_ids})
-    message_clause = f"e.message_id IN ({', '.join(['%s'] * len(ids))}) OR " if ids else ""
+    matches = []
+    if ids:
+        matches.append(f"e.message_id IN ({', '.join(['%s'] * len(ids))})")
+    if without_message:
+        # Entries stored before de-duplication have no message_id but keep
+        # their own text; on a large table they are many, so they are only
+        # read when the batch has entries without a message.
+        matches.append("(e.message_id IS NULL AND e.message IS NULL)")
+    if not matches:
+        return []
+    params: list[Any] = [int(agent_id), *ids, since]
+    until_clause = ""
+    if until is not None:
+        until_clause = " AND e.time_created <= %s"
+        params.append(until)
     # Only "%s" placeholders are interpolated; every value is a bound parameter.
-    # Entries stored before de-duplication keep their own text and never join.
     return await event_log_db.fetch_all(
         "SELECT e.id, e.company_id, e.asset_id, e.log_name, e.record_id, e.event_id, e.level, e.provider, "
         "e.computer, e.message_id, e.repeat_count, e.time_created, e.last_time_created, e.last_record_id "
-        f"FROM {ENTRIES_TABLE} e WHERE e.agent_id = %s AND ({message_clause}e.message_id IS NULL) "  # nosec B608
-        "AND e.message IS NULL AND e.time_created >= %s ORDER BY e.time_created, e.id",
-        (int(agent_id), *ids, since),
+        f"FROM {ENTRIES_TABLE} e WHERE e.agent_id = %s AND ({' OR '.join(matches)}) "  # nosec B608
+        f"AND e.time_created >= %s{until_clause} ORDER BY e.time_created, e.id",
+        tuple(params),
     )
 
 

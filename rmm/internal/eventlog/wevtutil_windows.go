@@ -5,6 +5,7 @@ package eventlog
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -17,6 +18,10 @@ import (
 
 // Supported is true where Windows event logs can be read.
 const Supported = true
+
+// errChannelNotFound is ERROR_EVT_CHANNEL_NOT_FOUND, wevtutil's exit code for
+// a log the device does not have.
+const errChannelNotFound = 15007
 
 // Wevtutil reads event logs with Windows' wevtutil.exe, which renders each
 // event's message the way Event Viewer shows it.
@@ -34,6 +39,10 @@ func (Wevtutil) run(ctx context.Context, args ...string) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == errChannelNotFound {
+			return "", fmt.Errorf("%s: %w", args[1], ErrNoLog)
+		}
 		detail := strings.TrimSpace(DecodeOutput(stderr.Bytes()))
 		if detail == "" {
 			detail = strings.TrimSpace(DecodeOutput(stdout.Bytes()))

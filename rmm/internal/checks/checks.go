@@ -42,7 +42,13 @@ func (c *Collector) Prime() {
 
 // Collect measures what cfg asks for.
 func (c *Collector) Collect(ctx context.Context, cfg client.CheckConfig) client.CheckReport {
-	var report client.CheckReport
+	// The lists are never null: MyPortal reads null as a malformed report.
+	report := client.CheckReport{
+		Services:  []client.ServiceStatus{},
+		Files:     []client.FileStatus{},
+		Processes: []client.ProcessStatus{},
+		Programs:  []client.ProgramStatus{},
+	}
 	if cfg.CPU {
 		if percent, ok := c.cpu.Percent(); ok {
 			report.CPUPercent = &percent
