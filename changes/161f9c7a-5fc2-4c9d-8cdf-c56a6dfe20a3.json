@@ -1,0 +1,7 @@
+{
+  "guid": "161f9c7a-5fc2-4c9d-8cdf-c56a6dfe20a3",
+  "occurred_at": "2026-10-27T04:08Z",
+  "change_type": "Fix",
+  "summary": "RMM agents no longer retry together after an outage, and the portal stores at most a few event log batches at once per worker, so an outage can no longer repeat itself every 15 minutes with the reverse proxy reporting \"no available server\".",
+  "content_hash": "18bdfd0afb5949db501ce7c9d46e78244909e17de5afa996aa65b972b68c5fd9"
+}

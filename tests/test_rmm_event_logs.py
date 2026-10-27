@@ -400,3 +400,39 @@ def test_event_logs_page_shows_levels_and_repeats():
     assert '<option value="3" selected>Warning or worse</option>' in html
     assert '<option value="2" selected>Error or worse</option>' in html
     assert "Company: Warning or worse" in html and "Default: Everything (verbose)" in html
+
+
+@pytest.mark.anyio
+async def test_batches_beyond_the_concurrency_cap_are_refused_not_queued(monkeypatch):
+    # Agents cut off by one outage come back together; storing every batch at
+    # once used up the database pool and caused the next outage.
+    import asyncio
+
+    from app.features.rmm import event_log_routes as routes
+
+    release = asyncio.Event()
+    started = 0
+
+    async def _slow_ingest(agent, entries):
+        nonlocal started
+        started += 1
+        await release.wait()
+        return {"received": len(entries)}
+
+    monkeypatch.setattr(routes.event_logs, "ingest", _slow_ingest)
+    monkeypatch.setattr(routes, "INGEST_CONCURRENCY", 2)
+    monkeypatch.setattr(routes, "INGEST_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr(routes, "_ingest_slots", None)
+    batch = routes.AgentEventLogBatch(entries=[])
+
+    running = [asyncio.create_task(routes.agent_event_logs(batch, {"id": 1})) for _ in range(2)]
+    await asyncio.sleep(0)
+    refused = await routes.agent_event_logs(batch, {"id": 1})
+    assert refused.status_code == 429
+    assert refused.headers["Retry-After"] == "60"
+    assert started == 2
+
+    release.set()
+    assert await asyncio.gather(*running) == [{"received": 0}, {"received": 0}]
+    # Slots are released, so the next batch is stored.
+    assert await routes.agent_event_logs(batch, {"id": 1}) == {"received": 0}

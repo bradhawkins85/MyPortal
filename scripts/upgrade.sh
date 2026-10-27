@@ -1039,7 +1039,9 @@ repair_control_checkout_permissions() {
   owner=$(stat -c %U "$repo_root")
   [[ "$owner" != root && "$owner" != UNKNOWN ]] || return 0
 
-  chown -R "$owner:$owner" "$repo_root" 2>/dev/null || true
+  # Keep the checkout's group: "$owner:$owner" fails outright, changing
+  # nothing, when the owner's primary group has another name.
+  chown -R "$owner:$(stat -c %G "$repo_root")" "$repo_root" 2>/dev/null || true
   find "$git_dir" -type d -exec chmod u+rwx,go+rx {} + 2>/dev/null || true
   find "$git_dir" -type f -exec chmod u+rw,go+r {} + 2>/dev/null || true
   find "$repo_root" -type d -exec chmod u+rwx,go+rx {} + 2>/dev/null || true

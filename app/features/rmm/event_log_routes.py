@@ -24,6 +24,7 @@ Agent side (``Authorization: Bearer`` token):
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -360,9 +361,39 @@ class AgentEventLogBatch(BaseModel):
     entries: list[AgentEventLogEntry] = Field(default_factory=list, max_length=event_logs.MAX_BATCH)
 
 
+# Batches stored at once per worker. Agents that were cut off together (an
+# outage, an upgrade) come back together with a backlog each; storing every
+# batch at once used up the database pool, failed the rest of the portal and
+# caused the next outage. A batch that finds no free slot is refused with 429,
+# which agents retry on their next cycle without moving their cursor.
+INGEST_CONCURRENCY = 4
+INGEST_WAIT_SECONDS = 5.0
+_ingest_slots: tuple[asyncio.AbstractEventLoop, asyncio.Semaphore] | None = None
+
+
+def _ingest_semaphore() -> asyncio.Semaphore:
+    global _ingest_slots
+    loop = asyncio.get_running_loop()
+    if _ingest_slots is None or _ingest_slots[0] is not loop:
+        _ingest_slots = (loop, asyncio.Semaphore(INGEST_CONCURRENCY))
+    return _ingest_slots[1]
+
+
 @router.post("/api/rmm/agent/event-logs", summary="Send a batch of event log entries")
 async def agent_event_logs(payload: AgentEventLogBatch, agent: dict = Depends(get_current_rmm_agent)):
-    result = await event_logs.ingest(agent, [entry.model_dump() for entry in payload.entries])
+    slots = _ingest_semaphore()
+    try:
+        await asyncio.wait_for(slots.acquire(), timeout=INGEST_WAIT_SECONDS)
+    except TimeoutError:
+        return JSONResponse(
+            {"detail": "Too many event log batches at once; send this one again later."},
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": "60"},
+        )
+    try:
+        result = await event_logs.ingest(agent, [entry.model_dump() for entry in payload.entries])
+    finally:
+        slots.release()
     if result is None:
         return JSONResponse(
             {"detail": "Event log collection is off.", "enabled": False},

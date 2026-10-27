@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	mrand "math/rand/v2"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -318,6 +319,14 @@ func sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
+// jitter spreads d over 75-125% of its length. Waits after an error use it:
+// every agent sees the same outage at the same moment, and with a fixed wait
+// they would all come back together and overload MyPortal again, so a
+// single outage would repeat itself every wait.
+func jitter(d time.Duration) time.Duration {
+	return d*3/4 + mrand.N(d/2+1)
+}
+
 // loop polls MyPortal for runs until ctx is cancelled.
 func loop(ctx context.Context) {
 	var st state.State
@@ -389,7 +398,7 @@ func loop(ctx context.Context) {
 			if errors.Is(err, client.ErrUnauthorized) {
 				backoff = 10 * time.Minute
 			}
-			sleep(ctx, backoff)
+			sleep(ctx, jitter(backoff))
 			if backoff < 5*time.Minute {
 				backoff *= 2
 			}
@@ -516,7 +525,7 @@ func eventLogLoop(ctx context.Context, api *client.Client) {
 			if err != nil && ctx.Err() == nil {
 				log.Printf("event logs: could not get settings: %v", err)
 			}
-			sleep(ctx, eventLogsOffWait)
+			sleep(ctx, jitter(eventLogsOffWait))
 			continue
 		}
 		lookback := time.Duration(cfg.InitialLookbackHours) * time.Hour
@@ -546,7 +555,7 @@ func eventLogLoop(ctx context.Context, api *client.Client) {
 		}
 		eventCollectionMu.Unlock()
 		if off {
-			sleep(ctx, eventLogsOffWait)
+			sleep(ctx, jitter(eventLogsOffWait))
 			continue
 		}
 		interval := time.Duration(cfg.IntervalSeconds) * time.Second
@@ -579,7 +588,7 @@ func checksLoop(ctx context.Context, api *client.Client) {
 					log.Printf("checks: could not get settings: %v", err)
 					lastError = err.Error()
 				}
-				sleep(ctx, checksOffWait)
+				sleep(ctx, jitter(checksOffWait))
 				continue
 			}
 			cfg, fetched = next, time.Now()
