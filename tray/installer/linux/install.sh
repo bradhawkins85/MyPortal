@@ -9,7 +9,7 @@
 # The service (myportal-tray-service) runs as root under systemd on every
 # computer. On a computer with a desktop the tray UI is added too, and XDG
 # autostart opens it in each user's session. Without --headless or --desktop
-# the installer adds the UI when the computer boots to a graphical login.
+# the installer adds the UI when an X11 or Wayland desktop session is installed.
 #
 # Options: --no-auto-update turns off automatic tray updates (AUTO_UPDATE=false).
 set -eu
@@ -52,9 +52,11 @@ esac
 command -v systemctl >/dev/null 2>&1 || die "systemd is required"
 
 has_desktop() {
-	[ "$(systemctl get-default 2>/dev/null)" = graphical.target ] && return 0
-	for session in /usr/share/xsessions/*.desktop /usr/share/wayland-sessions/*.desktop; do
-		[ -e "$session" ] && return 0
+	# graphical.target is also the default on some headless servers. Check
+	# installed sessions instead, so detection also works over SSH or sudo.
+	for session in /usr/share/xsessions/*.desktop /usr/share/wayland-sessions/*.desktop \
+		/usr/local/share/xsessions/*.desktop /usr/local/share/wayland-sessions/*.desktop; do
+		[ -f "$session" ] && return 0
 	done
 	return 1
 }
