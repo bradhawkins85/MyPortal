@@ -506,6 +506,9 @@ async def test_mesh_installer_is_selected_and_snapshotted(monkeypatch, os_name, 
     async def download(site, token, group, arch_id):
         assert arch_id == expected and group == 'company-group'
         return b'MZinstaller'
+    async def settings(site, token, group):
+        assert group == 'company-group'
+        return b'MeshID=group\nServerID=server\nMeshServer=wss://mesh.test/agent.ashx\n'
     async def create_run(**kwargs):
         payload = json.loads(remote.decrypt_secret(kwargs['payload_encrypted']))
         item = payload['files'][0]
@@ -513,8 +516,14 @@ async def test_mesh_installer_is_selected_and_snapshotted(monkeypatch, os_name, 
         assert item['destination'] == payload['env']['MESH_INSTALLER_PATH']
         assert item['destination'].startswith('C:\\' if os_name == 'windows' else '/')
         assert 'MESH_SITE' not in payload['env'] and 'token' not in payload['env']
+        assert len(payload['files']) == (1 if os_name == 'windows' else 2)
+        if os_name != 'windows':
+            config = payload['files'][1]
+            assert config['destination'] == item['destination'] + '.msh'
+            assert base64.b64decode(config['content_base64']).startswith(b'MeshID=group')
         return 123
     monkeypatch.setattr(remote.meshcentral, 'download_installer', download)
+    monkeypatch.setattr(remote.meshcentral, 'download_settings', settings)
     monkeypatch.setattr(remote.rmm_repo, 'create_run', create_run)
     assert await remote._queue_builtin_meshcentral(agent, 'company-group', 9) == 123
 

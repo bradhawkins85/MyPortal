@@ -92,8 +92,12 @@ MyPortal signs in to MeshCentral using the configured login token, then download
 company-scoped installer for the endpoint's reported architecture. The installer is kept in
 the encrypted run payload and delivered through the authenticated RMM file endpoint, with
 size and checksum verification before execution. MeshCentral credentials stay on MyPortal.
-The endpoint runs the delivered installer and removes it afterwards; it does not need to
-access MeshCentral's download URL. **Require login for agent downloads** (`lockagentdownload`)
+The endpoint invokes the delivered agent with `-fullinstall` to copy it into its installed
+location, register the service and start it. Windows uses the configuration embedded in the
+executable. Linux and macOS also receive the company's `.msh` file and use `--copy-msh=1` to
+install that configuration alongside the agent. MyPortal verifies the service is running and
+removes the delivered files afterwards; the endpoint does not need to access MeshCentral's
+download URL. **Require login for agent downloads** (`lockagentdownload`)
 can stay enabled. The configured MeshCentral user must have access to the company's group.
 The RMM agent must support associated files and report a supported architecture; update older
 agents before starting a session.
