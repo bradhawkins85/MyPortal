@@ -87,6 +87,12 @@ RustDesk):
   work here. The settings page shows whether each is set, but only the `.env` file holds the
   values.
 
+The built-in script has the device download the agent straight from the MeshCentral server
+(`…/meshagents?id=…&meshid=…`), so the server must **allow agent downloads**: if the
+"Require login for agent downloads" setting is on (MeshCentral's `lockagentdownload`), the
+device's anonymous download is rejected and installation fails. Leave it off, or the built-in
+path is not usable; a custom activation script that authenticates first can still be used.
+
 ## Connecting
 
 In a ticket's asset list, the **RustDesk** icon beside each asset starts a remote desktop
