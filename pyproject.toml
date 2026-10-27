@@ -27,6 +27,7 @@ dependencies = [
     "apscheduler",
     "croniter>=6.2.2",
     "httpx",
+    "websockets",
     "loguru",
     "cryptography>=46.0.7",
     "PyJWT[crypto]>=2.10.1",

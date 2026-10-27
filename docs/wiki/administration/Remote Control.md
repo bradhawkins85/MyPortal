@@ -62,8 +62,12 @@ To do something different, choose your own activation script instead (see
 Super admins set it up under **Scripts → Remote control** (`/rmm/remote-control`). For each
 provider:
 
-1. Turn it on. RustDesk uses the built-in script unless you choose another; MeshCentral needs
-   a script that reports the node ID, or the ID custom field below.
+1. Turn it on. RustDesk and MeshCentral both use MyPortal's **built-in script** unless you
+   choose another. The built-in MeshCentral script downloads the self-installing MeshCentral
+   agent scoped to a device group named after the device's company, so the device lands in its
+   company's group (a device already in the generic Tactical RMM group is moved here too); the
+   node ID is then looked up in that group by the device's host name. Without the RMM agent,
+   MeshCentral falls back to the ID custom field below, opening MeshCentral signed in.
 2. To use your own script, add it to the Gitea repository's `Common/` folder and choose
    **Sync from Gitea**, then choose it and save. Only `Common/` scripts are offered, as they
    run on every company's devices. The script's parameters then appear under **Script
@@ -94,7 +98,9 @@ later on the technician's computer), **Run script**, and future RMM actions. In 
 MyPortal shows the activation script's progress, then opens the session as soon as the device
 reports back: RustDesk through a `rustdesk://` link carrying the ID and password (the browser may
 ask to open RustDesk the first time), MeshCentral in a new tab already signed in on the device.
-An **Open … again** button stays in case the browser blocked it.
+The built-in scripts install the tool on first use: the RustDesk script applies `RUSTDESK_CFG`
+and sets a one-time password, and the MeshCentral script downloads and runs the agent into the
+device's company group. An **Open … again** button stays in case the browser blocked it.
 
 The device must be online: an activation script the device has not collected within 10 minutes
 expires. A session's link and password are kept encrypted for 30 minutes and only shown to the

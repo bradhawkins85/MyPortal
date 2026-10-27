@@ -26,8 +26,15 @@ Without a chosen script, RustDesk uses MyPortal's built-in one
 when it is missing, then it applies ``RUSTDESK_CFG`` from the .env file,
 starts the RustDesk service, sets a one-time password MyPortal generates and
 reports the ID. A device without the RMM agent falls back to an
-asset custom field holding its ID. A MeshCentral session without a node ID
-opens MeshCentral signed in.
+asset custom field holding its ID.
+
+MeshCentral has a matching built-in (``rmm_builtin/meshcentral_activate*``): on
+first use it downloads the self-installing MeshCentral agent scoped to a device
+group named after the device's company, so the device lands in its company's
+group rather than one shared group. The agent has no command-line that prints
+its node id, so once the run finishes MyPortal asks the MeshCentral control
+channel (``app.services.meshcentral``) for the node matching the device's host
+name and builds a signed-in link that jumps straight to it.
 
 Each session is a remote desktop, file transfer or terminal session (``mode``),
 which only changes the launch link. The asset and ticket pages open the link
@@ -53,9 +60,11 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_remote_control as remote_repo
+from app.repositories import companies as companies_repo
 from app.core.config import get_settings
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import rmm_scripts
+from app.services import meshcentral
 
 PROVIDERS = remote_repo.PROVIDERS
 PROVIDER_LABELS = {"rustdesk": "RustDesk", "meshcentral": "MeshCentral"}
@@ -136,7 +145,13 @@ def meshcentral_url(server_url: str, username: str, key_hex: str, node_id: str |
     params = {"login": meshcentral_login_token(key_hex, username, now=now)}
     if node_id:
         node_id = node_id.strip()
-        if not _MESH_NODE_ID.match(node_id):
+        # MeshCentral's UI builds the node id as "node/<domain>/" + gotonode, so
+        # gotonode must be the bare id. Accept the full "node//..." form too:
+        # the id itself never contains "/" (its base64 uses "@" and "$"), so
+        # dropping everything up to the last "/" is safe.
+        if node_id.startswith("node/"):
+            node_id = node_id.rsplit("/", 1)[-1]
+        if not node_id or not _MESH_NODE_ID.match(node_id):
             raise RemoteControlError("The MeshCentral node ID reported for this device is not valid.")
         params.update({"gotonode": node_id, "viewmode": _MESH_VIEWMODES.get(mode, "11"), "hide": "31"})
     return server_url.rstrip("/") + "/?" + urlencode(params, safe="@$/", quote_via=quote)
@@ -182,7 +197,7 @@ def _public_provider(row: Mapping[str, Any], script: Mapping[str, Any] | None = 
         "secret_set": bool(row.get("secret_encrypted")),
         "id_field": row.get("id_field") or "",
         "fields": _script_values(script, _stored_entries(row)),
-        "builtin": row["provider"] == "rustdesk" and not row.get("activation_script_id"),
+        "builtin": row["provider"] in {"rustdesk", "meshcentral"} and not row.get("activation_script_id"),
         "updated_at": row.get("updated_at"),
     }
 
@@ -322,6 +337,27 @@ def builtin_rustdesk_script(agent: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def builtin_meshcentral_script(agent: Mapping[str, Any]) -> dict[str, Any]:
+    """MyPortal's own MeshCentral activation script for the agent's operating system."""
+
+    os_name = str(agent.get("os") or "windows").lower()
+    if os_name in {"windows", ""}:
+        name, language = "meshcentral_activate.ps1", "powershell"
+    elif os_name in {"darwin", "macos"}:
+        name, language = "meshcentral_activate_macos.sh", "bash"
+    else:
+        name, language = "meshcentral_activate.sh", "bash"
+    content = _builtin_content(name)
+    return {
+        "id": None,
+        "name": "MeshCentral (built-in)",
+        "path": f"builtin/{name}",
+        "language": language,
+        "content": content,
+        "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+    }
+
+
 async def _queue_builtin_rustdesk(agent: Mapping[str, Any], password: str, user_id: int | None) -> int:
     script = rmm_scripts.always_run(builtin_rustdesk_script(agent), agent)
     problem = rmm_scripts.device_problem(script, agent)
@@ -338,6 +374,64 @@ async def _queue_builtin_rustdesk(agent: Mapping[str, Any], password: str, user_
     }.get(script["path"], "")
     if (installer_url or "").strip():
         env["RUSTDESK_INSTALLER_URL"] = installer_url.strip()
+    return await rmm_repo.create_run(
+        script=script,
+        content=script["content"],
+        agent_id=int(agent["id"]),
+        company_id=int(agent["company_id"]),
+        asset_id=int(agent["asset_id"]) if agent.get("asset_id") is not None else None,
+        requested_by_user_id=user_id,
+        inputs=[],
+        payload_encrypted=encrypt_secret(json.dumps({"parameters": {}, "parameter_order": [], "env": env})),
+        timeout_seconds=MAX_ACTIVATION_TIMEOUT_SECONDS,
+        expires_at=_utcnow() + ACTIVATION_QUEUE_LIFETIME,
+        run_source=RUN_SOURCE,
+    )
+
+
+async def _prepare_builtin_meshcentral(
+    agent: Mapping[str, Any], settings: Mapping[str, Any], company_id: int
+) -> tuple[str, list[str]]:
+    """The company's MeshCentral group id and the host name to match the node by.
+
+    MeshCentral's agent installer is scoped to a device group, so the group is
+    resolved (created if it does not exist) before the script runs; the group is
+    named after the device's company so each company's devices sit in their own
+    group. The node id is found later by matching the device's host name, because
+    the agent has no command-line that prints it.
+    """
+
+    site = (settings.get("server_url") or "").strip().rstrip("/")
+    username = (settings.get("username") or "").strip()
+    if not (site and username and settings.get("secret_encrypted")):
+        raise RemoteControlError("MeshCentral needs its address, a user name and the login token key.")
+    key = decrypt_secret(str(settings["secret_encrypted"]), allow_plaintext=False)
+    token = meshcentral_login_token(key, username)
+    company = await companies_repo.get_company_by_id(int(company_id))
+    group_name = str((company or {}).get("name") or "").strip()
+    if not group_name:
+        raise RemoteControlError("This device has no company to make a MeshCentral group for.")
+    try:
+        group_id = await meshcentral.ensure_group(site, token, group_name)
+    except meshcentral.MeshCentralError as exc:
+        raise RemoteControlError(f"MeshCentral could not be set up for this device: {exc.message}") from exc
+    hostname = str(agent.get("hostname") or "").strip()
+    return group_id, [hostname] if hostname else []
+
+
+async def _queue_builtin_meshcentral(
+    agent: Mapping[str, Any], group_id: str, user_id: int | None, settings: Mapping[str, Any]
+) -> int:
+    """Queue the built-in MeshCentral script, pointing it at the company's group."""
+
+    script = rmm_scripts.always_run(builtin_meshcentral_script(agent), agent)
+    problem = rmm_scripts.device_problem(script, agent)
+    if problem:
+        raise RemoteControlError(problem)
+    env = {
+        "MESH_SITE": (settings.get("server_url") or "").strip().rstrip("/"),
+        "MESH_GROUP_ID": group_id,
+    }
     return await rmm_repo.create_run(
         script=script,
         content=script["content"],
@@ -371,11 +465,25 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
             raise RemoteControlError(f"The {label} activation script is not available for this company.")
         if not agent:
             raise RemoteControlError(f"The RMM agent is not installed on this device, so {label} cannot be switched on.")
-    # RustDesk without a chosen script uses the built-in one on any device with the agent.
+    # Without a chosen script, RustDesk and MeshCentral use MyPortal's built-in
+    # one on any device with the agent.
     builtin = provider == "rustdesk" and script is None and agent is not None
+    builtin_mesh = provider == "meshcentral" and script is None and agent is not None
     if provider == "rustdesk" and script is None and agent is None and not settings.get("id_field"):
         raise RemoteControlError("The RMM agent is not installed on this device, so RustDesk cannot be switched on.")
-    password = secrets.token_urlsafe(12) if builtin else None
+    # Resolve the company's MeshCentral group up front so the session knows where
+    # the device will land (the agent has no command that prints its node id).
+    mesh_group_id: str | None = None
+    mesh_hosts: list[str] = []
+    if builtin_mesh:
+        mesh_group_id, mesh_hosts = await _prepare_builtin_meshcentral(agent, settings, company_id)
+    session_values: dict[str, Any] = {}
+    if builtin:
+        # The built-in script sets this password, so MyPortal knows it up front.
+        session_values["password"] = secrets.token_urlsafe(12)
+    elif builtin_mesh:
+        session_values["mesh_group_id"] = mesh_group_id
+        session_values["mesh_host"] = ";".join(mesh_hosts)
     session_id = await remote_repo.create_session(
         provider=provider,
         mode=mode,
@@ -384,12 +492,19 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
         agent_id=int(agent["id"]) if agent else None,
         requested_by_user_id=user_id,
         expires_at=_utcnow() + SESSION_LIFETIME,
-        # The built-in script sets this password, so MyPortal knows it up front.
-        values_encrypted=encrypt_secret(json.dumps({"password": password})) if password else None,
+        values_encrypted=encrypt_secret(json.dumps(session_values)) if session_values else None,
     )
     if builtin:
         try:
-            run_id = await _queue_builtin_rustdesk(agent, password, user_id)
+            run_id = await _queue_builtin_rustdesk(agent, session_values["password"], user_id)
+        except RemoteControlError as exc:
+            await remote_repo.finish_session(session_id, status="failed", error_message=exc.message)
+            raise
+        await remote_repo.set_session_run(session_id, run_id)
+        rmm_scripts.notify_agent(int(agent["id"]))
+    elif builtin_mesh:
+        try:
+            run_id = await _queue_builtin_meshcentral(agent, mesh_group_id, user_id, settings)
         except RemoteControlError as exc:
             await remote_repo.finish_session(session_id, status="failed", error_message=exc.message)
             raise
@@ -505,15 +620,31 @@ async def _launch_url(session: Mapping[str, Any], settings: Mapping[str, Any], v
                 + (f", or fill in the {settings['id_field']} field." if settings.get("id_field") else ".")
             )
         return rustdesk_url(remote_id, values.get("password"), session.get("mode") or "remote")
-    node_id = values.get("node_id") or values.get("id") or await _field_value(
-        int(session["asset_id"]), settings.get("id_field")
-    )
     if not (settings.get("server_url") and settings.get("username") and settings.get("secret_encrypted")):
         raise RemoteControlError("MeshCentral is missing its address, user name or login token key.")
     key = decrypt_secret(str(settings["secret_encrypted"]), allow_plaintext=False)
-    return meshcentral_url(
-        str(settings["server_url"]), str(settings["username"]), key, node_id or None, mode=session.get("mode") or "remote"
+    mode = session.get("mode") or "remote"
+    site = str(settings["server_url"]).strip().rstrip("/")
+    username = str(settings["username"])
+    group_id = values.get("mesh_group_id")
+    if group_id:
+        # Built-in: the agent was installed into the company's group, so ask
+        # MeshCentral for the node matching this device's host name.
+        hosts = [h.strip() for h in str(values.get("mesh_host") or "").split(";") if h.strip()]
+        node_id = None
+        if hosts:
+            node_id = await meshcentral.find_node(
+                site, meshcentral_login_token(key, username), group_id, hosts, attempts=3, delay_seconds=2.0
+            )
+        if not node_id:
+            # The agent has not checked in yet (or could not be matched); open
+            # MeshCentral signed in so the device shows up once it is online.
+            return meshcentral_url(site, username, key, None, mode=mode)
+        return meshcentral_url(site, username, key, node_id, mode=mode)
+    node_id = values.get("node_id") or values.get("id") or await _field_value(
+        int(session["asset_id"]), settings.get("id_field")
     )
+    return meshcentral_url(site, username, key, node_id or None, mode=mode)
 
 
 async def _resolve(session: Mapping[str, Any], settings: Mapping[str, Any], values: Mapping[str, str]) -> str | None:
