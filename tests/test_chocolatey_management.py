@@ -1,5 +1,6 @@
 """Source policy and feed/upgrade behavior, with no network or package changes."""
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -436,9 +437,73 @@ async def test_pushed_install_uses_inventory_names_and_revalidates_at_dispatch(s
     assert not await patch.job_is_current({**agent, 'os': 'linux'}, job)
     tampered = {**config, 'apps': config['apps'] + [{'package_id': 'other', 'display_name': 'Other'}]}
     assert not await patch.job_is_current(agent, {'env': {'MYPORTAL_PATCH_PLAN': json.dumps(tampered)}})
-    with pytest.raises(rmm_scripts.RunRequestError, match='already waiting'):
-        await updates.queue_apps(agent, ['7zip'], 'install', 9)
+    next_id = await updates.queue_apps(agent, ['7zip'], 'install', 9)
+    assert next_id != run_id
+    assert (await rmm_repo.get_run(next_id))['status'] == 'queued'
     assert (await rmm_repo.get_run(run_id))['status'] == 'queued'
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('source', ['manual', 'patch'])
+@pytest.mark.parametrize('status', ['queued', 'dispatched', 'running'])
+async def test_chocolatey_jobs_wait_for_existing_runs_in_order(sqlite_db, monkeypatch, source, status):
+    monkeypatch.setattr(catalog_repo, 'db', sqlite_db)
+    _, agent = await _enrol(sqlite_db)
+    monkeypatch.setattr(inventory_repo, 'list_software', AsyncMock(return_value=[]))
+    first_id = await updates.queue_apps(agent, ['7zip'], 'install', 9)
+    await sqlite_db.execute("UPDATE rmm_script_runs SET run_source = %s WHERE id = %s", (source, first_id))
+    if status != 'queued':
+        assert await rmm_repo.mark_dispatched(first_id, agent['id'], expires_at=patch.utcnow() + timedelta(hours=2))
+        if status == 'running':
+            await rmm_repo.mark_started(first_id)
+
+    # A backlog can easily exceed the old 15-minute queue deadline.
+    queued_at = patch.utcnow() - timedelta(minutes=20)
+    monkeypatch.setattr(patch, 'utcnow', lambda: queued_at)
+    second_id = await updates.queue_apps(agent, ['vlc'], 'install', 9)
+    third_id = await updates.queue_apps(agent, ['firefox'], 'install', 9)
+    for run_id in (second_id, third_id):
+        row = await rmm_repo.get_run(run_id)
+        deadline = row['expires_at']
+        if isinstance(deadline, str):
+            deadline = datetime.fromisoformat(deadline)
+        assert deadline == queued_at + rmm_scripts.QUEUE_LIFETIME
+        assert row['status'] == 'queued'
+
+    jobs = await rmm_scripts.claim_jobs(agent)
+    assert [job['id'] for job in jobs] == ([first_id] if status == 'queued' else [])
+    assert (await rmm_repo.get_run(second_id))['status'] == 'queued'
+    for completed_id, next_id in ((first_id, second_id), (second_id, third_id)):
+        await rmm_repo.finish_run(completed_id, status='succeeded', exit_code=0,
+                                 stdout='', stderr='', custom_values=[], error_message=None)
+        jobs = await rmm_scripts.claim_jobs(agent)
+        assert [job['id'] for job in jobs] == [next_id]
+
+
+@pytest.mark.anyio
+async def test_verified_upgrades_join_existing_chocolatey_queue(sqlite_db, monkeypatch):
+    monkeypatch.setattr(catalog_repo, 'db', sqlite_db)
+    _, agent = await _enrol(sqlite_db)
+    monkeypatch.setattr(inventory_repo, 'list_software', AsyncMock(return_value=[
+        {'name': 'App', 'version': '1', 'source': 'machine'}]))
+    monkeypatch.setattr(catalog, 'match', AsyncMock(return_value={
+        'package_id': 'app', 'title': 'App', 'version': '2'}))
+    first_id = await updates.queue_apps(agent, ['7zip'], 'install', 9)
+    assert [job['id'] for job in await rmm_scripts.claim_jobs(agent)] == [first_id]
+    await rmm_repo.mark_started(first_id)
+
+    queued_at = patch.utcnow()
+    monkeypatch.setattr(patch, 'utcnow', lambda: queued_at)
+    upgrade_id = await updates.queue(agent, 'App', 9)
+    row = await rmm_repo.get_run(upgrade_id)
+    deadline = row['expires_at']
+    if isinstance(deadline, str):
+        deadline = datetime.fromisoformat(deadline)
+    assert deadline == queued_at + rmm_scripts.QUEUE_LIFETIME
+    assert await rmm_scripts.claim_jobs(agent) == []
+    await rmm_repo.finish_run(first_id, status='succeeded', exit_code=0,
+                             stdout='', stderr='', custom_values=[], error_message=None)
+    assert [job['id'] for job in await rmm_scripts.claim_jobs(agent)] == [upgrade_id]
 
 
 @pytest.mark.anyio
@@ -534,7 +599,7 @@ async def test_push_api_targets_only_this_companys_windows_devices(monkeypatch):
         queued.append((agent['id'], ids, mode))
         assert options == {'force': False, 'ignore_pending_reboots': True}
         if agent['id'] == 3:
-            raise rmm_scripts.RunRequestError({'device': 'A patch job is already waiting or running on this device.'})
+            raise rmm_scripts.RunRequestError({'device': 'Chocolatey apps need an active Windows device.'})
         return None if agent['id'] == 4 else 100 + agent['id']
     monkeypatch.setattr(updates, 'queue_apps', queue_apps)
     monkeypatch.setattr(patch_routes.audit, 'record', AsyncMock())

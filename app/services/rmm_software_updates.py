@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import timedelta
-from app.repositories import chocolatey_catalog as catalog_repo, rmm as rmm_repo, rmm_inventory as inventory_repo, rmm_patching as patch_repo
+from app.repositories import chocolatey_catalog as catalog_repo, rmm as rmm_repo, rmm_inventory as inventory_repo
 from app.security.encryption import encrypt_secret
 from app.services import chocolatey_catalog as catalog, chocolatey_sources as sources, rmm_patching as patch, rmm_scripts
 from app.services.rmm_scripts import RunRequestError
@@ -43,8 +42,6 @@ async def queue(agent: dict, name: str, user_id: int) -> int:
     app = await upgrade_for(agent, name)
     if not app or not app['can_upgrade']:
         raise RunRequestError({'software': 'This application has no verified newer Chocolatey version.'})
-    if await patch_repo.has_active_run(int(agent['id'])):
-        raise RunRequestError({'software': 'A patch job is already waiting or running on this device.'})
     config = {'manual_upgrade': {'name': name, 'package_id': app['package_id']},
               'apps': [{'package_id': app['package_id'], 'display_name': name, 'install_missing': False}],
               'windows': None, 'reboot': {'reboot_mode': 'never'},
@@ -61,7 +58,7 @@ async def queue(agent: dict, name: str, user_id: int) -> int:
         company_id=int(agent['company_id']), asset_id=agent.get('asset_id'), requested_by_user_id=user_id,
         inputs=[{'key': 'application', 'label': 'Application', 'value': name}],
         payload_encrypted=encrypt_secret(json.dumps({'env': {'MYPORTAL_PATCH_PLAN': json.dumps(config)}})),
-        timeout_seconds=7200, expires_at=patch.utcnow() + timedelta(minutes=15), run_source='patch')
+        timeout_seconds=7200, expires_at=patch.utcnow() + rmm_scripts.QUEUE_LIFETIME, run_source='patch')
     rmm_scripts.notify_agent(int(agent['id']))
     return run_id
 
@@ -112,6 +109,8 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None
                      ignore_pending_reboots: bool = True) -> int | None:
     """Queue one package action; ``None`` when nothing applies.
 
+    Jobs wait and execute in the ordinary script queue, including when another
+    patch job is queued or running on the device.
     An onboarding step's job waits as long as a script step would and lets the
     onboarding sequence notify the device once it has moved on.
     """
@@ -125,8 +124,6 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None
     apps = await plan_apps(agent, ids, mode)
     if not apps:
         return None
-    if await patch_repo.has_active_run(int(agent['id'])):
-        raise RunRequestError({'device': 'A patch job is already waiting or running on this device.'})
     config = {'manual_apps': {'mode': mode, 'package_ids': ids, 'force': force,
                               'ignore_pending_reboots': ignore_pending_reboots}, 'apps': apps,
               'windows': None, 'reboot': {'reboot_mode': 'never'},
@@ -150,7 +147,7 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None
                  'value': 'Yes' if ignore_pending_reboots else 'No'}],
         payload_encrypted=encrypt_secret(json.dumps({'env': {'MYPORTAL_PATCH_PLAN': json.dumps(config)}})),
         timeout_seconds=7200, run_source='patch', onboarding_run_id=onboarding_run_id,
-        expires_at=patch.utcnow() + (rmm_scripts.QUEUE_LIFETIME if onboarding_run_id else timedelta(minutes=15)))
+        expires_at=patch.utcnow() + rmm_scripts.QUEUE_LIFETIME)
     if onboarding_run_id is None:
         rmm_scripts.notify_agent(int(agent['id']))
     return run_id
