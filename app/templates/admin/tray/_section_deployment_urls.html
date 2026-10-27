@@ -8,7 +8,7 @@
   </header>
   <div class="ce-section__body">
     {% if not dl.release_tag %}
-      <div class="alert alert--warning" role="status">No tray release is cached on this server yet, so Windows installers cannot be built and the macOS package is missing. Load a tray release on the server first; the <a href="#devices">Enrolled devices</a> section shows what is loaded.</div>
+      <div class="alert alert--warning" role="status">No tray release is cached on this server yet, so Windows installers cannot be built and the macOS and Linux packages are missing. Load a tray release on the server first; the <a href="#devices">Enrolled devices</a> section shows what is loaded.</div>
     {% endif %}
     <div class="ce-subsection" aria-labelledby="tray-deploy-new-title">
       <h3 id="tray-deploy-new-title">New deployment URL</h3>
@@ -124,6 +124,10 @@
         </details>
         <div class="form-actions"><button type="submit" class="button button--primary">Create URL</button></div>
       </form>
+      {% if dl.release_tag and not dl.linux_available %}
+        <p class="form-help">The cached tray release has no Linux package (<code>myportal-tray-linux.tar.gz</code>), so Linux computers cannot install from deployment URLs yet. Load a release built with the Linux package.</p>
+      {% endif %}
+      <p class="form-help">Linux computers, including servers such as Proxmox VE, install with the same one-line shell command as macOS. It installs the service on every computer and adds the tray icon on desktops.</p>
       <p class="form-help">Your Windows build server builds and signs the EXE and MSI installers for each company, and rebuilds them when a new tray release is cached{% if dl.release_tag %} (currently <code>{{ dl.release_tag }}</code>){% endif %}. See <em>Tray Build Server</em> in the wiki to set one up.</p>
       <p class="form-help">Use <code>{{ "{{ tray.deploymentUrl }}" }}</code> in automations, ticket replies, canned responses, message templates and email signatures to insert the company's deployment URL. Each company can have one active URL; companies that already have one are not listed. Revoke a company's URL to create a new one.</p>
     </div>
@@ -161,8 +165,12 @@
                     </div>
                     <details>
                       <summary>RMM one-liners</summary>
+                      <p class="form-help">Windows (PowerShell, as administrator)</p>
                       <pre class="code-block"><code>irm '{{ link.url }}/install.ps1' | iex</code></pre>
+                      <p class="form-help">macOS and Linux (as root)</p>
                       <pre class="code-block"><code>curl -fsSL '{{ link.url }}/install.sh' | sudo bash</code></pre>
+                      <p class="form-help">Linux servers without a desktop, such as Proxmox VE</p>
+                      <pre class="code-block"><code>curl -fsSL '{{ link.url }}/install.sh' | sudo bash -s -- --headless</code></pre>
                     </details>
                     {% if link.build and link.build.status == "ready" %}
                       <details>

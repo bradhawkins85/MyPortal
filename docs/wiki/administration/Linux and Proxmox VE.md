@@ -20,6 +20,10 @@ scripts, checks, inventory and the asset page's RMM actions like Windows and mac
    The package is cached on MyPortal by the **Update Tray Icon Installer** scheduled task from the
    release's `myportal-tray-linux.tar.gz`. It works on amd64 and arm64 with systemd.
 
+   With a company deployment URL (**Admin → Tray → Deployment URLs**) there is no token to copy:
+   run `curl -fsSL '<deployment URL>/install.sh' | sudo bash`, adding `-s -- --headless` after
+   `bash` for servers.
+
 3. Install the RMM agent from the asset page (**Install RMM agent**), or switch on **Install the RMM
    agent automatically** for the company.
 

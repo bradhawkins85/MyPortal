@@ -70,6 +70,7 @@ async def _render_page(
             "ppkg_ready": ppkg_ready,
             "provisioning_enabled": provisioning_enabled,
             "macos_ready": state == "open" and tray_deployment.installer_path("macos") is not None,
+            "linux_ready": state == "open" and tray_deployment.installer_path("linux") is not None,
             "deploy_base": portal_url + tray_deployment.link_path(slug) if slug else "",
         },
     )
@@ -230,7 +231,7 @@ async def _script(slug: str, request: Request, platform: str) -> PlainTextRespon
     link, token = await _resolve_or_404(slug)
     portal_url = tray_deployment.resolve_portal_url(request)
     render = (
-        tray_deployment.windows_script if platform == "windows" else tray_deployment.macos_script
+        tray_deployment.windows_script if platform == "windows" else tray_deployment.shell_script
     )
     try:
         body = render(portal_url, token)
@@ -250,8 +251,8 @@ async def deployment_windows_script(slug: str, request: Request) -> PlainTextRes
 
 
 @router.get("/deploy/{slug}/install.sh", include_in_schema=False)
-async def deployment_macos_script(slug: str, request: Request) -> PlainTextResponse:
-    return await _script(slug, request, "macos")
+async def deployment_shell_script(slug: str, request: Request) -> PlainTextResponse:
+    return await _script(slug, request, "shell")
 
 
 # ---------------------------------------------------------------------------

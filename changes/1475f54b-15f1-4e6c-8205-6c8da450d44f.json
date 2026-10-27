@@ -1,0 +1,7 @@
+{
+  "guid": "1475f54b-15f1-4e6c-8205-6c8da450d44f",
+  "occurred_at": "2026-10-27T00:13Z",
+  "change_type": "Fix",
+  "summary": "Tray deployment URLs now install on Linux: install.sh detects macOS or Linux, the download page shows a Linux install command, and the admin page lists the Linux one-liners.",
+  "content_hash": "ff5be18dd33da8395f3d7823a05c9f3a1c70edc83a6cec82a29e2c35204f2617"
+}
