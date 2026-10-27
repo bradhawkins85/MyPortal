@@ -456,12 +456,20 @@ async def _queue_builtin_meshcentral(
             raise RemoteControlError("The device must report a supported architecture before installing MeshCentral.")
     site, username, key = _meshcentral_config()
     try:
-        raw = await meshcentral.download_installer(site, meshcentral_login_token(key, username), group_id, arch_id)
+        token = meshcentral_login_token(key, username)
+        raw = await meshcentral.download_installer(site, token, group_id, arch_id)
+        # Only Windows downloads embed the company's .msh in the executable.
+        configuration = await meshcentral.download_settings(site, token, group_id) if not windows else None
     except meshcentral.MeshCentralError as exc:
         raise RemoteControlError(exc.message) from exc
-    filename = "meshcentral-" + secrets.token_hex(16) + (".exe" if windows else ".sh")
+    filename = "meshcentral-" + secrets.token_hex(16) + (".exe" if windows else "")
     destination = ("C:\\ProgramData\\MyPortal\\" if windows else "/var/tmp/") + filename
     installer = rmm_script_files.inline_file(raw, source_path="MeshCentral/" + filename, destination=destination)
+    files = [installer]
+    if configuration is not None:
+        files.append(rmm_script_files.inline_file(
+            configuration, source_path="MeshCentral/" + filename + ".msh", destination=destination + ".msh",
+        ))
     env = {
         "MESH_GROUP_ID": group_id,
         "MESH_INSTALLER_PATH": destination,
@@ -474,7 +482,7 @@ async def _queue_builtin_meshcentral(
         asset_id=int(agent["asset_id"]) if agent.get("asset_id") is not None else None,
         requested_by_user_id=user_id,
         inputs=[],
-        payload_encrypted=encrypt_secret(json.dumps({"parameters": {}, "parameter_order": [], "env": env, "files": [installer]})),
+        payload_encrypted=encrypt_secret(json.dumps({"parameters": {}, "parameter_order": [], "env": env, "files": files})),
         timeout_seconds=MAX_ACTIVATION_TIMEOUT_SECONDS,
         expires_at=_utcnow() + ACTIVATION_QUEUE_LIFETIME,
         run_source=RUN_SOURCE,

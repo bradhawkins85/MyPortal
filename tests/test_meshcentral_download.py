@@ -74,3 +74,22 @@ async def test_missing_login_session_is_rejected(monkeypatch):
                         lambda **kwargs: client(transport=httpx.MockTransport(respond), **kwargs))
     with pytest.raises(meshcentral.MeshCentralError, match='sign in'):
         await meshcentral.download_installer('https://mesh.test', 'secret-token', 'group', 4)
+
+
+@pytest.mark.anyio
+async def test_unix_configuration_download_uses_authenticated_session(monkeypatch):
+    raw = b'MeshID=0xgroup\r\nServerID=server\r\nMeshServer=wss://mesh.test/agent.ashx\r\n'
+    def respond(request):
+        assert request.url.path == '/domain/meshsettings'
+        assert dict(request.url.params) == {'id': 'group$@+&'}
+        return httpx.Response(200, content=raw)
+    mock_http(monkeypatch, respond)
+    assert await meshcentral.download_settings('https://mesh.test/domain/', 'secret', 'group$@+&') == raw
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('raw', [b'MeshID=group\n', b'invalid', b'\xff\xfe', b'<html>Sign in</html>'])
+async def test_unix_configuration_must_include_connection_details(monkeypatch, raw):
+    mock_http(monkeypatch, lambda request: httpx.Response(200, content=raw))
+    with pytest.raises(meshcentral.MeshCentralError):
+        await meshcentral.download_settings('https://mesh.test', 'secret', 'group')

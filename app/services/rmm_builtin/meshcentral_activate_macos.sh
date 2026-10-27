@@ -1,7 +1,6 @@
 #!/bin/bash
 # MyPortal built-in: switch MeshCentral on for a remote session (macOS).
-# Run the delivered self-installing
-# MeshCentral agent scoped to the device's company group (MESH_GROUP_ID), then
+# Install the delivered MeshCentral agent for the device's company group, then
 # make sure the launch daemon is running. Runs as root through the RMM agent.
 # The node id is resolved by MyPortal afterwards (the agent has no command-line
 # that prints it).
@@ -20,26 +19,32 @@ if [ -z "${MESH_GROUP_ID:-}" ]; then
   exit 1
 fi
 
-# The launch daemon the installer registers.
-PLIST="/Library/LaunchDaemons/meshagent.plist"
-LABEL="meshagent"
-
-# The agent may already be installed and in the right group.
+# Check launchd's system service, not an unrelated foreground meshagent process.
 is_active() {
-  pgrep -x meshagent >/dev/null 2>&1 && return 0
-  launchctl list 2>/dev/null | grep -q "$LABEL" && return 0
-  return 1
+  launchctl print system/meshagent 2>/dev/null | grep -q 'state = running'
 }
 
-# Always re-run the self-installing agent: it is idempotent, and re-running it
+# Always re-run the full installer: re-running it
 # scoped to this group is what moves the device into its company's group (a
 # device that was in the generic TacticalRMM group is moved here, too).
 INSTALLER="$MESH_INSTALLER_PATH"
-trap 'rm -f "$INSTALLER"' EXIT
+trap 'rm -f "$INSTALLER" "$INSTALLER.msh"' EXIT
+if [ ! -s "$INSTALLER.msh" ]; then
+  echo "The MeshCentral agent configuration was not delivered by the RMM." >&2
+  exit 1
+fi
 echo "Installing the MeshCentral agent (macOS, into group $MESH_GROUP_ID)"
-# The downloaded artifact is a self-installing, background installer.
+# Install the service and copy the company configuration alongside its binary.
 chmod +x "$INSTALLER"
-"$INSTALLER"
+INSTALL_EXIT=0
+INSTALL_OUTPUT=$("$INSTALLER" -fullinstall --copy-msh=1 2>&1) || INSTALL_EXIT=$?
+printf '%s\n' "$INSTALL_OUTPUT"
+if [ "$INSTALL_EXIT" -ne 0 ]; then exit "$INSTALL_EXIT"; fi
+# MeshAgent can report an installer error but still exit with status zero.
+if [[ "$INSTALL_OUTPUT" == *"[ERROR]"* ]]; then
+  echo "The MeshCentral service installation failed." >&2
+  exit 1
+fi
 for _ in $(seq 1 20); do
   if is_active; then break; fi
   sleep 3
@@ -49,11 +54,4 @@ if ! is_active; then
   exit 1
 fi
 
-# Make sure the service is running so the agent checks in.
-if ! pgrep -x meshagent >/dev/null 2>&1; then
-  if [ -f "$PLIST" ]; then
-    launchctl load -w "$PLIST" >/dev/null 2>&1 || true
-    launchctl start "$LABEL" >/dev/null 2>&1 || true
-  fi
-fi
 echo "The MeshCentral agent is installed and running."
