@@ -86,19 +86,19 @@ def test_customer_rows_keep_only_the_asset_options(page):
     assert "header-menu__divider" not in _menu(html, 12)
 
 
-def test_meshcentral_shortcut_is_visible_only_for_eligible_rows(page):
+def test_meshcentral_functions_stay_in_row_actions_without_a_connect_shortcut(page):
     providers = [{"provider": "meshcentral", "label": "MeshCentral"}]
     html = _render(page, AGENT, {"id": 11, "name": "No agent"}, rmm_remote_providers=providers)
+    assert "Connect with MeshCentral" not in html
     cell = html.split('<td class="table__actions"', 1)[1].split("</td>", 1)[0]
-    shortcut = cell.split('data-header-menu', 1)[0]
-    assert 'data-rmm-remote="meshcentral"' in shortcut
-    assert 'data-rmm-remote-asset="10"' in shortcut
-    assert 'data-rmm-remote-mode="remote"' in shortcut
-    assert ">Connect with MeshCentral</button>" in shortcut
-    assert html.count(">Connect with MeshCentral</button>") == 1
-    assert "MeshCentral file transfer" in _menu(html, 10)
-    assert "MeshCentral terminal" in _menu(html, 10)
-    assert "Connect with MeshCentral" not in _render(page, AGENT)
+    assert 'data-rmm-remote="meshcentral"' not in cell.split('data-header-menu', 1)[0]
+    menu = _menu(html, 10)
+    assert menu.count('data-rmm-remote="meshcentral"') == 3
+    assert menu.count('data-rmm-remote-asset="10"') == 3
+    for mode, label in (("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal")):
+        assert f'data-rmm-remote-mode="{mode}"' in menu
+        assert f"MeshCentral {label}" in menu
+    assert 'data-rmm-remote="meshcentral"' not in _menu(html, 11)
 
 
 @pytest.mark.parametrize("can_wake,can_write,visible", [(True, True, True), (False, True, False), (True, False, False)])
