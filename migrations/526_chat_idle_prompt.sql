@@ -1,3 +1,7 @@
+-- phase: expand
+-- compatible-from: *
+-- compatible-to: *
+-- maintenance: false
 -- Chat idle prompt
 -- Tracks whether a customer has written anything in a chat, and when the AI
 -- assistant asked an empty chat whether help is needed, so chats opened
