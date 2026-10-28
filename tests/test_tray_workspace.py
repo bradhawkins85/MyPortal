@@ -126,6 +126,29 @@ def test_device_list_shows_each_device_company():
     assert '<td data-value="">—</td>' in html
 
 
+def test_deployment_url_list_uses_the_standard_table_sorting_and_filters():
+    links = {
+        **_tray()["links"],
+        "links": [{
+            "id": 7, "company_name": "Acme Pty Ltd", "label": "Acme deployment", "url": "https://p/d/x",
+            "status": "active", "expires_at": "2026-12-01T00:00:00Z", "download_count": 3,
+            "last_downloaded_at": None, "created_at": "2026-10-01T00:00:00Z",
+            "build": {"status": "ready", "release_tag": "v1.2.3"}, "provisioning_enabled": False,
+        }],
+    }
+    html = _render(links=links)
+
+    assert 'id="tray-deployment-links" data-table data-table-id="tray-deployment-links"' in html
+    assert 'data-table-filter="tray-deployment-links"' in html
+    assert '<th scope="col" data-sort="string" data-filter-options="multiple">Status</th>' in html
+    assert '<th scope="col" data-sort="number">Downloads</th>' in html
+    assert '<th scope="col" data-column-filter-disabled>URL</th>' in html
+    assert '<td data-value="acme pty ltd">Acme Pty Ltd</td>' in html
+    assert '<td data-value="ready">' in html
+    assert '<td data-value="3">3</td>' in html
+    assert '<td data-value="2026-10-01T00:00:00Z"><span data-utc=' in html
+
+
 def test_technicians_see_only_the_device_section():
     html = _render(super_admin=False)
 

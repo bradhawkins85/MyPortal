@@ -136,27 +136,34 @@
       <div class="ce-section__header">
         <h3 id="tray-deploy-list-title">Existing URLs</h3>
         <div class="ce-section__meta">
-          <input class="form-input" type="search" placeholder="Search" aria-label="Search deployment URLs" data-deploy-search />
+          <input class="form-input" type="search" placeholder="Search" aria-label="Search deployment URLs" data-table-filter="tray-deployment-links" />
           {% set link_toggle_url = request.url.remove_query_params(['new_token', 'show_revoked_links']) %}
           <a class="button button--ghost button--small" href="{{ link_toggle_url if dl.show_revoked else link_toggle_url.include_query_params(show_revoked_links='true') }}#deployment-urls" aria-pressed="{{ 'true' if dl.show_revoked else 'false' }}">{{ "Hide expired and revoked" if dl.show_revoked else "Show expired and revoked" }}</a>
         </div>
       </div>
       {% if dl.links %}
         <div class="table-wrapper">
-        <table class="data-table" data-deploy-table>
+        <table class="data-table" id="tray-deployment-links" data-table data-table-id="tray-deployment-links" data-deploy-table>
           <caption class="visually-hidden">Tray deployment URLs</caption>
           <thead>
             <tr>
-              <th>Company</th><th>Label</th><th>URL</th><th>Status</th><th>Expires</th><th>Windows installer</th>
-              <th>Downloads</th><th>Last download</th><th>Created</th>
-              <th class="data-table__col--actions">Actions</th>
+              <th scope="col" data-sort="string">Company</th>
+              <th scope="col" data-sort="string">Label</th>
+              <th scope="col" data-column-filter-disabled>URL</th>
+              <th scope="col" data-sort="string" data-filter-options="multiple">Status</th>
+              <th scope="col" data-sort="date">Expires</th>
+              <th scope="col" data-sort="string">Windows installer</th>
+              <th scope="col" data-sort="number">Downloads</th>
+              <th scope="col" data-sort="date">Last download</th>
+              <th scope="col" data-sort="date">Created</th>
+              <th scope="col" class="data-table__col--actions" data-column-filter-disabled>Actions</th>
             </tr>
           </thead>
           <tbody>
             {% for link in dl.links %}
               <tr data-deploy-row>
-                <td>{{ link.company_name or '—' }}</td>
-                <td>{{ link.label }}</td>
+                <td data-value="{{ (link.company_name or '')|lower }}">{{ link.company_name or '—' }}</td>
+                <td data-value="{{ (link.label or '')|lower }}">{{ link.label }}</td>
                 <td>
                   {% if link.url and link.status == "active" %}
                     <div class="totp-copy-row">
@@ -214,14 +221,14 @@
                     <span class="status status--danger">Revoked</span>
                   {% endif %}
                 </td>
-                <td>
+                <td data-value="{{ link.expires_at or '' }}">
                   {% if link.expires_at %}
                     <span data-utc="{{ link.expires_at }}">{{ link.expires_at }}</span>
                   {% elif link.status == "active" %}Never (until revoked)
                   {% else %}—{% endif %}
                 </td>
-                <td>
-                  {% set build = link.build %}
+                {% set build = link.build %}
+                <td data-value="{{ '' if link.status != 'active' else 'not built' if not build else build.status }}">
                   {% if link.status != "active" %}—
                   {% elif not build %}<span class="status status--neutral">Not built</span>
                   {% elif build.status == "ready" %}<span class="status status--success">Ready</span> <code>{{ build.release_tag }}</code>
@@ -231,13 +238,13 @@
                     {% if build.error %}<p class="form-help">{{ build.error }}</p>{% endif %}
                   {% endif %}
                 </td>
-                <td>{{ link.download_count }}</td>
-                <td>
+                <td data-value="{{ link.download_count or 0 }}">{{ link.download_count }}</td>
+                <td data-value="{{ link.last_downloaded_at or '' }}">
                   {% if link.last_downloaded_at %}
                     <span data-utc="{{ link.last_downloaded_at }}">{{ link.last_downloaded_at }}</span>
                   {% else %}—{% endif %}
                 </td>
-                <td><span data-utc="{{ link.created_at }}">{{ link.created_at }}</span></td>
+                <td data-value="{{ link.created_at or '' }}"><span data-utc="{{ link.created_at }}">{{ link.created_at }}</span></td>
                 <td class="data-table__col--actions">
                   {% if link.status == "active" %}
                     <form method="post" action="/admin/tray/deployment-links/{{ link.id }}/rebuild" class="inline-form">
@@ -255,7 +262,7 @@
           </tbody>
         </table>
         </div>
-        <p class="empty-state" data-deploy-no-results hidden>No deployment URLs match your search.</p>
+        <p class="empty-state" data-deploy-no-results hidden>No deployment URLs match your search or filters.</p>
       {% else %}
         <div>
           {% if not dl.show_revoked and dl.hidden_revoked_count %}
