@@ -1,0 +1,7 @@
+{
+  "guid": "cb41fb21-ab83-4bb2-b9bc-b3ca29554ace",
+  "occurred_at": "2026-10-28T11:37Z",
+  "change_type": "Feature",
+  "summary": "Ticket automation filters can now check attachment file types with ticket.attachment_extensions, so an automation such as WhisperX transcription only runs when a ticket has, for example, m4a or mp3 attachments.",
+  "content_hash": "86acf4e1c716980d45b4db789510d64a6bbd610d10ed087046fa14cc016b6129"
+}
