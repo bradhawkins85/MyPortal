@@ -593,3 +593,34 @@ def test_clean_html_route_requires_signature_permission(monkeypatch):
     client = _clean_route_client(monkeypatch, context_redirect=RedirectResponse("/"))
     response = client.post("/m365/signatures/clean-html", json={"html": "<p>x</p>"})
     assert response.status_code == 403
+
+
+def test_convert_keeps_image_that_only_exists_inside_vml_comment():
+    # Some Outlook exports put the only <img> inside the VML block with no
+    # <![if !vml]> fallback; dropping the comment loses the logo.
+    html = (
+        "<html><body><p><!--[if gte vml 1]><v:shape id=\"Picture_x0020_1\">"
+        "<img width=153 height=68 src=\"data:image/gif;base64,R0lGODlh\" alt=Logo>"
+        "<w:wrap type=\"tight\"/></v:shape><![endif]--><span>Brad</span></p></body></html>"
+    )
+    result = _convert_outlook_html(html, {})
+    assert result.count("<img") == 1
+    assert 'src="data:image/gif;base64,R0lGODlh"' in result
+    assert result.index("<img") < result.index("Brad")
+
+
+def test_convert_does_not_duplicate_image_when_vml_has_fallback():
+    html = (
+        "<html><body><p><!--[if gte vml 1]><v:shape><img src=\"files/image001.png\">"
+        "</v:shape><![endif]--><![if !vml]><img src=\"files/image001.png\"><![endif]>"
+        "</p></body></html>"
+    )
+    assert _convert_outlook_html(html, _IMAGES).count("<img") == 1
+
+
+def test_convert_ignores_vml_comment_without_image():
+    html = (
+        "<html><body><!--[if gte vml 1]><v:shape><v:imagedata src=\"files/image001.png\"/>"
+        "</v:shape><![endif]--><![if !vml]><img src=\"files/image001.png\"><![endif]></body></html>"
+    )
+    assert _convert_outlook_html(html, _IMAGES).count("<img") == 1

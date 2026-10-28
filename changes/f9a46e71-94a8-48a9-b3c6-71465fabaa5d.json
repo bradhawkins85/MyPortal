@@ -1,0 +1,7 @@
+{
+  "guid": "f9a46e71-94a8-48a9-b3c6-71465fabaa5d",
+  "occurred_at": "2026-10-28T07:10Z",
+  "change_type": "Fix",
+  "summary": "Importing an Outlook signature ZIP now keeps logos that Outlook saved only inside its Windows-specific drawing markup, instead of dropping them.",
+  "content_hash": "7203118efd8d1b6b9b1aab27f52d01beeedd260f41c5f27119525f2926ebffed"
+}
