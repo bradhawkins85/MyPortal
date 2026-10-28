@@ -78,8 +78,10 @@ def test_catalog_uses_known_modules_even_when_deployment_hides_them(monkeypatch)
     policy = ComponentAvailability(disabled_modules=frozenset({"whisperx"}))
     monkeypatch.setattr(env_catalog, "get_component_availability", lambda: policy)
     catalog = {item["key"]: item for item in env_catalog.build_environment_catalog([], [])}
-    assert catalog["WHISPERX_API_KEY"]["group"] == "Module: WhisperX"
+    assert catalog["WHISPERX_API_KEY"]["group"] == "Module: Speech Transcription"
     assert catalog["WHISPERX_API_KEY"]["active"] is False
+    assert catalog["WHISPERCPP_BASE_URL"]["group"] == "Module: Speech Transcription"
+    assert catalog["TRANSCRIPTION_ENGINE"]["group"] == "Module: Speech Transcription"
     assert catalog["APP_NAME"]["active"] is True
     assert catalog["SESSION_SECRET"]["aliases"] == ("SESSION_SECRET", "SECRET_KEY")
     assert catalog["SESSION_SECRET"]["group"] == catalog["SECRET_KEY"]["group"]

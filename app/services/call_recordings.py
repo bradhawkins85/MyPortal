@@ -25,7 +25,7 @@ from app.services.ai_prompt_security import (
     build_prompt,
     parse_json_object,
 )
-from app.services.transcription import WhisperXSettings
+from app.services.transcription import TranscriptionSettings, build_asr_request, engine_label
 
 # Kept as a compatibility seam for deployments/tests which inject module
 # persistence independently from the higher-level module service.
@@ -59,21 +59,25 @@ def _env_bool(value: str | None, default: bool = False) -> bool:
     return value.strip().lower() not in {"false", "0", "no", "off"}
 
 
-def _whisperx_env_settings() -> dict[str, Any]:
-    """Return WhisperX transcription settings sourced only from ``.env``/env.
+def _transcription_env_settings() -> dict[str, Any]:
+    """Return transcription settings sourced only from ``.env``/env.
 
-    Call recording transcription intentionally ignores the WhisperX module's
-    persisted settings so stale database values cannot redirect audio or leak
+    The engine (WhisperX or whisper.cpp) is chosen by ``TRANSCRIPTION_ENGINE``
+    or, when unset, by whichever engine has a base URL configured.
+
+    Call recording transcription intentionally ignores the transcription
+    modules' persisted settings so stale database values cannot redirect audio or leak
     credentials to the wrong service. ``load_dotenv(..., override=True)`` lets
     an updated project ``.env`` take precedence over inherited process values.
     """
 
     if _ENV_PATH.exists():
         load_dotenv(_ENV_PATH, override=True)
-    settings = WhisperXSettings.from_environment()
+    settings = TranscriptionSettings.from_environment()
     return {
         "base_url": settings.base_url, "api_key": settings.api_key,
         "language": settings.language, "stereo_split": settings.stereo_split,
+        "engine": settings.engine,
     }
 
 
@@ -976,7 +980,7 @@ def _fmt_time(seconds: float) -> str:
 
 
 def _parse_whisperx_response(response: httpx.Response) -> tuple[str, list[dict[str, Any]]]:
-    """Parse a WhisperX ``/asr`` response.
+    """Parse a WhisperX ``/asr`` or whisper.cpp ``/inference`` response.
 
     Returns ``(text, segments)`` where *segments* is a (possibly empty) list
     of dicts with at least ``start`` and ``text`` keys.
@@ -1125,7 +1129,7 @@ async def process_queued_transcriptions() -> dict[str, Any]:
 
 async def transcribe_recording(recording_id: int, *, force: bool = False) -> dict[str, Any]:
     """
-    Transcribe a call recording using WhisperX service.
+    Transcribe a call recording using the configured WhisperX or whisper.cpp service.
 
     Args:
         recording_id: ID of the recording to transcribe
@@ -1155,20 +1159,22 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
         logger.info(f"Recording {recording_id} already being processed, skipping")
         return recording
 
-    # WhisperX transcription runtime settings are intentionally sourced only
-    # from .env/environment variables. Do not use the module database settings
+    # Transcription runtime settings are intentionally sourced only from
+    # .env/environment variables. Do not use the module database settings
     # here: stale DB values can point transcription at the wrong endpoint.
-    settings = _whisperx_env_settings()
+    settings = _transcription_env_settings()
+    engine = settings["engine"]
+    label = engine_label(engine)
     base_url = settings["base_url"]
     api_key = settings["api_key"]
 
     if not base_url:
-        logger.error("WhisperX base URL not configured")
+        logger.error("{} base URL not configured", label)
         await call_recordings_repo.update_call_recording(
             recording_id,
             transcription_status="failed",
         )
-        raise ValueError("WhisperX base URL not configured")
+        raise ValueError(f"{label} base URL not configured")
 
     # Update status to processing
     await call_recordings_repo.update_call_recording(
@@ -1178,7 +1184,10 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
 
     # Prepare webhook event
     file_path = recording["file_path"]
-    target_url = f"{base_url.rstrip('/')}/asr"
+    asr_request = build_asr_request(
+        engine, base_url, api_key=api_key, language=settings.get("language") or ""
+    )
+    target_url = asr_request.url
     
     # Log the transcription attempt
     logger.info(
@@ -1192,7 +1201,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
     webhook_event = None
     try:
         webhook_event = await webhook_monitor.create_manual_event(
-            name=f"whisperx_transcription_{recording_id}",
+            name=f"{engine}_transcription_{recording_id}",
             target_url=target_url,
             payload={
                 "recording_id": recording_id,
@@ -1210,22 +1219,20 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
         webhook_event_id = None
 
     try:
-        # Call WhisperX API
-        headers = {}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        headers = asr_request.headers
 
         # Log request details (redact authorization header)
         safe_headers = {k: ("***REDACTED***" if k.lower() == "authorization" else v) for k, v in headers.items()}
         logger.debug(
-            "WhisperX API request: url={}, headers={}, language={}",
+            "{} API request: url={}, headers={}, language={}",
+            label,
             target_url,
             safe_headers,
             settings.get("language"),
         )
 
         # Attempt stereo channel split (Grandstream UCM: right=caller, left=callee).
-        # Stereo split is enabled explicitly via the WhisperX module setting OR
+        # Stereo split is enabled explicitly via the transcription setting OR
         # automatically when the Call Recordings module is configured for
         # Grandstream UCM (which records each participant on a separate channel).
         stereo_split = settings.get("stereo_split", False)
@@ -1250,45 +1257,47 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
         await require_module_enabled("whisperx")
         async with httpx.AsyncClient(timeout=300.0) as client:
             try:
-                # WhisperX /asr uses FastAPI Query(...) parameters, so options
-                # like ``output`` and ``language`` MUST be sent as URL query
-                # parameters. Sending them as form data is silently ignored
-                # and the server falls back to its default ``output=txt``,
-                # which omits the segment timestamps we need for chronological
+                # Options are placed where each engine reads them (WhisperX:
+                # query parameters; whisper.cpp: form fields) so the response
+                # includes the segment timestamps needed for chronological
                 # merging of stereo channels.
-                params: dict[str, str] = {"output": "json"}
-                if settings.get("language"):
-                    params["language"] = settings["language"]
+                params = asr_request.params
+                form_data = asr_request.data
+                file_field = asr_request.file_field
 
                 if stereo_channel_paths:
                     # --- stereo: transcribe each channel separately then merge ---
                     callee_path, caller_path = stereo_channel_paths
                     try:
                         logger.debug(
-                            "Sending caller channel to WhisperX for recording {}: size={} bytes",
+                            "Sending caller channel to {} for recording {}: size={} bytes",
+                            label,
                             recording_id,
                             caller_path.stat().st_size,
                         )
                         with open(caller_path, "rb") as cf:
                             resp_caller = await client.post(
                                 target_url,
-                                files={"audio_file": (recording["file_name"], cf, "audio/wav")},
+                                files={file_field: (recording["file_name"], cf, "audio/wav")},
                                 params=params,
+                                data=form_data,
                                 headers=headers,
                             )
                         resp_caller.raise_for_status()
                         caller_text, caller_segs = _parse_whisperx_response(resp_caller)
 
                         logger.debug(
-                            "Sending callee channel to WhisperX for recording {}: size={} bytes",
+                            "Sending callee channel to {} for recording {}: size={} bytes",
+                            label,
                             recording_id,
                             callee_path.stat().st_size,
                         )
                         with open(callee_path, "rb") as cf:
                             resp_callee = await client.post(
                                 target_url,
-                                files={"audio_file": (recording["file_name"], cf, "audio/wav")},
+                                files={file_field: (recording["file_name"], cf, "audio/wav")},
                                 params=params,
+                                data=form_data,
                                 headers=headers,
                             )
                         resp_callee.raise_for_status()
@@ -1304,7 +1313,8 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                     response = resp_callee  # use last response for webhook logging
 
                     logger.info(
-                        "WhisperX stereo transcription completed for recording {}: length={}",
+                        "{} stereo transcription completed for recording {}: length={}",
+                        label,
                         recording_id,
                         len(transcription),
                     )
@@ -1312,20 +1322,22 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                 else:
                     # --- mono: single channel (original behaviour) ---
                     with open(file_path, "rb") as audio_file:
-                        files = {"audio_file": (recording["file_name"], audio_file, "audio/wav")}
+                        files = {file_field: (recording["file_name"], audio_file, "audio/wav")}
 
-                        logger.debug(f"Sending audio file to WhisperX: size={Path(file_path).stat().st_size} bytes")
+                        logger.debug(f"Sending audio file to {label}: size={Path(file_path).stat().st_size} bytes")
 
                         response = await client.post(
                             target_url,
                             files=files,
                             params=params,
+                            data=form_data,
                             headers=headers,
                         )
 
                         # Log response details
                         logger.info(
-                            "WhisperX API response: status={}, content_length={}",
+                            "{} API response: status={}, content_length={}",
+                            label,
                             response.status_code,
                             len(response.content),
                         )
@@ -1337,7 +1349,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                         result = None
                         try:
                             result = response.json()
-                            logger.debug(f"WhisperX response body (JSON): {result}")
+                            logger.debug(f"{label} response body (JSON): {result}")
                             transcription = result.get("text", "")
                         except ValueError as exc:
                             # Not JSON - check if it's plain text
@@ -1346,7 +1358,8 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                                 # Accept plain text response
                                 transcription = response.text.strip()
                                 logger.info(
-                                    "WhisperX returned plain text response for recording {}: length={}",
+                                    "{} returned plain text response for recording {}: length={}",
+                                    label,
                                     recording_id,
                                     len(transcription),
                                 )
@@ -1410,7 +1423,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
 
             # Transcription is already set from either JSON or plain text above
             if not transcription:
-                error_message = "Empty transcription received from WhisperX"
+                error_message = f"Empty transcription received from {label}"
                 logger.error(error_message)
                 await call_recordings_repo.update_call_recording(
                     recording_id,
@@ -1468,7 +1481,8 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
             response_body = e.response.text[:4000]
             response_headers = dict(e.response.headers)
             logger.error(
-                "WhisperX error response: status={}, body={}",
+                "{} error response: status={}, body={}",
+                label,
                 response_status,
                 response_body[:500],
             )

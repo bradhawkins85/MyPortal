@@ -17,7 +17,7 @@ from app.repositories import voice_monitor as repository
 from app.services.redis import close_redis_client
 from app.services.voice_monitor.providers import CallState, VoiceMonitorProvider
 from app.services.voice_monitor.policy import DialDenied, authorize_attempt
-from app.services.transcription import TranscriptionUnavailable, WhisperXClient
+from app.services.transcription import TranscriptionClient, TranscriptionUnavailable
 
 
 class VoiceMonitorWorker:
@@ -158,7 +158,7 @@ class VoiceMonitorWorker:
         attempt_id = int(attempt["id"])
         await repository.set_transcription_status(attempt_id, "processing")
         try:
-            result = await WhisperXClient().transcribe(media_reference)
+            result = await TranscriptionClient().transcribe(media_reference)
             await repository.store_transcript(
                 attempt_id, int(attempt["company_id"]), result.text
             )

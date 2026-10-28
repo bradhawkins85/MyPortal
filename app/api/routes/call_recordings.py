@@ -287,7 +287,7 @@ async def transcribe_recording(
     _: None = Depends(require_database),
     __: dict = Depends(require_super_admin),
 ):
-    """Transcribe a call recording using WhisperX (super admin only)."""
+    """Transcribe a call recording using WhisperX or whisper.cpp (super admin only)."""
     try:
         updated = await call_recordings_service.transcribe_recording(
             recording_id, force=payload.force

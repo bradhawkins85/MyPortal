@@ -40,6 +40,12 @@ from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import llm_usage, module_dispatch
 from app.services.module_constants import ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
+from app.services.transcription import (
+    TranscriptionSettings,
+    build_asr_request,
+    engine_label,
+    normalise_engine,
+)
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt, validate_object
 from app.services.realtime import RefreshNotifier, refresh_notifier
 from app.core.module_capabilities import COMMANDS_BY_MODULE, MODULE_CAPABILITIES
@@ -146,18 +152,22 @@ DEFAULT_CHATGPT_TOOLS = [
 
 
 def _default_whisperx_settings() -> dict[str, Any]:
-    """Return WhisperX module defaults sourced from the environment.
+    """Return transcription module defaults sourced from the environment.
 
     These values are evaluated after the project ``.env`` file is loaded at
     module import time, allowing operators to configure both ticket attachment
-    and call recording transcription from the same environment keys.
+    and call recording transcription from the same environment keys. The
+    ``engine`` selects WhisperX (``WHISPERX_*``) or whisper.cpp
+    (``WHISPERCPP_*``); see ``TRANSCRIPTION_ENGINE``.
     """
 
+    env = TranscriptionSettings.from_environment()
     return {
-        "base_url": str(os.getenv("WHISPERX_BASE_URL", "")).strip().rstrip("/"),
-        "api_key": str(os.getenv("WHISPERX_API_KEY", "")).strip(),
-        "language": str(os.getenv("WHISPERX_LANGUAGE", "")).strip() or "en",
-        "stereo_split": _ensure_bool(os.getenv("WHISPERX_STEREO_SPLIT"), False),
+        "engine": env.engine,
+        "base_url": env.base_url,
+        "api_key": env.api_key,
+        "language": env.language or "en",
+        "stereo_split": env.stereo_split,
     }
 
 
@@ -1137,8 +1147,8 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     },
     {
         "slug": "whisperx",
-        "name": "WhisperX",
-        "description": "Transcribe ticket audio attachments and call recordings with a WhisperX-compatible ASR service.",
+        "name": "Speech Transcription",
+        "description": "Transcribe ticket audio attachments and call recordings with a WhisperX or whisper.cpp speech-to-text service.",
         "icon": "🎙️",
         "settings": _default_whisperx_settings(),
     },
@@ -1518,7 +1528,7 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
         "port",
     ),
     "uptimekuma": ("shared_secret_hash", "sync_service_status"),
-    "whisperx": ("base_url", "api_key", "language", "stereo_split"),
+    "whisperx": ("engine", "base_url", "api_key", "language", "stereo_split"),
     "xero": (
         "client_id",
         "client_secret",
@@ -2155,17 +2165,27 @@ def _coerce_settings(
         env_settings = _default_whisperx_settings()
         merged.update(
             {
+                "engine": normalise_engine(merged.get("engine")),
                 "base_url": str(merged.get("base_url") or "").strip().rstrip("/"),
                 "api_key": str(merged.get("api_key") or "").strip(),
                 "language": str(merged.get("language") or "").strip() or "en",
                 "stereo_split": _ensure_bool(merged.get("stereo_split"), False),
             }
         )
-        for key in ("base_url", "api_key", "language"):
-            if env_settings[key]:
-                merged[key] = env_settings[key]
-        if os.getenv("WHISPERX_STEREO_SPLIT") is not None:
-            merged["stereo_split"] = env_settings["stereo_split"]
+        # The environment owns the engine when it selects one explicitly or
+        # configures an engine's base URL; its values then replace the
+        # persisted ones so audio is never sent to a stale endpoint.
+        if os.getenv("TRANSCRIPTION_ENGINE", "").strip() or env_settings["base_url"]:
+            if merged["engine"] != env_settings["engine"]:
+                merged.update(base_url="", api_key="")
+            merged["engine"] = env_settings["engine"]
+        if merged["engine"] == env_settings["engine"]:
+            for key in ("base_url", "api_key", "language"):
+                if env_settings[key]:
+                    merged[key] = env_settings[key]
+            env_prefix = "WHISPERCPP" if merged["engine"] == "whispercpp" else "WHISPERX"
+            if os.getenv(f"{env_prefix}_STEREO_SPLIT") is not None:
+                merged["stereo_split"] = env_settings["stereo_split"]
     elif slug == "unifi-talk":
         overrides = payload or {}
         password_override = overrides.get("password")
@@ -7685,7 +7705,7 @@ async def _invoke_smart_attachment_removal(
     }
 
 
-# Audio MIME types accepted for WhisperX transcription
+# Audio MIME types accepted for WhisperX / whisper.cpp transcription
 _WHISPERX_AUDIO_MIME_TYPES = {
     "audio/wav",
     "audio/x-wav",
@@ -7836,7 +7856,7 @@ def _fmt_time(seconds: float) -> str:
 def _parse_whisperx_response(
     response: httpx.Response,
 ) -> tuple[str, list[dict[str, Any]]]:
-    """Parse a WhisperX ``/asr`` response.
+    """Parse a WhisperX ``/asr`` or whisper.cpp ``/inference`` response.
 
     Returns ``(text, segments)`` where *segments* is a (possibly empty) list
     of dicts with at least ``start`` and ``text`` keys.
@@ -7912,7 +7932,7 @@ async def _invoke_whisperx(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
-    """Transcribe audio attachments on a ticket using WhisperX.
+    """Transcribe audio attachments on a ticket using WhisperX or whisper.cpp.
 
     Accepts a JSON payload with:
     - ticket_id: Required (can come from context.ticket.id)
@@ -7920,7 +7940,8 @@ async def _invoke_whisperx(
     - language: Optional – override the module-level language setting
 
     The handler finds all audio attachments on the ticket, sends each to the
-    WhisperX ``/asr`` endpoint, and (when *add_note* is true) posts the
+    configured engine (``settings["engine"]``: WhisperX ``/asr`` or whisper.cpp
+    ``/inference``), and (when *add_note* is true) posts the
     resulting transcription as an internal note on the ticket.
     """
     from app.repositories import ticket_attachments as attachments_repo
@@ -7949,13 +7970,16 @@ async def _invoke_whisperx(
     add_note = _ensure_bool(payload.get("add_note"), True)
     language = payload.get("language") or settings.get("language") or ""
 
-    # -- validate WhisperX settings ---------------------------------------
+    # -- validate transcription settings ----------------------------------
+    engine = normalise_engine(settings.get("engine"))
+    label = engine_label(engine)
     base_url = (settings.get("base_url") or "").strip().rstrip("/")
     api_key = settings.get("api_key") or ""
     if not base_url:
-        raise ValueError("WhisperX base_url is not configured")
+        raise ValueError(f"{label} base_url is not configured")
 
-    target_url = f"{base_url}/asr"
+    asr_request = build_asr_request(engine, base_url, api_key=api_key, language=language)
+    target_url = asr_request.url
 
     # -- create webhook event for tracking --------------------------------
     event = await _webhook_monitor().create_manual_event(
@@ -7965,6 +7989,7 @@ async def _invoke_whisperx(
             "ticket_id": ticket_id_int,
             "add_note": add_note,
             "language": language,
+            "engine": engine,
         },
         headers={"X-Module": "whisperx"},
         max_attempts=1,
@@ -7972,7 +7997,7 @@ async def _invoke_whisperx(
     )
     event_id = int(event.get("id")) if event.get("id") is not None else None
     if event_id is None:
-        raise RuntimeError("Failed to create webhook event for WhisperX transcription")
+        raise RuntimeError(f"Failed to create webhook event for {label} transcription")
     if event_future and not event_future.done():
         event_future.set_result(event_id)
 
@@ -8024,9 +8049,10 @@ async def _invoke_whisperx(
                 f"Audio attachments not yet available on disk for ticket {ticket_id_int}"
             )
 
-        headers: dict[str, str] = {}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        headers = asr_request.headers
+        params = asr_request.params
+        form_data = asr_request.data
+        file_field = asr_request.file_field
 
         transcriptions: list[dict[str, Any]] = []
 
@@ -8050,23 +8076,15 @@ async def _invoke_whisperx(
                             original_name,
                         )
 
-                # WhisperX /asr uses FastAPI Query(...) parameters, so options
-                # like ``output`` and ``language`` MUST be sent as URL query
-                # parameters. Sending them as form data is silently ignored
-                # and the server falls back to its default ``output=txt``,
-                # which omits the segment timestamps.
-                params: dict[str, str] = {"output": "json"}
-                if language:
-                    params["language"] = language
-
                 if stereo_paths:
                     callee_path, caller_path = stereo_paths
                     try:
                         with open(caller_path, "rb") as cf:
                             resp_caller = await client.post(
                                 target_url,
-                                files={"audio_file": (original_name, cf, "audio/wav")},
+                                files={file_field: (original_name, cf, "audio/wav")},
                                 params=params,
+                                data=form_data,
                                 headers=headers,
                             )
                         resp_caller.raise_for_status()
@@ -8075,8 +8093,9 @@ async def _invoke_whisperx(
                         with open(callee_path, "rb") as cf:
                             resp_callee = await client.post(
                                 target_url,
-                                files={"audio_file": (original_name, cf, "audio/wav")},
+                                files={file_field: (original_name, cf, "audio/wav")},
                                 params=params,
+                                data=form_data,
                                 headers=headers,
                             )
                         resp_callee.raise_for_status()
@@ -8091,12 +8110,13 @@ async def _invoke_whisperx(
                 else:
                     mime = (attachment.get("mime_type") or "audio/wav").strip()
                     with open(file_path, "rb") as audio_file:
-                        files = {"audio_file": (original_name, audio_file, mime)}
+                        files = {file_field: (original_name, audio_file, mime)}
 
                         response = await client.post(
                             target_url,
                             files=files,
                             params=params,
+                            data=form_data,
                             headers=headers,
                         )
                         response.raise_for_status()
@@ -8115,7 +8135,7 @@ async def _invoke_whisperx(
 
         if not transcriptions:
             raise ValueError(
-                "WhisperX returned empty transcriptions for all audio attachments"
+                f"{label} returned empty transcriptions for all audio attachments"
             )
 
         # -- optionally post an internal note -----------------------------
@@ -8143,7 +8163,8 @@ async def _invoke_whisperx(
 
     except Exception as exc:
         logger.error(
-            "WhisperX transcription failed",
+            "{} transcription failed",
+            label,
             error=str(exc),
             ticket_id=ticket_id_int,
         )
