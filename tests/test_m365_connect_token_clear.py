@@ -121,6 +121,10 @@ def _patch_connect_common(
         AsyncMock(return_value=0),
     )
     monkeypatch.setattr(
+        "app.main.m365_service.ensure_exchange_manage_as_app_on_manifest",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
         "app.main.m365_service._acquire_ediscovery_download_token",
         AsyncMock(return_value="download-token"),
     )
