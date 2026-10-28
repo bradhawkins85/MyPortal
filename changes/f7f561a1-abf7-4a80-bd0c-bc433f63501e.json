@@ -1,0 +1,7 @@
+{
+  "guid": "f7f561a1-abf7-4a80-bd0c-bc433f63501e",
+  "occurred_at": "2026-10-28T12:00Z",
+  "change_type": "Fix",
+  "summary": "Ticket automations for emails imported through IMAP or Microsoft 365 now run after the email's attachments are saved, so attachment filters match new tickets and replies.",
+  "content_hash": "e1913a282ea255de526e60502bc4fc7ec0e9e11e673adc67f5ec7cc1bd3be121"
+}
