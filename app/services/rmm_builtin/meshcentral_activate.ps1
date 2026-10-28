@@ -5,8 +5,8 @@
 #   MESH_GROUP_ID the device group to install into (the device's company group)
 #
 # Installs the delivered MeshCentral agent as a background service so the device
-# joins its company's group. The node id is resolved by
-# MyPortal afterwards (the agent has no command-line that prints it).
+# joins its company's group, then reports the agent's node id (meshagent -nodeid)
+# so MyPortal opens that device; MyPortal checks it is in the company's group.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $activationDeadline = (Get-Date).AddSeconds(280)
@@ -78,3 +78,33 @@ if ($service.Status -ne 'Running') {
     $service.WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
 }
 Write-Output 'The MeshCentral agent is installed and running.'
+
+# Report the node id (as Tactical RMM reads it) so MyPortal can open this device
+# directly. A fresh agent needs a moment to create its identity; without an id,
+# MyPortal falls back to matching the device's host name. Reading the id never
+# fails an activation that otherwise worked.
+$nodeId = $null
+try {
+    $agentPath = "$env:ProgramFiles\Mesh Agent\MeshAgent.exe"
+    try {
+        $serviceInfo = Get-CimInstance -ClassName Win32_Service -Filter "Name='Mesh Agent'" -ErrorAction Stop
+        if ($serviceInfo -and $serviceInfo.PathName -match '^\s*"?([^"]+?\.exe)') { $agentPath = $Matches[1] }
+    } catch {
+        # Fall back to the default install location.
+    }
+    for ($attempt = 0; $attempt -lt 10 -and -not $nodeId -and (Get-Date) -lt $activationDeadline; $attempt++) {
+        if ($attempt) { Start-Sleep -Seconds 3 }
+        try {
+            $output = (Invoke-MeshCommand -File $agentPath -Arguments @('-nodeid') -Step 'reading the node id' -TimeoutSeconds 15) -as [string]
+            $candidate = ($output -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
+            if ($candidate) { $candidate = $candidate.Trim() }
+            if ($candidate -match '^[A-Za-z0-9@$/_+=.-]{16,128}$') { $nodeId = $candidate }
+        } catch {
+            Write-Output "Could not read the node id yet: $($_.Exception.Message)"
+        }
+    }
+} catch {
+    Write-Output "Could not read the node id: $($_.Exception.Message)"
+}
+if ($nodeId) { Write-Output "##myportal[session.node_id]=$nodeId" }
+else { Write-Output 'The node id is not available yet; MyPortal will find the device by its host name.' }

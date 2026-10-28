@@ -1,0 +1,7 @@
+{
+  "guid": "9182143f-db2d-4a2f-a87d-d9685c2149fd",
+  "occurred_at": "2026-10-28T02:11Z",
+  "change_type": "Feature",
+  "summary": "Devices that enrol with an older tray app are now upgraded to the latest release automatically as soon as they connect, and automatic RMM agent installs wait until that upgrade has finished.",
+  "content_hash": "33dd36abd6d1ef8d51930d350cb42622daf038a1e0f5b7b279ab0c0b997e8845"
+}

@@ -93,9 +93,10 @@ def test_meshcentral_functions_stay_in_row_actions_without_a_connect_shortcut(pa
     cell = html.split('<td class="table__actions"', 1)[1].split("</td>", 1)[0]
     assert 'data-rmm-remote="meshcentral"' not in cell.split('data-header-menu', 1)[0]
     menu = _menu(html, 10)
-    assert menu.count('data-rmm-remote="meshcentral"') == 3
-    assert menu.count('data-rmm-remote-asset="10"') == 3
-    for mode, label in (("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal")):
+    assert menu.count('data-rmm-remote="meshcentral"') == 4
+    assert menu.count('data-rmm-remote-asset="10"') == 4
+    for mode, label in (("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal"),
+                        ("registry", "registry")):
         assert f'data-rmm-remote-mode="{mode}"' in menu
         assert f"MeshCentral {label}" in menu
     assert 'data-rmm-remote="meshcentral"' not in _menu(html, 11)

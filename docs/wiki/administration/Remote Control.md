@@ -66,8 +66,10 @@ provider:
    choose another. MyPortal downloads the authenticated self-installing MeshCentral
    agent and sends it through RMM associated files, scoped to a device group named after the
    device's company, so the device lands in its
-   company's group (a device already in the generic Tactical RMM group is moved here too); the
-   node ID is then looked up in that group by the device's host name. Without the RMM agent,
+   company's group (a device already in the generic Tactical RMM group is moved here too). The
+   script then reports the agent's node ID by running `MeshAgent -nodeid` on the device, the
+   same way Tactical RMM reads it. MyPortal opens that node only after confirming it is in the
+   company's group, and otherwise looks the device up in that group by its host name. Without the RMM agent,
    MeshCentral falls back to the ID custom field below, opening MeshCentral signed in.
 2. To use your own script, add it to the Gitea repository's `Common/` folder and choose
    **Sync from Gitea**, then choose it and save. Only `Common/` scripts are offered, as they
@@ -109,12 +111,19 @@ session straight away.
 
 On an asset's **Scripts** card, the **RMM** menu holds RustDesk and MeshCentral **Remote
 desktop**, **File transfer** and **Terminal** sessions (RustDesk terminal needs RustDesk 1.4.1 or
-later on the technician's computer), **Run script**, and future RMM actions. In a ticket, the
+later on the technician's computer), MeshCentral **Registry** sessions (Windows devices only),
+**Run script**, and future RMM actions. In a ticket, the
 **RMM** menu holds the MeshCentral sessions.
 
 MyPortal shows the activation script's progress, then opens the session as soon as the device
 reports back: RustDesk through a `rustdesk://` link carrying the ID and password (the browser may
-ask to open RustDesk the first time), MeshCentral in a new tab already signed in on the device.
+ask to open RustDesk the first time), MeshCentral in a new tab already signed in on the device's
+chosen view. The MeshCentral tab opens as soon as you choose the session and shows the script's
+progress until the device is ready, so pop-up blockers do not stop it. The link is MeshCentral's
+own `/?gotonode=<node id>&viewmode=<view>` address (11 desktop, 12 terminal, 13 files, 9 registry),
+signed in with a login token, so nothing is installed on the MeshCentral server. MeshCentral has
+no link option that starts the connection, so the technician presses **Connect** on the view it
+opens.
 The built-in scripts install the tool on first use: the RustDesk script applies `RUSTDESK_CFG`
 and sets a one-time password, and the MeshCentral script runs the installer delivered by MyPortal into the
 device's company group. An **Open … again** button stays in case the browser blocked it.

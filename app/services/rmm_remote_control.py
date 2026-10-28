@@ -33,14 +33,15 @@ asset custom field holding its ID.
 MeshCentral has a matching built-in (``rmm_builtin/meshcentral_activate*``).
 MyPortal downloads the authenticated installer and delivers it through RMM
 associated files, scoped to a device group named after the device's company, so the device lands in its company's
-group rather than one shared group. The agent has no command-line that prints
-its node id, so once the run finishes MyPortal asks the MeshCentral control
-channel (``app.services.meshcentral``) for the node matching the device's host
-name and builds a signed-in link that jumps straight to it.
+group rather than one shared group. The script reports the agent's node id
+(``meshagent -nodeid``, as Tactical RMM reads it); once the run finishes MyPortal
+asks the MeshCentral control channel (``app.services.meshcentral``) for that node
+in the company's group, falling back to the node matching the device's host
+name, and builds a signed-in link that jumps straight to it.
 
-Each session is a remote desktop, file transfer or terminal session (``mode``),
-which only changes the launch link. The asset and ticket pages open the link
-for the technician as soon as it is ready.
+Each session is a remote desktop, file transfer, terminal or (MeshCentral only)
+registry session (``mode``), which only changes the launch link. The asset and
+ticket pages open the link for the technician as soon as it is ready.
 """
 
 from __future__ import annotations
@@ -71,11 +72,11 @@ from app.services import meshcentral
 PROVIDERS = remote_repo.PROVIDERS
 PROVIDER_LABELS = {"rustdesk": "RustDesk", "meshcentral": "MeshCentral"}
 MODES = remote_repo.MODES
-MODE_LABELS = {"remote": "Remote desktop", "remote_prompt": "Remote desktop (Prompt)", "file_transfer": "File transfer", "terminal": "Terminal"}
+MODE_LABELS = {"remote": "Remote desktop", "remote_prompt": "Remote desktop (Prompt)", "file_transfer": "File transfer", "terminal": "Terminal", "registry": "Registry"}
 # rustdesk://<action>/<id> per session type (RustDesk 1.4.1 or later for terminal).
 _RUSTDESK_ACTIONS = {"remote": "connection/new", "remote_prompt": "connection/new", "file_transfer": "file-transfer", "terminal": "terminal"}
-# MeshCentral's device view: 11 desktop, 12 terminal, 13 files.
-_MESH_VIEWMODES = {"remote": "11", "file_transfer": "13", "terminal": "12"}
+# MeshCentral's device view: 11 desktop, 12 terminal, 13 files, 9 registry.
+_MESH_VIEWMODES = {"remote": "11", "file_transfer": "13", "terminal": "12", "registry": "9"}
 _BUILTIN_DIR = Path(__file__).resolve().parent / "rmm_builtin"
 # How long a session's link (and any one-time password) stays available.
 SESSION_LIFETIME = timedelta(minutes=30)
@@ -495,9 +496,11 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
     """Queue the activation script (or resolve straight away) and return the session."""
 
     if mode not in MODES:
-        raise RemoteControlError("Choose a remote desktop, file transfer or terminal session.")
+        raise RemoteControlError("Choose a remote desktop, file transfer, terminal or registry session.")
     if mode == "remote_prompt" and provider != "rustdesk":
         raise RemoteControlError("Prompt sessions are only available for RustDesk.")
+    if mode == "registry" and provider != "meshcentral":
+        raise RemoteControlError("Registry sessions are only available for MeshCentral.")
     settings = await _provider(provider)
     label = PROVIDER_LABELS[provider]
     agent = await rmm_repo.get_asset_agent(asset_id)
@@ -672,11 +675,15 @@ async def _launch_url(session: Mapping[str, Any], settings: Mapping[str, Any], v
     if group_id:
         # Built-in: the agent was installed into the company's group, so ask
         # MeshCentral for the node matching this device's host name.
+        # Like Tactical RMM, prefer the node id the device's own agent reported
+        # (meshagent -nodeid); find_node only accepts it inside the company's group.
         hosts = [h.strip() for h in str(values.get("mesh_host") or "").split(";") if h.strip()]
+        reported = values.get("node_id")
         node_id = None
-        if hosts:
+        if hosts or reported:
             node_id = await meshcentral.find_node(
-                site, meshcentral_login_token(key, username), group_id, hosts, attempts=3, delay_seconds=2.0
+                site, meshcentral_login_token(key, username), group_id, hosts,
+                node_id=reported, attempts=3, delay_seconds=2.0,
             )
         if not node_id:
             # The agent has not checked in yet (or could not be matched); open

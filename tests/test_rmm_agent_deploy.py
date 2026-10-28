@@ -682,3 +682,49 @@ async def test_upgrade_refuses_without_a_tray_app_or_a_known_release(sqlite_db, 
     with pytest.raises(deploy.AgentDeployError, match="latest release"):
         await deploy.upgrade_asset(10, company_id=1, user_id=9)
     assert await _commands(sqlite_db) == []
+
+
+@pytest.mark.anyio
+async def test_new_device_on_an_old_release_is_queued_an_upgrade_once(sqlite_db, storage, sent, no_cached_release):
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('1.3.0', 'https://x/a.msi')")
+    device = await _device(sqlite_db, version="1.2.0")
+
+    command_id = await deploy.upgrade_new_device(device)
+    assert command_id is not None
+    assert await deploy.upgrade_new_device(device) is None  # already waiting for the device
+    rows = await _commands(sqlite_db)
+    assert [(row["command"], row["status"], row["initiated_by_user_id"]) for row in rows] == [("update", "queued", None)]
+    assert json.loads(rows[0]["payload_json"]) == {
+        "reason": "first_checkin", "latest_tray_version": "1.3.0", "current_agent_version": "1.2.0",
+    }
+
+
+@pytest.mark.anyio
+async def test_new_devices_that_need_no_upgrade_are_left_alone(sqlite_db, storage, sent, no_cached_release):
+    assert await deploy.upgrade_new_device(await _device(sqlite_db, device_id=1, version="1.2.0")) is None  # nothing published
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('1.3.0', 'https://x/a.msi')")
+    for device_id, os_name, version in (
+        (2, "windows", "1.3.0"),
+        (3, "windows", "v1.4.0"),
+        (4, "windows", "0.0.0-dev"),
+        (5, "windows", None),
+        (6, "freebsd", "1.2.0"),
+    ):
+        device = await _device(sqlite_db, device_id=device_id, os_name=os_name, version=version)
+        assert await deploy.upgrade_new_device(device) is None
+    assert await _commands(sqlite_db) == []
+
+
+@pytest.mark.anyio
+async def test_auto_install_waits_for_a_pending_tray_upgrade(sqlite_db, storage, sent, no_cached_release):
+    _cache(storage)
+    await sqlite_db.execute("UPDATE companies SET rmm_agent_auto_deploy = 1 WHERE id = 1")
+    await sqlite_db.execute("INSERT INTO tray_versions (version, download_url) VALUES ('1.3.0', 'https://x/a.msi')")
+    device = await _device(sqlite_db, version="1.2.0")
+    command_id = await deploy.upgrade_new_device(device)
+
+    assert await deploy.auto_deploy_device(device) is False  # queued update
+    await deploy.tray_repo.mark_command_delivered(command_id)
+    assert await deploy.auto_deploy_device(device) is False  # the tray app is updating
+    await deploy.tray_repo.mark_command_completed(command_id)
+    assert await deploy.auto_deploy_device(device) is True

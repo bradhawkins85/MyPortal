@@ -1,0 +1,7 @@
+{
+  "guid": "b3c9a80e-452e-4a1d-b52a-a4418bc7900c",
+  "occurred_at": "2026-10-28T02:09Z",
+  "change_type": "Feature",
+  "summary": "MeshCentral sessions now open by themselves on the right device and tab as soon as it is ready (no more clicking Open MeshCentral), with nothing to install on the MeshCentral server; the device reports its own MeshCentral node ID, and a new MeshCentral Registry option is in the RMM menu.",
+  "content_hash": "90de918bcaaf0fdc3188d23aa3bae7e71b9aa515c46314c25182d55b3a843896"
+}

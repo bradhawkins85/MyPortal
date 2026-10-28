@@ -174,19 +174,23 @@ async def find_node(
     group_id: str,
     names: Sequence[str],
     *,
+    node_id: str | None = None,
     attempts: int = _NODE_WAIT_ATTEMPTS,
     delay_seconds: float = _NODE_WAIT_DELAY_SECONDS,
 ) -> str | None:
     """The node id (``node//...``) of a device in a group, matched by name.
 
-    A freshly installed agent takes a few seconds to check in, so the lookup is
-    retried a handful of times. ``group_id`` is the id without the ``mesh//``
-    prefix; matches are verified against it so a same-named device in another
-    group is never picked.
+    ``node_id`` is the id the device's own agent reported (``meshagent -nodeid``,
+    bare or ``node//...``); it wins over a name match, but only when that node is
+    in the group. A freshly installed agent takes a few seconds to check in, so
+    the lookup is retried a handful of times. ``group_id`` is the id without the
+    ``mesh//`` prefix; matches are verified against it so a same-named device (or
+    a reported id) in another group is never picked.
     """
 
     wanted = {n.strip().lower() for n in names if n and n.strip()}
-    if not wanted:
+    reported = (node_id or "").strip().rsplit("/", 1)[-1]
+    if not wanted and not reported:
         return None
     for attempt in range(attempts):
         if attempt:
@@ -202,9 +206,12 @@ async def find_node(
         except MeshCentralError:
             return None
         nodes = data.get("nodes") if isinstance(data.get("nodes"), list) else []
+        nodes = [node for node in nodes if str(node.get("mesh", "")).removeprefix("mesh//") == group_id]
+        if reported:
+            for node in nodes:
+                if str(node.get("_id", "")).rsplit("/", 1)[-1] == reported:
+                    return str(node.get("_id", ""))
         for node in nodes:
-            if str(node.get("mesh", "")).removeprefix("mesh//") != group_id:
-                continue
             # The node's display name defaults to the machine's hostname, which is
             # the same hostname the RMM agent reports; match either field.
             if str(node.get("name", "")).lower() in wanted or str(node.get("hostname", "")).lower() in wanted:

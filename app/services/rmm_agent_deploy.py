@@ -72,6 +72,8 @@ COMPANY_PUSH_STAGGER_SECONDS = 2.0
 # The first tray release whose service handles install_rmm_agent.
 MIN_TRAY_VERSION = (0, 8, 4)
 UPDATE_COMMAND = "update"
+# How long after a tray update is delivered an automatic RMM install waits for it.
+TRAY_UPDATE_SETTLE = timedelta(minutes=30)
 MAX_ERROR_LENGTH = 2000
 
 _STORAGE_DIR = Path(__file__).resolve().parents[2] / "private_uploads" / "rmm-agent"
@@ -600,6 +602,53 @@ async def upgrade_asset(asset_id: int, *, company_id: int, user_id: int | None) 
     return {**result, "latest_version": label}
 
 
+async def upgrade_new_device(device: dict[str, Any]) -> int | None:
+    """Queue a tray update for a device that enrols on an outdated release.
+
+    The ``update`` command is only queued: the tray service receives it when it
+    opens its WebSocket after enrolment, so the install is not interrupted.
+    Development builds and devices that have not reported a version are left
+    alone. Returns the command id, or ``None`` when nothing was queued.
+    """
+
+    os_name = str(device.get("os") or "").lower()
+    if os_name not in TRAY_PLATFORMS or str(device.get("status") or "") != "active":
+        return None
+    reported = str(device.get("agent_version") or "").strip()
+    current = parse_version(reported)
+    if current is None or "dev" in reported.lower():
+        return None
+    latest = await latest_agent_version(os_name)
+    if latest is None or current >= latest:
+        return None
+    command_id, _delivered = await tray_service.dispatch_update_command(
+        device,
+        initiated_by_user_id=None,
+        extra_payload={
+            "reason": "first_checkin",
+            "latest_tray_version": version_label(latest),
+            "current_agent_version": reported,
+        },
+    )
+    if command_id is not None:
+        log_info(
+            "Queued an automatic upgrade for a newly enrolled tray device",
+            device_id=device.get("id"),
+            current_version=reported,
+            latest_version=version_label(latest),
+        )
+    return command_id
+
+
+async def _tray_update_pending(device_id: int) -> bool:
+    """Whether a tray update is waiting for, or was just handed to, the device."""
+
+    if await deploy_repo.queued_command(device_id, UPDATE_COMMAND):
+        return True
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - TRAY_UPDATE_SETTLE
+    return await tray_repo.get_recent_delivered_command(device_id, UPDATE_COMMAND, since=since) is not None
+
+
 async def _auto_enabled(company_id: Any) -> bool:
     if company_id is None:
         return False
@@ -629,6 +678,9 @@ async def auto_deploy_device(device: dict[str, Any], *, now: datetime | None = N
     if not await _auto_enabled(device.get("company_id")):
         return False
     if await deploy_repo.device_has_agent(device):
+        return False
+    if await _tray_update_pending(int(device["id"])):
+        # The tray app restarts to update; install once it reconnects on the new release.
         return False
     now = now or datetime.now(timezone.utc)
     if await _recently_tried(int(device["id"]), now):

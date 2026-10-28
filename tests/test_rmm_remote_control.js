@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function setup(responses) {
+function setup(responses, {blockPopups = false} = {}) {
   class Element {
     constructor() { this.hidden = true; this.attributes = {}; this.classList = {toggle() {}}; }
     closest() { return this; }
@@ -20,7 +20,11 @@ function setup(responses) {
   const opened = [];
   const requests = [];
   const timers = [];
-  const window = {location: {}, open: (...args) => { opened.push(args); return null; }};
+  // A tab reserved on the click: about:blank, written to until it is sent on.
+  const tab = {closed: false, opener: {}, document: {title: '', body: {textContent: ''}}, location: {},
+    close() { this.closed = true; }};
+  tab.location.replace = url => { tab.location.href = url; };
+  const window = {location: {}, open: (...args) => { opened.push(args); return blockPopups ? null : tab; }};
   const document = {
     addEventListener: (name, callback) => { if (name === 'click') clicks.push(callback); },
     querySelector: selector => selector === '[data-rmm-remote-status]' ? box : null,
@@ -37,7 +41,7 @@ function setup(responses) {
     setTimeout: callback => { timers.push(callback); return timers.length; },
     clearTimeout() {},
   });
-  return {message, link, button, opened, window, requests,
+  return {message, link, button, opened, window, requests, tab,
     click: async () => { for (const click of clicks) await click({target: button, preventDefault() {}}); },
     poll: async () => { timers.shift()(); await new Promise(resolve => setImmediate(resolve)); },
   };
@@ -45,25 +49,40 @@ function setup(responses) {
 const activating = {id: 1, label: 'MeshCentral', status: 'activating', run_status: 'running'};
 const ready = {label: 'MeshCentral', status: 'ready', launch_url: 'https://mesh.example.com/?login=test'};
 
-test('opens no tab during activation, then opens only the ready URL', async () => {
+test('reserves a tab on the click, shows progress in it, then sends it to the ready URL', async () => {
   const app = setup([activating, ready]);
   await app.click();
-  assert.equal(app.opened.length, 0);
+  assert.deepEqual(app.opened, [['', '_blank']]);
+  assert.equal(app.tab.opener, null);
+  assert.match(app.tab.document.body.textContent, /script is running/);
   assert.match(app.message.textContent, /script is running/);
   await app.poll();
-  assert.deepEqual(app.opened, [[ready.launch_url, '_blank', 'noopener,noreferrer']]);
+  assert.equal(app.opened.length, 1);
+  assert.equal(app.tab.location.href, ready.launch_url);
+  assert.equal(app.tab.closed, false);
   assert.equal(app.link.href, ready.launch_url);
   assert.equal(app.link.hidden, false);
-  assert.match(app.message.textContent, /ready.*use the link/);
+  assert.match(app.message.textContent, /opening.*new tab/);
   assert.equal(app.button.disabled, false);
 });
 
+test('falls back to opening the URL, with a link, when pop-ups are blocked', async () => {
+  const app = setup([activating, ready], {blockPopups: true});
+  await app.click();
+  await app.poll();
+  assert.deepEqual(app.opened, [['', '_blank'], [ready.launch_url, '_blank', 'noopener,noreferrer']]);
+  assert.equal(app.link.hidden, false);
+  assert.match(app.message.textContent, /ready.*use the link/);
+});
+
 for (const failure of [{...activating, status: 'failed', error: 'Installation failed'}, new Error('Network failed')]) {
-  test('failed activation creates no tab: ' + (failure.error || failure.message), async () => {
+  test('failed activation closes the reserved tab: ' + (failure.error || failure.message), async () => {
     const app = setup([activating, failure]);
     await app.click();
     await app.poll();
-    assert.equal(app.opened.length, 0);
+    assert.equal(app.opened.length, 1);
+    assert.equal(app.tab.closed, true);
+    assert.equal(app.tab.location.href, undefined);
     assert.equal(app.link.hidden, true);
     assert.equal(app.button.disabled, false);
     assert.match(app.message.textContent, /failed/);
@@ -73,15 +92,24 @@ for (const failure of [{...activating, status: 'failed', error: 'Installation fa
 test('immediately ready session opens its actual URL', async () => {
   const app = setup([ready]);
   await app.click();
-  assert.equal(app.opened[0][0], ready.launch_url);
+  assert.equal(app.tab.location.href, ready.launch_url);
 });
 
-test('invalid launch URL never opens a tab', async () => {
+test('invalid launch URL never reaches a tab', async () => {
   const app = setup([{...ready, launch_url: 'javascript:alert(1)'}]);
   await app.click();
-  assert.equal(app.opened.length, 0);
+  assert.equal(app.tab.closed, true);
+  assert.equal(app.tab.location.href, undefined);
   assert.equal(app.link.hidden, true);
   assert.match(app.message.textContent, /cannot open/);
+});
+
+test('MeshCentral registry option sends its mode', async () => {
+  const app = setup([{...ready, mode: 'registry', mode_label: 'Registry'}]);
+  app.button.dataset.rmmRemoteMode = 'registry';
+  await app.click();
+  assert.deepEqual(JSON.parse(app.requests[0].options.body), {provider: 'meshcentral', mode: 'registry'});
+  assert.match(app.message.textContent, /MeshCentral registry/);
 });
 
 test('RustDesk continues to launch through its protocol handler', async () => {

@@ -49,9 +49,10 @@ def test_rustdesk_links_strip_spaces_and_quote_the_password():
 
 
 def test_meshcentral_modes_pick_the_device_view():
-    views = {mode: parse_qs(urlsplit(remote.meshcentral_url("https://m.example.com", "t", KEY, "n", mode=mode)).query)["viewmode"]
-             for mode in ("remote", "file_transfer", "terminal")}
-    assert views == {"remote": ["11"], "file_transfer": ["13"], "terminal": ["12"]}
+    queries = {mode: parse_qs(urlsplit(remote.meshcentral_url("https://m.example.com", "t", KEY, "n", mode=mode)).query)
+               for mode in ("remote", "file_transfer", "terminal", "registry")}
+    assert {mode: query["viewmode"] for mode, query in queries.items()} == {
+        "remote": ["11"], "file_transfer": ["13"], "terminal": ["12"], "registry": ["9"]}
 
 
 def test_meshcentral_link_carries_a_token_meshcentral_can_decrypt():
@@ -266,6 +267,65 @@ async def test_built_in_meshcentral_installs_into_the_companies_group(sqlite_db,
     assert fallback["status"] == "ready" and "gotonode" not in fallback["launch_url"]
 
 
+@pytest.mark.anyio
+async def test_built_in_meshcentral_opens_the_node_id_the_device_reported(sqlite_db, monkeypatch):
+    # Like Tactical RMM, the script reports meshagent -nodeid; MyPortal passes it
+    # to find_node, which only accepts it inside the company's group.
+    _meshcentral_env(monkeypatch)
+    await remote.save_settings("meshcentral", {"is_enabled": "on"}, user_id=9)
+    lookups = []
+
+    async def fake_ensure_group(server_url, login_token, name):
+        return "grp123"
+
+    async def fake_find_node(server_url, login_token, group_id, names, **kwargs):
+        lookups.append((group_id, list(names), kwargs.get("node_id")))
+        return "node//" + kwargs["node_id"]
+
+    async def fake_download(server_url, login_token, group_id, arch_id):
+        return b"MZ\x00\xffinstaller"
+
+    monkeypatch.setattr(remote.meshcentral, "download_installer", fake_download)
+    monkeypatch.setattr(remote.meshcentral, "ensure_group", fake_ensure_group)
+    monkeypatch.setattr(remote.meshcentral, "find_node", fake_find_node)
+    _r, agent = await _enrol(sqlite_db)
+    await rmm_repo.record_agent_checkin(agent["id"], {"script_files_supported": True})
+    await sqlite_db.execute("UPDATE rmm_agents SET arch = 'amd64' WHERE id = ?", (agent["id"],))
+    agent = await rmm_scripts.authenticate_agent(_r["auth_token"])
+    session = await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9, mode="registry")
+    await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
+
+    reported = "abc$def@" * 8
+    await rmm_scripts.record_result(agent, session["run_id"], {
+        "exit_code": 0, "stdout": f"installed\n##myportal[session.node_id]={reported}\n"})
+    ready = await remote.session_status(session["id"], company_id=1, user_id=9, is_super_admin=False)
+    assert lookups[-1] == ("grp123", ["PC"], reported)
+    query = parse_qs(urlsplit(ready["launch_url"]).query)
+    assert query["gotonode"] == [reported] and query["viewmode"] == ["9"]
+
+
+@pytest.mark.anyio
+async def test_find_node_prefers_the_reported_id_only_inside_the_group(monkeypatch):
+    nodes = [
+        {"_id": "node//elsewhere", "mesh": "mesh//other", "name": "PC"},
+        {"_id": "node//byname", "mesh": "mesh//grp", "name": "PC"},
+        {"_id": "node//reported", "mesh": "mesh//grp", "name": "Renamed"},
+    ]
+
+    async def fake_request(server_url, login_token, action, payload=None, **kwargs):
+        assert payload["meshid"] == "mesh//grp"
+        return {"nodes": nodes}
+
+    monkeypatch.setattr(remote.meshcentral, "_request", fake_request)
+    find = remote.meshcentral.find_node
+    assert await find("https://m", "t", "grp", ["pc"], node_id="reported", attempts=1) == "node//reported"
+    assert await find("https://m", "t", "grp", [], node_id="node//reported", attempts=1) == "node//reported"
+    # A reported id from another group is ignored in favour of the name match.
+    assert await find("https://m", "t", "grp", ["pc"], node_id="elsewhere", attempts=1) == "node//byname"
+    assert await find("https://m", "t", "grp", [], node_id="elsewhere", attempts=1) is None
+    assert await find("https://m", "t", "grp", ["pc"], attempts=1) == "node//byname"
+
+
 def test_settings_page_renders_providers_and_script_values():
     env = _environment()
     env.globals["static_url"] = lambda path: path
@@ -349,12 +409,13 @@ def test_asset_menu_has_a_rustdesk_menu_and_a_meshcentral_menu():
         assert f'role="menuitem" data-rmm-remote="rustdesk" data-rmm-remote-mode="{mode}"' in html
     # The RMM menu is shown as the MeshCentral icon rather than the "RMM" text.
     assert 'src="/static/images/meshcentral.svg"' in html and ">RMM <" not in html
-    for mode in ("remote", "file_transfer", "terminal"):
+    for mode in ("remote", "file_transfer", "terminal", "registry"):
         assert f'data-rmm-remote="meshcentral" data-rmm-remote-mode="{mode}"' in html
-    assert html.count('role="menuitem"') == 8 and html.count("data-rmm-menu") == 2
+    assert html.count('role="menuitem"') == 9 and html.count("data-rmm-menu") == 2
     assert 'data-rmm-remote-name="&lt;PC&gt;"' in html and "<PC>" not in html
     assert "data-rmm-run-open" in html
     assert 'data-rmm-remote="meshcentral" data-rmm-remote-mode="remote_prompt"' not in html
+    assert 'data-rmm-remote="rustdesk" data-rmm-remote-mode="registry"' not in html
     rustdesk_only = template.render(providers=providers[:1], run=False)
     assert "rmm-rustdesk__icon" in rustdesk_only and "Remote desktop (Prompt)" in rustdesk_only
     assert rustdesk_only.count("data-rmm-menu") == 1 and "meshcentral" not in rustdesk_only
@@ -514,6 +575,12 @@ def test_agent_indicator_shows_a_tick_an_o_or_a_cross():
 async def test_prompt_mode_is_rustdesk_only():
     with pytest.raises(remote.RemoteControlError, match="only available for RustDesk"):
         await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9, mode="remote_prompt")
+
+
+@pytest.mark.anyio
+async def test_registry_mode_is_meshcentral_only():
+    with pytest.raises(remote.RemoteControlError, match="only available for MeshCentral"):
+        await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9, mode="registry")
 
 
 @pytest.mark.anyio

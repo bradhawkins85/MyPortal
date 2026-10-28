@@ -117,7 +117,7 @@ async def providers_for_company(request: Request, user: dict, company_id: int | 
 
 class StartRequest(BaseModel):
     provider: Literal["rustdesk", "meshcentral"]
-    mode: Literal["remote", "remote_prompt", "file_transfer", "terminal"] = "remote"
+    mode: Literal["remote", "remote_prompt", "file_transfer", "terminal", "registry"] = "remote"
 
 
 @router.post("/api/rmm/assets/{asset_id:int}/remote-control", summary="Switch on remote control for a device")
