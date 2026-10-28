@@ -980,7 +980,7 @@ def _fmt_time(seconds: float) -> str:
 
 
 def _parse_whisperx_response(response: httpx.Response) -> tuple[str, list[dict[str, Any]]]:
-    """Parse a WhisperX ``/asr`` or whisper.cpp ``/v1/audio/transcriptions`` response.
+    """Parse a WhisperX ``/asr`` or whisper.cpp ``/inference`` response.
 
     Returns ``(text, segments)`` where *segments* is a (possibly empty) list
     of dicts with at least ``start`` and ``text`` keys.
