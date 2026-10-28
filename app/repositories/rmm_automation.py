@@ -339,11 +339,15 @@ async def list_onboarding_runs(*, company_id: int, limit: int = 50) -> list[dict
 
 
 async def running_onboarding_ids(*, agent_id: int | None = None) -> list[int]:
-    condition = " AND agent_id = %s" if agent_id is not None else ""
-    rows = await db.fetch_all(
-        "SELECT id FROM rmm_onboarding_runs WHERE status = 'running'" + condition + " ORDER BY id",
-        (agent_id,) if agent_id is not None else (),
-    )
+    if agent_id is None:
+        rows = await db.fetch_all(
+            "SELECT id FROM rmm_onboarding_runs WHERE status = 'running' ORDER BY id"
+        )
+    else:
+        rows = await db.fetch_all(
+            "SELECT id FROM rmm_onboarding_runs WHERE status = 'running' AND agent_id = %s ORDER BY id",
+            (agent_id,),
+        )
     return [int(row["id"]) for row in rows or []]
 
 

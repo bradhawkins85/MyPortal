@@ -157,7 +157,7 @@ async def list_events(
             usage_clauses.append("llm.occurred_at < ?")
             params.append(_ensure_naive_utc(llm_end).strftime("%Y-%m-%d %H:%M:%S"))
         clauses.append(
-            "EXISTS (SELECT 1 FROM llm_usage_events AS llm WHERE "
+            "EXISTS (SELECT 1 FROM llm_usage_events AS llm WHERE "  # nosec B608 - fixed SQL
             + " AND ".join(usage_clauses) + ")"
         )
     if status:

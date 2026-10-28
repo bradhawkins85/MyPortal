@@ -873,17 +873,19 @@ async def save_gitea_account(user_id: int, login: str, permission: str) -> None:
     now = _utcnow()
     # One atomic write avoids a second pool checkout and first-sign-in races
     # between workers. Keep an established login stable across email changes.
-    conflict = (
-        "ON CONFLICT(user_id) DO UPDATE SET permission = excluded.permission, updated_at = excluded.updated_at"
-        if db.is_sqlite()
-        else "ON DUPLICATE KEY UPDATE permission = VALUES(permission), updated_at = VALUES(updated_at)"
-    )
-    placeholder = "?" if db.is_sqlite() else "%s"
-    await db.execute(
-        "INSERT INTO rmm_gitea_accounts (user_id, gitea_login, permission, created_at, updated_at) "
-        f"VALUES ({', '.join([placeholder] * 5)}) {conflict}",
-        (user_id, login, permission, now, now),
-    )
+    if db.is_sqlite():
+        sql = (
+            "INSERT INTO rmm_gitea_accounts (user_id, gitea_login, permission, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET permission = excluded.permission, updated_at = excluded.updated_at"
+        )
+    else:
+        sql = (
+            "INSERT INTO rmm_gitea_accounts (user_id, gitea_login, permission, created_at, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON DUPLICATE KEY UPDATE permission = VALUES(permission), updated_at = VALUES(updated_at)"
+        )
+    await db.execute(sql, (user_id, login, permission, now, now))
 
 
 async def list_gitea_accounts() -> list[dict[str, Any]]:

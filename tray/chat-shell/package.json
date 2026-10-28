@@ -75,6 +75,6 @@
     "minimatch@10.2.5": {
       "brace-expansion": "5.0.12"
     },
-    "fast-uri": "3.1.8"
+    "fast-uri": "3.1.9"
   }
 }
