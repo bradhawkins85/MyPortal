@@ -1,0 +1,7 @@
+{
+  "guid": "fe462281-a177-4b43-a948-48733ed9aaab",
+  "occurred_at": "2026-10-28T03:30Z",
+  "change_type": "Fix",
+  "summary": "Apps and scripts that use the PNG copy of the tray icon now get your uploaded icon instead of the default MyPortal icon, even when the .ico stores its images as BMP.",
+  "content_hash": "567a977267a7c99c889ddb7c0f6fe06308f4bc822c37deb72dd601cabe8028f2"
+}
