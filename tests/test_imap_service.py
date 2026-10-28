@@ -1095,3 +1095,105 @@ async def test_find_existing_ticket_for_reply_rejects_closed_ticket_number(monke
     )
 
     assert ticket is None
+
+
+@pytest.mark.parametrize("is_reply", [False, True])
+async def test_sync_account_runs_automations_after_saving_attachments(monkeypatch, is_reply):
+    events: list[str] = []
+    created_tickets: list[dict[str, object]] = []
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True}
+
+    async def fake_get_account(account_id: int):
+        return {
+            "id": account_id,
+            "host": "mail.example.com",
+            "port": 993,
+            "username": "inbox",
+            "password_encrypted": "encrypted",
+            "folder": "INBOX",
+            "process_unread_only": True,
+            "mark_as_read": False,
+            "active": True,
+        }
+
+    async def fake_none(*_args, **_kwargs):
+        return None
+
+    async def fake_resolve_ticket_entities(*_args, **_kwargs):
+        return None, None, None
+
+    async def fake_create_ticket(**payload):
+        created_tickets.append(payload)
+        events.append("create_ticket")
+        return {"id": 99, "subject": payload.get("subject")}
+
+    async def fake_find_existing_ticket(*_args, **_kwargs):
+        return {"id": 99, "requester_id": None} if is_reply else None
+
+    async def fake_create_reply(**_payload):
+        events.append("create_reply")
+
+    async def fake_save_email_attachment(**payload):
+        events.append("save:" + str(payload["filename"]))
+
+    async def fake_emit_created(ticket_id):
+        events.append(f"created:{ticket_id}")
+
+    async def fake_emit_updated(ticket_id, *, actor=None):
+        events.append(f"updated:{ticket_id}")
+
+    message = MIMEMultipart()
+    message["From"] = "Caller <caller@example.com>"
+    message["Subject"] = "Re: Voicemail" if is_reply else "Voicemail"
+    message["Message-ID"] = "<vm-11@example.com>"
+    message.attach(MIMEText("<p>New voicemail</p>", "html"))
+    audio = EmailMessage()
+    audio.set_content(b"ID3", maintype="audio", subtype="mpeg", filename="voicemail.mp3")
+    message.attach(audio)
+    raw_message = message.as_bytes()
+
+    class VoicemailMailbox:
+        def login(self, username: str, password: str) -> None:
+            return None
+
+        def select(self, folder: str, readonly: bool = False):
+            return "OK", []
+
+        def uid(self, command: str, *args):
+            if command == "search":
+                return "OK", [b"11"]
+            if command == "fetch":
+                return "OK", [(b"11 (FLAGS () BODY[] {1})", raw_message)]
+            raise AssertionError(f"Unexpected command {command!r}")
+
+        def logout(self) -> None:
+            return None
+
+    monkeypatch.setattr(imap.imaplib, "IMAP4_SSL", lambda host, port: VoicemailMailbox())
+    monkeypatch.setattr(imap.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(imap.imap_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(imap.imap_repo, "get_message", fake_none)
+    monkeypatch.setattr(imap.imap_repo, "upsert_message", fake_none)
+    monkeypatch.setattr(imap.imap_repo, "update_account", fake_none)
+    monkeypatch.setattr(imap, "decrypt_secret", lambda value: "password")
+    monkeypatch.setattr(imap, "_resolve_ticket_entities", fake_resolve_ticket_entities)
+    monkeypatch.setattr(imap, "_find_existing_ticket_for_reply", fake_find_existing_ticket)
+    monkeypatch.setattr(imap, "_resolve_existing_reply_author_id", fake_none)
+    monkeypatch.setattr(imap, "_save_email_attachment", fake_save_email_attachment)
+    monkeypatch.setattr(imap, "_add_email_cc_watchers", fake_none)
+    monkeypatch.setattr(imap.tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(imap.tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(imap.tickets_service, "schedule_ticket_ai_refresh", lambda *_a, **_k: None)
+    monkeypatch.setattr(imap.tickets_service, "emit_ticket_created_event", fake_emit_created)
+    monkeypatch.setattr(imap.tickets_service, "emit_ticket_updated_event", fake_emit_updated)
+
+    result = await imap.sync_account(5)
+
+    assert result["errors"] == []
+    if is_reply:
+        assert events == ["create_reply", "save:voicemail.mp3", "updated:99"]
+    else:
+        assert created_tickets[0]["trigger_automations"] is False
+        assert events == ["create_ticket", "save:voicemail.mp3", "created:99"]

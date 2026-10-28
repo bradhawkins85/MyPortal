@@ -1923,3 +1923,121 @@ async def test_force_reimport_message_requires_existing_record(monkeypatch):
 
     with pytest.raises(LookupError):
         await m365_mail.force_reimport_message(9, "missing")
+
+
+@pytest.mark.parametrize(
+    ("is_reply", "recovery", "expected_events"),
+    [
+        (False, False, ["create_ticket", "save_attachments", "created:200"]),
+        (False, True, ["create_ticket", "save_attachments"]),
+        (True, False, ["create_reply", "save_attachments", "updated:200"]),
+    ],
+)
+async def test_sync_account_runs_automations_after_saving_attachments(
+    monkeypatch, is_reply, recovery, expected_events
+):
+    events: list[str] = []
+    created_tickets: list[dict[str, Any]] = []
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True}
+
+    async def fake_get_account(account_id: int):
+        return {
+            "id": 1,
+            "active": True,
+            "company_id": 5,
+            "user_principal_name": "voicemail@example.com",
+            "folder": "Inbox",
+            "process_unread_only": True,
+            "mark_as_read": False,
+            "filter_query": None,
+            "sync_known_only": False,
+        }
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "fake-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        return {
+            "value": [
+                {
+                    "id": "msg-vm",
+                    "internetMessageId": "<vm@example.com>",
+                    "subject": "Re: Voicemail" if is_reply else "Voicemail",
+                    "body": {"contentType": "html", "content": "<p>New voicemail</p>"},
+                    "from": {"emailAddress": {"address": "pbx@example.com", "name": "PBX"}},
+                    "toRecipients": [],
+                    "ccRecipients": [],
+                    "bccRecipients": [],
+                    "replyTo": [],
+                    "isRead": False,
+                    "receivedDateTime": "2026-01-15T12:00:00Z",
+                    "hasAttachments": True,
+                    "internetMessageHeaders": [],
+                },
+            ],
+        }
+
+    async def fake_none(*_args, **_kwargs):
+        return None
+
+    async def fake_resolve_ticket_entities(from_header, *, default_company_id=None):
+        return 5, 42
+
+    async def fake_find_existing_ticket(subject, from_email, **kwargs):
+        return {"id": 200, "status": "open"} if is_reply else None
+
+    async def fake_create_ticket(**kwargs):
+        created_tickets.append(kwargs)
+        events.append("create_ticket")
+        return {"id": 200, "ticket_number": "T-200"}
+
+    async def fake_create_reply(**kwargs):
+        events.append("create_reply")
+
+    async def fake_save_graph_attachments(**kwargs):
+        events.append("save_attachments")
+
+    async def fake_emit_created(ticket_id):
+        events.append(f"created:{ticket_id}")
+
+    async def fake_emit_updated(ticket_id, actor=None):
+        events.append(f"updated:{ticket_id}")
+
+    async def fake_persist_inline(ticket_id, html):
+        return html
+
+    async def fake_record_message(**kwargs):
+        return True
+
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_none)
+    monkeypatch.setattr(m365_mail.mail_repo, "upsert_message", fake_none)
+    monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_none)
+    monkeypatch.setattr(m365_mail, "_record_message", fake_record_message)
+    monkeypatch.setattr(m365_mail, "_resolve_ticket_entities", fake_resolve_ticket_entities)
+    monkeypatch.setattr(m365_mail, "_find_existing_ticket_for_reply", fake_find_existing_ticket)
+    monkeypatch.setattr(m365_mail, "_resolve_existing_reply_author_id", fake_none)
+    monkeypatch.setattr(m365_mail, "_persist_m365_inline_images_for_ticket", fake_persist_inline)
+    monkeypatch.setattr(m365_mail, "_save_graph_attachments", fake_save_graph_attachments)
+    monkeypatch.setattr(m365_mail, "_add_email_cc_watchers", fake_none)
+    monkeypatch.setattr(m365_mail.tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(m365_mail.tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(m365_mail.tickets_service, "update_ticket_description", fake_none)
+    monkeypatch.setattr(m365_mail.tickets_service, "schedule_ticket_ai_refresh", lambda *_a, **_k: None)
+    monkeypatch.setattr(m365_mail.tickets_service, "emit_ticket_created_event", fake_emit_created)
+    monkeypatch.setattr(m365_mail.tickets_service, "emit_ticket_updated_event", fake_emit_updated)
+    monkeypatch.setattr(imap, "sanitize_rich_text", lambda text: type(
+        "Sanitized", (), {"has_rich_content": True, "html": text}
+    )())
+
+    result = await m365_mail.sync_account(1, recovery=recovery)
+
+    assert result.get("errors") == [], result
+    assert events == expected_events
+    if not is_reply:
+        assert created_tickets[0]["trigger_automations"] is False

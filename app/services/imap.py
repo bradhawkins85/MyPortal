@@ -1900,6 +1900,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             
             ticket: Mapping[str, Any] | None = None
             is_new_ticket = False
+            reply_actor: dict[str, Any] | None = None
             
             try:
                 if existing_ticket:
@@ -1926,6 +1927,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         status=None,
                         category="marketing" if campaign_reply else "email",
                         module_slug="imap",
+                        trigger_automations=False,
                         external_reference=_normalise_ticket_external_reference(message_id),
                         initial_reply_author_id=requester_id,
                         requester_email=from_email_addr if requester_id is None else None,
@@ -2015,29 +2017,14 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 error=str(exc),
                             )
                         
-                        # Trigger ticket updated event for email replies
-                        # This allows automations to fire when requestor/watcher replies via email
                         if reply_added:
-                            try:
-                                actor_info: dict[str, Any] = {}
-                                if reply_author_id is not None:
-                                    actor_info["id"] = reply_author_id
-                                if from_email_addr:
-                                    actor_info["email"] = from_email_addr
-                                    actor_info["display_name"] = from_email_addr
-                                await tickets_service.emit_ticket_updated_event(
-                                    ticket_id,
-                                    actor=actor_info or None,
-                                )
-                            except Exception as exc:  # pragma: no cover - defensive logging
-                                log_error(
-                                    "Failed to trigger automation for email reply",
-                                    account_id=account_id,
-                                    uid=uid,
-                                    ticket_id=ticket_id,
-                                    error=str(exc),
-                                )
-                
+                            reply_actor = {}
+                            if reply_author_id is not None:
+                                reply_actor["id"] = reply_author_id
+                            if from_email_addr:
+                                reply_actor["email"] = from_email_addr
+                                reply_actor["display_name"] = from_email_addr
+
                 # Save non-image attachments with restricted access
                 for attachment_info in email_attachments:
                     try:
@@ -2056,6 +2043,25 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             filename=attachment_info.get("filename"),
                             error=str(exc),
                         )
+
+                # Automations run once the attachments are saved so their
+                # filters (e.g. ticket.attachment_extensions) can see them.
+                try:
+                    if is_new_ticket:
+                        await tickets_service.emit_ticket_created_event(int(ticket_id))
+                    elif reply_actor is not None:
+                        await tickets_service.emit_ticket_updated_event(
+                            ticket_id,
+                            actor=reply_actor or None,
+                        )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    log_error(
+                        "Failed to trigger automation for email",
+                        account_id=account_id,
+                        uid=uid,
+                        ticket_id=ticket_id,
+                        error=str(exc),
+                    )
             await _record_message(
                 account_id=int(account_id),
                 uid=uid,

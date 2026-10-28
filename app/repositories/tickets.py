@@ -1813,7 +1813,20 @@ async def get_time_totals_by_ticket_ids(
     return result
 
 
-async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]:
+def _attachment_extensions(rows: Iterable[dict[str, Any]]) -> list[str]:
+    """Return sorted, lower-case attachment extensions without the leading dot."""
+
+    extensions: set[str] = set()
+    for row in rows:
+        name = str(row.get("original_filename") or row.get("filename") or "")
+        stem, dot, extension = name.rpartition(".")
+        extension = extension.strip().casefold()
+        if dot and stem.strip() and extension:
+            extensions.add(extension)
+    return sorted(extensions)
+
+
+async def get_automation_filter_context(ticket_id: int) -> dict[str, Any]:
     """Return aggregate ticket values used by automation filter matching."""
 
     time_row = await db.fetch_one(
@@ -1826,8 +1839,8 @@ async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]
         """,
         (ticket_id,),
     )
-    attachment_row = await db.fetch_one(
-        "SELECT COUNT(*) AS attachment_count FROM ticket_attachments WHERE ticket_id = %s",
+    attachment_rows = await db.fetch_all(
+        "SELECT original_filename, filename FROM ticket_attachments WHERE ticket_id = %s",
         (ticket_id,),
     )
     expense_row = await db.fetch_one(
@@ -1853,7 +1866,7 @@ async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]
         (ticket_id,),
     )
 
-    attachment_count = int((attachment_row or {}).get("attachment_count") or 0)
+    attachment_count = len(attachment_rows or [])
     task_count = int((task_row or {}).get("task_count") or 0)
     open_task_count = int((task_row or {}).get("open_task_count") or 0)
     linked_asset_count = int(
@@ -1867,6 +1880,7 @@ async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]
         "non_billable_minutes": int((time_row or {}).get("non_billable_minutes") or 0),
         "attachment_count": attachment_count,
         "has_attachments": attachment_count > 0,
+        "attachment_extensions": _attachment_extensions(attachment_rows or []),
         "expense_total": float((expense_row or {}).get("expense_total") or 0),
         "expense_count": int((expense_row or {}).get("expense_count") or 0),
         "has_expenses": int((expense_row or {}).get("expense_count") or 0) > 0,
@@ -1903,6 +1917,7 @@ async def get_automation_filter_context_by_ticket_ids(
             "non_billable_minutes": 0,
             "attachment_count": 0,
             "has_attachments": False,
+            "attachment_extensions": [],
             "expense_total": 0.0,
             "expense_count": 0,
             "has_expenses": False,
@@ -1943,18 +1958,21 @@ async def get_automation_filter_context_by_ticket_ids(
 
     attachment_rows = await db.fetch_all(
         f"""
-        SELECT ticket_id, COUNT(*) AS attachment_count
+        SELECT ticket_id, original_filename, filename
         FROM ticket_attachments
         WHERE ticket_id IN ({placeholders})
-        GROUP BY ticket_id
         """,  # nosec B608
         tuple(unique_ids),
     )
+    attachments_by_ticket: dict[int, list[dict[str, Any]]] = {}
     for row in attachment_rows:
-        ticket_id = int(row["ticket_id"])
-        attachment_count = int(row.get("attachment_count") or 0)
-        result[ticket_id]["attachment_count"] = attachment_count
-        result[ticket_id]["has_attachments"] = attachment_count > 0
+        attachments_by_ticket.setdefault(int(row["ticket_id"]), []).append(row)
+    for ticket_id, rows in attachments_by_ticket.items():
+        if ticket_id not in result:
+            continue
+        result[ticket_id]["attachment_count"] = len(rows)
+        result[ticket_id]["has_attachments"] = True
+        result[ticket_id]["attachment_extensions"] = _attachment_extensions(rows)
 
     expense_rows = await db.fetch_all(
         f"""

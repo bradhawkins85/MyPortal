@@ -148,3 +148,23 @@ def test_filters_match_custom_regex_rejects_invalid_or_oversized_patterns():
     assert not automations_service._filters_match(
         {"regex": {"ticket.subject": "a" * 257}}, context
     )
+
+
+def test_filters_match_attachment_extensions():
+    voicemail = {"ticket": {"attachment_extensions": ["m4a", "pdf"]}}
+    document_only = {"ticket": {"attachment_extensions": ["pdf"]}}
+    no_attachments = {"ticket": {"attachment_extensions": []}}
+    audio = {"in": {"ticket.attachment_extensions": "m4a, mp3"}}
+
+    assert automations_service._filters_match(audio, voicemail)
+    assert not automations_service._filters_match(audio, document_only)
+    assert not automations_service._filters_match(audio, no_attachments)
+    assert automations_service._filters_match(
+        {"match": {"ticket.attachment_extensions": ".M4A"}}, voicemail
+    )
+    assert automations_service._filters_match(
+        {"not_in": {"ticket.attachment_extensions": "m4a, mp3"}}, document_only
+    )
+    assert not automations_service._filters_match(
+        {"not_in": {"ticket.attachment_extensions": "m4a, mp3"}}, voicemail
+    )

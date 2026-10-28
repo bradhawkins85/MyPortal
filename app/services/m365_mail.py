@@ -1956,7 +1956,7 @@ async def sync_account(
                                 else None
                             ),
                             record_initial_reply=not create_initial_reply_after_inline_persist,
-                            trigger_automations=not recovery,
+                            trigger_automations=False,
                             send_creation_notification=not recovery,
                         )
                         is_new_ticket = True
@@ -2049,6 +2049,7 @@ async def sync_account(
                 ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
                 reply_added = False
                 reply_outcome: str | None = None
+                reply_actor: dict[str, Any] | None = None
                 if isinstance(ticket_id, int):
                     # Add reply to existing ticket
                     if not is_new_ticket:
@@ -2114,30 +2115,14 @@ async def sync_account(
                                     error=str(exc),
                                 )
 
-                            # Trigger ticket updated event for email replies
                             if reply_added and not recovery:
                                 reply_outcome = "reply_added"
-                                try:
-                                    actor_info: dict[str, Any] = {}
-                                    if reply_author_id is not None:
-                                        actor_info["id"] = reply_author_id
-                                    if from_email_addr:
-                                        actor_info["email"] = from_email_addr
-                                        actor_info["display_name"] = from_email_addr
-                                    await tickets_service.emit_ticket_updated_event(
-                                        ticket_id,
-                                        actor=actor_info or None,
-                                    )
-                                except (
-                                    Exception
-                                ) as exc:  # pragma: no cover - defensive logging
-                                    log_error(
-                                        "Failed to trigger automation for M365 email reply",
-                                        account_id=account_id,
-                                        message_id=msg_id,
-                                        ticket_id=ticket_id,
-                                        error=str(exc),
-                                    )
+                                reply_actor = {}
+                                if reply_author_id is not None:
+                                    reply_actor["id"] = reply_author_id
+                                if from_email_addr:
+                                    reply_actor["email"] = from_email_addr
+                                    reply_actor["display_name"] = from_email_addr
                         else:
                             reply_outcome = "ignored_empty_reply_body"
 
@@ -2158,6 +2143,27 @@ async def sync_account(
                                 ticket_id=ticket_id,
                                 error=str(exc),
                             )
+
+                    # Automations run once the attachments are saved so their
+                    # filters (e.g. ticket.attachment_extensions) can see them.
+                    try:
+                        if is_new_ticket and not recovery:
+                            await tickets_service.emit_ticket_created_event(
+                                int(ticket_id)
+                            )
+                        elif reply_actor is not None:
+                            await tickets_service.emit_ticket_updated_event(
+                                ticket_id,
+                                actor=reply_actor or None,
+                            )
+                    except Exception as exc:  # pragma: no cover - defensive logging
+                        log_error(
+                            "Failed to trigger automation for M365 email",
+                            account_id=account_id,
+                            message_id=msg_id,
+                            ticket_id=ticket_id,
+                            error=str(exc),
+                        )
 
                 _remember_message_action(
                     {

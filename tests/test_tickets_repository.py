@@ -135,6 +135,23 @@ class _AssetAutomationContextDB:
             return {"suggested_asset_count": 3}
         return {}
 
+    async def fetch_all(self, sql, params):
+        assert params == (42,)
+        return []
+
+
+class _AttachmentAutomationContextDB:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def fetch_one(self, sql, params):
+        return {}
+
+    async def fetch_all(self, sql, params):
+        if "FROM ticket_attachments" in sql:
+            return self._rows
+        return []
+
 
 class _ReplaceTicketAssetsDB:
     def __init__(self, existing_rows, final_rows):
@@ -403,6 +420,42 @@ async def test_automation_filter_context_includes_asset_counts(monkeypatch):
 
     assert context["linked_asset_count"] == 2
     assert context["suggested_asset_count"] == 3
+
+
+@pytest.mark.anyio
+async def test_automation_filter_context_lists_attachment_extensions(monkeypatch):
+    rows = [
+        {"original_filename": "Voicemail.M4A", "filename": "a1b2.m4a"},
+        {"original_filename": "second.m4a", "filename": "c3d4.m4a"},
+        {"original_filename": None, "filename": "recording.mp3"},
+        {"original_filename": "README", "filename": "e5f6"},
+        {"original_filename": ".hidden", "filename": "g7h8"},
+    ]
+    monkeypatch.setattr(tickets, "db", _AttachmentAutomationContextDB(rows))
+
+    context = await tickets.get_automation_filter_context(42)
+
+    assert context["attachment_count"] == 5
+    assert context["has_attachments"] is True
+    assert context["attachment_extensions"] == ["m4a", "mp3"]
+
+
+@pytest.mark.anyio
+async def test_bulk_automation_filter_context_lists_attachment_extensions(monkeypatch):
+    rows = [
+        {"ticket_id": 5, "original_filename": "call.mp3", "filename": "x.mp3"},
+        {"ticket_id": 5, "original_filename": "notes.PDF", "filename": "y.pdf"},
+        {"ticket_id": 99, "original_filename": "other.m4a", "filename": "z.m4a"},
+    ]
+    monkeypatch.setattr(tickets, "db", _AttachmentAutomationContextDB(rows))
+
+    context = await tickets.get_automation_filter_context_by_ticket_ids([5, 6])
+
+    assert context[5]["attachment_count"] == 2
+    assert context[5]["attachment_extensions"] == ["mp3", "pdf"]
+    assert context[6]["attachment_count"] == 0
+    assert context[6]["attachment_extensions"] == []
+    assert 99 not in context
 
 
 @pytest.mark.anyio

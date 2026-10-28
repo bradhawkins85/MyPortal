@@ -800,6 +800,7 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     enriched.setdefault("non_billable_minutes", 0)
     enriched.setdefault("attachment_count", 0)
     enriched.setdefault("has_attachments", False)
+    enriched.setdefault("attachment_extensions", [])
     enriched.setdefault("task_count", 0)
     enriched.setdefault("has_tasks", False)
     enriched.setdefault("open_task_count", 0)
@@ -1838,17 +1839,7 @@ async def create_ticket(
     # longer triggers default platform notification/email delivery.
 
     if trigger_automations:
-        try:
-            await automations_service.handle_event(
-                "tickets.created",
-                {"ticket": enriched_ticket},
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            log_error(
-                "Failed to execute ticket creation automations",
-                ticket_id=ticket.get("id"),
-                error=str(exc),
-            )
+        await _run_ticket_created_automations(enriched_ticket)
     await broadcast_ticket_event(action="created", ticket_id=enriched_ticket.get("id"))
 
     # Push to Solidtime as a project (no-op if module disabled).
@@ -1866,6 +1857,41 @@ async def create_ticket(
             )
 
     return enriched_ticket
+
+
+async def _run_ticket_created_automations(enriched_ticket: Mapping[str, Any]) -> None:
+    try:
+        await automations_service.handle_event(
+            "tickets.created",
+            {"ticket": enriched_ticket},
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to execute ticket creation automations",
+            ticket_id=enriched_ticket.get("id"),
+            error=str(exc),
+        )
+
+
+async def emit_ticket_created_event(ticket: Mapping[str, Any] | int) -> None:
+    """Emit ``tickets.created`` for a ticket made with ``trigger_automations=False``.
+
+    Email importers create the ticket first, save its attachments, then call
+    this so creation filters such as ``ticket.attachment_extensions`` see them.
+    """
+
+    if isinstance(ticket, Mapping):
+        ticket_id = ticket.get("id")
+    else:
+        ticket_id = ticket
+    try:
+        ticket_record = await tickets_repo.get_ticket(int(ticket_id))
+    except (TypeError, ValueError):
+        return
+    if not ticket_record:
+        return
+    await _remove_assigned_user_from_watchers(ticket_record)
+    await _run_ticket_created_automations(await _enrich_ticket_context(ticket_record))
 
 
 def _render_prompt(

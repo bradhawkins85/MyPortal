@@ -1834,6 +1834,7 @@
             'ticket.non_billable_minutes',
             'ticket.has_attachments',
             'ticket.attachment_count',
+            'ticket.attachment_extensions',
             'ticket.expense_total',
             'ticket.expense_count',
             'ticket.has_expenses',

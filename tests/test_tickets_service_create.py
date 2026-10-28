@@ -744,3 +744,41 @@ async def test_create_ticket_records_initial_reply_external_author(monkeypatch):
             "author_display_name": "Sender <sender@example.com>",
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_emit_ticket_created_event_uses_current_ticket(monkeypatch):
+    async def fake_get_ticket(ticket_id):
+        assert ticket_id == 42
+        return {"id": 42, "subject": "Voicemail", "assigned_user_id": None}
+
+    async def fake_enrich(ticket):
+        return {**ticket, "attachment_extensions": ["m4a"]}
+
+    recorded: list[tuple[str, dict]] = []
+
+    async def fake_handle_event(event_name, context):
+        recorded.append((event_name, context))
+        return []
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_service, "_enrich_ticket_context", fake_enrich)
+    monkeypatch.setattr(
+        tickets_service.automations_service, "handle_event", fake_handle_event
+    )
+
+    await tickets_service.emit_ticket_created_event(42)
+
+    assert recorded == [
+        (
+            "tickets.created",
+            {
+                "ticket": {
+                    "id": 42,
+                    "subject": "Voicemail",
+                    "assigned_user_id": None,
+                    "attachment_extensions": ["m4a"],
+                }
+            },
+        )
+    ]
