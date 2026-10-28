@@ -85,6 +85,23 @@ def test_filters_match_ticket_boolean_and_time_automation_fields():
     )
 
 
+def test_filters_match_ticket_total_minutes():
+    context = {
+        "ticket": {
+            "billable_minutes": 45,
+            "non_billable_minutes": 20,
+            "total_minutes": 65,
+        }
+    }
+
+    assert automations_service._filters_match(
+        {"greater_than_or_equal": {"ticket.total_minutes": 60}}, context
+    )
+    assert not automations_service._filters_match(
+        {"greater_than": {"ticket.total_minutes": 65}}, context
+    )
+
+
 def test_filters_match_ticket_status_human_label_against_slug():
     context = {"ticket": {"status": "waiting_on_client", "in_status_age_hours": 97}}
     filters = {

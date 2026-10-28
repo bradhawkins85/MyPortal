@@ -1875,9 +1875,12 @@ async def get_automation_filter_context(ticket_id: int) -> dict[str, Any]:
     suggested_asset_count = int(
         (suggested_asset_row or {}).get("suggested_asset_count") or 0
     )
+    billable_minutes = int((time_row or {}).get("billable_minutes") or 0)
+    non_billable_minutes = int((time_row or {}).get("non_billable_minutes") or 0)
     return {
-        "billable_minutes": int((time_row or {}).get("billable_minutes") or 0),
-        "non_billable_minutes": int((time_row or {}).get("non_billable_minutes") or 0),
+        "billable_minutes": billable_minutes,
+        "non_billable_minutes": non_billable_minutes,
+        "total_minutes": billable_minutes + non_billable_minutes,
         "attachment_count": attachment_count,
         "has_attachments": attachment_count > 0,
         "attachment_extensions": _attachment_extensions(attachment_rows or []),
@@ -1915,6 +1918,7 @@ async def get_automation_filter_context_by_ticket_ids(
         ticket_id: {
             "billable_minutes": 0,
             "non_billable_minutes": 0,
+            "total_minutes": 0,
             "attachment_count": 0,
             "has_attachments": False,
             "attachment_extensions": [],
@@ -1951,10 +1955,11 @@ async def get_automation_filter_context_by_ticket_ids(
     )
     for row in time_rows:
         ticket_id = int(row["ticket_id"])
-        result[ticket_id]["billable_minutes"] = int(row.get("billable_minutes") or 0)
-        result[ticket_id]["non_billable_minutes"] = int(
-            row.get("non_billable_minutes") or 0
-        )
+        billable_minutes = int(row.get("billable_minutes") or 0)
+        non_billable_minutes = int(row.get("non_billable_minutes") or 0)
+        result[ticket_id]["billable_minutes"] = billable_minutes
+        result[ticket_id]["non_billable_minutes"] = non_billable_minutes
+        result[ticket_id]["total_minutes"] = billable_minutes + non_billable_minutes
 
     attachment_rows = await db.fetch_all(
         f"""
