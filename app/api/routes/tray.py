@@ -91,6 +91,7 @@ from app.services import chat_ntfy_notifications
 from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import matrix as matrix_service
 from app.services import matrix_ai_waiting_assistant
+from app.services import rmm_agent_deploy
 from app.services import rmm_scripts
 from app.services import tacticalrmm as tacticalrmm_service
 from app.services import tray_installer
@@ -309,6 +310,12 @@ async def enrol_device(
             device[key] = getattr(payload, key)
     asset_id = await tray_service.provision_device_for_checkin(device)
     await tray_repo.mark_install_token_used(int(token_record["id"]))
+    if payload.agent_version:
+        device["agent_version"] = payload.agent_version
+    try:
+        await rmm_agent_deploy.upgrade_new_device(device)
+    except Exception as exc:  # noqa: BLE001 - never block enrolment
+        log_warning("Automatic tray upgrade check failed", device_uid=device_uid, error=str(exc))
     log_info(
         "Tray device enrolled",
         device_uid=device_uid,

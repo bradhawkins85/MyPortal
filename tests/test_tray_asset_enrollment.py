@@ -480,3 +480,31 @@ async def test_stalled_provision_attempt_times_out_and_retries(asset_db, monkeyp
     monkeypatch.setattr(service, "ensure_device_asset", original)
     monkeypatch.setattr(service, "PROVISION_TIMEOUT_SECONDS", 120)
     assert await service.provision_device_for_checkin(device)
+
+
+@pytest.mark.anyio
+async def test_enrolment_checks_the_reported_version_for_an_upgrade(asset_db, monkeypatch):
+    from app.api.routes import tray as routes
+    from app.schemas.tray import TrayEnrolRequest
+    checked = []
+    async def token_lookup(token_hash):
+        return {"id": 1, "company_id": 1}
+    async def create_device(**kwargs):
+        return await add_device(asset_db, uid=kwargs["device_uid"], hostname=kwargs["hostname"])
+    async def used(token_id):
+        pass
+    async def upgrade_new_device(device):
+        checked.append(device.get("agent_version"))
+        raise RuntimeError("release lookup failed")
+    monkeypatch.setattr(tray, "get_install_token_by_hash", token_lookup)
+    monkeypatch.setattr(tray, "create_device", create_device)
+    monkeypatch.setattr(tray, "mark_install_token_used", used)
+    monkeypatch.setattr(routes.rmm_agent_deploy, "upgrade_new_device", upgrade_new_device)
+    response = await routes.enrol_device(
+        TrayEnrolRequest(
+            install_token="a" * 32, device_uid="tray-old", os="windows", hostname="OLD-PC", agent_version="1.2.0",
+        ),
+        SimpleNamespace(),
+    )
+    # A failed check never blocks enrolment.
+    assert response.auth_token and checked == ["1.2.0"]
