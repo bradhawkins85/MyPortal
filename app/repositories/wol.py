@@ -45,7 +45,6 @@ async def create_attempt(
     status: str = "pending",
     check_deadline: datetime | None = None,
 ) -> int:
-    placeholder = "?" if db.is_sqlite() else "%s"
     now = _utcnow()
     values = [
         company_id,
@@ -62,29 +61,27 @@ async def create_attempt(
         now,
     ]
     query = (
-        f"INSERT INTO wol_attempts "
-        f"(company_id, asset_id, target_device_id, target_mac, subnet, trigger_type, "
-        f"initiated_by_user_id, sender_device_ids, status, check_deadline, created_at, updated_at) "
-        f"VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, "
-        f"{placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})"
+        "INSERT INTO wol_attempts "
+        "(company_id, asset_id, target_device_id, target_mac, subnet, trigger_type, "
+        "initiated_by_user_id, sender_device_ids, status, check_deadline, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, "
+        "?, ?, ?, ?, ?, ?, ?)"
     )
     return int(await db.execute_returning_lastrowid(query, tuple(values)))
 
 
 async def get_attempt(attempt_id: int) -> dict[str, Any] | None:
-    placeholder = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT * FROM wol_attempts WHERE id = {placeholder}", (attempt_id,)
+        "SELECT * FROM wol_attempts WHERE id = ?", (attempt_id,)
     )
     return dict(row) if row else None
 
 
 async def list_attempts_by_asset(asset_id: int, limit: int = 20) -> list[dict[str, Any]]:
-    placeholder = "?" if db.is_sqlite() else "%s"
     limit_value = int(limit)
     rows = await db.fetch_all(
-        f"SELECT * FROM wol_attempts WHERE asset_id = {placeholder} "
-        f"ORDER BY created_at DESC, id DESC LIMIT {placeholder}",
+        "SELECT * FROM wol_attempts WHERE asset_id = ? "
+        "ORDER BY created_at DESC, id DESC LIMIT ?",
         (asset_id, limit_value),
     )
     return [dict(r) for r in rows]
@@ -101,12 +98,11 @@ async def list_pending_attempts() -> list[dict[str, Any]]:
 async def _update_attempt(
     attempt_id: int, *, sets: list[str], values: list[Any]
 ) -> None:
-    placeholder = "?" if db.is_sqlite() else "%s"
     now = _utcnow()
-    set_clause = ", ".join(sets)
+    # ``sets`` only ever holds static "column = ?" literals from this module.
     sql = (
-        f"UPDATE wol_attempts SET {set_clause}, updated_at = {placeholder} "
-        f"WHERE id = {placeholder}"
+        "UPDATE wol_attempts SET " + ", ".join(sets)  # nosec B608 - fixed SQL
+        + ", updated_at = ? WHERE id = ?"
     )
     await db.execute(sql, tuple(values + [now, attempt_id]))
 
@@ -138,10 +134,9 @@ async def mark_attempt_sent(attempt_id: int, device_id: int) -> None:
         senders.append(device_id)
     new_status = "awaiting" if attempt.get("status") == "pending" else attempt.get("status")
     now = _utcnow()
-    placeholder = "?" if db.is_sqlite() else "%s"
     await db.execute(
-        f"UPDATE wol_attempts SET sender_device_ids = {placeholder}, "
-        f"status = {placeholder}, updated_at = {placeholder} WHERE id = {placeholder}",
+        "UPDATE wol_attempts SET sender_device_ids = ?, "
+        "status = ?, updated_at = ? WHERE id = ?",
         (json.dumps(senders), new_status, now, attempt_id),
     )
 
@@ -174,12 +169,11 @@ async def asset_stats(asset_id: int) -> dict[str, Any]:
     Returns ``total``, ``success`` (awake), and ``last_success_at``.
     """
 
-    placeholder = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT COUNT(*) AS total, "
-        f"SUM(CASE WHEN status = 'awake' THEN 1 ELSE 0 END) AS success, "
-        f"MAX(CASE WHEN status = 'awake' THEN woken_at ELSE NULL END) AS last_success_at "
-        f"FROM wol_attempts WHERE asset_id = {placeholder}",
+        "SELECT COUNT(*) AS total, "
+        "SUM(CASE WHEN status = 'awake' THEN 1 ELSE 0 END) AS success, "
+        "MAX(CASE WHEN status = 'awake' THEN woken_at ELSE NULL END) AS last_success_at "
+        "FROM wol_attempts WHERE asset_id = ?",
         (asset_id,),
     )
     row = dict(row) if row else {}
@@ -205,11 +199,10 @@ async def get_target_subnet_cidr(asset_id: int) -> str | None:
          the (matched) device for the asset.
     """
 
-    placeholder = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
         "SELECT n.cidr AS cidr FROM ip_addresses AS a "
         "JOIN ip_networks AS n ON n.id = a.network_id "
-        f"WHERE a.asset_id = {placeholder} LIMIT 1",
+        "WHERE a.asset_id = ? LIMIT 1",
         (asset_id,),
     )
     if row and row.get("cidr"):
@@ -220,7 +213,7 @@ async def get_target_subnet_cidr(asset_id: int) -> str | None:
         "JOIN network_scan_subnets AS nss "
         "  ON nss.scanner_tray_device_id = nd.scanner_tray_device_id "
         "  AND nss.company_id = nd.company_id "
-        f"WHERE nd.matched_asset_id = {placeholder} LIMIT 1",
+        "WHERE nd.matched_asset_id = ? LIMIT 1",
         (asset_id,),
     )
     if row and row.get("cidr"):
@@ -233,12 +226,11 @@ async def list_active_devices(
 ) -> list[dict[str, Any]]:
     """Active tray devices in a company that report a last IP, with presence fields."""
 
-    placeholder = "?" if db.is_sqlite() else "%s"
     rows = await db.fetch_all(
         "SELECT id, device_uid, hostname, asset_id, last_ip, last_seen_utc, ws_last_seen_utc "
-        f"FROM tray_devices WHERE status = 'active' AND company_id = {placeholder} "
-        f"AND last_ip IS NOT NULL AND last_ip != '' AND id != {placeholder} "
-        f"ORDER BY id ASC",
+        "FROM tray_devices WHERE status = 'active' AND company_id = ? "
+        "AND last_ip IS NOT NULL AND last_ip != '' AND id != ? "
+        "ORDER BY id ASC",
         (company_id, exclude_device_id or -1),
     )
     return [dict(r) for r in rows]
@@ -249,14 +241,13 @@ async def list_subnet_scanner_devices(
 ) -> list[dict[str, Any]]:
     """Tray devices registered as scanners for ``subnet`` (they sit on it)."""
 
-    placeholder = "?" if db.is_sqlite() else "%s"
     rows = await db.fetch_all(
         "SELECT td.id, td.device_uid, td.hostname, td.asset_id, td.last_ip, "
         "td.last_seen_utc, td.ws_last_seen_utc "
         "FROM network_scan_subnets AS nss "
         "JOIN tray_devices AS td ON td.id = nss.scanner_tray_device_id "
-        f"WHERE nss.company_id = {placeholder} AND nss.subnet = {placeholder} "
-        f"AND td.status = 'active' ORDER BY td.id ASC",
+        "WHERE nss.company_id = ? AND nss.subnet = ? "
+        "AND td.status = 'active' ORDER BY td.id ASC",
         (company_id, subnet),
     )
     return [dict(r) for r in rows]
@@ -265,11 +256,10 @@ async def list_subnet_scanner_devices(
 async def get_matched_device_mac(asset_id: int) -> str | None:
     """A MAC address recorded by a subnet scanner for the matched device."""
 
-    placeholder = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT mac_address FROM network_devices "
-        f"WHERE matched_asset_id = {placeholder} AND mac_address IS NOT NULL "
-        f"AND mac_address != '' LIMIT 1",
+        "SELECT mac_address FROM network_devices "
+        "WHERE matched_asset_id = ? AND mac_address IS NOT NULL "
+        "AND mac_address != '' LIMIT 1",
         (asset_id,),
     )
     return str(row.get("mac_address")) if row and row.get("mac_address") else None

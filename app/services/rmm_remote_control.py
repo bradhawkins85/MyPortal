@@ -479,7 +479,7 @@ async def _queue_builtin_meshcentral(
     except meshcentral.MeshCentralError as exc:
         raise RemoteControlError(exc.message) from exc
     filename = "meshcentral-" + secrets.token_hex(16) + (".exe" if windows else "")
-    destination = ("C:\\ProgramData\\MyPortal\\" if windows else "/var/tmp/") + filename
+    destination = ("C:\\ProgramData\\MyPortal\\" if windows else "/var/tmp/") + filename  # nosec B108 - random name on the device
     installer = rmm_script_files.inline_file(raw, source_path="MeshCentral/" + filename, destination=destination)
     files = [installer]
     if configuration is not None:

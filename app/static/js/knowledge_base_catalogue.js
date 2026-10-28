@@ -30,10 +30,14 @@
     if (event.target.closest('a, button, input, label')) return;
     const row = event.target.closest('tr[data-kb-href]');
     if (!row) return;
+    // A fixed path from the slug: navigating to an attribute's value would run a javascript: URL.
+    const slug = row.dataset.kbArticleSlug;
+    if (!slug) return;
+    const href = '/admin/knowledge-base/articles/' + encodeURIComponent(slug);
     if (event.ctrlKey || event.metaKey) {
-      window.open(row.dataset.kbHref, '_blank', 'noopener');
+      window.open(href, '_blank', 'noopener');
     } else {
-      window.location.assign(row.dataset.kbHref);
+      window.location.assign(href);
     }
   });
 })();
