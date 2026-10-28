@@ -355,6 +355,100 @@
         }),
       },
     ],
+    'ai-custom-prompt': [
+      {
+        label: 'Summarise the ticket and conversation',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          instructions: 'Summarise the problem, what has been tried so far and what the requester is still waiting on.',
+          desired_outcome: 'A short summary of no more than five sentences a technician can read before picking up the ticket.',
+          response_format: 'text',
+          conversation: 'all',
+          history_limit: 20,
+          note_title: 'AI summary',
+        }),
+      },
+      {
+        label: 'Extract product names and models',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          instructions: 'Identify every hardware or software product mentioned, including make, model and version where given.',
+          desired_outcome: 'One item per product, for example "HP LaserJet Pro M404dn" or "Microsoft Outlook 365 v2408". Do not guess products that are not named.',
+          response_format: 'list',
+          conversation: 'public',
+          note_title: 'Products mentioned',
+        }),
+      },
+      {
+        label: 'List identified safety issues',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          instructions: 'Review the ticket for any physical, electrical or workplace safety hazards, such as overheating equipment, burning smells, exposed wiring, water near equipment, swollen batteries or trip hazards.',
+          desired_outcome: 'One item per hazard describing the hazard and where it is. Return an empty list when no safety issue is described.',
+          response_format: 'list',
+          conversation: 'public',
+          note_title: 'Safety issues identified',
+        }),
+      },
+      {
+        label: 'Extract action items and next steps',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          instructions: 'List the outstanding actions promised or requested in this ticket and who is responsible for each (requester or support team).',
+          desired_outcome: 'One item per action in the form "Owner: action".',
+          response_format: 'list',
+          conversation: 'all',
+          history_limit: 30,
+          note_title: 'Outstanding actions',
+        }),
+      },
+      {
+        label: 'Assess requester sentiment',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          instructions: 'Assess how the requester feels about this issue and the support received so far, quoting the wording that shows it.',
+          desired_outcome: 'Start with one word (Positive, Neutral, Frustrated or Angry), then one or two sentences explaining why.',
+          response_format: 'text',
+          conversation: 'public',
+          history_limit: 5,
+          note_title: 'Requester sentiment',
+        }),
+      },
+      {
+        label: 'Identify security or compliance concerns',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          instructions: 'Identify possible security incidents or compliance concerns, such as phishing, shared passwords, suspected compromise, data sent to the wrong person or lost devices.',
+          desired_outcome: 'One item per concern with a short reason. Return an empty list when there are none.',
+          response_format: 'list',
+          conversation: 'public',
+          note_title: 'Security concerns',
+        }),
+      },
+      {
+        label: 'Extract affected users, devices and locations',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          instructions: 'Extract the people, device names, serial numbers, IP addresses and office locations affected by this issue.',
+          desired_outcome: 'One item per entry prefixed with its type, for example "User: Jane Smith" or "Device: RECEPTION-PC".',
+          response_format: 'list',
+          conversation: 'public',
+          note_title: 'Affected users and devices',
+        }),
+      },
+      {
+        label: 'Draft a resolution summary for the requester',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          instructions: 'Write a plain-English explanation of what caused the issue and how it was resolved, suitable for the requester.',
+          desired_outcome: 'Two or three friendly sentences with no internal jargon. A technician will review it before sending.',
+          response_format: 'text',
+          conversation: 'all',
+          history_limit: 30,
+          note_title: 'Draft resolution summary',
+        }),
+      },
+    ],
     'run-troubleshooting-bot': [
       {
         label: 'Troubleshoot the linked asset',

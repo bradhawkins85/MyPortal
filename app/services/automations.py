@@ -455,8 +455,14 @@ async def _record_legacy_action_exception(
 
 # Payload keys a module renders itself.  RMM script values are resolved per
 # device ({{asset.*}}, {{company.variables.*}}), which the automation context
-# cannot fill, so they reach the module as entered.
-_UNRENDERED_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {"rmm-script": ("values",)}
+# cannot fill, so they reach the module as entered.  Custom LLM prompt
+# instructions are trusted prompt text: rendering {{ticket.*}} into them would
+# let customer content bypass the prompt's untrusted-data boundary, so ticket
+# data reaches that module only through its own untrusted records.
+_UNRENDERED_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
+    "rmm-script": ("values",),
+    "ai-custom-prompt": ("instructions", "desired_outcome"),
+}
 
 
 async def _render_action_payload(
