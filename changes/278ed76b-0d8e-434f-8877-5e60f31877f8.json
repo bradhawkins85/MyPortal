@@ -1,0 +1,7 @@
+{
+  "guid": "278ed76b-0d8e-434f-8877-5e60f31877f8",
+  "occurred_at": "2026-10-28T11:09Z",
+  "change_type": "Fix",
+  "summary": "Microsoft 365 Check permissions now also confirms the MyPortal app holds the Exchange Administrator role, and Repair permissions warns when it could not assign it instead of reporting everything as granted, so Exchange features such as signature deployment no longer fail with a 401 while diagnostics show all clear.",
+  "content_hash": "31dac09f5e536f5fb439a3d587a26e2a7f61f2e76d0e2d4e46c50c5aa6a479ee"
+}

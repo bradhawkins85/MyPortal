@@ -218,6 +218,52 @@ async def test_repair_route_no_new_permissions(async_client):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_repair_route_warns_when_exchange_role_still_missing(async_client):
+    """An incomplete repair must not claim every permission is already granted."""
+    async def fake_load_license_context(request):
+        user = {"id": 1, "is_super_admin": True}
+        company = {"id": 1, "name": "Test Co"}
+        return user, None, company, 1, None
+
+    async def fake_repair(company_id):
+        return {
+            "granted": False,
+            "complete": False,
+            "results": [{
+                "app_id": m365_service._EXO_APP_ID,
+                "permissions": [
+                    {"id": m365_service._EXO_ADMIN_ROLE_CHECK_ID, "status": "fail"},
+                ],
+            }],
+        }
+
+    flashed: list[tuple[str, str, str]] = []
+
+    def fake_flash_redirect(url, message, variant="info", **kwargs):
+        flashed.append((url, message, variant))
+        return main_module.RedirectResponse(url=url, status_code=303)
+
+    with (
+        patch("app.main._load_license_context", side_effect=fake_load_license_context),
+        patch("app.main.m365_service.repair_enterprise_app_permissions", side_effect=fake_repair),
+        patch("app.main.flash_redirect", side_effect=fake_flash_redirect),
+    ):
+        response = await async_client.post(
+            "/m365/diagnostics/repair",
+            headers={"X-CSRF-Token": "test-csrf-token"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert len(flashed) == 1
+    url, message, variant = flashed[0]
+    assert url == "/m365/diagnostics"
+    assert variant == "warning"
+    assert "Exchange Administrator" in message
+    assert "already granted" not in message
+
+
+@pytest.mark.anyio("asyncio")
 async def test_repair_route_no_token_redirects_to_connect(async_client):
     """POST /m365/diagnostics/repair redirects to MS OAuth when no delegated token."""
     async def fake_load_license_context(request):

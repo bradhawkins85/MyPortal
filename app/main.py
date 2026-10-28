@@ -5379,6 +5379,22 @@ async def repair_m365_permissions(request: Request):
     except m365_service.M365Error as exc:
         return flash_redirect("/m365/diagnostics", str(exc), "error")
 
+    if not outcome.get("complete", True):
+        msg = "Some permissions could not be repaired automatically. Review the failed items below."
+        exchange_role_missing = any(
+            permission.get("id") == m365_service._EXO_ADMIN_ROLE_CHECK_ID
+            and permission.get("status") != "pass"
+            for app_result in outcome.get("results") or []
+            for permission in app_result.get("permissions") or []
+        )
+        if exchange_role_missing:
+            msg += (
+                " The Exchange Administrator role can only be assigned by a Microsoft admin with the"
+                " Privileged Role Administrator or Global Administrator role: reconnect as that admin"
+                " and repair again, or assign the role to the MyPortal app in Microsoft Entra under"
+                " Roles and administrators."
+            )
+        return flash_redirect("/m365/diagnostics", msg, "warning")
     if outcome.get("granted") and outcome.get("purview_repaired"):
         msg = "Missing permissions and Purview configuration have been repaired successfully."
     elif outcome.get("granted"):
