@@ -102,7 +102,7 @@ and share the same module, scheduled tasks and automation action.
 | Engine | `TRANSCRIPTION_ENGINE` | Endpoint called | Settings |
 | --- | --- | --- | --- |
 | WhisperX (`whisper-asr-webservice`) | `whisperx` | `POST {base}/asr` | `WHISPERX_BASE_URL`, `WHISPERX_API_KEY`, `WHISPERX_LANGUAGE`, `WHISPERX_STEREO_SPLIT` |
-| whisper.cpp (`whisper-server`) | `whispercpp` | `POST {base}/v1/audio/transcriptions` | `WHISPERCPP_BASE_URL`, `WHISPERCPP_API_KEY`, `WHISPERCPP_LANGUAGE`, `WHISPERCPP_STEREO_SPLIT` |
+| whisper.cpp (`whisper-server`) | `whispercpp` | `POST {base}/inference` | `WHISPERCPP_BASE_URL`, `WHISPERCPP_API_KEY`, `WHISPERCPP_LANGUAGE`, `WHISPERCPP_STEREO_SPLIT` |
 
 When `TRANSCRIPTION_ENGINE` is blank, the first engine with a base URL is
 used (WhisperX before whisper.cpp), so existing WhisperX installs keep
@@ -123,20 +123,17 @@ WHISPERCPP_LANGUAGE=en
 
 #### Running whisper.cpp
 
-MyPortal calls whisper.cpp on the OpenAI-compatible
-`/v1/audio/transcriptions` route. Start `whisper-server` with
-`--inference-path /v1/audio/transcriptions` (its default route is
-`/inference`) and `--convert` so it can accept MP3 and WAV files that are not
-16 kHz mono (this requires `ffmpeg` on the server):
+Start `whisper-server` with `--convert` so it can accept MP3 and WAV
+files that are not 16 kHz mono (this requires `ffmpeg` on the server):
 
 ```bash
-whisper-server -m models/ggml-base.en.bin --host 0.0.0.0 --port 8080 \
-  --inference-path /v1/audio/transcriptions --convert
+whisper-server -m models/ggml-base.en.bin --host 0.0.0.0 --port 8080 --convert
 ```
 
-`WHISPERCPP_BASE_URL` may be the bare server address
-(`http://whisper-cpp:8080`), an OpenAI-style `/v1` base or the full
-`/v1/audio/transcriptions` URL.
+`WHISPERCPP_BASE_URL` can be the bare server address
+(`http://whisper-cpp:8080`), in which case `/inference` is appended, or the
+full endpoint URL (for example `http://whisper-cpp:8080/inference` or
+`http://whisper-cpp:8080/v1/audio/transcriptions`), which is used as-is.
 
 If both `WHISPERX_BASE_URL` and `WHISPERCPP_BASE_URL` are set, WhisperX
 (`/asr`) is used unless `TRANSCRIPTION_ENGINE=whispercpp`.

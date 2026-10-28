@@ -7856,7 +7856,7 @@ def _fmt_time(seconds: float) -> str:
 def _parse_whisperx_response(
     response: httpx.Response,
 ) -> tuple[str, list[dict[str, Any]]]:
-    """Parse a WhisperX ``/asr`` or whisper.cpp ``/v1/audio/transcriptions`` response.
+    """Parse a WhisperX ``/asr`` or whisper.cpp ``/inference`` response.
 
     Returns ``(text, segments)`` where *segments* is a (possibly empty) list
     of dicts with at least ``start`` and ``text`` keys.
@@ -7941,7 +7941,7 @@ async def _invoke_whisperx(
 
     The handler finds all audio attachments on the ticket, sends each to the
     configured engine (``settings["engine"]``: WhisperX ``/asr`` or whisper.cpp
-    ``/v1/audio/transcriptions``), and (when *add_note* is true) posts the
+    ``/inference``), and (when *add_note* is true) posts the
     resulting transcription as an internal note on the ticket.
     """
     from app.repositories import ticket_attachments as attachments_repo

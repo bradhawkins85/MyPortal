@@ -5,9 +5,10 @@ Two speech-to-text engines are supported:
 * **WhisperX** (``whisperx``) – the ``whisper-asr-webservice`` style API which
   accepts ``POST /asr`` with an ``audio_file`` upload and options as URL query
   parameters.
-* **whisper.cpp** (``whispercpp``) – the ``whisper-server`` HTTP example
-  exposed on the OpenAI-compatible ``POST /v1/audio/transcriptions`` route,
-  with a ``file`` upload and options as multipart form fields.
+* **whisper.cpp** (``whispercpp``) – the ``whisper-server`` HTTP example which
+  accepts ``POST /inference`` (or the full URL configured in
+  ``WHISPERCPP_BASE_URL``) with a ``file`` upload and options as multipart
+  form fields.
 
 Both return JSON with a ``text`` key and (optionally) timed ``segments``, so
 callers share a single response parser.
@@ -18,6 +19,7 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -89,21 +91,16 @@ def resolve_engine_from_environment() -> str:
     return ENGINE_WHISPERX
 
 
-WHISPERCPP_TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions"
-
-
 def _whispercpp_url(base: str) -> str:
-    """Return the OpenAI-compatible transcription URL for a whisper.cpp base.
+    """Use a configured URL with a path as-is; otherwise append ``/inference``.
 
-    Accepts a bare host (``http://host:8080``), an OpenAI-style ``/v1`` base or
-    the full transcription URL without duplicating path segments.
+    Operators can point at whatever route their whisper.cpp server exposes
+    (e.g. ``/v1/audio/transcriptions``) without a code change.
     """
 
-    if base.endswith(WHISPERCPP_TRANSCRIPTIONS_PATH):
+    if urlsplit(base).path.strip("/"):
         return base
-    if base.endswith("/v1"):
-        return base + "/audio/transcriptions"
-    return base + WHISPERCPP_TRANSCRIPTIONS_PATH
+    return f"{base}/inference"
 
 
 def build_asr_request(
