@@ -1,0 +1,7 @@
+{
+  "guid": "3b576b8d-a454-49ec-a63a-557d7741add9",
+  "occurred_at": "2026-10-28T14:02Z",
+  "change_type": "Security",
+  "summary": "Opening an article from the knowledge base list now always goes to that article's page, and database queries flagged by security scanning are written as fixed statements.",
+  "content_hash": "c3cee6df37344de3718a37b90a3f434ab49847807a2dbc1425316576201ed82d"
+}
