@@ -48,6 +48,7 @@
         <div class="form-field">
           <label class="form-label">MeshCentral server</label>
           <p class="form-help">Configured in the <code>.env</code> file: <code>MESHCENTRAL_SERVER_URL</code> is {{ "set" if mesh_env.server_set else "not set" }}, <code>MESHCENTRAL_USERNAME</code> is {{ "set" if mesh_env.username_set else "not set" }}, and <code>MESHCENTRAL_LOGIN_TOKEN_KEY</code> is {{ "set" if mesh_env.token_key_set else "not set" }}. Technicians sign in to MeshCentral as this user.</p>
+          <p class="form-help">To have sessions connect by themselves, copy <a href="/static/meshcentral/myportal-autoconnect.js" download>myportal-autoconnect.js</a> to <code>meshcentral-web/public/scripts/</code> on the MeshCentral server and load it as <code>custom.js</code> or through the domain's <code>customFiles</code> setting. Without it, MeshCentral opens on the device and the technician presses Connect.</p>
         </div>
         {% endif %}
       </div>

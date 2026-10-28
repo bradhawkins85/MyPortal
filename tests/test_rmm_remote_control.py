@@ -48,10 +48,12 @@ def test_rustdesk_links_strip_spaces_and_quote_the_password():
     assert remote.rustdesk_url("123 456", "stored-secret", "remote_prompt") == "rustdesk://connection/new/123456"
 
 
-def test_meshcentral_modes_pick_the_device_view():
-    views = {mode: parse_qs(urlsplit(remote.meshcentral_url("https://m.example.com", "t", KEY, "n", mode=mode)).query)["viewmode"]
-             for mode in ("remote", "file_transfer", "terminal")}
-    assert views == {"remote": ["11"], "file_transfer": ["13"], "terminal": ["12"]}
+def test_meshcentral_modes_pick_the_device_view_and_ask_to_connect():
+    queries = {mode: parse_qs(urlsplit(remote.meshcentral_url("https://m.example.com", "t", KEY, "n", mode=mode)).query)
+               for mode in ("remote", "file_transfer", "terminal", "registry")}
+    assert {mode: query["viewmode"] for mode, query in queries.items()} == {
+        "remote": ["11"], "file_transfer": ["13"], "terminal": ["12"], "registry": ["9"]}
+    assert all(query["myportalconnect"] == ["1"] for query in queries.values())
 
 
 def test_meshcentral_link_carries_a_token_meshcentral_can_decrypt():
@@ -62,7 +64,8 @@ def test_meshcentral_link_carries_a_token_meshcentral_can_decrypt():
     assert query["gotonode"] == ["abc$def@"] and query["viewmode"] == ["11"] and query["hide"] == ["31"]
     assert _decode_mesh_token(query["login"][0]) == {"a": 3, "u": "user//tactical", "time": 1_700_000_000}
     signed_in_only = parse_qs(urlsplit(remote.meshcentral_url("https://mesh.example.com", "user/acme/Bob", KEY)).query)
-    assert "gotonode" not in signed_in_only and _decode_mesh_token(signed_in_only["login"][0])["u"] == "user/acme/bob"
+    assert "gotonode" not in signed_in_only and "myportalconnect" not in signed_in_only
+    assert _decode_mesh_token(signed_in_only["login"][0])["u"] == "user/acme/bob"
     with pytest.raises(remote.RemoteControlError):
         remote.meshcentral_url("https://mesh.example.com", "t", KEY, "node//x&evil=1")
 
@@ -349,12 +352,13 @@ def test_asset_menu_has_a_rustdesk_menu_and_a_meshcentral_menu():
         assert f'role="menuitem" data-rmm-remote="rustdesk" data-rmm-remote-mode="{mode}"' in html
     # The RMM menu is shown as the MeshCentral icon rather than the "RMM" text.
     assert 'src="/static/images/meshcentral.svg"' in html and ">RMM <" not in html
-    for mode in ("remote", "file_transfer", "terminal"):
+    for mode in ("remote", "file_transfer", "terminal", "registry"):
         assert f'data-rmm-remote="meshcentral" data-rmm-remote-mode="{mode}"' in html
-    assert html.count('role="menuitem"') == 8 and html.count("data-rmm-menu") == 2
+    assert html.count('role="menuitem"') == 9 and html.count("data-rmm-menu") == 2
     assert 'data-rmm-remote-name="&lt;PC&gt;"' in html and "<PC>" not in html
     assert "data-rmm-run-open" in html
     assert 'data-rmm-remote="meshcentral" data-rmm-remote-mode="remote_prompt"' not in html
+    assert 'data-rmm-remote="rustdesk" data-rmm-remote-mode="registry"' not in html
     rustdesk_only = template.render(providers=providers[:1], run=False)
     assert "rmm-rustdesk__icon" in rustdesk_only and "Remote desktop (Prompt)" in rustdesk_only
     assert rustdesk_only.count("data-rmm-menu") == 1 and "meshcentral" not in rustdesk_only
@@ -514,6 +518,12 @@ def test_agent_indicator_shows_a_tick_an_o_or_a_cross():
 async def test_prompt_mode_is_rustdesk_only():
     with pytest.raises(remote.RemoteControlError, match="only available for RustDesk"):
         await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9, mode="remote_prompt")
+
+
+@pytest.mark.anyio
+async def test_registry_mode_is_meshcentral_only():
+    with pytest.raises(remote.RemoteControlError, match="only available for MeshCentral"):
+        await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9, mode="registry")
 
 
 @pytest.mark.anyio

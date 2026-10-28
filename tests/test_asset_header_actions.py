@@ -92,9 +92,10 @@ def test_meshcentral_functions_stay_in_actions_without_a_connect_shortcut(header
     assert "Connect with MeshCentral" not in html
     assert 'data-rmm-remote="meshcentral"' not in html.split('id="asset-detail-actions"', 1)[0]
     menu = html.split('id="asset-detail-actions"', 1)[1]
-    assert menu.count('data-rmm-remote="meshcentral"') == 3
-    assert menu.count('data-rmm-remote-asset="10"') == 3
-    for mode, label in (("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal")):
+    assert menu.count('data-rmm-remote="meshcentral"') == 4
+    assert menu.count('data-rmm-remote-asset="10"') == 4
+    for mode, label in (("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal"),
+                        ("registry", "registry")):
         assert f'data-rmm-remote-mode="{mode}"' in menu
         assert f"MeshCentral {label}" in menu
 

@@ -125,7 +125,7 @@
    rmm_remote_control.js starts the sessions; ticket_detail.js builds the same
    markup when it redraws the list (window.MyPortalRmm.assetActions).
    rustdesk_in_menu offers the RustDesk sessions under the RMM menu instead. #}
-{% set REMOTE_MODES = [("remote", "Remote desktop"), ("file_transfer", "File transfer"), ("terminal", "Terminal")] %}
+{% set REMOTE_MODES = [("remote", "Remote desktop"), ("file_transfer", "File transfer"), ("terminal", "Terminal"), ("registry", "Registry")] %}
 {% set RUSTDESK_MODES = [("remote", "Remote desktop"), ("remote_prompt", "Remote desktop (Prompt)"), ("file_transfer", "File transfer"), ("terminal", "Terminal")] %}
 {% macro asset_menu(asset_id, asset_name, remote_control, run_script=false, rustdesk_in_menu=false, choco_install=false, run_command=false, tray_repair=false) -%}
 {%- set providers = remote_control | map(attribute="provider") | list -%}

@@ -5,10 +5,11 @@
   // menu (the RustDesk icon) with every RustDesk session, and an RMM menu (the
   // MeshCentral icon) with every other action. Choosing a session runs the activation
   // script on the device, then opens the session for the technician as soon as
-  // the script reports back. Ticket pages redraw their asset list, so clicks are
-  // handled on the document.
+  // the script reports back. MeshCentral opens in a tab reserved on the click,
+  // so pop-up blockers allow it; the tab shows the script's progress until then.
+  // Ticket pages redraw their asset list, so clicks are handled on the document.
 
-  const MODES = [['remote', 'Remote desktop'], ['file_transfer', 'File transfer'], ['terminal', 'Terminal']];
+  const MODES = [['remote', 'Remote desktop'], ['file_transfer', 'File transfer'], ['terminal', 'Terminal'], ['registry', 'Registry']];
   const RUSTDESK_MODES = [['remote', 'Remote desktop'], ['remote_prompt', 'Remote desktop (Prompt)'],
     ['file_transfer', 'File transfer'], ['terminal', 'Terminal']];
 
@@ -148,6 +149,7 @@
   let timer = null;
   let busy = false;
   let target = '';
+  let pendingTab = null;
 
   function csrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -177,6 +179,36 @@
     box.hidden = false;
     box.classList.toggle('is-error', Boolean(isError));
     message.textContent = text;
+    if (pendingTab && !isError) {
+      try {
+        pendingTab.document.title = 'MeshCentral';
+        pendingTab.document.body.textContent = text;
+      } catch (error) {
+        // The tab has moved on; nothing to update.
+      }
+    }
+  }
+
+  function openPendingTab() {
+    // Opened with an opener so MyPortal can write progress into it and send it
+    // on; the opener is dropped straight away so MeshCentral never sees this page.
+    const tab = window.open('', '_blank');
+    if (!tab) {
+      return null;
+    }
+    try {
+      tab.opener = null;
+    } catch (error) {
+      // Some browsers do not let the opener be cleared; the tab is still usable.
+    }
+    return tab;
+  }
+
+  function closePendingTab() {
+    if (pendingTab && !pendingTab.closed) {
+      pendingTab.close();
+    }
+    pendingTab = null;
   }
 
   function setBusy(value) {
@@ -201,6 +233,7 @@
   function launch(session) {
     const url = String(session.launch_url || '');
     if (!/^(rustdesk:\/\/|https?:\/\/)/i.test(url)) {
+      closePendingTab();
       show('MyPortal returned a link it cannot open.', true);
       return;
     }
@@ -209,15 +242,24 @@
     if (url.indexOf('rustdesk:') === 0) {
       // Hands the link to the RustDesk app; the page stays where it is.
       link.removeAttribute('target');
+      closePendingTab();
       window.location.href = url;
       show(sessionName(session) + ' is opening' + target + '.', false);
     } else {
       link.setAttribute('target', '_blank');
-      // Open only once activation succeeds. The visible link also works when
-      // the browser blocks a tab opened after an asynchronous request.
-      window.open(url, '_blank', 'noopener,noreferrer');
-      link.textContent = 'Open ' + sessionName(session);
-      show(sessionName(session) + ' is ready' + target + '. If it did not open, use the link.', false);
+      link.setAttribute('rel', 'noopener noreferrer');
+      if (pendingTab && !pendingTab.closed) {
+        pendingTab.location.replace(url);
+        pendingTab = null;
+        show(sessionName(session) + ' is opening' + target + ' in a new tab.', false);
+      } else {
+        // The browser blocked the reserved tab (or it was closed): try once
+        // more, and keep the link for when that is blocked too.
+        pendingTab = null;
+        window.open(url, '_blank', 'noopener,noreferrer');
+        link.textContent = 'Open ' + sessionName(session);
+        show(sessionName(session) + ' is ready' + target + '. If it did not open, use the link.', false);
+      }
     }
     link.hidden = false;
   }
@@ -230,11 +272,13 @@
     }
     if (session.status !== 'activating') {
       finish();
+      closePendingTab();
       show(session.error || (session.label + ' could not be switched on.'), true);
       return;
     }
     if (Date.now() - startedAt > GIVE_UP_MS) {
       finish();
+      closePendingTab();
       show('The device has not reported back. Check its script runs.', true);
       return;
     }
@@ -250,6 +294,7 @@
       render(data.session, startedAt);
     } catch (error) {
       finish();
+      closePendingTab();
       show(error.message, true);
     }
   }
@@ -261,7 +306,11 @@
     }
     event.preventDefault();
     finish();
+    closePendingTab();
     const provider = button.dataset.rmmRemote;
+    if (provider === 'meshcentral') {
+      pendingTab = openPendingTab();
+    }
     setBusy(true);
     target = button.dataset.rmmRemoteName ? ' on ' + button.dataset.rmmRemoteName : '';
     link.hidden = true;
@@ -275,6 +324,7 @@
       render(data.session, Date.now());
     } catch (error) {
       finish();
+      closePendingTab();
       show(error.message, true);
     }
   });

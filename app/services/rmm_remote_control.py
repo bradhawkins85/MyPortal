@@ -38,8 +38,8 @@ its node id, so once the run finishes MyPortal asks the MeshCentral control
 channel (``app.services.meshcentral``) for the node matching the device's host
 name and builds a signed-in link that jumps straight to it.
 
-Each session is a remote desktop, file transfer or terminal session (``mode``),
-which only changes the launch link. The asset and ticket pages open the link
+Each session is a remote desktop, file transfer, terminal or (MeshCentral only)
+registry session (``mode``), which only changes the launch link. The asset and ticket pages open the link
 for the technician as soon as it is ready.
 """
 
@@ -71,11 +71,11 @@ from app.services import meshcentral
 PROVIDERS = remote_repo.PROVIDERS
 PROVIDER_LABELS = {"rustdesk": "RustDesk", "meshcentral": "MeshCentral"}
 MODES = remote_repo.MODES
-MODE_LABELS = {"remote": "Remote desktop", "remote_prompt": "Remote desktop (Prompt)", "file_transfer": "File transfer", "terminal": "Terminal"}
+MODE_LABELS = {"remote": "Remote desktop", "remote_prompt": "Remote desktop (Prompt)", "file_transfer": "File transfer", "terminal": "Terminal", "registry": "Registry"}
 # rustdesk://<action>/<id> per session type (RustDesk 1.4.1 or later for terminal).
 _RUSTDESK_ACTIONS = {"remote": "connection/new", "remote_prompt": "connection/new", "file_transfer": "file-transfer", "terminal": "terminal"}
-# MeshCentral's device view: 11 desktop, 12 terminal, 13 files.
-_MESH_VIEWMODES = {"remote": "11", "file_transfer": "13", "terminal": "12"}
+# MeshCentral's device view: 11 desktop, 12 terminal, 13 files, 9 registry.
+_MESH_VIEWMODES = {"remote": "11", "file_transfer": "13", "terminal": "12", "registry": "9"}
 _BUILTIN_DIR = Path(__file__).resolve().parent / "rmm_builtin"
 # How long a session's link (and any one-time password) stays available.
 SESSION_LIFETIME = timedelta(minutes=30)
@@ -156,7 +156,10 @@ def meshcentral_url(server_url: str, username: str, key_hex: str, node_id: str |
             node_id = node_id.rsplit("/", 1)[-1]
         if not node_id or not _MESH_NODE_ID.match(node_id):
             raise RemoteControlError("The MeshCentral node ID reported for this device is not valid.")
-        params.update({"gotonode": node_id, "viewmode": _MESH_VIEWMODES.get(mode, "11"), "hide": "31"})
+        # myportalconnect asks MyPortal's MeshCentral script (myportal-autoconnect.js)
+        # to press the view's Connect button; MeshCentral itself has no such option.
+        params.update({"gotonode": node_id, "viewmode": _MESH_VIEWMODES.get(mode, "11"), "hide": "31",
+                       "myportalconnect": "1"})
     return server_url.rstrip("/") + "/?" + urlencode(params, safe="@$/", quote_via=quote)
 
 
@@ -495,9 +498,11 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
     """Queue the activation script (or resolve straight away) and return the session."""
 
     if mode not in MODES:
-        raise RemoteControlError("Choose a remote desktop, file transfer or terminal session.")
+        raise RemoteControlError("Choose a remote desktop, file transfer, terminal or registry session.")
     if mode == "remote_prompt" and provider != "rustdesk":
         raise RemoteControlError("Prompt sessions are only available for RustDesk.")
+    if mode == "registry" and provider != "meshcentral":
+        raise RemoteControlError("Registry sessions are only available for MeshCentral.")
     settings = await _provider(provider)
     label = PROVIDER_LABELS[provider]
     agent = await rmm_repo.get_asset_agent(asset_id)
