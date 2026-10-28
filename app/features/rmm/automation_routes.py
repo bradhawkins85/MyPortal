@@ -130,7 +130,7 @@ class ScheduleRequest(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
     queue_timeout_seconds: int | None = Field(default=None, ge=0, le=rmm_scripts.MAX_QUEUE_TIMEOUT_SECONDS)
-    run_as: Literal["system", "user"] = "system"
+    run_as: Literal["system", "user"] | None = None
     enabled: bool = True
 
 
@@ -247,7 +247,7 @@ class StepRequest(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
     queue_timeout_seconds: int | None = Field(default=None, ge=0, le=rmm_scripts.MAX_QUEUE_TIMEOUT_SECONDS)
-    run_as: Literal["system", "user"] = "system"
+    run_as: Literal["system", "user"] | None = None
     continue_on_failure: bool = False
     skip_existing_assets: bool = False
 

@@ -1444,6 +1444,74 @@ def test_extract_png_from_ico_returns_none_for_bmp_ico():
     assert _extract_png_from_ico(ico) is None
 
 
+def _bmp_ico(sizes, colour):
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGBA", max(sizes), colour).save(
+        buffer, format="ICO", sizes=sizes, bitmap_format="bmp"
+    )
+    return buffer.getvalue()
+
+
+def test_extract_png_from_ico_converts_bmp_icons():
+    """Icons saved by common tools store BMP images; the largest is converted."""
+    import io
+
+    from PIL import Image
+
+    from app.services.tray_icon import _extract_png_from_ico
+
+    png = _extract_png_from_ico(_bmp_ico([(16, 16), (48, 48)], (200, 30, 40, 255)))
+    assert png is not None and png[:8] == b"\x89PNG\r\n\x1a\n"
+    image = Image.open(io.BytesIO(png)).convert("RGBA")
+    assert image.size == (48, 48)
+    assert image.getpixel((24, 24)) == (200, 30, 40, 255)
+
+
+def test_extract_png_from_ico_prefers_largest_embedded_png():
+    """A PNG stored after BMP images is found and returned unchanged."""
+    import io
+    import struct
+
+    from PIL import Image
+
+    from app.services.tray_icon import _extract_png_from_ico
+
+    bmp_ico = _bmp_ico([(16, 16)], (0, 0, 255, 255))
+    bmp_size, bmp_offset = struct.unpack_from("<II", bmp_ico, 14)
+    bmp = bmp_ico[bmp_offset:bmp_offset + bmp_size]
+    buffer = io.BytesIO()
+    Image.new("RGBA", (64, 64), (0, 255, 0, 255)).save(buffer, format="PNG")
+    png = buffer.getvalue()
+
+    header = b"\x00\x00\x01\x00" + struct.pack("<H", 2)
+    data_offset = len(header) + 32
+    entries = struct.pack("<BBBBHHII", 16, 16, 0, 0, 1, 32, len(bmp), data_offset)
+    entries += struct.pack("<BBBBHHII", 64, 64, 0, 0, 1, 32, len(png), data_offset + len(bmp))
+    assert _extract_png_from_ico(header + entries + bmp + png) == png
+
+
+def test_get_tray_icon_png_serves_uploaded_bmp_icon(tmp_path, run, monkeypatch):
+    """/tray/icon.png shows the uploaded icon, not the default, for BMP icons."""
+    from app.services import tray_icon as svc
+
+    (tmp_path / "tray-icon").mkdir()
+    (tmp_path / "tray-icon" / "tray-icon.ico").write_bytes(
+        _bmp_ico([(32, 32)], (200, 30, 40, 255))
+    )
+
+    async def fake_get_path():
+        return "tray-icon/tray-icon.ico"
+
+    monkeypatch.setattr(svc.site_settings_repo, "get_tray_icon_path", fake_get_path)
+    data = run(svc.get_tray_icon_png_bytes(tmp_path))
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    assert data != svc.build_default_png_bytes()
+
+
 def test_get_tray_icon_png_falls_back_to_default_when_no_upload(tmp_path, run):
     """get_tray_icon_png_bytes returns the default PNG when no file is uploaded."""
     from app.services.tray_icon import build_default_png_bytes, get_tray_icon_png_bytes

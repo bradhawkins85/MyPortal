@@ -136,29 +136,49 @@ def build_default_icon_bytes() -> bytes:
 
 
 def _extract_png_from_ico(data: bytes) -> Optional[bytes]:
-    """Try to extract the first embedded PNG image from an ICO container.
+    """Return the largest image in an ICO container as a PNG.
 
-    ICO files produced by this module always wrap a raw PNG payload.
-    Third-party ICO files may contain BMP data instead; in that case this
-    function returns ``None`` so callers can fall back to the default PNG.
+    An embedded PNG is returned unchanged. ICO files saved by most tools
+    store some or all sizes as BMP, so when there is no PNG the largest BMP
+    is converted with Pillow. Returns ``None`` when no image can be read, so
+    callers can fall back to the default PNG.
     """
     if not is_valid_ico(data):
         return None
+    largest_png: Optional[bytes] = None
+    largest_png_width = 0
     try:
         count = struct.unpack_from("<H", data, 4)[0]
-        if count < 1:
-            return None
-        # ICONDIRENTRY for image 0 starts at byte 6.
-        # Bytes 14-17: image data size (u32 LE).
-        # Bytes 18-21: image data offset (u32 LE).
-        img_size = struct.unpack_from("<I", data, 14)[0]
-        img_offset = struct.unpack_from("<I", data, 18)[0]
-        img_data = data[img_offset: img_offset + img_size]
-        if img_data[:8] == _PNG_MAGIC:
-            return img_data
-    except struct.error:
+        for index in range(count):
+            # Each 16-byte ICONDIRENTRY: width at byte 0 (0 means 256), then
+            # the image size and offset as u32 LE at bytes 8 and 12.
+            entry = 6 + index * 16
+            width = data[entry] or 256
+            img_size, img_offset = struct.unpack_from("<II", data, entry + 8)
+            img_data = data[img_offset: img_offset + img_size]
+            if img_data[:8] == _PNG_MAGIC and width > largest_png_width:
+                largest_png, largest_png_width = img_data, width
+    except (struct.error, IndexError):
         return None
-    return None
+    if largest_png is not None:
+        return largest_png
+    return _convert_ico_to_png(data)
+
+
+def _convert_ico_to_png(data: bytes) -> Optional[bytes]:
+    """Convert the largest image of a BMP-based ICO to PNG, or ``None``."""
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            # Pillow opens an ICO at its largest size.
+            output = io.BytesIO()
+            image.convert("RGBA").save(output, format="PNG")
+            return output.getvalue()
+    except (OSError, ValueError, SyntaxError):
+        return None
 
 
 def is_valid_ico(data: bytes) -> bool:
@@ -196,13 +216,11 @@ async def get_tray_icon_bytes(uploads_root: Path) -> bytes:
 
 
 async def get_tray_icon_png_bytes(uploads_root: Path) -> bytes:
-    """Return the active tray icon as a PNG, suitable for macOS.
+    """Return the active tray icon as a PNG, for clients that cannot read ICO.
 
-    Tries to use the same uploaded icon as ``get_tray_icon_bytes`` but
-    returns a raw PNG rather than an ICO container.  If the uploaded ICO
-    wraps an embedded PNG (as produced by this module) that PNG is extracted
-    and returned directly.  If the ICO contains raw BMP data — or if no
-    upload exists — the default PNG is returned so the endpoint never fails.
+    Uses the same uploaded icon as ``get_tray_icon_bytes``, returning its
+    largest image as a PNG. When nothing is uploaded, or the upload cannot
+    be read, the default PNG is returned so the endpoint never fails.
     """
     try:
         relative_path = await site_settings_repo.get_tray_icon_path()

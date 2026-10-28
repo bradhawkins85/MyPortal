@@ -34,6 +34,7 @@
         <div><dt>Execution timeout</dt><dd>{{ (script.default_timeout_seconds // 60) if script.default_timeout_seconds >= 60 else script.default_timeout_seconds }} {{ 'minutes' if script.default_timeout_seconds >= 60 else 'seconds' }}</dd></div>
         <div><dt>Offline wait timeout</dt><dd>{{ 'Forever' if not script.default_queue_timeout_seconds else (script.default_queue_timeout_seconds // 60) ~ ' minutes' }}</dd></div>
         <div><dt>Execution</dt><dd>{{ 'Run Anyway' if script.execution_mode == 'run_anyway' else ('Parallel' if script.allow_parallel else 'Sequential') }}</dd></div>
+        <div><dt>Runs as</dt><dd>{{ 'Logged in user' if script.default_run_as == 'user' else 'System' }}</dd></div>
         <div><dt>Lines</dt><dd>{{ script.line_count }}</dd></div>
         <div><dt>Last synced</dt><dd>{% if script.synced_at %}<span data-utc="{{ script.synced_at }}">{{ script.synced_at }}</span>{% else %}–{% endif %}</dd></div>
       </dl>
@@ -76,6 +77,18 @@
           <p class="form-help" id="rmm-execution-help">Sequential runs alone. Parallel runs share up to four slots and wait behind sequential scripts. Run Anyway bypasses the queue and runs regardless of other scripts, for independent tasks or urgent actions such as rebooting. Run Anyway requires an updated agent. Onboarding always runs in sequence. Changes apply to newly queued runs.</p>
         </div>
         <button type="submit" class="button button--ghost button--small">Save execution setting</button>
+      </form>
+      <form method="post" action="/rmm/scripts/{{ script.id }}/run-as">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <div class="form-field">
+          <label class="form-label" for="rmm-script-run-as">Default Run As</label>
+          <select class="form-input" id="rmm-script-run-as" name="run_as" aria-describedby="rmm-script-run-as-help">
+            <option value="system"{% if script.default_run_as != 'user' %} selected{% endif %}>System</option>
+            <option value="user"{% if script.default_run_as == 'user' %} selected{% endif %}>Logged in user</option>
+          </select>
+          <p class="form-help" id="rmm-script-run-as-help">The account this script runs as unless a technician chooses otherwise. Use Logged in user for scripts that change the signed-in person's settings, profile or drive mappings; those runs fail if nobody is signed in and need an updated agent. Rules, tray menu items and ticket automations that do not choose also use this. Existing schedules and onboarding steps keep the account they were saved with.</p>
+        </div>
+        <button type="submit" class="button button--ghost button--small">Save Run As</button>
       </form>
       {% endif %}
     </div>

@@ -174,7 +174,7 @@ async def run_for_ticket(
         except ValueError as exc:
             return {"status": "error", "error": f"Success status: {exc}", "ticket_id": ticket_id}
     try:
-        run_as = rmm_scripts.clean_run_as(run_as)
+        run_as = None if run_as in (None, "") else rmm_scripts.clean_run_as(run_as)
     except RunRequestError as exc:
         return {"status": "error", "error": "; ".join(exc.errors.values()), "ticket_id": ticket_id}
 

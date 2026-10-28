@@ -1,0 +1,7 @@
+{
+  "guid": "92a7c170-24bf-4c75-beef-a94577ab4a55",
+  "occurred_at": "2026-10-28T03:21Z",
+  "change_type": "Feature",
+  "summary": "Super admins can set each RMM script's Default Run As to System or Logged in user; the run form starts on it, and rules, tray menu items and new schedules use it unless another account is chosen.",
+  "content_hash": "651df2ec41a07307b740bd05ee5b52bc7f3cbf5bb88a1e309b4fcd3b12a82c57"
+}

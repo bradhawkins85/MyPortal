@@ -2823,7 +2823,7 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             {
                 "name": "run_as",
-                "label": "Run as",
+                "label": "Run as (optional; defaults to the script's)",
                 "type": "string",
                 "enum": ["system", "user"],
             },

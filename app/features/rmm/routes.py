@@ -129,6 +129,7 @@ def _script_summary(script: dict[str, Any]) -> dict[str, Any]:
         "platform_labels": [rmm_scripts.SCRIPT_PLATFORMS.get(item, item) for item in script.get("platforms", rmm_repo.default_script_platforms(script.get("language")))],
         "allow_parallel": bool(script.get("allow_parallel")),
         "execution_mode": rmm_repo.script_execution_mode(script),
+        "default_run_as": "user" if script.get("default_run_as") == "user" else "system",
         "synced_at": _iso(script.get("synced_at")),
         "files": script.get("files") or [],
     }
@@ -524,6 +525,39 @@ async def update_script_execution(script_id: int, request: Request):
     return flash_redirect(f"/rmm/scripts?script={script_id}", "Script execution setting saved.", "success")
 
 
+class ScriptRunAsRequest(BaseModel):
+    run_as: Literal["system", "user"]
+
+
+async def _save_script_run_as(request: Request, script_id: int, run_as: str) -> None:
+    user, _company, company_id, _can_run = await _context(request, api=True)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    script = await rmm_repo.get_script(script_id)
+    if not rmm_repo.script_available_to(script, company_id):
+        raise HTTPException(status_code=404, detail="Script not found")
+    if run_as not in rmm_scripts.RUN_AS_OPTIONS:
+        raise HTTPException(status_code=400, detail="Choose System or Logged in user")
+    await rmm_repo.set_script_run_as(script_id, run_as)
+    await audit_service.record(
+        action="rmm.script.run_as.update", request=request, user_id=user.get("id"),
+        entity_type="rmm_script", entity_id=script_id, metadata={"run_as": run_as},
+    )
+
+
+@router.put("/api/rmm/scripts/{script_id:int}/run-as", summary="Set the account a script runs as by default")
+async def update_script_run_as_api(script_id: int, payload: ScriptRunAsRequest, request: Request):
+    await _save_script_run_as(request, script_id, payload.run_as)
+    return {"default_run_as": payload.run_as}
+
+
+@router.post("/rmm/scripts/{script_id:int}/run-as", summary="Save the account a script runs as by default")
+async def update_script_run_as(script_id: int, request: Request):
+    form = await request.form()
+    await _save_script_run_as(request, script_id, str(form.get("run_as") or ""))
+    return flash_redirect(f"/rmm/scripts?script={script_id}", "Default Run As saved.", "success")
+
+
 async def _editable_script_files(request: Request, script_id: int) -> tuple[dict, dict, int]:
     user, _company, company_id, _can_run = await _context(request, api=True)
     if await gitea_sign_in.access_level(user) != "write":
@@ -656,7 +690,7 @@ class RunRequest(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = None
     queue_timeout_seconds: int | None = Field(default=None, ge=0, le=rmm_scripts.MAX_QUEUE_TIMEOUT_SECONDS)
-    run_as: Literal["system", "user"] = "system"
+    run_as: Literal["system", "user"] | None = None
 
 
 @router.post("/api/rmm/scripts/{script_id:int}/runs", summary="Push a script to one or more devices")
@@ -689,7 +723,7 @@ async def run_script_api(
                 "company_id": company_id,
                 "runs": [item["run_id"] for item in result["queued"]],
                 "assets": [item["asset_id"] for item in result["queued"]],
-                "run_as": payload.run_as,
+                "run_as": result["run_as"],
             },
         )
     return result
