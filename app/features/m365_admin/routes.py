@@ -6,7 +6,7 @@ from datetime import date
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import ValidationError
 
 from app.repositories import companies as companies_repo
@@ -23,7 +23,7 @@ from app.services import m365_signatures as signatures_service
 from app.services import m365_spam_purge as purge_service
 from app.services import m365_out_of_office as oof_service
 from app.services import m365_reported_emails as reported_service
-from app.services.m365_signature_import import import_outlook_signature
+from app.services.m365_signature_import import clean_pasted_signature_html, import_outlook_signature
 
 
 router = APIRouter(tags=["Office365 Spam Purge"])
@@ -436,6 +436,27 @@ async def create_signature_template(request: Request):
         },
     )
     return flash_redirect(f"/m365/signatures/{created['id']}/edit", "Signature template created.", "success")
+
+
+@router.post("/m365/signatures/clean-html")
+async def clean_signature_html(request: Request):
+    """Convert signature HTML pasted into the editor (Outlook, Word, webmail)
+    into self-contained HTML with inline styles."""
+    _, _, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return JSONResponse({"error": "Signature management permission required."}, status_code=403)
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = None
+    html_content = payload.get("html") if isinstance(payload, dict) else None
+    if not isinstance(html_content, str):
+        return JSONResponse({"error": "Send the pasted HTML as {\"html\": \"...\"}."}, status_code=400)
+    try:
+        cleaned, missing_images = clean_pasted_signature_html(html_content)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=413)
+    return JSONResponse({"html": cleaned, "missing_images": missing_images})
 
 
 @router.get("/m365/signatures/import", response_class=HTMLResponse)

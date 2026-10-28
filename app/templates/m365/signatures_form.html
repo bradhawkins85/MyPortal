@@ -29,6 +29,7 @@
     data-sig-editor
     data-sig-new="{{ 'false' if template_record.id else 'true' }}"
     data-sig-unsaved="{{ 'true' if preview else 'false' }}"
+    data-sig-clean-url="/m365/signatures/clean-html"
   >
     {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
 
@@ -61,7 +62,8 @@
                 <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertUnorderedList" aria-label="Bulleted list"><span aria-hidden="true">•</span></button>
                 <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertOrderedList" aria-label="Numbered list"><span aria-hidden="true">1.</span></button>
                 <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="link" aria-label="Insert link"><span aria-hidden="true">🔗</span></button>
-                <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="image" aria-label="Insert image"><span aria-hidden="true">🖼</span></button>
+                <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="image" aria-label="Insert image from a web address"><span aria-hidden="true">🖼</span></button>
+                <button type="button" class="rich-text-editor__button" aria-label="Upload an image, or replace the selected image" title="Upload an image, or replace the selected image" data-sig-image-upload hidden><span aria-hidden="true">⤒</span></button>
                 <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="table" aria-label="Insert table"><span aria-hidden="true">▦</span></button>
                 <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="removeFormat" aria-label="Clear formatting"><span aria-hidden="true">✕</span></button>
               </div>
@@ -77,9 +79,10 @@
                 ></div>
               </div>
               <textarea id="signature-html-value" name="html_content" data-rich-text-value hidden>{{ form_values.html_content or '' }}</textarea>
+              <input type="file" accept="image/png,image/jpeg,image/gif" aria-label="Signature image" data-sig-image-file hidden />
               <p class="form-help" data-rich-text-feedback role="status" hidden></p>
             </div>
-            <p class="form-help">Supports formatting, links, images, tables, template variables, and pasted signature content. Unsupported pasted images are removed with a warning.</p>
+            <p class="form-help">Paste a signature straight from Outlook, Word or a web page and its formatting is kept. Images Outlook keeps on your computer can't be copied by the browser; they show as dashed boxes — click one to upload the image. Click any image, then the upload button, to replace it.</p>
           </div>
           <div class="sig-vars" data-sig-vars>
             <p class="form-label" id="sig-vars-title">Insert a variable</p>

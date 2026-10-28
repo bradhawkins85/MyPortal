@@ -150,7 +150,7 @@
         removedImages += 1;
       });
       insertHtmlAtSelection(surface, wrapper.innerHTML);
-      updateSurfaceState(surface, hidden);
+      surface.dispatchEvent(new Event('input', { bubbles: true }));
       if (removedImages > 0) {
         showEditorMessage(editor, 'Some pasted images could not be imported automatically. Use an HTTPS image URL or paste the image by itself.', 'error');
       } else if (imageFiles.length > 0) {
@@ -166,7 +166,7 @@
       try {
         const dataUrls = await Promise.all(imageFiles.map((file) => readFileAsDataUrl(file)));
         insertHtmlAtSelection(surface, dataUrls.map((src) => `<img src="${src}" alt="Pasted image" />`).join(''));
-        updateSurfaceState(surface, hidden);
+        surface.dispatchEvent(new Event('input', { bubbles: true }));
         showEditorMessage(editor, 'Pasted images were imported into the signature.', 'info');
       } catch (error) {
         showEditorMessage(editor, 'A pasted image could not be imported. Paste the image again or use an HTTPS image URL.', 'error');

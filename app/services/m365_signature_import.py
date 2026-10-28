@@ -35,6 +35,7 @@ from app.services.sanitization import _filter_attribute, _ALLOWED_PROTOCOLS
 _MAX_ZIP_SIZE = 10 * 1024 * 1024  # 10 MB
 _MAX_EXTRACTED_SIZE = 50 * 1024 * 1024  # 50 MB total for all files
 _MAX_FILES = 200  # safety cap on number of files in the ZIP
+_MAX_PASTE_BYTES = 10 * 1024 * 1024  # pasted HTML may carry inline images
 # Embedded images are base64-encoded into the HTML, which must still fit in a
 # form post under the reverse proxy's 15 MB request limit when edited.
 _MAX_EMBEDDED_IMAGE_BYTES = 5 * 1024 * 1024
@@ -129,6 +130,26 @@ async def import_outlook_signature(
         source_name=signature_name,
         missing_images=missing_images,
     )
+
+
+def clean_pasted_signature_html(html_content: str) -> tuple[str, list[str]]:
+    """Convert signature HTML copied to the clipboard into editor-ready HTML.
+
+    Outlook, Word and most mail clients put class-based formatting in a
+    ``<style>`` block and wrap their markup across lines; this inlines the
+    styles and collapses the whitespace exactly as a ZIP import does.  Returns
+    the sanitised HTML and the names of local images (``file:``/``cid:``) the
+    browser could not read from the clipboard; those ``<img>`` tags are kept
+    without a ``src`` so the editor can ask for the files.
+    """
+    if len(html_content.encode("utf-8")) > _MAX_PASTE_BYTES:
+        raise ValueError(
+            "The pasted signature is too large (10 MB limit). "
+            "Reduce the image sizes, or export the signature from Outlook and import the ZIP."
+        )
+    missing_images: list[str] = []
+    converted = _convert_outlook_html(html_content, {}, missing_images)
+    return _sanitize_signature_html(converted), missing_images
 
 
 # ---------------------------------------------------------------------------
@@ -408,7 +429,13 @@ def _local_image_name(value: str) -> str | None:
     lowered = value.lower()
     if lowered.startswith("cid:"):
         return unquote(value[4:]).split("@", 1)[0] or None
-    if re.match(r"^[a-z][a-z0-9+.-]*:", lowered) or value.startswith(("/", "#")) or not value:
+    if lowered.startswith("file:"):
+        # Signatures built in Word can reference images by absolute path,
+        # e.g. file:///C:/Users/me/AppData/Roaming/Microsoft/Signatures/x_files/image001.png
+        value = value[5:].lstrip("/")
+        lowered = value.lower()
+    # A single letter before ":" is a Windows drive (C:\...), not a URL scheme.
+    if re.match(r"^[a-z][a-z0-9+.-]+:", lowered) or value.startswith(("/", "#")) or not value:
         return None
     path = unquote(value).replace("\\", "/").split("?", 1)[0].split("#", 1)[0]
     return PurePosixPath(path).name.lstrip(">") or None
