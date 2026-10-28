@@ -17572,8 +17572,46 @@ body.scf-modal-open {
   display: none;
 }
 
-.sig-editor__surface {
+/* Signatures are designed on the white canvas of an email, with mail-client
+   defaults, so the editor shows them as recipients will. */
+.sig-editor {
+  --sig-paper: #ffffff;
+  --sig-ink: #1f2937;
+  --sig-link: #0563c1;
+  --sig-placeholder: #b45309;
+  --sig-placeholder-bg: #fffbeb;
+}
+
+.sig-editor .sig-editor__surface {
   min-height: 12rem;
+  background: var(--sig-paper);
+  color: var(--sig-ink);
+  font: 13px/1.45 Arial, sans-serif;
+  white-space: normal;
+}
+
+.sig-editor .sig-editor__surface a {
+  color: var(--sig-link);
+}
+
+.sig-editor .sig-editor__surface img {
+  max-width: 100%;
+  height: auto;
+  cursor: pointer;
+}
+
+.sig-editor .sig-editor__surface img.is-selected {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.sig-editor .sig-editor__surface img[data-sig-missing] {
+  display: inline-block;
+  min-width: 4rem;
+  min-height: 2.5rem;
+  outline: 2px dashed var(--sig-placeholder);
+  outline-offset: -2px;
+  background: var(--sig-placeholder-bg);
 }
 
 .sig-editor__label-row {

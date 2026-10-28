@@ -1,0 +1,7 @@
+{
+  "guid": "6e8ab4b3-1d5b-4051-bfae-37b0b1f78321",
+  "occurred_at": "2026-10-28T06:19Z",
+  "change_type": "Fix",
+  "summary": "Pasting a signature from Outlook, Word or a web page into the signature editor now keeps its formatting and linked logos, images Outlook can't hand over can be uploaded in place, and Outlook ZIP imports now include images saved with a full file path.",
+  "content_hash": "77de3187c564f82705922423d8d12bdf19d14f86dd9373491ec4600759f3317c"
+}

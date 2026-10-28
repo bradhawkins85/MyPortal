@@ -64,6 +64,9 @@ class SecurityHeadersMiddleware:
         path = request.url.path
         # Only custom form pages need microphone access and local audio previews.
         is_custom_form = bool(re.fullmatch(r"/(?:public/)?forms/[^/]+/?", path))
+        # Email signatures commonly link logos hosted on a company website;
+        # the editor and previews must be able to show them.
+        is_signature_page = path == "/m365/signatures" or path.startswith("/m365/signatures/")
 
         # Get validated portal URL once for reuse in multiple CSP directives
         validated_portal_url = None
@@ -129,7 +132,7 @@ class SecurityHeadersMiddleware:
             "default-src 'self'",
             f"script-src {' '.join(script_sources)}",
             "style-src 'self' 'unsafe-inline'",
-            "img-src 'self' data: blob:",
+            "img-src 'self' data: blob:" + (" https:" if is_signature_page else ""),
             "font-src 'self' data:",
             f"connect-src {' '.join(connect_sources)}",
             f"frame-src {' '.join(frame_sources)}",

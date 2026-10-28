@@ -137,7 +137,9 @@ def test_signature_templates_compile_and_expose_designer_copy():
     source = (ROOT / "app" / "templates" / "m365" / "signatures_form.html").read_text(
         encoding="utf-8"
     )
-    assert "pasted signature content" in source
+    assert "Paste a signature straight from Outlook" in source
+    assert "data-sig-image-upload" in source
+    assert 'data-sig-clean-url="/m365/signatures/clean-html"' in source
     assert "Plain-text signature" in source
     assert "Preview staff member" in source
     assert "Activation start date" in source

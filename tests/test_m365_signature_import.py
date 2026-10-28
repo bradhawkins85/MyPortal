@@ -17,6 +17,7 @@ from app.services.m365_signature_import import (
     _resolve_image_reference,
     _sanitize_signature_html,
     _validate_zip_contents,
+    clean_pasted_signature_html,
     import_outlook_signature,
 )
 
@@ -134,6 +135,8 @@ _IMAGES = {"image001.png": {"name": "image001.png", "data_uri": "data:image/png;
         "files/%3Eimage001.png",
         "My%20Sig_files/image001.png",
         "cid:image001.png@01DA1234.ABCD5678",
+        "file:///C:/Users/me/AppData/Roaming/Microsoft/Signatures/My%20Sig_files/image001.png",
+        "C:\\Users\\me\\AppData\\Roaming\\Microsoft\\Signatures\\My Sig_files\\image001.png",
     ],
 )
 def test_resolve_image_reference_matches_outlook_paths(value):
@@ -141,7 +144,8 @@ def test_resolve_image_reference_matches_outlook_paths(value):
 
 
 @pytest.mark.parametrize(
-    "value", ["/external/image001.png", "https://example.com/image001.png", "files/other.png"]
+    "value",
+    ["/external/image001.png", "https://example.com/image001.png", "files/other.png", "file:///"],
 )
 def test_resolve_image_reference_ignores_unrelated(value):
     assert _resolve_image_reference(value, _IMAGES) is None
@@ -489,3 +493,103 @@ async def test_import_reports_images_missing_from_zip():
     )
     result = await import_outlook_signature(zip_bytes, filename="Sig.zip")
     assert result.missing_images == ["image001.png", "image002.jpg"]
+
+
+# ---------------------------------------------------------------------------
+# Pasted signature HTML
+# ---------------------------------------------------------------------------
+
+_CLIPBOARD_HTML = (
+    "<html xmlns:o=\"urn:schemas-microsoft-com:office:office\"><head><style><!--\n"
+    "p.MsoNormal, li.MsoNormal\n\t{margin:0cm;\n\tfont-size:11.0pt;\n\tfont-family:\"Calibri\",sans-serif;}\n"
+    "--></style></head><body lang=EN-AU><!--StartFragment-->"
+    "<p class=MsoNormal><span style='font-size:9.0pt;\ncolor:#7F7F7F'>M:\n0400 000 000<o:p></o:p></span></p>"
+    "<p class=MsoNormal><img width=100 height=50"
+    " src=\"file:///C:/Users/me/AppData/Local/Temp/msohtmlclip1/01/clip_image001.png\">"
+    "<img src=\"https://example.com/logo.png\" alt=Logo></p>"
+    "<!--EndFragment--></body></html>"
+)
+
+
+def test_clean_pasted_html_inlines_word_styles_and_collapses_wrapping():
+    cleaned, _ = clean_pasted_signature_html(_CLIPBOARD_HTML)
+    assert 'style="margin:0cm;font-size:11.0pt;font-family:&quot;Calibri&quot;,sans-serif"' in cleaned
+    assert "class=" not in cleaned and "o:p" not in cleaned
+    # Outlook wraps its markup; the editor must not show that as line breaks.
+    assert "M: 0400 000 000" in cleaned
+    assert "\n" not in cleaned
+
+
+def test_clean_pasted_html_keeps_web_images_and_reports_local_ones():
+    cleaned, missing = clean_pasted_signature_html(_CLIPBOARD_HTML)
+    assert missing == ["clip_image001.png"]
+    # The browser can't read file: paths, so the image stays as a placeholder.
+    assert '<img width="100" height="50">' in cleaned
+    assert "file:" not in cleaned
+    assert 'src="https://example.com/logo.png"' in cleaned
+
+
+def test_clean_pasted_html_strips_scripts():
+    cleaned, _ = clean_pasted_signature_html(
+        '<p onclick="x()">Hi<script>alert(1)</script><a href="javascript:alert(1)">x</a></p>'
+    )
+    assert "script" not in cleaned and "onclick" not in cleaned and "javascript" not in cleaned
+
+
+def test_clean_pasted_html_rejects_oversized(monkeypatch):
+    monkeypatch.setattr("app.services.m365_signature_import._MAX_PASTE_BYTES", 10)
+    with pytest.raises(ValueError, match="too large"):
+        clean_pasted_signature_html("<p>" + "x" * 20 + "</p>")
+
+
+@pytest.mark.anyio
+async def test_import_embeds_images_referenced_by_absolute_file_path():
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    html = (
+        "<html><body><img src=\"file:///C:/Users/me/AppData/Roaming/Microsoft/Signatures/"
+        "Sig_files/image001.png\"></body></html>"
+    )
+    zip_bytes = _make_zip({"Sig.htm": html.encode(), "Sig_files/image001.png": png})
+    result = await import_outlook_signature(zip_bytes, filename="Sig.zip")
+    assert result.missing_images == []
+    assert 'src="data:image/png;base64,' in result.html_content
+
+
+def _clean_route_client(monkeypatch, context_redirect=None):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.features.m365_admin import routes
+
+    async def fake_context(request, *, write=False):
+        assert write is True
+        return {"id": 1}, 1, context_redirect
+
+    monkeypatch.setattr(routes, "_signature_context", fake_context)
+    app = FastAPI()
+    app.include_router(routes.router)
+    return TestClient(app)
+
+
+def test_clean_html_route_returns_cleaned_html(monkeypatch):
+    response = _clean_route_client(monkeypatch).post(
+        "/m365/signatures/clean-html", json={"html": _CLIPBOARD_HTML}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["missing_images"] == ["clip_image001.png"]
+    assert "margin:0cm" in data["html"]
+
+
+def test_clean_html_route_rejects_bad_payload(monkeypatch):
+    client = _clean_route_client(monkeypatch)
+    assert client.post("/m365/signatures/clean-html", json={"html": 3}).status_code == 400
+    assert client.post("/m365/signatures/clean-html", content=b"not json").status_code == 400
+
+
+def test_clean_html_route_requires_signature_permission(monkeypatch):
+    from fastapi.responses import RedirectResponse
+
+    client = _clean_route_client(monkeypatch, context_redirect=RedirectResponse("/"))
+    response = client.post("/m365/signatures/clean-html", json={"html": "<p>x</p>"})
+    assert response.status_code == 403

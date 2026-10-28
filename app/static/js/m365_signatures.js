@@ -2,6 +2,9 @@
   'use strict';
 
   const SLUG_PATTERN = /^[a-z0-9._-]+$/;
+  // Classic Outlook only shows these formats; the server keeps the same set.
+  const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif'];
+  const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
   const FRAME_HEAD = "<!doctype html><meta charset='utf-8'><style>"
     + 'body{margin:14px;font:13px/1.45 Arial,sans-serif;color:#1f2937;background:#fff}'
     + 'img{max-width:100%;height:auto}'
@@ -416,6 +419,224 @@
       textArea.dispatchEvent(new Event('input', { bubbles: true }));
       textArea.focus();
     });
+
+    // ----- pasting and images ---------------------------------------------
+
+    const feedback = form.querySelector('[data-rich-text-feedback]');
+    const uploadButton = form.querySelector('[data-sig-image-upload]');
+    const imageFile = form.querySelector('[data-sig-image-file]');
+    const csrfInput = form.querySelector('input[name="_csrf"]');
+    let imageTarget = null;
+
+    function showFeedback(message, variant) {
+      feedback.hidden = !message;
+      feedback.textContent = message || '';
+      feedback.classList.toggle('text-danger', Boolean(message) && variant === 'error');
+      feedback.classList.toggle('text-muted', Boolean(message) && variant !== 'error');
+    }
+
+    function contentChanged() {
+      surface.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    function plural(count, word) {
+      return `${count} ${word}${count === 1 ? '' : 's'}`;
+    }
+
+    // An image without a source is one a paste or import couldn't bring in;
+    // it shows as a dashed box the user clicks to upload the file.
+    function markMissingImages() {
+      let count = 0;
+      surface.querySelectorAll('img').forEach((image) => {
+        const missing = !(image.getAttribute('src') || '').trim();
+        image.toggleAttribute('data-sig-missing', missing);
+        count += missing ? 1 : 0;
+      });
+      return count;
+    }
+
+    function readImage(file) {
+      return new Promise((resolve, reject) => {
+        if (!IMAGE_TYPES.includes(file.type)) {
+          reject(new Error('Use a PNG, JPEG or GIF image. Outlook can\'t show other image formats in signatures.'));
+          return;
+        }
+        if (file.size > MAX_IMAGE_BYTES) {
+          reject(new Error('That image is over 2 MB. Use a smaller image so the signature stays quick to send.'));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('The image could not be read. Try again.'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function insertAtRange(range, content) {
+      if (content.nodeType === Node.DOCUMENT_FRAGMENT_NODE && !content.firstChild) {
+        return;
+      }
+      surface.focus();
+      let target = range;
+      if (!target || !surface.contains(target.startContainer)) {
+        target = document.createRange();
+        target.selectNodeContents(surface);
+        target.collapse(false);
+      }
+      const last = content.nodeType === Node.DOCUMENT_FRAGMENT_NODE ? content.lastChild : content;
+      target.deleteContents();
+      target.insertNode(content);
+      target.setStartAfter(last);
+      target.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(target);
+    }
+
+    async function cleanPastedHtml(html) {
+      const response = await fetch(form.dataset.sigCleanUrl, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfInput ? csrfInput.value : '' },
+        body: JSON.stringify({ html }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.html !== 'string') {
+        throw new Error(data.error || 'The pasted signature could not be imported.');
+      }
+      return data.html;
+    }
+
+    async function pasteSignature(html, text, files, range) {
+      let cleaned;
+      try {
+        if (!window.DOMPurify) {
+          throw new Error('The editor is still loading.');
+        }
+        cleaned = window.DOMPurify.sanitize(await cleanPastedHtml(html), { USE_PROFILES: { html: true } });
+      } catch (error) {
+        insertAtRange(range, document.createTextNode(text));
+        contentChanged();
+        showFeedback(`${error.message} The text was pasted without its formatting.`, 'error');
+        return;
+      }
+      const template = document.createElement('template');
+      template.innerHTML = cleaned;
+      // A clipboard can carry the images as files alongside the HTML; when
+      // there is one file per missing image they arrive in document order.
+      const blanks = Array.from(template.content.querySelectorAll('img'))
+        .filter((image) => !(image.getAttribute('src') || '').trim());
+      if (blanks.length && files.length === blanks.length) {
+        try {
+          const sources = await Promise.all(files.map(readImage));
+          blanks.forEach((image, index) => image.setAttribute('src', sources[index]));
+        } catch (error) {
+          // Leave them as placeholders to upload.
+        }
+      }
+      insertAtRange(range, template.content);
+      const missing = markMissingImages();
+      contentChanged();
+      if (missing) {
+        showFeedback(
+          `Formatting was kept, but ${plural(missing, 'image')} couldn't be copied: Outlook keeps signature images as files on your computer. `
+          + 'Click each dashed box to upload the image, or import the signature ZIP instead.',
+          'error',
+        );
+      } else {
+        showFeedback('The pasted signature kept its formatting and images.', 'info');
+      }
+    }
+
+    // Runs before rich_text_editor.js's own paste handler on the surface.
+    form.addEventListener('paste', (event) => {
+      const clipboard = event.clipboardData;
+      const html = clipboard && surface.contains(event.target) ? clipboard.getData('text/html') : '';
+      if (!html) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const files = Array.from(clipboard.items || [])
+        .filter((item) => item.kind === 'file' && IMAGE_TYPES.includes(item.type))
+        .map((item) => item.getAsFile())
+        .filter(Boolean);
+      const selection = window.getSelection();
+      const range = selection && selection.rangeCount && surface.contains(selection.anchorNode)
+        ? selection.getRangeAt(0).cloneRange()
+        : null;
+      showFeedback('Importing the pasted signature…', 'info');
+      pasteSignature(html, clipboard.getData('text/plain'), files, range);
+    }, true);
+
+    function selectedImage() {
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount) {
+        return null;
+      }
+      const range = selection.getRangeAt(0);
+      const node = range.startContainer.childNodes[range.startOffset];
+      const single = range.startContainer === range.endContainer && range.endOffset - range.startOffset === 1;
+      return single && node && node.nodeName === 'IMG' && surface.contains(node) ? node : null;
+    }
+
+    uploadButton.hidden = false;
+    uploadButton.addEventListener('mousedown', (event) => event.preventDefault());
+    uploadButton.addEventListener('click', () => {
+      imageTarget = selectedImage();
+      imageFile.click();
+    });
+    surface.addEventListener('click', (event) => {
+      const image = event.target.closest('img');
+      if (!image) {
+        return;
+      }
+      const range = document.createRange();
+      range.selectNode(image);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      if (image.hasAttribute('data-sig-missing')) {
+        imageTarget = image;
+        imageFile.click();
+      }
+    });
+    imageFile.addEventListener('change', async () => {
+      const file = imageFile.files[0];
+      imageFile.value = '';
+      const target = imageTarget;
+      imageTarget = null;
+      if (!file) {
+        return;
+      }
+      let src;
+      try {
+        src = await readImage(file);
+      } catch (error) {
+        showFeedback(error.message, 'error');
+        return;
+      }
+      if (target && surface.contains(target)) {
+        target.setAttribute('src', src);
+      } else {
+        const image = document.createElement('img');
+        image.setAttribute('src', src);
+        image.setAttribute('alt', file.name.replace(/\.[^.]+$/, ''));
+        insertAtRange(savedRange, image);
+      }
+      const missing = markMissingImages();
+      contentChanged();
+      showFeedback(
+        missing ? `${plural(missing, 'image')} still need uploading. Click each dashed box.` : 'Image added to the signature.',
+        missing ? 'error' : 'info',
+      );
+    });
+
+    const missingOnLoad = markMissingImages();
+    if (missingOnLoad) {
+      contentChanged();
+      showFeedback(`${plural(missingOnLoad, 'image')} in this signature still need uploading. Click each dashed box.`, 'error');
+    }
 
     function validate(intent) {
       const problems = [];

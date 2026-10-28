@@ -49,6 +49,10 @@ def test_app():
     @app.get("/forms/{slug}")
     async def form_endpoint(slug: str):
         return JSONResponse({"slug": slug})
+
+    @app.get("/m365/{rest:path}")
+    async def m365_endpoint(rest: str):
+        return JSONResponse({"path": rest})
     
     # Add middleware (note: middleware is applied in reverse order)
     app.add_middleware(SecurityHeadersMiddleware, exempt_paths=("/static",))
@@ -71,6 +75,20 @@ def test_microphone_and_blob_audio_are_scoped_to_custom_form_pages(test_app, pat
     assert ("microphone=()" in permissions) is not allowed
     assert ("media-src 'self' blob:" in response.headers["Content-Security-Policy"]) is allowed
     assert "camera=()" in permissions
+
+
+@pytest.mark.parametrize("path, allowed", [
+    ("/m365/signatures", True),
+    ("/m365/signatures/new", True),
+    ("/m365/signatures/12/edit", True),
+    ("/m365/signatures-other", False),
+    ("/m365/mailboxes", False),
+    ("/test", False),
+])
+def test_remote_https_images_are_scoped_to_signature_pages(test_app, path, allowed):
+    csp = TestClient(test_app).get(path).headers["Content-Security-Policy"]
+    img_src = next(part for part in csp.split("; ") if part.startswith("img-src"))
+    assert ("https:" in img_src.split()) is allowed
 
 
 @pytest.fixture
