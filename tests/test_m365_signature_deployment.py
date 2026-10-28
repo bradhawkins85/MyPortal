@@ -168,7 +168,7 @@ async def test_classic_outlook_renders_only_company_staff_addresses(exchange, mo
 
     assert result["template_slug"] == "standard"
     assert [(s["address"], s["name"], s["html"], s["text"]) for s in result["signatures"]] == [
-        ("Ada@Example.com", "MyPortal (Ada@Example.com)", "<p>standard:1</p>", "standard:1")
+        ("Ada@Example.com", "Standard (Ada@Example.com)", "<p>standard:1</p>", "standard:1")
     ]
     assert result["additional_signatures"] == []
     assert len(result["signatures"][0]["hash"]) == 64
@@ -206,17 +206,44 @@ async def test_classic_outlook_returns_targeted_primary_and_additional_signature
         7, ["ada@example.com", "grace@example.com"]
     )
 
-    assert [(s["address"], s["html"]) for s in result["signatures"]] == [
-        ("ada@example.com", "<p>sales:1</p>"),
-        ("grace@example.com", "<p>standard:2</p>"),
+    assert [(s["address"], s["name"], s["html"]) for s in result["signatures"]] == [
+        ("ada@example.com", "Sales (ada@example.com)", "<p>sales:1</p>"),
+        ("grace@example.com", "Standard (grace@example.com)", "<p>standard:2</p>"),
     ]
     assert [(s["address"], s["name"]) for s in result["additional_signatures"]] == [
-        ("ada@example.com", "MyPortal - Standard (ada@example.com)"),
-        ("ada@example.com", "MyPortal - Short-Reply (ada@example.com)"),
-        ("grace@example.com", "MyPortal - Short-Reply (grace@example.com)"),
+        ("ada@example.com", "Standard (ada@example.com)"),
+        ("ada@example.com", "Short-Reply (ada@example.com)"),
+        ("grace@example.com", "Short-Reply (grace@example.com)"),
     ]
     assert result["template_slug"] == "sales, standard"
     assert result["skipped"] == {}
+
+
+@pytest.mark.anyio
+async def test_classic_outlook_names_clashing_templates_by_slug(exchange, monkeypatch):
+    monkeypatch.setattr(
+        deployment.companies_repo, "get_email_domains_for_company", _async(["example.com"])
+    )
+    monkeypatch.setattr(
+        deployment.signatures_service,
+        "list_templates",
+        _async(
+            [
+                _template(1, "standard", is_default=True, name="Hawkins IT"),
+                _template(2, "reply", signature_role="additional", name="Hawkins IT"),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        deployment.staff_repo,
+        "get_staff_by_company_and_email",
+        _async({"id": 1, "custom_fields": {}}),
+    )
+
+    result = await deployment.render_classic_outlook_signatures(7, ["ada@example.com"])
+
+    assert [s["name"] for s in result["signatures"]] == ["Hawkins IT (ada@example.com)"]
+    assert [s["name"] for s in result["additional_signatures"]] == ["reply (ada@example.com)"]
 
 
 @pytest.mark.anyio

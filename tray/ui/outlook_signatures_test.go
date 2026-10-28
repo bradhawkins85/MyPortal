@@ -246,6 +246,58 @@ func TestSyncWritesAdditionalSignaturesAndRemovesOnesThatNoLongerApply(t *testin
 	}
 }
 
+func TestSyncRemovesPrimarySignatureReplacedByRenamedTemplate(t *testing.T) {
+	platform := newFakePlatform(t,
+		outlookAccount{Key: "k1", Address: "ada@example.com"},
+		outlookAccount{Key: "k2", Address: "grace@example.com"},
+	)
+	response := outlookSignaturesResponse{
+		Enabled: true,
+		Signatures: []outlookSignature{
+			{Address: "Ada@Example.com", Name: "MyPortal (Ada@Example.com)", HTML: "<p>old</p>", Text: "old", Hash: "p1"},
+			{Address: "grace@example.com", Name: "MyPortal (grace@example.com)", HTML: "<p>old</p>", Text: "old", Hash: "p2"},
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The portal now names signatures after the template; Grace is skipped.
+	response.Signatures = []outlookSignature{
+		{Address: "Ada@Example.com", Name: "Hawkins IT (Ada@Example.com)", HTML: "<p>new</p>", Text: "new", Hash: "p3"},
+	}
+	response.Skipped = map[string]string{"grace@example.com": "No active staff record matches this address"}
+	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(platform.sigDir, "MyPortal (Ada@Example.com).htm")); !os.IsNotExist(err) {
+		t.Fatal("the legacy primary signature must be removed once it is replaced")
+	}
+	if !signatureFilesExist(platform.sigDir, "Hawkins IT (Ada@Example.com)", outlookSignature{}) ||
+		platform.accountDefaults["k1"] != "Hawkins IT (Ada@Example.com)" {
+		t.Fatalf("renamed primary must be written and made the default: %v", platform.accountDefaults)
+	}
+	if !signatureFilesExist(platform.sigDir, "MyPortal (grace@example.com)", outlookSignature{}) {
+		t.Fatal("a primary without a replacement must be left in place")
+	}
+
+	// Renaming the template again replaces the tracked primary too.
+	response.Signatures[0].Name = "Hawkins IT Solutions (Ada@Example.com)"
+	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(platform.sigDir, "Hawkins IT (Ada@Example.com).htm")); !os.IsNotExist(err) {
+		t.Fatal("the previous primary signature must be removed after a rename")
+	}
+	if state := loadOutlookSignatureState(platform); state.Primary["Hawkins IT Solutions (Ada@Example.com)"] != "ada@example.com" {
+		t.Fatalf("state must track the current primary: %v", state.Primary)
+	}
+}
+
 func TestExtractSignatureImagesWritesDataURIsAsFiles(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\nfake")
 	encoded := base64.StdEncoding.EncodeToString(png)

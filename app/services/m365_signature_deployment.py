@@ -197,15 +197,13 @@ async def deploy_template(
     return list(await asyncio.gather(*(_deploy(mailbox) for mailbox in requested)))
 
 
-def classic_outlook_signature_name(address: str) -> str:
-    """Stable Outlook signature name, so re-syncs overwrite the same files."""
-    return f"MyPortal ({address})"
+def classic_outlook_signature_name(template: dict[str, Any], address: str) -> str:
+    """Outlook name for a signature: the template's name and the address.
 
-
-def classic_outlook_additional_signature_name(template: dict[str, Any], address: str) -> str:
-    """Outlook name for an additional (non-default) signature template."""
+    The name is stable for a template, so re-syncs overwrite the same files.
+    """
     label = str(template.get("name") or template.get("slug") or "Signature").strip()
-    return f"MyPortal - {label} ({address})"
+    return f"{label} ({address})"
 
 
 async def render_classic_outlook_signatures(
@@ -256,17 +254,16 @@ async def render_classic_outlook_signatures(
             templates, staff=staff, on_date=on_date
         )
         entries: list[tuple[dict[str, Any], str, list[dict[str, str]]]] = []
+        used_names: set[str] = set()
+        candidates = [(template, additional_signatures) for template in resolved["additional"]]
         if resolved["primary"]:
-            entries.append(
-                (resolved["primary"], classic_outlook_signature_name(address), signatures)
-            )
-        used_names = {classic_outlook_signature_name(address).casefold()}
-        for template in resolved["additional"]:
-            name = classic_outlook_additional_signature_name(template, address)
+            candidates.insert(0, (resolved["primary"], signatures))
+        for template, bucket in candidates:
+            name = classic_outlook_signature_name(template, address)
             if name.casefold() in used_names:
-                name = f"MyPortal - {template.get('slug')} ({address})"
+                name = f"{template.get('slug') or template.get('id')} ({address})"
             used_names.add(name.casefold())
-            entries.append((template, name, additional_signatures))
+            entries.append((template, name, bucket))
         rendered_entries: list[tuple[list[dict[str, str]], dict[str, str]]] = []
         try:
             for template, name, bucket in entries:
@@ -318,7 +315,6 @@ async def render_classic_outlook_signatures(
 __all__ = [
     "MAX_CLASSIC_OUTLOOK_ADDRESSES",
     "MAX_DEPLOY_MAILBOXES",
-    "classic_outlook_additional_signature_name",
     "classic_outlook_signature_name",
     "deploy_template",
     "get_roaming_signature_status",
