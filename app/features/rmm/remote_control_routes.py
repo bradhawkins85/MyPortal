@@ -4,7 +4,8 @@
   each provider's activation script and connection settings (super admin)
 * ``POST /api/rmm/assets/{id}/remote-control`` run the activation script on a
   device (``menu.rmm_scripts`` with write access for the device's company, so
-  it works from a ticket whatever company the technician has selected)
+  it works from a ticket whatever company the technician has selected); for
+  MeshCentral, ``open_url`` is where MeshCentral opens while the script runs
 * ``GET /api/rmm/remote-sessions/{id}`` the session's progress and, once the
   script has reported back, its launch link (the technician who started it)
 """

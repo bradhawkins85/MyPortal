@@ -149,3 +149,20 @@ def decode_json(value: Any) -> dict[str, str]:
     except (TypeError, ValueError):
         return {}
     return {str(key): str(item) for key, item in decoded.items()} if isinstance(decoded, dict) else {}
+
+
+async def get_mesh_node(asset_id: int) -> str | None:
+    """The MeshCentral node id last found for ``asset_id``."""
+
+    row = await db.fetch_one("SELECT node_id FROM rmm_meshcentral_nodes WHERE asset_id = %s", (asset_id,))
+    return str(row["node_id"]) if row and row.get("node_id") else None
+
+
+async def save_mesh_node(asset_id: int, node_id: str) -> None:
+    query = "INSERT INTO rmm_meshcentral_nodes (asset_id, node_id, updated_at) VALUES (%s, %s, %s)"
+    query += (
+        " ON CONFLICT(asset_id) DO UPDATE SET node_id = excluded.node_id, updated_at = excluded.updated_at"
+        if db.is_sqlite()
+        else " ON DUPLICATE KEY UPDATE node_id = VALUES(node_id), updated_at = VALUES(updated_at)"
+    )
+    await db.execute(query, (asset_id, node_id[:256], _utcnow()))

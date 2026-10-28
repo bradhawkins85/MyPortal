@@ -1,0 +1,7 @@
+{
+  "guid": "3d228612-a087-4f01-bd01-4ad4506ef552",
+  "occurred_at": "2026-10-28T05:07Z",
+  "change_type": "Improvement",
+  "summary": "MeshCentral actions now open MeshCentral in a new tab straight away, filtered to the device, while MyPortal switches it on; once the device has been found, later actions open straight to its page.",
+  "content_hash": "2b6420dbf1ce4ae246a761284c529b207ffb9dc9c227ada38d22c46483342a4c"
+}

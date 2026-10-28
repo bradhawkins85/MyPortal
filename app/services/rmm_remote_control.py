@@ -37,7 +37,10 @@ group rather than one shared group. The script reports the agent's node id
 (``meshagent -nodeid``, as Tactical RMM reads it); once the run finishes MyPortal
 asks the MeshCentral control channel (``app.services.meshcentral``) for that node
 in the company's group, falling back to the node matching the device's host
-name, and builds a signed-in link that jumps straight to it.
+name, and builds a signed-in link that jumps straight to it. The node id is
+kept per asset (``rmm_meshcentral_nodes``): MeshCentral opens in a new tab as
+soon as the technician clicks, at that device's page when its node id is known
+and otherwise at the device list filtered to the asset's name.
 
 Each session is a remote desktop, file transfer, terminal or (MeshCentral only)
 registry session (``mode``), which only changes the launch link. The asset and
@@ -63,6 +66,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_remote_control as remote_repo
+from app.repositories import assets as assets_repo
 from app.repositories import companies as companies_repo
 from app.core.config import get_settings
 from app.security.encryption import decrypt_secret, encrypt_secret
@@ -145,8 +149,15 @@ def meshcentral_login_token(key_hex: str, username: str, *, now: float | None = 
 
 
 def meshcentral_url(server_url: str, username: str, key_hex: str, node_id: str | None = None,
-                    *, mode: str = "remote", now: float | None = None) -> str:
+                    *, mode: str = "remote", now: float | None = None, overview: bool = False,
+                    search: str | None = None) -> str:
+    """A signed-in MeshCentral link: to ``node_id`` in ``mode``'s view, or with
+    ``overview`` to the device's general page; without a node, the device list
+    filtered to ``search``."""
+
     params = {"login": meshcentral_login_token(key_hex, username, now=now)}
+    if not node_id and search and search.strip():
+        params["filter"] = search.strip()[:255]
     if node_id:
         node_id = node_id.strip()
         # MeshCentral's UI builds the node id as "node/<domain>/" + gotonode, so
@@ -157,7 +168,10 @@ def meshcentral_url(server_url: str, username: str, key_hex: str, node_id: str |
             node_id = node_id.rsplit("/", 1)[-1]
         if not node_id or not _MESH_NODE_ID.match(node_id):
             raise RemoteControlError("The MeshCentral node ID reported for this device is not valid.")
-        params.update({"gotonode": node_id, "viewmode": _MESH_VIEWMODES.get(mode, "11"), "hide": "31"})
+        if overview:
+            params.update({"viewmode": "10", "gotonode": node_id})
+        else:
+            params.update({"gotonode": node_id, "viewmode": _MESH_VIEWMODES.get(mode, "11"), "hide": "31"})
     return server_url.rstrip("/") + "/?" + urlencode(params, safe="@$/", quote_via=quote)
 
 
@@ -591,7 +605,11 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
             raise RemoteControlError(message) from exc
         await remote_repo.set_session_run(session_id, run_id)
         rmm_scripts.notify_agent(int(agent["id"]))
-    return await session_status(session_id, company_id=company_id, user_id=user_id, is_super_admin=False)
+    status = await session_status(session_id, company_id=company_id, user_id=user_id, is_super_admin=False)
+    if status is not None and provider == "meshcentral":
+        # Opened in a new tab on the click, so the device is in view while the script runs.
+        status["open_url"] = await meshcentral_open_url(asset_id)
+    return status
 
 
 def take_session_markers(stdout: str) -> tuple[str, dict[str, str]]:
@@ -689,11 +707,39 @@ async def _launch_url(session: Mapping[str, Any], settings: Mapping[str, Any], v
             # The agent has not checked in yet (or could not be matched); open
             # MeshCentral signed in so the device shows up once it is online.
             return meshcentral_url(site, username, key, None, mode=mode)
-        return meshcentral_url(site, username, key, node_id, mode=mode)
+        return await _remembered_mesh_url(session, site, username, key, node_id, mode)
     node_id = values.get("node_id") or values.get("id") or await _field_value(
         int(session["asset_id"]), settings.get("id_field")
     )
-    return meshcentral_url(site, username, key, node_id or None, mode=mode)
+    if not node_id:
+        return meshcentral_url(site, username, key, None, mode=mode)
+    return await _remembered_mesh_url(session, site, username, key, node_id, mode)
+
+
+async def _remembered_mesh_url(session: Mapping[str, Any], site: str, username: str, key: str,
+                               node_id: str, mode: str) -> str:
+    """The link to ``node_id``, kept for the asset so later actions open it straight away."""
+
+    url = meshcentral_url(site, username, key, node_id, mode=mode)
+    await remote_repo.save_mesh_node(int(session["asset_id"]), node_id)
+    return url
+
+
+async def meshcentral_open_url(asset_id: int) -> str:
+    """Where MeshCentral opens while the activation script runs.
+
+    The device's general page when its node id is known from an earlier
+    session, otherwise the device list filtered to the asset's name."""
+
+    site, username, key = _meshcentral_config()
+    node_id = await remote_repo.get_mesh_node(asset_id)
+    if node_id:
+        try:
+            return meshcentral_url(site, username, key, node_id, overview=True)
+        except RemoteControlError:
+            pass
+    asset = await assets_repo.get_asset_by_id(asset_id)
+    return meshcentral_url(site, username, key, None, search=str((asset or {}).get("name") or ""))
 
 
 async def _resolve(session: Mapping[str, Any], settings: Mapping[str, Any], values: Mapping[str, str]) -> str | None:

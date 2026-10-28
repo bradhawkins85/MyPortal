@@ -1,0 +1,7 @@
+{
+  "guid": "d8c65b24-9c33-4d1c-9cf5-0f46bcd072a7",
+  "occurred_at": "2026-10-28T04:59Z",
+  "change_type": "Fix",
+  "summary": "MeshCentral actions now show their progress on the page, as RustDesk does, instead of opening a blank tab first; MeshCentral opens in a new tab once the device is ready, with a link if the browser blocks it.",
+  "content_hash": "1c5f0762f016a1e6e52bacfcd24daa456f9b8512949709e022c3d48f031c9380"
+}

@@ -55,6 +55,13 @@ def test_meshcentral_modes_pick_the_device_view():
         "remote": ["11"], "file_transfer": ["13"], "terminal": ["12"], "registry": ["9"]}
 
 
+def test_meshcentral_opens_the_device_page_or_a_filtered_list():
+    overview = parse_qs(urlsplit(remote.meshcentral_url("https://m.example.com", "t", KEY, "node//abc", overview=True)).query)
+    assert overview["viewmode"] == ["10"] and overview["gotonode"] == ["abc"] and "hide" not in overview
+    filtered = urlsplit(remote.meshcentral_url("https://m.example.com", "t", KEY, None, search=" PC 01&x=1 "))
+    assert parse_qs(filtered.query)["filter"] == ["PC 01&x=1"] and "gotonode" not in parse_qs(filtered.query)
+
+
 def test_meshcentral_link_carries_a_token_meshcentral_can_decrypt():
     url = remote.meshcentral_url("https://mesh.example.com/", "Tactical", KEY, "node//abc$def@", now=1_700_000_000)
     parts = urlsplit(url)
@@ -235,6 +242,10 @@ async def test_built_in_meshcentral_installs_into_the_companies_group(sqlite_db,
     agent = await rmm_scripts.authenticate_agent(_r["auth_token"])
     session = await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9)
     assert session["status"] == "activating" and session["launch_url"] is None
+    # MeshCentral opens straight away at the device list filtered to the asset.
+    opened = parse_qs(urlsplit(session["open_url"]).query)
+    assert opened["filter"] == ["PC-01"] and "gotonode" not in opened
+    assert _decode_mesh_token(opened["login"][0])["u"] == "user//tactical"
     # The group is named after the device's company, not one shared group.
     assert group_names == ["Contoso"]
 
@@ -257,6 +268,11 @@ async def test_built_in_meshcentral_installs_into_the_companies_group(sqlite_db,
     assert ready["status"] == "ready"
     query = parse_qs(urlsplit(ready["launch_url"]).query)
     assert query["gotonode"] == ["abc$def@"] and _decode_mesh_token(query["login"][0])["u"] == "user//tactical"
+    # The node is remembered: later actions open the device's page while the script runs.
+    assert await remote.remote_repo.get_mesh_node(10) == "node//abc$def@"
+    again = await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9)
+    reopened = parse_qs(urlsplit(again["open_url"]).query)
+    assert reopened["gotonode"] == ["abc$def@"] and reopened["viewmode"] == ["10"] and "filter" not in reopened
 
     # If the device has not checked in yet, fall back to a signed-in link.
     async def no_node(server_url, login_token, group_id, names, **kwargs):
