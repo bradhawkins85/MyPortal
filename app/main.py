@@ -719,6 +719,10 @@ if settings.ip_whitelist_enabled and settings.ip_whitelist:
         "/api/webhooks",  # Webhooks use signature verification instead
         "/api/vault/shares",  # External shares use opaque tokens and verification codes
         "/api/integration-modules/xero/webhook",
+        # Outlook clients load the signature add-in from users' networks; the
+        # signature API authenticates each call with a Microsoft access token.
+        "/outlook-addin/",
+        "/api/outlook-addin/",
         "/manifest.webmanifest",
         "/service-worker.js",
     ]
@@ -745,7 +749,9 @@ elif settings.ip_whitelist_enabled:
 # Add security headers middleware
 app.add_middleware(
     SecurityHeadersMiddleware,
-    exempt_paths=("/static",),
+    # Outlook loads the signature add-in's launch page in a frame hosted by
+    # Microsoft, so frame-ancestors 'none' would stop the add-in running.
+    exempt_paths=("/static", "/outlook-addin/"),
 )
 
 # Add request logging middleware
@@ -764,6 +770,9 @@ endpoint_limiter.add_limit("/auth/login", "POST", limit=20, window_seconds=900)
 endpoint_limiter.add_limit("/auth/register", "POST", limit=10, window_seconds=3600)
 endpoint_limiter.add_limit(
     "/api/tray/ticket-form/fallback", "POST", limit=10, window_seconds=3600
+)
+endpoint_limiter.add_limit(
+    "/api/outlook-addin/signature", "GET", limit=300, window_seconds=60
 )
 endpoint_limiter.add_limit("/auth/passkeys/authenticate/options", "POST", limit=5, window_seconds=300)
 endpoint_limiter.add_limit("/auth/passkeys/authenticate/verify", "POST", limit=10, window_seconds=300)

@@ -25,21 +25,35 @@
 {% block content %}
   {% set is_published = template_record.status == 'published' %}
 
+  {% set exchange_mode = delivery_mode == 'exchange' %}
   {% if roaming.error %}
     <div class="alert alert--warning" role="status">
       Could not read the Exchange Online organization configuration: {{ roaming.error }}.
-      Deployment needs the <strong>Exchange.ManageAsApp</strong> permission and the Exchange Administrator role.
+      Changing how signatures are delivered needs the <strong>Exchange.ManageAsApp</strong> permission and the Exchange Administrator role.
     </div>
-  {% elif roaming.postponed is sameas false %}
+  {% elif tenant_matches_mode is sameas false %}
     <div class="alert alert--warning" role="status">
-      <p><strong>Roaming signatures are active in this tenant.</strong> While they are active, Exchange ignores signatures set by MyPortal, so deployed signatures will not appear in Outlook.</p>
-      <form method="post" action="/m365/signatures/{{ template_record.id }}/deploy/postpone-roaming" onsubmit="return confirm('Turn on PostponeRoamingSignaturesUntilLater for the whole organization? Users will stop syncing signatures they created themselves in Outlook.');">
+      {% if exchange_mode %}
+        <p><strong>Roaming signatures are active in this tenant.</strong> While they are active, Exchange ignores signatures set by MyPortal, so deployed signatures will not appear in Outlook.</p>
+      {% else %}
+        <p><strong>Roaming signatures are postponed in this tenant</strong>, but this company delivers signatures with the Outlook add-in. Turn roaming signatures back on so Outlook does not also apply an old Exchange signature.</p>
+      {% endif %}
+      <form method="post" action="/m365/signatures/delivery-mode" data-sig-delivery-form>
         {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-        <button type="submit" class="button button--small">Let MyPortal manage signatures (postpone roaming signatures)</button>
+        <input type="hidden" name="return_to" value="/m365/signatures/{{ template_record.id }}/deploy" />
+        <input type="radio" name="mode" value="{{ delivery_mode }}" checked hidden />
+        <button type="submit" class="button button--small">{{ 'Postpone roaming signatures' if exchange_mode else 'Turn roaming signatures back on' }}</button>
       </form>
     </div>
-  {% elif roaming.postponed %}
+  {% elif roaming.postponed and exchange_mode %}
     <div class="alert alert--info" role="status">Exchange-managed signatures are enabled for this tenant (roaming signatures postponed).</div>
+  {% endif %}
+
+  {% if not exchange_mode %}
+    <div class="alert alert--info" role="status">
+      This company delivers signatures with the <strong>MyPortal Outlook add-in</strong>, which adds each person's current signature whenever they start a message, so there is nothing to deploy to Exchange.
+      <a href="/m365/signatures#sig-delivery-title">Change how signatures reach Outlook</a>.
+    </div>
   {% endif %}
 
   {% if outcomes %}
@@ -110,13 +124,14 @@
           <label><input type="checkbox" name="auto_add_reply" {% if submitted.auto_add_reply is not defined or submitted.auto_add_reply %}checked{% endif %}> Add the signature to replies and forwards</label>
         </div>
         <p class="form-help">Up to {{ max_mailboxes }} mailboxes per deployment.</p>
-        <button class="button button--primary" type="submit" {% if not is_published or not targets %}disabled{% endif %}>Deploy to selected mailboxes</button>
+        <button class="button button--primary" type="submit" {% if not is_published or not targets or not exchange_mode %}disabled{% endif %}>Deploy to selected mailboxes</button>
       </form>
     </div>
   </section>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ static_url('/static/js/m365_signatures.js') }}" defer></script>
 <script>
 (() => {
   const maxMailboxes = {{ max_mailboxes|tojson }};

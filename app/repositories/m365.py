@@ -679,3 +679,23 @@ async def bulk_get_consent_status(
             result[cid] = "up_to_date"
 
     return result
+
+
+async def list_company_ids_for_app_tenant(client_id: str, tenant_id: str) -> list[int]:
+    """Companies whose MyPortal app is *client_id* and whose effective tenant is *tenant_id*.
+
+    The effective tenant is the company's CSP customer tenant when one is
+    mapped, otherwise the tenant the credentials were provisioned in.
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT cred.company_id
+        FROM company_m365_credentials AS cred
+        JOIN companies AS co ON co.id = cred.company_id
+        WHERE LOWER(cred.client_id) = LOWER(%s)
+          AND LOWER(COALESCE(NULLIF(co.csp_tenant_id, ''), cred.tenant_id)) = LOWER(%s)
+        ORDER BY cred.company_id
+        """,
+        (client_id, tenant_id),
+    )
+    return [int(row["company_id"]) for row in rows]

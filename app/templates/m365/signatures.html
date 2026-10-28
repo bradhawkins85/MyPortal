@@ -47,6 +47,77 @@
           {% endif %}
         </div>
       </div>
+      <section class="card card--panel sig-delivery" aria-labelledby="sig-delivery-title">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title" id="sig-delivery-title">How signatures reach Outlook</h2>
+            <p class="card__subtitle">Applies to Outlook on the web, the new Outlook and Outlook for Mac in this company's Microsoft 365 tenant. Classic Outlook sync above works the same with either choice.</p>
+          </div>
+        </header>
+        <div class="card__body">
+          <form method="post" action="/m365/signatures/delivery-mode" data-sig-delivery-form>
+            {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+            <input type="hidden" name="return_to" value="/m365/signatures" />
+            <fieldset class="sig-delivery__options" {% if not can_write %}disabled{% endif %}>
+              <legend class="visually-hidden">Signature delivery</legend>
+              <label class="scf-type-card sig-delivery__card">
+                <input type="radio" name="mode" value="exchange" {% if delivery_mode == 'exchange' %}checked{% endif %} />
+                <span class="scf-type-card__label">Exchange push <span class="text-muted">(roaming signatures postponed)</span></span>
+                <span class="scf-type-card__help">Deploy writes each person's signature into their mailbox. Users' own Outlook signatures stop syncing between devices.</span>
+              </label>
+              <label class="scf-type-card sig-delivery__card">
+                <input type="radio" name="mode" value="addin" {% if delivery_mode == 'addin' %}checked{% endif %} />
+                <span class="scf-type-card__label">Outlook add-in <span class="text-muted">(roaming signatures on)</span></span>
+                <span class="scf-type-card__help">The MyPortal add-in adds the signature each time someone starts a message or meeting invite. Keeps working when Microsoft makes roaming signatures permanent.</span>
+              </label>
+            </fieldset>
+            {% if can_write %}
+              <p class="form-help">Saving changes the roaming signatures setting for the whole Microsoft 365 tenant.</p>
+              <button type="submit" class="button button--small">Save delivery method</button>
+            {% endif %}
+          </form>
+
+          {% if delivery_mode == 'addin' %}
+            <div class="sig-addin" aria-labelledby="sig-addin-title">
+              <h3 class="sig-addin__title" id="sig-addin-title">Outlook add-in setup</h3>
+              {% if not portal_base_url %}
+                <div class="alert alert--warning" role="status">Set <code>PORTAL_URL</code> to this portal's HTTPS address. Outlook loads the add-in from there.</div>
+              {% endif %}
+              <ol class="sig-addin__steps">
+                <li>
+                  <strong>Prepare the app registration.</strong>
+                  {% if addin_registration and addin_registration.ready %}
+                    <span class="status status--success">Ready</span>
+                  {% elif addin_registration and addin_registration.error %}
+                    <span class="status status--warning">Unknown</span>
+                    <br><small class="text-muted">Could not check the app registration: {{ addin_registration.error }}</small>
+                  {% elif addin_registration %}
+                    <span class="status status--warning">Needs: {{ addin_registration.missing | join(', ') }}</span>
+                  {% endif %}
+                  <br><small class="text-muted">Adds the add-in's sign-in scope and redirect addresses to this company's MyPortal app in Microsoft Entra.</small>
+                  {% if can_write %}
+                    <form method="post" action="/m365/signatures/addin/prepare" class="inline-form">
+                      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                      <button type="submit" class="button button--ghost button--small">Prepare app registration</button>
+                    </form>
+                  {% endif %}
+                </li>
+                <li>
+                  <strong>Grant admin consent.</strong>
+                  <br><small class="text-muted">Sign in as a Global Administrator so staff are never asked to approve the add-in themselves.</small>
+                  {% if can_write %}<br><a class="button button--ghost button--small" href="/m365/signatures/addin/grant-consent">Grant admin consent</a>{% endif %}
+                </li>
+                <li>
+                  <strong>Deploy the add-in.</strong>
+                  <br><small class="text-muted">In the Microsoft 365 admin centre open <em>Settings → Integrated apps → Upload custom apps</em>, choose <em>Office Add-in</em>, upload this manifest and assign it to everyone who should get MyPortal signatures. Outlook can take up to a day to show a newly deployed add-in.</small>
+                  {% if can_write %}<br><a class="button button--ghost button--small" href="/m365/signatures/addin/manifest.xml" download>Download manifest</a>{% endif %}
+                </li>
+              </ol>
+              <p class="form-help">To check it, open Outlook on the web as a staff member and start a new message: their signature appears in the body. If it does not, confirm a published signature applies to them and that their address matches their staff record.</p>
+            </div>
+          {% endif %}
+        </div>
+      </section>
       {% if current_primary %}
         <div class="card card--panel">
           <div class="card__body">
@@ -182,7 +253,7 @@
         <li>HTML and TXT variants are stored separately so administrators can publish rich and plain-text versions independently.</li>
         <li>Preview uses live staff, company, custom-variable, and automation-token data before publication.</li>
         <li>Deployed signatures are used by Outlook on the web and the new Outlook. Classic Outlook for Windows keeps signatures on each device; enable Classic Outlook sync above so the MyPortal tray agent keeps them up to date. Outlook for Mac is not managed.</li>
-        <li>If roaming signatures are active in the tenant, Exchange ignores deployed signatures; the Deploy page shows this and can switch the tenant to Exchange-managed signatures.</li>
+        <li>Exchange ignores deployed signatures while roaming signatures are active, so Deploy only works with <strong>Exchange push</strong>. With <strong>Outlook add-in</strong> there is nothing to deploy: the add-in fetches each person's current signature whenever they start a message.</li>
         <li>Deploying replaces each selected mailbox's current signature. Outlook on the web and the new Outlook hold one MyPortal signature per mailbox, so additional signatures reach users through Classic Outlook sync.</li>
         <li>Use <strong>When it's used</strong> on a signature to target staff by name, job title, department, site or custom field, and to make it a primary or additional signature.</li>
       </ul>

@@ -23,6 +23,7 @@ _ALLOWED_COMPANY_COLUMNS = frozenset({
     "defender_auto_ticket_antivirus_off", "defender_auto_ticket_realtime_off",
     "defender_auto_ticket_tamper_off", "defender_auto_ticket_threat_detected",
     "classic_outlook_signatures_enabled", "pending_approval", "rmm_agent_auto_deploy",
+    "signature_delivery_mode", "outlook_addin_id",
 })
 _ALLOWED_COMPANY_INPUTS = _ALLOWED_COMPANY_COLUMNS | frozenset({"email_domains"})
 
@@ -73,6 +74,14 @@ async def get_company_by_id(company_id: int) -> Optional[dict[str, Any]]:
     company = _normalise_company(row)
     company["email_domains"] = await get_email_domains_for_company(company["id"])
     return company
+
+
+async def get_company_by_outlook_addin_id(addin_id: str) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT id, name FROM companies WHERE outlook_addin_id = %s",
+        (addin_id,),
+    )
+    return dict(row) if row else None
 
 
 async def get_company_csp_tenant_id(company_id: int) -> str | None:

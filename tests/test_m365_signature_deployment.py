@@ -354,7 +354,7 @@ async def test_classic_outlook_sync_notifies_only_when_enabled(monkeypatch):
     assert sent == [("dev-1", {"type": "config_changed"}), ("offline", {"type": "config_changed"})]
 
 
-def _deploy_route_client(monkeypatch, deploy_side_effect):
+def _deploy_route_client(monkeypatch, deploy_side_effect, mode="exchange"):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -378,6 +378,9 @@ def _deploy_route_client(monkeypatch, deploy_side_effect):
     )
     monkeypatch.setattr(routes.signature_deploy_service, "request_classic_outlook_sync", fake_sync)
     monkeypatch.setattr(routes.signature_deploy_service, "deploy_template", fake_deploy)
+    monkeypatch.setattr(
+        routes.companies_repo, "get_company_by_id", _async({"signature_delivery_mode": mode})
+    )
     app = FastAPI()
     app.include_router(routes.router)
     return TestClient(app), synced
@@ -397,6 +400,93 @@ def test_deploy_route_syncs_classic_outlook_when_exchange_fails(monkeypatch, fai
     )
     assert response.status_code in (302, 303)
     assert synced == [7]
+
+
+def test_deploy_route_refuses_exchange_push_in_addin_mode(monkeypatch):
+    client, synced = _deploy_route_client(monkeypatch, AssertionError("not called"), mode="addin")
+    response = client.post(
+        "/m365/signatures/5/deploy", data={"mailboxes": "ada@example.com"}, follow_redirects=False
+    )
+    assert response.status_code in (302, 303)
+    assert response.headers["location"].startswith("/m365/signatures/5/deploy")
+    assert synced == []
+
+
+def _delivery_route_client(monkeypatch, *, failure=None):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.features.m365_admin import routes
+
+    calls = {"modes": [], "audits": [], "addin_ids": []}
+
+    async def fake_context(request, *, write=False):
+        return {"id": 1}, 7, None
+
+    async def fake_set_mode(company_id, mode):
+        if failure:
+            raise failure
+        calls["modes"].append((company_id, mode))
+
+    async def fake_addin_id(company_id, company=None):
+        calls["addin_ids"].append(company_id)
+        return "0f8fad5b-d9cb-469f-a165-70867728950e"
+
+    async def fake_audit(**kwargs):
+        calls["audits"].append(kwargs)
+
+    monkeypatch.setattr(routes, "_signature_context", fake_context)
+    monkeypatch.setattr(
+        routes.companies_repo, "get_company_by_id", _async({"signature_delivery_mode": "exchange"})
+    )
+    monkeypatch.setattr(routes.signature_addin_service, "set_delivery_mode", fake_set_mode)
+    monkeypatch.setattr(routes.signature_addin_service, "ensure_addin_id", fake_addin_id)
+    monkeypatch.setattr(routes.audit_service, "record", fake_audit)
+    app = FastAPI()
+    app.include_router(routes.router)
+    return TestClient(app), calls
+
+
+def test_delivery_mode_route_switches_and_audits(monkeypatch):
+    client, calls = _delivery_route_client(monkeypatch)
+    response = client.post(
+        "/m365/signatures/delivery-mode",
+        data={"mode": "addin", "return_to": "/m365/signatures/5/deploy"},
+        follow_redirects=False,
+    )
+    assert response.status_code in (302, 303)
+    assert response.headers["location"].startswith("/m365/signatures/5/deploy")
+    assert calls["modes"] == [(7, "addin")]
+    assert calls["addin_ids"] == [7]
+    (audit,) = calls["audits"]
+    assert audit["action"] == "m365.signatures.delivery_mode"
+    assert audit["before"] == {"signature_delivery_mode": "exchange"}
+    assert audit["after"] == {
+        "signature_delivery_mode": "addin",
+        "PostponeRoamingSignaturesUntilLater": False,
+    }
+
+
+@pytest.mark.parametrize("target", ["https://evil.example", "//evil.example", "/m365/signatures/x/deploy"])
+def test_delivery_mode_route_only_returns_to_signature_pages(monkeypatch, target):
+    client, _ = _delivery_route_client(monkeypatch)
+    response = client.post(
+        "/m365/signatures/delivery-mode",
+        data={"mode": "exchange", "return_to": target},
+        follow_redirects=False,
+    )
+    assert response.headers["location"].split("?")[0] == "/m365/signatures"
+
+
+def test_delivery_mode_route_reports_exchange_refusal(monkeypatch):
+    client, calls = _delivery_route_client(
+        monkeypatch, failure=deployment.m365_service.M365Error("forbidden")
+    )
+    response = client.post(
+        "/m365/signatures/delivery-mode", data={"mode": "addin"}, follow_redirects=False
+    )
+    assert response.status_code in (302, 303)
+    assert calls["audits"] == [] and calls["addin_ids"] == []
 
 
 def test_signature_refresh_item_hidden_without_signature_templates():
