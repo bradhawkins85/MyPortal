@@ -122,6 +122,12 @@ FEATURES: tuple[LLMFeature, ...] = (
         module_slugs=("ai-request-missing-info",),
     ),
     LLMFeature(
+        "ai_custom_prompt", "Custom LLM prompt",
+        "Automation action that runs an admin-written prompt over a ticket.",
+        callers=(("app.services.modules", "_invoke_ai_custom_prompt"),),
+        module_slugs=("ai-custom-prompt",),
+    ),
+    LLMFeature(
         "ai_link_related", "AI link related tickets",
         "Automation action that links related tickets.",
         module_slugs=("ai-link-related",),

@@ -10,6 +10,7 @@ ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
     "ai-classify-ticket",
     "ai-link-related",
     "ai-request-missing-info",
+    "ai-custom-prompt",
     "run-troubleshooting-bot",
     "rmm-script",
     "add-ticket-reply",

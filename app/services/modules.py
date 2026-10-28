@@ -1368,6 +1368,14 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "enabled": True,
     },
     {
+        "slug": "ai-custom-prompt",
+        "name": "Custom LLM Prompt",
+        "description": "Give the AI your own instructions about the ticket, such as summarise it, extract product names or list safety issues, with optional conversation history. The answer is posted to the ticket as an internal note.",
+        "icon": "🧠",
+        "settings": {},
+        "enabled": True,
+    },
+    {
         "slug": "run-troubleshooting-bot",
         "name": "Run Troubleshooting Bot",
         "description": "Run the AI troubleshooting bot on the ticket's linked asset so research, recommended steps and log analysis are posted as internal notes before a technician picks up the ticket.",
@@ -2631,6 +2639,16 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "solidtime",  # Solidtime - dedicated ticket/reply sync, not a generic trigger action module
 }
 
+_AI_CUSTOM_PROMPT_FORMATS = ("text", "list")
+_AI_CUSTOM_PROMPT_CONVERSATIONS = ("public", "all", "none")
+_AI_CUSTOM_PROMPT_DEFAULT_HISTORY = 10
+_AI_CUSTOM_PROMPT_MAX_HISTORY = 50
+_AI_CUSTOM_PROMPT_INSTRUCTIONS_MAX_LENGTH = 4000
+_AI_CUSTOM_PROMPT_RESPONSE_MAX_LENGTH = 8000
+_AI_CUSTOM_PROMPT_MAX_ITEMS = 100
+_AI_CUSTOM_PROMPT_ITEM_MAX_LENGTH = 500
+_AI_CUSTOM_PROMPT_DEFAULT_TITLE = "AI response"
+
 _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
     "smtp": {
         "fields": [
@@ -2783,6 +2801,57 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
                 "label": "Required details (device, error_text, affected_user, when_started, steps_to_reproduce)",
                 "type": "string",
                 "placeholder": "device, error_text, affected_user",
+            },
+        ],
+    },
+    "ai-custom-prompt": {
+        "fields": [
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "placeholder": "{{ticket.id}}",
+            },
+            {
+                "name": "instructions",
+                "label": "Instructions for the AI (what it should do with the ticket)",
+                "type": "string",
+                "required": True,
+                "placeholder": "Summarise the problem and what has been tried so far.",
+            },
+            {
+                "name": "desired_outcome",
+                "label": "Desired outcome of the response (optional)",
+                "type": "string",
+                "placeholder": "Three short bullet points a technician can read in 10 seconds.",
+            },
+            {
+                "name": "response_format",
+                "label": "Response format (text, or list of items; defaults to text)",
+                "type": "string",
+                "enum": list(_AI_CUSTOM_PROMPT_FORMATS),
+            },
+            {
+                "name": "conversation",
+                "label": "Conversation history to include (public replies, all including internal notes, or none; defaults to public)",
+                "type": "string",
+                "enum": list(_AI_CUSTOM_PROMPT_CONVERSATIONS),
+            },
+            {
+                "name": "history_limit",
+                "label": f"Most recent replies to include (1-{_AI_CUSTOM_PROMPT_MAX_HISTORY}; defaults to {_AI_CUSTOM_PROMPT_DEFAULT_HISTORY})",
+                "type": "integer",
+            },
+            {
+                "name": "note_title",
+                "label": "Internal note heading (optional)",
+                "type": "string",
+                "placeholder": "AI summary",
+            },
+            {
+                "name": "model",
+                "label": "LLM model override (optional)",
+                "type": "string",
             },
         ],
     },
@@ -3279,6 +3348,7 @@ async def trigger_module(
         "ai-classify-ticket": _invoke_ai_classify_ticket,
         "ai-link-related": _invoke_ai_link_related,
         "ai-request-missing-info": _invoke_ai_request_missing_info,
+        "ai-custom-prompt": _invoke_ai_custom_prompt,
         "run-troubleshooting-bot": _invoke_run_troubleshooting_bot,
         "rmm-script": _invoke_rmm_script,
         "reprocess-ai": _invoke_reprocess_ai,
@@ -6529,6 +6599,7 @@ _AI_TICKET_MODULE_SLUGS = frozenset(
         "ai-classify-ticket",
         "ai-link-related",
         "ai-request-missing-info",
+        "ai-custom-prompt",
         "run-troubleshooting-bot",
         "reprocess-ai",
         "whisperx",
@@ -7206,6 +7277,212 @@ async def _invoke_ai_request_missing_info(
         "question": question,
         "reply_id": reply.get("id") if reply else None,
     }
+
+
+def _ai_custom_prompt_choice(name: str, value: Any, choices: tuple[str, ...]) -> str:
+    choice = str(value or "").strip().lower()
+    if not choice:
+        return choices[0]
+    if choice not in choices:
+        raise ValueError(f"{name} must be one of: {', '.join(choices)}")
+    return choice
+
+
+def _ai_custom_prompt_speaker(
+    reply: Mapping[str, Any], ticket: Mapping[str, Any]
+) -> str:
+    if reply.get("is_internal"):
+        return "technician internal note"
+    author_id = reply.get("author_id")
+    if author_id is not None and author_id == ticket.get("requester_id"):
+        return "requester"
+    return "support team" if author_id is not None else "email or system message"
+
+
+def _ai_custom_prompt_html(text: str) -> str:
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+    return "".join(
+        "<p>" + "<br>".join(html_escape(line) for line in part.splitlines()) + "</p>"
+        for part in paragraphs
+    )
+
+
+async def _invoke_ai_custom_prompt(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Run an admin-written prompt over a ticket and post the answer as a note.
+
+    The admin's instructions are the only trusted text; ticket content and
+    conversation history are passed as untrusted records.  The answer is
+    saved as an internal note, so model output never reaches the requester
+    directly.
+    """
+
+    instructions = str(payload.get("instructions") or "").strip()
+    if not instructions:
+        raise ValueError("instructions are required")
+    if len(instructions) > _AI_CUSTOM_PROMPT_INSTRUCTIONS_MAX_LENGTH:
+        raise ValueError(
+            f"instructions must be {_AI_CUSTOM_PROMPT_INSTRUCTIONS_MAX_LENGTH} characters or fewer"
+        )
+    desired_outcome = str(payload.get("desired_outcome") or "").strip()
+    if len(desired_outcome) > _AI_CUSTOM_PROMPT_INSTRUCTIONS_MAX_LENGTH:
+        raise ValueError(
+            f"desired_outcome must be {_AI_CUSTOM_PROMPT_INSTRUCTIONS_MAX_LENGTH} characters or fewer"
+        )
+    response_format = _ai_custom_prompt_choice(
+        "response_format", payload.get("response_format"), _AI_CUSTOM_PROMPT_FORMATS
+    )
+    conversation = _ai_custom_prompt_choice(
+        "conversation", payload.get("conversation"), _AI_CUSTOM_PROMPT_CONVERSATIONS
+    )
+    history_limit = _coerce_int(
+        payload.get("history_limit"), minimum=1, maximum=_AI_CUSTOM_PROMPT_MAX_HISTORY
+    ) or _AI_CUSTOM_PROMPT_DEFAULT_HISTORY
+    note_title = (
+        str(payload.get("note_title") or "").strip()[:255]
+        or _AI_CUSTOM_PROMPT_DEFAULT_TITLE
+    )
+
+    ticket_id, ticket = await _load_ai_action_ticket(payload)
+    records = [
+        UntrustedRecord(
+            f"ticket:{ticket_id}",
+            "helpdesk ticket",
+            {
+                "subject": _ai_prompt_ticket_text(ticket.get("subject"), limit=255),
+                "description": _ai_prompt_ticket_text(
+                    ticket.get("description"), limit=4000
+                ),
+                "status": ticket.get("status"),
+                "priority": ticket.get("priority"),
+                "category": ticket.get("category"),
+            },
+            "Use only as the ticket the instructions refer to",
+        )
+    ]
+    included_replies = 0
+    if conversation != "none":
+        replies = await _tickets_repo().list_replies(
+            ticket_id, include_internal=conversation == "all"
+        )
+        for reply in list(replies)[-history_limit:]:
+            body = _ai_prompt_ticket_text(reply.get("body"), limit=1500)
+            if not body:
+                continue
+            records.append(
+                UntrustedRecord(
+                    f"ticket-reply:{reply.get('id')}",
+                    "helpdesk ticket conversation entry",
+                    {
+                        "from": _ai_custom_prompt_speaker(reply, ticket),
+                        "sent_at": reply.get("created_at"),
+                        "body": body,
+                    },
+                    "Use only as the ticket conversation the instructions refer to",
+                )
+            )
+            included_replies += 1
+
+    trusted = (
+        "You are assisting a helpdesk technician. Follow the administrator's "
+        "instructions below using only the helpdesk ticket and conversation "
+        "history supplied as records.\n\n"
+        f"ADMINISTRATOR_INSTRUCTIONS:\n{instructions}"
+    )
+    if desired_outcome:
+        trusted += f"\n\nDESIRED_OUTCOME:\n{desired_outcome}"
+    if response_format == "list":
+        task = (
+            'Return only a JSON object: {"items": [string, ...]}. Each item is one '
+            "short finding. Use an empty list when nothing relevant is found."
+        )
+    else:
+        task = (
+            'Return only a JSON object: {"answer": string}. Use plain text '
+            "without HTML. Use an empty string when nothing relevant is found."
+        )
+    ai_payload: dict[str, Any] = {
+        "prompt": build_prompt(trusted, records, task=task),
+        "temperature": 0.2,
+        "max_tokens": 1500,
+    }
+    model = str(payload.get("model") or "").strip()
+    if model:
+        ai_payload["model"] = model
+    ai_result = await _invoke_ollama(
+        await _ai_action_ollama_settings(), ai_payload, event_future=event_future
+    )
+    if not module_result_succeeded(ai_result):
+        return {**ai_result, "ticket_id": ticket_id}
+
+    try:
+        if response_format == "list":
+            parsed = validate_object(
+                _ai_response_object(ai_result.get("response"), {"items"}),
+                {
+                    "items": lambda value: isinstance(value, list)
+                    and len(value) <= _AI_CUSTOM_PROMPT_MAX_ITEMS
+                    and all(
+                        isinstance(item, str)
+                        and len(item.strip()) <= _AI_CUSTOM_PROMPT_ITEM_MAX_LENGTH
+                        for item in value
+                    ),
+                },
+            )
+        else:
+            parsed = validate_object(
+                _ai_response_object(ai_result.get("response"), {"answer"}),
+                {
+                    "answer": lambda value: isinstance(value, str)
+                    and len(value.strip()) <= _AI_CUSTOM_PROMPT_RESPONSE_MAX_LENGTH,
+                },
+            )
+    except ValueError as exc:
+        return {
+            **ai_result,
+            "status": "error",
+            "error": f"AI returned an invalid custom prompt result: {exc}",
+            "ticket_id": ticket_id,
+        }
+
+    result: dict[str, Any] = {
+        **ai_result,
+        "ticket_id": ticket_id,
+        "ticket_number": ticket.get("ticket_number"),
+        "response_format": response_format,
+        "replies_included": included_replies,
+    }
+    if response_format == "list":
+        items = [
+            item for item in dict.fromkeys(item.strip() for item in parsed["items"]) if item
+        ]
+        result["items"] = items
+        content = (
+            "<ul>"
+            + "".join(f"<li>{html_escape(item)}</li>" for item in items)
+            + "</ul>"
+            if items
+            else ""
+        )
+    else:
+        text = parsed["answer"].strip()
+        result["text"] = text
+        content = _ai_custom_prompt_html(text)
+    if not content:
+        return {
+            **result,
+            "status": "skipped",
+            "reason": "AI found nothing relevant for the instructions",
+        }
+
+    note = f"<p><strong>{html_escape(note_title)}</strong></p>{content}"
+    reply = await _create_ai_internal_note(ticket_id, note)
+    result["reply_id"] = reply.get("id") if reply else None
+    return result
 
 
 async def _invoke_reprocess_ai(
