@@ -798,6 +798,11 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             enriched.update(filter_context)
     enriched.setdefault("billable_minutes", 0)
     enriched.setdefault("non_billable_minutes", 0)
+    enriched.setdefault(
+        "total_minutes",
+        int(enriched.get("billable_minutes") or 0)
+        + int(enriched.get("non_billable_minutes") or 0),
+    )
     enriched.setdefault("attachment_count", 0)
     enriched.setdefault("has_attachments", False)
     enriched.setdefault("attachment_extensions", [])

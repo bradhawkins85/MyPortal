@@ -1926,6 +1926,7 @@
             'ticket.external_reference',
             'ticket.billable_minutes',
             'ticket.non_billable_minutes',
+            'ticket.total_minutes',
             'ticket.has_attachments',
             'ticket.attachment_count',
             'ticket.attachment_extensions',

@@ -412,6 +412,41 @@ async def test_automation_filter_context_derives_latest_reply_kind(monkeypatch):
     assert context[5]["ticket_update_actor_type"] == "technician"
 
 
+class _TimeAutomationContextDB:
+    async def fetch_one(self, sql, params):
+        if "SUM(CASE WHEN is_billable" in sql:
+            return {"billable_minutes": 45, "non_billable_minutes": 15}
+        return {}
+
+    async def fetch_all(self, sql, params):
+        if "SUM(CASE WHEN is_billable" in sql:
+            return [
+                {"ticket_id": 5, "billable_minutes": 30, "non_billable_minutes": 20}
+            ]
+        return []
+
+
+@pytest.mark.anyio
+async def test_automation_filter_context_includes_total_minutes(monkeypatch):
+    monkeypatch.setattr(tickets, "db", _TimeAutomationContextDB())
+
+    context = await tickets.get_automation_filter_context(42)
+
+    assert context["billable_minutes"] == 45
+    assert context["non_billable_minutes"] == 15
+    assert context["total_minutes"] == 60
+
+
+@pytest.mark.anyio
+async def test_bulk_automation_filter_context_includes_total_minutes(monkeypatch):
+    monkeypatch.setattr(tickets, "db", _TimeAutomationContextDB())
+
+    context = await tickets.get_automation_filter_context_by_ticket_ids([5, 6])
+
+    assert context[5]["total_minutes"] == 50
+    assert context[6]["total_minutes"] == 0
+
+
 @pytest.mark.anyio
 async def test_automation_filter_context_includes_asset_counts(monkeypatch):
     monkeypatch.setattr(tickets, "db", _AssetAutomationContextDB())
