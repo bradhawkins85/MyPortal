@@ -123,19 +123,12 @@
     if (document.hidden) clearPackagePasswords.forEach((clear) => clear());
   });
 
-  const search = document.querySelector('[data-deploy-search]');
-  const rows = Array.from(document.querySelectorAll('[data-deploy-row]'));
+  // tables.js filters and sorts the list; show a message when nothing matches.
+  const table = document.querySelector('[data-deploy-table]');
   const noResults = document.querySelector('[data-deploy-no-results]');
-  if (search) {
-    search.addEventListener('input', () => {
-      const query = search.value.trim().toLowerCase();
-      let visible = 0;
-      rows.forEach((row) => {
-        const match = !query || row.textContent.toLowerCase().includes(query);
-        row.hidden = !match;
-        if (match) visible += 1;
-      });
-      if (noResults) noResults.hidden = visible > 0 || rows.length === 0;
+  if (table && noResults) {
+    table.addEventListener('table:render', (event) => {
+      noResults.hidden = event.detail.filteredCount > 0;
     });
   }
 })();

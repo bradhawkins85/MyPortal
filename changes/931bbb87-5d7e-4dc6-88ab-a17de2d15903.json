@@ -1,0 +1,7 @@
+{
+  "guid": "931bbb87-5d7e-4dc6-88ab-a17de2d15903",
+  "occurred_at": "2026-10-28T02:16Z",
+  "change_type": "Improvement",
+  "summary": "Sort, search and filter the Existing URLs list under Tray \u2192 Deployment URLs by company, status, Windows installer, downloads and dates, the same way as other tables.",
+  "content_hash": "6b6f6c711057adea7cbdd213fa9b2dbabe4b71c896d503700043a9e1c19f049e"
+}
