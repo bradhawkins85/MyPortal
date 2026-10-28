@@ -1,0 +1,7 @@
+{
+  "guid": "9abebf66-6d46-4c5a-97e1-36eac9ed6ebb",
+  "occurred_at": "2026-10-28T13:01Z",
+  "change_type": "Feature",
+  "summary": "Users can refresh their Outlook email signatures on demand from a new Refresh Email Signatures tray menu item, shown only to companies with Classic Outlook signature sync and a published signature template.",
+  "content_hash": "41a69cdd17530c733d3dc4ade845789b45be282780b472b5c12e5e7608dc7ba4"
+}

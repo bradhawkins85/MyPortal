@@ -247,6 +247,18 @@ then hourly and whenever the service relays `config_changed`:
 Signatures the user created themselves are never modified or deleted.
 Outlook for Mac keeps signatures in its own database and is not managed.
 
+This sync never goes through Exchange Online, so it keeps working when the
+portal's Exchange Online deployment fails. Deploying a template on the portal
+also sends `config_changed` to the company's connected devices so they sync
+straight away.
+
+Users can refresh on demand with the **Refresh Email Signatures** menu item
+(`refresh_signatures` node). The portal only sends it to companies with
+Classic Outlook sync enabled and a published signature template, and adds it
+before *Quit* when the menu does not place it. The item is hidden on macOS
+and Linux. A manual refresh rewrites every signature file, even unchanged
+ones, and shows a notification with the result.
+
 ## Configuration
 
 ### Network scanning

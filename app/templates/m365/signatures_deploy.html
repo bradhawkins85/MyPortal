@@ -60,6 +60,7 @@
           {% endfor %}
         </ul>
         <p class="form-help">Outlook on the web and the new Outlook use the deployed signature. Changes can take up to a few hours to appear. Classic Outlook for Windows and Mac keep their own locally stored signatures.</p>
+        {% if classic_note %}<p class="form-help" role="status">{{ classic_note }}</p>{% endif %}
       </div>
     </section>
   {% endif %}

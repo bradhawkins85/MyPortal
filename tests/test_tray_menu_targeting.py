@@ -69,6 +69,11 @@ def resolve(monkeypatch):
     monkeypatch.setattr(svc, "_expand_menu_url_variables", passthrough)
     monkeypatch.setattr(svc, "_filter_rmm_scripts_for_platform", passthrough)
 
+    async def no_signatures(company_id):
+        return False
+
+    monkeypatch.setattr(svc, "_signature_refresh_available", no_signatures)
+
     async def _resolve(device=DEVICE):
         return await svc.resolve_config_for_device(device)
 

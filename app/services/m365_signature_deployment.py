@@ -17,9 +17,11 @@ from typing import Any
 
 from app.repositories import companies as companies_repo
 from app.repositories import staff as staff_repo
+from app.repositories import tray as tray_repo
 from app.services import m365 as m365_service
 from app.services import m365_out_of_office as oof_service
 from app.services import m365_signatures as signatures_service
+from app.services import tray as tray_service
 
 MAX_DEPLOY_MAILBOXES = 200
 MAX_CLASSIC_OUTLOOK_ADDRESSES = 20
@@ -197,6 +199,39 @@ async def deploy_template(
     return list(await asyncio.gather(*(_deploy(mailbox) for mailbox in requested)))
 
 
+async def request_classic_outlook_sync(company_id: int) -> int | None:
+    """Ask the company's connected tray agents to re-sync Classic Outlook now.
+
+    Classic Outlook signatures are written by the tray agent from
+    :func:`render_classic_outlook_signatures` and never go through Exchange
+    Online, so this runs whatever happens to the Exchange deployment.
+    Returns ``None`` when Classic Outlook sync is disabled for the company,
+    otherwise how many connected devices were asked to sync; the rest pick
+    the change up on their hourly check.
+    """
+    company = await companies_repo.get_company_by_id(company_id)
+    if not company or not company.get("classic_outlook_signatures_enabled"):
+        return None
+    return await notify_company_tray_devices(company_id)
+
+
+async def notify_company_tray_devices(company_id: int) -> int:
+    """Send ``config_changed`` to the company's connected tray devices.
+
+    The tray re-fetches its menu, which shows or hides *Refresh Email
+    Signatures*, and re-syncs Classic Outlook signatures. Returns how many
+    devices were reached on this app instance.
+    """
+    notified = 0
+    for device in await tray_repo.list_devices(company_id=company_id):
+        device_uid = str(device.get("device_uid") or "").strip()
+        if device_uid and await tray_service.send_to_device(
+            device_uid, dict(tray_service.CONFIG_CHANGED_MESSAGE)
+        ):
+            notified += 1
+    return notified
+
+
 def classic_outlook_signature_name(template: dict[str, Any], address: str) -> str:
     """Outlook name for a signature: the template's name and the address.
 
@@ -319,6 +354,8 @@ __all__ = [
     "deploy_template",
     "get_roaming_signature_status",
     "list_deployment_targets",
+    "notify_company_tray_devices",
     "postpone_roaming_signatures",
     "render_classic_outlook_signatures",
+    "request_classic_outlook_sync",
 ]

@@ -79,6 +79,10 @@ class TrayMenuNode(BaseModel):
       server and are never sent to the tray.
     * ``scan_network`` — asks an enabled network-scanner device to scan now.
     * ``refresh_config`` — asks the tray service to pull the latest menu config.
+    * ``refresh_signatures`` — re-syncs the user's Classic Outlook email
+      signatures now. Only sent to companies with Classic Outlook sync and a
+      published signature template; the server adds it for them when the
+      menu does not place it.
     * ``separator`` — visual divider.
     * ``quit`` — exits the tray application.
     """

@@ -1,0 +1,7 @@
+{
+  "guid": "6607543f-9804-4028-b31a-cb6fad04b3f9",
+  "occurred_at": "2026-10-28T13:01Z",
+  "change_type": "Fix",
+  "summary": "Classic Outlook signatures now update even when the Exchange Online deployment fails, because deploying a template asks the company's tray agents to sync Classic Outlook straight away.",
+  "content_hash": "4070af711a5820f74db2d3ebb8bf9761c674b0e7ef7453e655417c9bc61e522e"
+}

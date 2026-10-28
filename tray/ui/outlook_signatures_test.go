@@ -149,6 +149,32 @@ func TestSyncSkipsUnchangedFilesAndRestoresMissingOnes(t *testing.T) {
 	}
 }
 
+func TestForcedSyncRewritesUnchangedSignatureFiles(t *testing.T) {
+	platform := newFakePlatform(t, outlookAccount{Key: "k", Address: "ada@example.com"})
+	var requests [][]string
+	server := signaturePortal(t, outlookSignaturesResponse{
+		Enabled: true,
+		Signatures: []outlookSignature{{
+			Address: "ada@example.com", Name: "Standard (ada@example.com)", HTML: "<p>v1</p>", Text: "v1", Hash: "same",
+		}},
+	}, &requests)
+	defer server.Close()
+
+	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
+		t.Fatal(err)
+	}
+	htm := filepath.Join(platform.sigDir, "Standard (ada@example.com).htm")
+	if err := os.WriteFile(htm, []byte("user edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncOutlookSignaturesWithOptions(context.Background(), platform, server.URL, "token", true); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(htm); !strings.Contains(string(data), "<p>v1</p>") {
+		t.Fatalf("forced refresh must rewrite the signature, got %q", data)
+	}
+}
+
 func TestSyncDoesNothingWhenDisabledOrNoAccounts(t *testing.T) {
 	var requests [][]string
 	server := signaturePortal(t, outlookSignaturesResponse{Enabled: false}, &requests)

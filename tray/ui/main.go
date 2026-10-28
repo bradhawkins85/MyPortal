@@ -338,6 +338,23 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 			}
 		}()
 
+	case "refresh_signatures":
+		// The portal only sends this item to companies with Classic Outlook
+		// signature templates; Outlook signatures are managed on Windows only.
+		if !outlookSignatureRefreshSupported() {
+			return
+		}
+		label := node.Label
+		if label == "" {
+			label = "Refresh Email Signatures"
+		}
+		item := addTrayMenuItem(parent, label, "Update your Outlook email signatures now")
+		go func() {
+			for range item.ClickedCh {
+				go refreshOutlookSignaturesFromMenu()
+			}
+		}()
+
 	case "refresh_config":
 		label := node.Label
 		if label == "" {

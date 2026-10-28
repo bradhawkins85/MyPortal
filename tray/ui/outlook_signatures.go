@@ -147,7 +147,37 @@ func triggerOutlookSignatureSync() {
 	}
 }
 
+// outlookSignatureRefreshSupported reports whether this device manages
+// Classic Outlook signatures, so the "Refresh Email Signatures" menu item is
+// only shown where it can do something.
+func outlookSignatureRefreshSupported() bool {
+	return newOutlookPlatform().Supported()
+}
+
+// refreshOutlookSignaturesFromMenu runs a sync requested by the user from the
+// tray menu. Every signature file is rewritten, even when its content hash is
+// unchanged, so local edits or damaged files are replaced, and the user is
+// told whether the refresh worked.
+func refreshOutlookSignaturesFromMenu() {
+	platform := newOutlookPlatform()
+	if !platform.Supported() {
+		return
+	}
+	if err := syncOutlookSignaturesWithOptions(context.Background(), platform, gPortalURL, gAuthToken, true); err != nil {
+		logger.Warn("Outlook signatures: manual refresh: %v", err)
+		showOSNotification("Email signatures", "Your email signatures could not be refreshed. Please try again later or contact support.")
+		return
+	}
+	showOSNotification("Email signatures", "Your Outlook email signatures have been refreshed.")
+}
+
 func syncOutlookSignatures(ctx context.Context, platform outlookPlatform, portalURL, authToken string) error {
+	return syncOutlookSignaturesWithOptions(ctx, platform, portalURL, authToken, false)
+}
+
+// syncOutlookSignaturesWithOptions syncs signatures; force rewrites files
+// whose content has not changed since the last sync.
+func syncOutlookSignaturesWithOptions(ctx context.Context, platform outlookPlatform, portalURL, authToken string, force bool) error {
 	outlookSignatureSyncMu.Lock()
 	defer outlookSignatureSyncMu.Unlock()
 
@@ -206,7 +236,7 @@ func syncOutlookSignatures(ctx context.Context, platform outlookPlatform, portal
 			continue
 		}
 		primaries[strings.ToLower(strings.TrimSpace(signature.Address))] = base
-		if state.Hashes[base] != signature.Hash || !signatureFilesExist(dir, base, signature) {
+		if force || state.Hashes[base] != signature.Hash || !signatureFilesExist(dir, base, signature) {
 			if err := writeSignatureFiles(dir, base, signature); err != nil {
 				logger.Warn("Outlook signatures: write %s: %v", base, err)
 				continue
@@ -240,7 +270,7 @@ func syncOutlookSignatures(ctx context.Context, platform outlookPlatform, portal
 		}
 		current[base] = true
 		state.Additional[base] = strings.ToLower(strings.TrimSpace(signature.Address))
-		if state.Hashes[base] != signature.Hash || !signatureFilesExist(dir, base, signature) {
+		if force || state.Hashes[base] != signature.Hash || !signatureFilesExist(dir, base, signature) {
 			if err := writeSignatureFiles(dir, base, signature); err != nil {
 				logger.Warn("Outlook signatures: write %s: %v", base, err)
 				continue
