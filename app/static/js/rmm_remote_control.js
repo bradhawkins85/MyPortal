@@ -1,10 +1,9 @@
 (function () {
   'use strict';
 
-  // RMM actions beside each asset (rmm/_macros.html asset_menu): a RustDesk icon
-  // button that starts a remote desktop session with a caret menu of every
-  // RustDesk session, and an RMM menu (the MeshCentral icon) with every
-  // other action. Choosing a session runs the activation
+  // RMM actions beside each asset (rmm/_macros.html asset_menu): a RustDesk
+  // menu (the RustDesk icon) with every RustDesk session, and an RMM menu (the
+  // MeshCentral icon) with every other action. Choosing a session runs the activation
   // script on the device, then opens the session for the technician as soon as
   // the script reports back. Ticket pages redraw their asset list, so clicks are
   // handled on the document.
@@ -67,24 +66,15 @@
     const wrapper = document.createElement('div');
     wrapper.className = 'rmm-asset-actions';
     if (names.indexOf('rustdesk') !== -1) {
-      const split = document.createElement('div');
-      split.className = 'rmm-split';
-      const button = menuItem('rustdesk', 'remote', '', String(assetId), assetName);
-      button.className = 'button button--ghost button--icon rmm-rustdesk';
-      button.removeAttribute('role');
-      button.title = 'Start a RustDesk remote session';
-      button.setAttribute('aria-label', 'Start a RustDesk remote session for ' + assetName);
-      button.append(icon('rmm-rustdesk__icon', '/static/images/rustdesk.svg'));
-      split.append(button);
       const rustdesk = dropdown('', 'RustDesk actions for ' + assetName, 'RustDesk actions for ' + assetName, '');
-      const caret = rustdesk.menu.querySelector('summary');
-      caret.classList.add('rmm-menu__toggle--caret');
-      caret.title = 'RustDesk actions';
+      const toggle = rustdesk.menu.querySelector('summary');
+      toggle.classList.add('rmm-menu__toggle--icon');
+      toggle.title = 'RustDesk actions';
+      toggle.prepend(icon('rmm-rustdesk__icon', '/static/images/rustdesk.svg'), ' ');
       RUSTDESK_MODES.forEach(function (entry) {
         rustdesk.panel.append(menuItem('rustdesk', entry[0], entry[1], String(assetId), assetName));
       });
-      split.append(rustdesk.menu);
-      wrapper.append(split);
+      wrapper.append(rustdesk.menu);
     }
     if (names.indexOf('meshcentral') !== -1) {
       const rmm = dropdown('', 'RMM actions for ' + assetName, 'RMM actions for ' + assetName, '');
