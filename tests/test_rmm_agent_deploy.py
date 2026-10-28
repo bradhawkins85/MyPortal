@@ -560,7 +560,7 @@ async def test_repair_route_checks_tenant_write_access_and_audits(sqlite_db, sto
     await _enrol(sqlite_db, tray_id=5, asset_id=10)
     audits = []
     async def context(request, **kwargs):
-        assert kwargs == {"write": True, "api": True}
+        assert kwargs == {"write": True, "api": True, "asset_id": kwargs["asset_id"]}
         return {"id": 9}, {}, 1, True
     async def audit(**kwargs):
         audits.append(kwargs)

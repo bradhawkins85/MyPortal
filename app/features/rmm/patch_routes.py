@@ -179,7 +179,7 @@ async def packages(request: Request, q: str = Query('', max_length=255)):
 
 @router.get('/api/rmm/assets/{asset_id:int}/software/upgrade')
 async def software_upgrade_info(asset_id: int, request: Request, name: str = Query(..., min_length=1, max_length=255)):
-    _, _, company_id, can_run = await _context(request, api=True)
+    _, _, company_id, can_run = await _context(request, api=True, asset_id=asset_id)
     from .inventory_routes import _company_agent
     from app.services import rmm_software_updates, chocolatey_catalog
     agent = await _company_agent(company_id, asset_id)
@@ -192,7 +192,7 @@ async def software_upgrade_info(asset_id: int, request: Request, name: str = Que
 
 @router.post('/rmm/assets/{asset_id:int}/software/upgrade')
 async def software_upgrade(asset_id: int, request: Request):
-    context = await _context(request, write=True)
+    context = await _context(request, write=True, asset_id=asset_id)
     if isinstance(context, RedirectResponse):
         return context
     user, _, company_id, _ = context
@@ -217,7 +217,7 @@ async def software_upgrade(asset_id: int, request: Request):
 @router.post('/rmm/assets/{asset_id:int}/software/install')
 async def software_install(asset_id: int, request: Request):
     """Manage one Chocolatey package on this device without a script."""
-    context = await _context(request, write=True)
+    context = await _context(request, write=True, asset_id=asset_id)
     if isinstance(context, RedirectResponse):
         return context
     user, _, company_id, _ = context

@@ -697,7 +697,7 @@ async def run_script_api(
 
 @router.post("/rmm/assets/{asset_id:int}/checkin", summary="Queue a one-off full agent check-in")
 async def checkin_now(asset_id: int, request: Request):
-    context = await _context(request, write=True)
+    context = await _context(request, write=True, asset_id=asset_id)
     if isinstance(context, RedirectResponse):
         return context
     user, _company, company_id, _can_run = context
@@ -727,7 +727,7 @@ class CommandRequest(BaseModel):
 
 @router.post("/api/rmm/assets/{asset_id:int}/commands", summary="Run an ad hoc command on a device")
 async def run_command_api(asset_id: int, payload: CommandRequest, request: Request):
-    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
     agent = await rmm_repo.get_asset_agent(asset_id)
     if not agent or int(agent.get("company_id") or 0) != int(company_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No RMM agent is installed on this device.")
@@ -758,7 +758,7 @@ async def run_command_api(asset_id: int, payload: CommandRequest, request: Reque
 
 @router.post("/api/rmm/assets/{asset_id:int}/tray-repair", summary="Repair the tray agent on a device through its RMM agent")
 async def tray_repair_api(asset_id: int, request: Request):
-    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
     agent = await rmm_repo.get_asset_agent(asset_id)
     if not agent or int(agent.get("company_id") or 0) != int(company_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No RMM agent is installed on this device.")

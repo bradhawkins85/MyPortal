@@ -49,7 +49,7 @@ _PUSH_MESSAGES = {
 
 @router.post("/api/rmm/assets/{asset_id:int}/agent-install", summary="Push the RMM agent to a device")
 async def push_agent(asset_id: int, request: Request):
-    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
     asset = await assets_repo.get_asset_by_id(asset_id)
     if not asset or asset.get("company_id") is None or int(asset["company_id"]) != int(company_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
@@ -71,7 +71,7 @@ async def push_agent(asset_id: int, request: Request):
 
 @router.post("/api/rmm/assets/{asset_id:int}/agent-repair", summary="Repair the RMM agent on a device")
 async def repair_agent(asset_id: int, request: Request):
-    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
     asset = await assets_repo.get_asset_by_id(asset_id)
     if not asset or asset.get("company_id") is None or int(asset["company_id"]) != int(company_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
@@ -94,7 +94,7 @@ async def repair_agent(asset_id: int, request: Request):
 
 @router.post("/api/rmm/assets/{asset_id:int}/agent-upgrade", summary="Upgrade a device's agents to the latest release")
 async def upgrade_agent(asset_id: int, request: Request):
-    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
     asset = await assets_repo.get_asset_by_id(asset_id)
     if not asset or asset.get("company_id") is None or int(asset["company_id"]) != int(company_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
@@ -128,7 +128,7 @@ async def upgrade_agent(asset_id: int, request: Request):
 
 @router.get("/api/rmm/assets/{asset_id:int}/agent-installs", summary="List a device's RMM agent install attempts")
 async def list_agent_installs(asset_id: int, request: Request, limit: int = Query(default=20, ge=1, le=100)):
-    _user, _company, company_id, _can_run = await _context(request, api=True)
+    _user, _company, company_id, _can_run = await _context(request, api=True, asset_id=asset_id)
     asset = await assets_repo.get_asset_by_id(asset_id)
     if not asset or asset.get("company_id") is None or int(asset["company_id"]) != int(company_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")

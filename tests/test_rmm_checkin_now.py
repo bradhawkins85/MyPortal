@@ -41,7 +41,7 @@ async def test_checkin_route_enforces_company_and_write_access(sqlite_db, monkey
     monkeypatch.setattr(tray, "dispatch_device_event", wake)
     response = await routes.checkin_now(10, None)
     assert response.status_code == 303 and "/assets/10" in response.headers["location"]
-    context.assert_awaited_once_with(None, write=True)
+    context.assert_awaited_once_with(None, write=True, asset_id=10)
     wake.assert_awaited_once_with(5, "checkin_now", initiated_by_user_id=None)
     assert audit.await_args.kwargs["action"] == "rmm.checkin.queued"
     context.return_value = ({"id": None}, {}, 2, True)
