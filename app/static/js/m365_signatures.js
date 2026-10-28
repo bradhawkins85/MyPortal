@@ -739,8 +739,27 @@
     }, 0);
   }
 
+  function initDeliveryForms() {
+    document.querySelectorAll('[data-sig-delivery-form]').forEach((form) => {
+      form.addEventListener('submit', (event) => {
+        const choice = form.querySelector('input[name="mode"]:checked');
+        if (!choice) {
+          event.preventDefault();
+          return;
+        }
+        const message = choice.value === 'addin'
+          ? 'Turn roaming signatures back on for the whole organization? Signatures deployed through Exchange stop applying, and the MyPortal Outlook add-in adds signatures instead.'
+          : 'Postpone roaming signatures for the whole organization? Users stop syncing signatures they created themselves in Outlook, and Deploy pushes MyPortal signatures through Exchange.';
+        if (!window.confirm(message)) {
+          event.preventDefault();
+        }
+      });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     initList();
+    initDeliveryForms();
     const form = document.querySelector('[data-sig-editor]');
     if (form) {
       initEditor(form);

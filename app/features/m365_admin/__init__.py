@@ -9,14 +9,15 @@ from __future__ import annotations
 
 from app.core.features import FeaturePack
 
+from .addin_routes import router as addin_router
 from .api_routes import oof_router, router as api_router
 from .routes import router as ui_router
 
 
 PACK = FeaturePack(
     slug="m365_admin",
-    version="1.5.0",
-    routers=(api_router, oof_router, ui_router),
+    version="1.6.0",
+    routers=(api_router, oof_router, addin_router, ui_router),
 )
 
 

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import ValidationError
 
 from app.repositories import companies as companies_repo
@@ -18,6 +19,7 @@ from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeDisable
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
+from app.services import m365_signature_addin as signature_addin_service
 from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import m365_signatures as signatures_service
 from app.services import m365_spam_purge as purge_service
@@ -332,6 +334,10 @@ async def signatures_page(request: Request):
     can_write = await _main()._has_menu_page_access(
         request, user, "menu.m365.signatures", write=True
     )
+    delivery_mode = signature_addin_service.get_delivery_mode(company)
+    addin_registration = None
+    if delivery_mode == signature_addin_service.DELIVERY_ADDIN:
+        addin_registration = await signature_addin_service.get_registration_status(company_id)
     return await _main()._render_template(
         "m365/signatures.html",
         request,
@@ -344,7 +350,144 @@ async def signatures_page(request: Request):
             "templates": templates,
             "classic_outlook_enabled": bool(company.get("classic_outlook_signatures_enabled")),
             "can_write": can_write,
+            "delivery_mode": delivery_mode,
+            "addin_registration": addin_registration,
+            "portal_base_url": signature_addin_service.portal_base_url(),
         },
+    )
+
+
+def _signatures_return_url(value: object) -> str:
+    """Only return to the signatures list or a deploy page after a mode change."""
+    target = str(value or "")
+    if re.fullmatch(r"/m365/signatures(?:/\d+/deploy)?", target):
+        return target
+    return "/m365/signatures"
+
+
+@router.post("/m365/signatures/delivery-mode")
+async def set_signature_delivery_mode(request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    form = await request.form()
+    mode = str(form.get("mode") or "")
+    return_url = _signatures_return_url(form.get("return_to"))
+    company = await companies_repo.get_company_by_id(company_id) or {}
+    previous = signature_addin_service.get_delivery_mode(company)
+    try:
+        await signature_addin_service.set_delivery_mode(company_id, mode)
+    except ValueError as exc:
+        return flash_redirect(return_url, str(exc), "error")
+    except m365_service.M365Error as exc:
+        return flash_redirect(
+            return_url, f"Microsoft 365 did not accept the change: {exc}", "error"
+        )
+    addin = mode == signature_addin_service.DELIVERY_ADDIN
+    if addin:
+        await signature_addin_service.ensure_addin_id(company_id)
+    await audit_service.record(
+        action="m365.signatures.delivery_mode",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+        before={"signature_delivery_mode": previous},
+        after={
+            "signature_delivery_mode": mode,
+            "PostponeRoamingSignaturesUntilLater": not addin,
+        },
+    )
+    message = (
+        "Roaming signatures are on and the MyPortal Outlook add-in now delivers signatures. "
+        "Finish the add-in setup below if you have not already."
+        if addin
+        else "Roaming signatures are postponed and Deploy pushes signatures through Exchange Online. "
+        "Outlook clients can take a few hours to pick up the change."
+    )
+    return flash_redirect(return_url, message, "success")
+
+
+@router.post("/m365/signatures/addin/prepare")
+async def prepare_signature_addin(request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    try:
+        changed = await signature_addin_service.prepare_app_registration(company_id)
+    except m365_service.M365Error as exc:
+        return flash_redirect(
+            "/m365/signatures", f"Could not update the app registration: {exc}", "error"
+        )
+    await audit_service.record(
+        action="m365.signatures.addin_prepare",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+        after={"changed": changed},
+    )
+    message = (
+        "App registration updated: " + ", ".join(changed) + ". Grant admin consent next."
+        if changed
+        else "The app registration already has everything the add-in needs."
+    )
+    return flash_redirect("/m365/signatures", message, "success")
+
+
+@router.get("/m365/signatures/addin/grant-consent")
+async def grant_signature_addin_consent(request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    try:
+        url = await signature_addin_service.admin_consent_url(company_id)
+    except m365_service.M365Error as exc:
+        return flash_redirect("/m365/signatures", str(exc), "error")
+    return RedirectResponse(url, status_code=303)
+
+
+@router.get("/m365/signatures/addin/consent")
+async def signature_addin_consent_callback(request: Request):
+    user, company_id, redirect = await _signature_context(request)
+    if redirect:
+        return redirect
+    if str(request.query_params.get("admin_consent") or "").lower() == "true":
+        return flash_redirect(
+            "/m365/signatures",
+            "Admin consent granted. Download the manifest and add it in Integrated Apps.",
+            "success",
+        )
+    detail = str(request.query_params.get("error_description") or "").strip()[:300]
+    message = "Admin consent was not granted." + (f" Microsoft said: {detail}" if detail else "")
+    return flash_redirect("/m365/signatures", message, "error")
+
+
+@router.get("/m365/signatures/addin/manifest.xml")
+async def download_signature_addin_manifest(request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    base_url = signature_addin_service.portal_base_url()
+    creds = await m365_service.get_credentials(company_id)
+    client_id = str((creds or {}).get("client_id") or "").strip()
+    if not base_url or not client_id:
+        return flash_redirect(
+            "/m365/signatures",
+            "Connect Microsoft 365 and set PORTAL_URL to the portal's HTTPS address first.",
+            "error",
+        )
+    company = await companies_repo.get_company_by_id(company_id) or {}
+    manifest = signature_addin_service.build_manifest(
+        addin_id=await signature_addin_service.ensure_addin_id(company_id, company),
+        client_id=client_id,
+        base_url=base_url,
+        company_name=str(company.get("name") or ""),
+    )
+    return Response(
+        manifest,
+        media_type="application/xml",
+        headers={"Content-Disposition": 'attachment; filename="myportal-signatures-manifest.xml"'},
     )
 
 
@@ -699,6 +842,9 @@ async def _render_signature_deploy(
     submitted: dict | None = None,
     classic_note: str | None = None,
 ):
+    company = await companies_repo.get_company_by_id(company_id) or {}
+    delivery_mode = signature_addin_service.get_delivery_mode(company)
+    roaming = await signature_deploy_service.get_roaming_signature_status(company_id)
     return await _main()._render_template(
         "m365/signatures_deploy.html",
         request,
@@ -710,7 +856,9 @@ async def _render_signature_deploy(
                 company_id, template_record
             ),
             "targeting_summary": signatures_service.describe_targeting(template_record),
-            "roaming": await signature_deploy_service.get_roaming_signature_status(company_id),
+            "roaming": roaming,
+            "delivery_mode": delivery_mode,
+            "tenant_matches_mode": signature_addin_service.tenant_matches_mode(delivery_mode, roaming),
             "max_mailboxes": signature_deploy_service.MAX_DEPLOY_MAILBOXES,
             "outcomes": outcomes or [],
             "submitted": submitted or {},
@@ -739,6 +887,14 @@ async def deploy_signature_template(template_id: int, request: Request):
     template_record = await signatures_service.get_template(company_id, template_id)
     if not template_record:
         return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    company = await companies_repo.get_company_by_id(company_id) or {}
+    if signature_addin_service.get_delivery_mode(company) != signature_addin_service.DELIVERY_EXCHANGE:
+        return flash_redirect(
+            deploy_url,
+            "This company delivers signatures with the Outlook add-in, so there is nothing to push "
+            "to Exchange. Switch to Exchange push on the Signatures page to deploy.",
+            "error",
+        )
     form = await request.form()
     submitted = {
         "mailboxes": [str(item) for item in form.getlist("mailboxes")],
@@ -792,31 +948,6 @@ async def deploy_signature_template(template_id: int, request: Request):
         outcomes=results,
         submitted=submitted,
         classic_note=classic_note,
-    )
-
-
-@router.post("/m365/signatures/{template_id}/deploy/postpone-roaming")
-async def postpone_roaming_signatures(template_id: int, request: Request):
-    user, company_id, redirect = await _signature_context(request, write=True)
-    if redirect:
-        return redirect
-    deploy_url = f"/m365/signatures/{template_id}/deploy"
-    try:
-        await signature_deploy_service.postpone_roaming_signatures(company_id)
-    except m365_service.M365Error as exc:
-        return flash_redirect(deploy_url, f"Microsoft 365 request failed: {exc}", "error")
-    await audit_service.record(
-        action="m365.signatures.postpone_roaming",
-        request=request,
-        user_id=int(user["id"]),
-        entity_type="m365_organization_config",
-        entity_id=None,
-        after={"PostponeRoamingSignaturesUntilLater": True},
-    )
-    return flash_redirect(
-        deploy_url,
-        "Exchange-managed signatures enabled. Outlook clients can take a few hours to pick up the change.",
-        "success",
     )
 
 

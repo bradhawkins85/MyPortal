@@ -94,15 +94,24 @@ async def get_roaming_signature_status(company_id: int) -> dict[str, Any]:
     return {"postponed": value if isinstance(value, bool) else None, "error": None}
 
 
-async def postpone_roaming_signatures(company_id: int) -> None:
-    """Enable ``PostponeRoamingSignaturesUntilLater`` so deployed signatures apply."""
+async def set_roaming_signatures_postponed(company_id: int, postponed: bool) -> None:
+    """Set ``PostponeRoamingSignaturesUntilLater`` for the company's tenant.
+
+    ``True`` lets signatures deployed through Exchange apply; ``False`` turns
+    roaming signatures back on, which the Outlook add-in delivery relies on.
+    """
     exo_token, tenant_id = await m365_service._acquire_exo_access_token(company_id)
     await m365_service._exo_invoke_command(
         exo_token,
         tenant_id,
         "Set-OrganizationConfig",
-        {"PostponeRoamingSignaturesUntilLater": True},
+        {"PostponeRoamingSignaturesUntilLater": bool(postponed)},
     )
+
+
+async def postpone_roaming_signatures(company_id: int) -> None:
+    """Enable ``PostponeRoamingSignaturesUntilLater`` so deployed signatures apply."""
+    await set_roaming_signatures_postponed(company_id, True)
 
 
 async def deploy_template(
@@ -356,6 +365,7 @@ __all__ = [
     "list_deployment_targets",
     "notify_company_tray_devices",
     "postpone_roaming_signatures",
+    "set_roaming_signatures_postponed",
     "render_classic_outlook_signatures",
     "request_classic_outlook_sync",
 ]

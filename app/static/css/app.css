@@ -17433,6 +17433,39 @@ body.scf-modal-open {
   overflow-wrap: anywhere;
 }
 
+.sig-delivery__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-gap-base);
+  margin: 0 0 var(--space-gap-base);
+  padding: 0;
+  border: 0;
+}
+
+.sig-delivery__card:has(input:checked) {
+  border-color: var(--hf-accent);
+  background: var(--hf-accent-soft);
+  box-shadow: 0 0 0 1px var(--hf-accent);
+}
+
+.sig-addin {
+  margin-top: var(--space-gap-roomy);
+  padding-top: var(--space-gap-roomy);
+  border-top: 1px solid var(--hf-line);
+}
+
+.sig-addin__title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.sig-addin__steps {
+  display: grid;
+  gap: var(--space-gap-base);
+  margin: 0 0 var(--space-gap-base);
+  padding-left: 1.25rem;
+}
+
 .sig-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
