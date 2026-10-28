@@ -160,6 +160,9 @@ _PACKAGE_MAILBOX_RE = PACKAGE_MAILBOX_RE  # backward-compat alias
 # Microsoft Graph's own well-known app ID (constant across all tenants)
 _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 _APP_SELF_OWNER_CHECK_ID = "myportal-app-self-owner"
+_EXO_ADMIN_ROLE_CHECK_ID = "myportal-exchange-admin-role"
+# Global Administrator also satisfies Exchange Online app-only RBAC.
+_GLOBAL_ADMIN_ROLE_TEMPLATE_ID = "62e90394-69f5-4237-9190-012177145e10"
 
 # Application-permission role IDs required for the provisioned integration app.
 # The CIS benchmark checks require several additional read-only permissions so
@@ -346,6 +349,10 @@ ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
         "app_id": _EXO_APP_ID,
         "permissions": [
             {"id": _EXO_MANAGE_AS_APP_ROLE, "name": "Exchange.ManageAsApp"},
+            {
+                "id": _EXO_ADMIN_ROLE_CHECK_ID,
+                "name": "Exchange Administrator role",
+            },
         ],
     },
 ]
@@ -5826,9 +5833,13 @@ async def check_enterprise_app_permissions(
         for perm in app_entry["permissions"]:
             role_id: str = perm["id"]
             role_name: str = perm["name"]
-            if role_id == _APP_SELF_OWNER_CHECK_ID:
-                perm_status = "pass" if self_owner_ok else "fail"
-                app_all_ok = app_all_ok and self_owner_ok
+            if role_id in (_APP_SELF_OWNER_CHECK_ID, _EXO_ADMIN_ROLE_CHECK_ID):
+                if role_id == _APP_SELF_OWNER_CHECK_ID:
+                    check_ok = self_owner_ok
+                else:
+                    check_ok = await _has_exchange_admin_role(access_token, sp_object_id)
+                perm_status = "pass" if check_ok else "fail"
+                app_all_ok = app_all_ok and check_ok
                 perm_results.append(
                     {"id": role_id, "name": role_name, "status": perm_status}
                 )
@@ -6061,6 +6072,33 @@ async def _ensure_directory_role_by_name(
             error=str(exc),
         )
         return False
+
+
+async def _has_exchange_admin_role(access_token: str, sp_object_id: str) -> bool:
+    """Return ``True`` when *sp_object_id* holds a directory role Exchange Online accepts.
+
+    Exchange Online rejects app-only cmdlet calls (401) when the service
+    principal has ``Exchange.ManageAsApp`` but no Exchange RBAC role, so the
+    permission check must verify this assignment alongside the app role.
+    """
+    try:
+        response = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+            f"?$filter=principalId eq '{quote(sp_object_id, safe='')}'&$select=roleDefinitionId",
+        )
+    except M365Error as exc:
+        log_error(
+            "Could not read directory role assignments for the M365 app",
+            sp_object_id=sp_object_id,
+            error=str(exc),
+        )
+        return False
+    accepted = {_EXO_ADMIN_ROLE_TEMPLATE_ID, _GLOBAL_ADMIN_ROLE_TEMPLATE_ID}
+    return any(
+        str(row.get("roleDefinitionId") or "").lower() in accepted
+        for row in response.get("value", [])
+    )
 
 
 async def _ensure_exchange_admin_role(
