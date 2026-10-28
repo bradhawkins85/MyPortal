@@ -5,8 +5,9 @@
   // menu (the RustDesk icon) with every RustDesk session, and an RMM menu (the
   // MeshCentral icon) with every other action. Choosing a session runs the activation
   // script on the device, then opens the session for the technician as soon as
-  // the script reports back. Progress shows on this page for both; MeshCentral
-  // then opens in a new tab, or offers a link when the browser blocks the tab.
+  // the script reports back. Progress shows on this page for both. MeshCentral
+  // opens straight away in a tab reserved on the click (so pop-up blockers allow
+  // it), at the device or the device list filtered to it, while the script runs.
   // Ticket pages redraw their asset list, so clicks are handled on the document.
 
   const MODES = [['remote', 'Remote desktop'], ['file_transfer', 'File transfer'], ['terminal', 'Terminal'], ['registry', 'Registry']];
@@ -149,6 +150,8 @@
   let timer = null;
   let busy = false;
   let target = '';
+  let meshTab = null;
+  let note = '';
 
   function csrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -180,17 +183,41 @@
     message.textContent = text;
   }
 
-  function openTab(url) {
-    // Opened blank so a blocked pop-up can be detected (window.open returns
-    // null for noopener tabs); the opener is dropped before MeshCentral loads.
+  function reserveTab() {
+    // Opened blank on the click so a blocked pop-up can be detected (window.open
+    // returns null for noopener tabs); the opener is dropped before MeshCentral loads.
     const tab = window.open('', '_blank');
     if (!tab) {
-      return false;
+      return null;
     }
     try {
       tab.opener = null;
     } catch (error) {
       // Some browsers do not let the opener be cleared; the tab is still usable.
+    }
+    return tab;
+  }
+
+  function closeMeshTab() {
+    if (meshTab && !meshTab.closed) {
+      meshTab.close();
+    }
+    meshTab = null;
+  }
+
+  function isWebLink(url) {
+    return /^https?:\/\//i.test(url);
+  }
+
+  // Sends the reserved tab to MeshCentral; true when it went.
+  function sendMeshTab(url) {
+    const tab = meshTab;
+    meshTab = null;
+    if (!tab || tab.closed || !isWebLink(url)) {
+      if (tab && !tab.closed) {
+        tab.close();
+      }
+      return false;
     }
     tab.location.replace(url);
     return true;
@@ -218,6 +245,7 @@
   function launch(session) {
     const url = String(session.launch_url || '');
     if (!/^(rustdesk:\/\/|https?:\/\/)/i.test(url)) {
+      closeMeshTab();
       show('MyPortal returned a link it cannot open.', true);
       return;
     }
@@ -231,12 +259,13 @@
     } else {
       link.setAttribute('target', '_blank');
       link.setAttribute('rel', 'noopener noreferrer');
-      if (openTab(url)) {
+      if (sendMeshTab(url)) {
         show(sessionName(session) + ' is opening' + target + ' in a new tab.', false);
       } else {
-        // The browser blocked the tab: the link opens it with the user's click.
+        // MeshCentral is already open in its tab (or the browser blocked it):
+        // the link goes straight to the session without moving that tab.
         link.textContent = 'Open ' + sessionName(session);
-        show(sessionName(session) + ' is ready' + target + '. Use the link to open it.', false);
+        show(sessionName(session) + ' is ready' + target + '. Use the link to go straight to it.', false);
       }
     }
     link.hidden = false;
@@ -250,15 +279,17 @@
     }
     if (session.status !== 'activating') {
       finish();
+      closeMeshTab();
       show(session.error || (session.label + ' could not be switched on.'), true);
       return;
     }
     if (Date.now() - startedAt > GIVE_UP_MS) {
       finish();
+      closeMeshTab();
       show('The device has not reported back. Check its script runs.', true);
       return;
     }
-    show('Switching on ' + session.label + target + ': ' + (RUN_STATUS[session.run_status] || 'working') + '…', false);
+    show('Switching on ' + session.label + target + ': ' + (RUN_STATUS[session.run_status] || 'working') + '…' + note, false);
     timer = setTimeout(function () {
       poll(session.id, startedAt);
     }, POLL_MS);
@@ -270,6 +301,7 @@
       render(data.session, startedAt);
     } catch (error) {
       finish();
+      closeMeshTab();
       show(error.message, true);
     }
   }
@@ -281,8 +313,13 @@
     }
     event.preventDefault();
     finish();
+    closeMeshTab();
     const provider = button.dataset.rmmRemote;
+    if (provider === 'meshcentral') {
+      meshTab = reserveTab();
+    }
     setBusy(true);
+    note = '';
     target = button.dataset.rmmRemoteName ? ' on ' + button.dataset.rmmRemoteName : '';
     link.hidden = true;
     link.removeAttribute('href');
@@ -292,9 +329,24 @@
         method: 'POST',
         body: JSON.stringify({ provider: provider, mode: button.dataset.rmmRemoteMode || 'remote' }),
       });
-      render(data.session, Date.now());
+      const session = data.session || {};
+      const openUrl = String(session.open_url || '');
+      if (provider === 'meshcentral' && !(session.status === 'ready' && session.launch_url)) {
+        // Still switching on: MeshCentral opens now so the device is in view.
+        if (sendMeshTab(openUrl)) {
+          note = ' MeshCentral is open in a new tab.';
+        } else if (isWebLink(openUrl)) {
+          link.href = openUrl;
+          link.textContent = 'Open MeshCentral';
+          link.setAttribute('target', '_blank');
+          link.setAttribute('rel', 'noopener noreferrer');
+          link.hidden = false;
+        }
+      }
+      render(session, Date.now());
     } catch (error) {
       finish();
+      closeMeshTab();
       show(error.message, true);
     }
   });
