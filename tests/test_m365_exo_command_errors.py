@@ -79,3 +79,53 @@ async def test_exo_invoke_command_sanitizes_and_bounds_plain_text_error():
     assert "\n" not in detail
     assert "\t" not in detail
     assert len(detail) == 500
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_invoke_command_appends_cmdlet_detail_to_generic_message():
+    body = {
+        "error": {
+            "code": "BadRequest",
+            "message": "Invalid Operation",
+            "details": [
+                {
+                    "code": "Context",
+                    "target": "",
+                    "message": (
+                        "Ex6F9304|Microsoft.Exchange.Configuration.Tasks.TaskException|"
+                        "The length of the property is too long."
+                    ),
+                }
+            ],
+            "innererror": {"message": "The length of the property is too long."},
+        }
+    }
+
+    class Response:
+        status_code = 400
+        text = "{}"
+
+        def json(self):
+            return body
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return Response()
+
+    with patch("app.services.m365.httpx.AsyncClient", Client):
+        with pytest.raises(M365Error) as exc_info:
+            await _exo_invoke_command("token", "tenant-id", "Set-MailboxMessageConfiguration")
+
+    assert str(exc_info.value) == (
+        "Exchange Online Set-MailboxMessageConfiguration failed (400): "
+        "Invalid Operation - The length of the property is too long."
+    )

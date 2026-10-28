@@ -2035,10 +2035,23 @@ def _exo_error_detail(response: httpx.Response) -> str:
     if isinstance(body, dict):
         error = body.get("error")
         if isinstance(error, dict):
-            candidates.extend((error.get("message"), error.get("description")))
+            # InvokeCommand answers cmdlet failures with a generic message such
+            # as "Invalid Operation" and puts the cmdlet's own error in
+            # ``details`` / ``innererror``; append it so the cause is visible.
+            reasons: list[str] = []
+            details = error.get("details")
             inner = error.get("innererror") or error.get("innerError")
-            if isinstance(inner, dict):
-                candidates.append(inner.get("message"))
+            for item in [*(details if isinstance(details, list) else []), inner]:
+                message = item.get("message") if isinstance(item, dict) else None
+                if isinstance(message, str) and message.strip():
+                    reason = message.rsplit("|", 1)[-1].strip()
+                    if reason and reason not in reasons:
+                        reasons.append(reason)
+            headline = error.get("message") or error.get("description")
+            if isinstance(headline, str) and headline.strip():
+                extra = [reason for reason in reasons if reason != headline.strip()]
+                candidates.append(" - ".join([headline.strip(), *extra]))
+            candidates.extend(reasons)
         elif isinstance(error, str):
             candidates.append(error)
         candidates.extend(
