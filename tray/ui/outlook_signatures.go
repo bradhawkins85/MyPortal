@@ -15,7 +15,9 @@
 //     "<name>_files" folder Outlook expects;
 //  4. makes each account's primary signature the default for new messages
 //     and replies, leaving additional signatures available in the picker; and
-//  5. removes additional signatures it wrote earlier that no longer apply.
+//  5. removes additional signatures it wrote earlier that no longer apply,
+//     and primary signatures it wrote earlier under a name that has since
+//     been replaced (for example when the template is renamed).
 //
 // Existing signatures created by the user are never modified or deleted.
 package main
@@ -92,12 +94,17 @@ type outlookSignaturesResponse struct {
 
 // outlookSignatureState records the content hash written for each signature
 // file so unchanged signatures are not rewritten every hour, and which
-// additional signatures were written for which address so they can be
-// removed once they no longer apply.
+// additional and primary signatures were written for which address so they
+// can be removed once they no longer apply or have been renamed.
 type outlookSignatureState struct {
 	Hashes     map[string]string `json:"hashes"`
 	Additional map[string]string `json:"additional,omitempty"`
+	Primary    map[string]string `json:"primary,omitempty"`
 }
+
+// legacyPrimarySignaturePrefix is the name earlier portal versions gave every
+// primary signature ("MyPortal (<address>)") before it used the template name.
+const legacyPrimarySignaturePrefix = "MyPortal ("
 
 var (
 	outlookSignatureSyncMu  sync.Mutex
@@ -191,12 +198,14 @@ func syncOutlookSignatures(ctx context.Context, platform outlookPlatform, portal
 
 	written := 0
 	var defaultName string
+	primaries := map[string]string{}
 	for _, signature := range response.Signatures {
 		base := signatureFileBase(signature.Name)
 		if base == "" {
 			logger.Warn("Outlook signatures: ignoring signature with an unusable name for %s", signature.Address)
 			continue
 		}
+		primaries[strings.ToLower(strings.TrimSpace(signature.Address))] = base
 		if state.Hashes[base] != signature.Hash || !signatureFilesExist(dir, base, signature) {
 			if err := writeSignatureFiles(dir, base, signature); err != nil {
 				logger.Warn("Outlook signatures: write %s: %v", base, err)
@@ -241,6 +250,7 @@ func syncOutlookSignatures(ctx context.Context, platform outlookPlatform, portal
 		}
 	}
 	removed := pruneAdditionalSignatures(dir, &state, addresses, response, current)
+	removed += pruneReplacedPrimarySignatures(dir, &state, primaries, current)
 	saveOutlookSignatureState(platform, state)
 	logger.Info("Outlook signatures: template %q applied to %d account(s), %d additional signature(s), %d file set(s) updated, %d removed",
 		response.TemplateSlug, len(response.Signatures), len(current), written, removed)
@@ -265,17 +275,7 @@ func pruneAdditionalSignatures(dir string, state *outlookSignatureState, request
 		if current[base] || !answered[address] {
 			continue
 		}
-		failed := false
-		for _, ext := range []string{".htm", ".rtf", ".txt"} {
-			if err := os.Remove(filepath.Join(dir, base+ext)); err != nil && !os.IsNotExist(err) {
-				logger.Warn("Outlook signatures: remove %s%s: %v", base, ext, err)
-				failed = true
-			}
-		}
-		// Outlook keeps images and other assets for an HTML signature in a
-		// "<name>_files" folder next to it.
-		_ = os.RemoveAll(filepath.Join(dir, base+"_files"))
-		if failed {
+		if !removeSignatureFiles(dir, base) {
 			continue
 		}
 		delete(state.Additional, base)
@@ -283,6 +283,55 @@ func pruneAdditionalSignatures(dir string, state *outlookSignatureState, request
 		removed++
 	}
 	return removed
+}
+
+// pruneReplacedPrimarySignatures deletes primary signatures written by an
+// earlier sync for an address that now has a primary signature under a
+// different name, so renaming a template does not leave the old copy behind.
+// Primaries for addresses without a new primary are left in place.
+func pruneReplacedPrimarySignatures(dir string, state *outlookSignatureState,
+	primaries map[string]string, current map[string]bool) int {
+	owned := map[string]string{}
+	for base := range state.Hashes {
+		if address, ok := strings.CutPrefix(base, legacyPrimarySignaturePrefix); ok && strings.HasSuffix(address, ")") {
+			owned[base] = strings.ToLower(strings.TrimSuffix(address, ")"))
+		}
+	}
+	for base, address := range state.Primary {
+		owned[base] = address
+	}
+	removed := 0
+	for base, address := range owned {
+		replacement, ok := primaries[address]
+		if !ok || replacement == base || current[base] {
+			continue
+		}
+		if removeSignatureFiles(dir, base) {
+			delete(state.Primary, base)
+			delete(state.Hashes, base)
+			removed++
+		}
+	}
+	for address, base := range primaries {
+		state.Primary[base] = address
+	}
+	return removed
+}
+
+// removeSignatureFiles deletes a signature's files and reports whether every
+// file is gone.
+func removeSignatureFiles(dir, base string) bool {
+	ok := true
+	for _, ext := range []string{".htm", ".rtf", ".txt"} {
+		if err := os.Remove(filepath.Join(dir, base+ext)); err != nil && !os.IsNotExist(err) {
+			logger.Warn("Outlook signatures: remove %s%s: %v", base, ext, err)
+			ok = false
+		}
+	}
+	// Outlook keeps images and other assets for an HTML signature in a
+	// "<name>_files" folder next to it.
+	_ = os.RemoveAll(filepath.Join(dir, base+"_files"))
+	return ok
 }
 
 func uniqueAddresses(accounts []outlookAccount) []string {
@@ -538,7 +587,7 @@ func writeFileAtomic(path string, data []byte) error {
 }
 
 func loadOutlookSignatureState(platform outlookPlatform) outlookSignatureState {
-	state := outlookSignatureState{Hashes: map[string]string{}, Additional: map[string]string{}}
+	state := outlookSignatureState{Hashes: map[string]string{}, Additional: map[string]string{}, Primary: map[string]string{}}
 	dir, err := platform.StateDir()
 	if err != nil {
 		return state
@@ -548,10 +597,13 @@ func loadOutlookSignatureState(platform outlookPlatform) outlookSignatureState {
 		return state
 	}
 	if err := json.Unmarshal(data, &state); err != nil || state.Hashes == nil {
-		return outlookSignatureState{Hashes: map[string]string{}, Additional: map[string]string{}}
+		return outlookSignatureState{Hashes: map[string]string{}, Additional: map[string]string{}, Primary: map[string]string{}}
 	}
 	if state.Additional == nil {
 		state.Additional = map[string]string{}
+	}
+	if state.Primary == nil {
+		state.Primary = map[string]string{}
 	}
 	return state
 }
