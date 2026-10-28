@@ -70,7 +70,7 @@ async def asset_windows_updates_context(company_id: int, asset_id: int, *, can_r
 
 @router.post("/rmm/assets/{asset_id:int}/windows-updates/scan", summary="Ask a device for a new Windows Update scan")
 async def scan_windows_updates(asset_id: int, request: Request):
-    context = await _context(request, write=True)
+    context = await _context(request, write=True, asset_id=asset_id)
     if isinstance(context, RedirectResponse):
         return context
     user, _company, company_id, _can_run = context
@@ -94,7 +94,7 @@ async def scan_windows_updates(asset_id: int, request: Request):
 
 @router.post("/rmm/assets/{asset_id:int}/windows-updates/install", summary="Install chosen Windows updates on a device")
 async def install_windows_updates(asset_id: int, request: Request):
-    context = await _context(request, write=True)
+    context = await _context(request, write=True, asset_id=asset_id)
     if isinstance(context, RedirectResponse):
         return context
     user, _company, company_id, _can_run = context
@@ -125,7 +125,7 @@ async def install_windows_updates(asset_id: int, request: Request):
 
 @router.post("/rmm/assets/{asset_id:int}/windows-updates/block", summary="Block chosen Windows updates")
 async def block_windows_updates(asset_id: int, request: Request):
-    context = await _context(request, write=True)
+    context = await _context(request, write=True, asset_id=asset_id)
     if isinstance(context, RedirectResponse):
         return context
     user, _company, company_id, _can_run = context
@@ -221,7 +221,7 @@ async def blocks_api(request: Request):
 
 @router.get("/api/rmm/assets/{asset_id:int}/windows-updates", summary="A device's latest Windows Update status")
 async def windows_updates_api(asset_id: int, request: Request):
-    user, _company, company_id, can_run = await _context(request, api=True)
+    user, _company, company_id, can_run = await _context(request, api=True, asset_id=asset_id)
     agent = await _company_agent(company_id, asset_id)
     context = await rmm_windows_updates.asset_context(agent, can_run=can_run,
                                                       is_super_admin=bool(user.get("is_super_admin")))

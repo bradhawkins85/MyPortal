@@ -49,7 +49,7 @@ async def asset_inventory_context(company_id: int, asset_id: int, *, can_refresh
 
 @router.post("/rmm/inventory/assets/{asset_id:int}/refresh", summary="Ask a device for a new inventory snapshot")
 async def refresh_asset_inventory(asset_id: int, request: Request):
-    context = await _context(request)
+    context = await _context(request, asset_id=asset_id)
     if isinstance(context, RedirectResponse):
         return context
     user, _company, company_id, can_run = context
@@ -73,7 +73,7 @@ async def refresh_asset_inventory(asset_id: int, request: Request):
 
 @router.get("/api/rmm/assets/{asset_id:int}/inventory", summary="A device's latest hardware and software snapshot")
 async def asset_inventory_api(asset_id: int, request: Request):
-    _user, _company, company_id, _can_run = await _context(request, api=True)
+    _user, _company, company_id, _can_run = await _context(request, api=True, asset_id=asset_id)
     agent = await _company_agent(company_id, asset_id)
     context = await rmm_inventory.asset_inventory_context(agent, can_refresh=False)
     inventory = context["inventory"] if context else None
