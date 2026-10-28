@@ -143,6 +143,7 @@ def test_whisperx_module_settings_load_from_env(monkeypatch):
     )
 
     assert settings == {
+        "engine": "whisperx",
         "base_url": "http://env-whisperx.local",
         "api_key": "env-key",
         "language": "cy",

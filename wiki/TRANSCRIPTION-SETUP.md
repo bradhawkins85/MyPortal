@@ -12,7 +12,7 @@ The system provides three scheduled tasks that work together to:
 ## Prerequisites
 
 1. **Call Recordings Module**: Configure the `call-recordings` integration module with the path to your recordings directory
-2. **WhisperX Module**: Configure the `whisperx` integration module with your transcription service URL and API key
+2. **Speech Transcription Module**: Enable the `whisperx` integration module and configure a transcription engine — either [WhisperX](https://github.com/ahmetoner/whisper-asr-webservice) or [whisper.cpp](https://github.com/ggml-org/whisper.cpp) — in `.env` (see [Choosing a transcription engine](#choosing-a-transcription-engine))
 
 ## Setting Up Scheduled Tasks
 
@@ -72,7 +72,7 @@ pending → queued → processing → completed
 3. **Process Task Runs**:
    - Finds the oldest "queued" recording
    - Updates status to "processing"
-   - Calls WhisperX API with the audio file
+   - Sends the audio file to the configured transcription engine (WhisperX or whisper.cpp)
    - Updates status to "completed" or "failed" based on result
    - Failed recordings remain in "failed" status and require manual retry
 
@@ -94,15 +94,47 @@ pending → queued → processing → completed
 }
 ```
 
-### WhisperX Module Settings
+### Choosing a transcription engine
 
-```json
-{
-  "base_url": "https://whisperx-service:8000",
-  "api_key": "your-api-key-here",
-  "language": "en"
-}
+Two speech-to-text engines are supported. Both are configured in `.env`
+and share the same module, scheduled tasks and automation action.
+
+| Engine | `TRANSCRIPTION_ENGINE` | Endpoint called | Settings |
+| --- | --- | --- | --- |
+| WhisperX (`whisper-asr-webservice`) | `whisperx` | `POST {base}/asr` | `WHISPERX_BASE_URL`, `WHISPERX_API_KEY`, `WHISPERX_LANGUAGE`, `WHISPERX_STEREO_SPLIT` |
+| whisper.cpp (`whisper-server`) | `whispercpp` | `POST {base}/inference` | `WHISPERCPP_BASE_URL`, `WHISPERCPP_API_KEY`, `WHISPERCPP_LANGUAGE`, `WHISPERCPP_STEREO_SPLIT` |
+
+When `TRANSCRIPTION_ENGINE` is blank, the first engine with a base URL is
+used (WhisperX before whisper.cpp), so existing WhisperX installs keep
+working unchanged.
+
+```env
+# WhisperX
+TRANSCRIPTION_ENGINE=whisperx
+WHISPERX_BASE_URL=http://whisperx-service:9000
+WHISPERX_API_KEY=your-api-key-here
+WHISPERX_LANGUAGE=en
+
+# or whisper.cpp
+TRANSCRIPTION_ENGINE=whispercpp
+WHISPERCPP_BASE_URL=http://whisper-cpp:8080
+WHISPERCPP_LANGUAGE=en
 ```
+
+#### Running whisper.cpp
+
+Start `whisper-server` with `--convert` so it can accept MP3 and WAV
+files that are not 16 kHz mono (this requires `ffmpeg` on the server):
+
+```bash
+whisper-server -m models/ggml-base.en.bin --host 0.0.0.0 --port 8080 --convert
+```
+
+MyPortal requests `response_format=verbose_json`, so segment timestamps are
+available for stereo (caller/callee) transcripts. `whisper-server` has no
+built-in authentication; if you put it behind an authenticating reverse
+proxy, set `WHISPERCPP_API_KEY` and it is sent as a `Bearer` token. Keep the
+server on a private network either way.
 
 ## Monitoring
 

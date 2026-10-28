@@ -89,6 +89,7 @@ def build_environment_catalog(modules: list[dict], loaded_packs: list[dict]) -> 
         "CURRICULA_": "huntress", "TRMM_": "tacticalrmm", "M365_": "m365_admin",
         "SIP_": "voice_monitor", "BACKUP_": "backups", "ASSET_": "assets",
         "REPORT_": "reports",
+        "WHISPERCPP_": "whisperx", "TRANSCRIPTION_": "whisperx",
     }
     for prefix, slug in prefix_owners.items():
         owner_prefix = slug.upper() + "_"

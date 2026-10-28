@@ -544,14 +544,18 @@ FEATURES: tuple[Feature, ...] = (
     ),
     Feature(
         "whisperx",
-        "WhisperX",
+        "Speech transcription (WhisperX / whisper.cpp)",
         "Transcribe ticket audio and call recordings.",
         modules=("whisperx",),
         group=_AI,
         settings=(
-            S("WHISPERX_BASE_URL", "WhisperX base URL", "url", required=True),
+            S("TRANSCRIPTION_ENGINE", "Engine", "choice", default="whisperx", choices=("whisperx", "whispercpp")),
+            S("WHISPERX_BASE_URL", "WhisperX base URL", "url", help="Required for the whisperx engine."),
             S("WHISPERX_API_KEY", "WhisperX API key", "secret"),
-            S("WHISPERX_LANGUAGE", "Language", default="en"),
+            S("WHISPERX_LANGUAGE", "WhisperX language", default="en"),
+            S("WHISPERCPP_BASE_URL", "whisper.cpp server URL", "url", help="Required for the whispercpp engine."),
+            S("WHISPERCPP_API_KEY", "whisper.cpp API key", "secret", help="Only needed behind an authenticating proxy."),
+            S("WHISPERCPP_LANGUAGE", "whisper.cpp language", default="en"),
         ),
     ),
     # -- Telephony and messaging --------------------------------------------

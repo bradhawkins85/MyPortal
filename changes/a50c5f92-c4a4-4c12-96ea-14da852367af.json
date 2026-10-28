@@ -1,0 +1,7 @@
+{
+  "guid": "a50c5f92-c4a4-4c12-96ea-14da852367af",
+  "occurred_at": "2026-10-28T12:05Z",
+  "change_type": "Feature",
+  "summary": "Ticket voicemails, call recordings and voice monitor calls can now be transcribed with a self-hosted whisper.cpp server as well as WhisperX.",
+  "content_hash": "616b6df34636f9131f7d0abcf2fde51b7568c7850c0d35975b5e56b0fb43d7f2"
+}

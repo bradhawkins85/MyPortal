@@ -465,7 +465,7 @@ async def test_call_transcription_skipped_for_opted_out_caller(monkeypatch):
     monkeypatch.setattr(call_recordings.call_recordings_repo, "update_call_recording", fake_update)
     monkeypatch.setattr(ai_consent.user_repo, "ai_opt_out_exists_for_email", fake_email)
     monkeypatch.setattr(
-        call_recordings, "_whisperx_env_settings", lambda: pytest.fail("WhisperX must not be used")
+        call_recordings, "_transcription_env_settings", lambda: pytest.fail("WhisperX must not be used")
     )
 
     result = await call_recordings.transcribe_recording(1)
