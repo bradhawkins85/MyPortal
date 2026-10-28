@@ -5,9 +5,9 @@ Two speech-to-text engines are supported:
 * **WhisperX** (``whisperx``) – the ``whisper-asr-webservice`` style API which
   accepts ``POST /asr`` with an ``audio_file`` upload and options as URL query
   parameters.
-* **whisper.cpp** (``whispercpp``) – the ``whisper-server`` HTTP example which
-  accepts ``POST /inference`` with a ``file`` upload and options as multipart
-  form fields.
+* **whisper.cpp** (``whispercpp``) – the ``whisper-server`` HTTP example
+  exposed on the OpenAI-compatible ``POST /v1/audio/transcriptions`` route,
+  with a ``file`` upload and options as multipart form fields.
 
 Both return JSON with a ``text`` key and (optionally) timed ``segments``, so
 callers share a single response parser.
@@ -89,6 +89,23 @@ def resolve_engine_from_environment() -> str:
     return ENGINE_WHISPERX
 
 
+WHISPERCPP_TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions"
+
+
+def _whispercpp_url(base: str) -> str:
+    """Return the OpenAI-compatible transcription URL for a whisper.cpp base.
+
+    Accepts a bare host (``http://host:8080``), an OpenAI-style ``/v1`` base or
+    the full transcription URL without duplicating path segments.
+    """
+
+    if base.endswith(WHISPERCPP_TRANSCRIPTIONS_PATH):
+        return base
+    if base.endswith("/v1"):
+        return base + "/audio/transcriptions"
+    return base + WHISPERCPP_TRANSCRIPTIONS_PATH
+
+
 def build_asr_request(
     engine: str, base_url: str, *, api_key: str = "", language: str = ""
 ) -> AsrRequest:
@@ -102,7 +119,7 @@ def build_asr_request(
         data = {"response_format": "verbose_json"}
         if language:
             data["language"] = language
-        return AsrRequest(url=f"{base}/inference", file_field="file", data=data, headers=headers)
+        return AsrRequest(url=_whispercpp_url(base), file_field="file", data=data, headers=headers)
     # WhisperX /asr uses FastAPI Query(...) parameters, so options MUST be URL
     # query parameters; form fields are silently ignored.
     params = {"output": "json"}

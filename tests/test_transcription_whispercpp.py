@@ -59,11 +59,25 @@ def test_build_asr_request_whisperx_uses_query_params():
 
 def test_build_asr_request_whispercpp_uses_form_fields():
     request = build_asr_request("whispercpp", "http://cpp.local/", language="en")
-    assert request.url == "http://cpp.local/inference"
+    assert request.url == "http://cpp.local/v1/audio/transcriptions"
     assert request.file_field == "file"
     assert request.params == {}
     assert request.data == {"response_format": "verbose_json", "language": "en"}
     assert request.headers == {}
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://cpp.local",
+        "http://cpp.local/",
+        "http://cpp.local/v1",
+        "http://cpp.local/v1/audio/transcriptions",
+    ],
+)
+def test_build_asr_request_whispercpp_targets_openai_transcriptions_route(base_url):
+    request = build_asr_request("whispercpp", base_url)
+    assert request.url == "http://cpp.local/v1/audio/transcriptions"
 
 
 def test_engine_resolution_prefers_explicit_then_configured(monkeypatch):
@@ -136,7 +150,7 @@ def test_transcription_client_posts_to_whispercpp(monkeypatch, tmp_path):
 
     assert result.text == "Hello from cpp."
     call = factory.calls[0]
-    assert call["url"] == "http://cpp.local/inference"
+    assert call["url"] == "http://cpp.local/v1/audio/transcriptions"
     assert set(call["files"]) == {"file"}
     assert call["data"] == {"response_format": "verbose_json", "language": "en"}
 
@@ -179,7 +193,7 @@ def test_invoke_ticket_transcription_with_whispercpp(monkeypatch, tmp_path):
     assert result["status"] == "succeeded", result
     assert result["transcription_count"] == 1
     call = factory.calls[0]
-    assert call["url"] == "http://cpp.local/inference"
+    assert call["url"] == "http://cpp.local/v1/audio/transcriptions"
     assert set(call["files"]) == {"file"}
     assert call["data"] == {"response_format": "verbose_json", "language": "en"}
     assert call["params"] == {}
@@ -227,7 +241,7 @@ def test_call_recording_transcription_uses_whispercpp_env(monkeypatch, tmp_path)
     assert result["transcription"] == "Hi there."
     gate.assert_awaited_once_with("whisperx")
     post = client.post.call_args
-    assert post.args[0] == "http://cpp.local/inference"
+    assert post.args[0] == "http://cpp.local/v1/audio/transcriptions"
     assert set(post.kwargs["files"]) == {"file"}
     assert post.kwargs["data"] == {"response_format": "verbose_json", "language": "en"}
     assert post.kwargs["params"] == {}
