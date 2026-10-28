@@ -33,14 +33,15 @@ asset custom field holding its ID.
 MeshCentral has a matching built-in (``rmm_builtin/meshcentral_activate*``).
 MyPortal downloads the authenticated installer and delivers it through RMM
 associated files, scoped to a device group named after the device's company, so the device lands in its company's
-group rather than one shared group. The agent has no command-line that prints
-its node id, so once the run finishes MyPortal asks the MeshCentral control
-channel (``app.services.meshcentral``) for the node matching the device's host
-name and builds a signed-in link that jumps straight to it.
+group rather than one shared group. The script reports the agent's node id
+(``meshagent -nodeid``, as Tactical RMM reads it); once the run finishes MyPortal
+asks the MeshCentral control channel (``app.services.meshcentral``) for that node
+in the company's group, falling back to the node matching the device's host
+name, and builds a signed-in link that jumps straight to it.
 
 Each session is a remote desktop, file transfer, terminal or (MeshCentral only)
-registry session (``mode``), which only changes the launch link. The asset and ticket pages open the link
-for the technician as soon as it is ready.
+registry session (``mode``), which only changes the launch link. The asset and
+ticket pages open the link for the technician as soon as it is ready.
 """
 
 from __future__ import annotations
@@ -156,10 +157,7 @@ def meshcentral_url(server_url: str, username: str, key_hex: str, node_id: str |
             node_id = node_id.rsplit("/", 1)[-1]
         if not node_id or not _MESH_NODE_ID.match(node_id):
             raise RemoteControlError("The MeshCentral node ID reported for this device is not valid.")
-        # myportalconnect asks MyPortal's MeshCentral script (myportal-autoconnect.js)
-        # to press the view's Connect button; MeshCentral itself has no such option.
-        params.update({"gotonode": node_id, "viewmode": _MESH_VIEWMODES.get(mode, "11"), "hide": "31",
-                       "myportalconnect": "1"})
+        params.update({"gotonode": node_id, "viewmode": _MESH_VIEWMODES.get(mode, "11"), "hide": "31"})
     return server_url.rstrip("/") + "/?" + urlencode(params, safe="@$/", quote_via=quote)
 
 
@@ -677,11 +675,15 @@ async def _launch_url(session: Mapping[str, Any], settings: Mapping[str, Any], v
     if group_id:
         # Built-in: the agent was installed into the company's group, so ask
         # MeshCentral for the node matching this device's host name.
+        # Like Tactical RMM, prefer the node id the device's own agent reported
+        # (meshagent -nodeid); find_node only accepts it inside the company's group.
         hosts = [h.strip() for h in str(values.get("mesh_host") or "").split(";") if h.strip()]
+        reported = values.get("node_id")
         node_id = None
-        if hosts:
+        if hosts or reported:
             node_id = await meshcentral.find_node(
-                site, meshcentral_login_token(key, username), group_id, hosts, attempts=3, delay_seconds=2.0
+                site, meshcentral_login_token(key, username), group_id, hosts,
+                node_id=reported, attempts=3, delay_seconds=2.0,
             )
         if not node_id:
             # The agent has not checked in yet (or could not be matched); open

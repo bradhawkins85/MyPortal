@@ -25,7 +25,14 @@ $env:MESH_INSTALLER_PATH = Join-Path $env:TEMP 'mesh-installer.exe'
 Set-Content -LiteralPath $env:MESH_INSTALLER_PATH -Value 'installer'
 $env:MESH_GROUP_ID = 'group-id'
 $env:PROCESSOR_ARCHITECTURE = 'AMD64'
+$env:ProgramFiles = 'C:\Program Files'
 $script:launches = 0
+$script:nodeIdReads = 0
+# The service's own path wins over the default install location.
+function Get-CimInstance {
+    param($ClassName, $Filter, $ErrorAction)
+    return [pscustomobject]@{PathName = '"C:\Mesh\MeshAgent.exe" --run'}
+}
 function Invoke-WebRequest { throw 'The endpoint must not download the installer.' }
 $script:clock = [datetime]'2026-10-27T12:00:00'
 function Get-Date { $script:clock = $script:clock.AddSeconds(15); return $script:clock }
@@ -58,6 +65,17 @@ function Set-Service {
 function Start-Process {
     param($FilePath, [ValidateNotNullOrEmpty()][string[]]$ArgumentList,
           [switch]$PassThru, $WindowStyle, $RedirectStandardOutput, $RedirectStandardError)
+    if ($ArgumentList.Count -eq 1 -and $ArgumentList[0] -eq '"-nodeid"') {
+        if ($FilePath -ne 'C:\Mesh\MeshAgent.exe') { throw "Read the node id from the wrong agent: $FilePath" }
+        # The first read comes before the agent has made its identity.
+        $script:nodeIdReads++
+        $id = if ($script:nodeIdReads -eq 1) { 'Node ID not defined' } else { 'abc$def@' * 8 }
+        Set-Content -LiteralPath $RedirectStandardOutput -Value $id
+        Set-Content -LiteralPath $RedirectStandardError -Value ''
+        $process = [pscustomobject]@{Handle = 1; ExitCode = 0; Id = 124}
+        $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($Timeout); return $true }
+        return $process
+    }
     $script:launches++
     if ($script:launches -eq 1 -and ($ArgumentList.Count -ne 1 -or $ArgumentList[0] -ne '"-fullinstall"')) {
         throw 'The agent must install the service with -fullinstall.'
@@ -88,6 +106,7 @@ if ($env:TEST_EXPECTED) {
     if ($script:launches -ne 2) { throw 'Expected installer and argument-bearing command.' }
     if (-not $script:automatic) { throw 'The service was not set to automatic startup.' }
     if ($env:TEST_CASE -eq 'stopped' -and -not $script:started) { throw 'The stopped service was not started.' }
+    if ($script:nodeIdReads -ne 2) { throw 'Expected the node id to be read until it was ready.' }
 }
 if (Get-ChildItem -LiteralPath $env:TEMP) { throw 'Temporary files were not cleaned up.' }
 ''')
@@ -102,6 +121,8 @@ if (Get-ChildItem -LiteralPath $env:TEMP) { throw 'Temporary files were not clea
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    if not expected_error:
+        assert '##myportal[session.node_id]=' + 'abc$def@' * 8 in result.stdout
 
 
 @pytest.mark.parametrize('script_name', ['meshcentral_activate.sh', 'meshcentral_activate_macos.sh'])
@@ -154,3 +175,43 @@ def test_unix_activation_uses_delivered_installer_and_cleans_up(tmp_path, script
     assert marker.read_text() == 'ran'
     assert not installer.exists()
     assert not configuration.exists()
+
+
+@pytest.mark.parametrize('script_name', ['meshcentral_activate.sh', 'meshcentral_activate_macos.sh'])
+@pytest.mark.parametrize('agent_output,reported', [
+    ('abc$def@' * 8, True), ('Node ID not defined', False), ('', False),
+])
+def test_unix_activation_reports_the_agents_node_id(tmp_path, script_name, agent_output, reported):
+    installer = tmp_path / 'installer'
+    installer.write_text('#!/bin/bash\nexit 0\n')
+    Path(str(installer) + '.msh').write_text('MeshID=company-group\n')
+    # The installed agent, found through the service as Tactical RMM's agent finds it.
+    agent = tmp_path / 'mesh services' / 'meshagent'
+    agent.parent.mkdir()
+    agent.write_text('#!/bin/bash\n[[ "$1" == -nodeid ]] || exit 98\n' + f"printf '%s\\r\\n' '{agent_output}'\n")
+    agent.chmod(0o700)
+    commands = tmp_path / 'bin'
+    commands.mkdir()
+    stubs = {
+        'systemctl': f'[[ "$1" == show ]] && echo "ExecStart={{ path={agent} ; argv[]={agent} ; }}"\nexit 0',
+        'launchctl': f'printf "state = running\\n        program = %s\\n" "{agent}"',
+        'sleep': 'exit 0',
+        'id': 'echo 0',
+    }
+    for name, body in stubs.items():
+        command = commands / name
+        command.write_text('#!/bin/bash\n' + body + '\n')
+        command.chmod(0o700)
+    result = subprocess.run(
+        ['bash', str(ROOT / 'app/services/rmm_builtin' / script_name)],
+        env={**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'],
+             'MESH_INSTALLER_PATH': str(installer), 'MESH_GROUP_ID': 'company-group'},
+        capture_output=True, text=True, timeout=10,
+    )
+    # Without an id the activation still succeeds; MyPortal matches the host name.
+    assert result.returncode == 0, result.stdout + result.stderr
+    if reported:
+        assert ('##myportal[session.node_id]=' + agent_output + '\n') in result.stdout
+    else:
+        assert '##myportal[session.node_id]' not in result.stdout
+        assert 'find the device by its host name' in result.stdout

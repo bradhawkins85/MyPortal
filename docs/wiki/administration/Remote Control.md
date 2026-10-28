@@ -66,8 +66,10 @@ provider:
    choose another. MyPortal downloads the authenticated self-installing MeshCentral
    agent and sends it through RMM associated files, scoped to a device group named after the
    device's company, so the device lands in its
-   company's group (a device already in the generic Tactical RMM group is moved here too); the
-   node ID is then looked up in that group by the device's host name. Without the RMM agent,
+   company's group (a device already in the generic Tactical RMM group is moved here too). The
+   script then reports the agent's node ID by running `MeshAgent -nodeid` on the device, the
+   same way Tactical RMM reads it. MyPortal opens that node only after confirming it is in the
+   company's group, and otherwise looks the device up in that group by its host name. Without the RMM agent,
    MeshCentral falls back to the ID custom field below, opening MeshCentral signed in.
 2. To use your own script, add it to the Gitea repository's `Common/` folder and choose
    **Sync from Gitea**, then choose it and save. Only `Common/` scripts are offered, as they
@@ -102,28 +104,6 @@ can stay enabled. The configured MeshCentral user must have access to the compan
 The RMM agent must support associated files and report a supported architecture; update older
 agents before starting a session.
 
-### Connecting automatically in MeshCentral
-
-MeshCentral links open the device on the chosen view, but MeshCentral has no link option that
-presses **Connect**. To have the session start by itself, install MyPortal's small MeshCentral
-script once on the MeshCentral server:
-
-1. Download `https://<your MyPortal>/static/meshcentral/myportal-autoconnect.js`.
-2. Copy it to `meshcentral-web/public/scripts/` on the MeshCentral server.
-3. Load it on MeshCentral's main page, either by saving it as `custom.js` there (or adding its
-   contents to your existing `custom.js`), or through the domain's `customFiles` setting in
-   `config.json`, then restart MeshCentral:
-
-   ```json
-   "customFiles": {
-     "myportal": { "js": ["myportal-autoconnect.js"], "scope": ["default", "default3"] }
-   }
-   ```
-
-The script only acts on links from MyPortal (they carry `myportalconnect=1`) and presses Connect
-once the device is online. Without it, MeshCentral opens on the device's view and the technician
-presses **Connect**.
-
 ## Connecting
 
 In a ticket's asset list, the **RustDesk** icon beside each asset starts a remote desktop
@@ -139,8 +119,11 @@ MyPortal shows the activation script's progress, then opens the session as soon 
 reports back: RustDesk through a `rustdesk://` link carrying the ID and password (the browser may
 ask to open RustDesk the first time), MeshCentral in a new tab already signed in on the device's
 chosen view. The MeshCentral tab opens as soon as you choose the session and shows the script's
-progress until the device is ready, so pop-up blockers do not stop it; with the MeshCentral script
-above installed, the session then connects by itself.
+progress until the device is ready, so pop-up blockers do not stop it. The link is MeshCentral's
+own `/?gotonode=<node id>&viewmode=<view>` address (11 desktop, 12 terminal, 13 files, 9 registry),
+signed in with a login token, so nothing is installed on the MeshCentral server. MeshCentral has
+no link option that starts the connection, so the technician presses **Connect** on the view it
+opens.
 The built-in scripts install the tool on first use: the RustDesk script applies `RUSTDESK_CFG`
 and sets a one-time password, and the MeshCentral script runs the installer delivered by MyPortal into the
 device's company group. An **Open … again** button stays in case the browser blocked it.

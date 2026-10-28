@@ -48,12 +48,11 @@ def test_rustdesk_links_strip_spaces_and_quote_the_password():
     assert remote.rustdesk_url("123 456", "stored-secret", "remote_prompt") == "rustdesk://connection/new/123456"
 
 
-def test_meshcentral_modes_pick_the_device_view_and_ask_to_connect():
+def test_meshcentral_modes_pick_the_device_view():
     queries = {mode: parse_qs(urlsplit(remote.meshcentral_url("https://m.example.com", "t", KEY, "n", mode=mode)).query)
                for mode in ("remote", "file_transfer", "terminal", "registry")}
     assert {mode: query["viewmode"] for mode, query in queries.items()} == {
         "remote": ["11"], "file_transfer": ["13"], "terminal": ["12"], "registry": ["9"]}
-    assert all(query["myportalconnect"] == ["1"] for query in queries.values())
 
 
 def test_meshcentral_link_carries_a_token_meshcentral_can_decrypt():
@@ -64,8 +63,7 @@ def test_meshcentral_link_carries_a_token_meshcentral_can_decrypt():
     assert query["gotonode"] == ["abc$def@"] and query["viewmode"] == ["11"] and query["hide"] == ["31"]
     assert _decode_mesh_token(query["login"][0]) == {"a": 3, "u": "user//tactical", "time": 1_700_000_000}
     signed_in_only = parse_qs(urlsplit(remote.meshcentral_url("https://mesh.example.com", "user/acme/Bob", KEY)).query)
-    assert "gotonode" not in signed_in_only and "myportalconnect" not in signed_in_only
-    assert _decode_mesh_token(signed_in_only["login"][0])["u"] == "user/acme/bob"
+    assert "gotonode" not in signed_in_only and _decode_mesh_token(signed_in_only["login"][0])["u"] == "user/acme/bob"
     with pytest.raises(remote.RemoteControlError):
         remote.meshcentral_url("https://mesh.example.com", "t", KEY, "node//x&evil=1")
 
@@ -267,6 +265,65 @@ async def test_built_in_meshcentral_installs_into_the_companies_group(sqlite_db,
     monkeypatch.setattr(remote.meshcentral, "find_node", no_node)
     fallback = await remote.session_status(session["id"], company_id=1, user_id=9, is_super_admin=False)
     assert fallback["status"] == "ready" and "gotonode" not in fallback["launch_url"]
+
+
+@pytest.mark.anyio
+async def test_built_in_meshcentral_opens_the_node_id_the_device_reported(sqlite_db, monkeypatch):
+    # Like Tactical RMM, the script reports meshagent -nodeid; MyPortal passes it
+    # to find_node, which only accepts it inside the company's group.
+    _meshcentral_env(monkeypatch)
+    await remote.save_settings("meshcentral", {"is_enabled": "on"}, user_id=9)
+    lookups = []
+
+    async def fake_ensure_group(server_url, login_token, name):
+        return "grp123"
+
+    async def fake_find_node(server_url, login_token, group_id, names, **kwargs):
+        lookups.append((group_id, list(names), kwargs.get("node_id")))
+        return "node//" + kwargs["node_id"]
+
+    async def fake_download(server_url, login_token, group_id, arch_id):
+        return b"MZ\x00\xffinstaller"
+
+    monkeypatch.setattr(remote.meshcentral, "download_installer", fake_download)
+    monkeypatch.setattr(remote.meshcentral, "ensure_group", fake_ensure_group)
+    monkeypatch.setattr(remote.meshcentral, "find_node", fake_find_node)
+    _r, agent = await _enrol(sqlite_db)
+    await rmm_repo.record_agent_checkin(agent["id"], {"script_files_supported": True})
+    await sqlite_db.execute("UPDATE rmm_agents SET arch = 'amd64' WHERE id = ?", (agent["id"],))
+    agent = await rmm_scripts.authenticate_agent(_r["auth_token"])
+    session = await remote.start(provider="meshcentral", company_id=1, asset_id=10, user_id=9, mode="registry")
+    await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
+
+    reported = "abc$def@" * 8
+    await rmm_scripts.record_result(agent, session["run_id"], {
+        "exit_code": 0, "stdout": f"installed\n##myportal[session.node_id]={reported}\n"})
+    ready = await remote.session_status(session["id"], company_id=1, user_id=9, is_super_admin=False)
+    assert lookups[-1] == ("grp123", ["PC"], reported)
+    query = parse_qs(urlsplit(ready["launch_url"]).query)
+    assert query["gotonode"] == [reported] and query["viewmode"] == ["9"]
+
+
+@pytest.mark.anyio
+async def test_find_node_prefers_the_reported_id_only_inside_the_group(monkeypatch):
+    nodes = [
+        {"_id": "node//elsewhere", "mesh": "mesh//other", "name": "PC"},
+        {"_id": "node//byname", "mesh": "mesh//grp", "name": "PC"},
+        {"_id": "node//reported", "mesh": "mesh//grp", "name": "Renamed"},
+    ]
+
+    async def fake_request(server_url, login_token, action, payload=None, **kwargs):
+        assert payload["meshid"] == "mesh//grp"
+        return {"nodes": nodes}
+
+    monkeypatch.setattr(remote.meshcentral, "_request", fake_request)
+    find = remote.meshcentral.find_node
+    assert await find("https://m", "t", "grp", ["pc"], node_id="reported", attempts=1) == "node//reported"
+    assert await find("https://m", "t", "grp", [], node_id="node//reported", attempts=1) == "node//reported"
+    # A reported id from another group is ignored in favour of the name match.
+    assert await find("https://m", "t", "grp", ["pc"], node_id="elsewhere", attempts=1) == "node//byname"
+    assert await find("https://m", "t", "grp", [], node_id="elsewhere", attempts=1) is None
+    assert await find("https://m", "t", "grp", ["pc"], attempts=1) == "node//byname"
 
 
 def test_settings_page_renders_providers_and_script_values():

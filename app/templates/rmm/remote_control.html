@@ -18,7 +18,7 @@
       <pre class="rmm-remote__example"><code>##myportal[session.id]=123456789        # RustDesk ID
 ##myportal[session.password]=one-time   # RustDesk password (optional)
 ##myportal[session.node_id]=node//abc   # MeshCentral node ID</code></pre>
-      <p class="form-help">RustDesk works without a script of your own: MyPortal's built-in script applies <code>RUSTDESK_CFG</code> from the .env file, starts the RustDesk service, sets a new one-time password and reports the ID. Choose your own script to replace it. Without the RMM agent, the device's ID is read from the asset custom field named below. MeshCentral also works without a script of your own: its built-in script installs the agent on first use into a device group named after the device's company (so each company's devices sit in their own group, not one shared group), then finds the device's node by its host name and opens a signed-in link straight to it. Only scripts in the <code>Common</code> folder are offered, as they run on every company's devices.</p>
+      <p class="form-help">RustDesk works without a script of your own: MyPortal's built-in script applies <code>RUSTDESK_CFG</code> from the .env file, starts the RustDesk service, sets a new one-time password and reports the ID. Choose your own script to replace it. Without the RMM agent, the device's ID is read from the asset custom field named below. MeshCentral also works without a script of your own: its built-in script installs the agent on first use into a device group named after the device's company (so each company's devices sit in their own group, not one shared group), then reports the device's node ID (<code>MeshAgent -nodeid</code>, checked against that group, with the host name as a fallback) and opens a signed-in link straight to it. Only scripts in the <code>Common</code> folder are offered, as they run on every company's devices.</p>
     </div>
   </section>
 
@@ -48,7 +48,6 @@
         <div class="form-field">
           <label class="form-label">MeshCentral server</label>
           <p class="form-help">Configured in the <code>.env</code> file: <code>MESHCENTRAL_SERVER_URL</code> is {{ "set" if mesh_env.server_set else "not set" }}, <code>MESHCENTRAL_USERNAME</code> is {{ "set" if mesh_env.username_set else "not set" }}, and <code>MESHCENTRAL_LOGIN_TOKEN_KEY</code> is {{ "set" if mesh_env.token_key_set else "not set" }}. Technicians sign in to MeshCentral as this user.</p>
-          <p class="form-help">To have sessions connect by themselves, copy <a href="/static/meshcentral/myportal-autoconnect.js" download>myportal-autoconnect.js</a> to <code>meshcentral-web/public/scripts/</code> on the MeshCentral server and load it as <code>custom.js</code> or through the domain's <code>customFiles</code> setting. Without it, MeshCentral opens on the device and the technician presses Connect.</p>
         </div>
         {% endif %}
       </div>

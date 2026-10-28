@@ -2,8 +2,8 @@
 # MyPortal built-in: switch MeshCentral on for a remote session (macOS).
 # Install the delivered MeshCentral agent for the device's company group, then
 # make sure the launch daemon is running. Runs as root through the RMM agent.
-# The node id is resolved by MyPortal afterwards (the agent has no command-line
-# that prints it).
+# Then reports the agent's node id (meshagent -nodeid) so MyPortal opens that
+# device; MyPortal checks it is in the company's group.
 #
 # MyPortal sets these for each run:
 #   MESH_INSTALLER_PATH the installer delivered by MyPortal through the RMM
@@ -55,3 +55,25 @@ if ! is_active; then
 fi
 
 echo "The MeshCentral agent is installed and running."
+
+# The installed agent, as launchd runs it.
+SUDO=""
+AGENT_BIN=$(launchctl print system/meshagent 2>/dev/null | sed -n 's/^[[:space:]]*program = //p' | head -n 1 || true)
+if [ -z "$AGENT_BIN" ]; then AGENT_BIN=/usr/local/mesh_services/meshagent/meshagent; fi
+
+# Report the node id (as Tactical RMM reads it) so MyPortal can open this device
+# directly. A fresh agent needs a moment to create its identity; without an id,
+# MyPortal falls back to matching the device's host name.
+NODE_ID=""
+for _ in $(seq 1 10); do
+  if [ -x "$AGENT_BIN" ]; then
+    CANDIDATE=$($SUDO "$AGENT_BIN" -nodeid 2>/dev/null | tr -d '\r' | awk 'NF { $1 = $1; last = $0 } END { print last }' || true)
+    if [[ "$CANDIDATE" =~ ^[A-Za-z0-9@\$/_+=.-]{16,128}$ ]]; then NODE_ID="$CANDIDATE"; break; fi
+  fi
+  sleep 3
+done
+if [ -n "$NODE_ID" ]; then
+  echo "##myportal[session.node_id]=$NODE_ID"
+else
+  echo "The node id is not available yet; MyPortal will find the device by its host name."
+fi

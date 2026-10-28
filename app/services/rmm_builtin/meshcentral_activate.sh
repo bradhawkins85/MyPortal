@@ -6,8 +6,8 @@
 #   MESH_GROUP_ID the device group to install into (the device's company group)
 #
 # Installs the delivered MeshCentral agent as a background service so the device
-# joins its company's group. The node id is resolved by
-# MyPortal afterwards (the agent has no command-line that prints it).
+# joins its company's group, then reports the agent's node id (meshagent -nodeid)
+# so MyPortal opens that device; MyPortal checks it is in the company's group.
 set -euo pipefail
 
 if [ -z "${MESH_INSTALLER_PATH:-}" ] || [ ! -f "$MESH_INSTALLER_PATH" ]; then
@@ -61,3 +61,24 @@ if ! systemctl is-active --quiet meshagent 2>/dev/null; then
 fi
 
 echo "The MeshCentral agent is installed and running."
+
+# The installed agent, as the service runs it.
+AGENT_BIN=$(systemctl show -p ExecStart meshagent 2>/dev/null | sed -n 's/.*path=\([^;]*[^ ;]\) *;.*/\1/p' | head -n 1 || true)
+if [ -z "$AGENT_BIN" ]; then AGENT_BIN=/usr/local/mesh_services/meshagent/meshagent; fi
+
+# Report the node id (as Tactical RMM reads it) so MyPortal can open this device
+# directly. A fresh agent needs a moment to create its identity; without an id,
+# MyPortal falls back to matching the device's host name.
+NODE_ID=""
+for _ in $(seq 1 10); do
+  if [ -x "$AGENT_BIN" ]; then
+    CANDIDATE=$($SUDO "$AGENT_BIN" -nodeid 2>/dev/null | tr -d '\r' | awk 'NF { $1 = $1; last = $0 } END { print last }' || true)
+    if [[ "$CANDIDATE" =~ ^[A-Za-z0-9@\$/_+=.-]{16,128}$ ]]; then NODE_ID="$CANDIDATE"; break; fi
+  fi
+  sleep 3
+done
+if [ -n "$NODE_ID" ]; then
+  echo "##myportal[session.node_id]=$NODE_ID"
+else
+  echo "The node id is not available yet; MyPortal will find the device by its host name."
+fi
