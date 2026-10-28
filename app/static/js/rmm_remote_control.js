@@ -2,13 +2,26 @@
   'use strict';
 
   // RMM actions beside each asset (rmm/_macros.html asset_menu): a RustDesk icon
-  // button that starts a remote desktop session, and an "RMM" menu with every
+  // button that starts a remote desktop session with a caret menu of every
+  // RustDesk session, and an RMM menu (the MeshCentral icon) with every
   // other action. Choosing a session runs the activation
   // script on the device, then opens the session for the technician as soon as
   // the script reports back. Ticket pages redraw their asset list, so clicks are
   // handled on the document.
 
   const MODES = [['remote', 'Remote desktop'], ['file_transfer', 'File transfer'], ['terminal', 'Terminal']];
+  const RUSTDESK_MODES = [['remote', 'Remote desktop'], ['remote_prompt', 'Remote desktop (Prompt)'],
+    ['file_transfer', 'File transfer'], ['terminal', 'Terminal']];
+
+  function icon(className, src) {
+    const image = document.createElement('img');
+    image.className = className;
+    image.src = src;
+    image.alt = '';
+    image.width = 16;
+    image.height = 16;
+    return image;
+  }
 
   function menuItem(provider, mode, label, assetId, assetName) {
     const item = document.createElement('button');
@@ -54,31 +67,34 @@
     const wrapper = document.createElement('div');
     wrapper.className = 'rmm-asset-actions';
     if (names.indexOf('rustdesk') !== -1) {
+      const split = document.createElement('div');
+      split.className = 'rmm-split';
       const button = menuItem('rustdesk', 'remote', '', String(assetId), assetName);
       button.className = 'button button--ghost button--icon rmm-rustdesk';
       button.removeAttribute('role');
       button.title = 'Start a RustDesk remote session';
       button.setAttribute('aria-label', 'Start a RustDesk remote session for ' + assetName);
-      const icon = document.createElement('img');
-      icon.className = 'rmm-rustdesk__icon';
-      icon.src = '/static/images/rustdesk.svg';
-      icon.alt = '';
-      icon.width = 16;
-      icon.height = 16;
-      button.append(icon);
-      wrapper.append(button);
+      button.append(icon('rmm-rustdesk__icon', '/static/images/rustdesk.svg'));
+      split.append(button);
+      const rustdesk = dropdown('', 'RustDesk actions for ' + assetName, 'RustDesk actions for ' + assetName, '');
+      const caret = rustdesk.menu.querySelector('summary');
+      caret.classList.add('rmm-menu__toggle--caret');
+      caret.title = 'RustDesk actions';
+      RUSTDESK_MODES.forEach(function (entry) {
+        rustdesk.panel.append(menuItem('rustdesk', entry[0], entry[1], String(assetId), assetName));
+      });
+      split.append(rustdesk.menu);
+      wrapper.append(split);
     }
-    if (names.indexOf('rustdesk') !== -1 || names.indexOf('meshcentral') !== -1) {
-      const rmm = dropdown('RMM', 'RMM actions for ' + assetName, 'RMM actions for ' + assetName, '');
-      rmm.menu.querySelector('summary').title = 'RMM actions';
-      if (names.indexOf('rustdesk') !== -1) {
-        rmm.panel.append(menuItem('rustdesk', 'remote_prompt', 'RustDesk remote desktop (Prompt)', String(assetId), assetName));
-      }
-      if (names.indexOf('meshcentral') !== -1) {
-        MODES.forEach(function (entry) {
-          rmm.panel.append(menuItem('meshcentral', entry[0], 'MeshCentral: ' + entry[1].toLowerCase(), String(assetId), assetName));
-        });
-      }
+    if (names.indexOf('meshcentral') !== -1) {
+      const rmm = dropdown('', 'RMM actions for ' + assetName, 'RMM actions for ' + assetName, '');
+      const toggle = rmm.menu.querySelector('summary');
+      toggle.classList.add('rmm-menu__toggle--icon');
+      toggle.title = 'MeshCentral and RMM actions';
+      toggle.prepend(icon('rmm-meshcentral__icon', '/static/images/meshcentral.svg'), ' ');
+      MODES.forEach(function (entry) {
+        rmm.panel.append(menuItem('meshcentral', entry[0], 'MeshCentral: ' + entry[1].toLowerCase(), String(assetId), assetName));
+      });
       wrapper.append(rmm.menu);
     }
     return wrapper;

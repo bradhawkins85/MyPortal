@@ -118,29 +118,41 @@
 {%- endmacro %}
 
 {# RMM actions for one asset (asset page Scripts card, ticket asset list):
-   a RustDesk icon button that starts a remote desktop session, then one
-   "RMM" menu with every other RMM action.
+   a RustDesk icon button that starts a remote desktop session with a caret
+   dropdown beside it offering every RustDesk session, then one RMM menu
+   (shown as the MeshCentral icon when MeshCentral is set up) with every
+   other RMM action.
    rmm_remote_control.js starts the sessions; ticket_detail.js builds the same
    markup when it redraws the list (window.MyPortalRmm.assetActions).
-   The asset detail page uses rustdesk_in_menu to offer every RustDesk session
-   (remote desktop, file transfer, terminal) under RMM instead.
-   The prompt desktop option is always offered in the RMM menu. #}
+   rustdesk_in_menu offers the RustDesk sessions under the RMM menu instead. #}
 {% set REMOTE_MODES = [("remote", "Remote desktop"), ("file_transfer", "File transfer"), ("terminal", "Terminal")] %}
+{% set RUSTDESK_MODES = [("remote", "Remote desktop"), ("remote_prompt", "Remote desktop (Prompt)"), ("file_transfer", "File transfer"), ("terminal", "Terminal")] %}
 {% macro asset_menu(asset_id, asset_name, remote_control, run_script=false, rustdesk_in_menu=false, choco_install=false, run_command=false, tray_repair=false) -%}
 {%- set providers = remote_control | map(attribute="provider") | list -%}
 <div class="rmm-asset-actions">
   {%- if "rustdesk" in providers and not rustdesk_in_menu %}
-  <button type="button" class="button button--ghost button--icon rmm-rustdesk" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}" title="Start a RustDesk remote session" aria-label="Start a RustDesk remote session for {{ asset_name }}"><img class="rmm-rustdesk__icon" src="/static/images/rustdesk.svg" alt="" width="16" height="16"></button>
+  <div class="rmm-split">
+    <button type="button" class="button button--ghost button--icon rmm-rustdesk" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}" title="Start a RustDesk remote session" aria-label="Start a RustDesk remote session for {{ asset_name }}"><img class="rmm-rustdesk__icon" src="/static/images/rustdesk.svg" alt="" width="16" height="16"></button>
+    <details class="rmm-menu" data-rmm-menu>
+      <summary class="button button--ghost button--small rmm-menu__toggle rmm-menu__toggle--caret" title="RustDesk actions" aria-label="RustDesk actions for {{ asset_name }}"><span aria-hidden="true">▾</span></summary>
+      <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RustDesk actions for {{ asset_name }}">
+        {%- for mode, label in RUSTDESK_MODES %}
+        <button type="button" class="dropdown__item" role="menuitem" data-rmm-remote="rustdesk" data-rmm-remote-mode="{{ mode }}" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}">{{ label }}</button>
+        {%- endfor %}
+      </div>
+    </details>
+  </div>
   {%- endif %}
-  {%- if "meshcentral" in providers or run_script or run_command or choco_install or tray_repair or "rustdesk" in providers %}
+  {%- if "meshcentral" in providers or run_script or run_command or choco_install or tray_repair or (rustdesk_in_menu and "rustdesk" in providers) %}
   <details class="rmm-menu" data-rmm-menu>
+    {%- if "meshcentral" in providers %}
+    <summary class="button button--ghost button--small rmm-menu__toggle rmm-menu__toggle--icon" title="MeshCentral and RMM actions" aria-label="RMM actions for {{ asset_name }}"><img class="rmm-meshcentral__icon" src="/static/images/meshcentral.svg" alt="" width="16" height="16"> <span aria-hidden="true">▾</span></summary>
+    {%- else %}
     <summary class="button button--ghost button--small rmm-menu__toggle" title="RMM actions" aria-label="RMM actions for {{ asset_name }}">RMM <span aria-hidden="true">▾</span></summary>
+    {%- endif %}
     <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RMM actions for {{ asset_name }}">
-      {%- if "rustdesk" in providers %}
-      <button type="button" class="dropdown__item" role="menuitem" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote_prompt" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}">RustDesk remote desktop (Prompt)</button>
-      {%- endif %}
       {%- if rustdesk_in_menu and "rustdesk" in providers %}
-      {%- for mode, label in REMOTE_MODES %}
+      {%- for mode, label in RUSTDESK_MODES %}
       <button type="button" class="dropdown__item" role="menuitem" data-rmm-remote="rustdesk" data-rmm-remote-mode="{{ mode }}" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}">RustDesk: {{ label | lower }}</button>
       {%- endfor %}
       {%- endif %}

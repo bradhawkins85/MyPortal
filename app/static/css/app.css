@@ -12693,7 +12693,8 @@ a.service-card__ai-icon:hover {
 }
 
 /* RMM actions beside each asset (rmm/_macros.html asset_menu): a RustDesk
-   icon button and an "RMM" <details> dropdown. */
+   icon button with a caret dropdown, and an RMM <details> dropdown shown as
+   the MeshCentral icon. */
 .rmm-asset-actions {
   display: inline-flex;
   flex-wrap: wrap;
@@ -12701,10 +12702,27 @@ a.service-card__ai-icon:hover {
   gap: var(--space-gap-tight, 0.35rem);
 }
 
-.rmm-rustdesk__icon {
+.rmm-rustdesk__icon,
+.rmm-meshcentral__icon {
   display: block;
   width: 1.1rem;
   height: 1.1rem;
+}
+
+/* The RustDesk icon and its caret read as one split button. */
+.rmm-split {
+  display: inline-flex;
+  align-items: center;
+}
+
+.rmm-menu > .rmm-menu__toggle--caret {
+  padding-inline: 0.3rem;
+}
+
+.rmm-menu > .rmm-menu__toggle--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .rmm-menu {
