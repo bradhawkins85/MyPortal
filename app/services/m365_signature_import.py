@@ -468,6 +468,9 @@ _BLOCK_TAG_WHITESPACE = re.compile(
 )
 # Containers whose text content is never part of the visible signature.
 _SKIP_CONTENT_TAGS = frozenset(("head", "title", "style", "script", "xml"))
+# Conditional comments only VML-capable Outlook reads: <!--[if gte vml 1]>...
+_VML_COMMENT = re.compile(r"^\[if\s[^\]]*(?<!!)\bvml\b[^\]]*\]>(.*?)(?:<!\[endif\])?$", re.IGNORECASE | re.DOTALL)
+_NON_VML_FALLBACK = re.compile(r"^if\s+!\s*vml\b", re.IGNORECASE)
 _VOID_TAGS = frozenset(("br", "hr", "img", "meta", "link", "input", "col", "area", "base", "wbr"))
 
 
@@ -539,9 +542,44 @@ class _OutlookHtmlConverter(HTMLParser):
         self._skip_depth = 0
         self._anchor_stack: list[bool] = []
         self.missing_images: list[str] = []
+        # Images found inside a VML comment, held back until we know whether
+        # a <![if !vml]> fallback follows with its own copy.
+        self._pending_vml: list[str] = []
+        self._pending_missing: list[str] = []
 
     def result(self) -> str:
+        self._flush_vml()
         return "".join(self._out)
+
+    def _flush_vml(self) -> None:
+        if self._pending_vml:
+            self._out.extend(self._pending_vml)
+            for name in self._pending_missing:
+                if name not in self.missing_images:
+                    self.missing_images.append(name)
+        self._pending_vml = []
+        self._pending_missing = []
+
+    def handle_comment(self, data):
+        # Some exports keep the only copy of an image inside the VML block,
+        # with no <![if !vml]> fallback, so nothing else would show it.
+        match = _VML_COMMENT.match(data)
+        if self._skip_depth or not match or "<img" not in match.group(1).lower():
+            return
+        self._flush_vml()
+        inner = _OutlookHtmlConverter(self._rules, self._images)
+        inner.feed(match.group(1))
+        inner.close()
+        images = re.findall(r"<img\b[^>]*>", inner.result())
+        if images:
+            self._pending_vml = images
+            self._pending_missing = inner.missing_images
+
+    def unknown_decl(self, data):
+        if _NON_VML_FALLBACK.match(data.strip()):
+            # The fallback that follows carries its own copy of the image.
+            self._pending_vml = []
+            self._pending_missing = []
 
     def _inline_style(self, tag: str, attrs: dict[str, str]) -> str:
         classes = {c.lower() for c in (attrs.get("class") or "").split()}
@@ -558,6 +596,7 @@ class _OutlookHtmlConverter(HTMLParser):
         return ";".join(f"{prop}:{value}" for prop, value in merged.items())
 
     def handle_starttag(self, tag, attrs):
+        self._flush_vml()
         if tag == "body":
             # </head> is optional; <body> always ends any skipped head content.
             self._skip_depth = 0
@@ -601,6 +640,8 @@ class _OutlookHtmlConverter(HTMLParser):
             self.handle_endtag(tag)
 
     def handle_endtag(self, tag):
+        if self._pending_vml and tag not in _SKIP_CONTENT_TAGS and ":" not in tag:
+            self._flush_vml()
         if tag in _SKIP_CONTENT_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
             return
@@ -615,6 +656,8 @@ class _OutlookHtmlConverter(HTMLParser):
     def handle_data(self, data):
         if self._skip_depth:
             return
+        if data.strip():
+            self._flush_vml()
         # HTML collapses whitespace, but the portal editor renders with
         # ``white-space: pre-wrap``, so Outlook's line-wrapped markup must be
         # collapsed here or every wrapped line becomes a blank line.
