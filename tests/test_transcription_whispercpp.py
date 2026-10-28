@@ -66,6 +66,19 @@ def test_build_asr_request_whispercpp_uses_form_fields():
     assert request.headers == {}
 
 
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        ("http://cpp.local", "http://cpp.local/inference"),
+        ("http://cpp.local/", "http://cpp.local/inference"),
+        ("http://cpp.local/inference", "http://cpp.local/inference"),
+        ("http://cpp.local/v1/audio/transcriptions", "http://cpp.local/v1/audio/transcriptions"),
+    ],
+)
+def test_build_asr_request_whispercpp_uses_full_url_when_path_given(base_url, expected):
+    assert build_asr_request("whispercpp", base_url).url == expected
+
+
 def test_engine_resolution_prefers_explicit_then_configured(monkeypatch):
     assert resolve_engine_from_environment() == ENGINE_WHISPERX
     monkeypatch.setenv("WHISPERCPP_BASE_URL", "http://cpp.local")

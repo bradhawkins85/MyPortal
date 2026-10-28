@@ -6,7 +6,8 @@ Two speech-to-text engines are supported:
   accepts ``POST /asr`` with an ``audio_file`` upload and options as URL query
   parameters.
 * **whisper.cpp** (``whispercpp``) – the ``whisper-server`` HTTP example which
-  accepts ``POST /inference`` with a ``file`` upload and options as multipart
+  accepts ``POST /inference`` (or the full URL configured in
+  ``WHISPERCPP_BASE_URL``) with a ``file`` upload and options as multipart
   form fields.
 
 Both return JSON with a ``text`` key and (optionally) timed ``segments``, so
@@ -18,6 +19,7 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -89,6 +91,18 @@ def resolve_engine_from_environment() -> str:
     return ENGINE_WHISPERX
 
 
+def _whispercpp_url(base: str) -> str:
+    """Use a configured URL with a path as-is; otherwise append ``/inference``.
+
+    Operators can point at whatever route their whisper.cpp server exposes
+    (e.g. ``/v1/audio/transcriptions``) without a code change.
+    """
+
+    if urlsplit(base).path.strip("/"):
+        return base
+    return f"{base}/inference"
+
+
 def build_asr_request(
     engine: str, base_url: str, *, api_key: str = "", language: str = ""
 ) -> AsrRequest:
@@ -102,7 +116,7 @@ def build_asr_request(
         data = {"response_format": "verbose_json"}
         if language:
             data["language"] = language
-        return AsrRequest(url=f"{base}/inference", file_field="file", data=data, headers=headers)
+        return AsrRequest(url=_whispercpp_url(base), file_field="file", data=data, headers=headers)
     # WhisperX /asr uses FastAPI Query(...) parameters, so options MUST be URL
     # query parameters; form fields are silently ignored.
     params = {"output": "json"}

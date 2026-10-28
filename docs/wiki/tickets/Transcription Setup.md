@@ -130,6 +130,11 @@ files that are not 16 kHz mono (this requires `ffmpeg` on the server):
 whisper-server -m models/ggml-base.en.bin --host 0.0.0.0 --port 8080 --convert
 ```
 
+`WHISPERCPP_BASE_URL` can be the bare server address
+(`http://whisper-cpp:8080`), in which case `/inference` is appended, or the
+full endpoint URL (for example `http://whisper-cpp:8080/inference` or
+`http://whisper-cpp:8080/v1/audio/transcriptions`), which is used as-is.
+
 If both `WHISPERX_BASE_URL` and `WHISPERCPP_BASE_URL` are set, WhisperX
 (`/asr`) is used unless `TRANSCRIPTION_ENGINE=whispercpp`.
 
