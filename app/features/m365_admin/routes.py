@@ -365,6 +365,7 @@ async def set_classic_outlook_signatures(request: Request):
         entity_id=company_id,
         after={"classic_outlook_signatures_enabled": enabled},
     )
+    await signature_deploy_service.notify_company_tray_devices(company_id)
     message = (
         "Classic Outlook signature sync enabled. Tray agents apply the active template within an hour."
         if enabled
@@ -661,6 +662,7 @@ async def publish_signature_template(template_id: int, request: Request):
     updated = await signatures_service.publish_template(company_id, template_id, user_id=int(user["id"]))
     if not updated:
         return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    await signature_deploy_service.notify_company_tray_devices(company_id)
     return flash_redirect(f"/m365/signatures/{template_id}/edit", "Signature template published.", "success")
 
 
@@ -672,7 +674,19 @@ async def disable_signature_template(template_id: int, request: Request):
     updated = await signatures_service.disable_template(company_id, template_id, user_id=int(user["id"]))
     if not updated:
         return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    await signature_deploy_service.notify_company_tray_devices(company_id)
     return flash_redirect(f"/m365/signatures/{template_id}/edit", "Signature template disabled.", "success")
+
+
+def _classic_outlook_sync_note(notified: int | None) -> str | None:
+    if notified is None:
+        return None
+    if notified:
+        return (
+            f"Classic Outlook sync requested on {notified} connected tray device(s); "
+            "other devices update within an hour."
+        )
+    return "Classic Outlook signatures update on tray devices within an hour."
 
 
 async def _render_signature_deploy(
@@ -683,6 +697,7 @@ async def _render_signature_deploy(
     *,
     outcomes: list | None = None,
     submitted: dict | None = None,
+    classic_note: str | None = None,
 ):
     return await _main()._render_template(
         "m365/signatures_deploy.html",
@@ -699,6 +714,7 @@ async def _render_signature_deploy(
             "max_mailboxes": signature_deploy_service.MAX_DEPLOY_MAILBOXES,
             "outcomes": outcomes or [],
             "submitted": submitted or {},
+            "classic_note": classic_note,
         },
     )
 
@@ -729,6 +745,12 @@ async def deploy_signature_template(template_id: int, request: Request):
         "auto_add_new": form.get("auto_add_new") == "on",
         "auto_add_reply": form.get("auto_add_reply") == "on",
     }
+    # Classic Outlook is synced by the tray agent, not Exchange Online, so it
+    # is requested first and is unaffected by the Exchange deployment below.
+    classic_notified = None
+    if template_record.get("status") == "published":
+        classic_notified = await signature_deploy_service.request_classic_outlook_sync(company_id)
+    classic_note = _classic_outlook_sync_note(classic_notified)
     try:
         results = await signature_deploy_service.deploy_template(
             company_id,
@@ -738,9 +760,13 @@ async def deploy_signature_template(template_id: int, request: Request):
             auto_add_reply=submitted["auto_add_reply"],
         )
     except ValueError as exc:
-        return flash_redirect(deploy_url, str(exc), "error")
+        return flash_redirect(deploy_url, " ".join(filter(None, (str(exc), classic_note))), "error")
     except m365_service.M365Error as exc:
-        return flash_redirect(deploy_url, f"Microsoft 365 request failed: {exc}", "error")
+        return flash_redirect(
+            deploy_url,
+            " ".join(filter(None, (f"Exchange Online deployment failed: {exc}", classic_note))),
+            "error",
+        )
     failures = [result for result in results if not result["success"]]
     await audit_service.record(
         action="m365.signatures.deploy",
@@ -755,10 +781,17 @@ async def deploy_signature_template(template_id: int, request: Request):
             "failure_count": len(failures),
             "auto_add_new": submitted["auto_add_new"],
             "auto_add_reply": submitted["auto_add_reply"],
+            "classic_outlook_devices_notified": classic_notified,
         },
     )
     return await _render_signature_deploy(
-        request, user, company_id, template_record, outcomes=results, submitted=submitted
+        request,
+        user,
+        company_id,
+        template_record,
+        outcomes=results,
+        submitted=submitted,
+        classic_note=classic_note,
     )
 
 
@@ -803,6 +836,7 @@ async def delete_signature_template(template_id: int, request: Request):
         entity_id=template_id,
         after=None,
     )
+    await signature_deploy_service.notify_company_tray_devices(company_id)
     return flash_redirect("/m365/signatures", "Signature template deleted.", "success")
 
 

@@ -31,6 +31,7 @@ from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import assets as assets_repo
 from app.repositories import companies as companies_repo
+from app.repositories import m365_signatures as m365_signatures_repo
 from app.repositories import site_settings as site_settings_repo
 from app.repositories import tray as tray_repo
 from app.services import ai_consent
@@ -952,6 +953,62 @@ async def select_config_for_device(
     return None
 
 
+SIGNATURE_REFRESH_NODE_TYPE = "refresh_signatures"
+SIGNATURE_REFRESH_LABEL = "Refresh Email Signatures"
+
+
+async def _signature_refresh_available(company_id: Any) -> bool:
+    """True when the company syncs Classic Outlook signatures from a published template."""
+
+    if not company_id:
+        return False
+    company = await companies_repo.get_company_by_id(int(company_id))
+    if not company or not company.get("classic_outlook_signatures_enabled"):
+        return False
+    templates = await m365_signatures_repo.list_templates(int(company_id))
+    return any(str(template.get("status") or "") == "published" for template in templates)
+
+
+def _apply_signature_refresh_item(
+    nodes: list[dict[str, Any]], available: bool
+) -> list[dict[str, Any]]:
+    """Show "Refresh Email Signatures" only to companies with signature templates.
+
+    Unavailable companies have every ``refresh_signatures`` node removed. For
+    available companies a menu that does not place the item itself gets one
+    added before a trailing *Quit* item, or at the end.
+    """
+
+    def _strip(items: list[Any]) -> tuple[list[Any], bool]:
+        kept: list[Any] = []
+        found = False
+        for node in items:
+            if not isinstance(node, dict):
+                kept.append(node)
+                continue
+            if str(node.get("type") or "").strip().lower() == SIGNATURE_REFRESH_NODE_TYPE:
+                found = True
+                if available:
+                    kept.append(node)
+                continue
+            children = node.get("children")
+            if isinstance(children, list):
+                node = dict(node)
+                node["children"], child_found = _strip(children)
+                found = found or child_found
+            kept.append(node)
+        return kept, found
+
+    result, found = _strip(list(nodes))
+    if available and not found:
+        item = {"type": SIGNATURE_REFRESH_NODE_TYPE, "label": SIGNATURE_REFRESH_LABEL}
+        position = len(result)
+        if result and isinstance(result[-1], dict) and str(result[-1].get("type") or "").lower() == "quit":
+            position -= 1
+        result.insert(position, item)
+    return result
+
+
 async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
     """Return the menu config payload + branding to send to ``device``.
 
@@ -993,6 +1050,9 @@ async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
 
     payload = await _expand_menu_url_variables(payload, company_id)
     payload = await _filter_rmm_scripts_for_platform(payload, device)
+    payload = _apply_signature_refresh_item(
+        payload, await _signature_refresh_available(company_id)
+    )
 
     return {
         "version": version,

@@ -320,3 +320,143 @@ async def test_tray_endpoint_requires_company_opt_in(monkeypatch):
     assert disabled.enabled is False and unassigned.enabled is False
     assert enabled.enabled is True and enabled.template_slug == "standard"
     assert calls == [(2, ["ada@example.com"])]
+
+
+@pytest.mark.anyio
+async def test_classic_outlook_sync_notifies_only_when_enabled(monkeypatch):
+    sent = []
+
+    async def fake_send(device_uid, payload):
+        sent.append((device_uid, payload))
+        return device_uid != "offline"
+
+    monkeypatch.setattr(
+        deployment.tray_repo,
+        "list_devices",
+        _async([{"device_uid": "dev-1"}, {"device_uid": "offline"}, {"device_uid": ""}]),
+    )
+    monkeypatch.setattr(deployment.tray_service, "send_to_device", fake_send)
+
+    monkeypatch.setattr(
+        deployment.companies_repo,
+        "get_company_by_id",
+        _async({"id": 7, "classic_outlook_signatures_enabled": 0}),
+    )
+    assert await deployment.request_classic_outlook_sync(7) is None
+    assert sent == []
+
+    monkeypatch.setattr(
+        deployment.companies_repo,
+        "get_company_by_id",
+        _async({"id": 7, "classic_outlook_signatures_enabled": 1}),
+    )
+    assert await deployment.request_classic_outlook_sync(7) == 1
+    assert sent == [("dev-1", {"type": "config_changed"}), ("offline", {"type": "config_changed"})]
+
+
+def _deploy_route_client(monkeypatch, deploy_side_effect):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.features.m365_admin import routes
+
+    synced = []
+
+    async def fake_context(request, *, write=False):
+        return {"id": 1}, 7, None
+
+    async def fake_sync(company_id):
+        synced.append(company_id)
+        return 2
+
+    async def fake_deploy(*args, **kwargs):
+        raise deploy_side_effect
+
+    monkeypatch.setattr(routes, "_signature_context", fake_context)
+    monkeypatch.setattr(
+        routes.signatures_service, "get_template", _async({"id": 5, "status": "published"})
+    )
+    monkeypatch.setattr(routes.signature_deploy_service, "request_classic_outlook_sync", fake_sync)
+    monkeypatch.setattr(routes.signature_deploy_service, "deploy_template", fake_deploy)
+    app = FastAPI()
+    app.include_router(routes.router)
+    return TestClient(app), synced
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        deployment.m365_service.M365Error("Exchange token refused"),
+        ValueError("Select at least one mailbox"),
+    ],
+)
+def test_deploy_route_syncs_classic_outlook_when_exchange_fails(monkeypatch, failure):
+    client, synced = _deploy_route_client(monkeypatch, failure)
+    response = client.post(
+        "/m365/signatures/5/deploy", data={"auto_add_new": "on"}, follow_redirects=False
+    )
+    assert response.status_code in (302, 303)
+    assert synced == [7]
+
+
+def test_signature_refresh_item_hidden_without_signature_templates():
+    from app.services import tray as tray_service
+
+    menu = [
+        {"type": "label", "label": "MyPortal"},
+        {"type": "submenu", "label": "Tools", "children": [{"type": "refresh_signatures"}]},
+        {"type": "refresh_signatures", "label": "Refresh Email Signatures"},
+        {"type": "quit"},
+    ]
+    result = tray_service._apply_signature_refresh_item(menu, False)
+    assert result == [
+        {"type": "label", "label": "MyPortal"},
+        {"type": "submenu", "label": "Tools", "children": []},
+        {"type": "quit"},
+    ]
+    assert menu[1]["children"] == [{"type": "refresh_signatures"}]
+
+
+def test_signature_refresh_item_added_before_quit_when_available():
+    from app.services import tray as tray_service
+
+    added = tray_service._apply_signature_refresh_item(
+        [{"type": "label", "label": "MyPortal"}, {"type": "quit"}], True
+    )
+    assert added == [
+        {"type": "label", "label": "MyPortal"},
+        {"type": "refresh_signatures", "label": "Refresh Email Signatures"},
+        {"type": "quit"},
+    ]
+    placed = [
+        {"type": "submenu", "label": "Email", "children": [{"type": "refresh_signatures", "label": "Fix my signature"}]},
+    ]
+    assert tray_service._apply_signature_refresh_item(placed, True) == placed
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("enabled", "statuses", "expected"),
+    [
+        (1, ["draft", "published"], True),
+        (1, ["draft", "disabled"], False),
+        (0, ["published"], False),
+    ],
+)
+async def test_signature_refresh_available_needs_classic_sync_and_published_template(
+    monkeypatch, enabled, statuses, expected
+):
+    from app.services import tray as tray_service
+
+    monkeypatch.setattr(
+        tray_service.companies_repo,
+        "get_company_by_id",
+        _async({"id": 7, "classic_outlook_signatures_enabled": enabled}),
+    )
+    monkeypatch.setattr(
+        tray_service.m365_signatures_repo,
+        "list_templates",
+        _async([{"status": status} for status in statuses]),
+    )
+    assert await tray_service._signature_refresh_available(7) is expected
+    assert await tray_service._signature_refresh_available(None) is False
