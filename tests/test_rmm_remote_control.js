@@ -20,7 +20,7 @@ function setup(responses, {blockPopups = false} = {}) {
   const opened = [];
   const requests = [];
   const timers = [];
-  // A tab reserved on the click: about:blank, written to until it is sent on.
+  // The tab opened once the session is ready: about:blank, then sent on.
   const tab = {closed: false, opener: {}, document: {title: '', body: {textContent: ''}}, location: {},
     close() { this.closed = true; }};
   tab.location.replace = url => { tab.location.href = url; };
@@ -49,40 +49,37 @@ function setup(responses, {blockPopups = false} = {}) {
 const activating = {id: 1, label: 'MeshCentral', status: 'activating', run_status: 'running'};
 const ready = {label: 'MeshCentral', status: 'ready', launch_url: 'https://mesh.example.com/?login=test'};
 
-test('reserves a tab on the click, shows progress in it, then sends it to the ready URL', async () => {
+test('shows progress on the page, then opens MeshCentral in a new tab once ready', async () => {
   const app = setup([activating, ready]);
   await app.click();
+  assert.equal(app.opened.length, 0);
+  assert.equal(app.message.textContent, 'Switching on MeshCentral on PC: the script is running…');
+  await app.poll();
   assert.deepEqual(app.opened, [['', '_blank']]);
   assert.equal(app.tab.opener, null);
-  assert.match(app.tab.document.body.textContent, /script is running/);
-  assert.match(app.message.textContent, /script is running/);
-  await app.poll();
-  assert.equal(app.opened.length, 1);
   assert.equal(app.tab.location.href, ready.launch_url);
-  assert.equal(app.tab.closed, false);
   assert.equal(app.link.href, ready.launch_url);
   assert.equal(app.link.hidden, false);
   assert.match(app.message.textContent, /opening.*new tab/);
   assert.equal(app.button.disabled, false);
 });
 
-test('falls back to opening the URL, with a link, when pop-ups are blocked', async () => {
+test('offers a link on the page when the browser blocks the new tab', async () => {
   const app = setup([activating, ready], {blockPopups: true});
   await app.click();
   await app.poll();
-  assert.deepEqual(app.opened, [['', '_blank'], [ready.launch_url, '_blank', 'noopener,noreferrer']]);
+  assert.deepEqual(app.opened, [['', '_blank']]);
+  assert.equal(app.link.href, ready.launch_url);
   assert.equal(app.link.hidden, false);
-  assert.match(app.message.textContent, /ready.*use the link/);
+  assert.match(app.message.textContent, /ready.*use the link/i);
 });
 
 for (const failure of [{...activating, status: 'failed', error: 'Installation failed'}, new Error('Network failed')]) {
-  test('failed activation closes the reserved tab: ' + (failure.error || failure.message), async () => {
+  test('failed activation opens no tab: ' + (failure.error || failure.message), async () => {
     const app = setup([activating, failure]);
     await app.click();
     await app.poll();
-    assert.equal(app.opened.length, 1);
-    assert.equal(app.tab.closed, true);
-    assert.equal(app.tab.location.href, undefined);
+    assert.equal(app.opened.length, 0);
     assert.equal(app.link.hidden, true);
     assert.equal(app.button.disabled, false);
     assert.match(app.message.textContent, /failed/);
@@ -98,8 +95,7 @@ test('immediately ready session opens its actual URL', async () => {
 test('invalid launch URL never reaches a tab', async () => {
   const app = setup([{...ready, launch_url: 'javascript:alert(1)'}]);
   await app.click();
-  assert.equal(app.tab.closed, true);
-  assert.equal(app.tab.location.href, undefined);
+  assert.equal(app.opened.length, 0);
   assert.equal(app.link.hidden, true);
   assert.match(app.message.textContent, /cannot open/);
 });
