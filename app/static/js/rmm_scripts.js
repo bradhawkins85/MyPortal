@@ -545,7 +545,8 @@
     queueTimeoutInput.value = saved && saved.queue_timeout_seconds != null ? saved.queue_timeout_seconds / 60 : '';
     const queueDefault = detail.script.default_queue_timeout_seconds || 0;
     queueTimeoutInput.placeholder = queueDefault ? 'Script default: ' + queueDefault / 60 + ' minutes' : 'Script default: Forever';
-    runAsSelect.value = saved && saved.run_as === 'user' ? 'user' : 'system';
+    const runAs = saved ? saved.run_as : detail.script.default_run_as;
+    runAsSelect.value = runAs === 'user' ? 'user' : 'system';
     if (saved) {
       Object.entries(saved.values || {}).forEach(([key, value]) => {
         const control = fieldsHost.querySelector('[data-rmm-value="' + CSS.escape(key) + '"]');

@@ -58,6 +58,7 @@ def _script_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     script["allow_parallel"] = bool(script.get("allow_parallel"))
     script["run_anyway"] = bool(script.get("run_anyway"))
     script["execution_mode"] = script_execution_mode(script)
+    script["default_run_as"] = "user" if script.get("default_run_as") == "user" else "system"
     if "ai_summary_json" in script:
         script["ai_summary"] = _decode_json(script.pop("ai_summary_json"), None)
     return script
@@ -105,13 +106,13 @@ async def list_scripts(*, company_id: int | None = None) -> list[dict[str, Any]]
     if company_id is None:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, default_run_as, company_id, is_active, synced_at, "
             "created_at, updated_at, platforms_json, files_json FROM rmm_scripts WHERE is_active = 1 ORDER BY folder, name"
         )
     else:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, default_run_as, company_id, is_active, synced_at, "
             "created_at, updated_at, platforms_json, files_json FROM rmm_scripts WHERE is_active = 1 "
             "AND (company_id IS NULL OR company_id = %s) ORDER BY folder, name",
             (company_id,),
@@ -132,7 +133,7 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
     if with_content:
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, default_run_as, company_id, is_active, synced_at, "
             "created_at, updated_at, platforms_json, files_json, content, ai_summary_json, ai_summary_sha256, ai_summary_model, "
             "ai_summary_updated_at FROM rmm_scripts WHERE id = %s",
             (script_id,),
@@ -140,7 +141,7 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
     else:
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, company_id, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, default_queue_timeout_seconds, allow_parallel, run_anyway, default_run_as, company_id, is_active, synced_at, "
             "created_at, updated_at, platforms_json, files_json FROM rmm_scripts WHERE id = %s",
             (script_id,),
         )
@@ -243,6 +244,15 @@ async def set_script_execution(script_id: int, execution_mode: str) -> None:
     await db.execute(
         "UPDATE rmm_scripts SET allow_parallel = %s, run_anyway = %s, updated_at = %s WHERE id = %s",
         (execution_mode == "parallel", execution_mode == "run_anyway", _utcnow(), script_id),
+    )
+
+
+async def set_script_run_as(script_id: int, run_as: str) -> None:
+    if run_as not in {"system", "user"}:
+        raise ValueError("Invalid script run as")
+    await db.execute(
+        "UPDATE rmm_scripts SET default_run_as = %s, updated_at = %s WHERE id = %s",
+        (run_as, _utcnow(), script_id),
     )
 
 

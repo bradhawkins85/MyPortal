@@ -627,6 +627,14 @@ def clean_run_as(value: Any) -> str:
     return str(value)
 
 
+def script_run_as(script: Mapping[str, Any], value: Any = None) -> str:
+    """``value`` when given, otherwise the script's default Run As."""
+
+    if value is None or value == "":
+        return "user" if script.get("default_run_as") == "user" else "system"
+    return clean_run_as(value)
+
+
 def notify_agent(agent_id: int) -> None:
     event = _agent_events.get(agent_id)
     if event is not None:
@@ -712,7 +720,7 @@ async def queue_for_agent(
     expires_at: datetime | None = None,
     notify: bool = True,
     extra_context: Mapping[str, Any] | None = None,
-    run_as: str = "system",
+    run_as: str | None = None,
     queue_timeout_seconds: Any = None,
     extra_env: Mapping[str, str] | None = None,
 ) -> int:
@@ -723,9 +731,10 @@ async def queue_for_agent(
     run started by an event log rule (``{{event.message}}``). ``extra_env``
     adds environment variables the script does not ask for, such as the
     previous run's result for a script result rule; the script's own values
-    win. ``run_as`` is ``system`` or ``user`` (the user logged in to the device)."""
+    win. ``run_as`` is ``system`` or ``user`` (the user logged in to the device);
+    when omitted the script's default applies."""
 
-    run_as = clean_run_as(run_as)
+    run_as = script_run_as(script, run_as)
     queue_wait = queue_timeout(queue_timeout_seconds, int(script.get("default_queue_timeout_seconds") or 0))
     if expires_at is None and queue_wait:
         expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=queue_wait)
@@ -778,7 +787,7 @@ async def queue_runs(
     submitted: Mapping[str, Any],
     timeout_seconds: Any,
     requested_by_user_id: int | None,
-    run_as: Any = "system",
+    run_as: Any = None,
     queue_timeout_seconds: Any = None,
 ) -> dict[str, Any]:
     """Queue the script on each device. Returns the queued run ids and per-device problems."""
@@ -792,7 +801,7 @@ async def queue_runs(
     if len(targets) > MAX_TARGETS_PER_RUN:
         raise RunRequestError({"assets": f"Choose at most {MAX_TARGETS_PER_RUN} devices at a time."})
     entries = validate_entries(script, submitted)
-    run_as = clean_run_as(run_as)
+    run_as = script_run_as(script, run_as)
     timeout = clamp_timeout(timeout_seconds, int(script.get("default_timeout_seconds") or 600))
     queue_wait = queue_timeout(queue_timeout_seconds, int(script.get("default_queue_timeout_seconds") or 0))
     inputs = stored_inputs(script, entries)
@@ -832,7 +841,8 @@ async def queue_runs(
             problems.append(problem)
             continue
         queued.append({"run_id": run_id, "asset_id": asset_id, "asset_name": asset.get("name")})
-    return {"queued": queued, "problems": problems, "script": {"id": script["id"], "name": script["name"]}}
+    return {"queued": queued, "problems": problems, "run_as": run_as,
+            "script": {"id": script["id"], "name": script["name"]}}
 
 
 async def queue_tray_run(*, device: Mapping[str, Any], node: Mapping[str, Any]) -> dict[str, Any]:

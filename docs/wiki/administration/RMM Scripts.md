@@ -444,11 +444,19 @@ Every manual run, schedule and onboarding step has a **Run as** setting:
   than running as System. Associated files are still downloaded by the agent's own
   account before the script starts, so put them where the user can read them.
 
-The choice is saved with schedules and onboarding steps, captured on each queued run,
-shown in the run's details, and kept when you **Retry** a run. Event log rules, the tray
-menu, remote control, patching and Windows Update jobs always run as System.
+Each script also has a **Default Run As**, System unless a super admin changes it. Open
+the script, choose **Default Run As**, and select **Save Run As**. The run form starts
+on the script's default, and the API uses it when a request leaves `run_as` out. Runs
+that do not choose an account (event log rules, script result rules, health check
+remediations, the tray menu, remote control activation and ticket automations without
+**Run as**) use the script's default too. Schedules and onboarding steps keep the account
+they were saved with; changing the default affects only ones you save afterwards.
 
-Running as the logged-in user needs migration 508 and an updated RMM agent: agents report
+The choice is saved with schedules and onboarding steps, captured on each queued run,
+shown in the run's details, and kept when you **Retry** a run. Patching and Windows
+Update jobs always run as System.
+
+Running as the logged-in user needs migration 508 (the script default needs 530) and an updated RMM agent: agents report
 `run_as_user_supported: true` on check-in. Deploy MyPortal first, then update agents. An
 older agent fails a **Logged in user** run with an update message instead of running it as
 System. System runs work on every agent.

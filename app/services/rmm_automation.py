@@ -233,7 +233,7 @@ async def save_schedule(
         entries = {}
     run_as = "system"
     try:
-        run_as = rmm_scripts.clean_run_as(payload.get("run_as"))
+        run_as = rmm_scripts.script_run_as(script, payload.get("run_as"))
     except RunRequestError as exc:
         errors.update(exc.errors)
     if errors:
@@ -477,7 +477,7 @@ async def save_step(
         entries = {}
     run_as = "system"
     try:
-        run_as = rmm_scripts.clean_run_as(payload.get("run_as"))
+        run_as = rmm_scripts.script_run_as(script, payload.get("run_as"))
     except RunRequestError as exc:
         errors.update(exc.errors)
     if errors:
