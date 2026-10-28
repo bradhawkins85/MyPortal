@@ -1131,3 +1131,95 @@ async def test_ensure_graph_app_roles_on_manifest_adds_missing_roles():
     assert all(item["type"] == "Role" for item in access)
     # Roles the tenant's Graph resource does not list stay out of the manifest.
     assert "cc117bb9-00cf-4eb8-b580-ea2a878fe8f7" not in ids
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_exchange_manage_as_app_on_manifest_adds_role():
+    patched: dict = {}
+
+    async def fake_get(token, url, **kwargs):
+        if url.startswith("https://graph.microsoft.com/v1.0/applications"):
+            return {"value": [{
+                "id": "11111111-1111-1111-1111-111111111111",
+                "requiredResourceAccess": [{
+                    "resourceAppId": _GRAPH_APP_ID,
+                    "resourceAccess": [{"id": "df021288-bdef-4463-88db-98f22de89214", "type": "Role"}],
+                }],
+            }]}
+        assert m365_service._EXO_APP_ID in url
+        return {"value": [{"id": "exo-sp-id", "appRoles": [{"id": m365_service._EXO_MANAGE_AS_APP_ROLE}]}]}
+
+    async def fake_patch(token, url, payload, **kwargs):
+        patched.update(payload)
+        return {}
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
+        patch.object(m365_service, "_graph_get", side_effect=fake_get),
+        patch.object(m365_service, "_graph_patch", side_effect=fake_patch),
+    ):
+        added = await m365_service.ensure_exchange_manage_as_app_on_manifest(1, "tok")
+
+    assert added is True
+    entries = {e["resourceAppId"]: e["resourceAccess"] for e in patched["requiredResourceAccess"]}
+    assert entries[_GRAPH_APP_ID] == [{"id": "df021288-bdef-4463-88db-98f22de89214", "type": "Role"}]
+    assert entries[m365_service._EXO_APP_ID] == [
+        {"id": m365_service._EXO_MANAGE_AS_APP_ROLE, "type": "Role"}
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_exchange_manage_as_app_on_manifest_skips_when_present():
+    async def fake_get(token, url, **kwargs):
+        if url.startswith("https://graph.microsoft.com/v1.0/applications"):
+            return {"value": [{
+                "id": "11111111-1111-1111-1111-111111111111",
+                "requiredResourceAccess": [{
+                    "resourceAppId": m365_service._EXO_APP_ID,
+                    "resourceAccess": [{"id": m365_service._EXO_MANAGE_AS_APP_ROLE, "type": "Role"}],
+                }],
+            }]}
+        return {"value": [{"id": "exo-sp-id", "appRoles": [{"id": m365_service._EXO_MANAGE_AS_APP_ROLE}]}]}
+
+    patch_mock = AsyncMock()
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
+        patch.object(m365_service, "_graph_get", side_effect=fake_get),
+        patch.object(m365_service, "_graph_patch", patch_mock),
+    ):
+        added = await m365_service.ensure_exchange_manage_as_app_on_manifest(1, "tok")
+
+    assert added is False
+    patch_mock.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_app_registration_lists_exchange_manage_as_app_on_manifest():
+    posted: list[dict] = []
+
+    async def fake_get(token, url, **kwargs):
+        if m365_service._EXO_APP_ID in url:
+            return {"value": [{"id": "exo-sp-id", "appRoles": [{"id": m365_service._EXO_MANAGE_AS_APP_ROLE}]}]}
+        return {"value": [{"id": "graph-sp-id", "appRoles": []}]}
+
+    async def fake_post(token, url, payload, **kwargs):
+        if url.endswith("/v1.0/applications"):
+            posted.append(payload)
+            return {"id": "app-object-id", "appId": "new-client-id"}
+        if url.endswith("/v1.0/servicePrincipals"):
+            return {"id": "sp-id"}
+        if "addPassword" in url:
+            return {"secretText": "s", "keyId": "k"}
+        return {}
+
+    with (
+        patch.object(m365_service, "_graph_get", side_effect=fake_get),
+        patch.object(m365_service, "_graph_post", side_effect=fake_post),
+        patch.object(m365_service, "_grant_provisioned_roles", AsyncMock()),
+    ):
+        await m365_service.provision_app_registration(access_token="tok")
+
+    entries = {e["resourceAppId"]: e["resourceAccess"] for e in posted[0]["requiredResourceAccess"]}
+    assert entries[m365_service._EXO_APP_ID] == [
+        {"id": m365_service._EXO_MANAGE_AS_APP_ROLE, "type": "Role"}
+    ]

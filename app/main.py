@@ -6744,6 +6744,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # List every baseline application permission on the app registration
         # so Entra shows it as configured and admin consent covers it.
         await m365_service.ensure_graph_app_roles_on_manifest(company_id, access_token)
+        await m365_service.ensure_exchange_manage_as_app_on_manifest(company_id, access_token)
         new_permissions_granted = await m365_service.try_grant_missing_permissions(
             company_id=company_id,
             access_token=access_token,

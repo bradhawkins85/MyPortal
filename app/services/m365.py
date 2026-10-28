@@ -2233,6 +2233,41 @@ async def ensure_graph_app_roles_on_manifest(company_id: int, access_token: str)
     return added
 
 
+async def ensure_exchange_manage_as_app_on_manifest(company_id: int, access_token: str) -> bool:
+    """List Office 365 Exchange Online ``Exchange.ManageAsApp`` on the app manifest.
+
+    Provisioning grants the role directly, but without a manifest entry Entra
+    does not show it under API permissions and Exchange cmdlets such as
+    ``Set-MailboxMessageConfiguration`` (email signatures) can be refused.
+    Returns ``True`` when the manifest was changed.  Failures are logged, never raised.
+    """
+    creds = await get_credentials(company_id)
+    client_id = str((creds or {}).get("client_id") or "").strip()
+    if not client_id:
+        return False
+    try:
+        _, exo_sp_role_ids = await _get_sp_app_role_ids(access_token, _EXO_APP_ID)
+        if _EXO_MANAGE_AS_APP_ROLE not in exo_sp_role_ids:
+            log_warning(
+                "Exchange.ManageAsApp is not exposed in this tenant; app manifest left unchanged",
+                company_id=company_id,
+            )
+            return False
+        added = await _merge_manifest_scopes(
+            access_token, client_id, _EXO_APP_ID, [_EXO_MANAGE_AS_APP_ROLE], access_type="Role",
+        )
+    except M365Error as exc:
+        log_warning(
+            "Could not add Exchange.ManageAsApp to the app manifest",
+            company_id=company_id,
+            **_safe_m365_error_fields(exc),
+        )
+        return False
+    if added:
+        log_info("Added Exchange.ManageAsApp to the app manifest", company_id=company_id)
+    return bool(added)
+
+
 async def ensure_ediscovery_delegated_permission(company_id: int, access_token: str) -> bool:
     """Add Microsoft Graph ``eDiscovery.ReadWrite.All`` (delegated) to the app manifest.
 
@@ -3392,6 +3427,15 @@ async def provision_app_registration(
             {"id": role_id, "type": "Role"} for role_id in valid_graph_roles
         ],
     }]
+    # List Exchange.ManageAsApp on the manifest as well as granting it, so
+    # Entra shows it under API permissions and a repair PATCH (which replaces
+    # requiredResourceAccess) does not drop a manually added entry.
+    _, exo_sp_role_ids = await _get_sp_app_role_ids(access_token, _EXO_APP_ID)
+    if _EXO_MANAGE_AS_APP_ROLE in exo_sp_role_ids:
+        required_resource_access.append({
+            "resourceAppId": _EXO_APP_ID,
+            "resourceAccess": [{"id": _EXO_MANAGE_AS_APP_ROLE, "type": "Role"}],
+        })
 
     # 2. Repair the known app in place or create a side-by-side registration.
     app_payload: dict[str, Any] = {
