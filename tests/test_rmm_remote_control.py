@@ -334,26 +334,37 @@ async def test_ticket_buttons_follow_the_tickets_company_permission(sqlite_db, m
     assert denied.value.status_code == 403
 
 
-def test_asset_menu_has_a_rustdesk_icon_button_and_an_rmm_menu():
+def test_asset_menu_has_a_rustdesk_split_button_and_a_meshcentral_menu():
     env = _environment()
     template = env.from_string(
         '{% import "rmm/_macros.html" as rmm_ui %}{{ rmm_ui.asset_menu(7, "<PC>", providers, run_script=run) }}'
     )
     providers = [{"provider": "rustdesk", "label": "RustDesk"}, {"provider": "meshcentral", "label": "MeshCentral"}]
     html = template.render(providers=providers, run=True)
-    # RustDesk keeps its desktop shortcut and offers a prompt option in the menu.
+    # RustDesk keeps its one-click desktop button, with a caret menu of every session.
     assert 'class="button button--ghost button--icon rmm-rustdesk" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote"' in html
     assert 'src="/static/images/rustdesk.svg"' in html and 'aria-label="Start a RustDesk remote session for &lt;PC&gt;"' in html
-    assert html.count('data-rmm-remote="rustdesk"') == 2
+    assert 'aria-label="RustDesk actions for &lt;PC&gt;"' in html
+    assert html.count('data-rmm-remote="rustdesk"') == 5
+    for mode in ("remote", "remote_prompt", "file_transfer", "terminal"):
+        assert f'role="menuitem" data-rmm-remote="rustdesk" data-rmm-remote-mode="{mode}"' in html
+    # The RMM menu is shown as the MeshCentral icon rather than the "RMM" text.
+    assert 'src="/static/images/meshcentral.svg"' in html and ">RMM <" not in html
     for mode in ("remote", "file_transfer", "terminal"):
         assert f'data-rmm-remote="meshcentral" data-rmm-remote-mode="{mode}"' in html
-    assert html.count('role="menuitem"') == 5 and html.count("data-rmm-menu") == 1
+    assert html.count('role="menuitem"') == 8 and html.count("data-rmm-menu") == 2
     assert 'data-rmm-remote-name="&lt;PC&gt;"' in html and "<PC>" not in html
     assert "data-rmm-run-open" in html
-    rustdesk_only = template.render(providers=providers[:1], run=False)
-    assert "rmm-rustdesk" in rustdesk_only and "RustDesk remote desktop (Prompt)" in rustdesk_only
-    assert 'data-rmm-remote-mode="remote_prompt"' in rustdesk_only
     assert 'data-rmm-remote="meshcentral" data-rmm-remote-mode="remote_prompt"' not in html
+    rustdesk_only = template.render(providers=providers[:1], run=False)
+    assert "rmm-rustdesk" in rustdesk_only and "Remote desktop (Prompt)" in rustdesk_only
+    assert rustdesk_only.count("data-rmm-menu") == 1 and "meshcentral" not in rustdesk_only
+    # Without MeshCentral the menu keeps its "RMM" label.
+    assert ">RMM <" in template.render(providers=[], run=True)
+    in_menu = env.from_string(
+        '{% import "rmm/_macros.html" as rmm_ui %}{{ rmm_ui.asset_menu(7, "PC", providers, rustdesk_in_menu=True) }}'
+    ).render(providers=providers[:1])
+    assert "rmm-rustdesk" not in in_menu and in_menu.count('data-rmm-remote="rustdesk"') == 4
 
 
 @pytest.mark.anyio
