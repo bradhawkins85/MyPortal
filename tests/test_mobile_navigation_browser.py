@@ -74,6 +74,8 @@ def test_mobile_navigation_portrait_landscape_and_desktop(browser, style, labels
             toggle.tap()
             expect(toggle).to_have_attribute("aria-expanded", "true")
             expect(nav).not_to_have_attribute("inert", "")
+            # Opening the drawer must not focus an input and raise the keyboard.
+            expect(nav).to_be_focused()
             expect(group.locator(".menu__label")).to_be_visible()
             if group.get_attribute("aria-expanded") == "true":
                 group.tap()
