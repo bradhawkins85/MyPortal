@@ -1,0 +1,7 @@
+{
+  "guid": "4104647f-b70f-40d9-87bf-ffadf36c454d",
+  "occurred_at": "2026-10-29T07:21Z",
+  "change_type": "Fix",
+  "summary": "Opening the menu on a phone or tablet no longer jumps into the company switcher, so the on-screen keyboard no longer pops up unexpectedly.",
+  "content_hash": "07c053378d891c913f839f4b5b4928ab503273aceb3bf9e96042b4a5e493c15c"
+}
