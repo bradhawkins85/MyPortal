@@ -26,4 +26,6 @@ func (unsupportedOutlookPlatform) SetDefaultSignature(string) error { return err
 
 func (unsupportedOutlookPlatform) DisableRoamingSignatures() error { return errOutlookUnsupported }
 
+func (unsupportedOutlookPlatform) EmbedSignatureImages() error { return errOutlookUnsupported }
+
 func (unsupportedOutlookPlatform) StateDir() (string, error) { return "", errOutlookUnsupported }

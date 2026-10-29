@@ -20,6 +20,7 @@ type fakeOutlookPlatform struct {
 	accountDefaults map[string]string
 	defaultName     string
 	roamingOff      bool
+	imagesEmbedded  bool
 }
 
 func (f *fakeOutlookPlatform) Supported() bool                     { return true }
@@ -31,6 +32,7 @@ func (f *fakeOutlookPlatform) SetDefaultSignature(name string) error {
 	return nil
 }
 func (f *fakeOutlookPlatform) DisableRoamingSignatures() error { f.roamingOff = true; return nil }
+func (f *fakeOutlookPlatform) EmbedSignatureImages() error     { f.imagesEmbedded = true; return nil }
 func (f *fakeOutlookPlatform) SetAccountSignature(a outlookAccount, name string) error {
 	f.accountDefaults[a.Key] = name
 	return nil
@@ -111,8 +113,8 @@ func TestSyncWritesSignatureFilesAndSetsDefaults(t *testing.T) {
 	if _, ok := platform.accountDefaults["profile\\0003"]; ok {
 		t.Fatal("skipped personal account must not be changed")
 	}
-	if platform.defaultName != base || !platform.roamingOff {
-		t.Fatalf("default=%q roamingOff=%v", platform.defaultName, platform.roamingOff)
+	if platform.defaultName != base || !platform.roamingOff || !platform.imagesEmbedded {
+		t.Fatalf("default=%q roamingOff=%v imagesEmbedded=%v", platform.defaultName, platform.roamingOff, platform.imagesEmbedded)
 	}
 }
 
@@ -192,7 +194,7 @@ func TestSyncDoesNothingWhenDisabledOrNoAccounts(t *testing.T) {
 	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(platform.sigDir); !os.IsNotExist(err) || platform.roamingOff || len(platform.accountDefaults) != 0 {
+	if _, err := os.Stat(platform.sigDir); !os.IsNotExist(err) || platform.roamingOff || platform.imagesEmbedded || len(platform.accountDefaults) != 0 {
 		t.Fatal("disabled company must not change Outlook")
 	}
 }
