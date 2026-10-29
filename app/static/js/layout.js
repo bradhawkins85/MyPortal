@@ -169,16 +169,10 @@
   const mobileMedia = window.matchMedia('(max-width: 1024px)');
   let lastFocusedTrigger = null;
 
-  const focusFirstSidebarItem = () => {
-    if (!sidebar) {
-      return;
-    }
-    const focusableSelector =
-      'a[href], button:not([disabled]), textarea, input:not([type="hidden"]), select, [tabindex]:not([tabindex="-1"])';
-    const firstFocusable = sidebar.querySelector(focusableSelector);
-    if (firstFocusable instanceof HTMLElement) {
-      firstFocusable.focus({ preventScroll: true });
-    } else {
+  // Focus the drawer itself rather than its first control: that control is
+  // the company switcher search, and focusing it raises the on-screen keyboard.
+  const focusSidebar = () => {
+    if (sidebar) {
       sidebar.focus({ preventScroll: true });
     }
   };
@@ -224,7 +218,7 @@
     toggleButton.setAttribute('aria-expanded', 'true');
     syncSidebarAria(true);
     lastFocusedTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    focusFirstSidebarItem();
+    focusSidebar();
   };
 
   const toggleSidebar = () => {
