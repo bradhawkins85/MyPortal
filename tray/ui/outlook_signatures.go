@@ -13,9 +13,12 @@
 //  3. writes the .htm, .rtf and .txt signature files when their content
 //     changed, saving images embedded as base64 data: URIs into the
 //     "<name>_files" folder Outlook expects;
-//  4. makes each account's primary signature the default for new messages
+//  4. turns on Outlook's "Send Pictures With Document" option, without which
+//     those image files are shown while composing but sent as links to
+//     files on this computer, so recipients never see them;
+//  5. makes each account's primary signature the default for new messages
 //     and replies, leaving additional signatures available in the picker; and
-//  5. removes additional signatures it wrote earlier that no longer apply,
+//  6. removes additional signatures it wrote earlier that no longer apply,
 //     and primary signatures it wrote earlier under a name that has since
 //     been replaced (for example when the template is renamed).
 //
@@ -70,6 +73,10 @@ type outlookPlatform interface {
 	// DisableRoamingSignatures stops Outlook's cloud signature sync from
 	// replacing the files written by this worker.
 	DisableRoamingSignatures() error
+	// EmbedSignatureImages makes Outlook attach the images a signature
+	// references from its "<name>_files" folder to sent messages instead of
+	// sending links to files on this computer.
+	EmbedSignatureImages() error
 	StateDir() (string, error)
 }
 
@@ -217,6 +224,9 @@ func syncOutlookSignaturesWithOptions(ctx context.Context, platform outlookPlatf
 
 	if err := platform.DisableRoamingSignatures(); err != nil {
 		logger.Warn("Outlook signatures: disable roaming signatures: %v", err)
+	}
+	if err := platform.EmbedSignatureImages(); err != nil {
+		logger.Warn("Outlook signatures: embed signature images: %v", err)
 	}
 	dir, err := platform.SignaturesDir()
 	if err != nil {

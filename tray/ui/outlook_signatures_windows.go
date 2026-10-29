@@ -207,6 +207,28 @@ func (windowsOutlookPlatform) DisableRoamingSignatures() error {
 	return nil
 }
 
+// EmbedSignatureImages sets "Send Pictures With Document". Outlook treats an
+// <img> whose src is a file path as a linked picture: it renders while
+// composing but is sent as a link to the local file unless this is on.
+func (windowsOutlookPlatform) EmbedSignatureImages() error {
+	var lastErr error
+	for _, version := range installedOfficeVersions() {
+		key, _, err := registry.CreateKey(registry.CURRENT_USER,
+			`Software\Microsoft\Office\`+version+`\Outlook\Options\Mail`, registry.QUERY_VALUE|registry.SET_VALUE)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if current, _, err := key.GetIntegerValue("Send Pictures With Document"); err != nil || current != 1 {
+			if err := key.SetDWordValue("Send Pictures With Document", 1); err != nil {
+				lastErr = err
+			}
+		}
+		key.Close()
+	}
+	return lastErr
+}
+
 func (windowsOutlookPlatform) StateDir() (string, error) {
 	base, err := os.UserCacheDir() // %LOCALAPPDATA%
 	if err != nil {
