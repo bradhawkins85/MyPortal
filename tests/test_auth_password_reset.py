@@ -57,10 +57,16 @@ def test_password_forgot_sends_email(monkeypatch):
     def fake_token_hex(size: int) -> str:
         return "fixedtoken"
 
+    async def fake_password_login_allowed(user):
+        return True
+
     monkeypatch.setattr(auth_routes.user_repo, "get_user_by_email", fake_get_user_by_email)
     monkeypatch.setattr(auth_routes.auth_repo, "create_password_reset_token", fake_create_password_reset_token)
     monkeypatch.setattr(auth_routes.email_service, "send_email", fake_send_email)
     monkeypatch.setattr(auth_routes.secrets, "token_hex", fake_token_hex)
+    monkeypatch.setattr(
+        auth_routes.sso_policy, "password_login_allowed", fake_password_login_allowed
+    )
 
     app.dependency_overrides[database_dependencies.require_database] = lambda: None
 

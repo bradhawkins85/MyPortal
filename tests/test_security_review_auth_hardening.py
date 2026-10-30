@@ -141,7 +141,15 @@ async def test_password_reset_revokes_sessions_and_other_tokens(monkeypatch):
     async def fake_record(**kwargs):
         return None
 
+    async def fake_get_user(user_id):
+        return {"id": user_id, "email": "u@example.com"}
+
+    async def fake_login_allowed(user):
+        return True
+
     monkeypatch.setattr(auth_routes.auth_repo, "get_password_reset_token", fake_get_token)
+    monkeypatch.setattr(auth_routes.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(auth_routes.sso_policy, "password_login_allowed", fake_login_allowed)
     monkeypatch.setattr(auth_routes.user_repo, "set_user_password", fake_set_password)
     monkeypatch.setattr(auth_routes.auth_repo, "mark_password_reset_token_used", fake_mark_used)
     monkeypatch.setattr(auth_routes.auth_repo, "invalidate_password_reset_tokens_for_user", fake_invalidate)

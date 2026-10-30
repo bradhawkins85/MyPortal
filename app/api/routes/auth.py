@@ -300,6 +300,32 @@ def _log_login_failure(request: Request, email: str, reason: str) -> None:
     )
 
 
+SSO_REQUIRED_DETAIL = "Your organisation requires Microsoft sign-in."
+
+
+async def _refuse_sso_required(
+    request: Request, user: dict[str, Any], email: str, *, authentication_method: str
+) -> Response:
+    """Refuse a non-SSO sign-in for a user whose company requires Microsoft sign-in."""
+    _log_login_failure(request, email, "sso_required")
+    await audit_service.record(
+        action="auth.sso.fail",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="user",
+        entity_id=int(user["id"]),
+        metadata={
+            "reason": "password_login_refused",
+            "authentication_method": authentication_method,
+            "outcome": "failure",
+        },
+    )
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content={"detail": SSO_REQUIRED_DETAIL, "sso_required": True},
+    )
+
+
 def _log_login_success(request: Request, user: dict[str, Any], *, auth_method: str = "password") -> None:
     email = str(user.get("email", "")).lower()
     ip = _client_ip(request)
@@ -886,6 +912,10 @@ async def login(
 
     await auth_repo.clear_login_attempts(account_identifier)
     await auth_repo.clear_login_attempts(identifier)
+    if not await sso_policy.password_login_allowed(user):
+        return await _refuse_sso_required(
+            request, user, payload.email, authentication_method="password"
+        )
     return await _complete_login_response(
         request=request,
         user=user,
@@ -1079,7 +1109,7 @@ async def _process_password_reset_request(email: str) -> None:
     """Look up the account and send a reset link, off the request path."""
     try:
         user = await user_repo.get_user_by_email(email)
-        if user:
+        if user and await sso_policy.password_login_allowed(user):
             await _issue_password_reset_email(user)
     except Exception as exc:  # pragma: no cover - background task, log and continue
         logger.error("Failed to process password reset request", error=str(exc))
@@ -1116,7 +1146,7 @@ async def password_reset(
     payload: PasswordResetConfirm,
     request: Request,
     _: None = Depends(require_database),
-) -> PasswordResetStatus:
+) -> Response:
     record = await auth_repo.get_password_reset_token(payload.token)
     if not record or int(record.get("used", 0)) == 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
@@ -1126,6 +1156,12 @@ async def password_reset(
         expires_dt = ensure_datetime(expires_at)
         if datetime.utcnow() > expires_dt:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+
+    reset_user = await user_repo.get_user_by_id(int(record["user_id"]))
+    if reset_user and not await sso_policy.password_login_allowed(reset_user):
+        return await _refuse_sso_required(
+            request, reset_user, str(reset_user.get("email") or ""), authentication_method="password_reset"
+        )
 
     await user_repo.set_user_password(record["user_id"], payload.password)
     await auth_repo.mark_password_reset_token_used(payload.token)
@@ -1602,6 +1638,10 @@ async def finish_passkey_authentication(
         credential_backed_up=bool(verified.credential_backed_up),
         last_used_at=datetime.utcnow(),
     )
+    if not await sso_policy.password_login_allowed(user):
+        return await _refuse_sso_required(
+            request, user, str(user.get("email") or ""), authentication_method="passkey"
+        )
     return await _complete_login_response(
         request=request,
         user=user,
