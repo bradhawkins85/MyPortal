@@ -1,0 +1,7 @@
+{
+  "guid": "aa06f0e9-0001-4ae9-b37b-399f27a382f5",
+  "occurred_at": "2026-10-30T08:09Z",
+  "change_type": "Feature",
+  "summary": "Microsoft 365 Policies gain a built-in template library: seven Conditional Access templates, created in report-only mode with break-glass accounts excluded, and four Intune compliance baselines for Windows, macOS, iOS and Android, created and assigned to all devices. Intune templates need the DeviceManagementConfiguration.ReadWrite.All permission, which is now part of the app's permission baseline.",
+  "content_hash": "9d360ba76a774eb9b7780a84ec95c563de6f62865f9dc5532c201842364d3cc4"
+}
