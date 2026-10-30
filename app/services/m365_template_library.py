@@ -1,6 +1,6 @@
 """Built-in Conditional Access and Intune compliance templates.
 
-Importing this module registers each template as a Microsoft 365 policy
+``register_templates`` adds each template as a Microsoft 365 policy
 standard. A template's check looks for a MyPortal-named policy in the tenant
 and compares the settings the template defines; its apply creates the policy
 or puts the settings back.
@@ -392,5 +392,3 @@ def register_templates() -> int:
             count += 1
     return count
 
-
-register_templates()

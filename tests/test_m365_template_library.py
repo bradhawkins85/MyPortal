@@ -9,6 +9,8 @@ from app.services.m365 import M365Error
 
 CA = library.CA_TEMPLATES[1]  # Azure management MFA: all users, excludes directory sync
 INTUNE = library.INTUNE_TEMPLATES[0]
+library.register_templates()
+
 BREAK_GLASS = [{"id": "bg-1", "upn": "myportal-emergency-admin-1@x.com"}]
 
 
