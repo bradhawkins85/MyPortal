@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services import m365_best_practices
 from app.services import m365_standards as standards
 from app.services.m365 import M365Error, _acquire_exo_access_token, _exo_invoke_command
 
@@ -121,3 +122,85 @@ standards.register(standards.Standard(
     apply=apply_delegated_sent_items,
     default_settings={"mailbox_types": list(_SENT_ITEMS_TYPES)},
 ))
+
+
+# ---------------------------------------------------------------------------
+# Best Practices checks
+# ---------------------------------------------------------------------------
+
+_BEST_PRACTICE_CATEGORY = "Best Practices"
+_BEST_PRACTICE_STATUS_NOTES = {
+    "not_applicable": "This check does not apply to the tenant.",
+    "not_licensed": "The tenant is not licensed for this check.",
+    "unsupported": "This check is not supported for the tenant.",
+    "permission_missing": "MyPortal is missing a permission needed for this check.",
+    "assessment_failed": "The check could not be completed.",
+}
+
+
+def _best_practice_affected(result: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for account in result.get("affected_accounts") or []:
+        if isinstance(account, dict):
+            name = account.get("name") or account.get("id")
+            if name:
+                names.append(str(name))
+    return names
+
+
+def _best_practice_check(check_id: str):
+    async def check(company_id: int, settings: dict[str, Any]) -> dict[str, Any]:
+        try:
+            result = await m365_best_practices.run_single_check(
+                company_id, check_id,
+                allow_auto_remediation=False, emit_ticket_on_fail=False, require_enabled=False,
+            )
+        except (M365Error, ValueError) as exc:
+            return {"status": "unknown", "details": f"Unable to run the check: {exc}", "affected": []}
+        status = str(result.get("status") or "unknown")
+        details = str(result.get("details") or "")
+        if status in ("pass", "fail"):
+            return {"status": status, "details": details, "affected": _best_practice_affected(result)}
+        note = _BEST_PRACTICE_STATUS_NOTES.get(status, "The check did not return a result.")
+        return {"status": "unknown", "details": f"{note} {details}".strip(), "affected": []}
+
+    return check
+
+
+def _best_practice_apply(check_id: str):
+    async def apply(company_id: int, settings: dict[str, Any]) -> dict[str, Any]:
+        try:
+            result = await m365_best_practices.remediate_check(company_id, check_id)
+        except (M365Error, ValueError) as exc:
+            return {"status": "failed", "details": f"Unable to remediate: {exc}"}
+        details = str(result.get("message") or "")
+        return {"status": "remediated" if result.get("success") else "failed", "details": details}
+
+    return apply
+
+
+def _best_practice_category(entry: dict[str, Any]) -> str:
+    category = str(entry.get("benchmark_category") or "")
+    return category if category and category != "Microsoft 365" else _BEST_PRACTICE_CATEGORY
+
+
+def register_best_practices() -> int:
+    """Register every Best Practices check as a standard; returns how many."""
+    count = 0
+    for entry in m365_best_practices.list_best_practices():
+        check_id = str(entry.get("id") or "")
+        if not check_id or standards.get(check_id) is not None:
+            continue
+        standards.register(standards.Standard(
+            id=check_id,
+            name=str(entry.get("name") or check_id),
+            category=_best_practice_category(entry),
+            description=str(entry.get("description") or ""),
+            check=_best_practice_check(check_id),
+            apply=_best_practice_apply(check_id) if entry.get("has_remediation") else None,
+        ))
+        count += 1
+    return count
+
+
+register_best_practices()

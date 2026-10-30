@@ -1,0 +1,7 @@
+{
+  "guid": "10cd0d04-7faa-4b76-a931-0f529fbd3b54",
+  "occurred_at": "2026-10-30T05:15Z",
+  "change_type": "Feature",
+  "summary": "Microsoft 365 Policies can now include any of the 122 Best Practices checks as standards, with Remediate available where the check supports automatic fixes. The standards picker is grouped by category and searchable.",
+  "content_hash": "ab296a2af8e509c3e7ab5929c5c92217610aad864ae5910b10756368489a073a"
+}
