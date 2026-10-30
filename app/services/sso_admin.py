@@ -25,6 +25,9 @@ _GUID_PATTERN = re.compile(
 NO_TENANT_MESSAGE = "Connect this company's Microsoft 365 tenant first."
 UNREACHABLE_MESSAGE = "Microsoft 365 could not be reached. Try again."
 NOT_FOUND_MESSAGE = "That Microsoft user was not found in this company's tenant."
+MUST_STAY_LINKED_MESSAGE = (
+    "Your organisation requires Microsoft sign-in, so this account must stay linked."
+)
 
 
 class SsoAdminError(Exception):
@@ -47,7 +50,7 @@ def _object_id_hash(object_id: str) -> str:
 async def _load_manageable_user(
     actor: dict[str, Any],
     target_user_id: int,
-    company_id: int,
+    company_id: int | None,
     managed_company_ids: set[int],
 ) -> dict[str, Any]:
     target = await user_repo.get_user_by_id(target_user_id)
@@ -128,22 +131,17 @@ async def link_identity(
     return identity
 
 
-async def unlink_identity(
+async def _record_unlink(
     *,
-    actor: dict[str, Any],
-    target_user_id: int,
-    company_id: int,
-    managed_company_ids: set[int],
+    actor_id: int,
+    deleted: dict[str, Any],
+    company_id: int | None,
     request: Request | None,
-) -> dict[str, Any] | None:
-    target = await _load_manageable_user(actor, target_user_id, company_id, managed_company_ids)
-    deleted = await sso_identity_repo.delete_for_user(int(target["id"]), PROVIDER)
-    if not deleted:
-        return None
+) -> None:
     await audit_service.record(
         action="auth.sso.unlink",
         request=request,
-        user_id=int(actor["id"]),
+        user_id=actor_id,
         entity_type="user_sso_identity",
         entity_id=deleted.get("id"),
         metadata={
@@ -152,6 +150,44 @@ async def unlink_identity(
             "object_id_hash": _object_id_hash(str(deleted.get("object_id") or "")),
             "company_id": company_id,
         },
+    )
+
+
+async def unlink_identity(
+    *,
+    actor: dict[str, Any],
+    target_user_id: int,
+    company_id: int | None,
+    managed_company_ids: set[int],
+    request: Request | None,
+) -> dict[str, Any] | None:
+    target = await _load_manageable_user(actor, target_user_id, company_id, managed_company_ids)
+    deleted = await sso_identity_repo.delete_for_user(int(target["id"]), PROVIDER)
+    if not deleted:
+        return None
+    await _record_unlink(
+        actor_id=int(actor["id"]), deleted=deleted, company_id=company_id, request=request
+    )
+    return deleted
+
+
+async def must_stay_linked(user: dict[str, Any]) -> bool:
+    for company_id in await sso_policy.user_company_ids(user):
+        if await sso_policy.get_company_sso_mode(company_id) == "required":
+            return True
+    return False
+
+
+async def unlink_own_identity(
+    *, user: dict[str, Any], request: Request | None
+) -> dict[str, Any] | None:
+    if await must_stay_linked(user):
+        raise SsoAdminError(403, MUST_STAY_LINKED_MESSAGE)
+    deleted = await sso_identity_repo.delete_for_user(int(user["id"]), PROVIDER)
+    if not deleted:
+        return None
+    await _record_unlink(
+        actor_id=int(user["id"]), deleted=deleted, company_id=None, request=request
     )
     return deleted
 

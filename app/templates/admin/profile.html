@@ -128,6 +128,34 @@
           <p class="form-help">Removing a passkey stops it signing in to {{ app_name | default('MyPortal') }}. Also delete it from your device or password manager, and sign out anywhere it's still in use.</p>
         </div>
       </section>
+      <section class="card card--panel profile-card" aria-labelledby="profile-microsoft-title">
+        <header class="card__header profile-card__header">
+          <span class="profile-card__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M3 3h8.5v8.5H3Zm9.5 0H21v8.5h-8.5ZM3 12.5h8.5V21H3Zm9.5 0H21V21h-8.5Z"/></svg>
+          </span>
+          <div class="profile-card__heading">
+            <h2 class="card__title" id="profile-microsoft-title">Microsoft sign-in</h2>
+            <p class="card__subtitle">Sign in to {{ app_name | default('MyPortal') }} with your work Microsoft account.</p>
+          </div>
+        </header>
+        <div class="card__body">
+          {% if profile_sso_identity %}
+            <p><span class="status status--success">Linked</span> <strong>{{ profile_sso_identity.upn or profile_sso_identity.email or "Microsoft account" }}</strong></p>
+            {% if profile_sso_identity.last_login_at %}<p class="form-help">Last signed in with Microsoft on <span data-utc="{{ profile_sso_identity.last_login_at.isoformat() }}">{{ profile_sso_identity.last_login_at.isoformat() }}</span>.</p>{% endif %}
+            {% if profile_sso_must_stay_linked %}
+              <p class="form-help">Your organisation requires Microsoft sign-in, so this account must stay linked.</p>
+            {% else %}
+              <form method="post" action="/admin/profile/microsoft-sign-in/unlink" class="form-actions profile-form__actions">
+                {% include "partials/csrf.html" %}
+                <button type="submit" class="button button--ghost">Unlink</button>
+              </form>
+            {% endif %}
+          {% else %}
+            <p><span class="status status--neutral">Not linked</span></p>
+            <p class="form-help">If your organisation uses Microsoft sign-in, choose <strong>Sign in with Microsoft</strong> on the sign-in page and your account is linked automatically when your email matches.</p>
+          {% endif %}
+        </div>
+      </section>
       <section class="card card--panel profile-card profile-card--full" aria-labelledby="profile-anonymise-title">
         <header class="card__header profile-card__header">
           <span class="profile-card__icon" aria-hidden="true">

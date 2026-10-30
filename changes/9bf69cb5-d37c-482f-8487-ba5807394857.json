@@ -1,0 +1,7 @@
+{
+  "guid": "9bf69cb5-d37c-482f-8487-ba5807394857",
+  "occurred_at": "2026-10-30T08:58Z",
+  "change_type": "Feature",
+  "summary": "Admins can now manage Microsoft sign-in for each company from the edit company page: choose Off, Optional or Required, link or unlink people to their Microsoft accounts, and see who is linked on the Users page and in their own profile.",
+  "content_hash": "d12cbc32bc99bf1a2c2996fe7fd86971d065f0a58fd81b74e7043b1b34597e48"
+}

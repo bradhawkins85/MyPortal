@@ -270,6 +270,149 @@ async def _render_companies_dashboard(
     return response
 
 
+_SSO_SECTION_URL = "/admin/companies/{company_id}/edit#ce-microsoft-sign-in"
+
+
+def _sso_member_name(row: Mapping[str, Any]) -> str:
+    full_name = " ".join(
+        part for part in ((row.get("first_name") or "").strip(), (row.get("last_name") or "").strip()) if part
+    )
+    return full_name or str(row.get("email") or "")
+
+
+async def _company_sso_context(
+    user: dict[str, Any],
+    company_id: int,
+    *,
+    managed_company_ids: set[int],
+) -> dict[str, Any]:
+    from app.repositories import user_sso_identities as sso_identity_repo
+    from app.repositories import users as user_repo
+    from app.services import sso_policy
+
+    can_manage = bool(user.get("is_super_admin")) or company_id in managed_company_ids
+    rows = await user_repo.list_company_members(company_id)
+    identities = await sso_identity_repo.list_for_users([int(row["id"]) for row in rows])
+    members: list[dict[str, Any]] = []
+    for row in rows:
+        identity = identities.get(int(row["id"]))
+        if identity is None and not row.get("is_active"):
+            continue
+        members.append(
+            {
+                "user_id": int(row["id"]),
+                "name": _sso_member_name(row),
+                "email": row.get("email") or "",
+                "is_super_admin": bool(row.get("is_super_admin")),
+                "identity": identity,
+                "can_manage": can_manage
+                and await sso_policy.can_manage_link(user, row, company_id, managed_company_ids),
+            }
+        )
+    return {
+        "sso_mode": await sso_policy.get_company_sso_mode(company_id),
+        "sso_tenant_connected": await sso_policy.company_has_tenant(company_id),
+        "sso_members": members,
+        "sso_linked_count": sum(1 for member in members if member["identity"]),
+        "sso_can_manage": can_manage,
+    }
+
+
+async def _sso_form_actor(
+    request: Request, company_id: int
+) -> tuple[dict[str, Any] | None, set[int], RedirectResponse | None]:
+    current_user, redirect = await _main()._require_authenticated_user(request)
+    if redirect:
+        return None, set(), redirect
+    is_super_admin, companies, _ = await _get_company_management_scope(request, current_user)
+    managed_company_ids = {int(company["id"]) for company in companies}
+    if not is_super_admin and company_id not in managed_company_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    await _get_company_or_404(company_id)
+    return current_user, managed_company_ids, None
+
+
+def _sso_redirect(company_id: int, message: str, variant: str) -> RedirectResponse:
+    from app.security.flash import flash_redirect
+
+    return flash_redirect(_SSO_SECTION_URL.format(company_id=company_id), message, variant)
+
+
+def _sso_user_id(form: Any) -> int | None:
+    try:
+        return int(str(form.get("user_id") or "").strip())
+    except ValueError:
+        return None
+
+
+async def admin_company_sso_mode(company_id: int, request: Request):
+    from app.services import sso_policy
+
+    current_user, _, redirect = await _sso_form_actor(request, company_id)
+    if redirect:
+        return redirect
+    form = await request.form()
+    mode = str(form.get("sso_mode") or "").strip()
+    if not mode:
+        return _sso_redirect(company_id, "Choose a sign-in mode.", "error")
+    try:
+        await sso_policy.set_company_sso_mode(
+            company_id, mode, actor=current_user, request=request
+        )
+    except ValueError as exc:
+        return _sso_redirect(company_id, str(exc), "error")
+    return _sso_redirect(company_id, "Microsoft sign-in mode saved.", "success")
+
+
+async def admin_company_sso_link(company_id: int, request: Request):
+    from app.services import sso_admin
+
+    current_user, managed_company_ids, redirect = await _sso_form_actor(request, company_id)
+    if redirect:
+        return redirect
+    form = await request.form()
+    user_id = _sso_user_id(form)
+    if user_id is None:
+        return _sso_redirect(company_id, "Choose a person to link.", "error")
+    try:
+        await sso_admin.link_identity(
+            actor=current_user,
+            target_user_id=user_id,
+            company_id=company_id,
+            object_id=str(form.get("object_id") or "").strip(),
+            managed_company_ids=managed_company_ids,
+            request=request,
+        )
+    except sso_admin.SsoAdminError as exc:
+        return _sso_redirect(company_id, exc.message, "error")
+    return _sso_redirect(company_id, "Microsoft account linked.", "success")
+
+
+async def admin_company_sso_unlink(company_id: int, request: Request):
+    from app.services import sso_admin
+
+    current_user, managed_company_ids, redirect = await _sso_form_actor(request, company_id)
+    if redirect:
+        return redirect
+    form = await request.form()
+    user_id = _sso_user_id(form)
+    if user_id is None:
+        return _sso_redirect(company_id, "Choose a person to unlink.", "error")
+    try:
+        deleted = await sso_admin.unlink_identity(
+            actor=current_user,
+            target_user_id=user_id,
+            company_id=company_id,
+            managed_company_ids=managed_company_ids,
+            request=request,
+        )
+    except sso_admin.SsoAdminError as exc:
+        return _sso_redirect(company_id, exc.message, "error")
+    if deleted is None:
+        return _sso_redirect(company_id, "That person has no Microsoft account linked.", "info")
+    return _sso_redirect(company_id, "Microsoft account unlinked.", "success")
+
+
 async def _render_company_edit_page(
     request: Request,
     user: dict[str, Any],
@@ -967,6 +1110,27 @@ async def _render_company_edit_page(
         except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
             if "Database pool not initialised" not in str(exc):
                 raise
+    extra.update(
+        {
+            "sso_mode": "off",
+            "sso_tenant_connected": False,
+            "sso_members": [],
+            "sso_linked_count": 0,
+            "sso_can_manage": False,
+        }
+    )
+    try:
+        extra.update(
+            await _company_sso_context(
+                user,
+                company_id,
+                managed_company_ids={int(company["id"]) for company in managed_companies},
+            )
+        )
+    except Exception as exc:  # pragma: no cover - SSO must not break the page
+        from app.core.logging import log_error
+
+        log_error("Failed to load company Microsoft sign-in", company_id=company_id, error=str(exc))
     from .business_hours_handlers import company_edit_context
 
     try:

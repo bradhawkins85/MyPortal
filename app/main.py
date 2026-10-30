@@ -7294,6 +7294,10 @@ async def admin_profile_page(request: Request):
         )
     profile_passkeys.sort(key=lambda entry: entry["name"].lower())
     m365_contacts_status = await user_m365_contacts_service.status_for_user(int(user["id"]))
+    from app.repositories import user_sso_identities as sso_identity_repo
+    from app.services import sso_admin
+
+    sso_identity = await sso_identity_repo.get_for_user(int(user["id"]))
 
     context = await _build_base_context(
         request,
@@ -7305,6 +7309,9 @@ async def admin_profile_page(request: Request):
             "profile_totp_devices": totp_devices,
             "profile_passkeys": profile_passkeys,
             "profile_m365_contacts": m365_contacts_status,
+            "profile_sso_identity": sso_identity,
+            "profile_sso_must_stay_linked": bool(sso_identity)
+            and await sso_admin.must_stay_linked(user),
             "profile_sales_opt_out": await _profile_sales_opt_out_status(user),
             "profile_anonymisation_request": await _profile_anonymisation_request(user),
         },
@@ -7606,6 +7613,24 @@ async def profile_ai_features_update(request: Request):
     return flash_redirect("/admin/profile#privacy", message, "success")
 
 
+@app.post("/admin/profile/microsoft-sign-in/unlink")
+async def profile_microsoft_sign_in_unlink(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    from app.services import sso_admin
+
+    try:
+        deleted = await sso_admin.unlink_own_identity(user=user, request=request)
+    except sso_admin.SsoAdminError as exc:
+        return flash_redirect("/admin/profile#security", exc.message, "error")
+    if deleted is None:
+        return flash_redirect(
+            "/admin/profile#security", "Your account is not linked to a Microsoft account.", "info"
+        )
+    return flash_redirect("/admin/profile#security", "Microsoft account unlinked.", "success")
+
+
 @app.post("/admin/profile/m365-contacts/disconnect")
 async def profile_m365_contacts_disconnect(request: Request):
     user, redirect = await _require_authenticated_user(request)
@@ -7746,13 +7771,50 @@ async def admin_users_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    from app.repositories import user_sso_identities as sso_identity_repo
+    from app.services import sso_policy
+
     active_users = await user_repo.list_active_users_for_admin()
+    identities = await sso_identity_repo.list_for_users([int(entry["id"]) for entry in active_users])
+    for entry in active_users:
+        identity = identities.get(int(entry["id"]))
+        entry["sso_identity"] = identity
+        entry["sso_can_unlink"] = bool(identity) and await sso_policy.can_manage_link(
+            current_user, entry, entry.get("company_id"), set()
+        )
     return await _render_template(
         "admin/users.html",
         request,
         current_user,
         extra={"title": "Users", "users": active_users},
     )
+
+
+@app.post("/admin/users/{user_id}/sso/unlink")
+async def admin_user_sso_unlink(request: Request, user_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import sso_admin
+
+    form = await request.form()
+    try:
+        company_id = int(str(form.get("company_id") or "").strip())
+    except ValueError:
+        company_id = None
+    try:
+        deleted = await sso_admin.unlink_identity(
+            actor=current_user,
+            target_user_id=user_id,
+            company_id=company_id,
+            managed_company_ids=set(),
+            request=request,
+        )
+    except sso_admin.SsoAdminError as exc:
+        return flash_redirect("/admin/users", exc.message, "error")
+    if deleted is None:
+        return flash_redirect("/admin/users", "That person has no Microsoft account linked.", "info")
+    return flash_redirect("/admin/users", "Microsoft account unlinked.", "success")
 
 
 @app.get("/admin/sessions", response_class=HTMLResponse)

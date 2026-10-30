@@ -25,6 +25,7 @@
           <th scope="col" data-sort="string" data-column-key="email">Email</th>
           <th scope="col" data-sort="string" data-column-key="company">Company</th>
           <th scope="col" data-sort="date" data-column-key="last_login">Last login</th>
+          <th scope="col" data-sort="string" data-column-key="microsoft">Microsoft sign-in</th>
           <th scope="col" data-sort="string" data-column-key="ai_processing">AI processing</th>
           <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
         </tr></thead>
@@ -43,6 +44,15 @@
               <td data-label="Last login" data-column-key="last_login"
                   data-sort-value="{{ entry.last_login_at.isoformat() if entry.last_login_at else '' }}">
                 {{ entry.last_login_at.strftime('%d %b %Y, %H:%M') if entry.last_login_at else 'Never' }}
+              </td>
+              {% set sso_identity = entry.sso_identity %}
+              <td data-label="Microsoft sign-in" data-column-key="microsoft" data-sort-value="{{ 'linked' if sso_identity else 'not linked' }}">
+                {% if sso_identity %}
+                  <span class="status status--success">Linked · {{ 'admin' if sso_identity.linked_via == 'admin' else 'auto' }}</span>
+                  {% if sso_identity.upn %}<span class="text-muted">{{ sso_identity.upn }}</span>{% endif %}
+                {% else %}
+                  <span class="status status--neutral">Not linked</span>
+                {% endif %}
               </td>
               <td data-label="AI processing" data-column-key="ai_processing" data-sort-value="{{ 'opted out' if entry.ai_opt_out else 'allowed' }}">
                 {% if entry.ai_opt_out %}
@@ -66,6 +76,14 @@
                   <button type="submit" class="button button--ghost" title="Use when the person asks by email or phone not to have their requests processed by AI">Opt out of AI</button>
                 </form>
                 {% endif %}
+                {% if entry.sso_can_unlink %}
+                <form action="/admin/users/{{ entry.id }}/sso/unlink" method="post" class="inline-form"
+                      onsubmit="return confirm({{ ('Unlink the Microsoft account from ' ~ entry.email ~ '? They will sign in with their MyPortal password instead.') | tojson | forceescape }});">
+                  {% include "partials/csrf.html" %}
+                  <input type="hidden" name="company_id" value="{{ entry.company_id if entry.company_id is not none else '' }}" />
+                  <button type="submit" class="button button--ghost" title="Remove this person's Microsoft sign-in link">Unlink Microsoft</button>
+                </form>
+                {% endif %}
                 <form action="/admin/users/{{ entry.id }}/deactivate" method="post" class="inline-form"
                       onsubmit="return confirm({{ ('Deactivate ' ~ entry.email ~ '? They will no longer be able to sign in.') | tojson | forceescape }});">
                   {% include "partials/csrf.html" %}
@@ -83,7 +101,7 @@
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="6" class="table__empty">No active users were found.</td></tr>
+            <tr><td colspan="7" class="table__empty">No active users were found.</td></tr>
           {% endfor %}
         </tbody>
       </table>

@@ -140,6 +140,22 @@ async def list_users_for_company(company_id: int) -> List[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+async def list_company_members(company_id: int) -> List[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT u.id, u.email, u.first_name, u.last_name, u.is_super_admin,
+               u.is_active, u.company_id
+        FROM users AS u
+        WHERE u.company_id = %s
+           OR EXISTS (SELECT 1 FROM user_companies AS uc
+                      WHERE uc.user_id = u.id AND uc.company_id = %s)
+        ORDER BY LOWER(u.email), u.id
+        """,
+        (company_id, company_id),
+    )
+    return [dict(row) for row in rows]
+
+
 async def create_user(
     *,
     email: str,

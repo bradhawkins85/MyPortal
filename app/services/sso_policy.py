@@ -80,7 +80,7 @@ async def discover(email: str) -> str:
 async def can_manage_link(
     actor: dict[str, Any],
     target_user: dict[str, Any],
-    company_id: int,
+    company_id: int | None,
     managed_company_ids: set[int],
 ) -> bool:
     if actor.get("is_super_admin"):

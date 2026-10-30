@@ -164,6 +164,7 @@
             ("assign-access", "ce-assign-access", "Assign staff access", "", is_super_admin),
             ("staff-intake-fields", "ce-staff-intake-fields", "Staff intake fields", "", is_super_admin),
             ("staff-custom-fields", "ce-staff-custom-fields", "Staff custom fields", staff_custom_field_definitions | length, is_super_admin),
+            ("microsoft-sign-in", "ce-microsoft-sign-in", "Microsoft sign-in", sso_linked_count | default(0), sso_can_manage | default(false)),
           ]),
           ("Security", [
             ("vault-rollout", "vault-rollout", "Credential vault", "", ce_vault),
@@ -831,6 +832,213 @@
         </noscript>
       </div>
     </section>
+    {% if sso_can_manage | default(false) %}
+    {% set sso_options = [
+      ("off", "Off", "Only MyPortal passwords and passkeys."),
+      ("optional", "Optional", "People can choose Microsoft or their MyPortal password."),
+      ("required", "Required", "Linked people must use Microsoft. Unlinked people keep their password."),
+    ] %}
+    {% set sso_mode_labels = {"off": "Off", "optional": "Optional", "required": "Required"} %}
+    {% set sso_unlinked = sso_members | rejectattr("identity") | list %}
+    {% set sso_required_available = sso_tenant_connected and sso_linked_count > 0 %}
+    {% set sso_via_labels = {"auto": "Linked · auto", "admin": "Linked · admin"} %}
+
+    <section class="card card--panel ce-section" id="ce-microsoft-sign-in" data-company-edit-section="microsoft-sign-in" data-sso-panel data-sso-mode="{{ sso_mode }}" aria-labelledby="ce-microsoft-sign-in-title">
+      <header class="ce-section__header">
+        <div class="ce-section__heading">
+          <h2 class="card__title" id="ce-microsoft-sign-in-title">Microsoft sign-in</h2>
+          <p class="card__subtitle">Let this company's people sign in to {{ app_name | default('MyPortal') }} with their Microsoft 365 account.</p>
+        </div>
+        <div class="ce-section__meta"><span class="badge badge--muted">{{ sso_linked_count }} linked</span></div>
+      </header>
+      <div class="ce-section__body scf sso">
+        <ul class="scf-item__chips sso-overview" aria-label="Microsoft sign-in summary">
+          {% if sso_tenant_connected %}
+            <li class="scf-chip scf-chip--visibility">Tenant connected</li>
+          {% else %}
+            <li class="scf-chip scf-chip--muted">Not connected</li>
+          {% endif %}
+          <li class="scf-chip scf-chip--logic">Mode: {{ sso_mode_labels.get(sso_mode, sso_mode) }}</li>
+          <li class="scf-chip">{{ sso_linked_count }} user{% if sso_linked_count != 1 %}s{% endif %} linked</li>
+        </ul>
+
+        {% if not sso_tenant_connected %}
+          <p class="form-help sso-notice">This company's Microsoft 365 tenant isn't connected yet, so people can't be linked or required to use Microsoft. <a href="/admin/companies/{{ company.id }}/m365">Connect Microsoft 365</a> first.</p>
+        {% endif %}
+
+        <form method="post" action="/admin/companies/{{ company.id }}/sso/mode" class="form sso-mode" data-sso-mode-form>
+          {% include "partials/csrf.html" %}
+          <fieldset class="sso-fieldset">
+            <legend class="form-label">Sign-in mode</legend>
+            <div class="sso-segmented" role="radiogroup" aria-label="Sign-in mode">
+              {% for value, label, help in sso_options %}
+                {% set sso_option_disabled = value == "required" and not sso_required_available %}
+                <label class="sso-segmented__option{% if sso_option_disabled %} is-disabled{% endif %}">
+                  <input type="radio" name="sso_mode" value="{{ value }}"{% if sso_mode == value %} checked{% endif %}{% if sso_option_disabled %} disabled aria-describedby="sso-required-help"{% endif %} data-sso-mode-input />
+                  <span>{{ label }}</span>
+                </label>
+              {% endfor %}
+            </div>
+            <dl class="sso-mode-help">
+              {% for value, label, help in sso_options %}
+                <div class="sso-mode-help__row{% if sso_mode == value %} is-current{% endif %}" data-sso-mode-help="{{ value }}">
+                  <dt>{{ label }}</dt>
+                  <dd>{{ help }}</dd>
+                </div>
+              {% endfor %}
+            </dl>
+            {% if not sso_required_available %}
+              <p class="form-help" id="sso-required-help">Required becomes available once this company's Microsoft 365 tenant is connected and at least one person is linked.</p>
+            {% endif %}
+          </fieldset>
+
+          {% if sso_unlinked %}
+            <div class="alert alert--warning sso-warning" role="status" data-sso-unlinked-warning data-sso-unlinked-count="{{ sso_unlinked | length }}"{% if sso_mode != "required" %} hidden{% endif %}>
+              <p class="sso-warning__title">{{ sso_unlinked | length }} {{ "person isn't" if sso_unlinked | length == 1 else "people aren't" }} linked and will keep password sign-in:</p>
+              <ul class="sso-warning__list">
+                {% for member in sso_unlinked[:10] %}<li>{{ member.name }}</li>{% endfor %}
+                {% if sso_unlinked | length > 10 %}<li>and {{ (sso_unlinked | length) - 10 }} more</li>{% endif %}
+              </ul>
+            </div>
+          {% endif %}
+
+          <div class="form-actions">
+            <button type="submit" class="button">Save mode</button>
+          </div>
+        </form>
+
+        <section class="sso-people" aria-labelledby="sso-people-title">
+          <div class="scf-toolbar">
+            <h3 class="scf-group__title" id="sso-people-title">People</h3>
+            {% if sso_members %}
+              <input
+                type="search"
+                class="form-input scf-toolbar__search"
+                placeholder="Search people by name, email or Microsoft account"
+                aria-label="Search people"
+                data-sso-search
+              />
+            {% endif %}
+          </div>
+
+          {% if not sso_linked_count %}
+            <div class="scf-empty sso-empty">
+              <p class="scf-empty__title">No one has signed in with Microsoft yet</p>
+              <p class="text-muted">People are linked automatically the first time they sign in with a Microsoft account that matches their MyPortal email. You can also link someone yourself from the list below.</p>
+            </div>
+          {% endif %}
+
+          {% if sso_members %}
+            <ul class="scf-list" data-sso-list>
+              {% for member in sso_members %}
+                {% set identity = member.identity %}
+                <li class="scf-item sso-item" data-sso-item data-sso-search-text="{{ [member.name, member.email, identity.upn if identity else ''] | join(' ') }}">
+                  <span class="sso-avatar" aria-hidden="true">{{ (member.name or "?")[:1] | upper }}</span>
+                  <div class="scf-item__main">
+                    <div class="scf-item__heading">
+                      <span class="sso-item__name">{{ member.name }}</span>
+                      {% if member.name != member.email %}<code class="scf-item__key">{{ member.email }}</code>{% endif %}
+                    </div>
+                    <ul class="scf-item__chips" aria-label="Microsoft sign-in status for {{ member.name }}">
+                      <li>
+                        {% if identity %}
+                          <span class="status status--success">{{ sso_via_labels.get(identity.linked_via, "Linked") }}</span>
+                        {% else %}
+                          <span class="status status--neutral">Not linked</span>
+                        {% endif %}
+                      </li>
+                      {% if identity and identity.upn %}<li class="scf-chip">{{ identity.upn }}</li>{% endif %}
+                      {% if identity %}
+                        <li class="scf-chip scf-chip--quiet">
+                          {% if identity.last_login_at %}Last Microsoft sign-in <span data-utc="{{ identity.last_login_at.isoformat() }}">{{ identity.last_login_at.isoformat() }}</span>{% else %}Hasn't signed in with Microsoft yet{% endif %}
+                        </li>
+                      {% endif %}
+                      {% if member.is_super_admin %}<li class="scf-chip scf-chip--muted">Super admin</li>{% endif %}
+                    </ul>
+                    {% if member.can_manage %}
+                      <details class="sso-fallback" data-sso-fallback>
+                        <summary>{{ "Re-link with a Microsoft ID" if identity else "Link with a Microsoft ID" }}</summary>
+                        <form method="post" action="/admin/companies/{{ company.id }}/sso/link" class="form sso-fallback__form">
+                          {% include "partials/csrf.html" %}
+                          <input type="hidden" name="user_id" value="{{ member.user_id }}" />
+                          <div class="form-field">
+                            <label class="form-label" for="sso-object-id-{{ member.user_id }}">Microsoft object ID</label>
+                            <input class="form-input scf-mono" id="sso-object-id-{{ member.user_id }}" name="object_id" maxlength="36" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false" required />
+                            <p class="form-help">Find it in the Microsoft Entra admin centre under the user's profile.</p>
+                          </div>
+                          <button type="submit" class="button button--small">Link</button>
+                        </form>
+                      </details>
+                    {% endif %}
+                  </div>
+                  {% if member.can_manage %}
+                    <div class="scf-item__actions">
+                      <button type="button" class="button button--ghost button--small" data-sso-link="{{ member.user_id }}" aria-haspopup="dialog" aria-controls="sso-link-modal" hidden>{{ "Re-link" if identity else "Link" }}</button>
+                      {% if identity %}
+                        <form method="post" action="/admin/companies/{{ company.id }}/sso/unlink" class="inline-form" data-sso-confirm="Unlink {{ member.name }} from their Microsoft account? They will sign in with their MyPortal password instead.">
+                          {% include "partials/csrf.html" %}
+                          <input type="hidden" name="user_id" value="{{ member.user_id }}" />
+                          <button type="submit" class="button button--ghost button--small">Unlink</button>
+                        </form>
+                      {% endif %}
+                    </div>
+                  {% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+            <p class="scf-empty scf-empty--search" data-sso-no-results hidden>No people match your search.</p>
+          {% else %}
+            <div class="scf-empty">
+              <p class="scf-empty__title">No users in this company yet</p>
+              <p class="text-muted">Add people to the company first, then link them to their Microsoft accounts here.</p>
+            </div>
+          {% endif %}
+        </section>
+      </div>
+    </section>
+
+    {% set sso_data_members = [] %}
+    {% for member in sso_members %}
+      {% set _ = sso_data_members.append({
+        "userId": member.user_id,
+        "name": member.name,
+        "email": member.email,
+        "upn": member.identity.upn if member.identity else "",
+        "linkedVia": member.identity.linked_via if member.identity else "",
+        "canManage": true if member.can_manage else false,
+      }) %}
+    {% endfor %}
+    <script type="application/json" id="company-sso-data">{{ {"companyId": company.id, "tenantConnected": true if sso_tenant_connected else false, "members": sso_data_members} | tojson }}</script>
+
+    <div class="modal scf-modal sso-modal" id="sso-link-modal" role="dialog" aria-modal="true" aria-labelledby="sso-modal-title" hidden>
+      <div class="modal__panel scf-editor sso-editor">
+        <header class="modal__header scf-editor__header">
+          <div>
+            <h2 class="modal__title" id="sso-modal-title">Link Microsoft account</h2>
+            <p class="scf-editor__subtitle" data-sso-subtitle>Choose the Microsoft account this person signs in with.</p>
+          </div>
+          <button type="button" class="modal__close" data-modal-close aria-label="Close Microsoft account linking"></button>
+        </header>
+        <div class="modal__body sso-editor__body">
+          <p class="form-help sso-current" data-sso-current hidden></p>
+          <div class="form-field">
+            <label class="form-label" for="sso-directory-query">Search this company's Microsoft 365 directory</label>
+            <input class="form-input" id="sso-directory-query" type="search" placeholder="Name or email address" autocomplete="off" aria-controls="sso-directory-results" data-sso-query />
+            <p class="form-help">Type at least two characters. Each Microsoft account can be linked to one MyPortal user.</p>
+          </div>
+          <p class="form-help" role="status" aria-live="polite" data-sso-status></p>
+          <ul class="sso-results" id="sso-directory-results" role="listbox" aria-label="Matching Microsoft accounts" data-sso-results></ul>
+          <p class="scf-error" role="alert" data-sso-error hidden></p>
+        </div>
+        <footer class="modal__footer scf-editor__footer">
+          <button type="button" class="button button--danger button--ghost" data-sso-unlink hidden>Unlink</button>
+          <span class="scf-editor__spacer"></span>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+          <button type="button" class="button" data-sso-submit disabled>Link</button>
+        </footer>
+      </div>
+    </div>
+    {% endif %}
     {% if is_super_admin %}
       {% set sif_type_labels = {'text': 'Text', 'select': 'Dropdown', 'multiselect': 'Multi-select', 'checkbox': 'Checkbox', 'date': 'Date'} %}
       {% set sif_core_keys = ['first_name', 'last_name'] %}
@@ -2725,6 +2933,7 @@
   {% if ce_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
   <script src="{{ static_url('/static/js/company_edit_sections.js') }}" defer></script>
+  {% if sso_can_manage | default(false) %}<script src="{{ static_url('/static/js/company_sso_admin.js') }}" defer></script>{% endif %}
   {% if is_super_admin %}
     <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
     <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
