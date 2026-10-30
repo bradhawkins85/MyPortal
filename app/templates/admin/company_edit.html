@@ -872,7 +872,7 @@
             <legend class="form-label">Sign-in mode</legend>
             <div class="sso-segmented" role="radiogroup" aria-label="Sign-in mode">
               {% for value, label, help in sso_options %}
-                {% set sso_option_disabled = value == "required" and not sso_required_available %}
+                {% set sso_option_disabled = value == "required" and not sso_required_available and sso_mode != "required" %}
                 <label class="sso-segmented__option{% if sso_option_disabled %} is-disabled{% endif %}">
                   <input type="radio" name="sso_mode" value="{{ value }}"{% if sso_mode == value %} checked{% endif %}{% if sso_option_disabled %} disabled aria-describedby="sso-required-help"{% endif %} data-sso-mode-input />
                   <span>{{ label }}</span>
@@ -921,7 +921,7 @@
             {% endif %}
           </div>
 
-          {% if not sso_linked_count %}
+          {% if sso_members and not sso_linked_count %}
             <div class="scf-empty sso-empty">
               <p class="scf-empty__title">No one has signed in with Microsoft yet</p>
               <p class="text-muted">People are linked automatically the first time they sign in with a Microsoft account that matches their MyPortal email. You can also link someone yourself from the list below.</p>
@@ -950,7 +950,7 @@
                       {% if identity and identity.upn %}<li class="scf-chip">{{ identity.upn }}</li>{% endif %}
                       {% if identity %}
                         <li class="scf-chip scf-chip--quiet">
-                          {% if identity.last_login_at %}Last Microsoft sign-in <span data-utc="{{ identity.last_login_at.isoformat() }}">{{ identity.last_login_at.isoformat() }}</span>{% else %}Hasn't signed in with Microsoft yet{% endif %}
+                          {% if member.last_login_iso %}Last Microsoft sign-in <span data-utc="{{ member.last_login_iso }}">{{ member.last_login_iso }}</span>{% else %}Hasn't signed in with Microsoft yet{% endif %}
                         </li>
                       {% endif %}
                       {% if member.is_super_admin %}<li class="scf-chip scf-chip--muted">Super admin</li>{% endif %}

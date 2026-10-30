@@ -288,7 +288,7 @@ async def _company_sso_context(
 ) -> dict[str, Any]:
     from app.repositories import user_sso_identities as sso_identity_repo
     from app.repositories import users as user_repo
-    from app.services import sso_policy
+    from app.services import sso_admin, sso_policy
 
     can_manage = bool(user.get("is_super_admin")) or company_id in managed_company_ids
     rows = await user_repo.list_company_members(company_id)
@@ -305,6 +305,7 @@ async def _company_sso_context(
                 "email": row.get("email") or "",
                 "is_super_admin": bool(row.get("is_super_admin")),
                 "identity": identity,
+                "last_login_iso": sso_admin.utc_iso(identity.get("last_login_at")) if identity else None,
                 "can_manage": can_manage
                 and await sso_policy.can_manage_link(user, row, company_id, managed_company_ids),
             }

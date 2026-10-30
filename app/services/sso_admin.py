@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import timezone
 from typing import Any
 from urllib.parse import quote
 
@@ -13,6 +14,7 @@ from app.repositories import user_sso_identities as sso_identity_repo
 from app.repositories import users as user_repo
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
+from app.security.session import ensure_datetime
 from app.services import sso_policy
 
 PROVIDER = "m365"
@@ -37,6 +39,19 @@ class SsoAdminError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.message = message
+
+
+def utc_iso(value: Any) -> str | None:
+    """Return a timezone-aware ISO string for a datetime or a SQLite-style string."""
+    if not value:
+        return None
+    try:
+        moment = ensure_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).isoformat()
 
 
 def is_guid(value: str) -> bool:
@@ -172,6 +187,8 @@ async def unlink_identity(
 
 
 async def must_stay_linked(user: dict[str, Any]) -> bool:
+    if user.get("is_super_admin"):
+        return False
     for company_id in await sso_policy.user_company_ids(user):
         if await sso_policy.get_company_sso_mode(company_id) == "required":
             return True

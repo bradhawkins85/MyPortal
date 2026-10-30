@@ -80,7 +80,6 @@
                 <form action="/admin/users/{{ entry.id }}/sso/unlink" method="post" class="inline-form"
                       onsubmit="return confirm({{ ('Unlink the Microsoft account from ' ~ entry.email ~ '? They will sign in with their MyPortal password instead.') | tojson | forceescape }});">
                   {% include "partials/csrf.html" %}
-                  <input type="hidden" name="company_id" value="{{ entry.company_id if entry.company_id is not none else '' }}" />
                   <button type="submit" class="button button--ghost" title="Remove this person's Microsoft sign-in link">Unlink Microsoft</button>
                 </form>
                 {% endif %}

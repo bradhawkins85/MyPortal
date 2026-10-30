@@ -7310,6 +7310,9 @@ async def admin_profile_page(request: Request):
             "profile_passkeys": profile_passkeys,
             "profile_m365_contacts": m365_contacts_status,
             "profile_sso_identity": sso_identity,
+            "profile_sso_last_login_iso": sso_admin.utc_iso(
+                sso_identity.get("last_login_at") if sso_identity else None
+            ),
             "profile_sso_must_stay_linked": bool(sso_identity)
             and await sso_admin.must_stay_linked(user),
             "profile_sales_opt_out": await _profile_sales_opt_out_status(user),
@@ -7797,16 +7800,14 @@ async def admin_user_sso_unlink(request: Request, user_id: int):
         return redirect
     from app.services import sso_admin
 
-    form = await request.form()
-    try:
-        company_id = int(str(form.get("company_id") or "").strip())
-    except ValueError:
-        company_id = None
+    target = await user_repo.get_user_by_id(user_id)
+    if not target:
+        return flash_redirect("/admin/users", "User not found.", "error")
     try:
         deleted = await sso_admin.unlink_identity(
             actor=current_user,
             target_user_id=user_id,
-            company_id=company_id,
+            company_id=target.get("company_id"),
             managed_company_ids=set(),
             request=request,
         )

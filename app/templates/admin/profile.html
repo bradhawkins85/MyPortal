@@ -141,11 +141,12 @@
         <div class="card__body">
           {% if profile_sso_identity %}
             <p><span class="status status--success">Linked</span> <strong>{{ profile_sso_identity.upn or profile_sso_identity.email or "Microsoft account" }}</strong></p>
-            {% if profile_sso_identity.last_login_at %}<p class="form-help">Last signed in with Microsoft on <span data-utc="{{ profile_sso_identity.last_login_at.isoformat() }}">{{ profile_sso_identity.last_login_at.isoformat() }}</span>.</p>{% endif %}
+            {% if profile_sso_last_login_iso %}<p class="form-help">Last signed in with Microsoft on <span data-utc="{{ profile_sso_last_login_iso }}">{{ profile_sso_last_login_iso }}</span>.</p>{% endif %}
             {% if profile_sso_must_stay_linked %}
               <p class="form-help">Your organisation requires Microsoft sign-in, so this account must stay linked.</p>
             {% else %}
-              <form method="post" action="/admin/profile/microsoft-sign-in/unlink" class="form-actions profile-form__actions">
+              <form method="post" action="/admin/profile/microsoft-sign-in/unlink" class="form-actions profile-form__actions"
+                    onsubmit="return confirm('Unlink your Microsoft account? You will sign in with your MyPortal password instead.');">
                 {% include "partials/csrf.html" %}
                 <button type="submit" class="button button--ghost">Unlink</button>
               </form>

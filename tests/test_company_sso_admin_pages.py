@@ -567,18 +567,32 @@ def test_users_page_unlink_form_only_for_linked_users(world, users_page, client)
     html = client.get("/admin/users").text
     assert html.count("/sso/unlink") == 1
     form = html[html.index('action="/admin/users/2/sso/unlink"') :]
-    assert 'name="company_id" value="7"' in form[: form.index("</form>")]
+    assert 'name="company_id"' not in form[: form.index("</form>")]
 
 
-def test_users_unlink_post_calls_service_for_super_admin(world, client):
+def test_users_unlink_post_derives_company_from_target_user(world, client):
     world.identities[2] = _identity(2)
-    response = client.post("/admin/users/2/sso/unlink", data={"company_id": "7"})
+    world.users[2] = {**COMPANY_ADMIN, "company_id": 7}
+    response = client.post("/admin/users/2/sso/unlink", data={"company_id": "9"})
     assert response.status_code == 303
     assert response.headers["location"] == "/admin/users"
     assert _flash(response)["variant"] == "success"
     call = world.unlink_calls[0]
     assert call["target_user_id"] == 2 and call["company_id"] == 7
     assert call["actor"]["id"] == SUPER["id"]
+
+
+def test_users_unlink_post_for_user_without_company(world, client):
+    response = client.post("/admin/users/1/sso/unlink")
+    assert response.status_code == 303
+    assert world.unlink_calls[0]["company_id"] is None
+
+
+def test_users_unlink_post_unknown_user_is_flashed(world, client):
+    response = client.post("/admin/users/99/sso/unlink")
+    assert response.status_code == 303
+    assert _flash(response) == {"message": "User not found.", "variant": "error"}
+    assert world.unlink_calls == []
 
 
 def test_users_unlink_post_requires_super_admin(world, client):
@@ -664,6 +678,72 @@ def test_profile_unlink_requires_csrf(world, client, monkeypatch):
     world.identities[3] = _identity(3)
     assert client.post("/admin/profile/microsoft-sign-in/unlink").status_code == 403
     assert 3 in world.identities
+
+
+# --- SQLite string timestamps, required-mode edge cases ---------------------------
+
+def test_edit_page_renders_string_last_login(world, client):
+    world.identities[3] = _identity(3, last="2026-10-30 08:00:00")
+    response = client.get(EDIT_URL)
+    assert response.status_code == 200
+    assert 'data-utc="2026-10-30T08:00:00+00:00"' in _section(response.text)
+
+
+def test_edit_page_tolerates_unparseable_last_login(world, client):
+    world.identities[3] = _identity(3, last="not a date")
+    response = client.get(EDIT_URL)
+    assert response.status_code == 200
+    assert "signed in with microsoft yet" in _section(response.text).lower()
+
+
+def test_profile_renders_string_last_login(world, client):
+    world.identities[1] = _identity(1, last="2026-10-30 08:00:00")
+    response = client.get("/admin/profile")
+    assert response.status_code == 200
+    assert 'data-utc="2026-10-30T08:00:00+00:00"' in response.text
+
+
+def test_current_required_radio_stays_enabled_when_unavailable(world, client):
+    world.companies[7]["sso_mode"] = "required"
+    world.companies[7]["csp_tenant_id"] = None
+    section = _section(client.get(EDIT_URL).text)
+    tag = _tag(section, 'value="required"')
+    assert "checked" in tag and "disabled" not in tag
+    assert 'id="sso-required-help"' in section
+
+
+def test_no_members_shows_only_one_empty_state(world, client):
+    world.members = []
+    section = _section(client.get(EDIT_URL).text)
+    assert "No users in this company yet" in section
+    assert "No one has signed in with Microsoft yet" not in section
+
+
+def test_super_admin_may_unlink_own_account_even_when_required(world, client):
+    world.actor = SUPER
+    world.identities[1] = _identity(1)
+    world.companies[7]["sso_mode"] = "required"
+    world.memberships[1] = {7}
+    response = client.post("/admin/profile/microsoft-sign-in/unlink")
+    assert _flash(response)["variant"] == "success"
+    assert 1 not in world.identities
+
+
+def test_profile_hides_required_notice_for_super_admin(world, client):
+    world.identities[1] = _identity(1)
+    world.companies[7]["sso_mode"] = "required"
+    world.memberships[1] = {7}
+    html = client.get("/admin/profile").text
+    assert "must stay linked" not in html
+    assert 'action="/admin/profile/microsoft-sign-in/unlink"' in html
+
+
+def test_profile_unlink_form_asks_for_confirmation(world, client):
+    html = client.get("/admin/profile").text
+    world.identities[1] = _identity(1)
+    html = client.get("/admin/profile").text
+    form = html[html.index('action="/admin/profile/microsoft-sign-in/unlink"') :]
+    assert "confirm(" in form[: form.index(">")]
 
 
 # --- static assets -------------------------------------------------------------------
