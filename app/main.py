@@ -244,14 +244,24 @@ async def _new_m365_oauth_state(request: Request, **context: Any) -> str:
 _SSO_TRANSACTION_FLOWS = frozenset({"sso_login", "sso_totp"})
 
 
-def _sso_state_envelope(state: str | None) -> dict[str, Any] | None:
-    """Return the signed Microsoft sign-in envelope, or ``None`` for other state."""
-    if not state:
-        return None
+def _decode_m365_oauth_state(request: Request, state: str) -> Any:
+    """Verify signed OAuth state once per request; ``None`` when it is invalid."""
+    cached = getattr(request.state, "m365_oauth_state", None)
+    if isinstance(cached, tuple) and cached[0] == state:
+        return cached[1]
     try:
         envelope = oauth_state_serializer.loads(state)
     except BadSignature:
+        envelope = None
+    request.state.m365_oauth_state = (state, envelope)
+    return envelope
+
+
+def _sso_state_envelope(request: Request, state: str | None) -> dict[str, Any] | None:
+    """Return the signed Microsoft sign-in envelope, or ``None`` for other state."""
+    if not state:
         return None
+    envelope = _decode_m365_oauth_state(request, state)
     if isinstance(envelope, dict) and "sso_transaction_id" in envelope:
         return envelope
     return None
@@ -261,10 +271,7 @@ async def _consume_m365_oauth_state(request: Request, state: str | None) -> dict
     """Validate, consume, and bind opaque OAuth state to this live session."""
     if not state:
         return None
-    try:
-        envelope = oauth_state_serializer.loads(state)
-    except BadSignature:
-        return None
+    envelope = _decode_m365_oauth_state(request, state)
     # Context-bearing legacy state is intentionally rejected (see service docs).
     transaction_id = envelope.get("transaction_id") if isinstance(envelope, dict) else None
     if not isinstance(transaction_id, str):
@@ -6124,7 +6131,7 @@ async def _continue_to_scc_consent(
 
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
-    sso_envelope = _sso_state_envelope(state)
+    sso_envelope = _sso_state_envelope(request, state)
     if sso_envelope is not None:
         return await auth.complete_sso_callback(request, sso_envelope, code, error)
     # Consume first, including denied-consent responses: a callback transaction

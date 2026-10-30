@@ -84,6 +84,8 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
 LOGIN_RATE_LIMIT_WINDOW = 300  # 5 minutes
 LOGIN_RATE_LIMIT_ATTEMPTS = 5
+# Microsoft sign-in start/discover are per client IP, shared by whole offices.
+SSO_RATE_LIMIT_ATTEMPTS = 30
 # Per-account failed sign-in limit, independent of the client address.
 ACCOUNT_LOCKOUT_WINDOW = 900  # 15 minutes
 ACCOUNT_LOCKOUT_ATTEMPTS = 10
@@ -1661,9 +1663,19 @@ async def _finish_sso_login(
     upn: Any,
     email: Any,
     next_path: str,
-    mfa_satisfied_by: str | None,
+    mfa_satisfied_by: str,
+    skip_totp_enrollment: bool,
     totp_devices: list[dict[str, Any]] | None = None,
 ) -> Response:
+    response = await _complete_login_response(
+        request=request,
+        user=user,
+        auth_method=sso_login.AUTHENTICATION_METHOD,
+        totp_devices=totp_devices,
+        skip_totp_enrollment=skip_totp_enrollment,
+        redirect_to=next_path,
+        extra_audit_metadata={"mfa_satisfied_by": mfa_satisfied_by},
+    )
     if identity_id is not None:
         await sso_identity_repo.record_login(
             int(identity_id),
@@ -1671,15 +1683,7 @@ async def _finish_sso_login(
             email=str(email) if email else None,
             when=datetime.now(timezone.utc),
         )
-    return await _complete_login_response(
-        request=request,
-        user=user,
-        auth_method=sso_login.AUTHENTICATION_METHOD,
-        totp_devices=totp_devices,
-        skip_totp_enrollment=mfa_satisfied_by is not None,
-        redirect_to=next_path,
-        extra_audit_metadata={"mfa_satisfied_by": mfa_satisfied_by} if mfa_satisfied_by else None,
-    )
+    return response
 
 
 async def _begin_sso_totp_step(
@@ -1766,6 +1770,7 @@ async def _handle_sso_callback(
             email=claims.get("email"),
             next_path=next_path,
             mfa_satisfied_by="microsoft",
+            skip_totp_enrollment=True,
         )
     totp_devices = await auth_repo.get_totp_authenticators(user["id"])
     if totp_devices:
@@ -1780,7 +1785,8 @@ async def _handle_sso_callback(
         upn=claims.get("preferred_username"),
         email=claims.get("email"),
         next_path=next_path,
-        mfa_satisfied_by=None,
+        mfa_satisfied_by="none",
+        skip_totp_enrollment=False,
         totp_devices=totp_devices,
     )
 
@@ -1789,9 +1795,24 @@ async def complete_sso_callback(
     request: Request, state_envelope: dict[str, Any], code: str | None, error: str | None
 ) -> Response:
     """Finish Microsoft sign-in for ``/m365/callback`` (called by ``app.main``)."""
-    response = await _handle_sso_callback(request, state_envelope, code, error)
+    try:
+        response = await _handle_sso_callback(request, state_envelope, code, error)
+    except Exception as exc:  # clear the binding cookie in every outcome
+        log_error("Microsoft sign-in callback failed", error_type=type(exc).__name__)
+        response = _sso_failure(SSO_MICROSOFT_FAILED_MESSAGE)
     _clear_sso_cookie(response, request, SSO_BINDING_COOKIE)
     return response
+
+
+async def _sso_identity_still_valid(user: dict[str, Any], identity_id: Any) -> bool:
+    identity = await sso_identity_repo.get_for_user(int(user["id"]), sso_login.PROVIDER)
+    if not identity or identity_id is None or str(identity.get("id")) != str(identity_id):
+        return False
+    tenant_id = str(identity.get("tenant_id") or "").strip().lower()
+    if not tenant_id:
+        return False
+    tenant_companies = {int(c) for c in await sso_policy.companies_for_tenant(tenant_id)}
+    return bool(await sso_policy.user_company_ids(user) & tenant_companies)
 
 
 async def _handle_sso_totp(request: Request, token: str, code: str) -> Response:
@@ -1815,7 +1836,7 @@ async def _handle_sso_totp(request: Request, token: str, code: str) -> Response:
         return _sso_failure(SSO_EXPIRED_MESSAGE)
 
     user = await user_repo.get_user_by_id(int(transaction.get("user_id") or 0))
-    if not user or int(user.get("is_active", 1)) != 1:
+    if not user or int(user.get("is_active", 0)) != 1:
         return _sso_failure(sso_login.GENERIC_FAILURE)
 
     account_identifier = _account_lockout_identifier(user["email"])
@@ -1844,6 +1865,11 @@ async def _handle_sso_totp(request: Request, token: str, code: str) -> Response:
         )
         return _sso_failure(SSO_INVALID_TOTP_MESSAGE)
 
+    # The link or company access may have changed while the code was typed.
+    if not await _sso_identity_still_valid(user, transaction.get("identity_id")):
+        _log_login_failure(request, user["email"], "sso_identity_changed")
+        return _sso_failure(sso_login.GENERIC_FAILURE)
+
     await auth_repo.clear_login_attempts(account_identifier)
     return await _finish_sso_login(
         request,
@@ -1853,6 +1879,7 @@ async def _handle_sso_totp(request: Request, token: str, code: str) -> Response:
         email=transaction.get("email"),
         next_path=_safe_redirect_target(str(transaction.get("next_path") or ""), fallback="/"),
         mfa_satisfied_by="myportal_totp",
+        skip_totp_enrollment=True,
         totp_devices=totp_devices,
     )
 
@@ -1870,7 +1897,7 @@ async def discover_microsoft_sign_in(
     allowed = await auth_repo.register_login_attempt(
         "sso-discover:" + _client_ip(request),
         window_seconds=LOGIN_RATE_LIMIT_WINDOW,
-        max_attempts=LOGIN_RATE_LIMIT_ATTEMPTS,
+        max_attempts=SSO_RATE_LIMIT_ATTEMPTS,
     )
     if not allowed:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests")
@@ -1892,7 +1919,7 @@ async def start_microsoft_sign_in(
     allowed = await auth_repo.register_login_attempt(
         "sso-start:" + _client_ip(request),
         window_seconds=LOGIN_RATE_LIMIT_WINDOW,
-        max_attempts=LOGIN_RATE_LIMIT_ATTEMPTS,
+        max_attempts=SSO_RATE_LIMIT_ATTEMPTS,
     )
     if not allowed:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many sign-in attempts")
@@ -1923,13 +1950,17 @@ async def complete_microsoft_totp(
     request: Request,
     _: None = Depends(require_database),
 ) -> Response:
-    form = await request.form()
-    token = form.get("t")
-    code = form.get("code")
-    response = await _handle_sso_totp(
-        request,
-        token if isinstance(token, str) else "",
-        code.strip() if isinstance(code, str) else "",
-    )
+    try:
+        form = await request.form()
+        token = form.get("t")
+        code = form.get("code")
+        response = await _handle_sso_totp(
+            request,
+            token if isinstance(token, str) else "",
+            code.strip() if isinstance(code, str) else "",
+        )
+    except Exception as exc:  # clear the pending cookie in every outcome
+        log_error("Microsoft sign-in authenticator step failed", error_type=type(exc).__name__)
+        response = _sso_failure(SSO_MICROSOFT_FAILED_MESSAGE)
     _clear_sso_cookie(response, request, SSO_PENDING_COOKIE)
     return response

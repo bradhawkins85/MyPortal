@@ -67,6 +67,11 @@ class Stubs:
         self.result = None
         self.resolve_error: Exception | None = None
         self.redeem_error: Exception | None = None
+        self.consume_error: Exception | None = None
+        self.session_error: Exception | None = None
+        self.identity = {"id": 77, "user_id": 1, "tenant_id": "tenant-1"}
+        self.user_companies = {1}
+        self.tenant_companies = [1]
         self.mode = "optional"
         self.user = {"id": 1, "email": "a@contoso.com", "first_name": "A", "last_name": "User",
                      "company_id": 1, "is_active": 1, "is_super_admin": 0}
@@ -109,6 +114,8 @@ def stubs(monkeypatch):
         return s.put_transaction(**context)
 
     async def consume(transaction_id):
+        if s.consume_error:
+            raise s.consume_error
         return s.transactions.pop(transaction_id, None)
 
     async def pkce_client_id(*, redirect_uri=None):
@@ -137,6 +144,8 @@ def stubs(monkeypatch):
         return dict(s.user) if int(user_id) == int(s.user["id"]) else None
 
     async def create_session(user_id, request, *, active_company_id=None, **kwargs):
+        if s.session_error:
+            raise s.session_error
         s.sessions_created.append(user_id)
         return _session(100 + len(s.sessions_created), user_id)
 
@@ -165,6 +174,17 @@ def stubs(monkeypatch):
     async def discover(email):
         return s.mode
 
+    async def identity_for_user(user_id, provider="m365"):
+        if s.identity and int(s.identity["user_id"]) == int(user_id):
+            return dict(s.identity)
+        return None
+
+    async def user_company_ids(user):
+        return set(s.user_companies)
+
+    async def companies_for_tenant(tenant_id):
+        return list(s.tenant_companies) if tenant_id == "tenant-1" else []
+
     async def first_company(user):
         return 1
 
@@ -187,6 +207,9 @@ def stubs(monkeypatch):
     monkeypatch.setattr(sso_login, "resolve", resolve)
     monkeypatch.setattr(sso_identity_repo, "record_login", identity_login)
     monkeypatch.setattr(sso_policy, "discover", discover)
+    monkeypatch.setattr(sso_identity_repo, "get_for_user", identity_for_user)
+    monkeypatch.setattr(sso_policy, "user_company_ids", user_company_ids)
+    monkeypatch.setattr(sso_policy, "companies_for_tenant", companies_for_tenant)
     monkeypatch.setattr(auth_routes, "_determine_active_company_id", first_company)
     return s
 
@@ -217,9 +240,13 @@ def _flash(response) -> dict | None:
     return json.loads(signed.rsplit("|", 1)[0])
 
 
+def _cookie_cleared(response, name: str) -> bool:
+    header = _cookie_header(response, name)
+    return header.startswith(name + '=""') and "Max-Age=0" in header and "expires=" in header
+
+
 def _binding_cleared(response) -> bool:
-    header = _cookie_header(response, "myportal_sso_binding")
-    return bool(header) and ('=""' in header or "Max-Age=0" in header)
+    return _cookie_cleared(response, "myportal_sso_binding")
 
 
 def _session_cookie_value(response) -> str | None:
@@ -258,7 +285,8 @@ def test_start_stores_safe_next_only(client, stubs):
 
 
 def test_start_is_rate_limited(client, stubs):
-    for _ in range(auth_routes.LOGIN_RATE_LIMIT_ATTEMPTS):
+    assert auth_routes.SSO_RATE_LIMIT_ATTEMPTS == 30
+    for _ in range(auth_routes.SSO_RATE_LIMIT_ATTEMPTS):
         assert client.get("/auth/microsoft/start", follow_redirects=False).status_code == 303
     r = client.get("/auth/microsoft/start", follow_redirects=False)
     assert r.status_code == 429
@@ -488,7 +516,7 @@ def test_no_mfa_with_totp_prompts_then_totp_completes(client, stubs):
     assert stubs.audit["auth.login.succeed"]["metadata"].items() >= {
         "authentication_method": "m365_sso", "mfa_satisfied_by": "myportal_totp"}.items()
     assert stubs.identity_logins and stubs.identity_logins[0]["id"] == 77
-    assert _cookie_header(r, "myportal_sso_pending")  # cleared
+    assert _cookie_cleared(r, "myportal_sso_pending")
 
     replay = client.post("/auth/microsoft/totp", data={"t": token, "code": code}, follow_redirects=False)
     assert replay.headers["location"] == "/login" and stubs.sessions_created == [1]
@@ -564,6 +592,8 @@ def test_no_mfa_without_totp_forces_enrolment(client, stubs):
     r = client.get(f"/m365/callback?code=c&state={state}", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/security/2fa"
     assert stubs.sessions_created == [1]
+    assert stubs.audit["auth.login.succeed"]["metadata"].items() >= {
+        "authentication_method": "m365_sso", "mfa_satisfied_by": "none"}.items()
 
 
 def test_mfa_skips_enrolment_for_user_without_totp(client, stubs):
@@ -580,12 +610,83 @@ def test_mfa_skips_enrolment_for_user_without_totp(client, stubs):
 def test_discover_returns_mode_and_rate_limits(client, stubs):
     r = client.post("/auth/microsoft/discover", json={"email": "a@contoso.com"})
     assert r.status_code == 200 and r.json() == {"sso": "optional"}
-    for _ in range(auth_routes.LOGIN_RATE_LIMIT_ATTEMPTS - 1):
+    # Calls 2..30 succeed; the 31st is refused.
+    for _ in range(2, 31):
         assert client.post("/auth/microsoft/discover", json={"email": "a@contoso.com"}).status_code == 200
     r = client.post("/auth/microsoft/discover", json={"email": "a@contoso.com"})
     assert r.status_code == 429
+    assert stubs.counts["sso-discover:testclient"] == 31
     assert any(key.startswith("sso-discover:") for key in stubs.counts)
 
 
 def test_microsoft_paths_are_csrf_exempt():
     assert "/auth/microsoft/" in csrf.DEFAULT_EXEMPT_PREFIXES
+
+
+# --- hardening -------------------------------------------------------------
+
+
+def test_callback_unexpected_error_clears_binding_cookie(client, stubs):
+    stubs.outcome(user_id=1, mfa=True)
+    state = stubs.begin(client)
+    stubs.consume_error = RuntimeError("redis down")
+    r = client.get(f"/m365/callback?code=c&state={state}", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login"
+    assert _flash(r) == {"message": MS_FAILED, "variant": "error"}
+    assert _binding_cleared(r)
+    assert stubs.sessions_created == []
+
+
+def test_totp_unexpected_error_clears_pending_cookie(client, stubs):
+    token = _totp_flow(client, stubs)
+    stubs.consume_error = RuntimeError("redis down")
+    code = pyotp.TOTP(stubs.devices[0]["secret"]).now()
+    r = client.post("/auth/microsoft/totp", data={"t": token, "code": code}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login"
+    assert _flash(r) == {"message": MS_FAILED, "variant": "error"}
+    assert _cookie_cleared(r, "myportal_sso_pending")
+    assert stubs.sessions_created == []
+
+
+def test_identity_login_recorded_only_after_session_created(client, stubs):
+    stubs.outcome(user_id=1, mfa=True)
+    stubs.session_error = RuntimeError("session store down")
+    state = stubs.begin(client, next_path="/tickets")
+    r = client.get(f"/m365/callback?code=c&state={state}", follow_redirects=False)
+    assert r.headers["location"] == "/login"
+    assert stubs.identity_logins == []
+
+
+def test_totp_identity_login_recorded_only_after_session_created(client, stubs):
+    token = _totp_flow(client, stubs)
+    stubs.session_error = RuntimeError("session store down")
+    code = pyotp.TOTP(stubs.devices[0]["secret"]).now()
+    r = client.post("/auth/microsoft/totp", data={"t": token, "code": code}, follow_redirects=False)
+    assert r.headers["location"] == "/login"
+    assert stubs.identity_logins == []
+
+
+def test_totp_fails_closed_when_is_active_missing(client, stubs):
+    token = _totp_flow(client, stubs)
+    del stubs.user["is_active"]
+    code = pyotp.TOTP(stubs.devices[0]["secret"]).now()
+    r = client.post("/auth/microsoft/totp", data={"t": token, "code": code}, follow_redirects=False)
+    assert r.headers["location"] == "/login"
+    assert _flash(r)["message"] == sso_login.GENERIC_FAILURE
+    assert stubs.sessions_created == []
+
+
+@pytest.mark.parametrize("change", ["identity_removed", "identity_replaced", "company_removed"])
+def test_totp_rechecks_identity_and_company(client, stubs, change):
+    token = _totp_flow(client, stubs)
+    if change == "identity_removed":
+        stubs.identity = None
+    elif change == "identity_replaced":
+        stubs.identity = {"id": 78, "user_id": 1, "tenant_id": "tenant-1"}
+    else:
+        stubs.user_companies = {2}
+    code = pyotp.TOTP(stubs.devices[0]["secret"]).now()
+    r = client.post("/auth/microsoft/totp", data={"t": token, "code": code}, follow_redirects=False)
+    assert r.headers["location"] == "/login"
+    assert _flash(r)["message"] == sso_login.GENERIC_FAILURE
+    assert stubs.sessions_created == [] and stubs.identity_logins == []
