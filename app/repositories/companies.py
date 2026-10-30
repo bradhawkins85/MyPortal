@@ -23,7 +23,7 @@ _ALLOWED_COMPANY_COLUMNS = frozenset({
     "defender_auto_ticket_antivirus_off", "defender_auto_ticket_realtime_off",
     "defender_auto_ticket_tamper_off", "defender_auto_ticket_threat_detected",
     "classic_outlook_signatures_enabled", "pending_approval", "rmm_agent_auto_deploy",
-    "signature_delivery_mode", "outlook_addin_id",
+    "signature_delivery_mode", "outlook_addin_id", "sso_mode",
 })
 _ALLOWED_COMPANY_INPUTS = _ALLOWED_COMPANY_COLUMNS | frozenset({"email_domains"})
 
@@ -60,6 +60,26 @@ def _normalise_company(row: dict[str, Any]) -> dict[str, Any]:
             normalised["default_ticket_replies_billable"]
         )
     return normalised
+
+
+async def list_sso_company_ids_for_tenant(tenant_id: str) -> list[int]:
+    """Companies with SSO enabled whose effective tenant is *tenant_id*.
+
+    The effective tenant is the company's CSP customer tenant when one is
+    mapped, otherwise the tenant the M365 credentials were provisioned in.
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT cred.company_id
+        FROM company_m365_credentials AS cred
+        JOIN companies AS co ON co.id = cred.company_id
+        WHERE LOWER(COALESCE(NULLIF(co.csp_tenant_id, ''), cred.tenant_id)) = LOWER(%s)
+          AND co.sso_mode <> 'off'
+        ORDER BY cred.company_id
+        """,
+        (tenant_id.lower(),),
+    )
+    return [int(row["company_id"]) for row in rows]
 
 
 async def count_companies() -> int:
