@@ -18682,6 +18682,10 @@ body.scf-modal-open {
   gap: var(--space-gap-tight);
 }
 
+.auth-passkey[hidden] {
+  display: none;
+}
+
 .auth-passkey__button {
   display: inline-flex;
   align-items: center;
@@ -18695,6 +18699,40 @@ body.scf-modal-open {
 }
 
 .auth-passkey .form-help {
+  margin: 0;
+  text-align: center;
+}
+
+.auth-sso {
+  margin-top: var(--space-gap-tight);
+}
+
+.auth-sso__button {
+  gap: 0.5rem;
+}
+
+.auth-sso__icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: currentColor;
+}
+
+.auth-sso-continue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.auth-sso-continue:not(:has(:not([hidden]))) {
+  display: none;
+}
+
+.auth-sso-continue__link[hidden],
+.auth-sso-continue__hint[hidden] {
+  display: none;
+}
+
+.auth-sso-continue__hint {
   margin: 0;
   text-align: center;
 }

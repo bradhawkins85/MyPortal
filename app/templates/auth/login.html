@@ -51,13 +51,20 @@
     </header>
 
     <div class="auth-passkey-section" data-auth-passkey-section>
-    <div class="auth-passkey">
+    <div class="auth-passkey" data-passkey-only>
       <button type="button" class="button button--secondary auth-card__wide auth-passkey__button" data-passkey-login>
         <svg class="auth-passkey__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 14a5 5 0 1 1 4.9-6H22v4h-2v3h-3v-3h-5.1A5 5 0 0 1 7 14zm0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>
         Sign in with a passkey
       </button>
       <p class="form-help" data-passkey-help>Use your fingerprint, face, device PIN or security key if you've set up a passkey.</p>
       <div class="form-error" role="alert" data-passkey-error hidden></div>
+    </div>
+
+    <div class="auth-sso">
+      <a class="button button--secondary auth-card__wide auth-sso__button" href="/auth/microsoft/start{% if next_path and next_path != '/' %}?next={{ next_path|urlencode|replace('/', '%2F') }}{% endif %}" data-sso-login>
+        <svg class="auth-sso__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 3h8.5v8.5H3zM12.5 3H21v8.5h-8.5zM3 12.5h8.5V21H3zM12.5 12.5H21V21h-8.5z"/></svg>
+        Sign in with Microsoft
+      </a>
     </div>
 
     <p class="auth-divider"><span>or use your email</span></p>
@@ -84,6 +91,10 @@
           required
           placeholder="you@example.com"
         />
+      </div>
+      <div class="auth-sso-continue">
+        <a class="button button--primary auth-card__wide auth-sso-continue__link" href="/auth/microsoft/start" data-sso-continue hidden>Continue with Microsoft</a>
+        <p class="form-help auth-sso-continue__hint" data-sso-hint role="status" aria-live="polite" hidden>Your organisation uses Microsoft sign-in.</p>
       </div>
       <div class="form-field">
         <div class="auth-form__label-row">
@@ -125,5 +136,6 @@
 {% block scripts %}
 <script src="{{ static_url('/static/js/passkey_utils.js') }}" defer></script>
 <script src="{{ static_url('/static/js/auth_ui.js') }}" defer></script>
+<script src="{{ static_url('/static/js/login_sso.js') }}" defer></script>
 <script type="module" src="{{ static_url('/static/js/auth.js') }}"></script>
 {% endblock %}
