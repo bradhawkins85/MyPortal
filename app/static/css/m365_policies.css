@@ -1,0 +1,298 @@
+/* Microsoft 365 Policies page. Builds on the shared .scf-* list and editor
+   styles; only the pieces specific to policies live here. */
+
+.mpol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-roomy);
+}
+
+.mpol-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--space-gap-base);
+  margin: 0;
+}
+
+.mpol-stat {
+  padding: var(--space-gap-base);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-bg-sunken);
+}
+
+.mpol-stat dt {
+  font-size: 0.8rem;
+  color: var(--hf-muted);
+}
+
+.mpol-stat dd {
+  margin: 0.35rem 0 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.mpol-stat dd a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.mpol-stat dd a:hover,
+.mpol-stat dd a:focus-visible {
+  text-decoration: underline;
+}
+
+.mpol-stat__of {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--hf-muted);
+}
+
+.mpol-legend {
+  margin: var(--space-gap-base) 0 0;
+  font-size: 0.85rem;
+}
+
+.mpol-item__icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--hf-accent-ring);
+}
+
+.mpol-item__target {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--hf-copy);
+}
+
+.mpol-item__target--error {
+  color: var(--hf-warning);
+}
+
+.mpol-chip--remediate {
+  color: var(--hf-success);
+  background: color-mix(in srgb, var(--hf-success) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hf-success) 30%, transparent);
+}
+
+.mpol-chip--alert {
+  color: var(--hf-warning);
+  background: color-mix(in srgb, var(--hf-warning) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hf-warning) 32%, transparent);
+}
+
+.mpol-standards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mpol-standards__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-base);
+  margin-bottom: var(--space-gap-base);
+}
+
+.mpol-standards__toolbar .form-input {
+  flex: 1 1 14rem;
+  width: auto;
+}
+
+.mpol-standards__selected {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--hf-copy);
+}
+
+.mpol-standards__group + .mpol-standards__group {
+  margin-top: var(--space-gap-roomy);
+}
+
+.mpol-standards__heading {
+  margin: 0 0 var(--space-gap-tight);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.mpol-standard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+  padding: var(--space-gap-base);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-bg-sunken);
+}
+
+.mpol-standard.is-selected {
+  border-color: var(--hf-accent-ring);
+  background: var(--hf-accent-soft);
+}
+
+.mpol-standard__pick {
+  display: flex;
+  flex: 1 1 18rem;
+  align-items: flex-start;
+  gap: var(--space-gap-base);
+  cursor: pointer;
+}
+
+.mpol-standard__pick input {
+  margin-top: 0.2rem;
+}
+
+.mpol-standard__text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+}
+
+.mpol-standard__name {
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.mpol-standard__help {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+  color: var(--hf-muted);
+}
+
+.mpol-segmented {
+  display: inline-flex;
+  margin: 0;
+  padding: 0.15rem;
+  border: 1px solid var(--hf-line);
+  border-radius: 999px;
+}
+
+.mpol-segmented__option {
+  position: relative;
+  cursor: pointer;
+}
+
+.mpol-segmented__option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mpol-segmented__option span {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--hf-muted);
+}
+
+.mpol-segmented__option input:checked + span {
+  color: var(--hf-copy-strong);
+  background: var(--hf-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--hf-accent-ring);
+}
+
+.mpol-segmented__option input:focus-visible + span {
+  outline: 2px solid var(--hf-accent);
+  outline-offset: 1px;
+}
+
+.mpol-segmented__option input:disabled + span {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.mpol-conditions__match {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-base);
+}
+
+.mpol-conditions__match .form-input {
+  width: auto;
+}
+
+.mpol-conditions__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mpol-condition {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
+.mpol-condition > .form-input {
+  flex: 1 1 9rem;
+  width: auto;
+  min-width: 0;
+}
+
+.mpol-condition > button {
+  flex: 0 0 auto;
+}
+
+.mpol-condition .scf-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.mpol .scf-empty[hidden],
+.mpol [data-mpol-item][hidden],
+.mpol-standard[hidden],
+.mpol-standards__group[hidden] {
+  display: none;
+}
+
+.mpol-exceptions__add {
+  display: flex;
+  gap: var(--space-gap-tight);
+}
+
+.mpol-preview__count {
+  margin: 0;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.mpol-preview__tenants {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--hf-copy);
+}
+
+.mpol-results__details {
+  max-width: 28rem;
+  font-size: 0.85rem;
+  color: var(--hf-copy);
+}
+
+.mpol-results__count {
+  margin: var(--space-gap-base) 0 0;
+  font-size: 0.85rem;
+}
+
+.mpol .scf-tags:empty {
+  display: none;
+}

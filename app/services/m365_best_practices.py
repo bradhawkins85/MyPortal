@@ -7915,6 +7915,7 @@ async def run_single_check(
     allow_auto_remediation: bool = True,
     previous_status: str | None = None,
     emit_ticket_on_fail: bool = True,
+    require_enabled: bool = True,
 ) -> dict[str, Any]:
     """Run a single best-practice check by ``check_id`` for ``company_id``.
 
@@ -7923,8 +7924,10 @@ async def run_single_check(
     the result, and returns a result dict in the same shape as the entries
     returned by :func:`run_best_practices`.
 
-    Raises :class:`ValueError` if ``check_id`` is unknown or not currently
-    enabled globally.  ``allow_auto_remediation`` is disabled by post-remediation
+    Raises :class:`ValueError` if ``check_id`` is unknown or, unless
+    ``require_enabled`` is false, not currently enabled globally. Microsoft 365
+    policies pass ``require_enabled=False`` because a policy that includes the
+    check decides where it runs.  ``allow_auto_remediation`` is disabled by post-remediation
     verification runs to prevent an unresolved check from remediating recursively.
     Callers that reset stored results before evaluation can pass ``previous_status``
     explicitly so pass→fail ticket detection still uses the pre-reset state.
@@ -7934,8 +7937,7 @@ async def run_single_check(
     if not bp:
         raise ValueError(f"Unknown best-practice check '{check_id}'")
 
-    enabled = await get_enabled_check_ids()
-    if check_id not in enabled:
+    if require_enabled and check_id not in await get_enabled_check_ids():
         raise ValueError(f"Best-practice check '{check_id}' is not enabled")
     create_ticket_on_fail_ids = (
         await get_create_ticket_on_fail_check_ids() if emit_ticket_on_fail else set()

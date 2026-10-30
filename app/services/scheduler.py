@@ -532,6 +532,18 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Check Microsoft 365 policy standards every four hours, alerting on
+        # drift and applying remediate-mode standards.
+        if not self._scheduler.get_job("m365-standards-run"):
+            self._scheduler.add_job(
+                self._run_m365_standards,
+                "interval",
+                hours=4,
+                id="m365-standards-run",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         # Daily Huntress snapshot sync (04:00 store-local). Pulls EDR / ITDR /
         # SAT / SIEM / SOC stats for every company linked to a Huntress org.
         if not self._scheduler.get_job("huntress-daily-sync"):
@@ -904,6 +916,15 @@ class SchedulerService:
                 log_info("M365 client secret renewal check completed", **result)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("M365 client secret renewal check failed", error=str(exc))
+
+    async def _run_m365_standards(self) -> None:
+        """Run Microsoft 365 policy standards with a distributed lock."""
+        from app.services import m365_policies as m365_policies_service
+
+        try:
+            await m365_policies_service.run_standards_locked()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error("M365 standards run failed", error=str(exc))
 
     async def _run_huntress_daily_sync(self) -> None:
         """Refresh Huntress snapshots for every linked company."""

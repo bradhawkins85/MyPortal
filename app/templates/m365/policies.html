@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import data_table, table_toolbar, pagination %}
+
+{% set status_labels = {'compliant': 'Compliant', 'drift': 'Drift', 'remediated': 'Fixed', 'failed': 'Fix failed', 'unknown': 'Unknown'} %}
+{% set status_variants = {'compliant': 'success', 'drift': 'warning', 'remediated': 'info', 'failed': 'error', 'unknown': 'neutral'} %}
+{% set mode_labels = {'report': 'Report', 'alert': 'Alert', 'remediate': 'Remediate'} %}
+
+{% block title %}Policies – Office 365{% endblock %}
+
+{% block header_title %}Policies{% endblock %}
+
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/m365_policies.css') }}">{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "+ Add policy", "variant": "primary", "attrs": {"data-mpol-create": "", "aria-haspopup": "dialog", "aria-controls": "mpol-modal"}},
+    {"label": "Check all tenants now", "type": "form", "action": "/m365/policies/run"},
+    {"label": "Best Practices", "type": "link", "href": "/m365/best-practices"},
+  ], menu_id="mpol-actions") }}
+{% endblock %}
+
+{% block content %}
+<div class="mpol" data-mpol>
+  <section class="card card--panel" aria-labelledby="mpol-overview-title">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="mpol-overview-title">Overview</h2>
+        <p class="card__subtitle">Policies apply standard Microsoft 365 settings to every tenant that matches their filters. Tenants are checked every four hours.</p>
+      </div>
+    </header>
+    <dl class="mpol-stats">
+      <div class="mpol-stat">
+        <dt>Policies</dt>
+        <dd>{{ policies | selectattr('enabled') | list | length }}<span class="mpol-stat__of"> of {{ policies | length }} on</span></dd>
+      </div>
+      <div class="mpol-stat">
+        <dt>Connected tenants</dt>
+        <dd>{{ tenants | length }}</dd>
+      </div>
+      {% for key in ['compliant', 'drift', 'remediated', 'failed'] %}
+        <div class="mpol-stat mpol-stat--{{ status_variants[key] }}">
+          <dt><span class="status status--{{ status_variants[key] }}">{{ status_labels[key] }}</span></dt>
+          <dd><a href="/m365/policies?status={{ key }}#mpol-results">{{ status_counts.get(key, 0) }}</a></dd>
+        </div>
+      {% endfor %}
+    </dl>
+    <p class="mpol-legend text-muted">
+      <strong>Report</strong> records drift. <strong>Alert</strong> also sends a notification when a tenant first drifts.
+      <strong>Remediate</strong> fixes the setting and alerts only if the fix fails.
+    </p>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="mpol-list-title">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="mpol-list-title">Policies</h2>
+        <p class="card__subtitle">Each policy is a baseline: a set of standards and the tenants they apply to.</p>
+      </div>
+    </header>
+    {% if policies %}
+      <div class="scf-toolbar">
+        <input type="search" class="form-input scf-toolbar__search" placeholder="Search policies by name, standard or filter" aria-label="Search policies" data-mpol-search />
+      </div>
+      <ul class="scf-list mpol-list" data-mpol-list>
+        {% for policy in policies %}
+          <li class="scf-item{% if not policy.enabled %} scf-item--inactive{% endif %}" data-mpol-item
+              data-mpol-search-text="{{ [policy.name, policy.description, policy.target_summary, policy.standards | map(attribute='name') | join(' ')] | join(' ') }}">
+            <span class="mpol-item__icon" aria-hidden="true"></span>
+            <div class="scf-item__main">
+              <div class="scf-item__heading">
+                <button type="button" class="scf-item__label" data-mpol-edit="{{ policy.id }}" aria-haspopup="dialog" aria-controls="mpol-modal">{{ policy.name }}</button>
+              </div>
+              {% if policy.description %}<p class="scf-item__help">{{ policy.description }}</p>{% endif %}
+              <p class="mpol-item__target{% if policy.rules_error %} mpol-item__target--error{% endif %}">{{ policy.target_summary }}</p>
+              <ul class="scf-item__chips" aria-label="Policy summary">
+                <li class="scf-chip">{{ policy.standards | length }} standard{% if policy.standards | length != 1 %}s{% endif %}</li>
+                {% for mode in ['remediate', 'alert', 'report'] if policy.mode_counts.get(mode) %}
+                  <li class="scf-chip mpol-chip--{{ mode }}">{{ policy.mode_counts[mode] }} {{ mode_labels[mode] | lower }}</li>
+                {% endfor %}
+                <li class="scf-chip scf-chip--logic">Targets {{ policy.target_count }} tenant{% if policy.target_count != 1 %}s{% endif %}</li>
+                {% if policy.overrides %}<li class="scf-chip scf-chip--visibility">{{ policy.overrides | length }} exception{% if policy.overrides | length != 1 %}s{% endif %}</li>{% endif %}
+                {% if not policy.enabled %}<li class="scf-chip scf-chip--muted">Off</li>{% endif %}
+              </ul>
+            </div>
+            <div class="scf-item__actions">
+              <button type="button" class="button button--ghost button--small" data-mpol-edit="{{ policy.id }}" aria-haspopup="dialog" aria-controls="mpol-modal">Edit</button>
+              <button type="button" class="button button--ghost button--small" data-mpol-duplicate="{{ policy.id }}" aria-haspopup="dialog" aria-controls="mpol-modal">Duplicate</button>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="scf-empty scf-empty--search" data-mpol-no-results hidden>No policies match your search.</p>
+    {% else %}
+      <div class="scf-empty">
+        <p class="scf-empty__title">No policies yet</p>
+        <p class="text-muted">Create a baseline, such as keeping delegate-sent mail in Sent Items, and choose which tenants it applies to by licence or company variable.</p>
+        <button type="button" class="button" data-mpol-create aria-haspopup="dialog" aria-controls="mpol-modal">+ Add your first policy</button>
+      </div>
+    {% endif %}
+    <noscript><p class="text-muted">Turn on JavaScript to create or edit policies.</p></noscript>
+  </section>
+
+  <section class="card card--panel" id="mpol-results" aria-labelledby="mpol-results-title">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="mpol-results-title">Tenant compliance</h2>
+        <p class="card__subtitle">The latest result for every standard on every targeted tenant.</p>
+      </div>
+    </header>
+    {% set status_options = [('', 'All statuses')] %}
+    {% for key in result_statuses %}{% set _ = status_options.append((key, status_labels[key])) %}{% endfor %}
+    {{ table_toolbar('mpol-results-table',
+      search_placeholder='Search tenants, standards or details',
+      search_value=result_filters.q,
+      filters=[{'name': 'status', 'label': 'Status', 'value': result_filters.status, 'options': status_options}],
+      extra_class='mpol-results__toolbar') }}
+    {% if result_page.rows %}
+      {% call data_table([
+        {'label': 'Tenant'}, {'label': 'Standard'}, {'label': 'Policy'}, {'label': 'Mode'},
+        {'label': 'Status'}, {'label': 'Details', 'sortable': false}, {'label': 'Checked', 'sort_type': 'date'},
+      ], aria_label='Tenant compliance results', table_id='mpol-results-table') %}
+        {% for row in result_page.rows %}
+          <tr>
+            <td>{{ row.company_name }}</td>
+            <td>{{ row.standard_name }}</td>
+            <td>{{ row.policy_name or '—' }}</td>
+            <td>{{ mode_labels.get(row.mode, row.mode) }}</td>
+            <td><span class="status status--{{ status_variants.get(row.status, 'neutral') }}">{{ status_labels.get(row.status, row.status) }}</span></td>
+            <td class="mpol-results__details">{{ row.details or '' }}</td>
+            <td>{% if row.checked_at %}<span data-utc="{{ row.checked_at.isoformat() if row.checked_at.isoformat is defined else row.checked_at }}">{{ row.checked_at }}</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+      {% endcall %}
+      <p class="text-muted mpol-results__count" role="status" aria-live="polite">{{ result_page.total }} result{% if result_page.total != 1 %}s{% endif %}</p>
+      {{ pagination(result_page.page, result_page.total_pages, base_url='/m365/policies', preserve={'q': result_filters.q | urlencode, 'status': result_filters.status}) }}
+    {% elif results %}
+      <p class="scf-empty scf-empty--search">No results match these filters.</p>
+    {% else %}
+      <div class="scf-empty">
+        <p class="scf-empty__title">No results yet</p>
+        <p class="text-muted">Results appear after the next check, or choose <em>Check all tenants now</em> from the Actions menu.</p>
+      </div>
+    {% endif %}
+  </section>
+</div>
+
+{% set editor_policies = [] %}
+{% for policy in policies %}
+  {% set _ = editor_policies.append({
+    'id': policy.id, 'name': policy.name, 'description': policy.description, 'enabled': policy.enabled,
+    'target_rules': policy.target_rules, 'standards': policy.standards, 'overrides': policy.overrides,
+  }) %}
+{% endfor %}
+<script type="application/json" id="mpol-data">{{ {'policies': editor_policies, 'standards': standards, 'fields': fields, 'tenants': tenants, 'suggestions': suggestions} | tojson }}</script>
+{% endblock %}
+
+{% block modals %}
+<div class="modal scf-modal mpol-modal" id="mpol-modal" role="dialog" aria-modal="true" aria-labelledby="mpol-modal-title" hidden>
+  <form class="modal__panel modal__panel--wide scf-editor" method="post" action="/m365/policies" data-mpol-form novalidate>
+    {% include "partials/csrf.html" %}
+    <input type="hidden" name="policy_id" data-mpol-out="policy_id" />
+    <input type="hidden" name="target_rules_json" data-mpol-out="target_rules_json" />
+    <input type="hidden" name="overrides_json" data-mpol-out="overrides_json" />
+
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Microsoft 365 policy</p>
+        <h2 class="modal__title" id="mpol-modal-title" data-mpol-title>Add policy</h2>
+        <p class="scf-editor__subtitle">Choose the standards, how each is enforced, and which tenants the policy applies to.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close policy editor"></button>
+    </header>
+
+    <nav class="scf-tabs" role="tablist" aria-label="Policy settings">
+      <button type="button" class="scf-tab is-active" role="tab" id="mpol-tab-details" aria-controls="mpol-panel-details" aria-selected="true" data-mpol-tab="details">Details<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="mpol-tab-standards" aria-controls="mpol-panel-standards" aria-selected="false" tabindex="-1" data-mpol-tab="standards">Standards<span class="scf-tab__count" data-mpol-count="standards"></span><span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="mpol-tab-targets" aria-controls="mpol-panel-targets" aria-selected="false" tabindex="-1" data-mpol-tab="targets">Applies to<span class="scf-tab__count" data-mpol-count="targets"></span><span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="mpol-tab-exceptions" aria-controls="mpol-panel-exceptions" aria-selected="false" tabindex="-1" data-mpol-tab="exceptions">Exceptions<span class="scf-tab__count" data-mpol-count="exceptions"></span><span class="scf-tab__dot" aria-hidden="true"></span></button>
+    </nav>
+
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        <section class="scf-panel" id="mpol-panel-details" role="tabpanel" aria-labelledby="mpol-tab-details" data-mpol-panel="details">
+          <div class="scf-grid">
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="mpol-name">Name</label>
+              <input class="form-input" id="mpol-name" name="name" maxlength="150" placeholder="e.g. Business Premium baseline" autocomplete="off" data-mpol-input="name" aria-describedby="mpol-name-error" />
+              <p class="scf-error" id="mpol-name-error" data-mpol-error="name" hidden></p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="mpol-description">Description <span class="scf-optional">optional</span></label>
+              <textarea class="form-input" id="mpol-description" name="description" rows="2" maxlength="2000" placeholder="What this baseline is for" data-mpol-input="description"></textarea>
+            </div>
+            <div class="form-field scf-grid__full">
+              <span class="form-label">Status</span>
+              <label class="scf-switch">
+                <input type="checkbox" name="enabled" value="1" checked data-mpol-input="enabled" />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span>Policy is on</span>
+              </label>
+              <p class="form-help">A policy that's off keeps its settings but isn't checked or applied.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="scf-panel" id="mpol-panel-standards" role="tabpanel" aria-labelledby="mpol-tab-standards" data-mpol-panel="standards" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">Standards in this policy</h3>
+            <p class="text-muted">Tick each setting this baseline should enforce, then choose what happens when a tenant doesn't match it.</p>
+          </div>
+          {% if standards %}
+            <div class="mpol-standards__toolbar">
+              <input type="search" class="form-input" placeholder="Find a standard…" aria-label="Find a standard" data-mpol-standard-search />
+              <label class="mpol-standards__selected"><input type="checkbox" data-mpol-standard-selected /> Selected only</label>
+            </div>
+            {% for group in standards | groupby('category') %}
+            <section class="mpol-standards__group" aria-labelledby="mpol-group-{{ loop.index }}" data-mpol-standard-group>
+            <h4 class="mpol-standards__heading" id="mpol-group-{{ loop.index }}">{{ group.grouper }} <span class="text-muted">({{ group.list | length }})</span></h4>
+            <ul class="mpol-standards">
+              {% for standard in group.list %}
+                <li class="mpol-standard" data-mpol-standard="{{ standard.id }}" data-mpol-standard-text="{{ [standard.name, standard.category, standard.description] | join(' ') | lower }}">
+                  <label class="mpol-standard__pick">
+                    <input type="checkbox" name="standard" value="{{ standard.id }}" data-mpol-standard-input />
+                    <span class="mpol-standard__text">
+                      <span class="mpol-standard__name">{{ standard.name }}</span>
+                      <span class="scf-chip scf-chip--quiet">{{ standard.category }}</span>
+                      <span class="mpol-standard__help">{{ standard.description }}</span>
+                    </span>
+                  </label>
+                  <fieldset class="mpol-segmented" data-mpol-mode>
+                    <legend class="visually-hidden">When {{ standard.name | lower }} drifts</legend>
+                    {% for mode in ['report', 'alert', 'remediate'] %}
+                      <label class="mpol-segmented__option{% if mode not in standard.modes %} is-disabled{% endif %}">
+                        <input type="radio" name="mode_{{ standard.id }}" value="{{ mode }}" {% if loop.first %}checked{% endif %} {% if mode not in standard.modes %}disabled{% endif %} />
+                        <span>{{ mode_labels[mode] }}</span>
+                      </label>
+                    {% endfor %}
+                  </fieldset>
+                </li>
+              {% endfor %}
+            </ul>
+            </section>
+            {% endfor %}
+            <p class="scf-empty scf-empty--inline" data-mpol-standard-empty hidden>No standards match your search.</p>
+          {% else %}
+            <p class="scf-empty scf-empty--inline">No standards are available yet.</p>
+          {% endif %}
+          <p class="scf-error" data-mpol-error="standards" hidden></p>
+        </section>
+
+        <section class="scf-panel" id="mpol-panel-targets" role="tabpanel" aria-labelledby="mpol-tab-targets" data-mpol-panel="targets" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">Which tenants does this apply to?</h3>
+            <p class="text-muted">Leave the conditions empty to apply the policy to every connected tenant. New tenants that match are picked up automatically.</p>
+          </div>
+          <div class="scf-condition mpol-conditions">
+            <div class="mpol-conditions__match">
+              <label class="scf-condition__word" for="mpol-match">Apply to tenants that match</label>
+              <select class="form-input" id="mpol-match" data-mpol-match>
+                <option value="and">all of these conditions</option>
+                <option value="or">any of these conditions</option>
+              </select>
+            </div>
+            <p class="scf-sentence" data-mpol-nested hidden>This policy's filter has grouped rules that were set through the API. Changing a condition here replaces them with the list below.</p>
+            <ol class="mpol-conditions__rows" data-mpol-conditions></ol>
+            <p class="form-help" data-mpol-conditions-empty>No conditions: every connected tenant.</p>
+            <div><button type="button" class="button button--ghost button--small" data-mpol-condition-add>+ Add condition</button></div>
+          </div>
+          {% for key, values in suggestions.items() %}
+            <datalist id="mpol-suggest-{{ key | replace('.', '-') }}">{% for value in values %}<option value="{{ value }}"></option>{% endfor %}</datalist>
+          {% endfor %}
+          <p class="scf-error" data-mpol-error="targets" hidden></p>
+        </section>
+
+        <section class="scf-panel" id="mpol-panel-exceptions" role="tabpanel" aria-labelledby="mpol-tab-exceptions" data-mpol-panel="exceptions" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">Exceptions</h3>
+            <p class="text-muted">Pin specific tenants in or out, whatever the conditions say.</p>
+          </div>
+          {% for action, label, help in [('include', 'Always include', 'These tenants get the policy even if they do not match.'), ('exclude', 'Never include', 'These tenants are skipped even if they match.')] %}
+            <div class="form-field mpol-exceptions" data-mpol-exceptions="{{ action }}">
+              <label class="form-label" for="mpol-exception-{{ action }}">{{ label }}</label>
+              <div class="mpol-exceptions__add">
+                <select class="form-input" id="mpol-exception-{{ action }}" data-mpol-exception-select>
+                  <option value="">Choose a tenant…</option>
+                  {% for tenant in tenants %}<option value="{{ tenant.company_id }}">{{ tenant.company_name }}</option>{% endfor %}
+                </select>
+                <button type="button" class="button button--ghost button--small" data-mpol-exception-add>Add</button>
+              </div>
+              <p class="form-help">{{ help }}</p>
+              <ul class="scf-tags" data-mpol-exception-list aria-label="{{ label }}"></ul>
+            </div>
+          {% endfor %}
+        </section>
+      </div>
+
+      <aside class="scf-preview mpol-preview" aria-label="Live preview">
+        <p class="scf-preview__eyebrow">Live preview</p>
+        <div class="scf-preview__card">
+          <p class="mpol-preview__count" data-mpol-preview-count role="status" aria-live="polite">Checking tenants…</p>
+          <ul class="mpol-preview__tenants" data-mpol-preview-tenants></ul>
+        </div>
+        <ul class="scf-preview__rules">
+          <li class="scf-preview__rule scf-preview__rule--logic" data-mpol-summary-targets></li>
+          <li class="scf-preview__rule" data-mpol-summary-standards></li>
+        </ul>
+      </aside>
+    </div>
+
+    <footer class="modal__footer scf-editor__footer">
+      <button type="button" class="button button--danger" data-mpol-delete hidden>Delete policy</button>
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button">Save policy</button>
+    </footer>
+  </form>
+  <form method="post" data-mpol-delete-form hidden>{% include "partials/csrf.html" %}</form>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="{{ static_url('/static/js/m365_policies.js') }}" defer></script>{% endblock %}
