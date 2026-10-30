@@ -25,6 +25,7 @@ from app.repositories import m365_policies as policy_repo
 from app.services import audit as audit_service
 from app.services import m365_policy_targeting as targeting
 from app.services import m365_standard_library  # noqa: F401 - registers built-in standards
+from app.services import m365_template_library  # noqa: F401 - registers CA and Intune templates
 from app.services import m365_standards as standards
 from app.services import notifications as notifications_service
 

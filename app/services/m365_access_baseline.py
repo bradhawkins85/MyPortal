@@ -99,6 +99,8 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
     "Policy.ReadWrite.ConditionalAccess": "01c0a623-fc9b-48e9-b794-0756f8e8f067",
     "Domain.ReadWrite.All": "7e05723c-0bb0-42da-be95-ae9f08a6e53c",
     "Policy.ReadWrite.DeviceConfiguration": "230fb2d5-aa21-49c1-bfa7-ae1be179d867",
+    # Microsoft 365 policy templates: create and assign Intune compliance policies.
+    "DeviceManagementConfiguration.ReadWrite.All": "9241abd9-d0e6-425a-bd4f-47ba86e767a4",
 }
 
 # Permissions from the legacy provisioning inventory that the named baseline
