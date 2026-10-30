@@ -241,3 +241,35 @@ def compile_rules(rules: Any) -> Callable[[Mapping[str, Any]], bool]:
             return False
 
     return matcher
+
+
+OPERATOR_LABELS = {
+    "equals": "is", "not_equals": "is not", "in": "is one of", "not_in": "is not one of",
+    "contains": "contains", "not_contains": "does not contain", "starts_with": "starts with",
+    "is_set": "is set", "is_not_set": "is not set",
+}
+
+
+def describe_rules(rules: Any) -> str:
+    """Return a plain-English summary such as ``Licence SKU is one of SPB``."""
+    tree = validate_rules(rules)
+    if tree is None:
+        return "Every connected tenant"
+
+    def describe(node: dict[str, Any], nested: bool) -> str:
+        if "children" in node:
+            joiner = " and " if node["operator"] == "and" else " or "
+            text = joiner.join(describe(child, True) for child in node["children"])
+            return f"({text})" if nested and len(node["children"]) > 1 else text
+        label = _FIELDS[node["field"]]["label"]
+        if node.get("key"):
+            label = f"{label} {node['key']}"
+        text = f"{label} {OPERATOR_LABELS[node['operator']]}"
+        value = node.get("value")
+        if isinstance(value, list):
+            text += " " + ", ".join(value)
+        elif value is not None:
+            text += f" “{value}”"
+        return text
+
+    return "Tenants where " + describe(tree, False)

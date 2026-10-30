@@ -87,7 +87,7 @@ def test_migration_and_drift_event_exist():
 def test_scheduler_registers_standards_run():
     source = Path("app/services/scheduler.py").read_text(encoding="utf-8")
     assert 'id="m365-standards-run"' in source
-    assert "m365_policies_service.run_standards()" in source
+    assert "m365_policies_service.run_standards_locked()" in source
 
 
 @pytest.mark.asyncio
