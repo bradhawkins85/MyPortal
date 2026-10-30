@@ -193,3 +193,71 @@ async def tenant_contexts(company_ids: Iterable[int]) -> dict[int, dict[str, Any
                 if name and name not in context["license_names"]:
                     context["license_names"].append(name)
     return contexts
+
+
+_RESULT_COLUMNS = (
+    "company_id", "standard_id", "policy_id", "mode", "status", "details", "affected",
+    "checked_at", "drift_since", "remediated_at",
+)
+
+
+def _normalise_result(row: dict[str, Any]) -> dict[str, Any]:
+    result = {column: row.get(column) for column in _RESULT_COLUMNS}
+    result["company_id"] = int(row["company_id"])
+    result["policy_id"] = int(row["policy_id"]) if row.get("policy_id") is not None else None
+    result["affected"] = _json(row.get("affected")) or []
+    return result
+
+
+_RESULT_SELECT = (
+    "SELECT company_id, standard_id, policy_id, mode, status, details, affected, "
+    "checked_at, drift_since, remediated_at FROM m365_standard_results"
+)
+_RESULT_UPSERT_SQLITE = (
+    "INSERT INTO m365_standard_results (company_id, standard_id, policy_id, mode, status, "
+    "details, affected, checked_at, drift_since, remediated_at) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+    "ON CONFLICT(company_id, standard_id) DO UPDATE SET policy_id = excluded.policy_id, "
+    "mode = excluded.mode, status = excluded.status, details = excluded.details, "
+    "affected = excluded.affected, checked_at = excluded.checked_at, "
+    "drift_since = excluded.drift_since, remediated_at = excluded.remediated_at"
+)
+_RESULT_UPSERT_MYSQL = (
+    "INSERT INTO m365_standard_results (company_id, standard_id, policy_id, mode, status, "
+    "details, affected, checked_at, drift_since, remediated_at) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+    "ON DUPLICATE KEY UPDATE policy_id = VALUES(policy_id), mode = VALUES(mode), "
+    "status = VALUES(status), details = VALUES(details), affected = VALUES(affected), "
+    "checked_at = VALUES(checked_at), drift_since = VALUES(drift_since), "
+    "remediated_at = VALUES(remediated_at)"
+)
+
+
+async def list_results(company_id: int | None = None) -> list[dict[str, Any]]:
+    """Return the latest standard results, for one company or every company."""
+    if company_id is None:
+        rows = await db.fetch_all(_RESULT_SELECT + " ORDER BY company_id, standard_id")
+    else:
+        rows = await db.fetch_all(_RESULT_SELECT + " WHERE company_id = %s ORDER BY standard_id", (company_id,))
+    return [_normalise_result(row) for row in rows or []]
+
+
+async def upsert_result(result: dict[str, Any]) -> None:
+    values = tuple(
+        json.dumps(result.get("affected") or []) if column == "affected" else result.get(column)
+        for column in _RESULT_COLUMNS
+    )
+    await db.execute(_RESULT_UPSERT_SQLITE if db.is_sqlite() else _RESULT_UPSERT_MYSQL, values)
+
+
+async def delete_stale_results(company_id: int, keep_standard_ids: Iterable[str]) -> None:
+    """Remove results for standards no policy assigns to the company any more."""
+    keep = tuple(sorted(set(keep_standard_ids)))
+    if not keep:
+        await db.execute("DELETE FROM m365_standard_results WHERE company_id = %s", (company_id,))
+        return
+    await db.execute(
+        "DELETE FROM m365_standard_results WHERE company_id = %s AND standard_id NOT IN ("
+        + ", ".join("%s" for _ in keep) + ")",  # nosec B608 - placeholders only, values are bound
+        (company_id, *keep),
+    )
