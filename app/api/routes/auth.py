@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -12,10 +13,12 @@ from io import BytesIO
 from typing import Any
 from urllib.parse import quote
 
+import aiomysql
 import pyotp
 import qrcode
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
+from itsdangerous import BadSignature
 from loguru import logger
 
 from app.api.dependencies.auth import (
@@ -26,12 +29,13 @@ from app.api.dependencies.auth import (
 from app.api.dependencies.database import require_database
 from app.core.config import get_settings
 from app.core.legal import LEGAL_POLICIES_UPDATED
-from app.core.logging import log_error, log_info
+from app.core.logging import log_error, log_info, log_warning
 from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
 from app.repositories import staff as staff_repo
 from app.repositories import users as user_repo
 from app.repositories import user_companies as user_company_repo
+from app.repositories import user_sso_identities as sso_identity_repo
 from app.schemas.auth import (
     ImpersonationRequest,
     LoginRequest,
@@ -51,6 +55,8 @@ from app.schemas.auth import (
     RegistrationPendingResponse,
     RegistrationRequest,
     SessionInfo,
+    SSODiscoverRequest,
+    SSODiscoverResponse,
     SessionResponse,
     TOTPAuthenticator,
     TOTPListResponse,
@@ -59,6 +65,8 @@ from app.schemas.auth import (
     TOTPVerifyRequest,
 )
 from app.schemas.users import UserResponse
+from app.security.flash import _safe_redirect_target, flash_redirect
+from app.security.oauth_state import oauth_state_serializer
 from app.security.passwords import get_dummy_password_hash, verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
 from app.services import company_access
@@ -66,6 +74,8 @@ from app.services import audit as audit_service
 from app.services import impersonation as impersonation_service
 from app.services import message_templates as message_templates_service
 from app.services import email as email_service
+from app.services import m365 as m365_service
+from app.services import m365_oauth_transactions, sso_login, sso_policy
 from app.services import passkeys as passkeys_service
 from app.services import staff_access as staff_access_service
 
@@ -78,6 +88,18 @@ LOGIN_RATE_LIMIT_ATTEMPTS = 5
 ACCOUNT_LOCKOUT_WINDOW = 900  # 15 minutes
 ACCOUNT_LOCKOUT_ATTEMPTS = 10
 _ACCOUNT_LOCKOUT_PREFIX = "account:"
+# Microsoft 365 single sign-on.
+SSO_BINDING_COOKIE = "myportal_sso_binding"
+SSO_PENDING_COOKIE = "myportal_sso_pending"
+SSO_PENDING_TTL_SECONDS = 300
+SSO_EXPIRED_MESSAGE = "Your Microsoft sign-in session expired. Please try again."
+SSO_MICROSOFT_FAILED_MESSAGE = "Microsoft sign-in was cancelled or failed. Please try again."
+SSO_UNAVAILABLE_MESSAGE = "Microsoft sign-in is not available right now. Please try again later."
+SSO_INVALID_TOTP_MESSAGE = "Invalid authenticator code."
+_SSO_LOGIN_FLOW = "sso_login"
+_SSO_TOTP_FLOW = "sso_totp"
+# A concurrent auto-link of the same Microsoft account hits the unique key.
+_SSO_INTEGRITY_ERRORS = (aiomysql.IntegrityError, sqlite3.IntegrityError)
 
 
 def _account_lockout_identifier(email: str) -> str:
@@ -389,10 +411,16 @@ async def _complete_login_response(
     auth_method: str,
     passkey_record: dict[str, Any] | None = None,
     totp_devices: list[dict[str, Any]] | None = None,
+    skip_totp_enrollment: bool = False,
+    redirect_to: str | None = None,
+    extra_audit_metadata: dict[str, Any] | None = None,
 ) -> Response:
-    if totp_devices is None:
-        totp_devices = await auth_repo.get_totp_authenticators(user["id"])
-    requires_totp_enrollment = not bool(totp_devices)
+    if skip_totp_enrollment:
+        requires_totp_enrollment = False
+    else:
+        if totp_devices is None:
+            totp_devices = await auth_repo.get_totp_authenticators(user["id"])
+        requires_totp_enrollment = not bool(totp_devices)
     login_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
     user = await user_repo.record_login(user["id"], login_timestamp)
     active_company_id = await _determine_active_company_id(user)
@@ -407,7 +435,13 @@ async def _complete_login_response(
         requires_totp_enrollment=requires_totp_enrollment,
         redirect="/security/2fa" if requires_totp_enrollment else None,
     )
-    response = JSONResponse(content=response_model.model_dump(mode="json"))
+    response: Response
+    if redirect_to is not None:
+        response = RedirectResponse(
+            url=response_model.redirect or redirect_to, status_code=status.HTTP_303_SEE_OTHER
+        )
+    else:
+        response = JSONResponse(content=response_model.model_dump(mode="json"))
     session_manager.apply_session_cookies(response, session, request)
     _log_login_success(request, user, auth_method=auth_method)
     await audit_service.record(
@@ -416,7 +450,11 @@ async def _complete_login_response(
         user_id=int(user["id"]),
         entity_type="user",
         entity_id=int(user["id"]),
-        metadata={"authentication_method": auth_method, "outcome": "success"},
+        metadata={
+            **(extra_audit_metadata or {}),
+            "authentication_method": auth_method,
+            "outcome": "success",
+        },
     )
     if passkey_record is not None:
         await audit_service.record(
@@ -1568,3 +1606,330 @@ async def finish_passkey_authentication(
         auth_method="passkey",
         passkey_record=passkey,
     )
+
+
+def _set_sso_cookie(response: Response, request: Request, name: str, value: str, max_age: int) -> None:
+    response.set_cookie(
+        name,
+        value,
+        max_age=max_age,
+        path="/",
+        httponly=True,
+        secure=_request_is_secure(request),
+        samesite="lax",
+    )
+
+
+def _clear_sso_cookie(response: Response, request: Request, name: str) -> None:
+    response.delete_cookie(
+        name, path="/", httponly=True, secure=_request_is_secure(request), samesite="lax"
+    )
+
+
+def _sso_login_hint(email: str | None) -> str | None:
+    candidate = str(email or "").strip()
+    if not candidate or len(candidate) > 320 or "@" not in candidate:
+        return None
+    if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in candidate):
+        return None
+    return candidate
+
+
+def _sso_state(transaction_id: str) -> str:
+    return oauth_state_serializer.dumps({"sso_transaction_id": transaction_id})
+
+
+def _sso_failure(message: str) -> Response:
+    return flash_redirect("/login", message, "error")
+
+
+def _sso_pending_expired(value: Any) -> bool:
+    try:
+        expires_at = datetime.fromisoformat(str(value or ""))
+    except ValueError:
+        return True
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= datetime.now(timezone.utc)
+
+
+async def _finish_sso_login(
+    request: Request,
+    *,
+    user: dict[str, Any],
+    identity_id: Any,
+    upn: Any,
+    email: Any,
+    next_path: str,
+    mfa_satisfied_by: str | None,
+    totp_devices: list[dict[str, Any]] | None = None,
+) -> Response:
+    if identity_id is not None:
+        await sso_identity_repo.record_login(
+            int(identity_id),
+            upn=str(upn) if upn else None,
+            email=str(email) if email else None,
+            when=datetime.now(timezone.utc),
+        )
+    return await _complete_login_response(
+        request=request,
+        user=user,
+        auth_method=sso_login.AUTHENTICATION_METHOD,
+        totp_devices=totp_devices,
+        skip_totp_enrollment=mfa_satisfied_by is not None,
+        redirect_to=next_path,
+        extra_audit_metadata={"mfa_satisfied_by": mfa_satisfied_by} if mfa_satisfied_by else None,
+    )
+
+
+async def _begin_sso_totp_step(
+    request: Request,
+    *,
+    user: dict[str, Any],
+    identity_id: Any,
+    claims: dict[str, Any],
+    next_path: str,
+) -> Response:
+    binding = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=SSO_PENDING_TTL_SECONDS)
+    pending_id = await m365_oauth_transactions.create(
+        flow=_SSO_TOTP_FLOW,
+        user_id=int(user["id"]),
+        identity_id=identity_id,
+        next_path=next_path,
+        binding_hash=hashlib.sha256(binding.encode()).hexdigest(),
+        upn=claims.get("preferred_username"),
+        email=claims.get("email"),
+        expires_at=expires_at.isoformat(),
+    )
+    token = oauth_state_serializer.dumps({"sso_pending_id": pending_id})
+    response = RedirectResponse(
+        url="/login/microsoft/verify?t=" + quote(token, safe=""),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    _set_sso_cookie(response, request, SSO_PENDING_COOKIE, binding, SSO_PENDING_TTL_SECONDS)
+    return response
+
+
+async def _handle_sso_callback(
+    request: Request, state_envelope: dict[str, Any], code: str | None, error: str | None
+) -> Response:
+    transaction_id = state_envelope.get("sso_transaction_id")
+    transaction = None
+    if isinstance(transaction_id, str) and transaction_id:
+        # Consume first: the transaction is single-use whatever happens next.
+        transaction = await m365_oauth_transactions.consume(transaction_id)
+    if (
+        not transaction
+        or transaction.get("flow") != _SSO_LOGIN_FLOW
+        or not sso_login.binding_matches(transaction, request.cookies.get(SSO_BINDING_COOKIE))
+    ):
+        _log_login_failure(request, "", "sso_state_rejected")
+        return _sso_failure(SSO_EXPIRED_MESSAGE)
+
+    if error:
+        log_warning(
+            "Microsoft sign-in returned an error",
+            error=str(error)[:100],
+            error_description=str(request.query_params.get("error_description") or "")[:500],
+            ip=_client_ip(request),
+        )
+        return _sso_failure(SSO_MICROSOFT_FAILED_MESSAGE)
+    if not code:
+        _log_login_failure(request, "", "sso_missing_code")
+        return _sso_failure(SSO_MICROSOFT_FAILED_MESSAGE)
+
+    try:
+        claims = await sso_login.redeem_code(transaction, code)
+    except m365_service.M365Error as exc:
+        log_warning("Microsoft sign-in code redemption failed", error=str(exc), ip=_client_ip(request))
+        return _sso_failure(SSO_MICROSOFT_FAILED_MESSAGE)
+
+    try:
+        outcome = await sso_login.resolve(claims, request=request)
+    except _SSO_INTEGRITY_ERRORS as exc:
+        log_error("Microsoft sign-in account link conflicted", error=type(exc).__name__)
+        return _sso_failure(sso_login.GENERIC_FAILURE)
+    if outcome.failure or not outcome.user or not outcome.identity:
+        _log_login_failure(request, "", "sso_" + str(outcome.failure or "unresolved"))
+        return _sso_failure(outcome.message or sso_login.GENERIC_FAILURE)
+
+    user = outcome.user
+    identity_id = outcome.identity.get("id")
+    next_path = _safe_redirect_target(str(transaction.get("next_path") or ""), fallback="/")
+    if outcome.mfa_satisfied:
+        return await _finish_sso_login(
+            request,
+            user=user,
+            identity_id=identity_id,
+            upn=claims.get("preferred_username"),
+            email=claims.get("email"),
+            next_path=next_path,
+            mfa_satisfied_by="microsoft",
+        )
+    totp_devices = await auth_repo.get_totp_authenticators(user["id"])
+    if totp_devices:
+        return await _begin_sso_totp_step(
+            request, user=user, identity_id=identity_id, claims=claims, next_path=next_path
+        )
+    # No second factor anywhere: sign in and keep the forced enrolment.
+    return await _finish_sso_login(
+        request,
+        user=user,
+        identity_id=identity_id,
+        upn=claims.get("preferred_username"),
+        email=claims.get("email"),
+        next_path=next_path,
+        mfa_satisfied_by=None,
+        totp_devices=totp_devices,
+    )
+
+
+async def complete_sso_callback(
+    request: Request, state_envelope: dict[str, Any], code: str | None, error: str | None
+) -> Response:
+    """Finish Microsoft sign-in for ``/m365/callback`` (called by ``app.main``)."""
+    response = await _handle_sso_callback(request, state_envelope, code, error)
+    _clear_sso_cookie(response, request, SSO_BINDING_COOKIE)
+    return response
+
+
+async def _handle_sso_totp(request: Request, token: str, code: str) -> Response:
+    envelope: Any = None
+    if token:
+        try:
+            envelope = oauth_state_serializer.loads(token)
+        except BadSignature:
+            envelope = None
+    pending_id = envelope.get("sso_pending_id") if isinstance(envelope, dict) else None
+    transaction = None
+    if isinstance(pending_id, str) and pending_id:
+        transaction = await m365_oauth_transactions.consume(pending_id)
+    if (
+        not transaction
+        or transaction.get("flow") != _SSO_TOTP_FLOW
+        or not sso_login.binding_matches(transaction, request.cookies.get(SSO_PENDING_COOKIE))
+        or _sso_pending_expired(transaction.get("expires_at"))
+    ):
+        _log_login_failure(request, "", "sso_totp_state_rejected")
+        return _sso_failure(SSO_EXPIRED_MESSAGE)
+
+    user = await user_repo.get_user_by_id(int(transaction.get("user_id") or 0))
+    if not user or int(user.get("is_active", 1)) != 1:
+        return _sso_failure(sso_login.GENERIC_FAILURE)
+
+    account_identifier = _account_lockout_identifier(user["email"])
+    failures = await auth_repo.get_login_attempt_count(
+        account_identifier, window_seconds=ACCOUNT_LOCKOUT_WINDOW
+    )
+    if failures >= ACCOUNT_LOCKOUT_ATTEMPTS:
+        _log_login_failure(request, user["email"], "account_locked")
+        return _sso_failure(SSO_INVALID_TOTP_MESSAGE)
+
+    totp_devices = await auth_repo.get_totp_authenticators(user["id"])
+    if not totp_devices or not await _verify_and_claim_totp(totp_devices, code):
+        await _record_account_login_failure(account_identifier)
+        _log_login_failure(request, user["email"], "invalid_totp")
+        await audit_service.record(
+            action="auth.login.fail",
+            request=request,
+            user_id=int(user["id"]),
+            entity_type="user",
+            entity_id=int(user["id"]),
+            metadata={
+                "authentication_method": sso_login.AUTHENTICATION_METHOD,
+                "outcome": "failure",
+                "reason": "invalid_totp",
+            },
+        )
+        return _sso_failure(SSO_INVALID_TOTP_MESSAGE)
+
+    await auth_repo.clear_login_attempts(account_identifier)
+    return await _finish_sso_login(
+        request,
+        user=user,
+        identity_id=transaction.get("identity_id"),
+        upn=transaction.get("upn"),
+        email=transaction.get("email"),
+        next_path=_safe_redirect_target(str(transaction.get("next_path") or ""), fallback="/"),
+        mfa_satisfied_by="myportal_totp",
+        totp_devices=totp_devices,
+    )
+
+
+@router.post(
+    "/microsoft/discover",
+    response_model=SSODiscoverResponse,
+    summary="Report whether Microsoft sign-in applies to an email address",
+)
+async def discover_microsoft_sign_in(
+    payload: SSODiscoverRequest,
+    request: Request,
+    _: None = Depends(require_database),
+) -> SSODiscoverResponse:
+    allowed = await auth_repo.register_login_attempt(
+        "sso-discover:" + _client_ip(request),
+        window_seconds=LOGIN_RATE_LIMIT_WINDOW,
+        max_attempts=LOGIN_RATE_LIMIT_ATTEMPTS,
+    )
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests")
+    return SSODiscoverResponse(sso=await sso_policy.discover(payload.email))
+
+
+@router.get(
+    "/microsoft/start",
+    summary="Begin Microsoft 365 sign-in",
+    status_code=status.HTTP_303_SEE_OTHER,
+    response_class=RedirectResponse,
+)
+async def start_microsoft_sign_in(
+    request: Request,
+    email: str | None = Query(default=None, max_length=320),
+    next_path: str | None = Query(default=None, alias="next", max_length=2048),
+    _: None = Depends(require_database),
+) -> Response:
+    allowed = await auth_repo.register_login_attempt(
+        "sso-start:" + _client_ip(request),
+        window_seconds=LOGIN_RATE_LIMIT_WINDOW,
+        max_attempts=LOGIN_RATE_LIMIT_ATTEMPTS,
+    )
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many sign-in attempts")
+    try:
+        result = await sso_login.start(
+            redirect_uri=m365_service.build_m365_redirect_uri(request),
+            login_hint=_sso_login_hint(email),
+            next_path=_safe_redirect_target(next_path or "", fallback="/"),
+            state_from_transaction=_sso_state,
+        )
+    except m365_service.M365Error as exc:
+        log_error("Microsoft sign-in could not start", error=str(exc))
+        return _sso_failure(SSO_UNAVAILABLE_MESSAGE)
+    response = RedirectResponse(url=result.authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+    _set_sso_cookie(
+        response, request, SSO_BINDING_COOKIE, result.binding, m365_oauth_transactions.TTL_SECONDS
+    )
+    return response
+
+
+@router.post(
+    "/microsoft/totp",
+    summary="Complete Microsoft sign-in with an authenticator code",
+    status_code=status.HTTP_303_SEE_OTHER,
+    response_class=RedirectResponse,
+)
+async def complete_microsoft_totp(
+    request: Request,
+    _: None = Depends(require_database),
+) -> Response:
+    form = await request.form()
+    token = form.get("t")
+    code = form.get("code")
+    response = await _handle_sso_totp(
+        request,
+        token if isinstance(token, str) else "",
+        code.strip() if isinstance(code, str) else "",
+    )
+    _clear_sso_cookie(response, request, SSO_PENDING_COOKIE)
+    return response

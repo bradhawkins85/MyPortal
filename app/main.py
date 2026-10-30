@@ -51,7 +51,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
-from itsdangerous import BadSignature, URLSafeSerializer
+from itsdangerous import BadSignature
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import FormData, MutableHeaders, URL
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -168,9 +168,10 @@ from app.security.cache_control import CacheControlMiddleware
 from app.security.client_ip import _peer_is_trusted, get_client_ip
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
-from app.security.flash import flash_redirect, set_flash
+from app.security.flash import clear_flash, flash_redirect, pop_flash, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
 from app.security.maintenance import MaintenanceMiddleware
+from app.security.oauth_state import oauth_state_serializer
 from app.security.rate_limiter import (
     EndpointRateLimiter,
     EndpointRateLimiterMiddleware,
@@ -227,7 +228,6 @@ from app.services import custom_forms
 configure_logging()
 settings = get_settings()
 templates_config = get_templates_config()
-oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="m365-oauth")
 
 
 async def _new_m365_oauth_state(request: Request, **context: Any) -> str:
@@ -239,6 +239,22 @@ async def _new_m365_oauth_state(request: Request, **context: Any) -> str:
         user_id=session.user_id, session_id=session.id, **context
     )
     return oauth_state_serializer.dumps({"transaction_id": transaction_id})
+
+
+_SSO_TRANSACTION_FLOWS = frozenset({"sso_login", "sso_totp"})
+
+
+def _sso_state_envelope(state: str | None) -> dict[str, Any] | None:
+    """Return the signed Microsoft sign-in envelope, or ``None`` for other state."""
+    if not state:
+        return None
+    try:
+        envelope = oauth_state_serializer.loads(state)
+    except BadSignature:
+        return None
+    if isinstance(envelope, dict) and "sso_transaction_id" in envelope:
+        return envelope
+    return None
 
 
 async def _consume_m365_oauth_state(request: Request, state: str | None) -> dict[str, Any] | None:
@@ -256,6 +272,9 @@ async def _consume_m365_oauth_state(request: Request, state: str | None) -> dict
     transaction = await m365_oauth_transactions.consume(transaction_id)
     session = await session_manager.load_session(request)
     if not transaction or session is None:
+        return None
+    # Sign-in transactions only ever travel in the SSO envelope.
+    if transaction.get("flow") in _SSO_TRANSACTION_FLOWS:
         return None
     if int(transaction.get("user_id") or 0) != session.user_id or int(transaction.get("session_id") or 0) != session.id:
         return None
@@ -5499,20 +5518,7 @@ async def delete_m365_admin_credentials(request: Request):
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
-def _build_m365_redirect_uri(request: Request) -> str:
-    """Return the absolute redirect URI for the M365 OAuth callback.
-
-    Uses PORTAL_URL when configured so that the redirect URI is stable
-    regardless of which host the request arrives on.  Falls back to
-    request.url_for and forces the scheme to HTTPS (required by Azure AD).
-    """
-    if settings.portal_url:
-        base = str(settings.portal_url).rstrip("/")
-        return f"{base}/m365/callback"
-    uri = str(request.url_for("m365_callback"))
-    if uri.startswith("http://"):
-        uri = "https://" + uri[len("http://"):]
-    return uri
+_build_m365_redirect_uri = m365_service.build_m365_redirect_uri
 
 
 @app.post("/m365/test", response_class=RedirectResponse)
@@ -6118,6 +6124,9 @@ async def _continue_to_scc_consent(
 
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+    sso_envelope = _sso_state_envelope(state)
+    if sso_envelope is not None:
+        return await auth.complete_sso_callback(request, sso_envelope, code, error)
     # Consume first, including denied-consent responses: a callback transaction
     # is single-use regardless of whether Microsoft returned a code.
     state_data = await _consume_m365_oauth_state(request, state)
@@ -12415,9 +12424,33 @@ async def login_page(request: Request):
             "title": "Sign in",
             "verification_success": request.query_params.get("verified") == "1",
             "next_path": next_path or "/",
+            "page_flash": pop_flash(request),
         },
     )
-    return templates.TemplateResponse(context["request"], "auth/login.html", context)
+    response = templates.TemplateResponse(context["request"], "auth/login.html", context)
+    clear_flash(response)
+    return response
+
+
+@app.get("/login/microsoft/verify", response_class=HTMLResponse)
+async def microsoft_sign_in_verify_page(request: Request, t: str | None = None):
+    token = str(t or "")
+    envelope: Any = None
+    if token:
+        try:
+            envelope = oauth_state_serializer.loads(token)
+        except BadSignature:
+            envelope = None
+    pending_id = envelope.get("sso_pending_id") if isinstance(envelope, dict) else None
+    if not isinstance(pending_id, str) or not request.cookies.get(auth.SSO_PENDING_COOKIE):
+        return flash_redirect("/login", auth.SSO_EXPIRED_MESSAGE, "error")
+    context = await _build_public_context(
+        request,
+        extra={"title": "Verify it's you", "pending_token": token},
+    )
+    response = templates.TemplateResponse(context["request"], "auth/sso_totp.html", context)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/forgot-password", response_class=HTMLResponse)

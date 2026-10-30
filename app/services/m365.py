@@ -14,7 +14,7 @@ import string
 import tempfile
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import httpx
@@ -45,6 +45,9 @@ from app.services.m365_access_baseline import (
     TENANT_OPTIONAL_GRAPH_PERMISSIONS,
     permissions_by_resource,
 )
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
 
 
 _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
@@ -1015,6 +1018,23 @@ async def auto_provision_company_pkce_client_id(
         redirect_uri=redirect_uri,
         company_admin_creds=company_admin_creds,
     )
+
+
+def build_m365_redirect_uri(request: Request) -> str:
+    """Return the absolute redirect URI for the M365 OAuth callback.
+
+    Uses PORTAL_URL when configured so that the redirect URI is stable
+    regardless of which host the request arrives on.  Falls back to
+    request.url_for and forces the scheme to HTTPS (required by Azure AD).
+    """
+    portal_url = get_settings().portal_url
+    if portal_url:
+        base = str(portal_url).rstrip("/")
+        return f"{base}/m365/callback"
+    uri = str(request.url_for("m365_callback"))
+    if uri.startswith("http://"):
+        uri = "https://" + uri[len("http://"):]
+    return uri
 
 
 async def get_effective_pkce_client_id(*, redirect_uri: str | None = None) -> str:
