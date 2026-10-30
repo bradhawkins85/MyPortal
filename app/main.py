@@ -7313,6 +7313,9 @@ async def admin_profile_page(request: Request):
             "profile_sso_last_login_iso": sso_admin.utc_iso(
                 sso_identity.get("last_login_at") if sso_identity else None
             ),
+            "profile_sso_last_login_display": sso_admin.utc_display(
+                sso_identity.get("last_login_at") if sso_identity else None
+            ),
             "profile_sso_must_stay_linked": bool(sso_identity)
             and await sso_admin.must_stay_linked(user),
             "profile_sales_opt_out": await _profile_sales_opt_out_status(user),
@@ -12490,13 +12493,17 @@ async def login_page(request: Request):
     if user_count == 0:
         return RedirectResponse(url="/register", status_code=status.HTTP_303_SEE_OTHER)
 
+    page_flash = pop_flash(request)
     context = await _build_public_context(
         request,
         extra={
             "title": "Sign in",
             "verification_success": request.query_params.get("verified") == "1",
             "next_path": next_path or "/",
-            "page_flash": pop_flash(request),
+            "page_flash": page_flash,
+            "sso_auto_redirect": not (
+                page_flash and page_flash.get("message") in auth.SSO_FAILURE_MESSAGES
+            ),
         },
     )
     response = templates.TemplateResponse(context["request"], "auth/login.html", context)

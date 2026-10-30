@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -19,7 +19,9 @@ GUID_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 
 
 class SsoModeUpdate(BaseModel):
-    mode: str = Field(description="Microsoft sign-in mode: `off`, `optional` or `required`.")
+    mode: Literal["off", "optional", "required"] = Field(
+        description="Microsoft sign-in mode: `off`, `optional` or `required`."
+    )
 
 
 class SsoIdentityItem(BaseModel):
@@ -78,6 +80,17 @@ async def _require_company(request: Request, user: dict[str, Any], company_id: i
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
 
+_FORBIDDEN = {
+    status.HTTP_403_FORBIDDEN: {
+        "description": "You do not manage this company or this user's Microsoft sign-in."
+    }
+}
+_NOT_FOUND = {status.HTTP_404_NOT_FOUND: {"description": "The MyPortal user does not exist."}}
+_GRAPH_UNREACHABLE = {
+    status.HTTP_502_BAD_GATEWAY: {"description": "Microsoft 365 could not be reached."}
+}
+
+
 def _error_response(status_code: int, message: str) -> JSONResponse:
     # Returned directly (not raised) so the global handler keeps 5xx copy.
     return JSONResponse(status_code=status_code, content={"detail": message})
@@ -87,6 +100,7 @@ def _error_response(status_code: int, message: str) -> JSONResponse:
     "/api/companies/{company_id}/sso",
     response_model=CompanySsoResponse,
     summary="Get a company's Microsoft sign-in settings",
+    responses={**_FORBIDDEN},
 )
 async def get_company_sso(
     company_id: int,
@@ -102,6 +116,15 @@ async def get_company_sso(
     "/api/companies/{company_id}/sso",
     response_model=CompanySsoResponse,
     summary="Set a company's Microsoft sign-in mode",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "description": (
+                "`required` was chosen before the company's Microsoft 365 tenant is "
+                "connected or before any user is linked."
+            )
+        },
+        **_FORBIDDEN,
+    },
 )
 async def set_company_sso(
     company_id: int,
@@ -124,6 +147,13 @@ async def set_company_sso(
     "/api/companies/{company_id}/sso/directory",
     response_model=list[DirectoryUser],
     summary="Search the company's Microsoft 365 directory",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "The search is too short or the company has no Microsoft 365 tenant."
+        },
+        **_FORBIDDEN,
+        **_GRAPH_UNREACHABLE,
+    },
 )
 async def search_company_directory(
     company_id: int,
@@ -146,6 +176,21 @@ async def search_company_directory(
     "/api/users/{user_id}/sso-identity",
     response_model=SsoLinkResponse,
     summary="Link a user to a Microsoft account",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "description": (
+                "The object ID is not a valid GUID or the company has no Microsoft 365 tenant."
+            )
+        },
+        **_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND: {
+            "description": "The MyPortal user or the Microsoft account does not exist."
+        },
+        status.HTTP_409_CONFLICT: {
+            "description": "The Microsoft account is already linked to another user."
+        },
+        **_GRAPH_UNREACHABLE,
+    },
 )
 async def link_user_sso_identity(
     user_id: int,
@@ -173,6 +218,7 @@ async def link_user_sso_identity(
     "/api/users/{user_id}/sso-identity",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Unlink a user's Microsoft account",
+    responses={**_FORBIDDEN, **_NOT_FOUND},
 )
 async def unlink_user_sso_identity(
     user_id: int,

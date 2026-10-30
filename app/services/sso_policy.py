@@ -55,9 +55,16 @@ async def user_company_ids(user: dict[str, Any]) -> set[int]:
 async def password_login_allowed(user: dict[str, Any]) -> bool:
     if user.get("is_super_admin"):
         return True
-    if not await sso_identity_repo.get_for_user(int(user["id"])):
+    identity = await sso_identity_repo.get_for_user(int(user["id"]))
+    if not identity:
         return True
-    for company_id in await user_company_ids(user):
+    tenant_id = str(identity.get("tenant_id") or "").strip().lower()
+    member_of = await user_company_ids(user)
+    # A link whose tenant no longer reaches any of the user's companies cannot
+    # be used to sign in, so it must not lock the password out either.
+    if not tenant_id or not member_of & {int(c) for c in await companies_for_tenant(tenant_id)}:
+        return True
+    for company_id in member_of:
         if await get_company_sso_mode(company_id) == "required":
             return False
     return True

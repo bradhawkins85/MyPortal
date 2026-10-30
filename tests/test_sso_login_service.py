@@ -29,6 +29,8 @@ class Fakes:
         self.created: list[dict] = []
         self.audits: list[dict] = []
         self.candidate_queries: list[tuple] = []
+        self.domains: set[str] = {"contoso.com"}
+        self.domain_queries: list[list[int]] = []
 
     @property
     def audit_actions(self) -> list[str]:
@@ -63,10 +65,16 @@ def fakes(monkeypatch):
 
     async def list_active(email, company_ids):
         f.candidate_queries.append((email, list(company_ids)))
+        wanted = set(company_ids)
         return [
             u for u in f.users
-            if (u["email"] or "").lower() == email and u["company_id"] in company_ids
+            if (u["email"] or "").lower() == email
+            and (u["company_id"] in wanted or f.memberships.get(int(u["id"]), set()) & wanted)
         ]
+
+    async def list_email_domains_for_companies(company_ids):
+        f.domain_queries.append(list(company_ids))
+        return set(f.domains)
 
     async def record(**kwargs):
         f.audits.append(kwargs)
@@ -78,6 +86,9 @@ def fakes(monkeypatch):
     monkeypatch.setattr(sso_login.sso_identity_repo, "create", create)
     monkeypatch.setattr(sso_login.user_repo, "get_user_by_id", get_user_by_id)
     monkeypatch.setattr(sso_login.user_repo, "list_active_users_by_email_in_companies", list_active)
+    monkeypatch.setattr(
+        sso_login.company_repo, "list_email_domains_for_companies", list_email_domains_for_companies
+    )
     monkeypatch.setattr(sso_login.audit_service, "record", record)
     return f
 
@@ -180,7 +191,8 @@ async def test_auto_link_single_match_creates_identity(fakes):
 @pytest.mark.parametrize(
     "claims",
     [
-        {**CLAIMS, "email": "  ALICE@Contoso.com "},
+        {**CLAIMS, "email": "  ALICE@Contoso.com ", "xms_edov": True},
+        {**CLAIMS, "preferred_username": " Alice@CONTOSO.com  "},
         {k: v for k, v in CLAIMS.items() if k != "email"},
     ],
 )
@@ -220,6 +232,123 @@ async def test_no_auto_link_when_tenant_shared_and_two_companies_match(fakes):
     out = await sso_login.resolve(CLAIMS, request=None)
     assert out.failure == "no_link" and out.user is None
     assert fakes.created == [] and fakes.audits == []
+
+
+ALICE = {"id": 1, "email": "alice@contoso.com", "company_id": 7, "is_active": 1}
+BOB = {"id": 2, "email": "bob@contoso.com", "company_id": 7, "is_active": 1}
+
+
+async def test_auto_link_ignores_unverified_email_and_uses_upn(fakes):
+    fakes.users = [dict(ALICE), dict(BOB)]
+    claims = {**CLAIMS, "email": "alice@contoso.com", "preferred_username": "bob@contoso.com"}
+    out = await sso_login.resolve(claims, request=None)
+    assert out.failure is None and out.user["id"] == 2
+    assert fakes.candidate_queries == [("bob@contoso.com", [7])]
+
+
+@pytest.mark.parametrize("flag", [False, "false", "0", "", None, "yes"])
+async def test_auto_link_without_true_xms_edov_uses_upn(fakes, flag):
+    fakes.users = [dict(ALICE), dict(BOB)]
+    claims = {**CLAIMS, "email": "alice@contoso.com", "preferred_username": "bob@contoso.com",
+              "xms_edov": flag}
+    out = await sso_login.resolve(claims, request=None)
+    assert out.user["id"] == 2
+    assert fakes.candidate_queries == [("bob@contoso.com", [7])]
+
+
+@pytest.mark.parametrize("flag", [True, "true", "True", "1"])
+async def test_auto_link_with_verified_email_uses_email(fakes, flag):
+    fakes.users = [dict(ALICE), dict(BOB)]
+    claims = {**CLAIMS, "email": "alice@contoso.com", "preferred_username": "bob@contoso.com",
+              "xms_edov": flag}
+    out = await sso_login.resolve(claims, request=None)
+    assert out.failure is None and out.user["id"] == 1
+    assert fakes.candidate_queries == [("alice@contoso.com", [7])]
+
+
+async def test_verified_email_flag_without_email_is_no_link(fakes):
+    fakes.users = [dict(ALICE)]
+    claims = {k: v for k, v in CLAIMS.items() if k != "email"}
+    out = await sso_login.resolve({**claims, "xms_edov": True}, request=None)
+    assert out.failure == "no_link" and fakes.candidate_queries == [] and fakes.created == []
+
+
+@pytest.mark.parametrize("address", ["alice", "alice@@contoso.com", "a@b@contoso.com", "@", "alice@"])
+async def test_auto_link_requires_exactly_one_at_sign(fakes, address):
+    fakes.users = [dict(ALICE)]
+    out = await sso_login.resolve({**CLAIMS, "preferred_username": address}, request=None)
+    assert out.failure == "no_link" and out.message == sso_login.GENERIC_FAILURE
+    assert fakes.candidate_queries == [] and fakes.created == [] and fakes.audits == []
+
+
+async def test_auto_link_refused_when_domain_is_not_a_company_domain(fakes):
+    fakes.users = [{**ALICE, "email": "alice@fabrikam.com"}]
+    claims = {**CLAIMS, "email": "alice@fabrikam.com", "preferred_username": "alice@fabrikam.com"}
+    out = await sso_login.resolve(claims, request=None)
+    assert out.failure == "no_link" and out.user is None
+    assert out.message == sso_login.GENERIC_FAILURE
+    assert fakes.domain_queries == [[7]]
+    assert fakes.created == [] and fakes.audits == []
+
+
+async def test_auto_link_accepts_domain_of_any_tenant_sso_company(fakes):
+    fakes.sso_companies = [7, 8]
+    fakes.domains = {"contoso.com", "fabrikam.com"}
+    fakes.users = [{**ALICE, "email": "alice@fabrikam.com", "company_id": 8}]
+    claims = {**CLAIMS, "preferred_username": "Alice@Fabrikam.com"}
+    out = await sso_login.resolve(claims, request=None)
+    assert out.failure is None and out.user["id"] == 1
+    assert fakes.domain_queries == [[7, 8]]
+
+
+async def test_auto_link_refused_without_any_company_domains(fakes):
+    fakes.domains = set()
+    fakes.users = [dict(ALICE)]
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure == "no_link" and fakes.created == []
+
+
+@pytest.mark.parametrize("flag", [True, 1])
+async def test_auto_link_refused_for_super_admin(fakes, flag):
+    fakes.users = [{**ALICE, "is_super_admin": flag}]
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure == "no_link" and out.user is None
+    assert out.message == sso_login.GENERIC_FAILURE
+    assert fakes.created == [] and fakes.audits == []
+
+
+async def test_auto_link_refused_when_candidate_belongs_outside_tenant_companies(fakes):
+    fakes.users = [dict(ALICE)]
+    fakes.memberships = {1: {7, 99}}
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure == "no_link" and out.user is None
+    assert fakes.created == [] and fakes.audits == []
+
+
+async def test_auto_link_refused_when_primary_company_outside_but_member_inside(fakes):
+    fakes.users = [{**ALICE, "company_id": 99}]
+    fakes.memberships = {1: {7}}
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure == "no_link" and fakes.created == []
+
+
+async def test_auto_link_membership_only_candidate_inside_tenant_companies_links(fakes):
+    fakes.sso_companies = [7, 8]
+    fakes.users = [{**ALICE, "company_id": None}]
+    fakes.memberships = {1: {7, 8}}
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure is None and out.user["id"] == 1
+    assert fakes.created[0]["linked_via"] == "auto"
+    assert fakes.audit_actions == ["auth.sso.link"]
+
+
+async def test_auto_link_stores_both_claims_on_the_identity(fakes):
+    fakes.users = [dict(ALICE)]
+    claims = {**CLAIMS, "email": "alice.smith@contoso.com", "preferred_username": "alice@contoso.com"}
+    out = await sso_login.resolve(claims, request=None)
+    assert out.failure is None
+    assert fakes.created[0]["upn"] == "alice@contoso.com"
+    assert fakes.created[0]["email"] == "alice.smith@contoso.com"
 
 
 def test_mfa_satisfied_accepts_list_and_string():
@@ -383,8 +512,9 @@ def start_fakes(monkeypatch):
         captured.update(context)
         return "txn-123"
 
-    async def client_id(*, redirect_uri=None):
+    async def client_id(*, redirect_uri=None, provision=True):
         captured["client_id_redirect"] = redirect_uri
+        captured["client_id_provision"] = provision
         return "client-1"
 
     monkeypatch.setattr(sso_login.m365_oauth_transactions, "create", create)
@@ -405,7 +535,7 @@ async def test_start_stores_binding_hash_not_binding(start_fakes):
     assert stored["client_id"] == "client-1" and stored["next_path"] == "/tickets"
     assert stored["login_hint"] == "a@b.com"
     assert stored["redirect_uri"] == "https://p/m365/callback"
-    assert start_fakes["client_id_redirect"] == "https://p/m365/callback"
+    assert start_fakes["client_id_provision"] is False
     assert result.state_transaction_id == "txn-123"
     assert "login_hint=a%40b.com" in result.authorize_url
     assert "scope=openid+profile+email" in result.authorize_url
@@ -431,6 +561,80 @@ async def test_start_wraps_state_and_omits_login_hint(start_fakes):
     assert query["state"] == ["signed.txn-123"]
     assert "login_hint" not in query
     assert result.state_transaction_id == "txn-123"
+
+
+@pytest.fixture
+def real_client_id(monkeypatch):
+    from types import SimpleNamespace
+
+    state = {"admin": None, "configured": "", "provision_calls": 0, "transactions": 0}
+
+    async def admin_credentials():
+        return state["admin"]
+
+    async def provision(**kwargs):
+        state["provision_calls"] += 1
+        return "provisioned-client"
+
+    async def create(**context):
+        state["transactions"] += 1
+        return "txn-1"
+
+    monkeypatch.setattr(sso_login.m365_service, "get_admin_m365_credentials", admin_credentials)
+    monkeypatch.setattr(sso_login.m365_service, "_auto_provision_and_get_pkce_client_id", provision)
+    monkeypatch.setattr(
+        sso_login.m365_service,
+        "get_settings",
+        lambda: SimpleNamespace(m365_pkce_client_id=state["configured"]),
+    )
+    monkeypatch.setattr(sso_login.m365_oauth_transactions, "create", create)
+    return state
+
+
+async def test_start_never_provisions_a_pkce_app(real_client_id):
+    with pytest.raises(M365Error):
+        await sso_login.start(redirect_uri="https://p/m365/callback", login_hint=None, next_path=None)
+    assert real_client_id["provision_calls"] == 0
+    assert real_client_id["transactions"] == 0
+
+
+async def test_start_uses_stored_pkce_client_without_provisioning(real_client_id):
+    real_client_id["admin"] = {"pkce_client_id": "stored-client"}
+    result = await sso_login.start(
+        redirect_uri="https://p/m365/callback", login_hint=None, next_path=None
+    )
+    assert parse_qs(urlsplit(result.authorize_url).query)["client_id"] == ["stored-client"]
+    assert real_client_id["provision_calls"] == 0
+
+
+async def test_start_uses_configured_pkce_client(real_client_id):
+    real_client_id["configured"] = "configured-client"
+    result = await sso_login.start(
+        redirect_uri="https://p/m365/callback", login_hint=None, next_path=None
+    )
+    assert parse_qs(urlsplit(result.authorize_url).query)["client_id"] == ["configured-client"]
+    assert real_client_id["provision_calls"] == 0
+
+
+@pytest.mark.parametrize("fallback", [sso_login.m365_service.AZURE_CLI_CLIENT_ID, ""])
+async def test_start_refuses_azure_cli_fallback_or_empty_client(start_fakes, monkeypatch, fallback):
+    async def client_id(*, redirect_uri=None, provision=True):
+        return fallback
+
+    async def no_transaction(**context):
+        raise AssertionError("no transaction may be created")
+
+    monkeypatch.setattr(sso_login.m365_service, "get_effective_pkce_client_id", client_id)
+    monkeypatch.setattr(sso_login.m365_oauth_transactions, "create", no_transaction)
+    with pytest.raises(M365Error):
+        await sso_login.start(redirect_uri="https://p/m365/callback", login_hint=None, next_path=None)
+
+
+async def test_get_effective_pkce_client_id_still_provisions_by_default(real_client_id):
+    from app.services import m365 as m365_module
+
+    client = await m365_module.get_effective_pkce_client_id(redirect_uri="https://p/m365/callback")
+    assert client == "provisioned-client" and real_client_id["provision_calls"] == 1
 
 
 class FakeDB:

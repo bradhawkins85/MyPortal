@@ -41,6 +41,11 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(main_module.settings, "enable_csrf", False)
 
 
+def _redirect_settings():
+    """The Settings object build_m365_redirect_uri reads (not always main_module.settings)."""
+    return main_module.m365_service.get_settings()
+
+
 def _extract_redirect_uri(location: str) -> str:
     query_params = parse_qs(urlparse(location).query)
     assert "redirect_uri" in query_params
@@ -49,7 +54,7 @@ def _extract_redirect_uri(location: str) -> str:
 
 def test_build_m365_redirect_uri_uses_portal_url(monkeypatch):
     """_build_m365_redirect_uri returns a PORTAL_URL-based URI when PORTAL_URL is set."""
-    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
+    monkeypatch.setattr(_redirect_settings(), "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
 
     calls = []
 
@@ -67,7 +72,7 @@ def test_build_m365_redirect_uri_uses_portal_url(monkeypatch):
 def test_build_m365_redirect_uri_falls_back_to_request(monkeypatch):
     """_build_m365_redirect_uri falls back to request.url_for when PORTAL_URL is not set,
     and forces the scheme to HTTPS."""
-    monkeypatch.setattr(main_module.settings, "portal_url", None)
+    monkeypatch.setattr(_redirect_settings(), "portal_url", None)
 
     calls = []
 
@@ -84,7 +89,7 @@ def test_build_m365_redirect_uri_falls_back_to_request(monkeypatch):
 
 def test_build_m365_redirect_uri_forces_https_on_http_fallback(monkeypatch):
     """_build_m365_redirect_uri upgrades http:// to https:// in the fallback path."""
-    monkeypatch.setattr(main_module.settings, "portal_url", None)
+    monkeypatch.setattr(_redirect_settings(), "portal_url", None)
 
     class FakeRequest:
         def url_for(self, name: str) -> str:
@@ -98,7 +103,7 @@ def test_build_m365_redirect_uri_forces_https_on_http_fallback(monkeypatch):
 
 def test_build_m365_redirect_uri_preserves_https_fallback(monkeypatch):
     """_build_m365_redirect_uri keeps https:// unchanged when the fallback already uses HTTPS."""
-    monkeypatch.setattr(main_module.settings, "portal_url", None)
+    monkeypatch.setattr(_redirect_settings(), "portal_url", None)
 
     class FakeRequest:
         def url_for(self, name: str) -> str:
@@ -125,7 +130,7 @@ def _make_session() -> SessionData:
 
 def test_admin_csp_signin_uses_portal_url_for_redirect_uri(monkeypatch):
     """admin_csp_signin includes PORTAL_URL-based redirect_uri in the Microsoft authorize URL."""
-    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
+    monkeypatch.setattr(_redirect_settings(), "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
 
     async def fake_load_session(request, *, allow_inactive: bool = False):
         return _make_session()
@@ -153,7 +158,7 @@ def test_admin_csp_signin_uses_portal_url_for_redirect_uri(monkeypatch):
 
 def test_admin_csp_provision_uses_portal_url_for_redirect_uri(monkeypatch):
     """admin_csp_provision includes PORTAL_URL-based redirect_uri in the Microsoft authorize URL."""
-    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
+    monkeypatch.setattr(_redirect_settings(), "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
     monkeypatch.setattr(main_module.settings, "m365_bootstrap_client_id", None)
 
     async def fake_load_session(request, *, allow_inactive: bool = False):
@@ -194,7 +199,7 @@ def _extract_scope(location: str) -> str:
 
 def test_m365_connect_scope_does_not_mix_default_with_resource_scopes(monkeypatch):
     """/m365/connect must not combine .default with resource-specific scopes (AADSTS70011)."""
-    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
+    monkeypatch.setattr(_redirect_settings(), "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
 
     async def fake_load_license_context(request, **kwargs):
         user = {"id": 1, "is_super_admin": True, "company_id": 1}
@@ -223,7 +228,7 @@ def test_m365_connect_scope_does_not_mix_default_with_resource_scopes(monkeypatc
 
 def test_m365_provision_uses_consent_prompt(monkeypatch):
     """m365_provision uses prompt=consent (not admin_consent) in the authorize URL."""
-    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
+    monkeypatch.setattr(_redirect_settings(), "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
 
     async def fake_load_license_context(request, **kwargs):
         user = {"id": 1, "is_super_admin": True, "company_id": 1}
@@ -252,7 +257,7 @@ def test_m365_provision_uses_consent_prompt(monkeypatch):
 
 def test_admin_company_m365_provision_uses_consent_prompt(monkeypatch):
     """admin_company_m365_provision uses prompt=consent (not admin_consent) in the authorize URL."""
-    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
+    monkeypatch.setattr(_redirect_settings(), "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
 
     async def fake_load_session(request, *, allow_inactive: bool = False):
         return _make_session()

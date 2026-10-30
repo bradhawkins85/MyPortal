@@ -5,7 +5,6 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-import app.main as main_module
 from app.api.dependencies import auth as auth_dependencies
 from app.api.dependencies import database as database_dependencies
 from app.api.routes import company_sso
@@ -16,8 +15,10 @@ from app.repositories import m365 as m365_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import user_sso_identities as sso_identity_repo
 from app.repositories import users as user_repo
+from app.security.session import session_manager
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
+from tests.conftest import TEST_CSRF_TOKEN, csrf_session, reset_rate_limiters
 
 OID = "11111111-2222-3333-4444-555555555555"
 OTHER_OID = "99999999-8888-7777-6666-555555555555"
@@ -38,7 +39,14 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(db, "run_migrations", noop)
     monkeypatch.setattr(scheduler_service, "start", noop)
     monkeypatch.setattr(scheduler_service, "stop", noop)
-    monkeypatch.setattr(main_module.settings, "enable_csrf", False)
+
+    # Send a real CSRF token so the tests pass whichever Settings object the
+    # CSRF middleware holds.
+    async def load_session(request, **kwargs):
+        return csrf_session()
+
+    monkeypatch.setattr(session_manager, "load_session", load_session)
+    reset_rate_limiters()
 
 
 class World:
@@ -174,7 +182,7 @@ def _client(world: World, actor: dict) -> TestClient:
 
     app.dependency_overrides[auth_dependencies.get_current_user] = override_user
     app.dependency_overrides[database_dependencies.require_database] = override_db
-    return TestClient(app)
+    return TestClient(app, headers={"X-CSRF-Token": TEST_CSRF_TOKEN})
 
 
 @pytest.fixture(autouse=True)
@@ -251,8 +259,30 @@ def test_required_without_links_is_400(world, as_company_admin):
     assert world.companies[7]["sso_mode"] == "off"
 
 
-def test_unknown_mode_is_400(world, as_company_admin):
-    assert as_company_admin.put("/api/companies/7/sso", json={"mode": "bogus"}).status_code == 400
+def test_unknown_mode_is_422(world, as_company_admin):
+    assert as_company_admin.put("/api/companies/7/sso", json={"mode": "bogus"}).status_code == 422
+    assert world.companies[7]["sso_mode"] == "off" and world.audits == []
+
+
+def test_mode_schema_lists_the_three_modes():
+    schema = company_sso.SsoModeUpdate.model_json_schema()
+    assert schema["properties"]["mode"]["enum"] == ["off", "optional", "required"]
+
+
+@pytest.mark.parametrize(
+    ("path", "method", "codes"),
+    [
+        ("/api/companies/{company_id}/sso", "get", {"403"}),
+        ("/api/companies/{company_id}/sso", "put", {"400", "403"}),
+        ("/api/companies/{company_id}/sso/directory", "get", {"400", "403", "502"}),
+        ("/api/users/{user_id}/sso-identity", "put", {"400", "403", "404", "409", "502"}),
+        ("/api/users/{user_id}/sso-identity", "delete", {"403", "404"}),
+    ],
+)
+def test_company_sso_routes_document_error_responses(path, method, codes):
+    responses = app.openapi()["paths"][path][method]["responses"]
+    for code in codes:
+        assert code in responses and responses[code]["description"]
 
 
 def test_mode_put_for_unmanaged_company_is_403(world, as_company_admin):

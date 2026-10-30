@@ -175,3 +175,53 @@ async def test_list_sso_company_ids_for_tenant_filters_mode(fake_db):
     sql, params = fake_db.calls[-1]
     assert "sso_mode" in sql and params == ("tenant-a",)
     assert result == [2, 5]
+
+
+@pytest.mark.asyncio
+async def test_list_email_domains_for_companies_is_parameterised(fake_db):
+    fake_db.rows = [{"domain": "Contoso.com "}, {"domain": "fabrikam.com"}, {"domain": None}]
+    result = await companies.list_email_domains_for_companies([8, 7, 7])
+    sql, params = fake_db.calls[-1]
+    assert result == {"contoso.com", "fabrikam.com"}
+    assert params == (7, 8) and sql.count("%s") == 2
+    assert "company_email_domains" in sql and "IN (%s, %s)" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_email_domains_for_companies_empty_skips_query(fake_db):
+    assert await companies.list_email_domains_for_companies([]) == set()
+    assert fake_db.calls == []
+
+
+def _tenant_query_rows(sql: str, params: tuple) -> list[int]:
+    import sqlite3
+
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(
+        """
+        CREATE TABLE companies (id INTEGER PRIMARY KEY, csp_tenant_id TEXT, sso_mode TEXT);
+        CREATE TABLE company_m365_credentials (company_id INTEGER, tenant_id TEXT);
+        INSERT INTO companies VALUES (1, 'Tenant-A', 'optional');
+        INSERT INTO companies VALUES (2, NULL, 'required');
+        INSERT INTO company_m365_credentials VALUES (2, 'tenant-a');
+        INSERT INTO companies VALUES (3, '', 'optional');
+        INSERT INTO company_m365_credentials VALUES (3, 'tenant-a');
+        INSERT INTO companies VALUES (4, 'tenant-a', 'off');
+        INSERT INTO companies VALUES (5, 'tenant-b', 'optional');
+        INSERT INTO company_m365_credentials VALUES (5, 'tenant-a');
+        INSERT INTO companies VALUES (6, NULL, 'optional');
+        """
+    )
+    rows = connection.execute(sql.replace("%s", "?"), params).fetchall()
+    connection.close()
+    return [int(row["company_id"]) for row in rows]
+
+
+@pytest.mark.asyncio
+async def test_list_sso_company_ids_for_tenant_counts_csp_tenant_without_credentials(fake_db):
+    await companies.list_sso_company_ids_for_tenant("TENANT-A")
+    sql, params = fake_db.calls[-1]
+    # 1: CSP tenant only (no credentials row); 2 and 3: credential tenant;
+    # 4: mode off; 5: CSP tenant wins over the credential tenant; 6: no tenant.
+    assert _tenant_query_rows(sql, params) == [1, 2, 3]

@@ -77,6 +77,7 @@
       data-endpoint="/auth/login"
       data-loading-text="Signing in&hellip;"
       data-success-redirect="{{ next_path or '/' }}"
+      data-sso-auto="{{ '1' if sso_auto_redirect | default(true) else '0' }}"
       novalidate
     >
       {% include "partials/csrf.html" %}
@@ -95,6 +96,7 @@
       <div class="auth-sso-continue">
         <a class="button button--primary auth-card__wide auth-sso-continue__link" href="/auth/microsoft/start" data-sso-continue hidden>Continue with Microsoft</a>
         <p class="form-help auth-sso-continue__hint" data-sso-hint role="status" aria-live="polite" hidden>Your organisation uses Microsoft sign-in.</p>
+        <button type="button" class="button-link auth-sso-continue__password" data-sso-use-password hidden>Use my password instead</button>
       </div>
       <div class="form-field">
         <div class="auth-form__label-row">

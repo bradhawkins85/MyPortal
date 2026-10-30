@@ -141,7 +141,7 @@
         <div class="card__body">
           {% if profile_sso_identity %}
             <p><span class="status status--success">Linked</span> <strong>{{ profile_sso_identity.upn or profile_sso_identity.email or "Microsoft account" }}</strong></p>
-            {% if profile_sso_last_login_iso %}<p class="form-help">Last signed in with Microsoft on <span data-utc="{{ profile_sso_last_login_iso }}">{{ profile_sso_last_login_iso }}</span>.</p>{% endif %}
+            {% if profile_sso_last_login_iso %}<p class="form-help">Last signed in with Microsoft on <span data-utc="{{ profile_sso_last_login_iso }}">{{ profile_sso_last_login_display }}</span>.</p>{% endif %}
             {% if profile_sso_must_stay_linked %}
               <p class="form-help">Your organisation requires Microsoft sign-in, so this account must stay linked.</p>
             {% else %}
@@ -698,5 +698,6 @@
   <script src="{{ static_url('/static/js/purify.min.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
   {% endif %}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/profile.js') }}" defer></script>
 {% endblock %}

@@ -96,8 +96,22 @@ SSO_PENDING_COOKIE = "myportal_sso_pending"
 SSO_PENDING_TTL_SECONDS = 300
 SSO_EXPIRED_MESSAGE = "Your Microsoft sign-in session expired. Please try again."
 SSO_MICROSOFT_FAILED_MESSAGE = "Microsoft sign-in was cancelled or failed. Please try again."
-SSO_UNAVAILABLE_MESSAGE = "Microsoft sign-in is not available right now. Please try again later."
-SSO_INVALID_TOTP_MESSAGE = "Invalid authenticator code."
+SSO_UNAVAILABLE_MESSAGE = (
+    "Microsoft sign-in isn't available right now. Use your password or contact your administrator."
+)
+SSO_INVALID_TOTP_MESSAGE = "Invalid authenticator code. Start Microsoft sign-in again."
+# Flashes that mean a Microsoft sign-in just failed; the login page must not
+# send the visitor straight back to Microsoft after one of these.
+SSO_FAILURE_MESSAGES = frozenset(
+    {
+        SSO_EXPIRED_MESSAGE,
+        SSO_MICROSOFT_FAILED_MESSAGE,
+        SSO_UNAVAILABLE_MESSAGE,
+        SSO_INVALID_TOTP_MESSAGE,
+        sso_login.GENERIC_FAILURE,
+        sso_login.TENANT_NOT_ENABLED_MESSAGE,
+    }
+)
 _SSO_LOGIN_FLOW = "sso_login"
 _SSO_TOTP_FLOW = "sso_totp"
 # A concurrent auto-link of the same Microsoft account hits the unique key.

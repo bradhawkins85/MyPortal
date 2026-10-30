@@ -1037,13 +1037,16 @@ def build_m365_redirect_uri(request: Request) -> str:
     return uri
 
 
-async def get_effective_pkce_client_id(*, redirect_uri: str | None = None) -> str:
+async def get_effective_pkce_client_id(
+    *, redirect_uri: str | None = None, provision: bool = True
+) -> str:
     """Return the best available PKCE public-client app ID.
 
     Resolution order:
     1. Auto-provisioned PKCE client stored in the ``m365-admin`` module settings.
     2. Operator-configured ``M365_PKCE_CLIENT_ID`` environment variable.
-    3. Well-known Azure CLI public client (``AZURE_CLI_CLIENT_ID``).
+    3. A newly provisioned client, unless ``provision`` is False.
+    4. Well-known Azure CLI public client (``AZURE_CLI_CLIENT_ID``).
 
     Using the auto-provisioned value ensures that the system always uses a
     freshly-created, valid app registration even when the previously configured
@@ -1065,9 +1068,10 @@ async def get_effective_pkce_client_id(*, redirect_uri: str | None = None) -> st
         return configured
 
     # 2. Best-effort auto-provision using admin credentials before falling back
-    provisioned = await _auto_provision_and_get_pkce_client_id(redirect_uri=redirect_uri)
-    if provisioned:
-        return provisioned
+    if provision:
+        provisioned = await _auto_provision_and_get_pkce_client_id(redirect_uri=redirect_uri)
+        if provisioned:
+            return provisioned
 
     # 3. Azure CLI fallback
     return AZURE_CLI_CLIENT_ID

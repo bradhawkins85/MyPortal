@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
@@ -52,6 +52,15 @@ def utc_iso(value: Any) -> str | None:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     return moment.astimezone(timezone.utc).isoformat()
+
+
+def utc_display(value: Any) -> str | None:
+    """Readable UTC text, e.g. ``30 Oct 2026, 09:55 UTC``, shown until JS localises it."""
+    iso = utc_iso(value)
+    if not iso:
+        return None
+    moment = datetime.fromisoformat(iso)
+    return f"{moment.day} {moment:%b %Y, %H:%M} UTC"
 
 
 def is_guid(value: str) -> bool:

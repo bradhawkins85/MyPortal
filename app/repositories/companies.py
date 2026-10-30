@@ -70,12 +70,12 @@ async def list_sso_company_ids_for_tenant(tenant_id: str) -> list[int]:
     """
     rows = await db.fetch_all(
         """
-        SELECT cred.company_id
-        FROM company_m365_credentials AS cred
-        JOIN companies AS co ON co.id = cred.company_id
-        WHERE LOWER(COALESCE(NULLIF(co.csp_tenant_id, ''), cred.tenant_id)) = LOWER(%s)
+        SELECT co.id AS company_id
+        FROM companies AS co
+        LEFT JOIN company_m365_credentials AS cred ON cred.company_id = co.id
+        WHERE LOWER(COALESCE(NULLIF(TRIM(co.csp_tenant_id), ''), TRIM(cred.tenant_id))) = LOWER(%s)
           AND co.sso_mode <> 'off'
-        ORDER BY cred.company_id
+        ORDER BY co.id
         """,
         (tenant_id.lower(),),
     )
@@ -214,6 +214,20 @@ async def get_email_domains_for_company(company_id: int) -> list[str]:
         (company_id,),
     )
     return [str(row["domain"]).strip().lower() for row in rows if row.get("domain")]
+
+
+async def list_email_domains_for_companies(company_ids: Iterable[int]) -> set[str]:
+    """Return the lower-cased email domains registered for any of the companies."""
+    ids = sorted({int(company_id) for company_id in company_ids})
+    if not ids:
+        return set()
+    placeholders = ", ".join(["%s"] * len(ids))
+    rows = await db.fetch_all(
+        "SELECT domain FROM company_email_domains"  # nosec B608
+        " WHERE company_id IN (" + placeholders + ")",
+        tuple(ids),
+    )
+    return {str(row["domain"]).strip().lower() for row in rows if row.get("domain")}
 
 
 async def _bulk_email_domains(company_ids: Sequence[int]) -> dict[int, list[str]]:

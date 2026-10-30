@@ -25,6 +25,7 @@ from app.security.session import SessionData, session_manager
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
 from app.services import m365_oauth_transactions, sso_login, sso_policy
+from tests.conftest import reset_rate_limiters
 
 EXPIRED = "Your Microsoft sign-in session expired. Please try again."
 MS_FAILED = "Microsoft sign-in was cancelled or failed. Please try again."
@@ -41,7 +42,7 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(db, "run_migrations", noop)
     monkeypatch.setattr(scheduler_service, "start", noop)
     monkeypatch.setattr(scheduler_service, "stop", noop)
-    monkeypatch.setattr(main_module.settings, "enable_csrf", False)
+    reset_rate_limiters()
 
 
 def _session(session_id: int, user_id: int) -> SessionData:
@@ -118,7 +119,8 @@ def stubs(monkeypatch):
             raise s.consume_error
         return s.transactions.pop(transaction_id, None)
 
-    async def pkce_client_id(*, redirect_uri=None):
+    async def pkce_client_id(*, redirect_uri=None, provision=True):
+        assert provision is False
         return "client-id"
 
     async def register_login_attempt(identifier, *, window_seconds, max_attempts):
@@ -188,7 +190,8 @@ def stubs(monkeypatch):
     async def first_company(user):
         return 1
 
-    monkeypatch.setattr(main_module.settings, "portal_url", "https://portal.example")
+    # build_m365_redirect_uri reads get_settings(), which may not be main_module.settings.
+    monkeypatch.setattr(m365_service.get_settings(), "portal_url", "https://portal.example")
     monkeypatch.setattr(m365_oauth_transactions, "create", create)
     monkeypatch.setattr(m365_oauth_transactions, "consume", consume)
     monkeypatch.setattr(m365_service, "get_effective_pkce_client_id", pkce_client_id)
@@ -291,6 +294,22 @@ def test_start_is_rate_limited(client, stubs):
     r = client.get("/auth/microsoft/start", follow_redirects=False)
     assert r.status_code == 429
     assert any(key.startswith("sso-start:") for key in stubs.counts)
+
+
+def test_start_without_a_pkce_app_flashes_unavailable(client, stubs, monkeypatch):
+    async def fallback_client_id(*, redirect_uri=None, provision=True):
+        return m365_service.AZURE_CLI_CLIENT_ID
+
+    monkeypatch.setattr(m365_service, "get_effective_pkce_client_id", fallback_client_id)
+    r = client.get("/auth/microsoft/start?email=a@contoso.com", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login"
+    assert _flash(r) == {
+        "message": "Microsoft sign-in isn't available right now. "
+        "Use your password or contact your administrator.",
+        "variant": "error",
+    }
+    assert stubs.transactions == {}
+    assert not _cookie_header(r, "myportal_sso_binding")
 
 
 # --- callback --------------------------------------------------------------
@@ -475,7 +494,7 @@ def test_oauth_state_serializer_is_shared_with_main():
 
 
 def test_redirect_uri_builder_moved_to_m365_service(monkeypatch):
-    monkeypatch.setattr(main_module.settings, "portal_url", None)
+    monkeypatch.setattr(m365_service.get_settings(), "portal_url", None)
     request = SimpleNamespace(url_for=lambda name: "http://host.example/m365/callback")
     assert m365_service.build_m365_redirect_uri(request) == "https://host.example/m365/callback"
     assert main_module._build_m365_redirect_uri(request) == "https://host.example/m365/callback"
@@ -526,7 +545,9 @@ def test_totp_wrong_code_counts_toward_lockout(client, stubs):
     token = _totp_flow(client, stubs)
     r = client.post("/auth/microsoft/totp", data={"t": token, "code": "not-a-code"}, follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/login"
-    assert _flash(r) == {"message": "Invalid authenticator code.", "variant": "error"}
+    assert _flash(r) == {
+        "message": "Invalid authenticator code. Start Microsoft sign-in again.", "variant": "error"
+    }
     assert stubs.counts.get("account:a@contoso.com") == 1
     assert stubs.sessions_created == []
     assert stubs.transactions == {}

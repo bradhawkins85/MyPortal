@@ -21,6 +21,8 @@ class Fakes:
         self.companies: dict[int, dict] = {}
         self.credentials: dict[int, dict] = {}
         self.tenant_companies: list[int] = []
+        self.tenant_map: dict[str, list[int]] | None = None
+        self.tenants_seen: list[str] = []
 
 
 @pytest.fixture
@@ -44,6 +46,9 @@ def fakes(monkeypatch):
         return {}
 
     async def list_sso_company_ids_for_tenant(tenant_id):
+        f.tenants_seen.append(tenant_id)
+        if f.tenant_map is not None:
+            return list(f.tenant_map.get(tenant_id, []))
         return f.tenant_companies
 
     async def get_credentials(company_id):
@@ -195,12 +200,13 @@ async def test_discover_never_looks_up_users(fakes):
 async def test_password_login_refused_only_for_linked_required_non_super(fakes):
     user = {"id": 1, "company_id": 7, "is_super_admin": 0}
     fakes.modes[7] = "required"
-    fakes.identities[1] = {"id": 9}
+    fakes.tenant_map = {"tenant-a": [7]}
+    fakes.identities[1] = {"id": 9, "tenant_id": "tenant-a"}
     assert await sso_policy.password_login_allowed(user) is False
     assert await sso_policy.password_login_allowed({**user, "is_super_admin": 1}) is True
     fakes.identities.pop(1)
     assert await sso_policy.password_login_allowed(user) is True
-    fakes.identities[1] = {"id": 9}
+    fakes.identities[1] = {"id": 9, "tenant_id": "tenant-a"}
     fakes.modes[7] = "optional"
     assert await sso_policy.password_login_allowed(user) is True
 
@@ -210,8 +216,43 @@ async def test_password_login_refused_via_membership_company(fakes):
     fakes.modes[7] = "optional"
     fakes.modes[8] = "required"
     fakes.memberships[1] = {8}
-    fakes.identities[1] = {"id": 9}
+    fakes.tenant_map = {"tenant-a": [8]}
+    fakes.identities[1] = {"id": 9, "tenant_id": "tenant-a"}
     assert await sso_policy.password_login_allowed(user) is False
+
+
+async def test_password_allowed_when_identity_tenant_maps_to_no_sso_company(fakes):
+    user = {"id": 1, "company_id": 7, "is_super_admin": 0}
+    fakes.modes[7] = "required"
+    fakes.identities[1] = {"id": 9, "tenant_id": "tenant-a"}
+    fakes.tenant_map = {}
+    assert await sso_policy.password_login_allowed(user) is True
+    assert fakes.tenants_seen == ["tenant-a"]
+
+
+async def test_password_allowed_when_identity_tenant_companies_exclude_the_user(fakes):
+    user = {"id": 1, "company_id": 7, "is_super_admin": 0}
+    fakes.modes[7] = "required"
+    fakes.identities[1] = {"id": 9, "tenant_id": "tenant-a"}
+    fakes.tenant_map = {"tenant-a": [12], "tenant-b": [7]}
+    assert await sso_policy.password_login_allowed(user) is True
+
+
+async def test_password_refused_when_identity_tenant_still_covers_a_user_company(fakes):
+    user = {"id": 1, "company_id": 7, "is_super_admin": 0}
+    fakes.modes[7] = "required"
+    fakes.memberships[1] = {12}
+    fakes.identities[1] = {"id": 9, "tenant_id": "tenant-a"}
+    fakes.tenant_map = {"tenant-a": [12]}
+    assert await sso_policy.password_login_allowed(user) is False
+
+
+async def test_password_allowed_when_identity_has_no_tenant(fakes):
+    user = {"id": 1, "company_id": 7, "is_super_admin": 0}
+    fakes.modes[7] = "required"
+    fakes.identities[1] = {"id": 9, "tenant_id": None}
+    fakes.tenant_map = {"": [7]}
+    assert await sso_policy.password_login_allowed(user) is True
 
 
 async def test_can_manage_link_rules(fakes):

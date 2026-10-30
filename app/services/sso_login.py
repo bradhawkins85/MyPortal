@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import Request
 
+from app.repositories import companies as company_repo
 from app.repositories import user_sso_identities as sso_identity_repo
 from app.repositories import users as user_repo
 from app.services import audit as audit_service
@@ -60,7 +61,10 @@ async def start(
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
     nonce = secrets.token_urlsafe(16)
     binding = secrets.token_urlsafe(32)
-    client_id = await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri)
+    # Anonymous visitors must never cause an app registration to be created.
+    client_id = await m365_service.get_effective_pkce_client_id(provision=False)
+    if not client_id or client_id == m365_service.AZURE_CLI_CLIENT_ID:
+        raise m365_service.M365Error("No MyPortal sign-in app is registered with Microsoft")
     transaction_id = await m365_oauth_transactions.create(
         flow="sso_login",
         code_verifier=code_verifier,
@@ -205,6 +209,23 @@ async def _resolve_linked(
     )
 
 
+def _email_verified(claims: dict[str, Any]) -> bool:
+    flag = claims.get("xms_edov")
+    if isinstance(flag, bool):
+        return flag
+    return isinstance(flag, str) and flag.strip().lower() in ("true", "1")
+
+
+def _auto_link_address(claims: dict[str, Any]) -> str | None:
+    """The address used to match a MyPortal user: a verified email, otherwise the UPN."""
+    raw = claims.get("email") if _email_verified(claims) else claims.get("preferred_username")
+    address = str(raw or "").strip().lower()
+    local, _, domain = address.partition("@")
+    if address.count("@") != 1 or not local or not domain:
+        return None
+    return address
+
+
 async def _resolve_auto_link(
     claims: dict[str, Any],
     companies: list[int],
@@ -212,16 +233,22 @@ async def _resolve_auto_link(
     object_id: str,
     request: Request | None,
 ) -> Outcome:
-    address = str(claims.get("email") or claims.get("preferred_username") or "").strip().lower()
+    company_ids = [int(c) for c in companies]
+    address = _auto_link_address(claims)
     if not address:
         return _failure("no_link")
-    candidates = await user_repo.list_active_users_by_email_in_companies(
-        address, [int(c) for c in companies]
-    )
+    domain = address.rpartition("@")[2]
+    if domain not in await company_repo.list_email_domains_for_companies(company_ids):
+        return _failure("no_link")
+    candidates = await user_repo.list_active_users_by_email_in_companies(address, company_ids)
     if len(candidates) != 1:
         return _failure("no_link")
     user = candidates[0]
     if await sso_identity_repo.get_for_user(int(user["id"]), PROVIDER):
+        return _failure("no_link")
+    if user.get("is_super_admin"):
+        return _failure("no_link")
+    if not await sso_policy.user_company_ids(user) <= set(company_ids):
         return _failure("no_link")
     identity = await sso_identity_repo.create(
         user_id=int(user["id"]),

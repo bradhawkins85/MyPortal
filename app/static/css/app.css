@@ -18728,8 +18728,13 @@ body.scf-modal-open {
 }
 
 .auth-sso-continue__link[hidden],
-.auth-sso-continue__hint[hidden] {
+.auth-sso-continue__hint[hidden],
+.auth-sso-continue__password[hidden] {
   display: none;
+}
+
+.auth-sso-continue__password {
+  align-self: center;
 }
 
 .auth-sso-continue__hint {

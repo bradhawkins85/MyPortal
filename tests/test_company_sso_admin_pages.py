@@ -2,8 +2,8 @@
 import base64
 import json
 import re
+import sys
 from datetime import datetime, timezone
-from types import SimpleNamespace
 from urllib.parse import quote
 
 import pytest
@@ -19,8 +19,10 @@ from app.repositories import m365 as m365_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import user_sso_identities as sso_identity_repo
 from app.repositories import users as user_repo
+from app.security.csrf import CSRFMiddleware
 from app.services import audit as audit_service
 from app.services import sso_admin, sso_policy
+from tests.conftest import TEST_CSRF_TOKEN, built_middleware, csrf_session, reset_rate_limiters
 
 TENANT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 OID = "11111111-2222-3333-4444-555555555555"
@@ -43,7 +45,22 @@ def mock_database(monkeypatch):
     monkeypatch.setattr(db, "fetch_all", empty_list)
     monkeypatch.setattr(db, "fetch_one", noop)
     monkeypatch.setattr(db, "execute", noop)
-    monkeypatch.setattr(main_module.settings, "enable_csrf", False)
+
+    # A real CSRF token keeps these tests correct whichever Settings object the
+    # CSRF middleware holds.
+    async def load_session(request, **kwargs):
+        return csrf_session()
+
+    monkeypatch.setattr(main_module.session_manager, "load_session", load_session)
+    reset_rate_limiters()
+
+
+def _feature_modules() -> dict:
+    return {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "app.features" or name.startswith("app.features.")
+    }
 
 
 @pytest.fixture(scope="module")
@@ -68,9 +85,16 @@ def app_client():
         patch.setattr(main_module.automations_service, "refresh_all_schedules", noop)
         patch.setattr(scheduler_service, "start", noop)
         patch.setattr(scheduler_service, "stop", noop)
-        patch.setattr(main_module.settings, "enable_csrf", False)
-        with TestClient(app, follow_redirects=False) as test_client:
-            yield test_client
+        # Shutdown unloads feature packs and drops their modules; later test
+        # modules hold references to the originals, so put them back.
+        feature_modules = _feature_modules()
+        try:
+            with TestClient(app, follow_redirects=False) as test_client:
+                yield test_client
+        finally:
+            for name in set(_feature_modules()) - set(feature_modules):
+                sys.modules.pop(name, None)
+            sys.modules.update(feature_modules)
 
 
 class World:
@@ -201,7 +225,22 @@ def world(monkeypatch):
 @pytest.fixture
 def client(world, app_client):
     app_client.cookies.clear()
-    return app_client
+    app_client.headers["X-CSRF-Token"] = TEST_CSRF_TOKEN
+    yield app_client
+    app_client.headers.pop("X-CSRF-Token", None)
+
+
+def _enforce_csrf(monkeypatch, client, *, user_id: int) -> None:
+    """Turn CSRF on in the live middleware and stop sending the default token."""
+    middleware = built_middleware(app, CSRFMiddleware)
+    monkeypatch.setattr(middleware._settings, "enable_csrf", True)
+    client.headers.pop("X-CSRF-Token", None)
+    session = csrf_session(user_id, "expected-token")
+
+    async def load_session(request, **kwargs):
+        return session
+
+    monkeypatch.setattr(main_module.session_manager, "load_session", load_session)
 
 
 def _flash(response) -> dict | None:
@@ -502,13 +541,7 @@ def test_unlink_form_service_error_is_flashed(world, client, monkeypatch):
 
 
 def test_unlink_form_requires_csrf(world, client, monkeypatch):
-    monkeypatch.setattr(main_module.settings, "enable_csrf", True)
-    session = SimpleNamespace(csrf_token="expected-token", user_id=1)
-
-    async def load_session(request, allow_inactive=True):
-        return session
-
-    monkeypatch.setattr(main_module.session_manager, "load_session", load_session)
+    _enforce_csrf(monkeypatch, client, user_id=1)
     response = client.post("/admin/companies/7/sso/unlink", data={"user_id": "3"})
     assert response.status_code == 403
     assert world.unlink_calls == []
@@ -667,13 +700,7 @@ def test_profile_unlink_when_not_linked_is_info(world, client):
 
 
 def test_profile_unlink_requires_csrf(world, client, monkeypatch):
-    monkeypatch.setattr(main_module.settings, "enable_csrf", True)
-    session = SimpleNamespace(csrf_token="expected-token", user_id=3)
-
-    async def load_session(request, allow_inactive=True):
-        return session
-
-    monkeypatch.setattr(main_module.session_manager, "load_session", load_session)
+    _enforce_csrf(monkeypatch, client, user_id=3)
     world.actor = MEMBER
     world.identities[3] = _identity(3)
     assert client.post("/admin/profile/microsoft-sign-in/unlink").status_code == 403
@@ -700,7 +727,18 @@ def test_profile_renders_string_last_login(world, client):
     world.identities[1] = _identity(1, last="2026-10-30 08:00:00")
     response = client.get("/admin/profile")
     assert response.status_code == 200
-    assert 'data-utc="2026-10-30T08:00:00+00:00"' in response.text
+    assert (
+        '<span data-utc="2026-10-30T08:00:00+00:00">30 Oct 2026, 08:00 UTC</span>' in response.text
+    )
+    assert "/static/js/tables.js" in response.text
+
+
+def test_utc_display_formats_readable_utc_text():
+    assert sso_admin.utc_display("2026-10-30 08:00:00") == "30 Oct 2026, 08:00 UTC"
+    aware = datetime(2026, 1, 5, 23, 30, tzinfo=timezone.utc)
+    assert sso_admin.utc_display(aware) == "5 Jan 2026, 23:30 UTC"
+    assert sso_admin.utc_display(None) is None
+    assert sso_admin.utc_display("not a date") is None
 
 
 def test_current_required_radio_stays_enabled_when_unavailable(world, client):
