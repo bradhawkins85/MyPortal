@@ -26,6 +26,7 @@ DEFAULT_EXEMPT_PREFIXES = (
     "/auth/register",
     "/auth/password/forgot",
     "/auth/password/reset",
+    "/auth/microsoft/",  # Sign-in start/discover/TOTP: no session yet; binding cookies protect them.
     "/api/knowledge-base/search",
     "/public/forms/",  # Bearer link only; these endpoints never use a session identity.
 )

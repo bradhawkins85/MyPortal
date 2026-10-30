@@ -55,3 +55,48 @@ def _isolated_erasure_ledger(tmp_path, monkeypatch):
     module._invalidate_index()
     yield
     module._invalidate_index()
+
+
+TEST_CSRF_TOKEN = "test-csrf-token"
+
+
+def csrf_session(user_id: int = 1, csrf_token: str = TEST_CSRF_TOKEN):
+    """A session whose CSRF token tests can send in the ``X-CSRF-Token`` header."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.security.session import SessionData
+
+    now = datetime.now(timezone.utc)
+    return SessionData(
+        id=user_id, user_id=user_id, session_token="session-" + str(user_id),
+        csrf_token=csrf_token, created_at=now, expires_at=now + timedelta(hours=1),
+        last_seen_at=now, ip_address=None, user_agent=None,
+    )
+
+
+
+def built_middleware(app, middleware_type):
+    """Return *app*'s live instance of *middleware_type*.
+
+    Middleware keeps the ``Settings`` object that existed when the stack was
+    built, which is not ``app.main.settings`` once another test has called
+    ``get_settings.cache_clear()``. Patch the instance's own state instead.
+    """
+    if app.middleware_stack is None:
+        app.middleware_stack = app.build_middleware_stack()
+    node = app.middleware_stack
+    while node is not None:
+        if isinstance(node, middleware_type):
+            return node
+        node = getattr(node, "app", None)
+    raise LookupError(middleware_type.__name__ + " is not installed")
+
+
+def reset_rate_limiters() -> None:
+    """Forget in-memory rate-limit history so earlier tests cannot cause a 429."""
+    main = sys.modules.get("app.main")
+    if main is None:
+        return
+    main.general_rate_limiter._events.clear()
+    for limiter in main.endpoint_limiter._limiters.values():
+        limiter._events.clear()

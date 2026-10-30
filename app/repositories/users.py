@@ -140,6 +140,22 @@ async def list_users_for_company(company_id: int) -> List[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+async def list_company_members(company_id: int) -> List[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT u.id, u.email, u.first_name, u.last_name, u.is_super_admin,
+               u.is_active, u.company_id
+        FROM users AS u
+        WHERE u.company_id = %s
+           OR EXISTS (SELECT 1 FROM user_companies AS uc
+                      WHERE uc.user_id = u.id AND uc.company_id = %s)
+        ORDER BY LOWER(u.email), u.id
+        """,
+        (company_id, company_id),
+    )
+    return [dict(row) for row in rows]
+
+
 async def create_user(
     *,
     email: str,
@@ -261,3 +277,24 @@ async def set_user_password(user_id: int, password: str) -> None:
         (password_hash, user_id),
     )
     log_info("User password updated successfully", user_id=user_id)
+
+
+async def list_active_users_by_email_in_companies(
+    email: str, company_ids: list[int]
+) -> list[dict[str, Any]]:
+    """Return active users with this address who belong to any of the companies."""
+    clean_email = str(email or "").strip().lower()
+    ids = [int(company_id) for company_id in company_ids]
+    if not clean_email or not ids:
+        return []
+    placeholders = ", ".join(["%s"] * len(ids))
+    rows = await db.fetch_all(
+        "SELECT DISTINCT u.* FROM users AS u"  # nosec B608
+        " WHERE LOWER(u.email) = %s AND u.is_active = 1"
+        " AND (u.company_id IN (" + placeholders + ")"
+        " OR EXISTS (SELECT 1 FROM user_companies AS uc"
+        " WHERE uc.user_id = u.id AND uc.company_id IN (" + placeholders + ")))"
+        " ORDER BY u.id ASC",
+        (clean_email, *ids, *ids),
+    )
+    return list(rows or [])

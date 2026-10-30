@@ -252,3 +252,121 @@ def menu_has_access(menu_access: dict[str, Any] | None, key: str, *, write: bool
         return False
     level = normalize_menu_permission_level(key, menu_access.get(key, "none"))
     return level == "write" if write else level in {"read", "write"}
+
+
+def menu_permission_is_explicit_no_access(raw: Any, key: str) -> bool:
+    """Return whether a menu permission payload explicitly denies a menu key."""
+    if isinstance(raw, dict):
+        source = raw.get("menu") if isinstance(raw.get("menu"), dict) else raw
+        if key in source:
+            return normalize_access_level(source.get(key)) == "none"
+    return False
+
+
+def build_menu_access_map(
+    *,
+    is_super_admin: bool,
+    membership_data: dict[str, Any],
+    is_helpdesk_technician: bool = False,
+    has_issue_tracker_access: bool = False,
+    has_marketing_access: bool = False,
+) -> dict[str, str]:
+    if is_super_admin:
+        return {item.key: "write" for item in MENU_PERMISSIONS}
+
+    raw_menu_permissions = membership_data.get("menu_permissions")
+    role_menu_permissions = normalize_menu_permissions(raw_menu_permissions)
+    menu_access = {item.key: role_menu_permissions.get(item.key, "none") for item in MENU_PERMISSIONS}
+    explicitly_denied_menu_keys = {
+        item.key
+        for item in MENU_PERMISSIONS
+        if menu_permission_is_explicit_no_access(raw_menu_permissions, item.key)
+    }
+    for key in explicitly_denied_menu_keys:
+        menu_access[key] = "none"
+
+    def promote(key: str, level: str = "write") -> None:
+        if key in explicitly_denied_menu_keys:
+            return
+        rank = {"none": 0, "read": 1, "write": 2}
+        if rank[level] > rank[menu_access.get(key, "none")]:
+            menu_access[key] = level
+
+    # Baseline authenticated pages remain readable unless explicitly controlled by a role.
+    for key in ("menu.dashboard", "menu.service_status", "menu.knowledge_base", "menu.admin.profile"):
+        promote(key, "read")
+
+    legacy_boolean_to_menu = {
+        "can_access_shop": "menu.shop",
+        "can_access_cart": "menu.shop",
+        "can_access_orders": "menu.orders",
+        "can_access_quotes": "menu.quotes",
+        "can_access_forms": "menu.forms",
+        "can_manage_assets": "menu.assets",
+        "can_manage_licenses": "menu.m365.licenses",
+        "can_manage_invoices": "menu.invoices",
+        "can_manage_staff": "menu.staff",
+        "can_view_compliance": "menu.compliance",
+        "can_view_bcp": "menu.continuity",
+        "can_view_m365_best_practices": "menu.m365.best_practices",
+        "can_view_compliance_checks": "menu.compliance_checks",
+        "can_manage_compliance_checks": "menu.compliance_checks.library",
+        "can_view_m365_user_mailboxes": "menu.m365.user_mailboxes",
+        "can_view_m365_shared_mailboxes": "menu.m365.shared_mailboxes",
+        "can_access_chat": "menu.chat",
+        "is_admin": "menu.admin.company",
+    }
+    for boolean_key, menu_key in legacy_boolean_to_menu.items():
+        if membership_data.get(boolean_key):
+            promote(menu_key, "write" if boolean_key.startswith("can_manage") or boolean_key == "is_admin" else "read")
+
+    # Pre-catalogue membership booleans receive the same compatibility-only
+    # preservation as sparse role payloads. Explicit feature denials still win
+    # through ``promote`` and newly saved roles contain every feature key.
+    if membership_data.get("can_manage_assets"):
+        for key in (
+            "menu.documentation_search", "menu.asset_photos",
+            "menu.asset_relationships", "menu.processes", "menu.expirations",
+            "menu.websites", "menu.applications",
+        ):
+            promote(key, "write")
+    if membership_data.get("is_admin"):
+        promote("menu.credentials", "write")
+        promote("menu.credential_sharing", "write")
+
+    if membership_data.get("can_manage_licenses"):
+        promote("menu.m365.configuration", "write")
+    if membership_data.get("can_manage_licenses") and membership_data.get("can_access_cart"):
+        promote("menu.subscriptions", "write")
+    if is_helpdesk_technician:
+        promote("menu.reporting", "write")
+    if has_issue_tracker_access:
+        promote("menu.issues", "write")
+    if has_marketing_access:
+        promote("menu.marketing", "write")
+    if int(membership_data.get("staff_permission") or 0) > 0:
+        promote("menu.staff", "write")
+    else:
+        # Staff role permissions control what a member may do, but the company
+        # membership scope controls whether they may see any staff at all.
+        # Never let a role's Read/Write setting grant staff access when the
+        # member has neither Department nor All staff access.
+        menu_access["menu.staff"] = "none"
+
+    return menu_access
+
+
+def membership_menu_can(
+    user: dict[str, Any],
+    membership: dict[str, Any] | None,
+    key: str,
+    *,
+    write: bool = False,
+) -> bool:
+    if user.get("is_super_admin"):
+        return True
+    menu_access = build_menu_access_map(
+        is_super_admin=False,
+        membership_data=membership or {},
+    )
+    return menu_has_access(menu_access, key, write=write)

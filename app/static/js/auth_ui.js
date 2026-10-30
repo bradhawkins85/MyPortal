@@ -85,7 +85,12 @@
     const section = document.querySelector('[data-auth-passkey-section]');
     const utils = window.MyPortalPasskeyUtils;
     if (section && utils && typeof utils.supportsPasskeys === 'function' && !utils.supportsPasskeys()) {
-      section.hidden = true;
+      const passkeyOnly = section.querySelectorAll('[data-passkey-only]');
+      if (passkeyOnly.length) {
+        passkeyOnly.forEach((element) => { element.hidden = true; });
+      } else {
+        section.hidden = true;
+      }
     }
   }
 

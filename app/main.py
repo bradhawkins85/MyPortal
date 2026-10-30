@@ -51,7 +51,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
-from itsdangerous import BadSignature, URLSafeSerializer
+from itsdangerous import BadSignature
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import FormData, MutableHeaders, URL
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -72,6 +72,7 @@ from app.api.routes import (
     call_recordings as call_recordings_api,
     click_to_call as click_to_call_api,
     companies,
+    company_sso as company_sso_api,
     documentation,
     dashboard as dashboard_api,
     essential8 as essential8_api,
@@ -162,15 +163,22 @@ from app.services import system_update_history
 from app.services import system_updates as system_updates_service
 from app.services import worker_readiness
 from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
-from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
+from app.security.menu_permissions import (
+    build_menu_access_map,
+    catalogue_for_api,
+    membership_menu_can,
+    menu_has_access,
+    normalize_menu_permissions,
+)
 from app.repositories import site_settings as site_settings_repo
 from app.security.cache_control import CacheControlMiddleware
 from app.security.client_ip import _peer_is_trusted, get_client_ip
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
-from app.security.flash import flash_redirect, set_flash
+from app.security.flash import clear_flash, flash_redirect, pop_flash, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
 from app.security.maintenance import MaintenanceMiddleware
+from app.security.oauth_state import oauth_state_serializer
 from app.security.rate_limiter import (
     EndpointRateLimiter,
     EndpointRateLimiterMiddleware,
@@ -227,7 +235,6 @@ from app.services import custom_forms
 configure_logging()
 settings = get_settings()
 templates_config = get_templates_config()
-oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="m365-oauth")
 
 
 async def _new_m365_oauth_state(request: Request, **context: Any) -> str:
@@ -241,14 +248,37 @@ async def _new_m365_oauth_state(request: Request, **context: Any) -> str:
     return oauth_state_serializer.dumps({"transaction_id": transaction_id})
 
 
+_SSO_TRANSACTION_FLOWS = frozenset({"sso_login", "sso_totp"})
+
+
+def _decode_m365_oauth_state(request: Request, state: str) -> Any:
+    """Verify signed OAuth state once per request; ``None`` when it is invalid."""
+    cached = getattr(request.state, "m365_oauth_state", None)
+    if isinstance(cached, tuple) and cached[0] == state:
+        return cached[1]
+    try:
+        envelope = oauth_state_serializer.loads(state)
+    except BadSignature:
+        envelope = None
+    request.state.m365_oauth_state = (state, envelope)
+    return envelope
+
+
+def _sso_state_envelope(request: Request, state: str | None) -> dict[str, Any] | None:
+    """Return the signed Microsoft sign-in envelope, or ``None`` for other state."""
+    if not state:
+        return None
+    envelope = _decode_m365_oauth_state(request, state)
+    if isinstance(envelope, dict) and "sso_transaction_id" in envelope:
+        return envelope
+    return None
+
+
 async def _consume_m365_oauth_state(request: Request, state: str | None) -> dict[str, Any] | None:
     """Validate, consume, and bind opaque OAuth state to this live session."""
     if not state:
         return None
-    try:
-        envelope = oauth_state_serializer.loads(state)
-    except BadSignature:
-        return None
+    envelope = _decode_m365_oauth_state(request, state)
     # Context-bearing legacy state is intentionally rejected (see service docs).
     transaction_id = envelope.get("transaction_id") if isinstance(envelope, dict) else None
     if not isinstance(transaction_id, str):
@@ -256,6 +286,9 @@ async def _consume_m365_oauth_state(request: Request, state: str | None) -> dict
     transaction = await m365_oauth_transactions.consume(transaction_id)
     session = await session_manager.load_session(request)
     if not transaction or session is None:
+        return None
+    # Sign-in transactions only ever travel in the SSO envelope.
+    if transaction.get("flow") in _SSO_TRANSACTION_FLOWS:
         return None
     if int(transaction.get("user_id") or 0) != session.user_id or int(transaction.get("session_id") or 0) != session.id:
         return None
@@ -1458,6 +1491,7 @@ app.include_router(users.router)
 app.include_router(click_to_call_api.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
+app.include_router(company_sso_api.router)
 app.include_router(feedback.router)
 app.include_router(documentation.router)
 app.include_router(essential8_api.router)
@@ -2403,106 +2437,7 @@ async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
 
 
 
-def _menu_permission_is_explicit_no_access(raw: Any, key: str) -> bool:
-    """Return whether a menu permission payload explicitly denies a menu key."""
-    if isinstance(raw, dict):
-        source = raw.get("menu") if isinstance(raw.get("menu"), dict) else raw
-        if key in source:
-            return normalize_access_level(source.get(key)) == "none"
-    return False
-
-
-def _build_menu_access_map(
-    *,
-    is_super_admin: bool,
-    membership_data: dict[str, Any],
-    is_helpdesk_technician: bool = False,
-    has_issue_tracker_access: bool = False,
-    has_marketing_access: bool = False,
-) -> dict[str, str]:
-    if is_super_admin:
-        return {item.key: "write" for item in MENU_PERMISSIONS}
-
-    raw_menu_permissions = membership_data.get("menu_permissions")
-    role_menu_permissions = normalize_menu_permissions(raw_menu_permissions)
-    menu_access = {item.key: role_menu_permissions.get(item.key, "none") for item in MENU_PERMISSIONS}
-    explicitly_denied_menu_keys = {
-        item.key
-        for item in MENU_PERMISSIONS
-        if _menu_permission_is_explicit_no_access(raw_menu_permissions, item.key)
-    }
-    for key in explicitly_denied_menu_keys:
-        menu_access[key] = "none"
-
-    def promote(key: str, level: str = "write") -> None:
-        if key in explicitly_denied_menu_keys:
-            return
-        rank = {"none": 0, "read": 1, "write": 2}
-        if rank[level] > rank[menu_access.get(key, "none")]:
-            menu_access[key] = level
-
-    # Baseline authenticated pages remain readable unless explicitly controlled by a role.
-    for key in ("menu.dashboard", "menu.service_status", "menu.knowledge_base", "menu.admin.profile"):
-        promote(key, "read")
-
-    legacy_boolean_to_menu = {
-        "can_access_shop": "menu.shop",
-        "can_access_cart": "menu.shop",
-        "can_access_orders": "menu.orders",
-        "can_access_quotes": "menu.quotes",
-        "can_access_forms": "menu.forms",
-        "can_manage_assets": "menu.assets",
-        "can_manage_licenses": "menu.m365.licenses",
-        "can_manage_invoices": "menu.invoices",
-        "can_manage_staff": "menu.staff",
-        "can_view_compliance": "menu.compliance",
-        "can_view_bcp": "menu.continuity",
-        "can_view_m365_best_practices": "menu.m365.best_practices",
-        "can_view_compliance_checks": "menu.compliance_checks",
-        "can_manage_compliance_checks": "menu.compliance_checks.library",
-        "can_view_m365_user_mailboxes": "menu.m365.user_mailboxes",
-        "can_view_m365_shared_mailboxes": "menu.m365.shared_mailboxes",
-        "can_access_chat": "menu.chat",
-        "is_admin": "menu.admin.company",
-    }
-    for boolean_key, menu_key in legacy_boolean_to_menu.items():
-        if membership_data.get(boolean_key):
-            promote(menu_key, "write" if boolean_key.startswith("can_manage") or boolean_key == "is_admin" else "read")
-
-    # Pre-catalogue membership booleans receive the same compatibility-only
-    # preservation as sparse role payloads. Explicit feature denials still win
-    # through ``promote`` and newly saved roles contain every feature key.
-    if membership_data.get("can_manage_assets"):
-        for key in (
-            "menu.documentation_search", "menu.asset_photos",
-            "menu.asset_relationships", "menu.processes", "menu.expirations",
-            "menu.websites", "menu.applications",
-        ):
-            promote(key, "write")
-    if membership_data.get("is_admin"):
-        promote("menu.credentials", "write")
-        promote("menu.credential_sharing", "write")
-
-    if membership_data.get("can_manage_licenses"):
-        promote("menu.m365.configuration", "write")
-    if membership_data.get("can_manage_licenses") and membership_data.get("can_access_cart"):
-        promote("menu.subscriptions", "write")
-    if is_helpdesk_technician:
-        promote("menu.reporting", "write")
-    if has_issue_tracker_access:
-        promote("menu.issues", "write")
-    if has_marketing_access:
-        promote("menu.marketing", "write")
-    if int(membership_data.get("staff_permission") or 0) > 0:
-        promote("menu.staff", "write")
-    else:
-        # Staff role permissions control what a member may do, but the company
-        # membership scope controls whether they may see any staff at all.
-        # Never let a role's Read/Write setting grant staff access when the
-        # member has neither Department nor All staff access.
-        menu_access["menu.staff"] = "none"
-
-    return menu_access
+_build_menu_access_map = build_menu_access_map
 
 
 def _menu_can(menu_access: dict[str, Any] | None, key: str, *, write: bool = False) -> bool:
@@ -2579,13 +2514,7 @@ async def _require_menu_page_access(
     return user, None
 
 def _membership_menu_can(user: dict[str, Any], membership: dict[str, Any] | None, key: str, *, write: bool = False) -> bool:
-    if user.get("is_super_admin"):
-        return True
-    menu_access = _build_menu_access_map(
-        is_super_admin=False,
-        membership_data=membership or {},
-    )
-    return _menu_can(menu_access, key, write=write)
+    return membership_menu_can(user, membership, key, write=write)
 
 
 async def _get_effective_company_membership(
@@ -5499,20 +5428,7 @@ async def delete_m365_admin_credentials(request: Request):
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
-def _build_m365_redirect_uri(request: Request) -> str:
-    """Return the absolute redirect URI for the M365 OAuth callback.
-
-    Uses PORTAL_URL when configured so that the redirect URI is stable
-    regardless of which host the request arrives on.  Falls back to
-    request.url_for and forces the scheme to HTTPS (required by Azure AD).
-    """
-    if settings.portal_url:
-        base = str(settings.portal_url).rstrip("/")
-        return f"{base}/m365/callback"
-    uri = str(request.url_for("m365_callback"))
-    if uri.startswith("http://"):
-        uri = "https://" + uri[len("http://"):]
-    return uri
+_build_m365_redirect_uri = m365_service.build_m365_redirect_uri
 
 
 @app.post("/m365/test", response_class=RedirectResponse)
@@ -6118,6 +6034,9 @@ async def _continue_to_scc_consent(
 
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+    sso_envelope = _sso_state_envelope(request, state)
+    if sso_envelope is not None:
+        return await auth.complete_sso_callback(request, sso_envelope, code, error)
     # Consume first, including denied-consent responses: a callback transaction
     # is single-use regardless of whether Microsoft returned a code.
     state_data = await _consume_m365_oauth_state(request, state)
@@ -7276,6 +7195,10 @@ async def admin_profile_page(request: Request):
         )
     profile_passkeys.sort(key=lambda entry: entry["name"].lower())
     m365_contacts_status = await user_m365_contacts_service.status_for_user(int(user["id"]))
+    from app.repositories import user_sso_identities as sso_identity_repo
+    from app.services import sso_admin
+
+    sso_identity = await sso_identity_repo.get_for_user(int(user["id"]))
 
     context = await _build_base_context(
         request,
@@ -7287,6 +7210,15 @@ async def admin_profile_page(request: Request):
             "profile_totp_devices": totp_devices,
             "profile_passkeys": profile_passkeys,
             "profile_m365_contacts": m365_contacts_status,
+            "profile_sso_identity": sso_identity,
+            "profile_sso_last_login_iso": sso_admin.utc_iso(
+                sso_identity.get("last_login_at") if sso_identity else None
+            ),
+            "profile_sso_last_login_display": sso_admin.utc_display(
+                sso_identity.get("last_login_at") if sso_identity else None
+            ),
+            "profile_sso_must_stay_linked": bool(sso_identity)
+            and await sso_admin.must_stay_linked(user),
             "profile_sales_opt_out": await _profile_sales_opt_out_status(user),
             "profile_anonymisation_request": await _profile_anonymisation_request(user),
         },
@@ -7588,6 +7520,24 @@ async def profile_ai_features_update(request: Request):
     return flash_redirect("/admin/profile#privacy", message, "success")
 
 
+@app.post("/admin/profile/microsoft-sign-in/unlink")
+async def profile_microsoft_sign_in_unlink(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    from app.services import sso_admin
+
+    try:
+        deleted = await sso_admin.unlink_own_identity(user=user, request=request)
+    except sso_admin.SsoAdminError as exc:
+        return flash_redirect("/admin/profile#security", exc.message, "error")
+    if deleted is None:
+        return flash_redirect(
+            "/admin/profile#security", "Your account is not linked to a Microsoft account.", "info"
+        )
+    return flash_redirect("/admin/profile#security", "Microsoft account unlinked.", "success")
+
+
 @app.post("/admin/profile/m365-contacts/disconnect")
 async def profile_m365_contacts_disconnect(request: Request):
     user, redirect = await _require_authenticated_user(request)
@@ -7728,13 +7678,48 @@ async def admin_users_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    from app.repositories import user_sso_identities as sso_identity_repo
+    from app.services import sso_policy
+
     active_users = await user_repo.list_active_users_for_admin()
+    identities = await sso_identity_repo.list_for_users([int(entry["id"]) for entry in active_users])
+    for entry in active_users:
+        identity = identities.get(int(entry["id"]))
+        entry["sso_identity"] = identity
+        entry["sso_can_unlink"] = bool(identity) and await sso_policy.can_manage_link(
+            current_user, entry, entry.get("company_id"), set()
+        )
     return await _render_template(
         "admin/users.html",
         request,
         current_user,
         extra={"title": "Users", "users": active_users},
     )
+
+
+@app.post("/admin/users/{user_id}/sso/unlink")
+async def admin_user_sso_unlink(request: Request, user_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import sso_admin
+
+    target = await user_repo.get_user_by_id(user_id)
+    if not target:
+        return flash_redirect("/admin/users", "User not found.", "error")
+    try:
+        deleted = await sso_admin.unlink_identity(
+            actor=current_user,
+            target_user_id=user_id,
+            company_id=target.get("company_id"),
+            managed_company_ids=set(),
+            request=request,
+        )
+    except sso_admin.SsoAdminError as exc:
+        return flash_redirect("/admin/users", exc.message, "error")
+    if deleted is None:
+        return flash_redirect("/admin/users", "That person has no Microsoft account linked.", "info")
+    return flash_redirect("/admin/users", "Microsoft account unlinked.", "success")
 
 
 @app.get("/admin/sessions", response_class=HTMLResponse)
@@ -12409,15 +12394,43 @@ async def login_page(request: Request):
     if user_count == 0:
         return RedirectResponse(url="/register", status_code=status.HTTP_303_SEE_OTHER)
 
+    page_flash = pop_flash(request)
     context = await _build_public_context(
         request,
         extra={
             "title": "Sign in",
             "verification_success": request.query_params.get("verified") == "1",
             "next_path": next_path or "/",
+            "page_flash": page_flash,
+            "sso_auto_redirect": not (
+                page_flash and page_flash.get("message") in auth.SSO_FAILURE_MESSAGES
+            ),
         },
     )
-    return templates.TemplateResponse(context["request"], "auth/login.html", context)
+    response = templates.TemplateResponse(context["request"], "auth/login.html", context)
+    clear_flash(response)
+    return response
+
+
+@app.get("/login/microsoft/verify", response_class=HTMLResponse)
+async def microsoft_sign_in_verify_page(request: Request, t: str | None = None):
+    token = str(t or "")
+    envelope: Any = None
+    if token:
+        try:
+            envelope = oauth_state_serializer.loads(token)
+        except BadSignature:
+            envelope = None
+    pending_id = envelope.get("sso_pending_id") if isinstance(envelope, dict) else None
+    if not isinstance(pending_id, str) or not request.cookies.get(auth.SSO_PENDING_COOKIE):
+        return flash_redirect("/login", auth.SSO_EXPIRED_MESSAGE, "error")
+    context = await _build_public_context(
+        request,
+        extra={"title": "Verify it's you", "pending_token": token},
+    )
+    response = templates.TemplateResponse(context["request"], "auth/sso_totp.html", context)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/forgot-password", response_class=HTMLResponse)
