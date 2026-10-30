@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies.auth import get_current_user
 from app.api.dependencies.database import require_database
-from app.features.companies import handlers as company_handlers
 from app.services import sso_admin, sso_policy
 from app.services.sso_admin import SsoAdminError
 
@@ -71,6 +70,10 @@ class SsoLinkResponse(BaseModel):
 
 
 async def _managed_company_ids(request: Request, user: dict[str, Any]) -> set[int]:
+    # Imported lazily: the companies pack reaches back into app.main, which
+    # registers this router.
+    from app.features.companies import handlers as company_handlers
+
     _, companies, _ = await company_handlers._get_company_management_scope(request, user)
     return {int(company["id"]) for company in companies}
 
@@ -138,8 +141,10 @@ async def set_company_sso(
         await sso_policy.set_company_sso_mode(
             company_id, payload.mode, actor=current_user, request=request
         )
-    except ValueError as exc:
-        return _error_response(status.HTTP_400_BAD_REQUEST, str(exc))
+    except sso_policy.SsoModeError as exc:
+        return _error_response(
+            status.HTTP_400_BAD_REQUEST, sso_policy.mode_error_message(exc.code)
+        )
     return await sso_admin.company_sso_summary(company_id)
 
 

@@ -98,18 +98,38 @@ async def can_manage_link(
     return company_id in target_company_ids and target_company_ids <= managed_company_ids
 
 
+_MODE_ERROR_MESSAGES = {
+    "unknown_mode": "Unknown sign-in mode.",
+    "tenant_required": (
+        "Connect this company's Microsoft 365 tenant before requiring Microsoft sign-in."
+    ),
+    "link_required": "Link at least one user before requiring Microsoft sign-in.",
+}
+_MODE_ERROR_FALLBACK = "Microsoft sign-in mode could not be changed."
+
+
+class SsoModeError(ValueError):
+    """A refused mode change; ``code`` selects constant user-facing copy."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(mode_error_message(code))
+        self.code = code
+
+
+def mode_error_message(code: str) -> str:
+    return _MODE_ERROR_MESSAGES.get(code, _MODE_ERROR_FALLBACK)
+
+
 async def set_company_sso_mode(
     company_id: int, mode: str, *, actor: dict[str, Any], request: Request | None
 ) -> None:
     if mode not in MODES:
-        raise ValueError("Unknown sign-in mode.")
+        raise SsoModeError("unknown_mode")
     if mode == "required":
         if not await company_has_tenant(company_id):
-            raise ValueError(
-                "Connect this company's Microsoft 365 tenant before requiring Microsoft sign-in."
-            )
+            raise SsoModeError("tenant_required")
         if not await sso_identity_repo.count_for_company(company_id):
-            raise ValueError("Link at least one user before requiring Microsoft sign-in.")
+            raise SsoModeError("link_required")
     previous = await get_company_sso_mode(company_id)
     await company_repo.update_company(company_id, sso_mode=mode)
     await audit_service.record(

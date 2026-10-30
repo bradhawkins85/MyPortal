@@ -153,7 +153,9 @@ def world(monkeypatch):
             raise response
         return response
 
-    monkeypatch.setattr(company_sso.company_handlers, "_get_company_management_scope", scope)
+    monkeypatch.setattr(
+        "app.features.companies.handlers._get_company_management_scope", scope
+    )
     monkeypatch.setattr(user_repo, "get_user_by_id", get_user_by_id)
     monkeypatch.setattr(user_company_repo, "list_companies_for_user", list_companies_for_user)
     monkeypatch.setattr(company_repo, "get_company_by_id", get_company_by_id)
@@ -257,6 +259,21 @@ def test_required_without_links_is_400(world, as_company_admin):
     assert response.status_code == 400
     assert response.json()["detail"] == "Link at least one user before requiring Microsoft sign-in."
     assert world.companies[7]["sso_mode"] == "off"
+
+
+def test_unexpected_mode_error_text_is_not_exposed(world, as_company_admin, monkeypatch):
+    from app.services import sso_policy
+
+    async def failing_set_mode(*args, **kwargs):
+        raise ValueError("internal detail: Unsupported company fields: secret_column")
+
+    monkeypatch.setattr(sso_policy, "set_company_sso_mode", failing_set_mode)
+    client = TestClient(
+        app, headers={"X-CSRF-Token": TEST_CSRF_TOKEN}, raise_server_exceptions=False
+    )
+    response = client.put("/api/companies/7/sso", json={"mode": "optional"})
+    assert response.status_code == 500
+    assert "secret_column" not in response.text
 
 
 def test_unknown_mode_is_422(world, as_company_admin):

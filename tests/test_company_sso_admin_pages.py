@@ -439,7 +439,7 @@ def test_mode_form_post_redirects_with_flash(world, client):
 
 
 def test_mode_form_error_is_flashed(world, client):
-    world.mode_error = ValueError("Link at least one user before requiring Microsoft sign-in.")
+    world.mode_error = sso_policy.SsoModeError("link_required")
     response = client.post("/admin/companies/7/sso/mode", data={"sso_mode": "required"})
     assert response.status_code == 303
     assert response.headers["location"] == SECTION_URL

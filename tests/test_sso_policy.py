@@ -300,6 +300,23 @@ async def test_set_optional_needs_no_tenant(fakes):
     assert fakes.audits[0]["before"] == {"sso_mode": "off"}
 
 
+async def test_set_mode_errors_are_typed_with_constant_copy(fakes):
+    with pytest.raises(sso_policy.SsoModeError) as unknown:
+        await sso_policy.set_company_sso_mode(7, "bogus", actor={"id": 2}, request=None)
+    assert unknown.value.code == "unknown_mode"
+    assert sso_policy.mode_error_message(unknown.value.code) == "Unknown sign-in mode."
+
+    with pytest.raises(sso_policy.SsoModeError) as no_tenant:
+        await sso_policy.set_company_sso_mode(7, "required", actor={"id": 2}, request=None)
+    assert no_tenant.value.code == "tenant_required"
+
+    fakes.tenant[7] = True
+    with pytest.raises(sso_policy.SsoModeError) as no_links:
+        await sso_policy.set_company_sso_mode(7, "required", actor={"id": 2}, request=None)
+    assert no_links.value.code == "link_required"
+    assert sso_policy.mode_error_message("not-a-code") == "Microsoft sign-in mode could not be changed."
+
+
 async def test_set_unknown_mode_rejected(fakes):
     with pytest.raises(ValueError, match="Unknown sign-in mode."):
         await sso_policy.set_company_sso_mode(7, "bogus", actor={"id": 2}, request=None)

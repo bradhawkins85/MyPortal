@@ -360,8 +360,8 @@ async def admin_company_sso_mode(company_id: int, request: Request):
         await sso_policy.set_company_sso_mode(
             company_id, mode, actor=current_user, request=request
         )
-    except ValueError as exc:
-        return _sso_redirect(company_id, str(exc), "error")
+    except sso_policy.SsoModeError as exc:
+        return _sso_redirect(company_id, sso_policy.mode_error_message(exc.code), "error")
     return _sso_redirect(company_id, "Microsoft sign-in mode saved.", "success")
 
 
