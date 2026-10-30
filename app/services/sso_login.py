@@ -68,6 +68,7 @@ async def start(
         client_id=client_id,
         redirect_uri=redirect_uri,
         binding_hash=_hash_binding(binding),
+        login_hint=login_hint,
         next_path=next_path,
     )
     params = {
@@ -134,7 +135,7 @@ async def redeem_code(transaction: dict[str, Any], code: str) -> dict[str, Any]:
     claims = await m365_service.validate_microsoft_id_token(id_token, client_id=client_id)
     expected_nonce = str(transaction.get("nonce") or "")
     received_nonce = str(claims.get("nonce") or "")
-    if not expected_nonce or not hmac.compare_digest(expected_nonce, received_nonce):
+    if not expected_nonce or not hmac.compare_digest(expected_nonce.encode(), received_nonce.encode()):
         raise m365_service.M365Error("Microsoft identity nonce did not match")
     if not str(claims.get("oid") or "").strip():
         raise m365_service.M365Error("Microsoft identity did not include an object id")

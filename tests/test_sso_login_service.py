@@ -321,6 +321,16 @@ async def test_redeem_code_rejects_nonce_mismatch(monkeypatch):
         await sso_login.redeem_code(TRANSACTION, "code")
 
 
+async def test_redeem_code_rejects_non_ascii_nonce(monkeypatch):
+    client = FakeClient(FakeResponse(200, {"id_token": "jwt"}))
+    _patch_redeem(monkeypatch, client, {"nonce": "\u00e9", "oid": "o", "tid": "t"})
+    with pytest.raises(M365Error):
+        await sso_login.redeem_code({**TRANSACTION, "nonce": "nonce-1"}, "code")
+    _patch_redeem(monkeypatch, client, {"nonce": "nonce-1", "oid": "o", "tid": "t"})
+    with pytest.raises(M365Error):
+        await sso_login.redeem_code({**TRANSACTION, "nonce": "\u00e9"}, "code")
+
+
 async def test_redeem_code_rejects_missing_nonce(monkeypatch):
     client = FakeClient(FakeResponse(200, {"id_token": "jwt"}))
     _patch_redeem(monkeypatch, client, {"oid": "o", "tid": "t"})
@@ -393,6 +403,7 @@ async def test_start_stores_binding_hash_not_binding(start_fakes):
     assert stored["binding_hash"] == sso_login.hashlib.sha256(result.binding.encode()).hexdigest()
     assert stored["code_verifier"] == "verifier"
     assert stored["client_id"] == "client-1" and stored["next_path"] == "/tickets"
+    assert stored["login_hint"] == "a@b.com"
     assert stored["redirect_uri"] == "https://p/m365/callback"
     assert start_fakes["client_id_redirect"] == "https://p/m365/callback"
     assert result.state_transaction_id == "txn-123"
@@ -450,3 +461,10 @@ async def test_list_active_users_by_email_in_companies_empty_skips_query(monkeyp
     assert await user_repo.list_active_users_by_email_in_companies("a@b.com", []) == []
     assert await user_repo.list_active_users_by_email_in_companies("", [7]) == []
     assert fake.calls == []
+
+
+def test_monitored_http_redacts_oauth_code_and_verifier():
+    from app.services import monitored_http
+
+    assert monitored_http._is_sensitive("code")
+    assert monitored_http._is_sensitive("code_verifier")
