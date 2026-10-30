@@ -3056,7 +3056,7 @@ async def _resolve_on_behalf_of_staff(
     value = str(raw_value or "").strip()
     if not value:
         return None
-    if not await main_module._is_helpdesk_technician(user, request):
+    if not await main_module._has_admin_technician_access(user, request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only technicians can submit requests on behalf of another staff member",

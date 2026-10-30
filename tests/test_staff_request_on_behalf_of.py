@@ -44,8 +44,9 @@ def _patch_common(monkeypatch, *, is_technician: bool, staff_member=None, portal
         AsyncMock(return_value=(_TECH, {"role": "admin"}, {"id": 9}, 3, 9, None)),
     )
     monkeypatch.setattr(
-        main, "_is_helpdesk_technician", AsyncMock(return_value=is_technician)
+        main, "_has_admin_technician_access", AsyncMock(return_value=is_technician)
     )
+    monkeypatch.setattr(main, "_is_helpdesk_technician", AsyncMock(return_value=True))
     monkeypatch.setattr(
         staff_handlers.staff_field_config_service,
         "load_effective_company_staff_fields",
@@ -158,6 +159,14 @@ async def test_non_technician_cannot_request_on_behalf_of(monkeypatch):
 
     assert exc_info.value.status_code == 403
     create_mock.assert_not_awaited()
+
+
+def test_requested_by_field_is_restricted_to_admin_technicians():
+    template = open("app/templates/staff/index.html", encoding="utf-8").read()
+    field_start = template.index('data-stf-field="requested_on_behalf_of"')
+    guard = template.rfind("{% if ", 0, field_start)
+
+    assert template[guard:field_start].startswith("{% if has_admin_technician_access %}")
 
 
 @pytest.mark.asyncio
