@@ -75,6 +75,9 @@
     const fields = data.fields || [];
     const tenants = new Map((data.tenants || []).map((tenant) => [String(tenant.company_id), tenant.company_name]));
     const policies = new Map((data.policies || []).map((policy) => [String(policy.id), policy]));
+    const standardSearch = modal.querySelector('[data-mpol-standard-search]');
+    const standardSelectedOnly = modal.querySelector('[data-mpol-standard-selected]');
+    const standardEmpty = modal.querySelector('[data-mpol-standard-empty]');
     const standardNames = new Map((data.standards || []).map((standard) => [standard.id, standard.name]));
     const state = { policyId: null, conditions: [], overrides: [], nestedRules: null, snapshot: '', lastTrigger: null };
     let previewTimer = null;
@@ -163,10 +166,30 @@
         });
       });
       summaryTargets.textContent = describe(rules());
-      summaryStandards.textContent = chosen.length
-        ? chosen.map((item) => standardNames.get(item.standard_id) + ' (' + item.mode + ')').join(', ')
-        : 'No standards chosen yet.';
+      const listed = chosen.slice(0, 5).map((item) => standardNames.get(item.standard_id) + ' (' + item.mode + ')');
+      if (chosen.length > listed.length) listed.push('and ' + (chosen.length - listed.length) + ' more');
+      summaryStandards.textContent = chosen.length ? listed.join(', ') : 'No standards chosen yet.';
       conditionsEmpty.hidden = state.conditions.length > 0 || Boolean(state.nestedRules);
+    }
+
+    function filterStandards() {
+      if (!standardSearch) return;
+      const terms = standardSearch.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const selectedOnly = standardSelectedOnly.checked;
+      let shown = 0;
+      form.querySelectorAll('[data-mpol-standard-group]').forEach((group) => {
+        let groupShown = 0;
+        group.querySelectorAll('[data-mpol-standard]').forEach((item) => {
+          const text = item.dataset.mpolStandardText || '';
+          const checked = item.querySelector('[data-mpol-standard-input]').checked;
+          const visible = terms.every((term) => text.includes(term)) && (!selectedOnly || checked);
+          item.hidden = !visible;
+          if (visible) groupShown += 1;
+        });
+        group.hidden = groupShown === 0;
+        shown += groupShown;
+      });
+      standardEmpty.hidden = shown > 0;
     }
 
     function renderConditions() {
@@ -322,6 +345,11 @@
         const mode = chosen.get(input.value) || 'report';
         form.querySelectorAll('input[name="mode_' + input.value + '"]').forEach((radio) => { radio.checked = radio.value === mode; });
       });
+      if (standardSearch) {
+        standardSearch.value = '';
+        standardSelectedOnly.checked = Boolean(policy && policy.standards && policy.standards.length);
+        filterStandards();
+      }
       const target = policy && policy.target_rules;
       const flat = target && Array.isArray(target.children) && target.children.every((child) => !Array.isArray(child.children));
       state.nestedRules = target && !flat ? target : null;
@@ -390,6 +418,11 @@
 
     form.querySelectorAll('[data-mpol-standard-input], [data-mpol-mode] input').forEach((input) => input.addEventListener('change', changed));
     [nameInput, descriptionInput, enabledInput].forEach((input) => input.addEventListener('input', refreshSummary));
+    if (standardSearch) {
+      standardSearch.addEventListener('input', filterStandards);
+      standardSearch.addEventListener('keydown', (event) => { if (event.key === 'Enter') event.preventDefault(); });
+      standardSelectedOnly.addEventListener('change', filterStandards);
+    }
     matchSelect.addEventListener('change', changed);
     form.querySelector('[data-mpol-condition-add]').addEventListener('click', () => {
       if (state.nestedRules) {

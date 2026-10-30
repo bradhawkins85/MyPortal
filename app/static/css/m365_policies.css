@@ -93,6 +93,38 @@
   list-style: none;
 }
 
+.mpol-standards__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-base);
+  margin-bottom: var(--space-gap-base);
+}
+
+.mpol-standards__toolbar .form-input {
+  flex: 1 1 14rem;
+  width: auto;
+}
+
+.mpol-standards__selected {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--hf-copy);
+}
+
+.mpol-standards__group + .mpol-standards__group {
+  margin-top: var(--space-gap-roomy);
+}
+
+.mpol-standards__heading {
+  margin: 0 0 var(--space-gap-tight);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
 .mpol-standard {
   display: flex;
   flex-wrap: wrap;
@@ -226,7 +258,9 @@
 }
 
 .mpol .scf-empty[hidden],
-.mpol [data-mpol-item][hidden] {
+.mpol [data-mpol-item][hidden],
+.mpol-standard[hidden],
+.mpol-standards__group[hidden] {
   display: none;
 }
 

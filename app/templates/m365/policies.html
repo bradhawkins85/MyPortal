@@ -210,9 +210,16 @@
             <p class="text-muted">Tick each setting this baseline should enforce, then choose what happens when a tenant doesn't match it.</p>
           </div>
           {% if standards %}
+            <div class="mpol-standards__toolbar">
+              <input type="search" class="form-input" placeholder="Find a standard…" aria-label="Find a standard" data-mpol-standard-search />
+              <label class="mpol-standards__selected"><input type="checkbox" data-mpol-standard-selected /> Selected only</label>
+            </div>
+            {% for group in standards | groupby('category') %}
+            <section class="mpol-standards__group" aria-labelledby="mpol-group-{{ loop.index }}" data-mpol-standard-group>
+            <h4 class="mpol-standards__heading" id="mpol-group-{{ loop.index }}">{{ group.grouper }} <span class="text-muted">({{ group.list | length }})</span></h4>
             <ul class="mpol-standards">
-              {% for standard in standards %}
-                <li class="mpol-standard" data-mpol-standard="{{ standard.id }}">
+              {% for standard in group.list %}
+                <li class="mpol-standard" data-mpol-standard="{{ standard.id }}" data-mpol-standard-text="{{ [standard.name, standard.category, standard.description] | join(' ') | lower }}">
                   <label class="mpol-standard__pick">
                     <input type="checkbox" name="standard" value="{{ standard.id }}" data-mpol-standard-input />
                     <span class="mpol-standard__text">
@@ -233,6 +240,9 @@
                 </li>
               {% endfor %}
             </ul>
+            </section>
+            {% endfor %}
+            <p class="scf-empty scf-empty--inline" data-mpol-standard-empty hidden>No standards match your search.</p>
           {% else %}
             <p class="scf-empty scf-empty--inline">No standards are available yet.</p>
           {% endif %}
