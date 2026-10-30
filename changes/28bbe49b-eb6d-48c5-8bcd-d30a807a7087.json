@@ -1,0 +1,7 @@
+{
+  "guid": "28bbe49b-eb6d-48c5-8bcd-d30a807a7087",
+  "occurred_at": "2026-10-30T04:53Z",
+  "change_type": "Feature",
+  "summary": "Super admins can now manage Microsoft 365 policies from Office 365 \u2192 Policies: pick standards and their report, alert or remediate mode, target tenants by licence or company variable with a live preview, pin exceptions, and see each tenant's compliance.",
+  "content_hash": "70e9bb310fd8d88022a219008fd110ba14fa407b863e1d4b9ca3d085cff31d1f"
+}

@@ -680,6 +680,16 @@
                   </a>
                 </li>
                 {% endif %}
+                {% if is_super_admin and feature_pack_available('m365_policies') %}
+                <li class="menu__subitem">
+                  <a href="/m365/policies" {% if current_path.startswith('/m365/policies') %}aria-current="page"{% endif %}>
+                    <span class="menu__icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2 4 5v6c0 5.1 3.4 9.9 8 11 4.6-1.1 8-5.9 8-11V5zm-1 14-4-4 1.4-1.4 2.6 2.6 5.6-5.6L18 9z"/></svg>
+                    </span>
+                    Policies
+                  </a>
+                </li>
+                {% endif %}
                 {% if can_view_m365_user_mailboxes %}
                 <li class="menu__subitem">
                   <a href="/m365/mailboxes/users" {% if current_path.startswith('/m365/mailboxes/users') %}aria-current="page"{% endif %}>
@@ -759,8 +769,8 @@
               </ul>
             </li>
           {% endif %}
-          {% if not can_manage_licenses and (can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_signatures or can_access_m365_out_of_office or can_access_m365_spam_purge) %}
-            {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/mailboxes') or current_path.startswith('/m365/signatures') or current_path.startswith('/m365/out-of-office') or current_path.startswith('/m365/spam-purge') %}
+          {% if not can_manage_licenses and ((is_super_admin and feature_pack_available('m365_policies')) or can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_signatures or can_access_m365_out_of_office or can_access_m365_spam_purge) %}
+            {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/policies') or current_path.startswith('/m365/mailboxes') or current_path.startswith('/m365/signatures') or current_path.startswith('/m365/out-of-office') or current_path.startswith('/m365/spam-purge') %}
             <li class="menu__item menu__item--expandable {% if m365_active %}menu__item--expanded{% endif %}" data-menu-key="/m365">
               <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if m365_active %}true{% else %}false{% endif %}">
                 <span class="menu__icon" aria-hidden="true">
@@ -779,6 +789,16 @@
                       <svg viewBox="0 0 24 24" focusable="false"><path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
                     </span>
                     Best Practices
+                  </a>
+                </li>
+                {% endif %}
+                {% if is_super_admin and feature_pack_available('m365_policies') %}
+                <li class="menu__subitem">
+                  <a href="/m365/policies" {% if current_path.startswith('/m365/policies') %}aria-current="page"{% endif %}>
+                    <span class="menu__icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2 4 5v6c0 5.1 3.4 9.9 8 11 4.6-1.1 8-5.9 8-11V5zm-1 14-4-4 1.4-1.4 2.6 2.6 5.6-5.6L18 9z"/></svg>
+                    </span>
+                    Policies
                   </a>
                 </li>
                 {% endif %}

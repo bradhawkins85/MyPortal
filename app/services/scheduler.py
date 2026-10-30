@@ -919,16 +919,12 @@ class SchedulerService:
 
     async def _run_m365_standards(self) -> None:
         """Run Microsoft 365 policy standards with a distributed lock."""
-        async with db.acquire_lock("m365_standards_run", timeout=5) as lock_acquired:
-            if not lock_acquired:
-                log_info("M365 standards run already running on another worker, skipping")
-                return
-            from app.services import m365_policies as m365_policies_service
+        from app.services import m365_policies as m365_policies_service
 
-            try:
-                await m365_policies_service.run_standards()
-            except Exception as exc:  # pragma: no cover - defensive logging
-                log_error("M365 standards run failed", error=str(exc))
+        try:
+            await m365_policies_service.run_standards_locked()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error("M365 standards run failed", error=str(exc))
 
     async def _run_huntress_daily_sync(self) -> None:
         """Refresh Huntress snapshots for every linked company."""

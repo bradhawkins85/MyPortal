@@ -12,11 +12,14 @@ whose settings are used. Every contributing policy is listed in ``sources``.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 from datetime import datetime, timezone
 from typing import Any
 
+from app.core.database import db
 from app.core.logging import log_error, log_info, log_warning
+from app.repositories import company_variables as company_variables_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import m365_policies as policy_repo
 from app.services import audit as audit_service
@@ -122,6 +125,22 @@ def _effective_mode(standard: standards.Standard, mode: str) -> str:
     return mode if mode in standard.modes else standard.modes[-1]
 
 
+def matching_company_ids(
+    target_rules: Any, overrides: list[dict[str, Any]] | None, contexts: dict[int, dict[str, Any]]
+) -> list[int]:
+    """Return the tenants a policy targets: its filter, then include/exclude overrides.
+
+    Raises ``ValueError`` when the filter rules are invalid.
+    """
+    matches = targeting.compile_rules(target_rules)
+    actions = {_company_id(item.get("company_id")): str(item.get("action")) for item in overrides or []}
+    return [
+        company_id for company_id, context in contexts.items()
+        if actions.get(company_id) == "include"
+        or (actions.get(company_id) != "exclude" and matches(context))
+    ]
+
+
 def resolve_assignments(
     policies: list[dict[str, Any]], contexts: dict[int, dict[str, Any]]
 ) -> dict[int, dict[str, dict[str, Any]]]:
@@ -135,15 +154,11 @@ def resolve_assignments(
         if not policy.get("enabled"):
             continue
         try:
-            matches = targeting.compile_rules(policy.get("target_rules"))
+            targets = matching_company_ids(policy.get("target_rules"), policy.get("overrides"), contexts)
         except ValueError as exc:
             log_warning("Skipping M365 policy with invalid filter rules", policy_id=policy["id"], error=str(exc))
             continue
-        overrides = {item["company_id"]: item["action"] for item in policy.get("overrides") or []}
-        for company_id, context in contexts.items():
-            action = overrides.get(company_id)
-            if action == "exclude" or (action != "include" and not matches(context)):
-                continue
+        for company_id in targets:
             assigned = result.setdefault(company_id, {})
             for item in policy.get("standards") or []:
                 standard = standards.get(item["standard_id"])
@@ -187,18 +202,140 @@ async def effective_standards(company_id: int | None = None) -> dict[int, dict[s
     return resolve_assignments(await policy_repo.list_policies(), contexts)
 
 
-async def preview_targets(target_rules: Any, overrides: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+async def preview_targets(target_rules: Any, overrides: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Return the connected tenants a draft filter would target, for live previews."""
-    matches = targeting.compile_rules(target_rules)
-    actions = {_company_id(item.get("company_id")): str(item.get("action")) for item in overrides or []}
+    targeting.validate_rules(target_rules)
     contexts = await tenant_contexts()
     matched = [
-        {"company_id": company_id, "company_name": context["company_name"]}
-        for company_id, context in contexts.items()
-        if actions.get(company_id) == "include"
-        or (actions.get(company_id) != "exclude" and matches(context))
+        {"company_id": company_id, "company_name": contexts[company_id]["company_name"]}
+        for company_id in matching_company_ids(target_rules, overrides, contexts)
     ]
-    return sorted(matched, key=lambda item: item["company_name"].casefold())
+    matched.sort(key=lambda item: item["company_name"].casefold())
+    return {"matched_count": len(matched), "eligible_count": len(contexts), "tenants": matched}
+
+
+def _audit_view(policy: dict[str, Any] | None) -> dict[str, Any] | None:
+    if policy is None:
+        return None
+    return {key: policy.get(key) for key in ("name", "description", "enabled", "target_rules", "standards", "overrides")}
+
+
+async def save_policy_audited(
+    payload: dict[str, Any], *, policy_id: int | None = None, user_id: int | None = None, request: Any = None
+) -> int:
+    """Save a policy and record the change in the audit log."""
+    before = await policy_repo.get_policy(policy_id) if policy_id is not None else None
+    if policy_id is not None and before is None:
+        raise LookupError("Policy not found")
+    saved_id = await save_policy(payload, policy_id=policy_id, user_id=user_id)
+    await audit_service.record(
+        action="m365.policy.update" if policy_id is not None else "m365.policy.create",
+        request=request,
+        user_id=user_id,
+        entity_type="m365_policy",
+        entity_id=saved_id,
+        before=_audit_view(before),
+        after=_audit_view(await policy_repo.get_policy(saved_id)),
+    )
+    return saved_id
+
+
+async def delete_policy(policy_id: int, *, user_id: int | None = None, request: Any = None) -> dict[str, Any]:
+    """Delete a policy and audit it, raising ``LookupError`` if it does not exist."""
+    policy = await policy_repo.get_policy(policy_id)
+    if policy is None:
+        raise LookupError("Policy not found")
+    await policy_repo.delete_policy(policy_id)
+    await audit_service.record_delete(
+        action="m365.policy.delete",
+        before=_audit_view(policy),
+        request=request,
+        user_id=user_id,
+        entity_type="m365_policy",
+        entity_id=policy_id,
+    )
+    return policy
+
+
+async def page_data() -> dict[str, Any]:
+    """Everything the Policies page shows: policies, results and editor choices."""
+    contexts = await tenant_contexts()
+    stored = await policy_repo.list_policies()
+    catalogue = {item["id"]: item for item in standards.catalogue()}
+    names = {company_id: context["company_name"] for company_id, context in contexts.items()}
+    for policy in stored:
+        try:
+            targets = matching_company_ids(policy.get("target_rules"), policy.get("overrides"), contexts)
+            policy["rules_error"] = None
+        except ValueError as exc:
+            targets, policy["rules_error"] = [], str(exc)
+        policy["target_count"] = len(targets)
+        policy["target_summary"] = (
+            "These filter rules can't be read: " + policy["rules_error"] if policy["rules_error"]
+            else targeting.describe_rules(policy.get("target_rules"))
+        )
+        modes: dict[str, int] = {}
+        for item in policy["standards"]:
+            modes[item["mode"]] = modes.get(item["mode"], 0) + 1
+            item["name"] = catalogue.get(item["standard_id"], {}).get("name", item["standard_id"])
+        policy["mode_counts"] = modes
+        for item in policy["overrides"]:
+            item["company_name"] = names.get(item["company_id"], f"Company {item['company_id']}")
+    policy_names = {policy["id"]: policy["name"] for policy in stored}
+    results = []
+    for row in await policy_repo.list_results():
+        if row["company_id"] not in names:
+            continue
+        row["company_name"] = names[row["company_id"]]
+        row["standard_name"] = catalogue.get(row["standard_id"], {}).get("name", row["standard_id"])
+        row["policy_name"] = policy_names.get(row["policy_id"], "")
+        results.append(row)
+    results.sort(key=lambda row: (row["company_name"].casefold(), row["standard_name"].casefold()))
+    status_counts: dict[str, int] = {}
+    for row in results:
+        status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
+    licence_skus = sorted({sku for context in contexts.values() for sku in context["license_skus"]})
+    licence_names = sorted({name for context in contexts.values() for name in context["license_names"]})
+    variables = sorted({str(row["name"]) for row in await company_variables_repo.list_definitions()})
+    return {
+        "policies": stored,
+        "results": results,
+        "status_counts": status_counts,
+        "standards": list(catalogue.values()),
+        "fields": targeting.field_catalogue(),
+        "tenants": sorted(
+            ({"company_id": key, "company_name": value} for key, value in names.items()),
+            key=lambda item: item["company_name"].casefold(),
+        ),
+        "suggestions": {"m365.license_sku": licence_skus, "m365.license_name": licence_names,
+                        "company.variable": variables},
+    }
+
+
+_background_runs: set[asyncio.Task[Any]] = set()
+
+
+async def run_standards_locked() -> bool:
+    """Run every standard unless another worker already is; return whether it ran."""
+    async with db.acquire_lock("m365_standards_run", timeout=5) as lock_acquired:
+        if not lock_acquired:
+            log_info("M365 standards run already running on another worker, skipping")
+            return False
+        await run_standards()
+        return True
+
+
+def start_background_run() -> None:
+    """Start a standards run without waiting for it, for the Run now action."""
+    async def runner() -> None:
+        try:
+            await run_standards_locked()
+        except Exception as exc:  # noqa: BLE001 - logged, never raised to the page
+            log_error("M365 standards run failed", error=str(exc))
+
+    task = asyncio.create_task(runner(), name="m365-standards-run")
+    _background_runs.add(task)
+    task.add_done_callback(_background_runs.discard)
 
 
 def _now() -> datetime:
