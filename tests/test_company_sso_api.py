@@ -84,7 +84,7 @@ class World:
 def world(monkeypatch):
     w = World()
 
-    async def scope(request, user, include_archived=False):
+    async def scope(user, *, include_archived=False, menu_can=None):
         if user.get("is_super_admin"):
             return True, [{"id": cid} for cid in sorted(w.companies)], {}
         if not w.managed:
@@ -153,9 +153,7 @@ def world(monkeypatch):
             raise response
         return response
 
-    monkeypatch.setattr(
-        "app.features.companies.handlers._get_company_management_scope", scope
-    )
+    monkeypatch.setattr("app.services.company_management.management_scope", scope)
     monkeypatch.setattr(user_repo, "get_user_by_id", get_user_by_id)
     monkeypatch.setattr(user_company_repo, "list_companies_for_user", list_companies_for_user)
     monkeypatch.setattr(company_repo, "get_company_by_id", get_company_by_id)

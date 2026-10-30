@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import aiomysql
 
 from app.security.menu_permissions import MENU_PERMISSION_MAP
+from app.services import company_management
 
 
 def _role_contains_admin_only_permissions(role_record: dict[str, Any]) -> bool:
@@ -84,45 +85,11 @@ async def _get_company_management_scope(
     user: dict[str, Any],
     include_archived: bool = False,
 ) -> tuple[bool, list[dict[str, Any]], dict[int, dict[str, Any]]]:
-    from app.repositories import companies as company_repo
-    from app.repositories import user_companies as user_company_repo
-
-    is_super_admin = bool(user.get("is_super_admin"))
-    if is_super_admin:
-        companies = await company_repo.list_companies(include_archived=include_archived)
-        companies.sort(key=lambda item: (item.get("name") or "").lower())
-        return True, companies, {}
-
-    memberships = await user_company_repo.list_companies_for_user(user["id"])
-    membership_lookup: dict[int, dict[str, Any]] = {}
-    for record in memberships:
-        raw_company_id = record.get("company_id")
-        try:
-            company_id = int(raw_company_id)
-        except (TypeError, ValueError):
-            continue
-        if _main()._membership_menu_can(user, record, "menu.admin.company"):
-            membership_lookup[company_id] = record
-
-    if not membership_lookup:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
-        )
-
-    companies: list[dict[str, Any]] = []
-    for company_id in sorted(membership_lookup.keys()):
-        company = await company_repo.get_company_by_id(company_id)
-        if company:
-            # Filter archived companies for non-super admins unless explicitly requested
-            if include_archived or not company.get("archived"):
-                companies.append(company)
-
-    if not companies:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
-        )
-
-    return False, companies, membership_lookup
+    return await company_management.management_scope(
+        user,
+        include_archived=include_archived,
+        menu_can=_main()._membership_menu_can,
+    )
 
 
 async def _render_companies_dashboard(

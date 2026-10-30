@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies.auth import get_current_user
 from app.api.dependencies.database import require_database
-from app.services import sso_admin, sso_policy
+from app.services import company_management, sso_admin, sso_policy
 from app.services.sso_admin import SsoAdminError
 
 router = APIRouter(tags=["Company SSO"])
@@ -70,11 +70,7 @@ class SsoLinkResponse(BaseModel):
 
 
 async def _managed_company_ids(request: Request, user: dict[str, Any]) -> set[int]:
-    # Imported lazily: the companies pack reaches back into app.main, which
-    # registers this router.
-    from app.features.companies import handlers as company_handlers
-
-    _, companies, _ = await company_handlers._get_company_management_scope(request, user)
+    _, companies, _ = await company_management.management_scope(user)
     return {int(company["id"]) for company in companies}
 
 
