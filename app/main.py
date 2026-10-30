@@ -164,13 +164,10 @@ from app.services import system_updates as system_updates_service
 from app.services import worker_readiness
 from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
 from app.security.menu_permissions import (
-    MENU_PERMISSIONS,
     build_menu_access_map,
     catalogue_for_api,
     membership_menu_can,
     menu_has_access,
-    menu_permission_is_explicit_no_access,
-    normalize_access_level,
     normalize_menu_permissions,
 )
 from app.repositories import site_settings as site_settings_repo
@@ -2440,7 +2437,6 @@ async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
 
 
 
-_menu_permission_is_explicit_no_access = menu_permission_is_explicit_no_access
 _build_menu_access_map = build_menu_access_map
 
 
