@@ -72,6 +72,7 @@ from app.api.routes import (
     call_recordings as call_recordings_api,
     click_to_call as click_to_call_api,
     companies,
+    company_sso as company_sso_api,
     documentation,
     dashboard as dashboard_api,
     essential8 as essential8_api,
@@ -1484,6 +1485,7 @@ app.include_router(users.router)
 app.include_router(click_to_call_api.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
+app.include_router(company_sso_api.router)
 app.include_router(feedback.router)
 app.include_router(documentation.router)
 app.include_router(essential8_api.router)

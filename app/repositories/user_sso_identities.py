@@ -121,3 +121,18 @@ async def count_for_company(company_id: int, provider: str = "m365") -> int:
         (provider, company_id, company_id),
     )
     return int(row["count"]) if row and row.get("count") is not None else 0
+
+
+async def list_for_company(company_id: int, provider: str = "m365") -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """SELECT i.user_id, u.email, i.upn, i.linked_via, i.last_login_at
+           FROM user_sso_identities AS i
+           INNER JOIN users AS u ON u.id = i.user_id
+           WHERE i.provider = %s
+             AND (u.company_id = %s
+                  OR EXISTS (SELECT 1 FROM user_companies AS uc
+                             WHERE uc.user_id = u.id AND uc.company_id = %s))
+           ORDER BY LOWER(u.email), i.id""",
+        (provider, company_id, company_id),
+    )
+    return [item for item in (_normalise(row) for row in rows) if item]

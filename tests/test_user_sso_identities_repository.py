@@ -150,6 +150,20 @@ async def test_count_for_company_defaults_to_zero(fake_db):
     assert await repo.count_for_company(12) == 0
 
 
+@pytest.mark.asyncio
+async def test_list_for_company_binds_params_and_normalises(fake_db):
+    fake_db.rows = [
+        {"user_id": 3, "email": "a@x.com", "upn": "a@x.com", "linked_via": "admin",
+         "last_login_at": datetime(2026, 1, 1, 12, 0)},
+    ]
+    rows = await repo.list_for_company(12)
+    sql, params = fake_db.calls[-1]
+    assert sql.count("%s") == len(params)
+    assert params == ("m365", 12, 12)
+    assert "user_companies" in sql and "u.company_id" in sql
+    assert rows[0]["last_login_at"].tzinfo is timezone.utc
+
+
 def test_sso_mode_is_allowed_company_input():
     companies._validate_company_fields({"sso_mode": "optional"})
 
