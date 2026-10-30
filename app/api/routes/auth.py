@@ -1158,7 +1158,9 @@ async def password_reset(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
 
     reset_user = await user_repo.get_user_by_id(int(record["user_id"]))
-    if reset_user and not await sso_policy.password_login_allowed(reset_user):
+    if not reset_user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+    if not await sso_policy.password_login_allowed(reset_user):
         return await _refuse_sso_required(
             request, reset_user, str(reset_user.get("email") or ""), authentication_method="password_reset"
         )

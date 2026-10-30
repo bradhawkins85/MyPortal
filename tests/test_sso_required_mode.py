@@ -382,3 +382,23 @@ async def test_reset_token_redemption_allowed_when_policy_allows(env):
     )
     assert result.detail == "Password reset successful."
     assert users.passwords_set == [42]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_reset_token_for_missing_user_is_rejected(env):
+    repo, users, _, _, policy = env
+    policy["allowed"] = True
+    users.user["id"] = 999  # get_user_by_id(42) now returns None
+    repo.reset_record = {
+        "user_id": 42, "used": 0, "expires_at": datetime.utcnow() + timedelta(hours=1)
+    }
+    with pytest.raises(HTTPException) as exc:
+        await auth_routes.password_reset(
+            PasswordResetConfirm(token="tok", password="NewPassw0rd!234"),
+            _request("/auth/password/reset"),
+            None,
+        )
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Invalid or expired token"
+    assert users.passwords_set == []
+    assert repo.used_tokens == []
