@@ -101,7 +101,11 @@ def env(monkeypatch):
     monkeypatch.setattr(auth_routes, "verify_password", fake_verify)
     monkeypatch.setattr(auth_routes, "get_dummy_password_hash", lambda: "dummy")
     monkeypatch.setattr(auth_routes, "_determine_active_company_id", company)
+    async def allowed(user):
+        return True
+
     monkeypatch.setattr(auth_routes.audit_service, "record", noop)
+    monkeypatch.setattr(auth_routes.sso_policy, "password_login_allowed", allowed)
     return repo, users, checked
 
 

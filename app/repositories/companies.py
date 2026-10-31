@@ -23,7 +23,7 @@ _ALLOWED_COMPANY_COLUMNS = frozenset({
     "defender_auto_ticket_antivirus_off", "defender_auto_ticket_realtime_off",
     "defender_auto_ticket_tamper_off", "defender_auto_ticket_threat_detected",
     "classic_outlook_signatures_enabled", "pending_approval", "rmm_agent_auto_deploy",
-    "signature_delivery_mode", "outlook_addin_id",
+    "signature_delivery_mode", "outlook_addin_id", "sso_mode",
 })
 _ALLOWED_COMPANY_INPUTS = _ALLOWED_COMPANY_COLUMNS | frozenset({"email_domains"})
 
@@ -60,6 +60,26 @@ def _normalise_company(row: dict[str, Any]) -> dict[str, Any]:
             normalised["default_ticket_replies_billable"]
         )
     return normalised
+
+
+async def list_sso_company_ids_for_tenant(tenant_id: str) -> list[int]:
+    """Companies with SSO enabled whose effective tenant is *tenant_id*.
+
+    The effective tenant is the company's CSP customer tenant when one is
+    mapped, otherwise the tenant the M365 credentials were provisioned in.
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT co.id AS company_id
+        FROM companies AS co
+        LEFT JOIN company_m365_credentials AS cred ON cred.company_id = co.id
+        WHERE LOWER(COALESCE(NULLIF(TRIM(co.csp_tenant_id), ''), TRIM(cred.tenant_id))) = LOWER(%s)
+          AND co.sso_mode <> 'off'
+        ORDER BY co.id
+        """,
+        (tenant_id.lower(),),
+    )
+    return [int(row["company_id"]) for row in rows]
 
 
 async def count_companies() -> int:
@@ -194,6 +214,20 @@ async def get_email_domains_for_company(company_id: int) -> list[str]:
         (company_id,),
     )
     return [str(row["domain"]).strip().lower() for row in rows if row.get("domain")]
+
+
+async def list_email_domains_for_companies(company_ids: Iterable[int]) -> set[str]:
+    """Return the lower-cased email domains registered for any of the companies."""
+    ids = sorted({int(company_id) for company_id in company_ids})
+    if not ids:
+        return set()
+    placeholders = ", ".join(["%s"] * len(ids))
+    rows = await db.fetch_all(
+        "SELECT domain FROM company_email_domains"  # nosec B608
+        " WHERE company_id IN (" + placeholders + ")",
+        tuple(ids),
+    )
+    return {str(row["domain"]).strip().lower() for row in rows if row.get("domain")}
 
 
 async def _bulk_email_domains(company_ids: Sequence[int]) -> dict[int, list[str]]:

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "auth/_auth_macros.html" import auth_brand, legal_links %}
+
+{% set title = "Verify it's you" %}
+
+{% block header_title %}Verify it's you{% endblock %}
+
+{% block sidebar_menu %}
+<li class="menu__item">
+  <a href="/login">
+    <span class="menu__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M10 4h10a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H10a1 1 0 0 1-1-1v-3h2v2h8V6h-8v2H9V5a1 1 0 0 1 1-1zm-1.707 7.293 2.586-2.586L12.293 10.12 10.414 12l1.879 1.879-1.414 1.414-2.586-2.586a1 1 0 0 1 0-1.414z"/></svg>
+    </span>
+    <span class="menu__label">Sign in</span>
+  </a>
+</li>
+{% endblock %}
+
+{% block content %}
+<div class="auth-shell auth-shell--single">
+  {{ auth_brand(app_name) }}
+  <section class="auth-card" aria-labelledby="sso-totp-title">
+    <header class="auth-card__header">
+      <p class="auth-card__eyebrow">One more step</p>
+      <h1 class="auth-card__title" id="sso-totp-title">Enter your authenticator code</h1>
+      <p class="auth-card__subtitle">You signed in with Microsoft. Enter the 6-digit code from your authenticator app to finish signing in to {{ app_name }}.</p>
+    </header>
+
+    <form class="auth-form" method="post" action="/auth/microsoft/totp">
+      <input type="hidden" name="t" value="{{ pending_token }}" />
+      <div class="form-field">
+        <label class="form-label" for="sso-totp-code">Authenticator code</label>
+        <input
+          id="sso-totp-code"
+          class="form-input auth-form__code"
+          type="text"
+          name="code"
+          inputmode="numeric"
+          pattern="[0-9]{6}"
+          maxlength="6"
+          autocomplete="one-time-code"
+          autocorrect="off"
+          autocapitalize="none"
+          required
+          autofocus
+          placeholder="123456"
+          aria-describedby="sso-totp-help"
+        />
+        <p class="form-help" id="sso-totp-help">The code changes every 30 seconds. This step expires after 5 minutes.</p>
+      </div>
+      <button type="submit" class="button auth-card__wide">Verify and sign in</button>
+    </form>
+
+    <p class="auth-card__footer"><a href="/login">Start again</a></p>
+    {{ legal_links() }}
+  </section>
+</div>
+{% endblock %}

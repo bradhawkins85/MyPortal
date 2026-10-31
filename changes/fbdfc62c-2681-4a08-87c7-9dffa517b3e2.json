@@ -1,0 +1,7 @@
+{
+  "guid": "fbdfc62c-2681-4a08-87c7-9dffa517b3e2",
+  "occurred_at": "2026-10-30T09:07Z",
+  "change_type": "Feature",
+  "summary": "Companies connected to Microsoft 365 can now let their people sign in to MyPortal with their Office 365 account, with accounts linked automatically by email or by an admin, and admins can make Microsoft sign-in optional or required for each company.",
+  "content_hash": "3ec2d9d3e746f6c8dd9a673db4b0c0e43b16a7741386e8d1a9875cfea01be234"
+}

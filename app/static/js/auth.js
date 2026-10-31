@@ -171,6 +171,9 @@ class AuthForm {
           this.showAccountSetupReset(detail, payload.email);
           return;
         }
+        if (response.status === 403 && result && result.sso_required === true) {
+          this.revealSsoContinue(payload.email);
+        }
         if (detail && /totp/i.test(detail)) {
           const shouldSelect = /invalid/i.test(detail);
           this.revealTotpField({ focus: true, select: shouldSelect });
@@ -317,6 +320,28 @@ class AuthForm {
     }
 
     return '';
+  }
+
+  revealSsoContinue(email) {
+    const link = this.form.querySelector('[data-sso-continue]');
+    if (!link) {
+      return;
+    }
+    const params = new URLSearchParams();
+    if (email) {
+      params.set('email', email);
+    }
+    const next = this.successRedirect;
+    if (next && next !== '/') {
+      params.set('next', next);
+    }
+    const query = params.toString();
+    link.setAttribute('href', '/auth/microsoft/start' + (query ? '?' + query : ''));
+    link.removeAttribute('hidden');
+    const hint = this.form.querySelector('[data-sso-hint]');
+    if (hint) {
+      hint.removeAttribute('hidden');
+    }
   }
 
   showError(message) {

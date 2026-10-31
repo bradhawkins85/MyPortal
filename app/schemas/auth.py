@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -23,6 +23,16 @@ class RegistrationRequest(BaseModel):
     #: be created.  Defaults to ``False`` so a missing field is treated as
     #: "not accepted" and the route returns a 400.
     accept_policies: bool = False
+
+
+class SSODiscoverRequest(BaseModel):
+    email: str = Field(default="", max_length=320, description="Address typed on the sign-in page.")
+
+
+class SSODiscoverResponse(BaseModel):
+    sso: Literal["off", "optional", "required"] = Field(
+        description="Whether Microsoft sign-in is off, offered, or required for the address's organisation."
+    )
 
 
 class LoginRequest(BaseModel):

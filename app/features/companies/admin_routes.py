@@ -134,6 +134,11 @@ _add(
     response_class=HTMLResponse,
 )
 
+# --- Company Microsoft sign-in (SSO) ------------------------------------------
+_add("/admin/companies/{company_id}/sso/mode", handlers.admin_company_sso_mode, ["POST"])
+_add("/admin/companies/{company_id}/sso/link", handlers.admin_company_sso_link, ["POST"])
+_add("/admin/companies/{company_id}/sso/unlink", handlers.admin_company_sso_unlink, ["POST"])
+
 # --- Company users (create / invite) -----------------------------------------
 _add(
     "/admin/companies/users/create",

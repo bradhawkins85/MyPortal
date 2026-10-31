@@ -133,6 +133,7 @@ async def test_finish_passkey_authentication_creates_session(monkeypatch):
     monkeypatch.setattr(auth_routes.session_manager, "create_session", fake_create_session)
     monkeypatch.setattr(auth_routes.session_manager, "apply_session_cookies", lambda response, session, request: None)
     monkeypatch.setattr(auth_routes, "_determine_active_company_id", lambda user: _async_return(user.get("company_id")))
+    monkeypatch.setattr(auth_routes.sso_policy, "password_login_allowed", lambda user: _async_return(True))
     monkeypatch.setattr(
         auth_routes.passkeys_service,
         "verify_authentication",

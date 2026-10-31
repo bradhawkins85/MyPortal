@@ -1,0 +1,7 @@
+{
+  "guid": "520218fc-2fb4-49bd-8da7-447cc3fc2b98",
+  "occurred_at": "2026-10-30T12:03Z",
+  "change_type": "Security",
+  "summary": "Microsoft sign-in now links an account automatically only when the sign-in name or verified email is on one of the company's email domains, and never for super admins or people who also belong to other companies; after a failed Microsoft sign-in the sign-in page no longer sends you straight back to Microsoft, and you can choose \"Use my password instead\".",
+  "content_hash": "e0fcdcda2b10d38fad4086051e9b137e0b9967172242e5da48ce3e3dbe9c3188"
+}
