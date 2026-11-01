@@ -72,8 +72,8 @@ panic reports).
 
 CPU, GPU and motherboard temperatures, fan speeds, voltages and clocks are read with the
 LibreHardwareMonitor library built into the Windows tray service. Its CPU and motherboard
-sensors need the PawnIO driver, so **on physical hardware only** (never on a virtual
-machine) and only when allowed, the tray service:
+sensors need the PawnIO driver, so **on physical workstations only** (never on a virtual
+machine or a server) and only when allowed, the tray service:
 
 1. records in its state folder that it is about to install PawnIO,
 2. installs the bundled, pinned PawnIO 2.1.0 (SHA-256 checked) silently,
@@ -82,8 +82,15 @@ machine) and only when allowed, the tray service:
    sensors fails or the check runs out of time.
 
 If the service stops part-way, it removes PawnIO the next time it starts. A PawnIO that was
-already installed before the check is used and left as it was. The report says which of
-these happened, and warns when removal failed.
+already installed before the check is used and left as it was on a workstation. The report
+says which of these happened, and warns when removal failed.
+
+**Servers never keep PawnIO.** The tray service reads the Windows edition
+(`ProductOptions\ProductType`): on Windows Server and domain controllers it never installs
+PawnIO, and if PawnIO is already installed it uninstalls it, whether or not PawnIO is allowed
+for the check. If the edition cannot be read, PawnIO is not installed. The portal also does
+not ask for PawnIO when the asset's operating system names a server or its type is Server,
+Virtualisation host or Storage.
 
 PawnIO is the driver earlier RMM agents kept installed, on machines that then reported
 `SYSTEM_THREAD_EXCEPTION_NOT_HANDLED` (0x7E) crashes; the RMM agent still removes it when it

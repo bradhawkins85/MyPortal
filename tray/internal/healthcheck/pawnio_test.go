@@ -104,7 +104,7 @@ func (f *fakePawnIO) ops() pawnIOOps {
 			return nil
 		},
 		uninstallCommand: func() (string, error) {
-			if f.installed || f.version != "" {
+			if f.installed || f.version != "" && !f.uninstalled {
 				return `C:\Program Files\PawnIO\uninstall.exe`, nil
 			}
 			return "", nil
@@ -140,7 +140,7 @@ func (f *fakePawnIO) ops() pawnIOOps {
 	}
 }
 
-var physical = machineIdentity{Manufacturer: "Dell Inc.", Model: "Latitude 7440"}
+var physical = machineIdentity{Manufacturer: "Dell Inc.", Model: "Latitude 7440", ProductType: "WinNT"}
 
 func reading(value float64) SensorReading {
 	return SensorReading{HardwareType: "Cpu", Hardware: "CPU", Type: "Temperature", Name: "Package", Value: &value}
@@ -227,10 +227,16 @@ func TestSensorsNeverInstallOnVirtualMachinesOrWhenDisabled(t *testing.T) {
 		identity machineIdentity
 		status   string
 	}{
-		"disabled": {false, physical, PawnIOSkippedDisabled},
-		"virtual":  {true, machineIdentity{Manufacturer: "VMware, Inc.", Model: "VMware7,1"}, PawnIOSkippedVirtual},
-		"unknown":  {true, machineIdentity{Err: errors.New("registry unavailable")}, PawnIOIdentifyFailed},
-		"no model": {true, machineIdentity{Manufacturer: "Dell Inc."}, PawnIOIdentifyFailed},
+		"disabled":             {false, physical, PawnIOSkippedDisabled},
+		"virtual":              {true, machineIdentity{Manufacturer: "VMware, Inc.", Model: "VMware7,1"}, PawnIOSkippedVirtual},
+		"unknown":              {true, machineIdentity{Err: errors.New("registry unavailable")}, PawnIOIdentifyFailed},
+		"no model":             {true, machineIdentity{Manufacturer: "Dell Inc.", ProductType: "WinNT"}, PawnIOIdentifyFailed},
+		"server":               {true, machineIdentity{Manufacturer: "Dell Inc.", Model: "PowerEdge R650", ProductType: "ServerNT"}, PawnIOSkippedServer},
+		"domain controller":    {true, machineIdentity{Manufacturer: "HPE", Model: "ProLiant DL380", ProductType: "LanmanNT"}, PawnIOSkippedServer},
+		"server disabled":      {false, machineIdentity{Manufacturer: "Dell Inc.", Model: "PowerEdge R650", ProductType: "ServerNT"}, PawnIOSkippedServer},
+		"edition unknown":      {true, machineIdentity{Manufacturer: "Dell Inc.", Model: "PowerEdge R650", ProductErr: errors.New("access denied")}, PawnIOIdentifyFailed},
+		"edition unrecognised": {true, machineIdentity{Manufacturer: "Dell Inc.", Model: "PowerEdge R650", ProductType: "Embedded"}, PawnIOIdentifyFailed},
+		"no edition":           {true, machineIdentity{Manufacturer: "Dell Inc.", Model: "Latitude 7440"}, PawnIOIdentifyFailed},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := &fakePawnIO{installSets: "2.1.0"}
@@ -244,6 +250,49 @@ func TestSensorsNeverInstallOnVirtualMachinesOrWhenDisabled(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+var server = machineIdentity{Manufacturer: "Dell Inc.", Model: "PowerEdge R650", ProductType: "ServerNT"}
+
+func TestSensorsRemoveAnExistingPawnIOFromServers(t *testing.T) {
+	for _, allow := range []bool{true, false} {
+		f := &fakePawnIO{version: "2.2.0", marker: true, readings: []SensorReading{reading(50)}}
+		sensors, pawn := collectSensors(context.Background(), allow, server, f.ops())
+		if pawn.Status != PawnIORemovedFromServer || !f.uninstalled || f.marker {
+			t.Fatalf("allow=%v pawn %+v steps %v marker %v", allow, pawn, f.steps, f.marker)
+		}
+		if got := strings.Join(f.steps, ","); got != "uninstall -silent,unmark,read" {
+			t.Fatalf("allow=%v steps %s", allow, got)
+		}
+		if sensors.Status != "available" {
+			t.Fatalf("sensors %+v", sensors)
+		}
+	}
+}
+
+func TestSensorsReportFailureToRemovePawnIOFromServers(t *testing.T) {
+	f := &fakePawnIO{version: "2.2.0", uninstallKeep: true}
+	_, pawn := collectSensors(context.Background(), true, server, f.ops())
+	if pawn.Status != PawnIORemovalFailed {
+		t.Fatalf("pawn %+v", pawn)
+	}
+	for _, step := range f.steps {
+		if step == "install" {
+			t.Fatalf("PawnIO installed on a server: %v", f.steps)
+		}
+	}
+}
+
+func TestProductFamily(t *testing.T) {
+	for value, want := range map[string]string{
+		"WinNT": productWorkstation, "winnt ": productWorkstation,
+		"ServerNT": productServer, "LanmanNT": productServer,
+		"": "", "Embedded": "",
+	} {
+		if got := productFamily(value); got != want {
+			t.Errorf("productFamily(%q) = %q, want %q", value, got, want)
+		}
 	}
 }
 

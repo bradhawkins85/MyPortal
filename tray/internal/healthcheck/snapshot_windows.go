@@ -315,11 +315,29 @@ func readSensors(ctx context.Context, dir string) ([]SensorReading, error) {
 	return cleanReadings(readings), nil
 }
 
+// platformProductType reads ProductType: WinNT on workstations, ServerNT on
+// servers and LanmanNT on domain controllers.
+func platformProductType() (string, error) {
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\ProductOptions`, registry.QUERY_VALUE)
+	if err != nil {
+		return "", err
+	}
+	defer key.Close()
+	value, _, err := key.GetStringValue("ProductType")
+	return value, err
+}
+
 func platformSensors(ctx context.Context, stateDir string, allow bool, identity machineIdentity) (SensorReport, PawnIOReport) {
 	dir, cleanup, err := extractBundle(stateDir)
 	if err != nil {
 		sensors := SensorReport{Status: "unavailable", Source: "LibreHardwareMonitor", Detail: truncate(err.Error(), 300), Readings: []SensorReading{}}
 		switch {
+		case identity.isServer():
+			return sensors, removeFromServer(pawnIOOps{
+				uninstallCommand: pawnIOUninstallCommand,
+				runUninstaller:   runUninstaller,
+				removeMarker:     func() error { return removePawnIOMarker(stateDir) },
+			})
 		case !allow:
 			return sensors, PawnIOReport{Status: PawnIOSkippedDisabled}
 		case identity.Err == nil && isVirtualMachine(identity.Manufacturer, identity.Model):

@@ -167,6 +167,8 @@ PAWNIO_LABELS = {
     "installed_and_removed": "PawnIO was installed for the check and removed afterwards.",
     "already_installed": "PawnIO was already installed and was left as it was.",
     "skipped_virtual": "Not installed: the computer is a virtual machine.",
+    "skipped_server": "Not installed: PawnIO is never installed on servers.",
+    "removed_from_server": "PawnIO was found on this server and removed; it is never kept on servers.",
     "skipped_disabled": "Not installed: PawnIO is turned off for this check.",
     "skipped_unsupported": "Not installed: PawnIO is only used on Windows.",
     "bundle_missing": "Not installed: this tray build does not include the sensor bundle.",
@@ -260,6 +262,31 @@ def pawnio_allowed(requested: bool | None) -> bool:
 
     enabled = bool(getattr(get_settings(), "health_check_pawnio_enabled", True))
     return enabled if requested is None else enabled and bool(requested)
+
+
+_SERVER_ASSET_TYPES = {"server", "hypervisor", "storage"}
+
+
+def is_server_endpoint(device: Mapping[str, Any] | None, asset: Mapping[str, Any] | None) -> bool:
+    """True when the device or asset is known to be a server.
+
+    PawnIO is only installed on workstations. The tray app also checks the
+    Windows edition itself and refuses on servers; this only stops the portal
+    asking for it.
+    """
+
+    hints = " ".join(
+        str(value or "")
+        for value in (
+            (device or {}).get("os"),
+            (device or {}).get("os_version"),
+            (asset or {}).get("os_name"),
+        )
+    ).lower()
+    if "server" in hints:
+        return True
+    asset_type = str((asset or {}).get("type") or "").strip().lower()
+    return asset_type in _SERVER_ASSET_TYPES
 
 
 def pawnio_label(snapshot: Mapping[str, Any] | None) -> str:
@@ -1424,7 +1451,7 @@ async def start_health_check(
     if not llm["model"]:
         raise HealthCheckError("No LLM model is configured for the AI assistant.")
     platform = ai_troubleshooter.endpoint_platform(device, asset)
-    pawnio = pawnio_allowed(allow_pawnio) and platform == "windows"
+    pawnio = pawnio_allowed(allow_pawnio) and platform == "windows" and not is_server_endpoint(device, asset)
     user_id = _int_or_none((requested_by or {}).get("id"))
     ticket_id = _int_or_none((ticket or {}).get("id"))
     check_id = await repo.create(

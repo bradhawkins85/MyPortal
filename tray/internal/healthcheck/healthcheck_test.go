@@ -23,6 +23,7 @@ func testRunner(t *testing.T) (*Runner, *[]string) {
 		OnProgress:   func(stage, _ string) { stages = append(stages, stage) },
 		now:          func() time.Time { now = now.Add(time.Second); return now },
 		identify:     func() (string, string, error) { return "Dell Inc.", "Latitude 7440", nil },
+		productType:  func() (string, error) { return "WinNT", nil },
 		diskSMART: func(context.Context) DiskSMARTReport {
 			return DiskSMARTReport{Status: SMARTError, Source: smartSource, Detail: "Chocolatey could not be installed.", Disks: []SMARTDisk{}}
 		},
