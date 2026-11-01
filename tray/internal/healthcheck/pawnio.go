@@ -15,8 +15,10 @@ import (
 // PawnIO is the signed kernel driver LibreHardwareMonitor uses to read CPU
 // and motherboard sensors. The MyPortal RMM agent once kept it installed and
 // those machines reported SYSTEM_THREAD_EXCEPTION_NOT_HANDLED (0x7E) crashes,
-// so the health check only installs it on physical hardware, only for the
-// length of one check, and removes it straight afterwards. A marker file in
+// so the health check only installs it on physical workstations, only for
+// the length of one check, and removes it straight afterwards. It is never
+// installed on Windows Server: a check on a server removes any PawnIO it
+// finds instead. A marker file in
 // the state folder records the installation until removal is confirmed, so a
 // service that stops part-way removes the driver when it next starts
 // (CleanupPawnIO). The RMM agent also removes PawnIO whenever it starts.
@@ -49,6 +51,24 @@ func isVirtualMachine(manufacturer, model string) bool {
 	}
 	// EC2 bare-metal instances expose physical hardware and can have sensors.
 	return strings.Contains(identity, "amazon ec2") && !strings.Contains(strings.ToLower(model), ".metal")
+}
+
+// Windows edition families, from ProductOptions\ProductType.
+const (
+	productWorkstation = "workstation"
+	productServer      = "server"
+)
+
+// productFamily maps a Windows ProductType value to workstation or server.
+// Domain controllers (LanmanNT) are servers. Anything else is "".
+func productFamily(productType string) string {
+	switch strings.ToLower(strings.TrimSpace(productType)) {
+	case "winnt":
+		return productWorkstation
+	case "servernt", "lanmannt":
+		return productServer
+	}
+	return ""
 }
 
 // compatiblePawnIO reports whether an installed version is 2.1 or newer.
@@ -138,13 +158,38 @@ type pawnIOOps struct {
 	removeMarker     func() error
 }
 
+// removeFromServer makes sure PawnIO is not installed on a server, removing
+// any installation it finds whoever made it. It needs only the uninstall
+// operations, so it also runs when the sensor bundle is unavailable.
+func removeFromServer(ops pawnIOOps) PawnIOReport {
+	command, err := ops.uninstallCommand()
+	if err != nil {
+		return PawnIOReport{Status: PawnIORemovalFailed, Detail: truncate("reading PawnIO uninstall command: "+err.Error(), 300)}
+	}
+	if command == "" {
+		return PawnIOReport{Status: PawnIOSkippedServer}
+	}
+	removeCtx, cancel := context.WithTimeout(context.Background(), removalTimeout)
+	defer cancel()
+	if err := removePawnIO(removeCtx, ops.uninstallCommand, ops.runUninstaller); err != nil {
+		return PawnIOReport{Status: PawnIORemovalFailed, Detail: truncate(err.Error(), 300)}
+	}
+	if ops.removeMarker != nil {
+		_ = ops.removeMarker()
+	}
+	return PawnIOReport{Status: PawnIORemovedFromServer}
+}
+
 // collectSensors reads hardware sensors, installing PawnIO first when it is
-// allowed, the computer is physical and PawnIO is not already installed, and
-// always removing an installation it made before returning.
+// allowed, the computer is a physical workstation and PawnIO is not already
+// installed, and always removing an installation it made before returning.
+// On a server it never installs PawnIO and removes any it finds.
 func collectSensors(ctx context.Context, allow bool, identity machineIdentity, ops pawnIOOps) (sensors SensorReport, pawn PawnIOReport) {
 	sensors = SensorReport{Status: "unavailable", Source: "LibreHardwareMonitor", Readings: []SensorReading{}}
 	installed := false
 	switch {
+	case identity.isServer():
+		pawn = removeFromServer(ops)
 	case !allow:
 		pawn = PawnIOReport{Status: PawnIOSkippedDisabled}
 	case identity.Err != nil:
@@ -153,6 +198,10 @@ func collectSensors(ctx context.Context, allow bool, identity machineIdentity, o
 		pawn = PawnIOReport{Status: PawnIOIdentifyFailed, Detail: "missing manufacturer or model"}
 	case isVirtualMachine(identity.Manufacturer, identity.Model):
 		pawn = PawnIOReport{Status: PawnIOSkippedVirtual}
+	case identity.ProductErr != nil:
+		pawn = PawnIOReport{Status: PawnIOIdentifyFailed, Detail: truncate("could not tell whether this is a server: "+identity.ProductErr.Error(), 300)}
+	case productFamily(identity.ProductType) != productWorkstation:
+		pawn = PawnIOReport{Status: PawnIOIdentifyFailed, Detail: truncate("unrecognised Windows product type "+strconv.Quote(identity.ProductType), 300)}
 	default:
 		pawn, installed = installPawnIO(ctx, ops)
 	}

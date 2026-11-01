@@ -431,7 +431,8 @@ async def asset_context(asset: dict[str, Any], *, can_run: bool) -> dict[str, An
         "can_manage": can_run,
         "can_run": can_run and bool(device),
         "platform": platform,
-        "pawnio_available": pawnio_enabled and platform == "windows",
+        "pawnio_available": pawnio_enabled and platform == "windows" and not service.is_server_endpoint(device, asset),
+        "is_server": service.is_server_endpoint(device, asset),
         "pawnio_enabled": pawnio_enabled,
         "schedule": await ai_health_check_schedule.schedule_for(asset_id),
     }

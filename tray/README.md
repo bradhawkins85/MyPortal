@@ -488,10 +488,11 @@ reported). Ctrl-C cancels an in-flight LLM call.
   performance, crashes and WHEA errors, problem devices, updates, security and
   battery. macOS uses `system_profiler`, `pmset` and `sysctl`.
 - **Hardware sensors** — the bundled LibreHardwareMonitor library reads CPU,
-  GPU and motherboard sensors. On physical Windows hardware, when the server
+  GPU and motherboard sensors. On physical Windows workstations, when the server
   allows it (`HEALTH_CHECK_PAWNIO_ENABLED`), the service installs the pinned
   PawnIO driver for the length of the check and always removes it before
-  reporting back. A marker in the state folder makes the next service start
+  reporting back. On Windows Server (ProductType `ServerNT`/`LanmanNT`) it is
+  never installed, and any existing PawnIO is uninstalled. A marker in the state folder makes the next service start
   remove it if the service stopped part-way. The bundle is extracted to a
   folder only SYSTEM and Administrators can use, and deleted afterwards.
 - **Logs** — the allowlisted logs the server asks for, through `internal/agent`.

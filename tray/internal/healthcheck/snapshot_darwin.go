@@ -56,6 +56,12 @@ func platformIdentity() (string, string, error) {
 	return "Apple", model, nil
 }
 
+// platformProductType is only meaningful on Windows; PawnIO is never used
+// on macOS.
+func platformProductType() (string, error) {
+	return "", fmt.Errorf("product type is only read on Windows")
+}
+
 func asMap(value any) map[string]any {
 	m, _ := value.(map[string]any)
 	return m

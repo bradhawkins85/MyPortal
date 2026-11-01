@@ -626,6 +626,26 @@ async def test_start_refuses_bad_devices_and_respects_the_pawnio_setting(store, 
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("asset_extra", [
+    {"os_name": "Windows Server 2022 Standard"},
+    {"os_name": "Windows", "type": "Server"},
+    {"os_name": "Windows", "type": "hypervisor"},
+])
+async def test_start_never_requests_pawnio_on_servers(store, monkeypatch, asset_extra):
+    monkeypatch.setattr(hc.get_settings(), "health_check_pawnio_enabled", True)
+    asset = {"id": 10, "company_id": 1, "name": "SRV-01", **asset_extra}
+    started = await hc.start_health_check(asset=asset, device=await _device(5), requested_by=None, allow_pawnio=True)
+    assert started["allow_pawnio"] is False and store["sent"][-1][1]["allow_pawnio"] is False
+
+
+def test_server_detection_and_labels():
+    assert hc.is_server_endpoint({"os": "Windows", "os_version": "Server 2019"}, None)
+    assert not hc.is_server_endpoint({"os": "Windows", "os_version": "11 Pro"}, {"type": "Workstation"})
+    assert hc.pawnio_label({"pawnio": {"status": "skipped_server"}}) == hc.PAWNIO_LABELS["skipped_server"]
+    assert "removed" in hc.pawnio_label({"pawnio": {"status": "removed_from_server"}})
+
+
+@pytest.mark.anyio
 async def test_start_needs_a_deployed_rmm_agent(store):
     asset = {"id": 10, "company_id": 1, "name": "PC-01"}
     store["agents"].pop(10)

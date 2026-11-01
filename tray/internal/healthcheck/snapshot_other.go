@@ -17,6 +17,8 @@ func collectPlatformSnapshot(context.Context, int) (platformSnapshot, error) {
 
 func platformIdentity() (string, string, error) { return "", "", errUnsupported }
 
+func platformProductType() (string, error) { return "", errUnsupported }
+
 func platformSensors(context.Context, string, bool, machineIdentity) (SensorReport, PawnIOReport) {
 	return SensorReport{Status: "unavailable", Detail: errUnsupported.Error(), Readings: []SensorReading{}},
 		PawnIOReport{Status: PawnIOSkippedUnsupported}

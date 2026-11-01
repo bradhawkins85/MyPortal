@@ -12,7 +12,7 @@
 //  2. on physical Windows hardware reads each drive's SMART attributes with
 //     CrystalDiskInfo, which is installed with Chocolatey when it is missing
 //     and stays installed afterwards;
-//  3. on physical Windows hardware, when the server allows it, installs the
+//  3. on physical Windows workstations, when the server allows it, installs the
 //     PawnIO driver for the length of the check, reads hardware sensors with
 //     the bundled LibreHardwareMonitor library and removes PawnIO again
 //     before reporting back (a marker file makes the next service start
@@ -87,6 +87,7 @@ type Snapshot struct {
 	DurationMS       int64             `json:"duration_ms"`
 	AgentVersion     string            `json:"agent_version,omitempty"`
 	IsVirtual        *bool             `json:"is_virtual,omitempty"`
+	IsServer         *bool             `json:"is_server,omitempty"`
 	HardwareIdentity map[string]string `json:"hardware_identity,omitempty"`
 	Sections         json.RawMessage   `json:"sections"`
 	Errors           map[string]string `json:"errors"`
@@ -126,6 +127,8 @@ const (
 	PawnIOInstalledAndRemoved = "installed_and_removed"
 	PawnIOAlreadyInstalled    = "already_installed"
 	PawnIOSkippedVirtual      = "skipped_virtual"
+	PawnIOSkippedServer       = "skipped_server"
+	PawnIORemovedFromServer   = "removed_from_server"
 	PawnIOSkippedDisabled     = "skipped_disabled"
 	PawnIOSkippedUnsupported  = "skipped_unsupported"
 	PawnIOBundleMissing       = "bundle_missing"
@@ -154,6 +157,7 @@ type Runner struct {
 
 	collectSnapshot func(ctx context.Context, eventDays int) (platformSnapshot, error)
 	identify        func() (string, string, error)
+	productType     func() (string, error)
 	diskSMART       func(ctx context.Context) DiskSMARTReport
 	sensors         func(ctx context.Context, allowPawnIO bool, identity machineIdentity) (SensorReport, PawnIOReport)
 	newAgent        func() *agent.Agent
@@ -162,11 +166,18 @@ type Runner struct {
 }
 
 // machineIdentity is the hardware maker and model, used to tell physical
-// hardware from virtual machines.
+// hardware from virtual machines, and the Windows ProductType, used to tell
+// servers from workstations.
 type machineIdentity struct {
 	Manufacturer string
 	Model        string
 	Err          error
+	ProductType  string
+	ProductErr   error
+}
+
+func (m machineIdentity) isServer() bool {
+	return m.ProductErr == nil && productFamily(m.ProductType) == productServer
 }
 
 // NewRunner returns a Runner wired to this platform's collectors.
@@ -176,6 +187,7 @@ func NewRunner(stateDir, agentVersion string) *Runner {
 		AgentVersion:    agentVersion,
 		collectSnapshot: collectPlatformSnapshot,
 		identify:        platformIdentity,
+		productType:     platformProductType,
 		diskSMART:       platformDiskSMART,
 		newAgent:        agent.NewAgent,
 		now:             time.Now,
@@ -240,6 +252,17 @@ func (r *Runner) snapshot(ctx context.Context, req Request) (Snapshot, error) {
 	var errs []string
 	identity := machineIdentity{}
 	identity.Manufacturer, identity.Model, identity.Err = r.identify()
+	if r.productType != nil {
+		identity.ProductType, identity.ProductErr = r.productType()
+	} else {
+		identity.ProductErr = errors.New("product type not available")
+	}
+	if identity.ProductErr == nil {
+		if family := productFamily(identity.ProductType); family != "" {
+			server := family == productServer
+			snapshot.IsServer = &server
+		}
+	}
 	if identity.Err == nil && strings.TrimSpace(identity.Manufacturer+identity.Model) != "" {
 		virtual := isVirtualMachine(identity.Manufacturer, identity.Model)
 		snapshot.IsVirtual = &virtual
@@ -282,7 +305,7 @@ func (r *Runner) snapshot(ctx context.Context, req Request) (Snapshot, error) {
 	}
 
 	if ctx.Err() == nil {
-		r.progress(StageReadingSensors, sensorProgressMessage(r.platform, req.AllowPawnIO, snapshot.IsVirtual))
+		r.progress(StageReadingSensors, sensorProgressMessage(r.platform, req.AllowPawnIO, snapshot.IsVirtual, snapshot.IsServer))
 		sensors, pawn := r.sensors(ctx, req.AllowPawnIO, identity)
 		snapshot.Sensors = &sensors
 		snapshot.PawnIO = &pawn
@@ -297,10 +320,12 @@ func (r *Runner) snapshot(ctx context.Context, req Request) (Snapshot, error) {
 	return snapshot, nil
 }
 
-func sensorProgressMessage(platform string, allow bool, virtual *bool) string {
+func sensorProgressMessage(platform string, allow bool, virtual, server *bool) string {
 	switch {
 	case platform != "windows":
 		return "Reading hardware sensors."
+	case server != nil && *server:
+		return "Reading hardware sensors without PawnIO; it is never installed on servers and is removed if found."
 	case !allow:
 		return "Reading hardware sensors without PawnIO (turned off for this check)."
 	case virtual != nil && *virtual:

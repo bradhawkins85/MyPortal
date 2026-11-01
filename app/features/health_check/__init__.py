@@ -32,7 +32,7 @@ rmm_automation.register_tick_job(ai_health_check_schedule.tick)
 
 PACK = FeaturePack(
     slug="health_check",
-    version="1.1.0",
+    version="1.1.1",
     routers=(detection_router, schedule_router, router),
 )
 
