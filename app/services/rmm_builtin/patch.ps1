@@ -5,10 +5,25 @@ $mutex = New-Object Threading.Mutex($false, 'Global\MyPortalPatchManagement')
 if (-not $mutex.WaitOne(0)) { throw 'Another patch operation is running.' }
 $failed = $false
 $rebootRequired = $false
+# Leaves room inside the 2-hour run timeout to report back after waiting.
+$idleDeadline = (Get-Date).AddMinutes(100)
 function Pending-Reboot {
     return (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or
         (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or
         [bool](Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue)
+}
+function Wait-WindowsUpdateIdle([datetime]$deadline) {
+    # Install() can return while Windows Update, for this job or its own automatic
+    # updates, is still installing. A restart then interrupts the installation.
+    $waiting = $false
+    while ($true) {
+        try { $busy = [bool](New-Object -ComObject Microsoft.Update.Installer).IsBusy }
+        catch { Write-Output "Could not check whether Windows Update is installing: $_"; return $false }
+        if (-not $busy) { return $true }
+        if ((Get-Date) -ge $deadline) { return $false }
+        if (-not $waiting) { Write-Output 'Waiting for Windows Update to finish installing before restarting.'; $waiting = $true }
+        Start-Sleep -Seconds 15
+    }
 }
 function Compare-Version($installed, $latest) {
     # Normalize dotted numeric versions, padding components; unknown vendor formats fail closed.
@@ -70,10 +85,12 @@ try {
             throw 'No Chocolatey sources are enabled.'
         }
     }
-    # Only app actions a technician started from an asset can skip the reboot gate:
-    # one-click upgrades always do, and pushed actions unless the option is unticked.
-    # Missing options on older queued app jobs use the same default as the UI.
-    $ignorePendingReboots = [bool]$plan.manual_upgrade -or
+    # Only actions a technician started from an asset can skip the reboot gate:
+    # chosen Windows updates and one-click upgrades always do, and pushed app actions
+    # unless the option is unticked. Otherwise the restart they asked for would run
+    # without installing anything. Missing options on older queued app jobs use the
+    # same default as the UI.
+    $ignorePendingReboots = [bool]$plan.manual_windows -or [bool]$plan.manual_upgrade -or
         ($plan.manual_apps -and $plan.manual_apps.ignore_pending_reboots -ne $false)
     $pendingReboot = Pending-Reboot
     if ($pendingReboot) { $rebootRequired = $true }
@@ -200,6 +217,7 @@ try {
         try { Send-MyPortalWindowsUpdateState } catch { Write-Output "Could not report Windows Update status: $_" }
     }
     if ($rebootRequired -and -not $failed -and $plan.reboot.reboot_mode -ne 'never') {
+        $idle = Wait-WindowsUpdateIdle $idleDeadline
         $start = [int]$plan.reboot.active_start; $end = [int]$plan.reboot.active_end
         function Active-Hour([datetime]$time) {
             $hour = $time.Hour
@@ -242,7 +260,9 @@ public class PatchSessions {
 '@
             if ([PatchSessions]::HasUsers()) { $safe = $false; Write-Output 'Reboot deferred: a user session exists.' }
         }
-        if ($safe) {
+        if (-not $idle) {
+            Write-Output 'Reboot deferred: Windows Update may still be installing. Restart the device once it finishes.'
+        } elseif ($safe) {
             & shutdown.exe /r /t ($delay * 60) /d p:2:17 /c 'MyPortal: updates require a restart. Save your work.'
             if ($LASTEXITCODE -ne 0) { throw "Could not schedule restart ($LASTEXITCODE)." }
             Write-Output "Restart scheduled in $delay minutes."
