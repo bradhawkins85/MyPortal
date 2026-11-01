@@ -104,7 +104,6 @@ class AuthForm {
     this.accountSetupResetButton = form.querySelector('[data-account-setup-reset-submit]');
     this.accountSetupResetEmail = '';
     this.totpField = form.querySelector('[data-totp-field]');
-    this.totpToggle = form.querySelector('[data-auth-toggle-totp]');
     this.defaultButtonLabel = this.submitButton ? this.submitButton.textContent : '';
 
     form.addEventListener('submit', (event) => this.handleSubmit(event));
@@ -113,24 +112,9 @@ class AuthForm {
       this.accountSetupResetButton.addEventListener('click', () => this.sendAccountSetupReset());
     }
 
-    if (this.totpToggle && this.totpField) {
-      this.syncTotpVisibility();
-      this.totpToggle.addEventListener('click', (event) => this.toggleTotp(event));
-    }
-
     if (this.policyCheckbox) {
       this.policyCheckbox.addEventListener('change', () => this.clearPolicyError());
     }
-  }
-
-  toggleTotp(event) {
-    event.preventDefault();
-    if (!this.totpField || !this.totpToggle) {
-      return;
-    }
-
-    const isHidden = this.totpField.hasAttribute('hidden');
-    this.applyTotpVisibility(isHidden, { focus: isHidden, clearOnHide: !isHidden });
   }
 
   async handleSubmit(event) {
@@ -467,48 +451,11 @@ class AuthForm {
     }
   }
 
-  syncTotpVisibility() {
-    if (!this.totpField) {
-      return;
-    }
-    const isHidden = this.totpField.hasAttribute('hidden');
-    this.totpField.setAttribute('aria-hidden', isHidden ? 'true' : 'false');
-    if (this.totpToggle) {
-      this.totpToggle.textContent = isHidden ? 'Use authenticator code' : 'Hide authenticator code';
-      this.totpToggle.setAttribute('aria-expanded', isHidden ? 'false' : 'true');
-    }
-  }
-
-  applyTotpVisibility(shouldShow, { focus = false, clearOnHide = false } = {}) {
-    if (!this.totpField) {
-      return;
-    }
-
-    if (shouldShow) {
-      this.totpField.removeAttribute('hidden');
-      this.syncTotpVisibility();
-      if (focus) {
-        this.focusTotpInput({ select: false });
-      }
-      return;
-    }
-
-    this.totpField.setAttribute('hidden', '');
-    this.syncTotpVisibility();
-    if (clearOnHide) {
-      this.clearTotpInput();
-    }
-  }
-
   revealTotpField({ focus = false, select = false } = {}) {
     if (!this.totpField) {
       return;
     }
-    const wasHidden = this.totpField.hasAttribute('hidden');
-    if (wasHidden) {
-      this.totpField.removeAttribute('hidden');
-      this.syncTotpVisibility();
-    }
+    this.totpField.removeAttribute('hidden');
     if (focus || select) {
       this.focusTotpInput({ select });
     }
@@ -529,16 +476,6 @@ class AuthForm {
         input.focus();
       }
     });
-  }
-
-  clearTotpInput() {
-    if (!this.totpField) {
-      return;
-    }
-    const input = this.totpField.querySelector('input');
-    if (input) {
-      input.value = '';
-    }
   }
 }
 
