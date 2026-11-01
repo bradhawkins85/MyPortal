@@ -564,13 +564,19 @@ function New-Object {
             $collection | Add-Member ScriptMethod Item { param($i) $this.Items[$i] }
             return $collection
         }
+        'Microsoft.Update.Installer' {
+            if ($env:TEST_WU_BUSY -eq 'error') { throw 'Installer unavailable' }
+            $global:BusyChecks++
+            return [pscustomobject]@{ IsBusy = ($global:BusyChecks -le [int]$env:TEST_WU_BUSY) }
+        }
         'Microsoft.Update.SystemInfo' { return [pscustomobject]@{ RebootRequired = $false } }
         'Microsoft.Update.ServiceManager' { return [pscustomobject]@{ Services = @([pscustomobject]@{ Name = 'Microsoft Update'; IsDefaultAUService = $true }) } }
         default { return Microsoft.PowerShell.Utility\New-Object -TypeName $TypeName -ArgumentList $ArgumentList }
     }
 }
 function Get-HotFix { @([pscustomobject]@{ HotFixID = 'KB5029999'; Description = 'Security Update'; InstalledOn = [datetime]'2026-08-01'; InstalledBy = 'SYSTEM' }) }
-function Test-Path { $false }
+function Test-Path { param($Path) [bool]$env:TEST_REBOOT_PENDING -and $Path -like '*RebootPending' }
+function Start-Sleep { param($Seconds) $global:Slept += $Seconds }
 function Get-ItemProperty { param($Path, $Name, $ErrorAction) $null }
 function shutdown.exe { $global:LASTEXITCODE = 0; ($args -join ' ') | Set-Content $env:TEST_SHUTDOWN_LOG }
 '''
@@ -627,6 +633,46 @@ def test_patch_script_installs_only_the_chosen_updates(tmp_path, reboot_mode):
     else:
         # Active hours are not checked for a technician's install.
         assert log.read_text().startswith("/r /t 600") and "Restart scheduled in 10 minutes." in result.stdout
+
+
+@pytest.mark.skipif(not POWERSHELL, reason="Requires PowerShell; Windows Update is mocked")
+@pytest.mark.parametrize("busy", ["0", "2", "error"])
+def test_patch_script_restarts_only_once_windows_update_is_idle(tmp_path, busy):
+    """Install() can return while Windows Update is still installing; restarting then
+    interrupts the installation, so the restart waits until Windows Update is idle."""
+    script = tmp_path / "patch.ps1"
+    script.write_text(rmm_patching.script_content(), encoding="utf-8")
+    plan = {"manual_windows": {"update_ids": [CU]}, "windows": None, "apps": [], "policies": [],
+            "reboot": {"reboot_mode": "always", "reboot_delay_minutes": 10, "immediate": True,
+                       "active_start": 0, "active_end": 0}}
+    log = tmp_path / "shutdown.txt"
+    result = _run_powershell(tmp_path, f"& '{script}'\n'SLEPT=' + [int]$global:Slept\n", {
+        "TEST_CU": CU, "TEST_OTHER": OLD, "TEST_INTERACTIVE": EDGE, "TEST_SEARCH_FAILS": "",
+        "TEST_WU_BUSY": busy, "TEST_SHUTDOWN_LOG": str(log), "MYPORTAL_PATCH_PLAN": json.dumps(plan)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    if busy == "error":
+        assert not log.exists() and "Reboot deferred: Windows Update may still be installing" in result.stdout
+    else:
+        assert log.read_text().startswith("/r /t 600") and "Restart scheduled in 10 minutes." in result.stdout
+        assert ("Waiting for Windows Update to finish installing" in result.stdout) == (busy == "2")
+        assert f"SLEPT={int(busy) * 15}" in result.stdout
+
+
+@pytest.mark.skipif(not POWERSHELL, reason="Requires PowerShell; Windows Update is mocked")
+def test_chosen_updates_install_despite_a_pending_restart(tmp_path):
+    """A technician's install must not restart the device without installing anything."""
+    script = tmp_path / "patch.ps1"
+    script.write_text(rmm_patching.script_content(), encoding="utf-8")
+    plan = {"manual_windows": {"update_ids": [CU]}, "windows": None, "apps": [], "policies": [],
+            "reboot": {"reboot_mode": "always", "reboot_delay_minutes": 10, "immediate": True,
+                       "active_start": 0, "active_end": 0}}
+    log = tmp_path / "shutdown.txt"
+    result = _run_powershell(tmp_path, f"& '{script}'\n'INSTALLED=' + ($global:Installed -join ',')\n", {
+        "TEST_CU": CU, "TEST_OTHER": OLD, "TEST_INTERACTIVE": EDGE, "TEST_SEARCH_FAILS": "",
+        "TEST_REBOOT_PENDING": "1", "TEST_SHUTDOWN_LOG": str(log), "MYPORTAL_PATCH_PLAN": json.dumps(plan)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Installation deferred" not in result.stdout and "Proceeding despite a pending restart" in result.stdout
+    assert f"INSTALLED={CU}" in result.stdout and log.exists()
 
 
 @pytest.mark.skipif(not POWERSHELL, reason="Requires PowerShell; Windows Update is mocked")

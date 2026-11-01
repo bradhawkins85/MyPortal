@@ -174,8 +174,8 @@ updates**. Choose whether the device may restart afterwards — never, only when
 in, or after warning signed-in users — and the warning time. The installation is a patch job, so it
 follows the one-patch-job-per-device rule and its results appear in **Scripts** run history as
 **Windows updates**. Patch policy categories, deferral and active hours do not apply to these
-chosen updates. A restart that is already pending postpones installation; choose a restart option to
-clear it first. Updates that need someone at the device cannot be installed remotely. Queued
+chosen updates. They install even when a restart is already pending, and any restart waits until
+Windows Update has finished installing. Updates that need someone at the device cannot be installed remotely. Queued
 installations expire if the device does not collect them within an hour.
 
 ### Blocking updates
@@ -213,7 +213,10 @@ hours. The no-user mode checks Windows sessions, including disconnected RDP
 sessions; a query failure prevents the restart. This is a check when scheduling,
 not a continuous sign-in restriction during the countdown.
 
-Existing pending restarts defer installation. Pending restart flags and installer
+Existing pending restarts defer installation by patch policies. A restart is only
+scheduled once Windows Update has finished installing, whether for this job or its own
+automatic updates; MyPortal waits up to about 100 minutes, then leaves the restart for
+the next run. Pending restart flags and installer
 results trigger the reboot decision; failed patch runs do not request a restart.
 Deferred restarts are reconsidered on the next policy run. Windows shutdown
 countdowns display a warning and can force applications closed when they expire.
