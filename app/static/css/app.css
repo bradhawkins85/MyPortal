@@ -18780,12 +18780,6 @@ body.scf-modal-open {
   font-size: 0.85rem;
 }
 
-.auth-form__toggle {
-  align-self: flex-start;
-  margin-top: calc(var(--space-gap-tight) * -1);
-  font-size: 0.85rem;
-}
-
 .auth-form__code {
   max-width: 12rem;
   letter-spacing: 0.2em;

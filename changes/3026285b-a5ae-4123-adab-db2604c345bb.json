@@ -1,0 +1,7 @@
+{
+  "guid": "3026285b-a5ae-4123-adab-db2604c345bb",
+  "occurred_at": "2026-11-01T00:36Z",
+  "change_type": "Improvement",
+  "summary": "The sign-in page now always shows the authenticator code box, so you no longer need to click \"Use authenticator code\" to enter your code.",
+  "content_hash": "ddabe4a5044e25cdf564e00dda66ad72280905540e551c0ebc34be7fd8fd0bb6"
+}

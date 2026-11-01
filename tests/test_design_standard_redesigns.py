@@ -305,7 +305,7 @@ def _auth_env() -> jinja2.Environment:
     return env
 
 
-def test_login_page_keeps_auth_hooks_and_hides_totp_until_needed():
+def test_login_page_keeps_auth_hooks_and_always_shows_totp():
     html = _auth_env().get_template("auth/login.html").render(
         app_name="MyPortal", current_user=None, csrf_token="t", request=None,
         verification_success=False, next_path="/tickets",
@@ -314,8 +314,10 @@ def test_login_page_keeps_auth_hooks_and_hides_totp_until_needed():
     assert 'data-endpoint="/auth/login"' in html
     assert 'data-success-redirect="/tickets"' in html
     assert "data-passkey-login" in html and "data-auth-passkey-section" in html
-    assert re.search(r'data-totp-field\s+hidden', html)
-    assert "data-auth-toggle-totp" in html
+    assert "data-totp-field" in html
+    assert not re.search(r'data-totp-field\s+hidden', html)
+    assert "data-auth-toggle-totp" not in html
+    assert "Use authenticator code" not in html
     assert 'name="totp_code"' in html
     assert "data-password-toggle" in html
     assert 'href="/forgot-password"' in html and 'href="/register"' in html

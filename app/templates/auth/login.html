@@ -105,8 +105,8 @@
         </div>
         {{ password_input('login-password', 'password', 'current-password', minlength=8) }}
       </div>
-      <div class="form-field" id="login-totp-field" data-totp-field hidden>
-        <label class="form-label" for="login-totp">Authenticator code</label>
+      <div class="form-field" id="login-totp-field" data-totp-field>
+        <label class="form-label" for="login-totp">Authenticator code <span class="form-label__optional">optional</span></label>
         <input
           id="login-totp"
           class="form-input auth-form__code"
@@ -121,9 +121,8 @@
           placeholder="123456"
           aria-describedby="login-totp-help"
         />
-        <p class="form-help" id="login-totp-help">The 6-digit code from your authenticator app.</p>
+        <p class="form-help" id="login-totp-help">The 6-digit code from your authenticator app. Leave blank if you have not set one up.</p>
       </div>
-      <button type="button" class="button-link auth-form__toggle" data-auth-toggle-totp aria-controls="login-totp-field" aria-expanded="false">Use authenticator code</button>
       <div class="form-error" role="alert" data-auth-error hidden></div>
       <button type="submit" class="button auth-card__wide" data-auth-submit>Sign in</button>
     </form>
