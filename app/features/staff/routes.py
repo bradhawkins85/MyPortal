@@ -95,6 +95,11 @@ router.add_api_route(
     handlers.request_staff_offboarding,
     methods=["POST"],
 )
+router.add_api_route(
+    "/api/staff/{staff_id}/offboarding/forward-groups",
+    handlers.staff_offboarding_forward_groups,
+    methods=["GET"],
+)
 router.add_api_route("/staff/{staff_id}", handlers.delete_staff_member, methods=["DELETE"])
 router.add_api_route("/staff/enabled", handlers.set_staff_enabled, methods=["POST"], response_class=HTMLResponse)
 router.add_api_route("/staff/{staff_id}/verify", handlers.verify_staff_member, methods=["POST"])

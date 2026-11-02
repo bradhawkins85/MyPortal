@@ -35,6 +35,7 @@ EXPECTED = {
     ("PUT", "/staff/{staff_id}"),
     ("GET", "/api/staff/{staff_id}/tickets"),
     ("POST", "/api/staff/{staff_id}/offboarding/request"),
+    ("GET", "/api/staff/{staff_id}/offboarding/forward-groups"),
     ("DELETE", "/staff/{staff_id}"),
     ("POST", "/staff/enabled"),
     ("POST", "/staff/{staff_id}/verify"),

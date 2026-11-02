@@ -3909,17 +3909,14 @@ async def update_staff_member(staff_id: int, request: Request):
     return JSONResponse({"success": True, "staff": updated})
 
 
-async def request_staff_offboarding(staff_id: int, request: Request):
-    (
-        user,
-        membership,
-        company,
-        staff_permission,
-        company_id,
-        redirect,
-    ) = await _load_staff_context(request)
-    if redirect:
-        return redirect
+async def _get_offboarding_target(
+    staff_id: int,
+    *,
+    user: dict[str, Any],
+    staff_permission: int,
+    company_id: int | None,
+) -> dict[str, Any]:
+    """Return the staff member being offboarded once the requester may act on them."""
 
     existing = await staff_repo.get_staff_by_id(staff_id)
     if not existing:
@@ -3947,6 +3944,80 @@ async def request_staff_offboarding(staff_id: int, request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only active staff members can be offboarding requested",
         )
+    return existing
+
+
+async def _list_offboarding_forward_groups(
+    company_id: int | None, company_email_domains: list[str]
+) -> list[dict[str, Any]]:
+    """Return the company's mail-enabled groups usable as a forwarding target.
+
+    Raises :class:`m365_service.M365Error` when Microsoft 365 cannot be read.
+    """
+
+    if company_id is None or not await m365_service.get_credentials(int(company_id)):
+        return []
+    groups = await m365_service.list_mail_forward_groups(int(company_id))
+    return [
+        group
+        for group in groups
+        if _staff_member_is_offboarding_mail_choice(
+            {"email": group.get("mail")}, company_email_domains
+        )
+    ]
+
+
+async def staff_offboarding_forward_groups(staff_id: int, request: Request):
+    """List distribution lists and mail-enabled groups for the offboarding form."""
+
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request)
+    if redirect:
+        return redirect
+    await _get_offboarding_target(
+        staff_id, user=user, staff_permission=staff_permission, company_id=company_id
+    )
+    try:
+        groups = await _list_offboarding_forward_groups(
+            company_id, list((company or {}).get("email_domains") or [])
+        )
+    except m365_service.M365Error as exc:
+        log_error(
+            "Failed to load distribution lists for offboarding",
+            staff_id=staff_id,
+            company_id=company_id,
+            error=str(exc),
+        )
+        return JSONResponse(
+            {
+                "groups": [],
+                "error": "Distribution lists could not be loaded from Microsoft 365.",
+            }
+        )
+    return JSONResponse({"groups": groups})
+
+
+async def request_staff_offboarding(staff_id: int, request: Request):
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request)
+    if redirect:
+        return redirect
+
+    existing = await _get_offboarding_target(
+        staff_id, user=user, staff_permission=staff_permission, company_id=company_id
+    )
 
     if (
         str(existing.get("account_action") or "").strip().lower()
@@ -3995,6 +4066,11 @@ async def request_staff_offboarding(staff_id: int, request: Request):
     email_forward_to_staff_id_raw = payload.get("emailForwardToStaffId") or payload.get(
         "email_forward_to_staff_id"
     )
+    email_forward_to_address_raw = str(
+        payload.get("emailForwardToAddress")
+        or payload.get("email_forward_to_address")
+        or ""
+    ).strip().lower()
     mailbox_grant_staff_ids_raw = (
         payload.get("mailboxGrantStaffIds")
         or payload.get("mailbox_grant_staff_ids")
@@ -4037,6 +4113,24 @@ async def request_staff_offboarding(staff_id: int, request: Request):
                 detail="Email forwarding target must use an allowed company email domain",
             )
         email_forward_to = str(forward_staff["email"]).strip().lower()
+    elif email_forward_to_address_raw:
+        try:
+            forward_groups = await _list_offboarding_forward_groups(
+                company_id, company_email_domains
+            )
+        except m365_service.M365Error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Could not confirm the distribution list with Microsoft 365. Try again shortly.",
+            )
+        if email_forward_to_address_raw not in {
+            str(group.get("mail") or "") for group in forward_groups
+        }:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email forwarding target must be a staff member or a distribution list in this company",
+            )
+        email_forward_to = email_forward_to_address_raw
 
     # Resolve mailbox grant access list
     mailbox_grant_emails: list[str] = []
