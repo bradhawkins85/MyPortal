@@ -480,3 +480,12 @@ def test_scheduled_runs_are_queued_on_the_automation_tick():
     from app.services import rmm_automation
 
     assert rules.run_due_scheduled in rmm_automation._TICK_JOBS
+
+
+def test_hidden_device_rules_builder_stays_hidden():
+    """The builder's display rule must not override [hidden]; otherwise rules can be
+    built while "All devices in scope" is chosen and are discarded on save."""
+    from pathlib import Path
+
+    css = (Path(__file__).resolve().parents[1] / "app/static/css/rmm.css").read_text()
+    assert ".rmm-targeting[hidden] { display: none; }" in css
