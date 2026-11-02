@@ -4509,7 +4509,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         email=existing.get("email") or "",
         mobile_phone=existing.get("mobile_phone"),
         date_onboarded=_parse_input_datetime(existing.get("date_onboarded")),
-        date_offboarded=None,
+        date_offboarded=requested_at,
         enabled=bool(existing.get("enabled", True)),
         is_ex_staff=bool(existing.get("is_ex_staff", False)),
         street=existing.get("street"),
@@ -4568,30 +4568,6 @@ async def request_staff_offboarding(staff_id: int, request: Request):
             "email_forward_to": email_forward_to,
             "mailbox_grant_emails": mailbox_grant_emails,
         },
-    )
-
-    policy = await staff_workflow_repo.get_company_workflow_policy(
-        int(updated["company_id"]),
-        default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
-        direction=staff_workflow_repo.DIRECTION_OFFBOARDING,
-    )
-    scheduled_for_utc, normalized_timezone = (
-        staff_onboarding_workflow_service._compute_scheduled_execution(
-            staff=updated,
-            direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
-            requested_timezone=requested_timezone,
-        )
-    )
-    await staff_workflow_repo.create_or_reset_execution(
-        company_id=int(updated["company_id"]),
-        staff_id=staff_id,
-        workflow_key=str(
-            policy.get("workflow_key")
-            or staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
-        ),
-        direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
-        scheduled_for_utc=scheduled_for_utc,
-        requested_timezone=normalized_timezone,
     )
 
     return JSONResponse({"success": True, "staff": updated})

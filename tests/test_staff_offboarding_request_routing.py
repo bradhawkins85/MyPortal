@@ -7,6 +7,7 @@ be handed to the staff feature pack instead of failing with "API key required".
 
 import asyncio
 import json
+from datetime import timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -157,11 +158,8 @@ def _patch_offboarding_context(monkeypatch, *, groups=GROUPS):
     monkeypatch.setattr(handlers.audit_service, "log_action", AsyncMock())
     monkeypatch.setattr(
         handlers.staff_workflow_repo,
-        "get_company_workflow_policy",
-        AsyncMock(return_value={"workflow_key": "offboarding"}),
-    )
-    monkeypatch.setattr(
-        handlers.staff_workflow_repo, "create_or_reset_execution", AsyncMock()
+        "create_or_reset_execution",
+        AsyncMock(side_effect=AssertionError("request must not create a workflow run")),
     )
     return update_mock
 
@@ -187,6 +185,37 @@ def test_offboarding_request_can_forward_to_distribution_list(monkeypatch):
 
     assert response.status_code == 200
     assert update_mock.await_args.kwargs["offboarding_email_forward_to"] == "sales@example.com"
+
+
+def test_offboarding_request_does_not_create_a_workflow_run(monkeypatch):
+    """Approval queues the single run; requesting must not add a second one."""
+    _patch_offboarding_context(monkeypatch)
+
+    response = asyncio.run(
+        handlers.request_staff_offboarding(44, _offboarding_request({}))
+    )
+
+    assert response.status_code == 200
+    handlers.staff_workflow_repo.create_or_reset_execution.assert_not_awaited()
+
+
+def test_offboarding_request_stores_requested_time_as_offboard_schedule(monkeypatch):
+    """Approval schedules the run from date_offboarded, so it must be kept."""
+    update_mock = _patch_offboarding_context(monkeypatch)
+
+    response = asyncio.run(
+        handlers.request_staff_offboarding(
+            44,
+            _offboarding_request(
+                {"requestedAt": "2026-11-20T09:00", "requestedTimezone": "Australia/Brisbane"}
+            ),
+        )
+    )
+
+    assert response.status_code == 200
+    stored = update_mock.await_args.kwargs["date_offboarded"]
+    assert stored is not None
+    assert stored.astimezone(timezone.utc).isoformat() == "2026-11-19T23:00:00+00:00"
 
 
 @pytest.mark.parametrize("address", ["team@partner.com", "nobody@example.com"])

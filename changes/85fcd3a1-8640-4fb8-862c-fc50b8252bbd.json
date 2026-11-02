@@ -1,0 +1,7 @@
+{
+  "guid": "85fcd3a1-8640-4fb8-862c-fc50b8252bbd",
+  "occurred_at": "2026-11-02T00:57Z",
+  "change_type": "Fix",
+  "summary": "Requesting a staff offboarding no longer adds a duplicate run to the workflow history; one run is created when the request is approved.",
+  "content_hash": "e644134a4683ba61abdd708b7e606b6d47122f25d34ff79c92418c9fc7def674"
+}
