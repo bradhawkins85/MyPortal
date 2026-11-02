@@ -8,7 +8,11 @@
    or the richer columns shape used by the new toolbar:
        {"key": "name", "label": "Name", "sortable": true, "sort_type": "string",
         "default_visible": true, "mobile_priority": "essential",
-        "width": "20%", "align": "left"}
+        "width": "20%", "align": "left", "filter_options": "multiple",
+        "filterable": false}
+
+   `filter_options: "multiple"` gives the column a pick-from-values filter
+   instead of the text filter; `filterable: false` removes its filter.
 
    When `table_id` and `columns` are supplied, the table emits the
    data-table-id and per-cell data-column-key attributes consumed by
@@ -31,6 +35,8 @@
             scope="col"
             {% if header.get('key') %}data-column-key="{{ header.key }}"{% endif %}
             {% if header.get('mobile_priority') %}data-mobile-priority="{{ header.mobile_priority }}"{% endif %}
+            {% if header.get('filter_options') %}data-filter-options="{{ header.filter_options }}"{% endif %}
+            {% if header.get('filterable') is sameas false %}data-column-filter-disabled{% endif %}
             {% if header.get('width') %}style="width: {{ header.width }};{% if header.get('align') %} text-align: {{ header.align }};{% endif %}"
             {%- elif header.get('align') %} style="text-align: {{ header.align }};"{% endif %}
             {% if is_sortable %}class="sortable" tabindex="0" data-sort="{{ sort_type }}"{% endif %}>

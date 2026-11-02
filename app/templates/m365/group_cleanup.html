@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/tables.html" import data_table, table_toolbar %}
+{% from "macros/counters.html" import counter_strip %}
 
 {% block title %}Group cleanup{% endblock %}
 {% block header_title %}Group cleanup{% endblock %}
@@ -30,6 +31,14 @@
   </section>
   {% else %}
 
+  {% if scan %}
+  {{ counter_strip([
+    {"label": "Groups to clean", "value": summary.groups, "variant": "warning" if summary.groups else "success"},
+    {"label": "Removable entries", "value": summary.removable_entries, "variant": "danger" if summary.removable_entries else "success"},
+    {"label": "People who have left", "value": summary.removable_people, "variant": "info"},
+  ], total=summary.users_checked, total_label="Accounts checked", class="gcl-stats") }}
+  {% endif %}
+
   <section class="card card--panel" aria-labelledby="gcl-summary-title">
     <header class="card__header">
       <div>
@@ -50,12 +59,6 @@
         {% endif %}
       </p>
       {% if scan %}
-      <dl class="gcl-stats">
-        <div><dt>Groups to clean</dt><dd>{{ summary.groups }}</dd></div>
-        <div><dt>Removable entries</dt><dd>{{ summary.removable_entries }}</dd></div>
-        <div><dt>People who have left</dt><dd>{{ summary.removable_people }}</dd></div>
-        <div><dt>Accounts checked</dt><dd>{{ summary.users_checked }}</dd></div>
-      </dl>
       {% if summary.lookup_failures %}
       <p class="form-help">Group memberships could not be read for {{ summary.lookup_failures }} account{{ '' if summary.lookup_failures == 1 else 's' }}; scan again to retry them.</p>
       {% endif %}
@@ -88,10 +91,10 @@
       {% else %}
       {% set columns = [
         {"key": "group", "label": "Group", "mobile_priority": "essential", "width": "34%"},
-        {"key": "kind", "label": "Type"},
+        {"key": "kind", "label": "Type", "filter_options": "multiple"},
         {"key": "removable", "label": "Removable", "sort_type": "number", "mobile_priority": "essential"},
-        {"key": "state", "label": "Status"},
-        {"key": "actions", "label": "Actions", "sortable": false, "mobile_priority": "essential", "width": "16rem"}
+        {"key": "state", "label": "Status", "filter_options": "multiple"},
+        {"key": "actions", "label": "Actions", "sortable": false, "filterable": false, "mobile_priority": "essential", "width": "16rem"}
       ] %}
       {{ table_toolbar("m365-group-cleanup", search=true, search_placeholder="Filter groups", columns=columns) }}
       {% call data_table(columns, table_id="m365-group-cleanup", columns=columns, aria_label="Groups with removable members") %}
@@ -114,10 +117,10 @@
             <div class="gcl-row-actions">
               <button type="button" class="button button--ghost button--small" data-gcl-open="gcl-group-{{ loop.index }}" aria-haspopup="dialog" aria-controls="gcl-group-{{ loop.index }}">View {{ group.removable_count }}</button>
               {% if can_write and group.can_clean %}
-              <form method="post" action="/m365/group-cleanup/{{ group.id }}/clean">
+              <form method="post" action="/m365/group-cleanup/{{ group.id }}/clean" data-gcl-clean>
                 {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
                 <input type="hidden" name="scope" value="all">
-                <button type="submit" class="button button--danger button--small" data-gcl-open="gcl-group-{{ loop.index }}" data-gcl-focus="gcl-submit-{{ loop.index }}" aria-haspopup="dialog" aria-controls="gcl-group-{{ loop.index }}">Clean&hellip;</button>
+                <button type="submit" class="button button--danger button--small" aria-label="Clean {{ group.removable_count }} from {{ group.display_name }}">Clean</button>
               </form>
               {% endif %}
             </div>

@@ -264,3 +264,10 @@ def test_template_renders_groups_and_member_modal():
     assert f"/m365/group-cleanup/{GROUP_ID}/clean" in html
     assert 'name="member_ids" value="' + BOB in html
     assert "Ex-staff in MyPortal" in html
+
+    clean_form = html.split("data-gcl-clean>", 1)[1].split("</form>", 1)[0]
+    assert 'name="scope" value="all"' in clean_form
+    assert "data-gcl-open" not in clean_form
+    assert 'class="stat-strip gcl-stats"' in html
+    assert html.count('data-filter-options="multiple"') == 2
+    assert "data-column-filter-disabled" in html
