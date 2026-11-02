@@ -328,6 +328,7 @@
           {% set can_access_m365_signatures = can_access_m365_signatures and feature_pack_available('m365_admin') %}
           {% set can_access_m365_out_of_office = can_access_m365_out_of_office and feature_pack_available('m365_admin') %}
           {% set can_access_m365_spam_purge = (can_access_m365_spam_purge | default(false)) and feature_pack_available('m365_admin') %}
+          {% set can_access_m365_group_cleanup = (can_access_m365_group_cleanup | default(false)) and feature_pack_available('m365_admin') %}
           {% if not feature_pack_available('office365') %}
             {% set can_manage_licenses = false %}
             {% set can_access_m365_configuration = false %}
@@ -336,6 +337,7 @@
             {% set can_access_m365_signatures = false %}
             {% set can_access_m365_out_of_office = false %}
             {% set can_access_m365_spam_purge = false %}
+            {% set can_access_m365_group_cleanup = false %}
             {% set can_view_m365_best_practices = false %}
             {% set can_view_m365_user_mailboxes = false %}
             {% set can_view_m365_shared_mailboxes = false %}
@@ -750,6 +752,16 @@
                   </a>
                 </li>
                 {% endif %}
+                {% if can_access_m365_group_cleanup %}
+                <li class="menu__subitem">
+                  <a href="/m365/group-cleanup" {% if current_path.startswith('/m365/group-cleanup') %}aria-current="page"{% endif %}>
+                    <span class="menu__icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8.5 1.5L15 16l2.5 2.5L15 21l1.5 1.5L19 20l2.5 2.5L23 21l-2.5-2.5L23 16l-1.5-1.5L19 17z"/></svg>
+                    </span>
+                    Group Cleanup
+                  </a>
+                </li>
+                {% endif %}
                 {% if can_access_m365_spam_purge %}<li class="menu__subitem">
                   <a href="/m365/spam-purge" {% if current_path.startswith('/m365/spam-purge') %}aria-current="page"{% endif %}>
                     <span class="menu__icon" aria-hidden="true">
@@ -769,8 +781,8 @@
               </ul>
             </li>
           {% endif %}
-          {% if not can_manage_licenses and ((is_super_admin and feature_pack_available('m365_policies')) or can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_signatures or can_access_m365_out_of_office or can_access_m365_spam_purge) %}
-            {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/policies') or current_path.startswith('/m365/mailboxes') or current_path.startswith('/m365/signatures') or current_path.startswith('/m365/out-of-office') or current_path.startswith('/m365/spam-purge') %}
+          {% if not can_manage_licenses and ((is_super_admin and feature_pack_available('m365_policies')) or can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_signatures or can_access_m365_out_of_office or can_access_m365_group_cleanup or can_access_m365_spam_purge) %}
+            {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/policies') or current_path.startswith('/m365/mailboxes') or current_path.startswith('/m365/signatures') or current_path.startswith('/m365/out-of-office') or current_path.startswith('/m365/spam-purge') or current_path.startswith('/m365/group-cleanup') %}
             <li class="menu__item menu__item--expandable {% if m365_active %}menu__item--expanded{% endif %}" data-menu-key="/m365">
               <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if m365_active %}true{% else %}false{% endif %}">
                 <span class="menu__icon" aria-hidden="true">
@@ -839,6 +851,16 @@
                       <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7z"/></svg>
                     </span>
                     Out of Office
+                  </a>
+                </li>
+                {% endif %}
+                {% if can_access_m365_group_cleanup %}
+                <li class="menu__subitem">
+                  <a href="/m365/group-cleanup" {% if current_path.startswith('/m365/group-cleanup') %}aria-current="page"{% endif %}>
+                    <span class="menu__icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8.5 1.5L15 16l2.5 2.5L15 21l1.5 1.5L19 20l2.5 2.5L23 21l-2.5-2.5L23 16l-1.5-1.5L19 17z"/></svg>
+                    </span>
+                    Group Cleanup
                   </a>
                 </li>
                 {% endif %}

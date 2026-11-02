@@ -964,3 +964,16 @@ async def get_verification_by_code(code: str) -> dict[str, Any] | None:
         (code,),
     )
     return dict(row) if row else None
+
+
+async def list_staff_email_statuses(company_id: int) -> list[dict[str, Any]]:
+    """Return every staff email for a company with its enabled/ex-staff flags."""
+    rows = await db.fetch_all(
+        """
+        SELECT s.email, s.enabled, s.is_ex_staff
+        FROM staff AS s
+        WHERE s.company_id = %s AND s.email IS NOT NULL AND s.email != ''
+        """,
+        (company_id,),
+    )
+    return [dict(row) for row in rows]

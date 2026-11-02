@@ -222,6 +222,7 @@ from app.services.rag_urls import canonical_source_url
 from app.services import webhook_monitor
 from app.services import integration_operations as integration_operations_service
 from app.services import m365_jobs as m365_jobs_service
+from app.services import m365_group_cleanup as m365_group_cleanup_service
 from app.services import issues as issues_service
 from app.services import service_status as service_status_service
 from app.services import system_state as system_state_service
@@ -2660,6 +2661,7 @@ async def _build_base_context(
         "can_view_m365_shared_mailboxes": _menu_can(menu_access, "menu.m365.shared_mailboxes") or is_super_admin or _has_permission("can_view_m365_shared_mailboxes"),
         "can_access_m365_signatures": _menu_can(menu_access, "menu.m365.signatures") or is_super_admin,
         "can_access_m365_spam_purge": _menu_can(menu_access, "menu.m365.spam_purge", write=True),
+        "can_access_m365_group_cleanup": _menu_can(menu_access, "menu.m365.group_cleanup") or is_super_admin,
         "can_access_chat": _menu_can(menu_access, "menu.chat") or is_super_admin or _has_permission("can_access_chat"),
         "can_access_marketing": _menu_can(menu_access, "menu.marketing") or has_marketing_access,
         "can_manage_subscriptions": _menu_can(menu_access, "menu.subscriptions", write=True),
@@ -3451,7 +3453,12 @@ async def on_startup() -> None:
         count = await m365_service.sync_mailboxes(int(job["company_id"]))
         return {"mailboxes_synced": count}
 
+    async def _group_cleanup_scan_job(job: dict[str, Any]) -> dict[str, Any]:
+        result = await m365_group_cleanup_service.scan(int(job["company_id"]))
+        return {"groups": len(result["groups"]), "removable_people": result["removable_people"]}
+
     m365_jobs_service.register("mailbox_sync", _mailbox_sync_job)
+    m365_jobs_service.register("group_cleanup_scan", _group_cleanup_scan_job)
     m365_jobs_service.start_worker()
     modules_service.start_xero_token_keepalive()
 
