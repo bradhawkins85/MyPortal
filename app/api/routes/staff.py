@@ -4,7 +4,9 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 
 from app.api.dependencies.auth import get_current_user, get_optional_user, require_super_admin
 from app.api.dependencies.api_keys import (
@@ -742,13 +744,72 @@ async def deny_staff_request(
     return StaffResponse.model_validate(updated)
 
 
-@router.post("/{staff_id}/offboarding/request", response_model=StaffResponse)
+def _staff_pack_offboarding_handler():
+    """Return the staff feature pack's session-authenticated offboarding handler.
+
+    Imported on demand so a hot-reloaded staff pack is always used.
+    """
+    from app.features.staff import handlers as staff_handlers
+
+    return staff_handlers.request_staff_offboarding
+
+
+@router.post(
+    "/{staff_id}/offboarding/request",
+    response_model=StaffResponse,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": StaffOffboardingRequestCreate.model_json_schema(by_alias=True)
+                }
+            },
+        }
+    },
+)
+async def request_staff_offboarding_endpoint(
+    staff_id: int,
+    request: Request,
+    _: None = Depends(require_database),
+):
+    """Request offboarding for a staff member.
+
+    Integrations authenticate with an ``X-API-Key`` header and send the
+    documented body. Portal users submitting the staff page offboarding form
+    authenticate with their session; those requests share this path, so they
+    are handed to the staff feature pack handler, which applies the portal's
+    company, permission and department checks.
+    """
+    if not request.headers.get("x-api-key"):
+        return await _staff_pack_offboarding_handler()(staff_id, request)
+    api_key_record = await require_api_key(request, None)
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Request body must be valid JSON"
+        ) from exc
+    try:
+        payload = StaffOffboardingRequestCreate.model_validate(body)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors(include_url=False)) from exc
+    return await request_staff_offboarding(
+        staff_id=staff_id,
+        payload=payload,
+        _=None,
+        api_key_record=api_key_record,
+    )
+
+
 async def request_staff_offboarding(
     staff_id: int,
     payload: StaffOffboardingRequestCreate,
-    _: None = Depends(require_database),
-    api_key_record: dict = Depends(require_api_key),
+    _: None = None,
+    api_key_record: dict | None = None,
 ):
+    if api_key_record is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key required")
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
         raise HTTPException(

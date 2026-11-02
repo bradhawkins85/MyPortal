@@ -6682,6 +6682,45 @@ async def _get_user_mail_enabled_groups(
     return [g for g in groups if g.get("mailEnabled") and g.get("mail")]
 
 
+def _mail_group_kind(group: dict[str, Any]) -> str:
+    group_types = [str(t).lower() for t in (group.get("groupTypes") or [])]
+    if "unified" in group_types:
+        return "Microsoft 365 group"
+    if group.get("securityEnabled"):
+        return "Mail-enabled security group"
+    return "Distribution list"
+
+
+async def list_mail_forward_groups(company_id: int) -> list[dict[str, Any]]:
+    """Return the tenant's mail-enabled groups that mail can be forwarded to.
+
+    Covers distribution lists, mail-enabled security groups and Microsoft 365
+    groups. Each entry has ``id``, ``display_name``, ``mail`` (lower-cased)
+    and a plain-language ``kind``; entries are unique by address and sorted
+    by display name. Raises :class:`M365Error` when Graph cannot be read.
+    """
+
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
+    groups = await _graph_get_all(
+        access_token,
+        "https://graph.microsoft.com/v1.0/groups"
+        "?$filter=mailEnabled eq true"
+        "&$select=id,displayName,mail,groupTypes,securityEnabled&$top=999",
+    )
+    results: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        mail = str(group.get("mail") or "").strip().lower()
+        if not mail or "@" not in mail or mail in results:
+            continue
+        results[mail] = {
+            "id": str(group.get("id") or ""),
+            "display_name": str(group.get("displayName") or "").strip() or mail,
+            "mail": mail,
+            "kind": _mail_group_kind(group),
+        }
+    return sorted(results.values(), key=lambda g: (g["display_name"].lower(), g["mail"]))
+
+
 async def _get_mailbox_group_members(
     access_token: str, mailbox_email: str
 ) -> list[dict[str, Any]]:

@@ -836,6 +836,78 @@
       });
     }
 
+    let forwardGroupsRequestId = 0;
+
+    function resetForwardOptions(selectEl) {
+      while (selectEl.firstElementChild && selectEl.lastElementChild !== selectEl.firstElementChild) {
+        selectEl.removeChild(selectEl.lastElementChild);
+      }
+      selectEl.value = '';
+    }
+
+    function appendForwardGroup(selectEl, label, options) {
+      const group = document.createElement('optgroup');
+      group.label = label;
+      options.forEach(({ value, label: optionLabel }) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = optionLabel;
+        group.appendChild(opt);
+      });
+      selectEl.appendChild(group);
+      return group;
+    }
+
+    async function populateForwardOptions(staffId, staffOptions) {
+      const selectEl = offboardingEmailForwardToField;
+      if (!selectEl) return;
+      resetForwardOptions(selectEl);
+      if (staffOptions.length) {
+        appendForwardGroup(
+          selectEl,
+          'Staff',
+          staffOptions.map(({ value, label }) => ({ value: `staff:${value}`, label })),
+        );
+      }
+      const loading = appendForwardGroup(selectEl, 'Distribution lists', [
+        { value: '', label: 'Loading distribution lists…' },
+      ]);
+      loading.firstElementChild.disabled = true;
+      const requestId = ++forwardGroupsRequestId;
+      let groups = [];
+      let message = '';
+      try {
+        const data = await requestJson(
+          `/api/staff/${encodeURIComponent(staffId)}/offboarding/forward-groups`,
+          { method: 'GET' },
+        );
+        groups = data && Array.isArray(data.groups) ? data.groups : [];
+        message = data && data.error ? String(data.error) : '';
+      } catch (error) {
+        message = 'Distribution lists could not be loaded.';
+      }
+      if (requestId !== forwardGroupsRequestId) return;
+      loading.remove();
+      if (groups.length) {
+        appendForwardGroup(
+          selectEl,
+          'Distribution lists',
+          groups.map((group) => {
+            const mail = String(group.mail || '').trim();
+            const name = String(group.display_name || '').trim() || mail;
+            const kind = String(group.kind || '').trim();
+            return {
+              value: `group:${mail}`,
+              label: `${name} (${mail})${kind ? ` · ${kind}` : ''}`,
+            };
+          }),
+        );
+      } else if (message) {
+        const notice = appendForwardGroup(selectEl, 'Distribution lists', [{ value: '', label: message }]);
+        notice.firstElementChild.disabled = true;
+      }
+    }
+
     function openOffboardingRequestModal(staffId) {
       const member = staffById.get(Number(staffId));
       if (
@@ -857,7 +929,7 @@
       setDefaultOffboardingDateTime();
 
       const staffOptions = buildStaffOptions(staffId);
-      populateStaffSelect(offboardingEmailForwardToField, staffOptions, false);
+      populateForwardOptions(staffId, staffOptions);
       populateStaffSelect(offboardingMailboxGrantField, staffOptions, true);
 
       closeModal(editModal);
@@ -1205,8 +1277,11 @@
           return;
         }
         const outOfOfficeMessage = offboardingOutOfOfficeField ? offboardingOutOfOfficeField.value.trim() || null : null;
-        const emailForwardToStaffId = offboardingEmailForwardToField && offboardingEmailForwardToField.value
-          ? Number(offboardingEmailForwardToField.value) : null;
+        const forwardChoice = offboardingEmailForwardToField ? offboardingEmailForwardToField.value : '';
+        const emailForwardToStaffId = forwardChoice.startsWith('staff:')
+          ? Number(forwardChoice.slice('staff:'.length)) : null;
+        const emailForwardToAddress = forwardChoice.startsWith('group:')
+          ? forwardChoice.slice('group:'.length) : null;
         const mailboxGrantStaffIds = offboardingMailboxGrantField
           ? Array.from(offboardingMailboxGrantField.selectedOptions).map((opt) => Number(opt.value))
           : [];
@@ -1222,6 +1297,7 @@
               notes: reasonNotes || null,
               outOfOfficeMessage,
               emailForwardToStaffId,
+              emailForwardToAddress,
               mailboxGrantStaffIds,
             }),
           });
