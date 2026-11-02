@@ -1,0 +1,7 @@
+{
+  "guid": "621835a1-0d76-415d-8f82-a0a0b04d3114",
+  "occurred_at": "2026-11-02T01:50Z",
+  "change_type": "Fix",
+  "summary": "Device rules are now only shown when \"Only devices that match rules\" is chosen, so event log rules and other RMM rules no longer appear to keep device rules that were never saved and then still apply to every device.",
+  "content_hash": "323f0141d62fa16a8612f6c719df365fcb0f28f5004f490e88e0d50391b2e14b"
+}
