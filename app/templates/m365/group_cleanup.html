@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import data_table, table_toolbar %}
+
+{% block title %}Group cleanup{% endblock %}
+{% block header_title %}Group cleanup{% endblock %}
+
+{% block header_actions %}
+  {% if can_write and has_credentials %}
+    {{ page_header_actions([
+      {"label": "Scanning…" if scan_running else ("Scan again" if scan else "Run scan"), "type": "form", "action": "/m365/group-cleanup/scan", "variant": "primary", "attrs": {"disabled": scan_running}}
+    ]) }}
+  {% endif %}
+{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="{{ static_url('/static/css/m365_group_cleanup.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="gcl-workspace" data-group-cleanup data-gcl-refresh="{{ 'true' if scan_running else 'false' }}">
+  {% if not has_credentials %}
+  <section class="card card--panel">
+    <div class="card__body">
+      <div class="empty-state">
+        <p class="empty-state-message">Connect Microsoft 365 for this company to find groups and distribution lists that still contain people who have left.</p>
+        <a class="button button--primary" href="/m365">Open Office 365 configuration</a>
+      </div>
+    </div>
+  </section>
+  {% else %}
+
+  <section class="card card--panel" aria-labelledby="gcl-summary-title">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="gcl-summary-title">Overview</h2>
+        <p class="card__subtitle">Groups, distribution lists and security groups that still contain accounts with sign-in blocked, or people marked as ex-staff or disabled in MyPortal.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      <p class="gcl-status" role="status" aria-live="polite">
+        {% if scan_running %}
+          <span class="status status--info">Scan in progress</span> Reading the tenant's users and their group memberships. This page refreshes automatically.
+        {% elif scan_error %}
+          <span class="status status--danger">Last scan failed</span> {{ scan_error }}
+        {% elif scanned_at %}
+          Last scanned <span data-utc="{{ scanned_at }}">{{ scanned_at }}</span>.
+        {% else %}
+          No scan has been run yet.
+        {% endif %}
+      </p>
+      {% if scan %}
+      <dl class="gcl-stats">
+        <div><dt>Groups to clean</dt><dd>{{ summary.groups }}</dd></div>
+        <div><dt>Removable entries</dt><dd>{{ summary.removable_entries }}</dd></div>
+        <div><dt>People who have left</dt><dd>{{ summary.removable_people }}</dd></div>
+        <div><dt>Accounts checked</dt><dd>{{ summary.users_checked }}</dd></div>
+      </dl>
+      {% if summary.lookup_failures %}
+      <p class="form-help">Group memberships could not be read for {{ summary.lookup_failures }} account{{ '' if summary.lookup_failures == 1 else 's' }}; scan again to retry them.</p>
+      {% endif %}
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="gcl-groups-title">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="gcl-groups-title">Groups with removable members</h2>
+        <p class="card__subtitle">Review who will be removed, then clean each group. Members are re-checked against Microsoft 365 before anything is removed.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      {% if not groups %}
+      <div class="empty-state">
+        {% if scan %}
+        <p class="empty-state-message">Every group is clean — no disabled accounts or ex-staff were found in any group or distribution list.</p>
+        {% else %}
+        <p class="empty-state-message">Run a scan to find groups and distribution lists that still contain disabled accounts or ex-staff.</p>
+        {% if can_write %}
+        <form method="post" action="/m365/group-cleanup/scan">
+          {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+          <button class="button button--primary" type="submit"{% if scan_running %} disabled{% endif %}>Run your first scan</button>
+        </form>
+        {% endif %}
+        {% endif %}
+      </div>
+      {% else %}
+      {% set columns = [
+        {"key": "group", "label": "Group", "mobile_priority": "essential", "width": "34%"},
+        {"key": "kind", "label": "Type"},
+        {"key": "removable", "label": "Removable", "sort_type": "number", "mobile_priority": "essential"},
+        {"key": "state", "label": "Status"},
+        {"key": "actions", "label": "Actions", "sortable": false, "mobile_priority": "essential", "width": "16rem"}
+      ] %}
+      {{ table_toolbar("m365-group-cleanup", search=true, search_placeholder="Filter groups", columns=columns) }}
+      {% call data_table(columns, table_id="m365-group-cleanup", columns=columns, aria_label="Groups with removable members") %}
+        {% for group in groups %}
+        <tr>
+          <td data-column-key="group">
+            <strong>{{ group.display_name }}</strong>
+            {% if group.mail %}<div class="gcl-muted">{{ group.mail }}</div>{% endif %}
+          </td>
+          <td data-column-key="kind">{{ group.kind }}</td>
+          <td data-column-key="removable" data-sort-value="{{ group.removable_count }}">{{ group.removable_count }}</td>
+          <td data-column-key="state">
+            {% if group.can_clean %}
+            <span class="status status--warning">Needs cleaning</span>
+            {% else %}
+            <span class="status status--neutral" title="{{ group.blocked_reason }}">Change elsewhere</span>
+            {% endif %}
+          </td>
+          <td data-column-key="actions">
+            <div class="gcl-row-actions">
+              <button type="button" class="button button--ghost button--small" data-gcl-open="gcl-group-{{ loop.index }}" aria-haspopup="dialog" aria-controls="gcl-group-{{ loop.index }}">View {{ group.removable_count }}</button>
+              {% if can_write and group.can_clean %}
+              <form method="post" action="/m365/group-cleanup/{{ group.id }}/clean">
+                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+                <input type="hidden" name="scope" value="all">
+                <button type="submit" class="button button--danger button--small" data-gcl-open="gcl-group-{{ loop.index }}" data-gcl-focus="gcl-submit-{{ loop.index }}" aria-haspopup="dialog" aria-controls="gcl-group-{{ loop.index }}">Clean&hellip;</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      {% endcall %}
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+</div>
+
+{% for group in groups %}
+{% set idx = loop.index %}
+<div class="modal gcl-modal" id="gcl-group-{{ idx }}" role="dialog" aria-modal="true" aria-labelledby="gcl-group-title-{{ idx }}" aria-hidden="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close><span class="visually-hidden">Close</span>&times;</button>
+    <p class="gcl-eyebrow">{{ group.kind }}</p>
+    <h2 class="modal__title" id="gcl-group-title-{{ idx }}">{{ group.display_name }}</h2>
+    <p class="gcl-muted">{{ group.mail or 'No email address' }} · {{ group.removable_count }} removable member{{ '' if group.removable_count == 1 else 's' }}</p>
+    <form method="post" action="/m365/group-cleanup/{{ group.id }}/clean" data-gcl-form>
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+      <input type="hidden" name="scope" value="selected">
+      <div class="modal__body">
+        {% if not group.can_clean %}
+        <p class="alert alert--warning" role="status">{{ group.blocked_reason }}</p>
+        {% endif %}
+        {% if can_write and group.can_clean %}
+        <label class="gcl-select-all"><input type="checkbox" data-gcl-select-all checked> Select all</label>
+        {% endif %}
+        <ul class="gcl-members">
+          {% for member in group.members %}
+          <li class="gcl-member">
+            {% if can_write and group.can_clean %}
+            <input type="checkbox" name="member_ids" value="{{ member.id }}" id="gcl-m-{{ idx }}-{{ loop.index }}" checked data-gcl-member>
+            {% endif %}
+            <label for="gcl-m-{{ idx }}-{{ loop.index }}" class="gcl-member__label">
+              <span class="gcl-member__name">{{ member.display_name }}</span>
+              <span class="gcl-muted">{{ member.user_principal_name or member.mail }}</span>
+            </label>
+            <span class="gcl-chips">
+              {% for label in member.reason_labels %}<span class="gcl-chip">{{ label }}</span>{% endfor %}
+            </span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% if can_write and group.can_clean %}
+        <p class="form-help">MyPortal removes the selected people from this {{ group.kind | lower }} in Microsoft 365. Their accounts, mailboxes and other groups are not changed. Anyone who has since been re-enabled is skipped.</p>
+        <p class="form-help gcl-error" data-gcl-error role="alert" hidden>Select at least one member to remove.</p>
+        {% endif %}
+      </div>
+      <div class="gcl-modal__footer">
+        <span class="gcl-spacer"></span>
+        <button type="button" class="button button--ghost" data-modal-close>{{ 'Cancel' if can_write and group.can_clean else 'Close' }}</button>
+        {% if can_write and group.can_clean %}
+        <button type="submit" class="button button--danger" id="gcl-submit-{{ idx }}" data-gcl-submit>Remove <span data-gcl-count>{{ group.removable_count }}</span> from group</button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/m365_group_cleanup.js') }}" defer></script>
+{% endblock %}

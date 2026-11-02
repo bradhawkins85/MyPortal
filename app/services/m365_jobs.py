@@ -70,6 +70,15 @@ async def get(job_id: str, company_id: int) -> dict[str, Any] | None:
     return _decode(row) if row else None
 
 
+async def latest(company_id: int, job_type: str) -> dict[str, Any] | None:
+    """Return the most recently created operation of ``job_type`` for a tenant."""
+    row = await db.fetch_one(
+        "SELECT * FROM m365_jobs WHERE company_id = %s AND job_type = %s ORDER BY created_at DESC LIMIT 1",
+        (company_id, job_type),
+    )
+    return _decode(row) if row else None
+
+
 async def _claim() -> dict[str, Any] | None:
     now, lease = _now(), _now() + timedelta(seconds=LEASE_SECONDS)
     rows = await db.fetch_all(
