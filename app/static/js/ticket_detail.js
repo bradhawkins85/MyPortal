@@ -1056,6 +1056,7 @@
     const emptyMessage = linkedContainer.dataset.emptyMessage || 'No assets are linked to this ticket yet.';
     const detailsFormId = linkedContainer.dataset.detailsFormId || '';
     const tacticalBaseUrlRaw = linkedContainer.dataset.tacticalBaseUrl || '';
+    const tacticalEnabled = linkedContainer.dataset.tacticalEnabled === 'true';
     const initialCompanyId = select.dataset.initialCompanyId || '';
     const ticketNumber = (linkedContainer.dataset.ticketNumber || '').trim();
     const ticketSubject = (linkedContainer.dataset.ticketSubject || '').trim();
@@ -1300,7 +1301,7 @@
           tacticalAction.setAttribute('aria-label', `Open ${displayName} in Tactical RMM`);
           tacticalAction.innerHTML = '<span aria-hidden="true">🖥️</span>';
           actions.appendChild(tacticalAction);
-        } else {
+        } else if (tacticalEnabled) {
           const tacticalAction = document.createElement('button');
           tacticalAction.type = 'button';
           tacticalAction.className = 'button button--ghost button--icon ticket-assets-linked__action';

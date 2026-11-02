@@ -755,3 +755,19 @@ def test_external_customer_messages_are_not_labelled_as_automation() -> None:
     assert "reply.external_reference.startswith('shipment-watch:')" in template
     assert "reply.author_id != ticket.requester_id" in template
     assert 'data-message-kind="{{ reply_kind }}"' in template
+
+
+def test_linked_asset_tactical_icon_hidden_when_module_disabled() -> None:
+    template = Path("app/templates/admin/ticket_detail.html").read_text(encoding="utf-8")
+    script = Path("app/static/js/ticket_detail.js").read_text(encoding="utf-8")
+
+    assert (
+        "data-tactical-enabled=\"{{ 'true' if module_enabled.get('tacticalrmm', false) else 'false' }}\""
+        in template
+    )
+    placeholder = template.index('title="Tactical RMM search is not configured"')
+    branch = template.rindex("{%", 0, placeholder)
+    assert template[branch:].startswith("{% elif module_enabled.get('tacticalrmm', false) %}")
+
+    assert "const tacticalEnabled = linkedContainer.dataset.tacticalEnabled === 'true';" in script
+    assert "} else if (tacticalEnabled) {" in script

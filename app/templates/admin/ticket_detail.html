@@ -1021,6 +1021,7 @@
                   data-ticket-linked-assets
                   data-initial-linked="{{ ticket_asset_linked_data | tojson | forceescape }}"
                   data-tactical-base-url="{{ tacticalrmm_base_url if module_enabled.get('tacticalrmm', false) else '' }}"
+                  data-tactical-enabled="{{ 'true' if module_enabled.get('tacticalrmm', false) else 'false' }}"
                   data-empty-message="No assets are linked to this ticket yet."
                   data-details-form-id="ticket-details-form"
                   data-ticket-number="{{ ticket.ticket_number or ticket.id }}"
@@ -1107,7 +1108,7 @@
                             >
                               <span aria-hidden="true">🖥️</span>
                             </a>
-                          {% else %}
+                          {% elif module_enabled.get('tacticalrmm', false) %}
                             <button
                               type="button"
                               class="button button--ghost button--icon ticket-assets-linked__action"
