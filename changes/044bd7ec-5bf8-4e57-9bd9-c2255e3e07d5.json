@@ -1,0 +1,7 @@
+{
+  "guid": "044bd7ec-5bf8-4e57-9bd9-c2255e3e07d5",
+  "occurred_at": "2026-11-02T03:56Z",
+  "change_type": "Fix",
+  "summary": "Offboarding no longer fails at the Remove from Teams groups and Remove from SharePoint sites steps when no groups or sites are listed; MyPortal now checks every group, Team and SharePoint site, removes the staff member wherever it can and skips the ones Microsoft 365 does not allow it to change.",
+  "content_hash": "896dd84793a7ccb3839a1af4f9a2d6b5540669992c699798733563f79f4f93c9"
+}

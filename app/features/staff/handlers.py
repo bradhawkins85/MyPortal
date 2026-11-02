@@ -889,12 +889,19 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
     {
         "type": "m365_remove_teams_group_member",
         "name": "Remove from Teams groups",
-        "description": "Removes the staff member from one or more Teams/M365 groups using object IDs.",
+        "description": (
+            "Removes the staff member from the listed Teams/M365 groups. Leave the group IDs blank to remove them "
+            "from every group they are a member or owner of; groups Microsoft Graph cannot change (dynamic, "
+            "on-premises synced, distribution lists) are skipped."
+        ),
     },
     {
         "type": "m365_remove_sharepoint_site_member",
         "name": "Remove from SharePoint sites",
-        "description": "Removes the staff member from one or more SharePoint sites using Graph site IDs.",
+        "description": (
+            "Removes the staff member's direct access from the listed SharePoint sites. Leave the site IDs blank to "
+            "check every SharePoint site. Access through a Team's group is removed by the Teams groups step."
+        ),
     },
     {
         "type": "m365_export_onedrive",
@@ -1664,7 +1671,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "Teams group IDs (comma separated)",
                 "type": "text",
                 "default": "",
-                "description": "Microsoft 365 group object IDs to remove the user from.",
+                "description": "Microsoft 365 group object IDs to remove the user from. Leave blank to remove them from all groups and Teams they belong to.",
             },
             {
                 "name": "user_id",
@@ -1709,7 +1716,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "SharePoint site IDs (comma separated)",
                 "type": "text",
                 "default": "",
-                "description": "Graph site IDs to remove access from.",
+                "description": "Graph site IDs to remove access from. Leave blank to check every SharePoint site.",
             },
             {
                 "name": "user_id",
