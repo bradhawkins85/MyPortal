@@ -27,6 +27,7 @@ EXPECTED = {
     ("POST", "/staff/workflows/{direction}/policies"),
     ("PUT", "/staff/workflows/{direction}/policies/{policy_id}"),
     ("DELETE", "/staff/workflows/{direction}/policies/{policy_id}"),
+    ("POST", "/staff/workflows/{direction}/policies/{policy_id}/copy"),
     ("GET", "/staff/workflows/history"),
     ("GET", "/staff/workflows/history/recent"),
     ("POST", "/api/staff/workflows/executions/{execution_id}/retry"),

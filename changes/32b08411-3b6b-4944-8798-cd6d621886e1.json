@@ -1,0 +1,7 @@
+{
+  "guid": "32b08411-3b6b-4944-8798-cd6d621886e1",
+  "occurred_at": "2026-11-02T01:46Z",
+  "change_type": "Feature",
+  "summary": "Duplicate on the onboarding and offboarding workflow pages can now copy a workflow into a different company, so techs no longer rebuild similar procedures for each company; the copy starts turned off so company-specific settings can be reviewed first.",
+  "content_hash": "df986777611bea9dcf9483d672762e929149613121755e5a691a2bbf2e5fbdb2"
+}

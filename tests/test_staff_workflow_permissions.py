@@ -41,6 +41,7 @@ def test_staff_workflow_handlers_request_super_admin_context(monkeypatch):
         handlers.create_staff_workflow_policy("onboarding", request),
         handlers.update_staff_workflow_policy("onboarding", 1, request),
         handlers.delete_staff_workflow_policy("onboarding", 1, request),
+        handlers.copy_staff_workflow_policy_to_company("onboarding", 1, request),
         handlers.staff_workflow_history_page(request),
         handlers.staff_workflow_history_recent(request),
         handlers.retry_workflow_execution(1, request),
