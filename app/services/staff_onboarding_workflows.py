@@ -34,6 +34,7 @@ from app.services import m365 as m365_service
 from app.services.m365 import M365Error
 from app.services import notifications as notifications_service
 from app.services import system_variables
+from app.services.sanitization import sanitize_rich_text
 from app.services import webhook_monitor
 from app.services import tickets as tickets_service
 from app.security.api_keys import hash_api_key
@@ -1841,24 +1842,46 @@ async def _execute_policy_step(
 
     if step_type == "reply_ticket":
         ticket = await _resolve_workflow_ticket(step, vars_map)
-        body = str(
+        body_text = str(
             _resolve_template_value(step.get("body"), vars_map=vars_map) or ""
         ).strip()
-        if not body:
+        # Store HTML like a technician reply so line breaks survive in the
+        # notification email that quotes ``ticket.latest_reply.body``.
+        sanitized_body = sanitize_rich_text(body_text)
+        if not sanitized_body.has_rich_content:
             raise WorkflowStepError("reply_ticket requires body")
-        author_id = _coerce_positive_int(ticket.get("assigned_user_id"))
+        # Reply as the technician who approved the request, falling back to
+        # the assigned technician, then to System.
+        author_id = _coerce_positive_int(
+            staff.get("approved_by_user_id")
+        ) or _coerce_positive_int(ticket.get("assigned_user_id"))
+        author = await user_repo.get_user_by_id(author_id) if author_id else None
+        if author_id and not author:
+            author_id = _coerce_positive_int(ticket.get("assigned_user_id"))
+            author = await user_repo.get_user_by_id(author_id) if author_id else None
+            if not author:
+                author_id = None
         reply = await tickets_repo.create_reply(
             ticket_id=int(ticket["id"]),
             author_id=author_id,
-            body=body,
+            body=sanitized_body.html,
             is_internal=bool(step.get("is_internal") or step.get("internal_note")),
             author_display_name="System" if author_id is None else None,
+            external_reference=(
+                tickets_repo.WORKFLOW_TECHNICIAN_REPLY_REFERENCE_PREFIX
+                + str(staff.get("id"))
+                + ":"
+                + secrets.token_hex(8)
+            )
+            if author_id
+            else None,
+        )
+        actor_type = "technician" if author_id else "system"
+        await tickets_service.emit_ticket_updated_event(
+            ticket, actor_type=actor_type, actor=author, reply=reply
         )
         await tickets_service.emit_ticket_replied_event(
-            ticket, actor_type="technician" if author_id else "system", reply=reply
-        )
-        await tickets_service.emit_ticket_updated_event(
-            ticket, actor_type="technician" if author_id else "system", reply=reply
+            ticket, actor_type=actor_type, actor=author, reply=reply
         )
         return {
             "ticket_id": int(ticket["id"]),
@@ -2147,11 +2170,21 @@ async def _execute_policy_step(
         new_user_id = result.get("id")
         if new_user_id:
             vars_map["m365_user_id"] = str(new_user_id)
-        return {
+        outputs: dict[str, Any] = {
             "m365_user_id": new_user_id,
             "user_principal_name": upn,
             "generated_password": raw_password,
         }
+        # A request submitted without an email gets its address from the UPN
+        # generated here; expose it so later steps can use ${vars.staff.email}.
+        if not vars_map.get("staff.email"):
+            outputs["staff.email"] = upn
+            outputs["staff_email"] = upn
+            outputs["staff.email_local_part"] = upn.split("@", 1)[0]
+            vars_map.update(
+                {key: outputs[key] for key in ("staff.email", "staff_email", "staff.email_local_part")}
+            )
+        return outputs
 
     if step_type == "assign_licenses":
         m365_user_id = await _resolve_step_user_id()

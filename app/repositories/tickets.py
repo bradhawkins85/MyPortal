@@ -20,6 +20,10 @@ _FULLTEXT_MIN_SEARCH_LENGTH = 3
 # excluded from reply-activity timestamps so audit notes do not reset the
 # inactivity timers that scheduled automations filter on.
 AUTOMATION_AUDIT_REFERENCE_PREFIX = "automation:"
+# Public replies posted by a staff onboarding/offboarding workflow on behalf of
+# a technician. They always count as technician replies, even when the
+# technician is also the ticket requester.
+WORKFLOW_TECHNICIAN_REPLY_REFERENCE_PREFIX = "staff-workflow-reply:"
 _SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SQL_UPDATE_TICKET_REPLIES = "UPDATE ticket_replies SET "
 _SQL_INSERT_TICKET_WATCHERS = "INSERT INTO ticket_watchers (ticket_id, user_id) VALUES "

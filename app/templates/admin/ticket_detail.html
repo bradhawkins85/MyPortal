@@ -1727,7 +1727,8 @@
                     {% else %}
                       {% set reply = timeline_entry %}
                       {% set reply_is_automation = reply.external_reference and (reply.external_reference.startswith('shipment-watch:') or reply.external_reference.startswith('automation:')) %}
-                      {% set reply_kind = 'ai' if reply.is_ai else ('automation' if reply_is_automation else ('internal' if reply.is_internal else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer'))) %}
+                      {% set reply_is_workflow_technician = reply.external_reference and reply.external_reference.startswith('staff-workflow-reply:') %}
+                      {% set reply_kind = 'ai' if reply.is_ai else ('automation' if reply_is_automation else ('internal' if reply.is_internal else ('technician' if reply.author_id and (reply_is_workflow_technician or reply.author_id != ticket.requester_id) else 'customer'))) %}
                       <article
                         class="timeline__event timeline__event--{{ reply_kind }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
                         data-ticket-reply
@@ -1750,7 +1751,7 @@
                             </span>
                             <span class="timeline__action">
                               {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
-                              <span class="timeline__direction">{{ 'AI note' if reply.is_ai else ('Automation' if reply_is_automation else ('Internal note' if reply.is_internal else ('Technician reply' if reply.author_id and reply.author_id != ticket.requester_id else 'Customer message'))) }}</span>
+                              <span class="timeline__direction">{{ 'AI note' if reply.is_ai else ('Automation' if reply_is_automation else ('Internal note' if reply.is_internal else ('Technician reply' if reply.author_id and (reply_is_workflow_technician or reply.author_id != ticket.requester_id) else 'Customer message'))) }}</span>
                               {% if reply.is_ai %}
                                 <span class="badge badge--info" title="Written by {{ ai_agent_name() }}. Visible to staff only.">AI</span>
                               {% elif reply.is_internal %}
