@@ -1,0 +1,7 @@
+{
+  "guid": "7774aad1-af1d-4275-ab90-9c00528818d8",
+  "occurred_at": "2026-11-01T23:59Z",
+  "change_type": "Feature",
+  "summary": "The staff onboarding and offboarding workflow designers now show each workflow as a step-by-step flow, edit steps in a focused editor, and include a variable helper that lists the values available from earlier steps and warns when a variable would be blank.",
+  "content_hash": "b903bd9dd43e60dc4ccc81e6067e1527e343f14afb491680f4564f49178ae35e"
+}

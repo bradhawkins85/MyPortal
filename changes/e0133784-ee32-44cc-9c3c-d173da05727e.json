@@ -1,0 +1,7 @@
+{
+  "guid": "e0133784-ee32-44cc-9c3c-d173da05727e",
+  "occurred_at": "2026-11-01T23:59Z",
+  "change_type": "Fix",
+  "summary": "Staff workflow step defaults for company name, requester email and Hudu contact phone now fill in correctly instead of coming out blank.",
+  "content_hash": "fdbfa96efe850afbc0d4f777021a2b6baf9b2ecdfcb8089dacbbfd3e16c20b88"
+}
