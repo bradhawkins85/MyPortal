@@ -3418,6 +3418,7 @@ async def _execute_policy_steps(
         "staff.department": str(staff.get("department") or "").strip() or None,
         "staff.office_location": str(staff.get("office_location") or "").strip()
         or None,
+        "staff.mobile_phone": str(staff.get("mobile_phone") or "").strip() or None,
         # Backward-compatible aliases.
         "staff_first_name": staff_first_name,
         "staff_last_name": staff_last_name,
@@ -3429,6 +3430,8 @@ async def _execute_policy_steps(
     company = await company_repo.get_company_by_id(company_id)
     if company:
         vars_map["company_name"] = company.get("name")
+        # Shipped step defaults reference ${vars.staff.company_name}.
+        vars_map["staff.company_name"] = company.get("name")
     requestor_timezone_name: str | None = None
     requestor_user_id = staff.get("requested_by_user_id")
     if requestor_user_id is not None:

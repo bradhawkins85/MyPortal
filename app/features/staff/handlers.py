@@ -1322,8 +1322,11 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "name": "password",
                 "label": "Initial password",
                 "type": "text",
-                "default": "${vars.password.strong}",
-                "description": "Use variables where possible; avoid static passwords.",
+                "default": "",
+                "description": (
+                    "Leave blank to generate a strong random password, or insert the "
+                    "output of an earlier Generate password step. Avoid static passwords."
+                ),
             },
             {
                 "name": "force_change_password_next_signin",
@@ -1467,7 +1470,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "name": "to",
                 "label": "To address",
                 "type": "text",
-                "default": "${vars.requestor.email}",
+                "default": "${vars.requestor_email}",
                 "description": "Defaults to the user who requested onboarding.",
             },
             {
@@ -1796,6 +1799,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "Request URL",
                 "type": "text",
                 "default": "",
+                "required": True,
                 "description": "Supports workflow variables like ${vars.staff.email}.",
                 "example": "https://api.example.com/users/${vars.staff.email}",
             },
@@ -1838,6 +1842,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "Request URL",
                 "type": "text",
                 "default": "",
+                "required": True,
                 "description": "Supports workflow variables like ${vars.staff.email}.",
                 "example": "https://api.example.com/users",
             },
@@ -1886,6 +1891,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "Request URL",
                 "type": "text",
                 "default": "",
+                "required": True,
                 "description": "HTTP/HTTPS URL to fetch via CURL. Supports workflow variables like ${vars.staff.email}.",
                 "example": "https://example.com/api/source?email=${vars.staff.email}",
             },
@@ -2044,7 +2050,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "name": "phone",
                 "label": "Phone",
                 "type": "text",
-                "default": "${vars.staff.phone}",
+                "default": "${vars.staff.mobile_phone}",
                 "description": "Phone number of the person.",
             },
             {
@@ -2125,7 +2131,441 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
             {"name": "output_var", "label": "Output object variable", "type": "text", "default": "credential_share", "required": True},
         ],
     },
+    "wait_for_webhook": {
+        "fields": [
+            {
+                "name": "expected_values",
+                "label": "Values the callback sends",
+                "type": "text",
+                "default": "",
+                "description": (
+                    "Optional names of the values your external automation posts back "
+                    "in the callback body. Listing them here lets later steps pick them "
+                    "from the variable helper."
+                ),
+                "example": "laptop_serial, phone_number",
+            },
+        ],
+    },
 }
+
+# ---------------------------------------------------------------------------
+# Workflow designer metadata
+#
+# The designer UI groups steps by category and shows which variables each
+# step makes available to later steps.  Output names mirror the keys each
+# step returns in ``app/services/staff_onboarding_workflows.py``; every key a
+# step returns is copied into the workflow variables as ``${vars.<key>}``.
+# ---------------------------------------------------------------------------
+
+_WORKFLOW_STEP_CATEGORIES: list[dict[str, str]] = [
+    {"key": "m365", "label": "Microsoft 365"},
+    {"key": "tickets", "label": "Tickets"},
+    {"key": "email", "label": "Email"},
+    {"key": "passwords", "label": "Passwords & credentials"},
+    {"key": "integrations", "label": "Integrations"},
+    {"key": "web", "label": "Web requests"},
+    {"key": "flow", "label": "Pauses & callbacks"},
+    {"key": "records", "label": "MyPortal records"},
+]
+
+
+def _out(name: str, label: str, *, secret: bool = False) -> dict[str, Any]:
+    output: dict[str, Any] = {"name": name, "label": label}
+    if secret:
+        output["secret"] = True
+    return output
+
+
+_TICKET_OUTPUTS = [
+    _out("ticket_id", "Ticket ID"),
+    _out("ticket_number", "Ticket number"),
+]
+_EMAIL_OUTPUTS = [
+    _out("email_sent", "Email was sent"),
+    _out("recipients", "Recipients"),
+    _out("subject", "Email subject"),
+]
+_HTTP_OUTPUTS = [
+    _out("status_code", "Response status code"),
+    _out("body", "Response body"),
+]
+_GENERATED_PASSWORD_OUTPUTS = [
+    _out("generated_password", "Generated password", secret=True),
+]
+
+# ``output_fields`` names config fields whose value becomes an extra variable
+# name; ``mapping_fields`` names key/value fields whose keys become variables.
+_WORKFLOW_STEP_DESIGNER_META: dict[str, dict[str, Any]] = {
+    "create_user": {
+        "category": "m365",
+        "outputs": [
+            _out("m365_user_id", "Microsoft 365 user ID"),
+            _out("user_principal_name", "Sign-in name (UPN)"),
+            _out("generated_password", "Initial password", secret=True),
+        ],
+    },
+    "assign_licenses": {
+        "category": "m365",
+        "outputs": [
+            _out("m365_user_id", "Microsoft 365 user ID"),
+            _out("licenses_assigned", "Licenses assigned"),
+            _out("licenses_removed", "Licenses removed"),
+        ],
+    },
+    "add_to_groups": {
+        "category": "m365",
+        "outputs": [
+            _out("m365_user_id", "Microsoft 365 user ID"),
+            _out("groups_added", "Groups added"),
+        ],
+    },
+    "set_manager": {
+        "category": "m365",
+        "outputs": [
+            _out("m365_user_id", "Microsoft 365 user ID"),
+            _out("manager_id", "Manager object ID"),
+            _out("manager_set", "Manager was set"),
+        ],
+    },
+    "m365_add_teams_group_member": {"category": "m365", "outputs": []},
+    "m365_remove_teams_group_member": {"category": "m365", "outputs": []},
+    "m365_add_sharepoint_site_member": {"category": "m365", "outputs": []},
+    "m365_remove_sharepoint_site_member": {"category": "m365", "outputs": []},
+    "offboard_account": {
+        "category": "m365",
+        "outputs": [
+            _out("m365_user_id", "Microsoft 365 user ID"),
+            _out("licenses_removed", "Number of licenses removed"),
+            _out("groups_removed", "Number of groups removed"),
+            _out("mailbox_rules_disabled", "Number of mailbox rules disabled"),
+            _out("converted_to_shared_mailbox", "Mailbox converted to shared"),
+            _out("out_of_office_set", "Out-of-office reply set"),
+            _out("email_forwarding_set", "Email forwarding set"),
+        ],
+    },
+    "m365_rename_upn_display_name": {
+        "category": "m365",
+        "outputs": [
+            _out("m365_user_id", "Microsoft 365 user ID"),
+            _out("previous.userPrincipalName", "Previous sign-in name"),
+            _out("previous.displayName", "Previous display name"),
+        ],
+    },
+    "m365_update_org_fields": {
+        "category": "m365",
+        "outputs": [_out("m365_user_id", "Microsoft 365 user ID")],
+    },
+    "m365_hide_from_gal": {
+        "category": "m365",
+        "outputs": [
+            _out("m365_user_id", "Microsoft 365 user ID"),
+            _out("hidden", "Hidden from address list"),
+        ],
+    },
+    "m365_identity_hygiene": {
+        "category": "m365",
+        "outputs": [
+            _out("m365_user_id", "Microsoft 365 user ID"),
+            _out("revoke_sign_in_sessions", "Sign-in sessions revoked"),
+        ],
+    },
+    "m365_export_onedrive": {
+        "category": "m365",
+        "outputs": [
+            _out("m365_user_id", "Microsoft 365 user ID"),
+            _out("destination_folder_name", "Export folder name"),
+            _out("destination_folder_web_url", "Export folder link"),
+            _out("copy_status", "Copy status"),
+            _out("export_verified", "Export verified"),
+        ],
+    },
+    "create_ticket": {
+        "category": "tickets",
+        "outputs": list(_TICKET_OUTPUTS),
+        "mapping_fields": ["store"],
+    },
+    "update_ticket": {"category": "tickets", "outputs": list(_TICKET_OUTPUTS)},
+    "reply_ticket": {
+        "category": "tickets",
+        "outputs": [*_TICKET_OUTPUTS, _out("reply_id", "Reply ID")],
+    },
+    "send_welcome_email": {"category": "email", "outputs": list(_EMAIL_OUTPUTS)},
+    "send_custom_email": {"category": "email", "outputs": list(_EMAIL_OUTPUTS)},
+    "email_requestor": {"category": "email", "outputs": list(_EMAIL_OUTPUTS)},
+    "generate_password": {
+        "category": "passwords",
+        "outputs": list(_GENERATED_PASSWORD_OUTPUTS),
+        "output_fields": [{"field": "output_var", "label": "Generated password", "secret": True}],
+    },
+    "generate_kid_friendly_password": {
+        "category": "passwords",
+        "outputs": list(_GENERATED_PASSWORD_OUTPUTS),
+        "output_fields": [{"field": "output_var", "label": "Generated password", "secret": True}],
+    },
+    "push_to_password_pusher": {
+        "category": "passwords",
+        "outputs": [_out("push_url", "Password Pusher link")],
+        "output_fields": [{"field": "output_var", "label": "Password Pusher link"}],
+    },
+    "create_myportal_credential": {
+        "category": "passwords",
+        "outputs": [
+            _out("credential_id", "Credential ID"),
+            _out("credential_version", "Credential version"),
+        ],
+        "output_fields": [{"field": "credential_output_var", "label": "Credential ID"}],
+    },
+    "share_myportal_credential": {
+        "category": "passwords",
+        "outputs": [
+            _out("grant_id", "Share grant ID"),
+            _out("url", "Share link", secret=True),
+        ],
+        "output_fields": [
+            {"field": "output_var", "label": "Share details", "suffixes": ["url", "grant_id"]}
+        ],
+    },
+    "hudu_create_contact": {
+        "category": "integrations",
+        "outputs": [
+            _out("hudu_person_id", "Hudu contact ID"),
+            _out("hudu_person_name", "Hudu contact name"),
+        ],
+    },
+    "hudu_push_password": {
+        "category": "integrations",
+        "outputs": [
+            _out("hudu_asset_password_id", "Hudu password ID"),
+            _out("hudu_password_name", "Hudu password name"),
+        ],
+    },
+    "http_get": {
+        "category": "web",
+        "outputs": list(_HTTP_OUTPUTS),
+        "mapping_fields": ["store_json"],
+    },
+    "http_post": {
+        "category": "web",
+        "outputs": list(_HTTP_OUTPUTS),
+        "mapping_fields": ["store_json"],
+    },
+    "curl_text": {
+        "category": "web",
+        "outputs": list(_HTTP_OUTPUTS),
+        "mapping_fields": ["store_json"],
+    },
+    "wait_for_webhook": {
+        "category": "flow",
+        "outputs": [],
+        "list_fields": ["expected_values"],
+    },
+    "delete_staff_record": {
+        "category": "records",
+        "outputs": [_out("deleted", "Staff record deleted")],
+    },
+    "disable_myportal_account": {
+        "category": "records",
+        "outputs": [_out("disabled", "Portal account disabled")],
+    },
+}
+
+# Presentation hints for the designer.  ``tags`` fields hold comma-separated
+# lists, ``mapping`` fields hold JSON objects edited row by row, ``json``
+# fields hold a raw JSON body and ``variable_name`` fields name a new variable.
+_WORKFLOW_FIELD_WIDGETS: dict[str, str] = {
+    "conditions.department_in": "tags",
+    "conditions.custom_fields_truthy": "tags",
+    "to": "tags",
+    "cc": "tags",
+    "bcc": "tags",
+    "licenses_csv": "tags",
+    "group_ids_csv": "tags",
+    "group_names_csv": "tags",
+    "site_ids_csv": "tags",
+    "mailbox_grant_emails": "tags",
+    "permissions": "tags",
+    "expected_values": "tags",
+    "headers_json": "mapping",
+    "query_params_json": "mapping",
+    "store_json": "mapping",
+    "json_body": "json",
+    "output_var": "variable_name",
+    "credential_output_var": "variable_name",
+    "store.ticket_number": "variable_name",
+}
+
+
+def _designer_step_catalog(catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the step catalog enriched with designer category and outputs."""
+
+    enriched: list[dict[str, Any]] = []
+    for item in catalog:
+        meta = _WORKFLOW_STEP_DESIGNER_META.get(str(item.get("type") or ""), {})
+        entry = dict(item)
+        entry["category"] = meta.get("category", "records")
+        entry["outputs"] = [dict(output) for output in meta.get("outputs", [])]
+        for key in ("output_fields", "mapping_fields", "list_fields"):
+            if meta.get(key):
+                entry[key] = [
+                    dict(value) if isinstance(value, dict) else value
+                    for value in meta[key]
+                ]
+        enriched.append(entry)
+    return enriched
+
+
+def _designer_step_form_schema() -> dict[str, dict[str, Any]]:
+    """Return the step form schema with designer widget hints applied."""
+
+    decorated: dict[str, dict[str, Any]] = {}
+    for step_type, schema in _WORKFLOW_STEP_FORM_SCHEMA.items():
+        fields = []
+        for field in schema.get("fields", []):
+            entry = dict(field)
+            widget = _WORKFLOW_FIELD_WIDGETS.get(str(entry.get("name") or ""))
+            if widget:
+                entry["widget"] = widget
+            options = entry.get("options")
+            if isinstance(options, list):
+                entry["options"] = [
+                    dict(option)
+                    if isinstance(option, dict)
+                    else {"value": str(option), "label": str(option).replace("_", " ").capitalize()}
+                    for option in options
+                ]
+            fields.append(entry)
+        decorated[step_type] = {**schema, "fields": fields}
+    return decorated
+
+
+def _variable(name: str, label: str, sample: Any = None) -> dict[str, Any]:
+    entry: dict[str, Any] = {"name": name, "label": label}
+    if sample is not None:
+        entry["sample"] = sample
+    return entry
+
+
+async def _build_workflow_variable_catalog(
+    company_id: int, *, direction: str, company: Mapping[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Describe the variables every step of a workflow can use.
+
+    Names match the keys built by ``_execute_policy_steps`` in the workflow
+    service.  Values are never included, only illustrative samples.
+    """
+
+    is_offboarding = direction == staff_workflow_repo.DIRECTION_OFFBOARDING
+    person = "Departing staff member" if is_offboarding else "New staff member"
+    company_name = str((company or {}).get("name") or "").strip() or "Example Pty Ltd"
+    groups: list[dict[str, Any]] = [
+        {
+            "key": "staff",
+            "label": person,
+            "variables": [
+                _variable("staff.first_name", "First name", "Jane"),
+                _variable("staff.last_name", "Last name", "Citizen"),
+                _variable("staff.full_name", "Full name", "Jane Citizen"),
+                _variable("staff.email", "Email address", "jane.citizen@example.com"),
+                _variable("staff.email_local_part", "Email before the @", "jane.citizen"),
+                _variable("staff.job_title", "Job title", "Accounts Officer"),
+                _variable("staff.department", "Department", "Finance"),
+                _variable("staff.office_location", "Office location", "Head office"),
+                _variable("staff.mobile_phone", "Mobile phone", "0400 000 000"),
+                _variable("staff.company_name", "Company name", company_name),
+                _variable("staff_id", "MyPortal staff ID", 1024),
+            ],
+        },
+        {
+            "key": "request",
+            "label": "Request & company",
+            "variables": [
+                _variable("requestor_email", "Requester's email", "manager@example.com"),
+                _variable("company_name", "Company name", company_name),
+                _variable("company_id", "MyPortal company ID", company_id),
+            ],
+        },
+    ]
+    if is_offboarding:
+        groups.append(
+            {
+                "key": "offboarding",
+                "label": "Offboarding request",
+                "variables": [
+                    _variable(
+                        "offboarding.out_of_office_message",
+                        "Out-of-office message",
+                        "Jane has left the company. Please contact accounts@example.com.",
+                    ),
+                    _variable(
+                        "offboarding.email_forward_to",
+                        "Forward email to",
+                        "accounts@example.com",
+                    ),
+                    _variable(
+                        "offboarding.mailbox_grant_emails",
+                        "Give mailbox access to",
+                        "manager@example.com",
+                    ),
+                ],
+            }
+        )
+    groups.append(
+        {
+            "key": "dates",
+            "label": "Dates & times",
+            "variables": [
+                _variable("now.date", "Today's date (UTC)", "2026-11-01"),
+                _variable("now.datetime_utc", "Date and time (UTC)", "2026-11-01 09:30:00 UTC"),
+                _variable("now.iso", "Timestamp (ISO 8601)", "2026-11-01T09:30:00+00:00"),
+                _variable("now.local.date", "Today's date (company time)", "2026-11-01"),
+                _variable("now.local.display", "Today's date, readable", "Nov 01, 2026"),
+                _variable("now.local.datetime", "Date and time (company time)", "2026-11-01 20:30:00 AEDT"),
+                _variable("now.local.timezone", "Company time zone", "Australia/Sydney"),
+            ],
+        }
+    )
+    try:
+        definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
+    except Exception:  # noqa: BLE001 - the designer still works without custom fields
+        definitions = []
+    custom_variables = []
+    for definition in definitions or []:
+        name = str(definition.get("name") or "").strip()
+        if not name:
+            continue
+        field_type = str(definition.get("field_type") or "text")
+        entry = _variable(
+            f"custom_fields.{name}",
+            str(definition.get("display_name") or name),
+            True if field_type == "checkbox" else None,
+        )
+        entry["field_type"] = field_type
+        entry["field_name"] = name
+        custom_variables.append(entry)
+    if custom_variables:
+        groups.append(
+            {
+                "key": "custom_fields",
+                "label": "Staff custom fields",
+                "variables": custom_variables,
+            }
+        )
+    return groups
+
+
+def _designer_payload_extras(direction: str) -> dict[str, Any]:
+    catalog = (
+        _OFFBOARDING_STEP_CATALOG
+        if direction == staff_workflow_repo.DIRECTION_OFFBOARDING
+        else _ONBOARDING_STEP_CATALOG
+    )
+    return {
+        "step_catalog": _designer_step_catalog(catalog),
+        "step_form_schema": _designer_step_form_schema(),
+        "step_categories": [dict(item) for item in _WORKFLOW_STEP_CATEGORIES],
+    }
+
 
 
 def _collect_validation_errors(exc: ValidationError) -> list[str]:
@@ -2592,7 +3032,7 @@ async def list_staff_workflow_policies(direction: str, request: Request):
     (
         _user,
         _membership,
-        _company,
+        company,
         _staff_permission,
         company_id,
         redirect,
@@ -2625,10 +3065,8 @@ async def list_staff_workflow_policies(direction: str, request: Request):
     policies = await staff_workflow_repo.list_company_workflow_policies(
         company_id, direction=direction
     )
-    catalog = (
-        _OFFBOARDING_STEP_CATALOG
-        if direction == staff_workflow_repo.DIRECTION_OFFBOARDING
-        else _ONBOARDING_STEP_CATALOG
+    variables = await _build_workflow_variable_catalog(
+        company_id, direction=direction, company=company
     )
     return JSONResponse(
         {
@@ -2636,8 +3074,8 @@ async def list_staff_workflow_policies(direction: str, request: Request):
                 _normalise_workflow_policy_response(p, default_workflow_key=default_key)
                 for p in policies
             ],
-            "step_catalog": catalog,
-            "step_form_schema": _WORKFLOW_STEP_FORM_SCHEMA,
+            **_designer_payload_extras(direction),
+            "variables": variables,
         }
     )
 
