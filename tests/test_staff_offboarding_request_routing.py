@@ -7,6 +7,7 @@ be handed to the staff feature pack instead of failing with "API key required".
 
 import asyncio
 import json
+from datetime import timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -196,6 +197,25 @@ def test_offboarding_request_does_not_create_a_workflow_run(monkeypatch):
 
     assert response.status_code == 200
     handlers.staff_workflow_repo.create_or_reset_execution.assert_not_awaited()
+
+
+def test_offboarding_request_stores_requested_time_as_offboard_schedule(monkeypatch):
+    """Approval schedules the run from date_offboarded, so it must be kept."""
+    update_mock = _patch_offboarding_context(monkeypatch)
+
+    response = asyncio.run(
+        handlers.request_staff_offboarding(
+            44,
+            _offboarding_request(
+                {"requestedAt": "2026-11-20T09:00", "requestedTimezone": "Australia/Brisbane"}
+            ),
+        )
+    )
+
+    assert response.status_code == 200
+    stored = update_mock.await_args.kwargs["date_offboarded"]
+    assert stored is not None
+    assert stored.astimezone(timezone.utc).isoformat() == "2026-11-19T23:00:00+00:00"
 
 
 @pytest.mark.parametrize("address", ["team@partner.com", "nobody@example.com"])

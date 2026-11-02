@@ -1,0 +1,7 @@
+{
+  "guid": "421de469-2d3f-4a59-8f0f-f15117b816de",
+  "occurred_at": "2026-11-02T01:02Z",
+  "change_type": "Fix",
+  "summary": "Approved staff offboardings now run at the date and time chosen on the request, in the requester's timezone, instead of starting as soon as they are approved.",
+  "content_hash": "15bf0d632da9eca9bc5abf8b27bdeb88618f5676f45152950bc14387bc7577b3"
+}

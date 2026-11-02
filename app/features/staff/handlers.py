@@ -4327,7 +4327,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         email=existing.get("email") or "",
         mobile_phone=existing.get("mobile_phone"),
         date_onboarded=_parse_input_datetime(existing.get("date_onboarded")),
-        date_offboarded=None,
+        date_offboarded=requested_at,
         enabled=bool(existing.get("enabled", True)),
         is_ex_staff=bool(existing.get("is_ex_staff", False)),
         street=existing.get("street"),

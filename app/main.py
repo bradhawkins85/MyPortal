@@ -2068,12 +2068,25 @@ def _parse_local_datetime_to_utc(
     parsed = _parse_input_datetime(value, assume_midnight=assume_midnight)
     if parsed is None:
         return None
-    if parsed.tzinfo is not None:
-        return parsed.astimezone(timezone.utc)
+    if _raw_value_has_utc_offset(value):
+        return parsed
     local_zone, _normalized_timezone = _resolve_timezone(timezone_name)
     if local_zone is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.replace(tzinfo=local_zone).astimezone(timezone.utc)
+        return parsed
+    # _parse_input_datetime labels a naive value as UTC without shifting it,
+    # so the wall-clock time is intact and belongs to the requester's zone.
+    return (
+        parsed.replace(tzinfo=None)
+        .replace(tzinfo=local_zone)
+        .astimezone(timezone.utc)
+    )
+
+
+def _raw_value_has_utc_offset(value: str | None) -> bool:
+    try:
+        return datetime.fromisoformat(str(value or "").strip()).tzinfo is not None
+    except ValueError:
+        return False
 
 
 def _parse_bool(value: Any, *, default: bool = False) -> bool:
