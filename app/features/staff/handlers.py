@@ -18,6 +18,7 @@ from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import staff_onboarding_workflows as staff_workflow_repo
 from app.repositories import staff_requests as staff_requests_repo
 from app.schemas.staff_onboarding_workflows import (
+    CompanyWorkflowPolicyCopySchema,
     CompanyWorkflowPolicyUpsertSchema,
     WorkflowConfigSchema,
 )
@@ -3076,6 +3077,8 @@ async def list_staff_workflow_policies(direction: str, request: Request):
             ],
             **_designer_payload_extras(direction),
             "variables": variables,
+            "company_id": int(company_id),
+            "companies": await _workflow_copy_target_companies(company_id),
         }
     )
 
@@ -3224,6 +3227,185 @@ async def update_staff_workflow_policy(
                 updated, default_workflow_key=default_key
             ),
         }
+    )
+
+
+async def _workflow_copy_target_companies(
+    current_company_id: int,
+) -> list[dict[str, Any]]:
+    """Active companies a workflow can be copied into, current company first."""
+    try:
+        companies = await company_repo.list_companies()
+    except Exception as exc:  # pragma: no cover - defensive
+        log_error("Failed to list companies for workflow copy", error=str(exc))
+        return []
+    options: list[dict[str, Any]] = []
+    for company in companies:
+        company_id = company.get("id")
+        if company_id is None:
+            continue
+        options.append(
+            {
+                "id": int(company_id),
+                "name": str(company.get("name") or f"Company {company_id}"),
+                "is_current": int(company_id) == int(current_company_id),
+            }
+        )
+    options.sort(key=lambda item: (not item["is_current"], item["name"].lower()))
+    return options
+
+
+async def copy_staff_workflow_policy_to_company(
+    direction: str, policy_id: int, request: Request
+):
+    """Copy a saved workflow from the active company into another company."""
+    (
+        user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
+    direction = direction.strip().lower()
+    if direction not in (
+        staff_workflow_repo.DIRECTION_ONBOARDING,
+        staff_workflow_repo.DIRECTION_OFFBOARDING,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="direction must be 'onboarding' or 'offboarding'",
+        )
+    source = await staff_workflow_repo.get_company_workflow_policy_by_id(
+        policy_id, company_id
+    )
+    if not source or str(source.get("direction") or "") != direction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workflow policy not found"
+        )
+
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Send the copy settings as JSON."},
+        ) from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Send the copy settings as JSON."},
+        )
+    payload.pop("config", None)
+    payload.pop("config_json", None)
+    payload.pop("configJson", None)
+    try:
+        copy_input = CompanyWorkflowPolicyCopySchema.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Invalid workflow copy settings.",
+                "errors": _collect_validation_errors(exc),
+            },
+        ) from exc
+
+    target_company_id = int(copy_input.target_company_id)
+    if target_company_id == int(company_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Choose a different company. Use Duplicate to copy within this company."
+            },
+        )
+    target_company = await company_repo.get_company_by_id(target_company_id)
+    if not target_company or target_company.get("archived"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "The company to copy to was not found."},
+        )
+    target_name = str(target_company.get("name") or f"Company {target_company_id}")
+    workflow_key = str(copy_input.workflow_key or "")
+    clash = await staff_workflow_repo.get_company_workflow_policy_by_key(
+        target_company_id, workflow_key, direction
+    )
+    if clash:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": f"{target_name} already has a {direction} workflow with the key "
+                f"\u201c{workflow_key}\u201d. Choose a different key."
+            },
+        )
+
+    default_key = (
+        staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
+        if direction == staff_workflow_repo.DIRECTION_OFFBOARDING
+        else staff_workflow_repo.DEFAULT_WORKFLOW_KEY
+    )
+    source_config = source.get("config") if isinstance(source.get("config"), dict) else {}
+    config = _normalise_workflow_config(json.loads(json.dumps(source_config)))
+    existing_target = await staff_workflow_repo.list_company_workflow_policies(
+        target_company_id, direction=direction
+    )
+    next_sort_order = (
+        max((int(item.get("sort_order") or 0) for item in existing_target), default=-1)
+        + 1
+    )
+    created = await staff_workflow_repo.upsert_company_workflow_policy(
+        company_id=target_company_id,
+        workflow_key=workflow_key,
+        is_enabled=bool(copy_input.enabled),
+        max_retries=int(copy_input.max_retries),
+        config=config,
+        default_workflow_key=default_key,
+        direction=direction,
+        delay_type=str(copy_input.delay_type or "scheduled"),
+        workflow_name=copy_input.workflow_name,
+        sort_order=next_sort_order,
+    )
+    copied = _normalise_workflow_policy_response(created, default_workflow_key=default_key)
+    actor_id = int(user["id"]) if user.get("id") is not None else None
+    audit_metadata = {
+        "source_company_id": int(company_id),
+        "source_policy_id": policy_id,
+        "source_workflow_key": source.get("workflow_key"),
+        "target_company_id": target_company_id,
+        "target_policy_id": copied.get("id"),
+        "target_workflow_key": copied.get("workflow_key"),
+    }
+    await audit_service.log_action(
+        user_id=actor_id,
+        action=f"staff.workflows.{direction}.policy.copied_out",
+        entity_type="company",
+        entity_id=int(company_id),
+        metadata=audit_metadata,
+    )
+    await audit_service.log_action(
+        user_id=actor_id,
+        action=f"staff.workflows.{direction}.policy.copied_in",
+        entity_type="company",
+        entity_id=target_company_id,
+        metadata=audit_metadata,
+    )
+    return JSONResponse(
+        {
+            "success": True,
+            "policy": copied,
+            "company": {"id": target_company_id, "name": target_name},
+        },
+        status_code=status.HTTP_201_CREATED,
     )
 
 

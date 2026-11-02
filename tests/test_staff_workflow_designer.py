@@ -158,12 +158,21 @@ def test_list_policies_returns_designer_payload(monkeypatch):
         AsyncMock(return_value=[]),
     )
 
+    monkeypatch.setattr(
+        handlers.company_repo,
+        "list_companies",
+        AsyncMock(return_value=[{"id": 4, "name": "Beta"}, {"id": 9, "name": "Acme"}]),
+    )
+
     response = asyncio.run(
         handlers.list_staff_workflow_policies("offboarding", SimpleNamespace(query_params={}))
     )
     payload = json.loads(response.body)
 
     assert payload["policies"] == []
+    assert payload["company_id"] == 9
+    assert [c["id"] for c in payload["companies"]] == [9, 4]
+    assert payload["companies"][0]["is_current"] is True
     types = {item["type"] for item in payload["step_catalog"]}
     assert "offboard_account" in types
     assert all("category" in item for item in payload["step_catalog"])
@@ -218,3 +227,138 @@ async def test_engine_provides_staff_company_name(monkeypatch):
 
     request_payload = attempt_mock.await_args.kwargs["request_payload"]
     assert request_payload["subject"] == "Welcome to Acme"
+
+
+class _JsonRequest(SimpleNamespace):
+    def __init__(self, body):
+        super().__init__(query_params={}, headers={})
+        self._body = body
+
+    async def json(self):
+        return self._body
+
+
+_SOURCE_POLICY = {
+    "id": 5,
+    "company_id": 9,
+    "direction": "onboarding",
+    "workflow_key": "staff_onboarding_standard",
+    "workflow_name": "Standard",
+    "delay_type": "scheduled",
+    "is_enabled": True,
+    "max_retries": 2,
+    "sort_order": 0,
+    "config": {"version": 1, "steps": [{"key": "create_ticket", "name": "Ticket", "config": {"type": "create_ticket"}}]},
+}
+
+
+def _patch_copy(monkeypatch, *, source=_SOURCE_POLICY, target=None, clash=None, existing=None):
+    async def fake_load_staff_context(request, **kwargs):
+        assert kwargs.get("require_super_admin") is True
+        return ({"id": 1, "is_super_admin": True}, None, {"name": "Acme"}, 3, 9, None)
+
+    monkeypatch.setattr(handlers, "_load_staff_context", fake_load_staff_context)
+    get_by_id = AsyncMock(return_value=source)
+    monkeypatch.setattr(handlers.staff_workflow_repo, "get_company_workflow_policy_by_id", get_by_id)
+    monkeypatch.setattr(
+        handlers.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value=target if target is not None else {"id": 4, "name": "Beta"}),
+    )
+    monkeypatch.setattr(
+        handlers.staff_workflow_repo, "get_company_workflow_policy_by_key", AsyncMock(return_value=clash)
+    )
+    monkeypatch.setattr(
+        handlers.staff_workflow_repo,
+        "list_company_workflow_policies",
+        AsyncMock(return_value=existing or []),
+    )
+
+    async def fake_upsert(**kwargs):
+        return {
+            "id": 77,
+            "company_id": kwargs["company_id"],
+            "direction": kwargs["direction"],
+            "workflow_key": kwargs["workflow_key"],
+            "workflow_name": kwargs["workflow_name"],
+            "delay_type": kwargs["delay_type"],
+            "is_enabled": kwargs["is_enabled"],
+            "max_retries": kwargs["max_retries"],
+            "sort_order": kwargs["sort_order"],
+            "config": kwargs["config"],
+        }
+
+    upsert = AsyncMock(side_effect=fake_upsert)
+    monkeypatch.setattr(handlers.staff_workflow_repo, "upsert_company_workflow_policy", upsert)
+    audit = AsyncMock()
+    monkeypatch.setattr(handlers.audit_service, "log_action", audit)
+    return get_by_id, upsert, audit
+
+
+def test_copy_workflow_to_another_company(monkeypatch):
+    get_by_id, upsert, audit = _patch_copy(
+        monkeypatch, existing=[{"sort_order": 0}, {"sort_order": 3}]
+    )
+    request = _JsonRequest(
+        {
+            "target_company_id": 4,
+            "workflow_name": "Standard (copy)",
+            "workflow_key": "staff_onboarding_standard",
+            "enabled": False,
+            "max_retries": 1,
+            "delay_type": "immediate",
+            "config": {"steps": [{"key": "evil", "name": "Ignored"}]},
+        }
+    )
+
+    response = asyncio.run(handlers.copy_staff_workflow_policy_to_company("onboarding", 5, request))
+    payload = json.loads(response.body)
+
+    assert response.status_code == 201
+    get_by_id.assert_awaited_once_with(5, 9)
+    kwargs = upsert.await_args.kwargs
+    assert kwargs["company_id"] == 4
+    assert kwargs["direction"] == "onboarding"
+    assert kwargs["is_enabled"] is False
+    assert kwargs["delay_type"] == "immediate"
+    assert kwargs["sort_order"] == 4
+    assert [step["name"] for step in kwargs["config"]["steps"]] == ["Ticket"]
+    assert payload["policy"]["company_id"] == 4
+    assert payload["company"] == {"id": 4, "name": "Beta"}
+    actions = [call.kwargs["action"] for call in audit.await_args_list]
+    assert actions == [
+        "staff.workflows.onboarding.policy.copied_out",
+        "staff.workflows.onboarding.policy.copied_in",
+    ]
+    assert [call.kwargs["entity_id"] for call in audit.await_args_list] == [9, 4]
+
+
+def test_copy_workflow_rejects_key_clash_in_target(monkeypatch):
+    _, upsert, _ = _patch_copy(monkeypatch, clash={"id": 12})
+    request = _JsonRequest({"target_company_id": 4, "workflow_name": "Standard", "workflow_key": "staff_onboarding_standard"})
+
+    with pytest.raises(handlers.HTTPException) as excinfo:
+        asyncio.run(handlers.copy_staff_workflow_policy_to_company("onboarding", 5, request))
+
+    assert excinfo.value.status_code == 409
+    upsert.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "body, source, target, expected",
+    [
+        ({"target_company_id": 9, "workflow_name": "Copy"}, _SOURCE_POLICY, None, 400),
+        ({"target_company_id": 4, "workflow_name": "Copy"}, None, None, 404),
+        ({"target_company_id": 4, "workflow_name": "Copy"}, {**_SOURCE_POLICY, "direction": "offboarding"}, None, 404),
+        ({"target_company_id": 4, "workflow_name": "Copy"}, _SOURCE_POLICY, {"id": 4, "name": "Beta", "archived": 1}, 404),
+        ({"workflow_name": "Copy"}, _SOURCE_POLICY, None, 400),
+    ],
+)
+def test_copy_workflow_rejects_invalid_requests(monkeypatch, body, source, target, expected):
+    _, upsert, _ = _patch_copy(monkeypatch, source=source, target=target)
+
+    with pytest.raises(handlers.HTTPException) as excinfo:
+        asyncio.run(handlers.copy_staff_workflow_policy_to_company("onboarding", 5, _JsonRequest(body)))
+
+    assert excinfo.value.status_code == expected
+    upsert.assert_not_awaited()

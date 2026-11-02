@@ -67,6 +67,19 @@ router.add_api_route(
     methods=["DELETE"],
 )
 router.add_api_route(
+    "/staff/workflows/{direction}/policies/{policy_id}/copy",
+    handlers.copy_staff_workflow_policy_to_company,
+    methods=["POST"],
+    status_code=201,
+    summary="Copy a workflow to another company",
+    description=(
+        "Copies a saved onboarding or offboarding workflow from the active company "
+        "into another company. Body: target_company_id, workflow_name, workflow_key, "
+        "delay_type, max_retries, enabled. Steps come from the saved source workflow. "
+        "Returns 409 when the target company already uses the workflow key. Super admin only."
+    ),
+)
+router.add_api_route(
     "/staff/workflows/history",
     handlers.staff_workflow_history_page,
     methods=["GET"],

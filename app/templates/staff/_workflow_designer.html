@@ -220,12 +220,18 @@
     <header class="modal__header scf-editor__header">
       <div>
         <h2 class="modal__title" id="swf-settings-title" data-swf-settings-title>Workflow settings</h2>
-        <p class="scf-editor__subtitle">Name the workflow and choose when it runs.</p>
+        <p class="scf-editor__subtitle" data-swf-settings-subtitle>Name the workflow and choose when it runs.</p>
       </div>
       <button type="button" class="modal__close" data-modal-close aria-label="Close workflow settings"></button>
     </header>
     <div class="modal__body">
       <div class="scf-grid">
+        <div class="form-field scf-grid__full" data-swf-settings-target-field hidden>
+          <label class="form-label" for="swf-settings-target">Copy to</label>
+          <select class="form-input" id="swf-settings-target" data-swf-settings-target></select>
+          <p class="form-help" data-swf-settings-target-help>Keep this company to make an unsaved copy here, or pick another company to save the copy straight into it.</p>
+          <p class="scf-error" data-swf-error="target_company" hidden></p>
+        </div>
         <div class="form-field scf-grid__full">
           <label class="form-label" for="swf-settings-name">Name</label>
           <input class="form-input" id="swf-settings-name" maxlength="255" autocomplete="off" placeholder="{{ swf.name_placeholder }}" data-swf-settings-name />

@@ -161,3 +161,17 @@ class CompanyWorkflowPolicyUpsertSchema(BaseModel):
             raise ValueError("Workflow key must include at least one letter or number.")
         self.workflow_key = normalized
         return self
+
+
+class CompanyWorkflowPolicyCopySchema(CompanyWorkflowPolicyUpsertSchema):
+    """Settings for a saved workflow copied into another company.
+
+    The steps always come from the saved source workflow; any ``config`` sent
+    with the request is ignored.
+    """
+
+    target_company_id: int = Field(
+        ...,
+        ge=1,
+        validation_alias=AliasChoices("target_company_id", "targetCompanyId", "company_id"),
+    )

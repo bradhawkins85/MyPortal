@@ -241,6 +241,8 @@
     baseGroups: [],
     workflows: [],
     selectedUid: null,
+    companyId: null,
+    companies: [],
   };
 
   function catalogEntry(type) {
@@ -1827,6 +1829,39 @@
   settings.submit = $('[data-swf-settings-submit]', settings.modal);
   settings.nameError = $('[data-swf-error="workflow_name"]', settings.modal);
   settings.keyError = $('[data-swf-error="workflow_key"]', settings.modal);
+  settings.subtitle = $('[data-swf-settings-subtitle]', settings.modal);
+  settings.targetField = $('[data-swf-settings-target-field]', settings.modal);
+  settings.target = $('[data-swf-settings-target]', settings.modal);
+  settings.targetHelp = $('[data-swf-settings-target-help]', settings.modal);
+  settings.targetError = $('[data-swf-error="target_company"]', settings.modal);
+
+  const TARGET_HELP_HERE = 'Keep this company to make an unsaved copy here, or pick another company to save the copy straight into it.';
+  const TARGET_HELP_OTHER = 'The saved steps are copied into this company. It starts turned off so you can review company-specific settings such as groups, licences and mailboxes first.';
+
+  // The company a duplicate goes to, or null when it stays in this company.
+  function copyTargetCompany() {
+    if (settings.mode !== 'duplicate' || settings.targetField.hidden) {
+      return null;
+    }
+    const id = Number(settings.target.value);
+    if (!id || id === state.companyId) {
+      return null;
+    }
+    return state.companies.find((company) => company.id === id) || null;
+  }
+
+  function renderCopyTarget() {
+    const target = copyTargetCompany();
+    settings.targetHelp.textContent = target ? TARGET_HELP_OTHER : TARGET_HELP_HERE;
+    settings.submit.textContent = target ? `Copy to ${target.name}` : 'Create workflow';
+    settings.targetError.hidden = true;
+  }
+
+  settings.target.addEventListener('change', () => {
+    const target = copyTargetCompany();
+    settings.enabled.checked = target ? false : settings.enabledDefault;
+    renderCopyTarget();
+  });
 
   function settingsValues() {
     return {
@@ -1848,8 +1883,21 @@
       max_retries: 2,
       enabled: true,
     };
-    settings.title.textContent = mode === 'edit' ? 'Workflow settings' : 'New workflow';
+    settings.title.textContent = mode === 'edit' ? 'Workflow settings' : (mode === 'duplicate' ? 'Duplicate workflow' : 'New workflow');
+    settings.subtitle.textContent = mode === 'duplicate'
+      ? 'Choose where the copy goes, then name it.'
+      : 'Name the workflow and choose when it runs.';
     settings.submit.textContent = mode === 'edit' ? 'Apply' : 'Create workflow';
+    const showTarget = mode === 'duplicate' && state.companies.length > 1;
+    settings.targetField.hidden = !showTarget;
+    settings.targetError.hidden = true;
+    settings.target.replaceChildren(...state.companies.map((company) => el('option', {
+      value: String(company.id),
+      text: company.id === state.companyId ? `${company.name} (this company)` : company.name,
+    })));
+    if (state.companyId !== null) {
+      settings.target.value = String(state.companyId);
+    }
     settings.name.value = values.workflow_name || '';
     settings.key.value = values.workflow_key || '';
     settings.keyTouched = mode === 'edit' && Boolean(wf && wf.id);
@@ -1861,6 +1909,10 @@
     });
     settings.retries.value = String(Number(values.max_retries ?? 2));
     settings.enabled.checked = values.enabled !== false;
+    settings.enabledDefault = settings.enabled.checked;
+    if (showTarget) {
+      renderCopyTarget();
+    }
     settings.deleteButton.hidden = mode !== 'edit';
     settings.nameError.hidden = true;
     settings.keyError.hidden = true;
@@ -1896,7 +1948,8 @@
       valid = false;
     }
     const current = settings.mode === 'edit' ? selectedWorkflow() : null;
-    const clash = state.workflows.some((wf) => wf !== current && wf.workflow_key === values.workflow_key);
+    const target = copyTargetCompany();
+    const clash = !target && state.workflows.some((wf) => wf !== current && wf.workflow_key === values.workflow_key);
     if (!values.workflow_key || clash) {
       settings.keyError.textContent = !values.workflow_key ? 'Add a key using letters, numbers, _ , - or .' : 'Another workflow already uses this key.';
       settings.keyError.hidden = false;
@@ -1906,6 +1959,10 @@
     }
     if (!valid) {
       (values.workflow_name ? settings.key : settings.name).focus();
+      return;
+    }
+    if (target) {
+      copyToCompany(target, values);
       return;
     }
     if (current) {
@@ -1929,6 +1986,47 @@
     render();
     announce(current ? 'Workflow settings updated' : 'Workflow created. Add steps, then save.');
   });
+
+  async function copyToCompany(target, values) {
+    const source = selectedWorkflow();
+    if (!source || !source.id || isDirty(source)) {
+      settings.targetError.textContent = 'Save this workflow first. Only saved steps are copied to another company.';
+      settings.targetError.hidden = false;
+      settings.target.focus();
+      return;
+    }
+    settings.submit.disabled = true;
+    settings.submit.classList.add('button--processing');
+    try {
+      const response = await fetch(`${API_BASE}/${source.id}/copy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ ...values, target_company_id: target.id }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = errorMessage(payload).replace('The workflow could not be saved.', 'The workflow could not be copied.');
+        const errorNode = response.status === 409 ? settings.keyError : settings.targetError;
+        errorNode.textContent = message;
+        errorNode.hidden = false;
+        (response.status === 409 ? settings.key : settings.target).focus();
+        return;
+      }
+      closeModal(settings.modal);
+      const name = (payload.company && payload.company.name) || target.name;
+      const message = `Copied ${values.workflow_name} to ${name}. Switch to ${name} to review it and turn it on.`;
+      if (window.__portalToast) {
+        window.__portalToast.show(message, { variant: 'success' });
+      }
+      announce(message);
+    } catch (error) {
+      settings.targetError.textContent = 'The workflow could not be copied. Check your connection and try again.';
+      settings.targetError.hidden = false;
+    } finally {
+      settings.submit.disabled = false;
+      settings.submit.classList.remove('button--processing');
+    }
+  }
 
   settings.deleteButton.addEventListener('click', async () => {
     const wf = selectedWorkflow();
@@ -2221,6 +2319,10 @@
         variables: Array.isArray(group.variables) ? group.variables : [],
       })) : [];
       state.workflows = (Array.isArray(payload.policies) ? payload.policies : []).map(readWorkflow);
+      state.companyId = Number(payload.company_id) || null;
+      state.companies = (Array.isArray(payload.companies) ? payload.companies : [])
+        .map((company) => ({ id: Number(company.id), name: String(company.name || '') }))
+        .filter((company) => company.id);
       const remembered = storageGet(STORAGE_KEY);
       const match = state.workflows.find((wf) => String(wf.id) === remembered);
       state.selectedUid = match ? match.uid : (state.workflows[0] || {}).uid || null;
