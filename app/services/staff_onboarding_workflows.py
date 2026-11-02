@@ -9,6 +9,7 @@ import re
 import secrets
 from urllib.parse import quote, urlparse
 from datetime import datetime, time, timedelta, timezone
+from collections.abc import Iterable, Mapping
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -768,7 +769,9 @@ async def _attempt_step(
     request_payload: dict[str, Any],
     callback,
     secret_vars: set[str] | None = None,
+    secret_values: Iterable[str] = (),
 ) -> dict[str, Any]:
+    secret_values = tuple(secret_values)
     last_error: Exception | None = None
     for attempt in range(1, max_retries + 2):
         try:
@@ -786,7 +789,9 @@ async def _attempt_step(
                     if _is_secret_var(str(key)):
                         effective_secret_vars.add(str(key))
             log_response = _redact_payload(
-                raw_response, secret_vars=effective_secret_vars
+                raw_response,
+                secret_vars=effective_secret_vars,
+                secret_values=secret_values,
             )
             await workflow_repo.append_step_log(
                 execution_id=execution_id,
@@ -809,13 +814,15 @@ async def _attempt_step(
                 status="failed",
                 attempt=attempt,
                 request_payload=request_payload,
-                error_message=str(exc),
+                error_message=_scrub_secret_text(str(exc), secret_values),
             )
             if attempt > max_retries:
                 break
             await asyncio.sleep(min(2 ** (attempt - 1), 5))
     raise WorkflowStepError(
-        str(last_error) if last_error else f"{step_name} failed",
+        _scrub_secret_text(str(last_error), secret_values)
+        if last_error
+        else f"{step_name} failed",
         step_name=step_name,
         request_payload=request_payload,
     )
@@ -872,17 +879,68 @@ def _resolve_template_value(raw: Any, *, vars_map: dict[str, Any]) -> Any:
     return raw
 
 
-def _redact_payload(payload: Any, *, secret_vars: set[str]) -> Any:
+_REDACTED = "***redacted***"
+# Shorter secrets are not scrubbed from free text: replacing them would mangle
+# unrelated words while protecting very little.
+_MIN_SCRUB_SECRET_LENGTH = 4
+
+
+def _secret_value_texts(
+    vars_map: Mapping[str, Any], secret_vars: Iterable[str]
+) -> tuple[str, ...]:
+    """Return the plaintext of secret variables, longest first, for scrubbing."""
+
+    texts: set[str] = set()
+    for name in secret_vars:
+        value = vars_map.get(str(name))
+        if value is None or isinstance(value, bool):
+            continue
+        if isinstance(value, (dict, list)):
+            continue
+        text = str(value)
+        if len(text) >= _MIN_SCRUB_SECRET_LENGTH:
+            texts.add(text)
+    return tuple(sorted(texts, key=len, reverse=True))
+
+
+def _scrub_secret_text(text: str, secret_values: Iterable[str]) -> str:
+    for secret in secret_values:
+        if secret and secret in text:
+            text = text.replace(secret, _REDACTED)
+    return text
+
+
+def _redact_payload(
+    payload: Any,
+    *,
+    secret_vars: set[str],
+    secret_values: Iterable[str] = (),
+) -> Any:
+    """Redact secret-named keys and any embedded secret values.
+
+    Key-based redaction alone misses templated text such as
+    ``"Password: ${vars.ad_password}"`` once it has been resolved, so the
+    plaintext of known secret variables is also scrubbed from every string.
+    """
+
+    secret_values = tuple(secret_values)
     if isinstance(payload, dict):
         redacted: dict[str, Any] = {}
         for key, value in payload.items():
             if _is_secret_var(str(key)) or str(key) in secret_vars:
-                redacted[key] = "***redacted***"
+                redacted[key] = _REDACTED
             else:
-                redacted[key] = _redact_payload(value, secret_vars=secret_vars)
+                redacted[key] = _redact_payload(
+                    value, secret_vars=secret_vars, secret_values=secret_values
+                )
         return redacted
     if isinstance(payload, list):
-        return [_redact_payload(item, secret_vars=secret_vars) for item in payload]
+        return [
+            _redact_payload(item, secret_vars=secret_vars, secret_values=secret_values)
+            for item in payload
+        ]
+    if isinstance(payload, str) and secret_values:
+        return _scrub_secret_text(payload, secret_values)
     return payload
 
 
@@ -3502,10 +3560,15 @@ async def _execute_policy_steps(
             response_payload.get("context_patch"), dict
         ):
             patch = response_payload["context_patch"]
-            for key, value in (patch.get("vars") or {}).items():
-                vars_map[str(key)] = value
-            for name in patch.get("secret_vars") or []:
-                secret_vars.add(str(name))
+            patch_vars = patch.get("vars")
+            if isinstance(patch_vars, dict):
+                for key, value in patch_vars.items():
+                    vars_map[str(key)] = value
+            # Older logs stored this list redacted as a plain string.
+            patch_secret_names = patch.get("secret_vars")
+            if isinstance(patch_secret_names, list):
+                for name in patch_secret_names:
+                    secret_vars.add(str(name))
 
     await _apply_webhook_callback_values(
         execution_id=execution_id, vars_map=vars_map, secret_vars=secret_vars
@@ -3594,7 +3657,10 @@ async def _execute_policy_steps(
                 current_step=f"{index + 1}:{step_name}:skipped",
             )
             continue
-        request_payload = _redact_payload(resolved_step, secret_vars=secret_vars)
+        secret_values = _secret_value_texts(vars_map, secret_vars)
+        request_payload = _redact_payload(
+            resolved_step, secret_vars=secret_vars, secret_values=secret_values
+        )
         step_max_retries = _resolve_step_max_retries(
             step, default_max_retries=max_retries
         )
@@ -3649,6 +3715,7 @@ async def _execute_policy_steps(
                     step_name=step_name,
                 ),
                 secret_vars=step_secret_vars,
+                secret_values=secret_values,
             )
         except WorkflowStepError as exc:
             if step_failure_policy["mode"] == "continue":
@@ -3732,7 +3799,16 @@ async def _execute_policy_steps(
             attempt=1,
             request_payload={"source_step": step_name},
             response_payload={
-                "context_patch": _redact_payload(context_patch, secret_vars=secret_vars)
+                "context_patch": {
+                    "vars": _redact_payload(
+                        context_patch["vars"],
+                        secret_vars=secret_vars,
+                        secret_values=_secret_value_texts(vars_map, secret_vars),
+                    ),
+                    # Names only, never values: kept readable so the history
+                    # can list protected outputs and resumed runs know them.
+                    "secret_vars": sorted(set(context_patch["secret_vars"])),
+                }
             },
         )
         if bool(step_outputs.get("pause")):

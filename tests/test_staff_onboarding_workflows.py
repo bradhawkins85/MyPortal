@@ -1199,7 +1199,7 @@ async def test_vars_map_contains_staff_extended_fields(monkeypatch):
     """_execute_policy_steps populates email_local_part, job_title, department in vars_map."""
     captured_vars: dict[str, object] = {}
 
-    async def fake_step(*, step, company_id, staff, policy_config, vars_map):
+    async def fake_step(*, step, company_id, staff, policy_config, vars_map, **_kwargs):
         captured_vars.update(vars_map)
         return {"ok": True}
 

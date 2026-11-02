@@ -1,0 +1,7 @@
+{
+  "guid": "a3ad3a3e-b886-4d11-bf3c-ee5b28eb2012",
+  "occurred_at": "2026-11-02T00:24Z",
+  "change_type": "Feature",
+  "summary": "Workflow execution history now lists runs by day with status counts and opens each run in a focused view showing every step, its errors and the values it produced, including Pause For Webhook callback values you can copy straight into onboarding and offboarding workflows.",
+  "content_hash": "f4cbba933d5b5fbe99a5287768b91e354cff4cc40cdf536568d9e9da4e33bb29"
+}
