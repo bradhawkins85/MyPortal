@@ -1,0 +1,298 @@
+{#
+  Shared staff workflow designer used by /staff/workflows/onboarding and
+  /staff/workflows/offboarding.  The page template sets ``swf`` (a dict of
+  direction-specific copy) before including this partial.  Driven by
+  app/static/js/staff_workflow_designer.js and styled by
+  app/static/css/staff_workflows.css (reusing the .scf-* editor pieces).
+#}
+<script type="application/json" id="swf-config">{{ swf | tojson }}</script>
+
+<div class="swf" data-swf aria-busy="true">
+  <noscript>
+    <section class="card card--panel">
+      <p>The workflow designer needs JavaScript. Turn it on in your browser to build {{ swf.direction }} workflows.</p>
+    </section>
+  </noscript>
+
+  <p class="swf-loading text-muted" data-swf-loading role="status" aria-live="polite">Loading {{ swf.direction }} workflows…</p>
+
+  <div class="swf-empty card card--panel" data-swf-empty hidden>
+    <p class="swf-empty__title">No {{ swf.direction }} workflows yet</p>
+    <p class="text-muted">{{ swf.empty_help }}</p>
+    <button type="button" class="button" data-swf-add-workflow aria-haspopup="dialog" aria-controls="swf-settings-modal">+ Add your first workflow</button>
+  </div>
+
+  <div class="swf-workspace" data-swf-workspace hidden>
+    <aside class="swf-list card card--panel" aria-labelledby="swf-list-title">
+      <header class="swf-list__header">
+        <h2 class="swf-list__title" id="swf-list-title">Workflows</h2>
+        <p class="text-muted">{{ swf.list_help }}</p>
+      </header>
+      <ul class="swf-list__items" data-swf-list aria-label="{{ swf.direction | capitalize }} workflows"></ul>
+    </aside>
+
+    <section class="swf-designer card card--panel" aria-labelledby="swf-designer-title" data-swf-designer>
+      <header class="swf-designer__header">
+        <div class="swf-designer__heading">
+          <p class="swf-eyebrow" data-swf-designer-eyebrow>{{ swf.direction | capitalize }} workflow</p>
+          <h2 class="swf-designer__title" id="swf-designer-title" data-swf-designer-title></h2>
+          <ul class="scf-item__chips" data-swf-designer-chips aria-label="Workflow summary"></ul>
+        </div>
+        <div class="swf-designer__actions">
+          <button type="button" class="button button--ghost button--small" data-swf-variables-open aria-haspopup="dialog" aria-controls="swf-variables-modal">Variables</button>
+          <button type="button" class="button button--ghost button--small" data-swf-duplicate-workflow>Duplicate</button>
+          <button type="button" class="button button--ghost button--small" data-swf-settings-open aria-haspopup="dialog" aria-controls="swf-settings-modal">Workflow settings</button>
+        </div>
+      </header>
+
+      <ol class="swf-flow" data-swf-flow aria-label="Workflow steps"></ol>
+    </section>
+  </div>
+
+  <div class="ce-savebar swf-savebar" data-swf-savebar role="region" aria-label="Unsaved workflow changes" hidden>
+    <p class="ce-savebar__text" aria-live="polite"><strong data-swf-savebar-count>Unsaved changes</strong> <span class="text-muted" data-swf-savebar-detail></span></p>
+    <span class="swf-savebar__spacer" aria-hidden="true"></span>
+    <button type="button" class="button button--ghost" data-swf-discard>Discard</button>
+    <button type="button" class="button button--primary" data-swf-save>Save workflow</button>
+  </div>
+  <p class="visually-hidden" data-swf-announce role="status" aria-live="polite"></p>
+</div>
+
+{# ---------------------------------------------------------------- Step picker #}
+<div class="modal swf-modal" id="swf-picker-modal" role="dialog" aria-modal="true" aria-labelledby="swf-picker-title" hidden>
+  <div class="modal__panel modal__panel--wide scf-editor swf-picker">
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="swf-eyebrow" data-swf-picker-eyebrow>Add a step</p>
+        <h2 class="modal__title" id="swf-picker-title">What should happen next?</h2>
+        <p class="scf-editor__subtitle">Pick an action. You can fill in its details and reorder it afterwards.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close step picker"></button>
+    </header>
+    <div class="modal__body swf-picker__body">
+      <label class="visually-hidden" for="swf-picker-search">Search steps</label>
+      <input type="search" class="form-input swf-picker__search" id="swf-picker-search" placeholder="Search steps, e.g. ticket, licence, password" autocomplete="off" data-swf-picker-search />
+      <div class="swf-picker__groups" data-swf-picker-groups></div>
+      <p class="scf-empty scf-empty--search" data-swf-picker-empty hidden>No steps match your search.</p>
+    </div>
+  </div>
+</div>
+
+{# ---------------------------------------------------------------- Step editor #}
+<div class="modal swf-modal" id="swf-step-modal" role="dialog" aria-modal="true" aria-labelledby="swf-step-title" hidden>
+  <form class="modal__panel modal__panel--wide scf-editor swf-step-editor" data-swf-step-form novalidate>
+    {% include "partials/csrf.html" %}
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="swf-eyebrow" data-swf-step-eyebrow></p>
+        <h2 class="modal__title" id="swf-step-title" data-swf-step-title>Edit step</h2>
+        <p class="scf-editor__subtitle" data-swf-step-subtitle></p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close step editor"></button>
+    </header>
+
+    <nav class="scf-tabs" role="tablist" aria-label="Step settings">
+      <button type="button" class="scf-tab is-active" role="tab" id="swf-tab-settings" aria-controls="swf-panel-settings" aria-selected="true" data-swf-tab="settings">What it does<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="swf-tab-outputs" aria-controls="swf-panel-outputs" aria-selected="false" tabindex="-1" data-swf-tab="outputs">What it provides<span class="scf-tab__count" data-swf-outputs-count></span><span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="swf-tab-conditions" aria-controls="swf-panel-conditions" aria-selected="false" tabindex="-1" data-swf-tab="conditions">Run when<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="swf-tab-failure" aria-controls="swf-panel-failure" aria-selected="false" tabindex="-1" data-swf-tab="failure">If it fails<span class="scf-tab__dot" aria-hidden="true"></span></button>
+    </nav>
+
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        <section class="scf-panel" id="swf-panel-settings" role="tabpanel" aria-labelledby="swf-tab-settings" data-swf-panel="settings">
+          <div class="scf-grid">
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="swf-step-name">Step name</label>
+              <input class="form-input" id="swf-step-name" maxlength="255" autocomplete="off" data-swf-step-name />
+              <p class="form-help">Shown in the workflow and in execution history. Webhook steps use it to build their callback URL.</p>
+              <p class="scf-error" data-swf-error="name" hidden></p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <span class="form-label">Status</span>
+              <label class="scf-switch">
+                <input type="checkbox" data-swf-step-enabled />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span>Run this step</span>
+              </label>
+              <p class="form-help">Turn off to keep the step in the workflow without running it.</p>
+            </div>
+          </div>
+          <div class="scf-grid swf-fields" data-swf-fields="settings"></div>
+          <div class="swf-webhook" data-swf-webhook hidden></div>
+        </section>
+
+        <section class="scf-panel" id="swf-panel-outputs" role="tabpanel" aria-labelledby="swf-tab-outputs" data-swf-panel="outputs" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">Values later steps can use</h3>
+            <p class="text-muted">When this step finishes, these values are available to every step after it. Pick them from the variable helper or click one to copy it.</p>
+          </div>
+          <ul class="swf-provides" data-swf-provides></ul>
+          <div class="scf-grid swf-fields" data-swf-fields="outputs"></div>
+        </section>
+
+        <section class="scf-panel" id="swf-panel-conditions" role="tabpanel" aria-labelledby="swf-tab-conditions" data-swf-panel="conditions" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">When should this step run?</h3>
+            <p class="text-muted">Skip the step for staff it doesn't apply to. Skipped steps are recorded in the execution history.</p>
+          </div>
+          <div class="scf-choice-list" role="radiogroup" aria-label="When to run">
+            <label class="scf-choice">
+              <input type="radio" name="swf_condition_mode" value="always" data-swf-condition-mode checked />
+              <span><strong>Always run</strong><span class="text-muted">Every {{ swf.direction }} runs this step.</span></span>
+            </label>
+            <label class="scf-choice">
+              <input type="radio" name="swf_condition_mode" value="conditional" data-swf-condition-mode />
+              <span><strong>Only when the staff member matches</strong><span class="text-muted">Limit by department or by ticked custom fields.</span></span>
+            </label>
+          </div>
+          <div class="scf-condition swf-conditions" data-swf-conditions hidden>
+            <div class="scf-grid swf-fields" data-swf-fields="conditions"></div>
+            <p class="scf-sentence" data-swf-condition-sentence></p>
+          </div>
+        </section>
+
+        <section class="scf-panel" id="swf-panel-failure" role="tabpanel" aria-labelledby="swf-tab-failure" data-swf-panel="failure" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">If this step fails</h3>
+            <p class="text-muted">Choose what the workflow does after the retries below are used up.</p>
+          </div>
+          <div class="scf-choice-list" role="radiogroup" aria-label="Failure behaviour">
+            <label class="scf-choice">
+              <input type="radio" name="swf_failure_mode" value="fail_fast" data-swf-failure-mode />
+              <span><strong>Stop the workflow</strong><span class="text-muted">No later steps run. A technician can retry it from execution history.</span></span>
+            </label>
+            <label class="scf-choice">
+              <input type="radio" name="swf_failure_mode" value="pause" data-swf-failure-mode />
+              <span><strong>Pause and wait for a technician</strong><span class="text-muted">The workflow waits until someone resumes it from execution history.</span></span>
+            </label>
+            <label class="scf-choice">
+              <input type="radio" name="swf_failure_mode" value="continue" data-swf-failure-mode />
+              <span><strong>Carry on with the next step</strong><span class="text-muted">Use for optional steps. Values from this step won't be available.</span></span>
+            </label>
+          </div>
+          <div class="scf-grid">
+            <div class="form-field">
+              <label class="form-label" for="swf-step-retries">Retries before giving up</label>
+              <input class="form-input" id="swf-step-retries" type="number" min="0" max="20" step="1" data-swf-step-retries />
+              <p class="form-help">0 means try once.</p>
+            </div>
+            <div class="form-field">
+              <span class="form-label">Ticket</span>
+              <label class="scf-switch">
+                <input type="checkbox" data-swf-step-ticket />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span data-swf-step-ticket-label>Create a ticket when it fails</span>
+              </label>
+              <p class="form-help">Raises a helpdesk ticket so the problem is followed up.</p>
+            </div>
+          </div>
+          <p class="scf-sentence" data-swf-failure-sentence></p>
+        </section>
+      </div>
+
+      <aside class="scf-preview swf-helper" aria-labelledby="swf-helper-title">
+        <p class="scf-preview__eyebrow" id="swf-helper-title">Variable helper</p>
+        <p class="swf-helper__target text-muted" data-swf-helper-target>Click into a field, then pick a value to insert it.</p>
+        <div class="swf-preview" data-swf-preview hidden>
+          <p class="scf-preview__eyebrow">Preview with sample data</p>
+          <div class="scf-preview__card swf-preview__card" data-swf-preview-text></div>
+        </div>
+        <label class="visually-hidden" for="swf-helper-search">Search variables</label>
+        <input type="search" class="form-input swf-helper__search" id="swf-helper-search" placeholder="Search variables" autocomplete="off" data-swf-helper-search />
+        <div class="swf-vars" data-swf-helper-groups></div>
+      </aside>
+    </div>
+
+    <footer class="modal__footer scf-editor__footer">
+      <button type="button" class="button button--danger" data-swf-step-delete>Remove step</button>
+      <span class="scf-editor__spacer" aria-hidden="true"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button button--primary">Apply</button>
+    </footer>
+  </form>
+</div>
+
+{# ---------------------------------------------------------- Workflow settings #}
+<div class="modal swf-modal" id="swf-settings-modal" role="dialog" aria-modal="true" aria-labelledby="swf-settings-title" hidden>
+  <form class="modal__panel scf-editor swf-settings" data-swf-settings-form novalidate>
+    {% include "partials/csrf.html" %}
+    <header class="modal__header scf-editor__header">
+      <div>
+        <h2 class="modal__title" id="swf-settings-title" data-swf-settings-title>Workflow settings</h2>
+        <p class="scf-editor__subtitle">Name the workflow and choose when it runs.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close workflow settings"></button>
+    </header>
+    <div class="modal__body">
+      <div class="scf-grid">
+        <div class="form-field scf-grid__full">
+          <label class="form-label" for="swf-settings-name">Name</label>
+          <input class="form-input" id="swf-settings-name" maxlength="255" autocomplete="off" placeholder="{{ swf.name_placeholder }}" data-swf-settings-name />
+          <p class="scf-error" data-swf-error="workflow_name" hidden></p>
+        </div>
+        <div class="form-field scf-grid__full">
+          <label class="form-label" for="swf-settings-key">Key</label>
+          <input class="form-input scf-mono" id="swf-settings-key" maxlength="120" autocomplete="off" spellcheck="false" data-swf-settings-key />
+          <p class="form-help" data-swf-settings-key-help>Generated from the name. Webhook callback URLs are built from it, so changing it later issues new URLs.</p>
+          <p class="scf-error" data-swf-error="workflow_key" hidden></p>
+        </div>
+        <fieldset class="scf-grid__full scf-fieldset">
+          <legend class="form-label">When it runs</legend>
+          <div class="scf-type-grid swf-timing">
+            <label class="scf-type-card">
+              <input type="radio" name="swf_delay_type" value="scheduled" data-swf-settings-delay />
+              <span class="swf-type-icon swf-type-icon--scheduled" aria-hidden="true"></span>
+              <span class="scf-type-card__label">Scheduled</span>
+              <span class="scf-type-card__help">{{ swf.scheduled_help }}</span>
+            </label>
+            <label class="scf-type-card">
+              <input type="radio" name="swf_delay_type" value="immediate" data-swf-settings-delay />
+              <span class="swf-type-icon swf-type-icon--immediate" aria-hidden="true"></span>
+              <span class="scf-type-card__label">Immediate</span>
+              <span class="scf-type-card__help">{{ swf.immediate_help }}</span>
+            </label>
+          </div>
+        </fieldset>
+        <div class="form-field">
+          <label class="form-label" for="swf-settings-retries">Default retries</label>
+          <input class="form-input" id="swf-settings-retries" type="number" min="0" max="20" step="1" data-swf-settings-retries />
+          <p class="form-help">Used by steps that don't set their own.</p>
+        </div>
+        <div class="form-field">
+          <span class="form-label">Status</span>
+          <label class="scf-switch">
+            <input type="checkbox" data-swf-settings-enabled />
+            <span class="scf-switch__track" aria-hidden="true"></span>
+            <span>Workflow is on</span>
+          </label>
+          <p class="form-help">Turned-off workflows don't run for new requests.</p>
+        </div>
+      </div>
+    </div>
+    <footer class="modal__footer scf-editor__footer">
+      <button type="button" class="button button--danger" data-swf-workflow-delete hidden>Delete workflow</button>
+      <span class="scf-editor__spacer" aria-hidden="true"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button button--primary" data-swf-settings-submit>Apply</button>
+    </footer>
+  </form>
+</div>
+
+{# ------------------------------------------------------- Variables reference #}
+<div class="modal swf-modal" id="swf-variables-modal" role="dialog" aria-modal="true" aria-labelledby="swf-variables-title" hidden>
+  <div class="modal__panel modal__panel--wide scf-editor swf-variables">
+    <header class="modal__header scf-editor__header">
+      <div>
+        <h2 class="modal__title" id="swf-variables-title">Variables in this workflow</h2>
+        <p class="scf-editor__subtitle">Type <code>${vars.name}</code> in any text field, or use the variable helper while editing a step. Values from a step are only available to the steps after it.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close variables reference"></button>
+    </header>
+    <div class="modal__body">
+      <label class="visually-hidden" for="swf-variables-search">Search variables</label>
+      <input type="search" class="form-input swf-helper__search" id="swf-variables-search" placeholder="Search variables" autocomplete="off" data-swf-reference-search />
+      <div class="swf-vars swf-vars--reference" data-swf-reference-groups></div>
+    </div>
+  </div>
+</div>
