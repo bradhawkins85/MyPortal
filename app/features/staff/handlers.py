@@ -3275,6 +3275,99 @@ async def delete_staff_workflow_policy(
     return JSONResponse({"success": True})
 
 
+_HISTORY_REDACTED = "***redacted***"
+
+
+def _is_secret_name_list(key: str, value: Any) -> bool:
+    """``secret_vars`` in a context log lists variable names, not values."""
+
+    return key == "secret_vars" and isinstance(value, list) and all(
+        isinstance(item, str) for item in value
+    )
+
+
+def _history_redact(payload: Any) -> Any:
+    """Hide secret-named keys in stored step payloads before display.
+
+    New logs are redacted when written; this also covers older rows.
+    """
+
+    if isinstance(payload, dict):
+        return {
+            key: (
+                _HISTORY_REDACTED
+                if staff_onboarding_workflow_service._is_secret_var(str(key))
+                and value not in (None, "")
+                and not _is_secret_name_list(str(key), value)
+                else _history_redact(value)
+            )
+            for key, value in payload.items()
+        }
+    if isinstance(payload, list):
+        return [_history_redact(item) for item in payload]
+    return payload
+
+
+def _history_variable(
+    name: str, value: Any, *, step: str, source: str, secret: bool
+) -> dict[str, Any]:
+    hidden = (
+        secret
+        or value == _HISTORY_REDACTED
+        or staff_onboarding_workflow_service._is_secret_var(name)
+    )
+    return {
+        "name": name,
+        "value": None if hidden else value,
+        "secret": hidden,
+        "step": step,
+        "source": source,
+    }
+
+
+def _workflow_history_variables(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """List the variables an execution produced, for reuse in later workflows.
+
+    Values from Pause For Webhook callbacks come from the step's response
+    ``values``; other steps record theirs in a ``<step>:context`` log.  Secret
+    values are never included, only their names.
+    """
+
+    found: dict[str, dict[str, Any]] = {}
+    for step in steps:
+        if step.get("status") != "success":
+            continue
+        name = str(step.get("stepName") or "")
+        response = step.get("responsePayload")
+        if not isinstance(response, dict):
+            continue
+        if "webhook_public_id" in response and isinstance(response.get("values"), dict):
+            for var_name, value in response["values"].items():
+                found[str(var_name)] = _history_variable(
+                    str(var_name), value, step=name, source="webhook", secret=False
+                )
+            continue
+        patch = response.get("context_patch")
+        if not name.endswith(":context") or not isinstance(patch, dict):
+            continue
+        source_step = name[: -len(":context")]
+        secret_names = patch.get("secret_vars")
+        # Older logs stored this list redacted as a plain string.
+        for var_name in secret_names if isinstance(secret_names, list) else []:
+            found[str(var_name)] = _history_variable(
+                str(var_name), None, step=source_step, source="step", secret=True
+            )
+        variables = patch.get("vars")
+        if isinstance(variables, dict):
+            for var_name, value in variables.items():
+                if str(var_name) in found and found[str(var_name)]["secret"]:
+                    continue
+                found[str(var_name)] = _history_variable(
+                    str(var_name), value, step=source_step, source="step", secret=False
+                )
+    return list(found.values())
+
+
 async def staff_workflow_history_page(request: Request):
     (
         user,
@@ -3356,6 +3449,18 @@ async def staff_workflow_history_recent(request: Request):
     step_logs_map = await staff_workflow_repo.list_step_logs_for_execution_ids(
         execution_ids
     )
+    workflow_names: dict[tuple[str, str], str] = {}
+    for policy_direction in (
+        staff_workflow_repo.DIRECTION_ONBOARDING,
+        staff_workflow_repo.DIRECTION_OFFBOARDING,
+    ):
+        for policy in await staff_workflow_repo.list_company_workflow_policies(
+            company_id, direction=policy_direction
+        ):
+            key = str(policy.get("workflow_key") or "")
+            name = str(policy.get("workflow_name") or "").strip()
+            if key and name:
+                workflow_names[(policy_direction, key)] = name
 
     def _serialise_dt(val: Any) -> str | None:
         if isinstance(val, datetime):
@@ -3388,8 +3493,8 @@ async def staff_workflow_history_recent(request: Request):
                     "stepName": str(log.get("step_name") or ""),
                     "status": str(log.get("status") or ""),
                     "attempt": int(log.get("attempt") or 1),
-                    "requestPayload": req_p or {},
-                    "responsePayload": res_p or {},
+                    "requestPayload": _history_redact(req_p or {}),
+                    "responsePayload": _history_redact(res_p or {}),
                     "errorMessage": log.get("error_message"),
                     "startedAt": _serialise_dt(log.get("started_at")),
                     "completedAt": _serialise_dt(log.get("completed_at")),
@@ -3404,6 +3509,13 @@ async def staff_workflow_history_recent(request: Request):
                 "direction": str(ex.get("direction") or "onboarding"),
                 "state": str(ex.get("state") or ""),
                 "workflowKey": str(ex.get("workflow_key") or ""),
+                "workflowName": workflow_names.get(
+                    (
+                        str(ex.get("direction") or "onboarding"),
+                        str(ex.get("workflow_key") or ""),
+                    ),
+                    "",
+                ),
                 "currentStep": ex.get("current_step"),
                 "retriesUsed": int(ex.get("retries_used") or 0),
                 "lastError": ex.get("last_error"),
@@ -3412,6 +3524,7 @@ async def staff_workflow_history_recent(request: Request):
                 "startedAt": _serialise_dt(ex.get("started_at")),
                 "completedAt": _serialise_dt(ex.get("completed_at")),
                 "steps": steps,
+                "variables": _workflow_history_variables(steps),
             }
         )
     return JSONResponse({"executions": items, "total": len(items)})
