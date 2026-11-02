@@ -1,0 +1,7 @@
+{
+  "guid": "1555a3d4-ba24-4e48-9f84-31ce24681767",
+  "occurred_at": "2026-11-02T01:02Z",
+  "change_type": "Fix",
+  "summary": "Duplicate \"Requested\" offboarding runs left in the workflow history by earlier offboarding requests are removed.",
+  "content_hash": "bc16a3ede2dae70d36662cbd85ebfa2fd42ff965b8b1d850745e919d501dcd88"
+}

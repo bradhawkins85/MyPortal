@@ -562,6 +562,31 @@ async def test_resume_uses_direction_from_execution_id_not_latest_staff_executio
 
 
 @pytest.mark.anyio
+async def test_enqueue_offboarding_schedules_run_at_requested_offboard_time(monkeypatch):
+    """The approved run waits for the stored offboard schedule (UTC)."""
+    staff_record = {"id": 701, "date_offboarded": "2026-11-20T09:00:00+00:00"}
+    monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "list_company_workflow_policies",
+        AsyncMock(return_value=[{"workflow_key": "offboarding", "delay_type": "scheduled"}]),
+    )
+    create_mock = AsyncMock(return_value={"id": 89})
+    monkeypatch.setattr(workflows.workflow_repo, "create_or_reset_execution", create_mock)
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+
+    await workflows.enqueue_staff_onboarding_workflow(
+        company_id=5,
+        staff_id=701,
+        initiated_by_user_id=None,
+        direction=workflows.DIRECTION_OFFBOARDING,
+    )
+
+    create_mock.assert_awaited_once()
+    assert create_mock.await_args.kwargs["scheduled_for_utc"].isoformat() == "2026-11-20T09:00:00"
+
+
+@pytest.mark.anyio
 async def test_enqueue_offboarding_without_configured_policy_does_not_create_execution(monkeypatch):
     staff_record = {"id": 700, "date_offboarded": None}
     monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
