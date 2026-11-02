@@ -579,16 +579,20 @@ async def test_execute_policy_step_removes_user_from_all_teams_groups_when_ids_b
     monkeypatch.setattr(
         workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
     )
+    async def fake_graph_get_all(_token: str, url: str):
+        if "/ownedObjects/" in url:
+            return []
+        return [
+            {"id": "group-a", "groupTypes": ["Unified"]},
+            {"id": "security-group", "groupTypes": [], "securityEnabled": True},
+            {"id": "group-dynamic", "groupTypes": ["Unified", "DynamicMembership"]},
+            {"id": "group-b", "groupTypes": ["Unified"]},
+        ]
+
     monkeypatch.setattr(
         workflows.m365_service,
         "_graph_get_all",
-        AsyncMock(
-            return_value=[
-                {"id": "group-a", "groupTypes": []},
-                {"id": "group-dynamic", "groupTypes": ["DynamicMembership"]},
-                {"id": "group-b", "groupTypes": ["Unified"]},
-            ]
-        ),
+        AsyncMock(side_effect=fake_graph_get_all),
     )
     graph_delete = AsyncMock(return_value={})
     monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
@@ -614,11 +618,9 @@ async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatc
     monkeypatch.setattr(
         workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
     )
-    monkeypatch.setattr(
-        workflows.m365_service,
-        "_graph_get",
-        AsyncMock(
-            return_value={
+    async def fake_graph_get(_token: str, url: str):
+        if url.endswith("/sites/site-a/permissions"):
+            return {
                 "value": [
                     {
                         "id": "perm-1",
@@ -626,7 +628,10 @@ async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatc
                     }
                 ]
             }
-        ),
+        return {"value": []}
+
+    monkeypatch.setattr(
+        workflows.m365_service, "_graph_get", AsyncMock(side_effect=fake_graph_get)
     )
     graph_delete = AsyncMock(return_value={})
     monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
@@ -659,7 +664,7 @@ async def test_execute_policy_step_removes_user_from_all_sharepoint_sites_when_i
     monkeypatch.setattr(workflows.m365_service, "_graph_get_all", graph_get_all)
 
     async def fake_graph_get(_token: str, url: str):
-        if "/sites/site-a/permissions" in url:
+        if url.endswith("/sites/site-a/permissions"):
             return {
                 "value": [
                     {
@@ -687,6 +692,343 @@ async def test_execute_policy_step_removes_user_from_all_sharepoint_sites_when_i
     assert result["operation"] == "remove"
     assert result["site_ids"] == ["site-a", "site-b"]
     graph_delete.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_remove_all_teams_groups_skips_unmanageable_and_failed_groups(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-1"})
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
+
+    async def fake_graph_get_all(_token: str, url: str):
+        if "/ownedObjects/" in url:
+            return [{"id": "team-owned", "groupTypes": ["Unified"]}]
+        return [
+            {"id": "team-a", "groupTypes": ["Unified"], "mailEnabled": True},
+            {"id": "synced", "groupTypes": ["Unified"], "onPremisesSyncEnabled": True},
+            {"id": "dist-list", "groupTypes": [], "mailEnabled": True},
+            {"id": "gone", "groupTypes": ["Unified"]},
+            {"id": "locked", "groupTypes": ["Unified"]},
+        ]
+
+    async def fake_graph_delete(_token: str, url: str):
+        if "/groups/gone/" in url:
+            raise workflows.M365Error("not found", http_status=404)
+        if "/groups/locked/" in url or "/owners/" in url:
+            raise workflows.M365Error("bad request", http_status=400)
+        return None
+
+    monkeypatch.setattr(
+        workflows.m365_service, "_graph_get_all", AsyncMock(side_effect=fake_graph_get_all)
+    )
+    graph_delete = AsyncMock(side_effect=fake_graph_delete)
+    monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "m365_remove_teams_group_member", "group_ids_csv": ""},
+        company_id=9,
+        staff={"id": 703, "email": "old.user@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["group_ids"] == ["team-a"]
+    assert result["failed_groups"] == [{"group_id": "locked", "http_status": 400}]
+    skipped = {item["group_id"]: item["reason"] for item in result["skipped_groups"]}
+    assert skipped == {
+        "synced": "not_manageable",
+        "gone": "not_a_member",
+        "team-owned": "owner_not_removed",
+    }
+    deleted_urls = [call.args[1] for call in graph_delete.await_args_list]
+    assert not any("/groups/synced/" in url or "/groups/dist-list/" in url for url in deleted_urls)
+
+
+@pytest.mark.anyio
+async def test_remove_explicit_teams_group_failure_raises(monkeypatch):
+    monkeypatch.setattr(
+        workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-1"})
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "_graph_delete",
+        AsyncMock(side_effect=workflows.M365Error("forbidden", http_status=403)),
+    )
+
+    with pytest.raises(workflows.WorkflowStepError, match="group-a"):
+        await workflows._execute_policy_step(
+            step={"type": "m365_remove_teams_group_member", "group_ids_csv": "group-a"},
+            company_id=9,
+            staff={"id": 703, "email": "old.user@example.com"},
+            policy_config={},
+            vars_map={},
+        )
+
+
+@pytest.mark.anyio
+async def test_remove_all_sharepoint_sites_tolerates_unreadable_sites(monkeypatch):
+    monkeypatch.setattr(
+        workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-2"})
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "_graph_get_all",
+        AsyncMock(
+            return_value=[
+                {"id": "site-a", "webUrl": "https://contoso.sharepoint.com/sites/a"},
+                {"id": "site-locked", "webUrl": "https://contoso.sharepoint.com/sites/b"},
+                {"id": "onedrive", "webUrl": "https://contoso-my.sharepoint.com/personal/x"},
+            ]
+        ),
+    )
+
+    async def fake_graph_get(_token: str, url: str):
+        if "/sites/site-locked/" in url or "/sites/onedrive/" in url:
+            raise workflows.M365Error("forbidden", http_status=403)
+        if url.endswith("/sites/site-a/permissions"):
+            raise workflows.M365Error("forbidden", http_status=403)
+        return {
+            "value": [
+                {"id": "direct", "grantedToV2": {"user": {"id": "user-2"}}},
+                {
+                    "id": "inherited",
+                    "grantedToV2": {"user": {"id": "user-2"}},
+                    "inheritedFrom": {"id": "parent"},
+                },
+                {"id": "members", "grantedToV2": {"siteGroup": {"id": "3"}}},
+            ]
+        }
+
+    monkeypatch.setattr(
+        workflows.m365_service, "_graph_get", AsyncMock(side_effect=fake_graph_get)
+    )
+    graph_delete = AsyncMock(return_value=None)
+    monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "m365_remove_sharepoint_site_member", "site_ids_csv": ""},
+        company_id=9,
+        staff={"id": 704, "email": "offboard.user@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["site_ids"] == ["site-a"]
+    assert result["failed_sites"] == [{"site_id": "site-locked", "http_status": 403}]
+    graph_delete.assert_awaited_once()
+    assert graph_delete.await_args.args[1].endswith(
+        "/sites/site-a/drive/root/permissions/direct"
+    )
+
+
+def _patch_distribution_group_env(monkeypatch, *, memberships, contacts=None, contact_groups=None):
+    monkeypatch.setattr(
+        workflows,
+        "_resolve_staff_m365_user",
+        AsyncMock(
+            return_value={
+                "id": "user-3",
+                "mail": "leaver@example.com",
+                "userPrincipalName": "leaver@example.com",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "_graph_get_all", AsyncMock(return_value=memberships)
+    )
+    graph_delete = AsyncMock(return_value=None)
+    monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
+    session = AsyncMock(return_value=("exo-token", "tenant"))
+    monkeypatch.setattr(workflows.m365_service, "acquire_exchange_session", session)
+    find_contacts = AsyncMock(return_value=contacts or [])
+    monkeypatch.setattr(
+        workflows.m365_service, "find_mail_contacts_for_addresses", find_contacts
+    )
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "list_distribution_groups_with_member",
+        AsyncMock(return_value=contact_groups or []),
+    )
+    remove_member = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        workflows.m365_service, "remove_distribution_group_member", remove_member
+    )
+    return graph_delete, remove_member, find_contacts, session
+
+
+_DISTRIBUTION_MEMBERSHIPS = [
+    {"id": "team", "groupTypes": ["Unified"], "mailEnabled": True, "securityEnabled": False},
+    {"id": "dl", "displayName": "All Staff", "mail": "all@example.com", "groupTypes": [], "mailEnabled": True, "securityEnabled": False},
+    {"id": "mesg", "displayName": "Finance", "mail": "finance@example.com", "groupTypes": [], "mailEnabled": True, "securityEnabled": True},
+    {"id": "sec", "displayName": "VPN Users", "groupTypes": [], "mailEnabled": False, "securityEnabled": True},
+    {"id": "synced", "displayName": "AD Group", "groupTypes": [], "mailEnabled": False, "securityEnabled": True, "onPremisesSyncEnabled": True},
+    {"id": "dyn", "displayName": "Dynamic", "groupTypes": ["DynamicMembership"], "mailEnabled": False, "securityEnabled": True},
+]
+
+
+@pytest.mark.anyio
+async def test_remove_distribution_groups_handles_lists_security_groups_and_contacts(
+    monkeypatch,
+):
+    graph_delete, remove_member, find_contacts, session = _patch_distribution_group_env(
+        monkeypatch,
+        memberships=_DISTRIBUTION_MEMBERSHIPS,
+        contacts=[
+            {"distinguished_name": "CN=Leaver Contact", "display_name": "Leaver (personal)", "email": "leaver@example.com"}
+        ],
+        contact_groups=[
+            {"identity": "suppliers@example.com", "display_name": "Suppliers", "synced": False},
+            {"identity": "onprem@example.com", "display_name": "On-prem list", "synced": True},
+        ],
+    )
+
+    result = await workflows._execute_policy_step(
+        step={"type": "m365_remove_distribution_groups"},
+        company_id=9,
+        staff={"id": 705, "email": "leaver@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    removed = {(item["group_id"], item["kind"]) for item in result["removed"]}
+    assert removed == {
+        ("dl", "distribution_list"),
+        ("mesg", "security_group"),
+        ("sec", "security_group"),
+        ("suppliers@example.com", "contact_membership"),
+    }
+    skipped = {item["group_id"]: item["reason"] for item in result["skipped"]}
+    assert skipped == {
+        "synced": "managed_on_premises",
+        "dyn": "dynamic_membership",
+        "onprem@example.com": "managed_on_premises",
+    }
+    assert result["groups_removed"] == 3
+    assert result["contact_memberships_removed"] == 1
+    graph_delete.assert_awaited_once()
+    assert "/groups/sec/members/user-3/$ref" in graph_delete.await_args.args[1]
+    exo_calls = {(call.args[1], call.args[2]) for call in remove_member.await_args_list}
+    assert exo_calls == {
+        ("all@example.com", "leaver@example.com"),
+        ("finance@example.com", "leaver@example.com"),
+        ("suppliers@example.com", "CN=Leaver Contact"),
+    }
+    assert set(find_contacts.await_args.args[1]) == {"leaver@example.com"}
+    session.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_remove_distribution_groups_respects_disabled_options(monkeypatch):
+    graph_delete, remove_member, find_contacts, session = _patch_distribution_group_env(
+        monkeypatch, memberships=_DISTRIBUTION_MEMBERSHIPS
+    )
+
+    result = await workflows._execute_policy_step(
+        step={
+            "type": "m365_remove_distribution_groups",
+            "remove_distribution_lists": True,
+            "remove_security_groups": False,
+            "remove_mail_contacts": "false",
+        },
+        company_id=9,
+        staff={"id": 705, "email": "leaver@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert [item["group_id"] for item in result["removed"]] == ["dl"]
+    graph_delete.assert_not_awaited()
+    find_contacts.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_remove_distribution_groups_reports_partial_failures(monkeypatch):
+    _graph_delete, remove_member, _find, _session = _patch_distribution_group_env(
+        monkeypatch, memberships=_DISTRIBUTION_MEMBERSHIPS
+    )
+    remove_member.side_effect = workflows.M365Error("forbidden", http_status=403)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "m365_remove_distribution_groups"},
+        company_id=9,
+        staff={"id": 705, "email": "leaver@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert [item["group_id"] for item in result["removed"]] == ["sec"]
+    assert {item["group_id"] for item in result["failed"]} == {"dl", "mesg"}
+
+
+@pytest.mark.anyio
+async def test_remove_distribution_groups_fails_when_nothing_could_be_removed(
+    monkeypatch,
+):
+    graph_delete, remove_member, find_contacts, _session = _patch_distribution_group_env(
+        monkeypatch, memberships=_DISTRIBUTION_MEMBERSHIPS[:3]
+    )
+    remove_member.side_effect = workflows.M365Error("forbidden", http_status=403)
+    find_contacts.side_effect = workflows.M365Error("forbidden", http_status=403)
+
+    with pytest.raises(workflows.WorkflowStepError, match="All Staff"):
+        await workflows._execute_policy_step(
+            step={"type": "m365_remove_distribution_groups"},
+            company_id=9,
+            staff={"id": 705, "email": "leaver@example.com"},
+            policy_config={},
+            vars_map={},
+        )
+
+
+@pytest.mark.anyio
+async def test_find_mail_contacts_matches_external_address(monkeypatch):
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "_exo_invoke_command",
+        AsyncMock(
+            return_value={
+                "value": [
+                    {"DistinguishedName": "CN=Match", "DisplayName": "Leaver", "ExternalEmailAddress": "SMTP:Leaver@Example.com"},
+                    {"DistinguishedName": "CN=Other", "ExternalEmailAddress": "SMTP:someone@else.com", "EmailAddresses": ["X500:/o=leaver@example.com"]},
+                ]
+            }
+        ),
+    )
+
+    contacts = await workflows.m365_service.find_mail_contacts_for_addresses(
+        9, ["leaver@example.com"], exo_session=("token", "tenant")
+    )
+
+    assert contacts == [
+        {"distinguished_name": "CN=Match", "display_name": "Leaver", "email": "leaver@example.com"}
+    ]
+
+
+@pytest.mark.anyio
+async def test_list_distribution_groups_with_member_escapes_filter(monkeypatch):
+    invoke = AsyncMock(return_value={"value": {"PrimarySmtpAddress": "list@example.com", "IsDirSynced": False}})
+    monkeypatch.setattr(workflows.m365_service, "_exo_invoke_command", invoke)
+
+    groups = await workflows.m365_service.list_distribution_groups_with_member(
+        9, "CN=O'Brien,OU=Contacts", exo_session=("token", "tenant")
+    )
+
+    assert groups[0]["identity"] == "list@example.com"
+    assert invoke.await_args.args[3]["Filter"] == "Members -eq 'CN=O''Brien,OU=Contacts'"
 
 
 @pytest.mark.anyio

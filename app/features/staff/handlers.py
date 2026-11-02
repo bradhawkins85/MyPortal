@@ -889,12 +889,28 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
     {
         "type": "m365_remove_teams_group_member",
         "name": "Remove from Teams groups",
-        "description": "Removes the staff member from one or more Teams/M365 groups using object IDs.",
+        "description": (
+            "Removes the staff member from the listed Teams/M365 groups. Leave the group IDs blank to remove them "
+            "from every Team and Microsoft 365 group they are a member or owner of; dynamic and on-premises synced "
+            "groups are skipped. Use \"Remove from distribution lists & security groups\" for those group types."
+        ),
+    },
+    {
+        "type": "m365_remove_distribution_groups",
+        "name": "Remove from distribution lists & security groups",
+        "description": (
+            "Removes the staff member from every distribution list and security group they belong to, and removes "
+            "Exchange mail contacts that use their email address from distribution lists. Groups synced from "
+            "on-premises Active Directory and dynamic groups are skipped. Needs Exchange Online access for mail-enabled groups."
+        ),
     },
     {
         "type": "m365_remove_sharepoint_site_member",
         "name": "Remove from SharePoint sites",
-        "description": "Removes the staff member from one or more SharePoint sites using Graph site IDs.",
+        "description": (
+            "Removes the staff member's direct access from the listed SharePoint sites. Leave the site IDs blank to "
+            "check every SharePoint site. Access through a Team's group is removed by the Teams groups step."
+        ),
     },
     {
         "type": "m365_export_onedrive",
@@ -1664,13 +1680,38 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "Teams group IDs (comma separated)",
                 "type": "text",
                 "default": "",
-                "description": "Microsoft 365 group object IDs to remove the user from.",
+                "description": "Microsoft 365 group object IDs to remove the user from. Leave blank to remove them from all groups and Teams they belong to.",
             },
             {
                 "name": "user_id",
                 "label": "User object ID (optional)",
                 "type": "text",
                 "default": "",
+            },
+        ],
+    },
+    "m365_remove_distribution_groups": {
+        "fields": [
+            {
+                "name": "remove_distribution_lists",
+                "label": "Remove from distribution lists",
+                "type": "checkbox",
+                "default": True,
+                "description": "Removes them from every distribution list they are a member of.",
+            },
+            {
+                "name": "remove_security_groups",
+                "label": "Remove from security groups",
+                "type": "checkbox",
+                "default": True,
+                "description": "Includes mail-enabled security groups. Dynamic and on-premises synced groups are skipped.",
+            },
+            {
+                "name": "remove_mail_contacts",
+                "label": "Remove matching mail contacts from distribution lists",
+                "type": "checkbox",
+                "default": True,
+                "description": "Finds Exchange mail contacts that use their email address and removes those contacts from every distribution list.",
             },
         ],
     },
@@ -1709,7 +1750,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "SharePoint site IDs (comma separated)",
                 "type": "text",
                 "default": "",
-                "description": "Graph site IDs to remove access from.",
+                "description": "Graph site IDs to remove access from. Leave blank to check every SharePoint site.",
             },
             {
                 "name": "user_id",
@@ -2233,6 +2274,15 @@ _WORKFLOW_STEP_DESIGNER_META: dict[str, dict[str, Any]] = {
     "m365_remove_teams_group_member": {"category": "m365", "outputs": []},
     "m365_add_sharepoint_site_member": {"category": "m365", "outputs": []},
     "m365_remove_sharepoint_site_member": {"category": "m365", "outputs": []},
+    "m365_remove_distribution_groups": {
+        "category": "m365",
+        "outputs": [
+            _out("m365_user_id", "Microsoft 365 user ID"),
+            _out("groups_removed", "Distribution lists and security groups removed"),
+            _out("contact_memberships_removed", "Mail contact list memberships removed"),
+            _out("mail_contacts_found", "Matching mail contacts found"),
+        ],
+    },
     "offboard_account": {
         "category": "m365",
         "outputs": [

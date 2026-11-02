@@ -1156,6 +1156,446 @@ def _normalize_group_ids(raw_group_ids: Any) -> list[str]:
     return normalized
 
 
+def _is_removable_group(group: Mapping[str, Any]) -> bool:
+    """Return True when Graph allows removing members from ``group``.
+
+    Dynamic groups, groups synced from on-premises AD, and Exchange-managed
+    groups (distribution lists and mail-enabled security groups) reject
+    membership changes through Microsoft Graph.
+    """
+    group_types = group.get("groupTypes") or []
+    if "DynamicMembership" in group_types:
+        return False
+    if group.get("onPremisesSyncEnabled"):
+        return False
+    if group.get("mailEnabled") and "Unified" not in group_types:
+        return False
+    return True
+
+
+def _graph_user_ids_for_permission(permission: Mapping[str, Any]) -> set[str]:
+    user_ids: set[str] = set()
+    for key in ("grantedToV2", "grantedTo"):
+        entry = permission.get(key)
+        if isinstance(entry, dict):
+            user_ids.add(str((entry.get("user") or {}).get("id") or "").strip())
+    for key in ("grantedToIdentitiesV2", "grantedToIdentities"):
+        for entry in permission.get(key) or []:
+            if isinstance(entry, dict):
+                user_ids.add(str((entry.get("user") or {}).get("id") or "").strip())
+    user_ids.discard("")
+    return user_ids
+
+
+async def _remove_user_from_groups(
+    *,
+    access_token: str,
+    m365_user_id: str,
+    group_ids: list[str],
+) -> dict[str, Any]:
+    """Remove a user from Teams/M365 groups.
+
+    With no ``group_ids`` every Microsoft 365 group (the groups behind Teams)
+    the user is a member or owner of is discovered and processed. Distribution
+    lists and security groups are handled by ``m365_remove_distribution_groups``. Groups that cannot be changed through Graph are
+    skipped, and per-group failures are reported instead of failing the
+    whole step. Explicitly configured groups that fail still raise.
+    """
+    encoded_user_id = quote(m365_user_id, safe="")
+    discover = not group_ids
+    owned_group_ids: list[str] = []
+    skipped: list[dict[str, Any]] = []
+    if discover:
+        memberships = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            "https://graph.microsoft.com/v1.0/users/"
+            + encoded_user_id
+            + "/memberOf/microsoft.graph.group"
+            + "?$select=id,displayName,groupTypes,mailEnabled,securityEnabled,onPremisesSyncEnabled",
+        )
+        for item in memberships:
+            group_id = str(item.get("id") or "").strip()
+            if not group_id:
+                continue
+            if "Unified" not in (item.get("groupTypes") or []):
+                # Distribution lists and security groups have their own step.
+                continue
+            if _is_removable_group(item):
+                group_ids.append(group_id)
+            else:
+                skipped.append({"group_id": group_id, "reason": "not_manageable"})
+        try:
+            owned = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                "https://graph.microsoft.com/v1.0/users/"
+                + encoded_user_id
+                + "/ownedObjects/microsoft.graph.group"
+                + "?$select=id,groupTypes,mailEnabled,onPremisesSyncEnabled",
+            )
+        except M365Error as exc:
+            log_warning(
+                "Offboarding: unable to list groups owned by user",
+                user_id=m365_user_id,
+                http_status=exc.http_status,
+            )
+            owned = []
+        owned_group_ids = [
+            str(item.get("id") or "").strip()
+            for item in owned
+            if str(item.get("id") or "").strip()
+            and "Unified" in (item.get("groupTypes") or [])
+            and _is_removable_group(item)
+        ]
+
+    removed: list[str] = []
+    failed: list[dict[str, Any]] = []
+    for group_id in group_ids:
+        try:
+            await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                "https://graph.microsoft.com/v1.0/groups/"
+                + quote(group_id, safe="")
+                + "/members/"
+                + encoded_user_id
+                + "/$ref",
+            )
+            removed.append(group_id)
+        except M365Error as exc:
+            if exc.http_status == 404:
+                skipped.append({"group_id": group_id, "reason": "not_a_member"})
+                continue
+            log_warning(
+                "Offboarding: unable to remove user from group",
+                group_id=group_id,
+                user_id=m365_user_id,
+                http_status=exc.http_status,
+            )
+            failed.append({"group_id": group_id, "http_status": exc.http_status})
+
+    removed_owner: list[str] = []
+    for group_id in owned_group_ids:
+        try:
+            await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                "https://graph.microsoft.com/v1.0/groups/"
+                + quote(group_id, safe="")
+                + "/owners/"
+                + encoded_user_id
+                + "/$ref",
+            )
+            removed_owner.append(group_id)
+        except M365Error as exc:
+            # Graph refuses to remove the last owner of a group; leave it in place.
+            log_warning(
+                "Offboarding: unable to remove user as group owner",
+                group_id=group_id,
+                user_id=m365_user_id,
+                http_status=exc.http_status,
+            )
+            skipped.append(
+                {"group_id": group_id, "reason": "owner_not_removed", "http_status": exc.http_status}
+            )
+
+    if failed and not discover:
+        raise WorkflowStepError(
+            "Unable to remove the user from group(s): "
+            + ", ".join(str(item["group_id"]) for item in failed)
+        )
+    return {
+        "m365_user_id": m365_user_id,
+        "group_ids": removed,
+        "owner_removed_group_ids": removed_owner,
+        "skipped_groups": skipped,
+        "failed_groups": failed,
+        "operation": "remove",
+    }
+
+
+async def _remove_user_from_sharepoint_sites(
+    *,
+    access_token: str,
+    m365_user_id: str,
+    site_ids: list[str],
+) -> dict[str, Any]:
+    """Remove a user's direct access grants from SharePoint sites.
+
+    With no ``site_ids`` every SharePoint site visible to the app is checked
+    (OneDrive personal sites are excluded). Membership of group-connected
+    sites comes from the Microsoft 365 group and is handled by the Teams group
+    removal step. Sites that cannot be read are skipped rather than failing
+    the whole step; explicitly configured sites that fail still raise.
+    """
+    discover = not site_ids
+    if discover:
+        sites = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            "https://graph.microsoft.com/v1.0/sites?search=*&$select=id,webUrl&$top=200",
+        )
+        for site in sites:
+            site_id = str(site.get("id") or "").strip()
+            web_url = str(site.get("webUrl") or "").lower()
+            if not site_id or "-my.sharepoint." in web_url or "/personal/" in web_url:
+                continue
+            site_ids.append(site_id)
+
+    processed: list[str] = []
+    removed_permissions: list[dict[str, str]] = []
+    failed: list[dict[str, Any]] = []
+    for site_id in site_ids:
+        encoded_site_id = quote(site_id, safe="")
+        permission_sources = (
+            ("site", "https://graph.microsoft.com/v1.0/sites/" + encoded_site_id + "/permissions"),
+            ("library", "https://graph.microsoft.com/v1.0/sites/" + encoded_site_id + "/drive/root/permissions"),
+        )
+        readable_sources = 0
+        site_errors: list[int | None] = []
+        for source, list_url in permission_sources:
+            try:
+                permissions = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+                    access_token, list_url
+                )
+            except M365Error as exc:
+                site_errors.append(exc.http_status)
+                continue
+            readable_sources += 1
+            for permission in permissions.get("value") or []:
+                permission_id = str(permission.get("id") or "").strip()
+                if not permission_id or permission.get("inheritedFrom"):
+                    continue
+                if m365_user_id not in _graph_user_ids_for_permission(permission):
+                    continue
+                try:
+                    await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
+                        access_token,
+                        list_url.split("?", 1)[0] + "/" + quote(permission_id, safe=""),
+                    )
+                    removed_permissions.append(
+                        {"site_id": site_id, "source": source, "permission_id": permission_id}
+                    )
+                except M365Error as exc:
+                    if exc.http_status != 404:
+                        site_errors.append(exc.http_status)
+        if not readable_sources:
+            log_warning(
+                "Offboarding: unable to check SharePoint site access",
+                site_id=site_id,
+                user_id=m365_user_id,
+                http_status=site_errors[0],
+            )
+            failed.append({"site_id": site_id, "http_status": site_errors[0]})
+            continue
+        processed.append(site_id)
+
+    if failed and not discover:
+        raise WorkflowStepError(
+            "Unable to remove the user from SharePoint site(s): "
+            + ", ".join(str(item["site_id"]) for item in failed)
+        )
+    return {
+        "m365_user_id": m365_user_id,
+        "site_ids": processed,
+        "removed_permissions": removed_permissions,
+        "failed_sites": failed,
+        "operation": "remove",
+    }
+
+
+def _step_flag(step: Mapping[str, Any], key: str, default: bool) -> bool:
+    value = step.get(key)
+    if value is None or value == "":
+        return default
+    return _is_truthy_custom_field(value)
+
+
+def _mail_group_kind(group: Mapping[str, Any]) -> str | None:
+    """Classify a Graph group as ``distribution_list``, ``security_group`` or None."""
+    group_types = group.get("groupTypes") or []
+    if "Unified" in group_types:
+        return None
+    if group.get("mailEnabled"):
+        return "security_group" if group.get("securityEnabled") else "distribution_list"
+    if group.get("securityEnabled"):
+        return "security_group"
+    return None
+
+
+async def _remove_user_from_distribution_groups(
+    *,
+    company_id: int,
+    staff: Mapping[str, Any],
+    step: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Remove a leaver from distribution lists, security groups and contact memberships.
+
+    Cloud security groups are changed through Microsoft Graph. Distribution
+    lists and mail-enabled security groups are owned by Exchange Online, so
+    they are changed with ``Remove-DistributionGroupMember``. Mail contacts
+    that use the leaver's email address are removed from every distribution
+    list too. Groups synced from on-premises AD and dynamic groups cannot be
+    changed from the cloud and are skipped. Individual failures are reported
+    rather than failing the step unless nothing could be removed.
+    """
+    include_lists = _step_flag(step, "remove_distribution_lists", True)
+    include_security = _step_flag(step, "remove_security_groups", True)
+    include_contacts = _step_flag(step, "remove_mail_contacts", True)
+
+    user = await _resolve_staff_m365_user(company_id, dict(staff))
+    m365_user_id = str(user["id"]).strip()
+    encoded_user_id = quote(m365_user_id, safe="")
+    user_upn = str(user.get("userPrincipalName") or user.get("mail") or "").strip()
+    access_token = await m365_service.acquire_access_token(
+        company_id, force_client_credentials=True
+    )
+
+    removed: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    exo_session: tuple[str, str] | None = None
+
+    async def _exchange() -> tuple[str, str]:
+        nonlocal exo_session
+        if exo_session is None:
+            exo_session = await m365_service.acquire_exchange_session(company_id)
+        return exo_session
+
+    if include_lists or include_security:
+        memberships = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            "https://graph.microsoft.com/v1.0/users/"
+            + encoded_user_id
+            + "/memberOf/microsoft.graph.group"
+            + "?$select=id,displayName,mail,groupTypes,mailEnabled,securityEnabled,onPremisesSyncEnabled",
+        )
+        for group in memberships:
+            group_id = str(group.get("id") or "").strip()
+            kind = _mail_group_kind(group)
+            if not group_id or kind is None:
+                continue
+            if (kind == "distribution_list" and not include_lists) or (
+                kind == "security_group" and not include_security
+            ):
+                continue
+            entry: dict[str, Any] = {
+                "group_id": group_id,
+                "name": str(group.get("displayName") or "").strip(),
+                "kind": kind,
+            }
+            if "DynamicMembership" in (group.get("groupTypes") or []):
+                skipped.append({**entry, "reason": "dynamic_membership"})
+                continue
+            if group.get("onPremisesSyncEnabled"):
+                skipped.append({**entry, "reason": "managed_on_premises"})
+                continue
+            try:
+                if group.get("mailEnabled"):
+                    group_mail = str(group.get("mail") or "").strip()
+                    if not group_mail or not user_upn:
+                        skipped.append({**entry, "reason": "no_email_address"})
+                        continue
+                    await m365_service.remove_distribution_group_member(
+                        company_id,
+                        group_mail,
+                        user_upn,
+                        exo_session=await _exchange(),
+                    )
+                else:
+                    await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
+                        access_token,
+                        "https://graph.microsoft.com/v1.0/groups/"
+                        + quote(group_id, safe="")
+                        + "/members/"
+                        + encoded_user_id
+                        + "/$ref",
+                    )
+            except M365Error as exc:
+                if exc.http_status == 404:
+                    skipped.append({**entry, "reason": "not_a_member"})
+                    continue
+                log_warning(
+                    "Offboarding: unable to remove user from group",
+                    group_id=group_id,
+                    user_id=m365_user_id,
+                    http_status=exc.http_status,
+                )
+                failed.append({**entry, "http_status": exc.http_status, "error": str(exc)[:300]})
+                continue
+            removed.append(entry)
+
+    contacts: list[dict[str, str]] = []
+    if include_contacts:
+        addresses = {
+            str(value).strip().lower()
+            for value in (staff.get("email"), user.get("mail"), user.get("userPrincipalName"))
+            if str(value or "").strip()
+        }
+        try:
+            session = await _exchange()
+            contacts = await m365_service.find_mail_contacts_for_addresses(
+                company_id, addresses, exo_session=session
+            )
+            for contact in contacts:
+                groups = await m365_service.list_distribution_groups_with_member(
+                    company_id, contact["distinguished_name"], exo_session=session
+                )
+                for group in groups:
+                    entry = {
+                        "group_id": group["identity"],
+                        "name": group.get("display_name") or group["identity"],
+                        "kind": "contact_membership",
+                        "contact": contact.get("display_name") or contact.get("email"),
+                    }
+                    if group.get("synced"):
+                        skipped.append({**entry, "reason": "managed_on_premises"})
+                        continue
+                    try:
+                        await m365_service.remove_distribution_group_member(
+                            company_id,
+                            group["identity"],
+                            contact["distinguished_name"],
+                            exo_session=session,
+                        )
+                    except M365Error as exc:
+                        log_warning(
+                            "Offboarding: unable to remove mail contact from distribution list",
+                            group=group["identity"],
+                            http_status=exc.http_status,
+                        )
+                        failed.append(
+                            {**entry, "http_status": exc.http_status, "error": str(exc)[:300]}
+                        )
+                        continue
+                    removed.append(entry)
+        except M365Error as exc:
+            log_warning(
+                "Offboarding: unable to check mail contacts in Exchange Online",
+                user_id=m365_user_id,
+                http_status=exc.http_status,
+            )
+            failed.append(
+                {"kind": "contact_lookup", "http_status": exc.http_status, "error": str(exc)[:300]}
+            )
+
+    if failed and not removed:
+        raise WorkflowStepError(
+            "Unable to remove the user from distribution lists or security groups: "
+            + "; ".join(
+                str(item.get("name") or item.get("kind")) + " (" + str(item.get("error") or "") + ")"
+                for item in failed[:5]
+            )
+        )
+    return {
+        "m365_user_id": m365_user_id,
+        "removed": removed,
+        "skipped": skipped,
+        "failed": failed,
+        "groups_removed": sum(1 for item in removed if item["kind"] != "contact_membership"),
+        "contact_memberships_removed": sum(
+            1 for item in removed if item["kind"] == "contact_membership"
+        ),
+        "mail_contacts_found": len(contacts),
+    }
+
+
 def _normalise_custom_field_group_mappings(
     policy_config: dict[str, Any],
 ) -> dict[str, list[str]]:
@@ -1530,39 +1970,28 @@ async def _execute_policy_step(
         access_token = await m365_service.acquire_access_token(
             company_id, force_client_credentials=True
         )
-        if not group_ids:
-            memberships = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
-                access_token,
-                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/memberOf/microsoft.graph.group?$select=id,groupTypes",
+        if step_type == "m365_remove_teams_group_member":
+            return await _remove_user_from_groups(
+                access_token=access_token,
+                m365_user_id=m365_user_id,
+                group_ids=group_ids,
             )
-            group_ids = [
-                str(item.get("id")).strip()
-                for item in memberships
-                if item.get("id")
-                and "DynamicMembership" not in (item.get("groupTypes") or [])
-            ]
         changed_group_ids: list[str] = []
         for group_id in group_ids:
-            if step_type == "m365_add_teams_group_member":
-                await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
-                    access_token,
-                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/$ref",
-                    {
-                        "@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{encoded_user_id}"
-                    },
-                )
-            else:
-                await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
-                    access_token,
-                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{encoded_user_id}/$ref",
-                )
+            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                "https://graph.microsoft.com/v1.0/groups/"
+                + quote(group_id, safe="")
+                + "/members/$ref",
+                {
+                    "@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{encoded_user_id}"
+                },
+            )
             changed_group_ids.append(group_id)
         return {
             "m365_user_id": m365_user_id,
             "group_ids": changed_group_ids,
-            "operation": (
-                "add" if step_type == "m365_add_teams_group_member" else "remove"
-            ),
+            "operation": "add",
         }
 
     if step_type in {
@@ -1590,53 +2019,32 @@ async def _execute_policy_step(
         )
         if site_role not in {"read", "write"}:
             raise WorkflowStepError("site_role must be either 'read' or 'write'")
-        if not site_ids:
-            sites = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
-                access_token,
-                "https://graph.microsoft.com/v1.0/sites?search=*&$select=id&$top=200",
+        if step_type == "m365_remove_sharepoint_site_member":
+            result = await _remove_user_from_sharepoint_sites(
+                access_token=access_token,
+                m365_user_id=m365_user_id,
+                site_ids=site_ids,
             )
-            site_ids = [str(site.get("id")).strip() for site in sites if site.get("id")]
+            result["site_role"] = site_role
+            return result
         changed_site_ids: list[str] = []
         for site_id in site_ids:
             encoded_site_id = quote(site_id, safe="")
-            if step_type == "m365_add_sharepoint_site_member":
-                await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
-                    access_token,
-                    f"https://graph.microsoft.com/v1.0/sites/{encoded_site_id}/permissions",
-                    {
-                        "roles": [site_role],
-                        "grantedToIdentitiesV2": [
-                            {"user": {"id": m365_user_id}},
-                        ],
-                    },
-                )
-            else:
-                permissions = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
-                    access_token,
-                    f"https://graph.microsoft.com/v1.0/sites/{encoded_site_id}/permissions",
-                )
-                for permission in permissions.get("value") or []:
-                    permission_id = str(permission.get("id") or "").strip()
-                    if not permission_id:
-                        continue
-                    granted_entries = permission.get("grantedToIdentitiesV2") or []
-                    user_ids = {
-                        str((entry.get("user") or {}).get("id") or "").strip()
-                        for entry in granted_entries
-                        if isinstance(entry, dict)
-                    }
-                    if m365_user_id in user_ids:
-                        await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
-                            access_token,
-                            f"https://graph.microsoft.com/v1.0/sites/{site_id}/permissions/{permission_id}",
-                        )
+            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/sites/{encoded_site_id}/permissions",
+                {
+                    "roles": [site_role],
+                    "grantedToIdentitiesV2": [
+                        {"user": {"id": m365_user_id}},
+                    ],
+                },
+            )
             changed_site_ids.append(site_id)
         return {
             "m365_user_id": m365_user_id,
             "site_ids": changed_site_ids,
-            "operation": (
-                "add" if step_type == "m365_add_sharepoint_site_member" else "remove"
-            ),
+            "operation": "add",
             "site_role": site_role,
         }
 
@@ -1718,6 +2126,13 @@ async def _execute_policy_step(
             "m365_user_id": user_id,
             "updated": patch_payload,
         }
+
+    if step_type == "m365_remove_distribution_groups":
+        return await _remove_user_from_distribution_groups(
+            company_id=company_id,
+            staff=staff,
+            step=step,
+        )
 
     if step_type == "m365_hide_from_gal":
         user = await _resolve_staff_m365_user(company_id, staff)

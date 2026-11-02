@@ -14,6 +14,7 @@ import string
 import tempfile
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
@@ -8321,6 +8322,138 @@ async def convert_mailbox_to_shared(company_id: int, upn: str) -> None:
         "M365 mailbox converted to shared for offboarded user",
         company_id=company_id,
         upn=normalised,
+    )
+
+
+def _exo_rows(data: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    rows = (data or {}).get("value") or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _exo_address_set(value: Any) -> set[str]:
+    """Normalise Exchange address values (``SMTP:a@b``, lists) to bare lowercase addresses."""
+    values = value if isinstance(value, list) else [value]
+    addresses: set[str] = set()
+    for item in values:
+        text = _coerce_exo_string(item).strip().lower()
+        if ":" in text:
+            prefix, _, rest = text.partition(":")
+            if prefix != "smtp":
+                continue
+            text = rest
+        if "@" in text:
+            addresses.add(text)
+    return addresses
+
+
+def _opath_quote(value: str) -> str:
+    """Quote a value for an Exchange OPATH ``-Filter`` string literal."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+async def acquire_exchange_session(company_id: int) -> tuple[str, str]:
+    """Return ``(exo_token, tenant_id)`` for reuse across several Exchange cmdlets."""
+    return await _acquire_exo_access_token(company_id)
+
+
+async def find_mail_contacts_for_addresses(
+    company_id: int,
+    addresses: Iterable[str],
+    *,
+    exo_session: tuple[str, str] | None = None,
+) -> list[dict[str, str]]:
+    """Return Exchange mail contacts whose email matches any of ``addresses``."""
+    wanted = {str(address).strip().lower() for address in addresses if str(address).strip()}
+    if not wanted:
+        return []
+    exo_token, tenant_id = exo_session or await _acquire_exo_access_token(company_id)
+    data = await _exo_invoke_command(
+        exo_token, tenant_id, "Get-MailContact", {"ResultSize": "Unlimited"}
+    )
+    contacts: list[dict[str, str]] = []
+    for row in _exo_rows(data):
+        contact_addresses = (
+            _exo_address_set(row.get("ExternalEmailAddress"))
+            | _exo_address_set(row.get("PrimarySmtpAddress"))
+            | _exo_address_set(row.get("EmailAddresses"))
+        )
+        distinguished_name = _coerce_exo_string(row.get("DistinguishedName")).strip()
+        if not distinguished_name or not (contact_addresses & wanted):
+            continue
+        contacts.append(
+            {
+                "distinguished_name": distinguished_name,
+                "display_name": _coerce_exo_string(
+                    row.get("DisplayName") or row.get("Name")
+                ).strip(),
+                "email": sorted(contact_addresses & wanted)[0],
+            }
+        )
+    return contacts
+
+
+async def list_distribution_groups_with_member(
+    company_id: int,
+    member_distinguished_name: str,
+    *,
+    exo_session: tuple[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """List distribution lists and mail-enabled security groups containing a recipient."""
+    exo_token, tenant_id = exo_session or await _acquire_exo_access_token(company_id)
+    data = await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Get-DistributionGroup",
+        {
+            "ResultSize": "Unlimited",
+            "Filter": "Members -eq " + _opath_quote(member_distinguished_name),
+        },
+    )
+    groups: list[dict[str, Any]] = []
+    for row in _exo_rows(data):
+        identity = _coerce_exo_string(
+            row.get("PrimarySmtpAddress") or row.get("DistinguishedName")
+        ).strip()
+        if not identity:
+            continue
+        groups.append(
+            {
+                "identity": identity,
+                "display_name": _coerce_exo_string(
+                    row.get("DisplayName") or row.get("Name")
+                ).strip(),
+                "recipient_type": _coerce_exo_string(row.get("RecipientTypeDetails")).strip(),
+                "synced": _coerce_exo_bool(row.get("IsDirSynced")),
+            }
+        )
+    return groups
+
+
+async def remove_distribution_group_member(
+    company_id: int,
+    group_identity: str,
+    member_identity: str,
+    *,
+    exo_session: tuple[str, str] | None = None,
+) -> None:
+    """Remove a member from a distribution list or mail-enabled security group."""
+    group = str(group_identity or "").strip()
+    member = str(member_identity or "").strip()
+    if not group or not member:
+        raise M365Error("A group and member are required", http_status=400)
+    exo_token, tenant_id = exo_session or await _acquire_exo_access_token(company_id)
+    await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Remove-DistributionGroupMember",
+        {
+            "Identity": group,
+            "Member": member,
+            "BypassSecurityGroupManagerCheck": True,
+            "Confirm": False,
+        },
     )
 
 
