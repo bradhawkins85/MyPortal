@@ -45,8 +45,7 @@ document.addEventListener('DOMContentLoaded', function () {
     modal.classList.add('is-visible');
     modal.setAttribute('aria-hidden', 'false');
     document.addEventListener('keydown', onKeydown);
-    var focusId = trigger.getAttribute('data-gcl-focus');
-    var target = (focusId && document.getElementById(focusId)) || modal.querySelector('[data-modal-close]');
+    var target = modal.querySelector('[data-modal-close]');
     if (target) target.focus();
   }
 
@@ -65,6 +64,17 @@ document.addEventListener('DOMContentLoaded', function () {
     trigger.addEventListener('click', function (event) {
       event.preventDefault();
       open(trigger);
+    });
+  });
+
+  document.querySelectorAll('[data-gcl-clean]').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      var button = form.querySelector('button[type="submit"]');
+      if (!button) return;
+      window.setTimeout(function () {
+        button.disabled = true;
+        button.textContent = 'Cleaning…';
+      }, 0);
     });
   });
 
