@@ -1227,6 +1227,11 @@ async def test_update_and_reply_ticket_steps_use_created_ticket_variable(monkeyp
     )
     create_reply = AsyncMock(return_value={"id": 77, "is_internal": True})
     monkeypatch.setattr(workflows.tickets_repo, "create_reply", create_reply)
+    monkeypatch.setattr(
+        workflows.user_repo,
+        "get_user_by_id",
+        AsyncMock(return_value={"id": 44, "email": "tech@example.com"}),
+    )
     emit_replied = AsyncMock()
     monkeypatch.setattr(
         workflows.tickets_service, "emit_ticket_replied_event", emit_replied
@@ -1265,10 +1270,107 @@ async def test_update_and_reply_ticket_steps_use_created_ticket_variable(monkeyp
         "reply_id": 77,
         "is_internal": True,
     }
-    create_reply.assert_awaited_once_with(
-        ticket_id=123,
-        author_id=44,
-        body="Done",
-        is_internal=True,
-        author_display_name=None,
+    reply_kwargs = create_reply.await_args.kwargs
+    assert reply_kwargs["ticket_id"] == 123
+    assert reply_kwargs["author_id"] == 44
+    assert reply_kwargs["body"] == "Done"
+    assert reply_kwargs["is_internal"] is True
+    assert reply_kwargs["author_display_name"] is None
+
+
+@pytest.mark.anyio
+async def test_reply_ticket_step_is_authored_by_approving_technician(monkeypatch):
+    ticket = {
+        "id": 123,
+        "ticket_number": "HD-123",
+        "requester_id": 17,
+        "assigned_user_id": 44,
+    }
+    monkeypatch.setattr(
+        workflows.tickets_repo,
+        "get_ticket_by_number_or_id",
+        AsyncMock(return_value=ticket),
     )
+    approver = {"id": 61, "email": "approver@example.com"}
+    monkeypatch.setattr(
+        workflows.user_repo, "get_user_by_id", AsyncMock(return_value=approver)
+    )
+    create_reply = AsyncMock(return_value={"id": 78, "is_internal": False})
+    monkeypatch.setattr(workflows.tickets_repo, "create_reply", create_reply)
+    emit_replied = AsyncMock()
+    emit_updated = AsyncMock()
+    monkeypatch.setattr(
+        workflows.tickets_service, "emit_ticket_replied_event", emit_replied
+    )
+    monkeypatch.setattr(
+        workflows.tickets_service, "emit_ticket_updated_event", emit_updated
+    )
+
+    await workflows._execute_policy_step(
+        step={
+            "type": "reply_ticket",
+            "ticket_number": "${vars.ticket_number}",
+            "body": "Username / Email: ${vars.staff.email}\n\nPassword Link: ${vars.link}",
+        },
+        company_id=9,
+        staff={"id": 5, "requested_by_user_id": 17, "approved_by_user_id": 61},
+        policy_config={},
+        vars_map={
+            "ticket_number": "HD-123",
+            "staff.email": "jane@example.com",
+            "link": "https://pw.example.com/p/abc",
+        },
+    )
+
+    kwargs = create_reply.await_args.kwargs
+    assert kwargs["author_id"] == 61
+    assert kwargs["author_display_name"] is None
+    assert kwargs["is_internal"] is False
+    assert kwargs["external_reference"].startswith(
+        workflows.tickets_repo.WORKFLOW_TECHNICIAN_REPLY_REFERENCE_PREFIX
+    )
+    # Plain-text bodies keep their line breaks once rendered as HTML email.
+    assert kwargs["body"] == (
+        "Username / Email: jane@example.com<br /><br />"
+        "Password Link: https://pw.example.com/p/abc"
+    )
+    for emitted in (emit_replied, emit_updated):
+        assert emitted.await_args.kwargs["actor_type"] == "technician"
+        assert emitted.await_args.kwargs["actor"] == approver
+
+
+@pytest.mark.anyio
+async def test_create_user_step_exposes_generated_upn_as_staff_email(monkeypatch):
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "acquire_access_token",
+        AsyncMock(return_value="token"),
+    )
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "_graph_post",
+        AsyncMock(return_value={"id": "new-user-id"}),
+    )
+    vars_map = {
+        "staff.first_name": "john",
+        "staff.last_name": "smith",
+        "staff.email": None,
+    }
+
+    result = await workflows._execute_policy_step(
+        step={
+            "type": "create_user",
+            "user_principal_name": "${vars.staff.first_name}.${vars.staff.last_name}@example.com",
+        },
+        company_id=9,
+        staff={"id": 5, "first_name": "John", "last_name": "Smith", "email": None},
+        policy_config={},
+        vars_map=vars_map,
+    )
+
+    assert result["staff.email"] == "john.smith@example.com"
+    assert result["staff.email_local_part"] == "john.smith"
+    assert vars_map["staff.email"] == "john.smith@example.com"
+    assert workflows._resolve_template_value(
+        "Username / Email: ${vars.staff.email}", vars_map=vars_map
+    ) == "Username / Email: john.smith@example.com"

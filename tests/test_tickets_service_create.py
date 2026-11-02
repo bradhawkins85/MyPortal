@@ -563,6 +563,43 @@ async def test_enrich_ticket_context_uses_latest_public_technician_reply(monkeyp
 
 
 @pytest.mark.anyio
+async def test_enrich_ticket_context_treats_workflow_reply_by_requester_as_technician(monkeypatch):
+    """A workflow reply authored by the approving technician counts as a
+    technician reply even when that technician also raised the request."""
+
+    ticket = {"id": 99, "requester_id": 7, "assigned_user_id": 7}
+    replies = [
+        {"id": 1, "author_id": 7, "body": "Original request", "is_internal": False},
+        {
+            "id": 2,
+            "author_id": 7,
+            "body": "Password Link: https://pw.example.com/p/abc",
+            "is_internal": False,
+            "external_reference": tickets_repo.WORKFLOW_TECHNICIAN_REPLY_REFERENCE_PREFIX + "5:abc",
+        },
+    ]
+
+    async def fake_list_replies(ticket_id, include_internal=True):
+        return replies
+
+    async def fake_list_watchers(ticket_id):
+        return []
+
+    async def fake_get_user_by_id(user_id):
+        return {"id": user_id, "email": "tech@example.com"}
+
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user_by_id)
+
+    enriched = await tickets_service._enrich_ticket_context(ticket)
+
+    assert enriched["latest_reply"]["id"] == 2
+    assert enriched["latest_reply"]["body"] == "Password Link: https://pw.example.com/p/abc"
+    assert enriched["latest_customer_reply"]["id"] == 1
+
+
+@pytest.mark.anyio
 async def test_enrich_ticket_context_uses_latest_public_watcher_reply(monkeypatch):
     ticket = {"id": 99, "requester_id": 7, "assigned_user_id": 11}
     replies = [

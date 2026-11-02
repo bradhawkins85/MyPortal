@@ -584,6 +584,13 @@ def _attach_sms_context(ticket: TicketRecord) -> None:
     ticket["sms"] = {"recipient": recipient} if recipient else None
 
 
+def _is_workflow_technician_reply(reply: Mapping[str, Any]) -> bool:
+    reference = reply.get("external_reference")
+    return isinstance(reference, str) and reference.startswith(
+        tickets_repo.WORKFLOW_TECHNICIAN_REPLY_REFERENCE_PREFIX
+    )
+
+
 async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     enriched: TicketRecord = dict(ticket)
 
@@ -745,20 +752,24 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             normalised_author_email = (
                 str(author_email).strip().casefold() if author_email else None
             )
-            if customer_reply is None and (
+            is_workflow_technician_reply = _is_workflow_technician_reply(reply_record)
+            if customer_reply is None and not is_workflow_technician_reply and (
                 author_id in customer_author_ids
                 or normalised_author_email in customer_author_emails
             ):
                 customer_reply = reply_record
                 customer_author = author_user
 
-            if technician_reply is not None or author_id is None or author_id == requester_id:
+            if technician_reply is not None or author_id is None:
+                continue
+            if author_id == requester_id and not is_workflow_technician_reply:
                 continue
             permissions = author_user.get("permissions") if author_user else []
             if isinstance(permissions, str):
                 permissions = [permissions]
             is_technician = (
-                author_id == assigned_user_id
+                is_workflow_technician_reply
+                or author_id == assigned_user_id
                 or bool(author_user and author_user.get("is_super_admin"))
                 or HELPDESK_PERMISSION_KEY in set(permissions or [])
             )
