@@ -1,0 +1,7 @@
+{
+  "guid": "d673e92f-d7d0-4808-ae08-efc2e61de43a",
+  "occurred_at": "2026-11-02T04:31Z",
+  "change_type": "Feature",
+  "summary": "Offboarding workflows have a new Remove from distribution lists & security groups step that removes the leaver from every distribution list and security group, and removes Exchange mail contacts using their email address from distribution lists.",
+  "content_hash": "e95b704cb85107005f20a6d53826082c4e4500cc6b071e68bc120a2f6058a91b"
+}
