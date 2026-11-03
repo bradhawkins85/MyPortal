@@ -420,6 +420,7 @@
     const descriptionText = typeof product.description === 'string' ? product.description.trim() : '';
     if (descriptionHtml) {
       descriptionDiv.innerHTML = descriptionHtml;
+      openDescriptionLinksInNewTab(descriptionDiv);
     } else {
       descriptionDiv.textContent = descriptionText || 'No product details are available yet.';
     }
@@ -465,6 +466,17 @@
     });
   }
 
+
+  function openDescriptionLinksInNewTab(root) {
+    root.querySelectorAll('a[href]').forEach((link) => {
+      const href = (link.getAttribute('href') || '').trim().toLowerCase();
+      if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) {
+        return;
+      }
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+    });
+  }
 
   function findSafeTitleTruncation(value, limit, minVisibleChars) {
     if (typeof value !== 'string' || value.length <= limit) {
