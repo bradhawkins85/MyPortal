@@ -549,6 +549,67 @@
 
     bindModalDismissal(detailsModal);
 
+    function showShopToast(message, variant) {
+      const toast = typeof window !== 'undefined' ? window.__portalToast : null;
+      if (toast && typeof toast.show === 'function') {
+        toast.show(message, { variant, persist: false });
+      } else {
+        window.alert(message);
+      }
+    }
+
+    if (refreshForm) {
+      refreshForm.addEventListener('submit', async (event) => {
+        const action = refreshForm.getAttribute('action');
+        if (!action || typeof window.fetch !== 'function') {
+          return;
+        }
+        event.preventDefault();
+        const button = refreshForm.querySelector('[data-product-refresh-button]');
+        if (button) {
+          if (button.disabled) {
+            return;
+          }
+          button.disabled = true;
+          button.setAttribute('aria-busy', 'true');
+        }
+        try {
+          const response = await fetch(action, {
+            method: 'POST',
+            body: new FormData(refreshForm),
+            credentials: 'same-origin',
+            headers: {
+              Accept: 'application/json',
+              'X-Requested-With': 'XMLHttpRequest',
+              'X-CSRF-Token': getCsrfToken(),
+            },
+          });
+          let payload = null;
+          try {
+            payload = await response.json();
+          } catch (_error) {
+            payload = null;
+          }
+          if (!response.ok) {
+            const detail = payload && typeof payload.detail === 'string' ? payload.detail : '';
+            throw new Error(detail || `Request failed with status ${response.status}`);
+          }
+          const message =
+            (payload && typeof payload.message === 'string' && payload.message) ||
+            'Product refresh queued and will run in the background.';
+          showShopToast(message, 'success');
+        } catch (error) {
+          console.error('Unable to queue product refresh', error);
+          showShopToast('Unable to queue the product refresh. Please try again.', 'error');
+        } finally {
+          if (button) {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+          }
+        }
+      });
+    }
+
     async function openProductDetails(id) {
       if (editLink) {
         if (Number.isFinite(id) && id > 0) {
