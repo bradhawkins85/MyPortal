@@ -18,6 +18,8 @@ MOCKS = r'''
 $global:testevents = [Collections.Generic.List[string]]::new()
 $global:testinstalled = $env:TEST_SCENARIO -eq 'installed'
 $global:testserviceInstalled = $global:testinstalled
+$global:testserviceStatus = 'Running'
+$global:testraced = $false
 $env:ProgramFiles = $env:TEST_PROGRAMFILES
 $env:ProgramW6432 = $env:TEST_PROGRAMFILES
 ${env:ProgramFiles(x86)} = ''
@@ -28,7 +30,10 @@ function Test-Path {
     param($LiteralPath)
     return $global:testinstalled -and $LiteralPath -eq $global:testexe
 }
-function Start-Sleep { param($Seconds) }
+function Start-Sleep {
+    param($Seconds)
+    if ($global:testserviceStatus -eq 'StartPending') { $global:testserviceStatus = 'Running' }
+}
 function Invoke-RestMethod {
     param($Uri, $Headers, $TimeoutSec)
     $global:testevents.Add('release')
@@ -50,7 +55,10 @@ function Start-Process {
     $action = $ArgumentList[0].Trim('"')
     $global:testevents.Add($action)
     $output = ''
-    if ($action -eq '--silent-install') { $global:testinstalled = $true }
+    if ($action -eq '--silent-install') {
+        $global:testinstalled = $true
+        if ($env:TEST_SCENARIO -eq 'installer-registers-service') { $global:testserviceInstalled = $true }
+    }
     if ($action -eq '--install-service') { $global:testserviceInstalled = $true }
     if ($action -eq '--get-id') { $output = '123 456 789' }
     if ($action -eq '--config' -and $ArgumentList[1] -ne '"config with spaces"') { throw 'Config argument was not preserved' }
@@ -72,10 +80,19 @@ function Stop-Process {
 function Get-Service {
     param($Name, $ErrorAction)
     if (-not $global:testserviceInstalled) { return }
-    $service = [pscustomobject]@{ Status = 'Running' }
-    $service | Add-Member ScriptMethod Stop { $global:testevents.Add('stop') }
-    $service | Add-Member ScriptMethod Start { $global:testevents.Add('start') }
-    $service | Add-Member ScriptMethod WaitForStatus { param($Status, $Timeout) }
+    $service = [pscustomobject]@{ Status = $global:testserviceStatus }
+    $service | Add-Member ScriptMethod Stop { $global:testevents.Add('stop'); $global:testserviceStatus = 'Stopped' }
+    $service | Add-Member ScriptMethod Start {
+        $global:testevents.Add('start')
+        if ($env:TEST_SCENARIO -eq 'start-failure') { throw "Cannot start service RustDesk on computer '.'." }
+        if ($env:TEST_SCENARIO -eq 'start-race' -and -not $global:testraced) {
+            # The installer's own background start wins the race.
+            $global:testraced = $true
+            $global:testserviceStatus = 'StartPending'
+            throw "Cannot start service RustDesk on computer '.'."
+        }
+        $global:testserviceStatus = 'Running'
+    }
     return $service
 }
 function Set-Service { param($Name, $StartupType) }
@@ -151,3 +168,29 @@ def test_failures_return_an_error_without_a_ready_session(tmp_path, scenario, me
     assert "##myportal[session.id]=" not in output
     if scenario == "command-timeout":
         assert report["events"][-1] == "kill"
+
+
+def test_installer_registered_service_is_not_reinstalled(tmp_path):
+    report, output = run_script(tmp_path, "installer-registers-service")
+    assert report["error"] is None
+    assert "--install-service" not in report["events"]
+    assert "##myportal[session.id]=123456789" in output
+
+
+def test_service_started_by_the_installer_during_restart_is_accepted(tmp_path):
+    # First installs: the installer starts the service in the background, so our
+    # Start() call loses the race and throws even though the service comes up.
+    report, output = run_script(tmp_path, "start-race")
+    assert report["error"] is None
+    assert report["events"] == [
+        "release", "download:https://github.com/rustdesk/rustdesk/releases/download/9.8.7/rustdesk-9.8.7-x86_64.exe",
+        "--silent-install", "--install-service", "--config", "stop", "start", "--password", "--get-id",
+    ]
+    assert "##myportal[session.id]=123456789" in output
+
+
+def test_service_that_never_starts_reports_the_reason(tmp_path):
+    report, output = run_script(tmp_path, "start-failure")
+    assert "The RustDesk service did not start: Cannot start service RustDesk" in report["error"]
+    assert "--password" not in report["events"]
+    assert "##myportal[session.id]=" not in output
