@@ -905,6 +905,43 @@ def _auto_detect_ticket_update_actor(
     return "system"
 
 
+def reply_email_excluded_recipients(
+    ticket: Mapping[str, Any],
+    reply: Mapping[str, Any],
+) -> list[str]:
+    """Return addresses a technician chose not to email for this reply.
+
+    ``email_requester`` / ``email_watchers`` default to ``True`` when absent so
+    replies from other sources keep their existing delivery. An address that
+    belongs to a group still being emailed (e.g. the requester is also a
+    watcher) is never excluded.
+    """
+
+    email_requester = reply.get("email_requester", True) is not False
+    email_watchers = reply.get("email_watchers", True) is not False
+    if email_requester and email_watchers:
+        return []
+
+    requester = {
+        email
+        for email in (_normalise_email_for_compare(ticket.get("requester_email")),)
+        if email
+    }
+    watchers = {
+        email
+        for email in (
+            _normalise_email_for_compare(value)
+            for value in (ticket.get("watcher_emails") or [])
+        )
+        if email
+    }
+    kept: set[str] = set()
+    excluded: set[str] = set()
+    for wanted, group in ((email_requester, requester), (email_watchers, watchers)):
+        (kept if wanted else excluded).update(group)
+    return sorted(excluded - kept)
+
+
 async def _emit_ticket_event(
     event_name: str,
     ticket: Mapping[str, Any] | int,
@@ -975,6 +1012,9 @@ async def _emit_ticket_event(
         reply_context = dict(reply)
         reply_context["is_internal"] = is_internal
         reply_context["kind"] = "internal_note" if is_internal else "message"
+        excluded_recipients = reply_email_excluded_recipients(enriched, reply)
+        if excluded_recipients:
+            reply_context["email_excluded_recipients"] = excluded_recipients
         context["reply"] = reply_context
         # For reply-backed events, ``ticket.body`` represents the update that
         # caused this event. The original request remains separately available.

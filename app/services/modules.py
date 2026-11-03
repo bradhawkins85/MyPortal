@@ -631,6 +631,54 @@ def _extract_ticket_reply_id(context: Any) -> int | None:
     return None
 
 
+def _reply_excluded_email_recipients(context: Any) -> set[str]:
+    """Addresses the technician unticked (requester/watchers) for this reply."""
+
+    if not isinstance(context, Mapping):
+        return set()
+    reply = context.get("reply")
+    if not isinstance(reply, Mapping):
+        return set()
+    values = reply.get("email_excluded_recipients")
+    if not isinstance(values, (list, tuple, set)):
+        return set()
+    return {str(value).strip().lower() for value in values if str(value or "").strip()}
+
+
+def _recipient_address(value: str) -> str:
+    text = str(value).strip().lower()
+    start = text.find("<")
+    end = text.find(">", start + 1)
+    if start != -1 and end > start:
+        inner = text[start + 1 : end].strip()
+        if inner:
+            return inner
+    return text
+
+
+def _filter_reply_email_recipients(
+    payload: Mapping[str, Any],
+    to: list[str],
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+) -> tuple[list[str], list[str], list[str]]:
+    """Drop excluded reply recipients; promote CC to To if To becomes empty."""
+
+    cc = list(cc or [])
+    bcc = list(bcc or [])
+    excluded = _reply_excluded_email_recipients(payload.get("context"))
+    if not excluded:
+        return list(to), cc, bcc
+
+    def _keep(values: list[str]) -> list[str]:
+        return [value for value in values if _recipient_address(value) not in excluded]
+
+    filtered_to, filtered_cc, filtered_bcc = _keep(list(to)), _keep(cc), _keep(bcc)
+    if not filtered_to and filtered_cc:
+        filtered_to, filtered_cc = filtered_cc, []
+    return filtered_to, filtered_cc, filtered_bcc
+
+
 def _extract_ticket_id_from_email_payload(payload: Mapping[str, Any]) -> int | None:
     context = payload.get("context")
     candidates: list[Any] = [payload.get("ticket_id")]
@@ -3843,6 +3891,14 @@ async def _invoke_smtp(
     recipients = _ensure_list(
         payload.get("to") or payload.get("recipients")
     ) or _ensure_list(settings.get("default_recipients"))
+    if recipients:
+        recipients, _, _ = _filter_reply_email_recipients(payload, recipients)
+        if not recipients:
+            return {
+                "status": "skipped",
+                "reason": "recipients_excluded_by_reply",
+                "module": "smtp",
+            }
     subject_prefix = str(settings.get("subject_prefix") or "").strip()
     # Use payload value if key exists, even if empty string (template may have rendered to empty)
     if "subject" in payload:
@@ -4043,6 +4099,17 @@ async def _invoke_smtp2go(
         text_body = payload.get("text") or payload.get("text_body")
         sender = str(payload.get("sender") or "").strip() or None
 
+    cc = _ensure_list(payload.get("cc"))
+    bcc = _ensure_list(payload.get("bcc"))
+    if recipients or cc:
+        recipients, cc, bcc = _filter_reply_email_recipients(payload, recipients, cc, bcc)
+        if not recipients:
+            return {
+                "status": "skipped",
+                "reason": "recipients_excluded_by_reply",
+                "module": "smtp2go",
+            }
+
     if not recipients:
         logger.warning(
             "SMTP2Go module skipped because no recipients were provided after rendering",
@@ -4057,9 +4124,6 @@ async def _invoke_smtp2go(
 
     reply_to = str(payload.get("reply_to") or "").strip() or None
 
-    # Extract additional SMTP2Go API fields
-    cc = _ensure_list(payload.get("cc"))
-    bcc = _ensure_list(payload.get("bcc"))
     attachments = (
         payload.get("attachments")
         if isinstance(payload.get("attachments"), list)
