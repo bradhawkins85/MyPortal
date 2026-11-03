@@ -16,7 +16,7 @@ from fastapi import File, Form, HTTPException, Query, Request, UploadFile, statu
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.security.flash import flash_redirect
-from app.services.file_storage import delete_stored_file, store_product_image
+from app.services.file_storage import copy_product_image, delete_stored_file, store_product_image
 from app.services.sanitization import sanitize_rich_text
 
 
@@ -2944,6 +2944,201 @@ async def admin_update_shop_product(
             redirect_params["pageSize"] = page_size_str
     redirect_url = f"/admin/shop?{urlencode(redirect_params)}" if redirect_params else "/admin/shop"
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+async def admin_duplicate_shop_product(
+    request: Request,
+    product_id: int,
+    name: str = Form(...),
+    sku: str = Form(...),
+    vendor_sku: str = Form(...),
+    microsoft_sku: str | None = Form(default=None),
+    description: str | None = Form(default=None),
+    invoice_description: str | None = Form(default=None),
+    product_link: str | None = Form(default=None),
+    price: str = Form(...),
+    stock: str = Form(...),
+    vip_price: str | None = Form(default=None),
+    category_id: str | None = Form(default=None),
+    image: UploadFile | None = File(default=None),
+    remove_image: bool = Form(default=False),
+    features: str | None = Form(default=None),
+    cross_sell_product_ids: list[int] | None = Form(default=None),
+    upsell_product_ids: list[int] | None = Form(default=None),
+    cross_sell_sku: str | None = Form(default=None),
+    upsell_sku: str | None = Form(default=None),
+    subscription_category_id: str | None = Form(default=None),
+    commitment_type: str | None = Form(default=None),
+    payment_frequency: str | None = Form(default=None),
+    price_monthly_commitment: str | None = Form(default=None),
+    price_annual_monthly_payment: str | None = Form(default=None),
+    price_annual_annual_payment: str | None = Form(default=None),
+    voice_monitor_calls_per_day: str | None = Form(default=None),
+    scheduled_price: str | None = Form(default=None),
+    scheduled_vip_price: str | None = Form(default=None),
+    scheduled_buy_price: str | None = Form(default=None),
+    price_change_date: str | None = Form(default=None),
+    freight_fields: str | None = Form(default=None),
+    item_size: str | None = Form(default=None),
+    weight: str | None = Form(default=None),
+    length: str | None = Form(default=None),
+    width: str | None = Form(default=None),
+    height: str | None = Form(default=None),
+):
+    """Create a new product or subscription from an edited copy of another.
+
+    The duplicate modal posts the full editor form. The submitted values are
+    applied through the normal update path; settings the editor does not show
+    (DBP buy price, company visibility and featured companies) and the stored
+    image are copied from the source product.
+    """
+    from app.repositories import shop as shop_repo
+    from app.services import audit as audit_service
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    source = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    cleaned_name = name.strip()
+    cleaned_sku = sku.strip()
+    cleaned_vendor_sku = vendor_sku.strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product name cannot be empty")
+    if not cleaned_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU cannot be empty")
+    if not cleaned_vendor_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU cannot be empty")
+
+    uploading_new_image = image is not None and bool(image.filename)
+    copied_image_url: str | None = None
+    copied_image_path: Path | None = None
+    if not remove_image and not uploading_new_image and source.get("image_url"):
+        try:
+            copied_image_url, copied_image_path = copy_product_image(
+                source.get("image_url"), _main()._private_uploads_path
+            )
+        except OSError as exc:
+            _main().log_error(
+                "Failed to copy product image for duplicate",
+                product_id=product_id,
+                error=str(exc),
+            )
+
+    def _discard_copied_image() -> None:
+        if copied_image_path is not None:
+            copied_image_path.unlink(missing_ok=True)
+
+    try:
+        draft = await shop_repo.create_product(
+            name=cleaned_name,
+            sku=cleaned_sku,
+            vendor_sku=cleaned_vendor_sku,
+            price=Decimal("0.00"),
+            stock=0,
+            image_url=copied_image_url,
+        )
+    except aiomysql.IntegrityError as exc:
+        _discard_copied_image()
+        if exc.args and exc.args[0] == 1062:
+            detail = "A product with that SKU or vendor SKU already exists. Give the copy its own SKU and vendor SKU."
+        else:
+            detail = "Unable to duplicate product."
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
+    except Exception:
+        _discard_copied_image()
+        raise
+
+    new_product_id = int(draft["id"])
+    try:
+        response = await admin_update_shop_product(
+            request,
+            product_id=new_product_id,
+            name=name,
+            sku=sku,
+            vendor_sku=vendor_sku,
+            microsoft_sku=microsoft_sku,
+            description=description,
+            invoice_description=invoice_description,
+            product_link=product_link,
+            price=price,
+            stock=stock,
+            vip_price=vip_price,
+            category_id=category_id,
+            image=image,
+            remove_image=remove_image,
+            features=features,
+            cross_sell_product_ids=cross_sell_product_ids,
+            upsell_product_ids=upsell_product_ids,
+            cross_sell_sku=cross_sell_sku,
+            upsell_sku=upsell_sku,
+            remove_inbound_cross_sell_product_ids=None,
+            remove_inbound_upsell_product_ids=None,
+            subscription_category_id=subscription_category_id,
+            commitment_type=commitment_type,
+            payment_frequency=payment_frequency,
+            price_monthly_commitment=price_monthly_commitment,
+            price_annual_monthly_payment=price_annual_monthly_payment,
+            price_annual_annual_payment=price_annual_annual_payment,
+            voice_monitor_calls_per_day=voice_monitor_calls_per_day,
+            scheduled_price=scheduled_price,
+            scheduled_vip_price=scheduled_vip_price,
+            scheduled_buy_price=scheduled_buy_price,
+            price_change_date=price_change_date,
+            freight_fields=freight_fields,
+            item_size=item_size,
+            weight=weight,
+            length=length,
+            width=width,
+            height=height,
+        )
+    except BaseException:
+        with suppress(Exception):
+            await shop_repo.delete_product(new_product_id)
+        _discard_copied_image()
+        raise
+
+    buy_price = source.get("buy_price")
+    if buy_price is not None:
+        await shop_repo.set_product_buy_price(new_product_id, buy_price)
+    restrictions = await shop_repo.list_product_restrictions_for_product(product_id)
+    if restrictions:
+        await shop_repo.replace_product_exclusions(
+            new_product_id, [entry["company_id"] for entry in restrictions]
+        )
+    featured = await shop_repo.list_product_featured_companies_for_product(product_id)
+    if featured:
+        await shop_repo.replace_product_featured_companies(
+            new_product_id, [entry["company_id"] for entry in featured]
+        )
+
+    created = await shop_repo.get_product_by_id(new_product_id, include_archived=True)
+    _main().log_info(
+        "Shop product duplicated",
+        product_id=new_product_id,
+        source_product_id=product_id,
+        created_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record_create(
+        action="shop.product.duplicate",
+        request=request,
+        entity_type="shop.product",
+        entity_id=new_product_id,
+        after=created or draft,
+        metadata={"source_product_id": product_id},
+        sensitive_extra_keys=("buy_price",),
+    )
+    is_subscription = (created or {}).get("subscription_category_id") is not None
+    noun = "subscription" if is_subscription else "product"
+    location = response.headers.get("location") or "/admin/shop"
+    return flash_redirect(
+        location,
+        f"Created {noun} {cleaned_name} as a copy of {source.get('name') or 'the original'}.",
+        "success",
+    )
 
 
 async def admin_bulk_refresh_shop_product_descriptions(request: Request):

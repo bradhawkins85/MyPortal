@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 from typing import Tuple
 from uuid import uuid4
@@ -195,6 +196,35 @@ async def store_product_image(
 
     public_url = f"/uploads/shop/{stored_name}"
     return public_url, destination
+
+
+def copy_product_image(image_url: str | None, uploads_root: Path) -> tuple[str | None, Path | None]:
+    """Give a duplicated product its own copy of a stored product image.
+
+    Returns ``(image_url, copied_path)``. Images stored by MyPortal under
+    ``/uploads/shop/`` are copied to a new file so deleting or replacing one
+    product's image never removes the other's. External URLs are reused as-is
+    (``copied_path`` is ``None``); a missing source file yields ``(None, None)``.
+    """
+
+    if not image_url:
+        return None, None
+    prefix = "/uploads/shop/"
+    if not image_url.startswith(prefix):
+        return image_url, None
+    filename = image_url[len(prefix):]
+    if not filename or filename != Path(filename).name or filename.startswith("."):
+        return None, None
+    product_directory = (uploads_root / "shop").resolve()
+    source = (product_directory / filename).resolve()
+    if source.parent != product_directory or not source.is_file():
+        return None, None
+    suffix = source.suffix.lower()
+    if suffix not in _ALLOWED_IMAGE_EXTENSIONS:
+        return None, None
+    destination = product_directory / f"{uuid4().hex}{suffix}"
+    shutil.copyfile(source, destination)
+    return f"{prefix}{destination.name}", destination
 
 
 async def store_report_cover_image(

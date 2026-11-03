@@ -233,6 +233,14 @@ _add(
     status_code=303,
 )
 _add(
+    "/shop/admin/product/{product_id}/duplicate",
+    handlers.admin_duplicate_shop_product,
+    ["POST"],
+    status_code=303,
+    summary="Create a new shop product or subscription from an edited copy of an existing one",
+    tags=["Shop"],
+)
+_add(
     "/shop/admin/products/bulk-refresh-descriptions",
     handlers.admin_bulk_refresh_shop_product_descriptions,
     ["POST"],
