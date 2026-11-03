@@ -1250,3 +1250,110 @@ async def test_get_next_invoice_no_invoice_returns_none(monkeypatch):
 
     result = await renewals_service.get_next_scheduled_invoice_for_subscription("sub-1")
     assert result is None
+
+
+def _install_process_invoice_mocks(monkeypatch, *, patch_side_effect=None):
+    patch_calls: list[dict[str, object]] = []
+
+    async def fake_patch(scheduled_invoice_id, /, **updates):
+        patch_calls.append({"id": scheduled_invoice_id, **updates})
+        if patch_side_effect is not None:
+            raise patch_side_effect
+        return {"id": scheduled_invoice_id, **updates}
+
+    monkeypatch.setattr(
+        renewals_service,
+        "_select_billing_contact",
+        AsyncMock(return_value=({"staff_id": 1}, "billing@example.com", None)),
+    )
+    monkeypatch.setattr(
+        renewals_service.invoice_generator,
+        "generate_invoice",
+        AsyncMock(
+            return_value={
+                "status": "succeeded",
+                "invoice_id": 376,
+                "invoice_number": "2026000376",
+            }
+        ),
+    )
+    monkeypatch.setattr(invoices_repo, "patch_scheduled_invoice", fake_patch)
+    delete_invoice = AsyncMock()
+    monkeypatch.setattr(
+        renewals_service.local_invoices_repo, "delete_invoice", delete_invoice
+    )
+    return patch_calls, delete_invoice
+
+
+def _renewal_invoice_item(renewal_date: date) -> dict[str, object]:
+    return {
+        "subscription_id": "sub-m365",
+        "subscription_name": "Microsoft 365 Business Standard",
+        "renewal_term": "Annual commitment · annual payment",
+        "renewal_date": renewal_date,
+        "renewal_quantity": 1,
+        "unit_price": Decimal("275.00"),
+        "product_code": "M365 Business Standard A/A NCE",
+    }
+
+
+@pytest.mark.anyio
+async def test_invoice_is_recorded_before_xero_sync_so_failures_do_not_rebill(
+    monkeypatch,
+):
+    """A Xero sync crash must not leave the renewal unmarked.
+
+    Regression: the scheduled invoice was only marked as issued after the Xero
+    sync returned, so an exception there left ``invoice_id`` empty and every
+    daily run inside the 30-day window generated another renewal invoice.
+    """
+    renewal_date = date(2026, 11, 21)
+    patch_calls, delete_invoice = _install_process_invoice_mocks(monkeypatch)
+    monkeypatch.setattr(
+        renewals_service.xero_service,
+        "sync_invoice",
+        AsyncMock(side_effect=RuntimeError("Xero contact lookup failed")),
+    )
+    issues: list[dict[str, object]] = []
+
+    processed = await renewals_service._process_invoice(
+        company={"id": 31, "name": "Example Co"},
+        renewal_date=renewal_date,
+        scheduled_invoice={"id": 44},
+        renewal_items=[_renewal_invoice_item(renewal_date)],
+        issue_log=issues,
+    )
+
+    assert processed is True
+    delete_invoice.assert_not_awaited()
+    assert patch_calls[0] == {
+        "id": 44,
+        "status": "issued",
+        "invoice_id": 376,
+        "invoice_number": "2026000376",
+    }
+    assert patch_calls[-1]["invoice_sent_at"] is None
+    assert "Xero contact lookup failed" in str(patch_calls[-1]["invoice_error"])
+    assert issues and issues[0]["stage"] == "invoice"
+
+
+@pytest.mark.anyio
+async def test_invoice_is_removed_when_renewal_cannot_be_marked_issued(monkeypatch):
+    renewal_date = date(2026, 11, 21)
+    patch_calls, delete_invoice = _install_process_invoice_mocks(
+        monkeypatch, patch_side_effect=RuntimeError("database unavailable")
+    )
+    sync_invoice = AsyncMock()
+    monkeypatch.setattr(renewals_service.xero_service, "sync_invoice", sync_invoice)
+
+    with pytest.raises(RuntimeError):
+        await renewals_service._process_invoice(
+            company={"id": 31, "name": "Example Co"},
+            renewal_date=renewal_date,
+            scheduled_invoice={"id": 44},
+            renewal_items=[_renewal_invoice_item(renewal_date)],
+            issue_log=[],
+        )
+
+    delete_invoice.assert_awaited_once_with(376)
+    sync_invoice.assert_not_awaited()

@@ -15,6 +15,7 @@ from loguru import logger
 
 from app.repositories import billing_contacts as billing_contacts_repo
 from app.repositories import companies as company_repo
+from app.repositories import invoices as local_invoices_repo
 from app.repositories import licenses as license_repo
 from app.repositories import scheduled_invoices as invoices_repo
 from app.repositories import shop as shop_repo
@@ -751,19 +752,54 @@ async def _process_invoice(
         )
         return False
 
-    auto_send = bool(company.get("xero_auto_send_subscription_invoices", 1))
-    xero_result = await xero_service.sync_invoice(
-        int(result["invoice_id"]),
-        auto_send=auto_send,
-    )
-    invoice_error = None
-    xero_status = str(xero_result.get("status") or "").strip().lower()
-    if xero_status not in {"succeeded"}:
-        invoice_error = str(
-            xero_result.get("reason")
-            or xero_result.get("error")
-            or "Invoice generated locally but delivery did not complete."
+    invoice_id = int(result["invoice_id"])
+    # Record the local invoice before any delivery work. The renewal run
+    # repeats daily inside the invoice window and treats a scheduled invoice
+    # without ``invoice_id`` as still unbilled, so a later failure must never
+    # leave this marker unset or the customer is invoiced again tomorrow.
+    try:
+        await invoices_repo.patch_scheduled_invoice(
+            int(scheduled_invoice["id"]),
+            status="issued",
+            invoice_id=invoice_id,
+            invoice_number=result.get("invoice_number"),
         )
+    except Exception:
+        try:
+            await local_invoices_repo.delete_invoice(invoice_id)
+        except Exception as cleanup_exc:
+            logger.error(
+                "Failed to remove renewal invoice that could not be recorded",
+                company_id=company_id,
+                invoice_id=invoice_id,
+                error=str(cleanup_exc),
+            )
+        raise
+
+    auto_send = bool(company.get("xero_auto_send_subscription_invoices", 1))
+    invoice_error = None
+    try:
+        xero_result = await xero_service.sync_invoice(
+            invoice_id,
+            auto_send=auto_send,
+        )
+    except Exception as exc:
+        logger.error(
+            "Renewal invoice delivery failed",
+            company_id=company_id,
+            invoice_id=invoice_id,
+            error=str(exc),
+        )
+        invoice_error = f"Invoice generated locally but delivery failed: {exc}"
+    else:
+        xero_status = str(xero_result.get("status") or "").strip().lower()
+        if xero_status not in {"succeeded"}:
+            invoice_error = str(
+                xero_result.get("reason")
+                or xero_result.get("error")
+                or "Invoice generated locally but delivery did not complete."
+            )
+    if invoice_error is not None:
         issue_log.append(
             {
                 "company_id": company_id,
@@ -775,9 +811,6 @@ async def _process_invoice(
 
     await invoices_repo.patch_scheduled_invoice(
         int(scheduled_invoice["id"]),
-        status="issued",
-        invoice_id=int(result["invoice_id"]),
-        invoice_number=result.get("invoice_number"),
         invoice_sent_at=datetime.now(timezone.utc) if invoice_error is None else None,
         invoice_error=invoice_error,
     )
