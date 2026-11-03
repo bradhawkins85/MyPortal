@@ -1188,9 +1188,18 @@
       });
     });
 
-    container.querySelectorAll('[data-product-edit]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const id = Number(button.getAttribute('data-product-edit'));
+    const linkedSection = document.getElementById('edit-linked-heading')
+      ? document.getElementById('edit-linked-heading').closest('details')
+      : null;
+    const duplicateNotice = document.getElementById('edit-product-duplicate-notice');
+
+    function duplicateValue(value) {
+      const text = (value || '').trim();
+      return text ? `${text}-COPY` : '';
+    }
+
+    async function openProductEditor(button, id, mode) {
+        const isDuplicate = mode === 'duplicate';
         if (!Number.isFinite(id) || id <= 0 || !editForm || !editIdField) {
           return;
         }
@@ -1210,10 +1219,25 @@
         }
 
         editIdField.value = String(id);
-        editForm.action = `/shop/admin/product/${id}`;
-        editForm.querySelector('#edit-product-name').value = product.name || '';
-        editForm.querySelector('#edit-product-sku').value = product.sku || '';
-        editForm.querySelector('#edit-product-vendor').value = product.vendor_sku || '';
+        editForm.action = isDuplicate
+          ? `/shop/admin/product/${id}/duplicate`
+          : `/shop/admin/product/${id}`;
+        editForm.dataset.mode = isDuplicate ? 'duplicate' : 'edit';
+        editForm.querySelector('#edit-product-name').value = isDuplicate
+          ? `${product.name || ''} (copy)`.trim()
+          : product.name || '';
+        editForm.querySelector('#edit-product-sku').value = isDuplicate
+          ? duplicateValue(product.sku)
+          : product.sku || '';
+        editForm.querySelector('#edit-product-vendor').value = isDuplicate
+          ? duplicateValue(product.vendor_sku)
+          : product.vendor_sku || '';
+        if (duplicateNotice) {
+          duplicateNotice.hidden = !isDuplicate;
+          const sourceName = duplicateNotice.querySelector('[data-duplicate-source]');
+          if (sourceName) sourceName.textContent = product.name || product.sku || 'this item';
+        }
+        if (linkedSection) linkedSection.hidden = isDuplicate;
         const microsoftSkuField = editForm.querySelector('#edit-product-microsoft-sku');
         if (microsoftSkuField) microsoftSkuField.value = product.microsoft_sku || '';
         editForm.querySelector('#edit-product-description').value = product.description || '';
@@ -1236,11 +1260,20 @@
         const editSubtitle = editModalContent.querySelector('#edit-product-subtitle');
         const invoiceDescriptionField = editForm.querySelector('#edit-product-invoice-description-field');
         const invoiceDescriptionInput = editForm.querySelector('#edit-product-invoice-description');
-        if (editTitle) editTitle.textContent = isSubscription ? 'Edit subscription' : 'Edit product';
+        const noun = isSubscription ? 'subscription' : 'product';
+        if (editTitle) {
+          editTitle.textContent = isDuplicate
+            ? `Duplicate ${noun}`
+            : isSubscription ? 'Edit subscription' : 'Edit product';
+        }
         if (editSubtitle) {
-          editSubtitle.textContent = isSubscription
-            ? 'Update this subscription and its billing options.'
-            : 'Update this catalogue product.';
+          if (isDuplicate) {
+            editSubtitle.textContent = `Everything below is copied from the original. Adjust what differs, then create the new ${noun}.`;
+          } else {
+            editSubtitle.textContent = isSubscription
+              ? 'Update this subscription and its billing options.'
+              : 'Update this catalogue product.';
+          }
         }
         if (invoiceDescriptionField) invoiceDescriptionField.hidden = !isSubscription;
         if (invoiceDescriptionInput) {
@@ -1252,7 +1285,13 @@
           stockLabel.htmlFor = isSubscription ? 'edit-product-availability' : 'edit-product-stock';
         }
         const submitButton = editForm.querySelector('#edit-product-submit');
-        if (submitButton) submitButton.textContent = isSubscription ? 'Save subscription' : 'Save product';
+        if (submitButton) {
+          if (isDuplicate) {
+            submitButton.textContent = isSubscription ? 'Create subscription' : 'Create product';
+          } else {
+            submitButton.textContent = isSubscription ? 'Save subscription' : 'Save product';
+          }
+        }
         if (stockHelp) stockHelp.textContent = 'The number of physical units available.';
         const stockInput = editForm.querySelector('#edit-product-stock');
         if (stockInput) {
@@ -1307,8 +1346,8 @@
           await editUpsellManager.initFromIds(product.upsell_product_ids || [], id);
         }
         editForm.querySelectorAll('input[name^="remove_inbound_"]').forEach((input) => input.remove());
-        renderInboundLinks(product.linked_from_cross_sell_products, 'cross-sell');
-        renderInboundLinks(product.linked_from_upsell_products, 'upsell');
+        renderInboundLinks(isDuplicate ? [] : product.linked_from_cross_sell_products, 'cross-sell');
+        renderInboundLinks(isDuplicate ? [] : product.linked_from_upsell_products, 'upsell');
         currentEditProductId = id;
         populateFreightFields(product, isSubscription);
         if (removeImageInput) removeImageInput.checked = false;
@@ -1331,6 +1370,24 @@
         renderFeatureRows(product.features || []);
         setLoadingStatus(editLoadingStatus, '');
         setFormLoadingState(editForm, false);
+        if (isDuplicate) {
+          const skuField = editForm.querySelector('#edit-product-sku');
+          if (skuField) {
+            skuField.focus();
+            skuField.select();
+          }
+        }
+    }
+
+    container.querySelectorAll('[data-product-edit]').forEach((button) => {
+      button.addEventListener('click', () => {
+        openProductEditor(button, Number(button.getAttribute('data-product-edit')), 'edit');
+      });
+    });
+
+    container.querySelectorAll('[data-product-duplicate]').forEach((button) => {
+      button.addEventListener('click', () => {
+        openProductEditor(button, Number(button.getAttribute('data-product-duplicate')), 'duplicate');
       });
     });
 

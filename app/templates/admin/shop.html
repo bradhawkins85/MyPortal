@@ -256,6 +256,7 @@
                        data-header-menu-panel
                        hidden>
                     <button type="button" class="header-menu__item" role="menuitem" data-product-edit="{{ product.id }}">Edit</button>
+                    <button type="button" class="header-menu__item" role="menuitem" data-product-duplicate="{{ product.id }}" aria-haspopup="dialog" aria-controls="product-edit-modal">Duplicate</button>
                     <button type="button" class="header-menu__item" role="menuitem" data-product-visibility="{{ product.id }}">Visibility</button>
                     <button type="button" class="header-menu__item" role="menuitem" data-product-featured="{{ product.id }}">Feature product</button>
                     <button type="button" class="header-menu__item" role="menuitem" data-product-price-history="{{ product.id }}" data-product-sku="{{ product.vendor_sku or product.sku }}">Price History</button>
@@ -435,6 +436,9 @@
     <h2 class="modal__title" id="edit-product-title">Edit product</h2>
     <p class="modal__subtitle" id="edit-product-subtitle">Update this catalogue product.</p>
     <p class="form-helper" id="edit-product-loading-status" hidden>Loading product details…</p>
+    <p class="form-helper" id="edit-product-duplicate-notice" role="status" aria-live="polite" hidden>
+      Copying <strong data-duplicate-source></strong>. Give the copy its own SKU and vendor SKU. Its visibility, featured companies and DBP are copied from the original when you create it.
+    </p>
     <form id="product-edit-form" method="post" enctype="multipart/form-data" class="subscription-edit-form">
       {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
       <input type="hidden" id="edit-product-id" />

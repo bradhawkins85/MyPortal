@@ -1954,6 +1954,13 @@ async def update_product(
     return await get_product_by_id(product_id, include_archived=True)
 
 
+async def set_product_buy_price(product_id: int, buy_price: Decimal | None) -> None:
+    await db.execute(
+        "UPDATE shop_products SET buy_price = %s WHERE id = %s",
+        (buy_price, product_id),
+    )
+
+
 async def set_product_archived(product_id: int, *, archived: bool) -> bool:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
