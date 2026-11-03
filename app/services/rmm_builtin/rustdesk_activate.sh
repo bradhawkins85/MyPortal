@@ -5,8 +5,9 @@
 # MyPortal sets these for each run:
 #   MYPORTAL_RUSTDESK_PASSWORD  one-time password for this session
 #   RUSTDESK_CFG                server config string (RUSTDESK_CFG in MyPortal's .env)
+#   RUSTDESK_OPTIONS            client options, one key=value per line
 #
-# Applies the config, starts the service, sets the password and reports the ID.
+# Applies the config and options, starts the service, sets the password and reports the ID.
 set -euo pipefail
 
 if [ -x /Applications/RustDesk.app/Contents/MacOS/RustDesk ]; then
@@ -21,6 +22,19 @@ fi
 if [ -n "${RUSTDESK_CFG:-}" ]; then
   echo "Applying the RustDesk server config"
   "$RUSTDESK" --config "$RUSTDESK_CFG" >/dev/null 2>&1 || true
+fi
+
+if [ -n "${RUSTDESK_OPTIONS:-}" ]; then
+  echo "Applying the RustDesk options"
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    [ -n "$line" ] || continue
+    case "$line" in
+      [!=]*=*) ;;
+      *) echo "Invalid RustDesk option: $line." >&2; exit 1 ;;
+    esac
+    "$RUSTDESK" --option "${line%%=*}" "${line#*=}" >/dev/null 2>&1 || true
+  done <<<"$RUSTDESK_OPTIONS"
 fi
 
 echo "Starting the RustDesk service"

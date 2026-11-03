@@ -1290,6 +1290,9 @@ class Settings(BaseSettings):
     # RustDesk server settings (RustDesk > Settings > Network > Export), applied
     # to a device each time a technician starts a RustDesk session.
     rustdesk_cfg: str = Field(default="", validation_alias="RUSTDESK_CFG")
+    # RustDesk client options (``--option <key> <value>``) applied with the
+    # server config, as semicolon-separated ``key=value`` pairs.
+    rustdesk_options: str = Field(default="", validation_alias="RUSTDESK_OPTIONS")
     # Optional RustDesk installer (.exe for Windows) used when a device does not
     # have RustDesk yet. When blank, use the latest stable GitHub release.
     rustdesk_installer_url: str = Field(default="", validation_alias="RUSTDESK_INSTALLER_URL")

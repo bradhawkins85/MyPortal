@@ -358,7 +358,7 @@ def test_settings_page_renders_providers_and_script_values():
              "fields": []},
         ],
         scripts=[{"id": 1, "name": "Activate", "path": "rmm/Common/Activate.ps1"}],
-        rustdesk_env={"cfg_set": True, "installer_set": False, "macos_installer_set": True},
+        rustdesk_env={"cfg_set": True, "options_count": 2, "options_error": "", "installer_set": False, "macos_installer_set": True},
         mesh_env={"server_set": True, "username_set": False, "token_key_set": True},
         variables=[{"group": "Company variables", "label": "Key", "token": "{{company.variables.Key}}"}],
     )
@@ -453,6 +453,7 @@ async def test_builtin_rustdesk_applies_the_config_and_its_own_password(sqlite_d
     from app.core.config import get_settings
 
     monkeypatch.setattr(get_settings(), "rustdesk_cfg", "=0nI9cfgString")
+    monkeypatch.setattr(get_settings(), "rustdesk_options", "enable-audio=N; whitelist=10.0.0.0/8,172.16.254.0/24;")
     monkeypatch.setattr(get_settings(), "rustdesk_installer_url", "")
     await remote.save_settings("rustdesk", {"is_enabled": "1"}, user_id=9)
     assert (await remote.load_settings())[0]["builtin"] is True
@@ -467,6 +468,8 @@ async def test_builtin_rustdesk_applies_the_config_and_its_own_password(sqlite_d
     assert job["language"] == "powershell" and "--get-id" in job["script"]
     password = job["env"]["MYPORTAL_RUSTDESK_PASSWORD"]
     assert job["env"]["RUSTDESK_CFG"] == "=0nI9cfgString" and "RUSTDESK_INSTALLER_URL" not in job["env"]
+    assert job["env"]["RUSTDESK_OPTIONS"] == "enable-audio=N\nwhitelist=10.0.0.0/8,172.16.254.0/24"
+    assert "--option" in job["script"]
     assert len(password) >= 16
 
     await rmm_scripts.record_result(agent, session["run_id"], {"exit_code": 0, "stdout": "##myportal[session.id]=987 654 321\n"})
@@ -510,7 +513,9 @@ async def test_builtin_rustdesk_sends_each_platform_its_own_installer(sqlite_db,
     monkeypatch.setattr(get_settings(), "rustdesk_cfg", "")
     monkeypatch.setattr(get_settings(), "rustdesk_installer_url", "https://downloads.example.com/rustdesk.exe")
     monkeypatch.setattr(get_settings(), "rustdesk_macos_installer_url", "https://downloads.example.com/rustdesk.dmg")
-    assert remote.rustdesk_environment() == {"cfg_set": False, "installer_set": True, "macos_installer_set": True}
+    monkeypatch.setattr(get_settings(), "rustdesk_options", "")
+    assert remote.rustdesk_environment() == {
+        "cfg_set": False, "options_count": 0, "options_error": "", "installer_set": True, "macos_installer_set": True}
     await remote.save_settings("rustdesk", {"is_enabled": "1"}, user_id=9)
     _r, agent = await _enrol(sqlite_db, os_name="darwin")
 
@@ -702,3 +707,27 @@ def test_company_remote_control_setting_migration_defaults_to_allowed():
     sql = (Path(__file__).resolve().parents[1] / "migrations" / "539_rustdesk_unattended_access.sql").read_text()
     assert "-- phase: expand" in sql
     assert "ADD COLUMN IF NOT EXISTS rustdesk_unattended_access TINYINT(1) NOT NULL DEFAULT 1" in sql
+
+
+def test_rustdesk_options_parse_key_value_pairs_in_order():
+    assert remote.rustdesk_options(" enable-audio = N ;enable-camera=N\nenable-audio=Y;;whitelist=") == [
+        ("enable-camera", "N"), ("enable-audio", "Y"), ("whitelist", "")]
+    assert remote.rustdesk_options("") == []
+
+
+@pytest.mark.parametrize("raw", ["enable-audio", "=N", "bad key=Y", 'enable-audio=say "hi"', "enable-audio=\x07"])
+def test_rustdesk_options_reject_malformed_entries(raw):
+    with pytest.raises(remote.RemoteControlError, match="RUSTDESK_OPTIONS"):
+        remote.rustdesk_options(raw)
+
+
+@pytest.mark.anyio
+async def test_invalid_rustdesk_options_stop_the_session_and_show_on_the_settings_page(sqlite_db, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "rustdesk_options", "enable-audio")
+    assert "invalid entry" in remote.rustdesk_environment()["options_error"]
+    await remote.save_settings("rustdesk", {"is_enabled": "1"}, user_id=9)
+    _r, _agent = await _enrol(sqlite_db)
+    with pytest.raises(remote.RemoteControlError, match="RUSTDESK_OPTIONS"):
+        await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9)

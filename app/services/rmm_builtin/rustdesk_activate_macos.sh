@@ -3,8 +3,8 @@
 # Detect an existing installation, otherwise install the latest stable GitHub
 # release for the Mac's architecture (RUSTDESK_INSTALLER_URL optionally
 # overrides the .dmg download URL). Then install the RustDesk launch daemon and
-# agent, apply RUSTDESK_CFG, restart the service and set
-# MYPORTAL_RUSTDESK_PASSWORD. Runs as root through the RMM agent.
+# agent, apply RUSTDESK_CFG and RUSTDESK_OPTIONS (one key=value per line),
+# restart the service and set MYPORTAL_RUSTDESK_PASSWORD. Runs as root through the RMM agent.
 set -euo pipefail
 
 APP=/Applications/RustDesk.app
@@ -195,6 +195,19 @@ fi
 if [ -n "${RUSTDESK_CFG:-}" ]; then
   echo "Applying the RustDesk server config"
   run_bounded 20 "server configuration" "$EXE" --config "$RUSTDESK_CFG" >/dev/null
+fi
+
+if [ -n "${RUSTDESK_OPTIONS:-}" ]; then
+  echo "Applying the RustDesk options"
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    [ -n "$line" ] || continue
+    case "$line" in
+      [!=]*=*) ;;
+      *) fail "Invalid RustDesk option: $line." ;;
+    esac
+    run_bounded 20 "option ${line%%=*}" "$EXE" --option "${line%%=*}" "${line#*=}" >/dev/null
+  done <<<"$RUSTDESK_OPTIONS"
 fi
 
 echo "Starting the RustDesk service"

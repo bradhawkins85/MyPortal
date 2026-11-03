@@ -53,7 +53,13 @@ function Invoke-WebRequest {
 function Start-Process {
     param($FilePath, $ArgumentList, [switch]$PassThru, $WindowStyle, $RedirectStandardOutput, $RedirectStandardError)
     $action = $ArgumentList[0].Trim('"')
-    $global:testevents.Add($action)
+    if ($action -eq '--option') {
+        $optionKey = $ArgumentList[1].Trim('"')
+        $optionValue = $ArgumentList[2].Trim('"')
+        $global:testevents.Add("--option $optionKey [$optionValue]")
+    } else {
+        $global:testevents.Add($action)
+    }
     $output = ''
     if ($action -eq '--silent-install') {
         $global:testinstalled = $true
@@ -106,7 +112,7 @@ Write-Output ('RESULT:' + (ConvertTo-Json -Compress -InputObject @{ events = @($
 '''
 
 
-def run_script(tmp_path, scenario, architecture="AMD64", override=""):
+def run_script(tmp_path, scenario, architecture="AMD64", override="", options=""):
     harness = tmp_path / "harness.ps1"
     harness.write_text(MOCKS)
     env = {
@@ -119,6 +125,7 @@ def run_script(tmp_path, scenario, architecture="AMD64", override=""):
         "PROCESSOR_ARCHITEW6432": "",
         "RUSTDESK_INSTALLER_URL": override,
         "RUSTDESK_CFG": "config with spaces",
+        "RUSTDESK_OPTIONS": options,
         "MYPORTAL_RUSTDESK_PASSWORD": "secret-session-password",
     }
     result = subprocess.run(
@@ -135,6 +142,16 @@ def test_installed_client_is_configured_without_a_download(tmp_path):
     assert report["error"] is None
     assert report["events"] == ["--config", "stop", "start", "--password", "--get-id"]
     assert "##myportal[session.id]=123456789" in output
+
+
+def test_options_are_applied_after_the_config_and_before_the_session(tmp_path):
+    options = "enable-audio=N\r\nwhitelist=10.0.0.0/8,172.16.254.0/24\nnote=two words"
+    report, _output = run_script(tmp_path, "installed", options=options)
+    assert report["error"] is None
+    assert report["events"] == [
+        "--config", "--option enable-audio [N]", "--option whitelist [10.0.0.0/8,172.16.254.0/24]",
+        "--option note [two words]", "stop", "start", "--password", "--get-id",
+    ]
 
 
 @pytest.mark.parametrize("architecture,asset", [("AMD64", "x86_64"), ("X86", "x86"), ("ARM64", "aarch64")])

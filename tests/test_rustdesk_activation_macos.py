@@ -56,7 +56,7 @@ fi
     "xattr": ':',
     "sleep": f'exec {SLEEP} 0.01',
     "rustdesk": r'''
-echo "$1" >>"$TEST_EVENTS"
+if [ "$1" = "--option" ]; then echo "--option $2 [$3]"; else echo "$1"; fi >>"$TEST_EVENTS"
 case "$1" in
   --get-id) echo "123 456 789" ;;
   --config)
@@ -70,7 +70,7 @@ exit 0
 }
 
 
-def run_script(tmp_path, scenario, arch="arm64", override="", installed=None):
+def run_script(tmp_path, scenario, arch="arm64", override="", installed=None, options=""):
     mocks = tmp_path / "mocks"
     mocks.mkdir()
     for name, body in MOCKS.items():
@@ -107,6 +107,7 @@ def run_script(tmp_path, scenario, arch="arm64", override="", installed=None):
         "TEST_ARCH": arch,
         "RUSTDESK_INSTALLER_URL": override,
         "RUSTDESK_CFG": "config with spaces",
+        "RUSTDESK_OPTIONS": options,
         "MYPORTAL_RUSTDESK_PASSWORD": "secret-session-password",
     }
     result = subprocess.run([BASH, str(script)], env=env, capture_output=True, text=True, timeout=60)
@@ -125,6 +126,18 @@ def test_installed_client_is_configured_without_a_download(tmp_path):
     assert "##myportal[session.id]=123456789" in result.stdout
     # The existing launchd files are left alone.
     assert (root / "Library/LaunchDaemons/com.carriez.RustDesk_service.plist").read_text() == "existing"
+
+
+def test_options_are_applied_after_the_config_and_before_the_session(tmp_path):
+    options = "enable-audio=N\nwhitelist=10.0.0.0/8,172.16.254.0/24\nnote=two words"
+    result, events, _root = run_script(tmp_path, "installed", options=options)
+    assert result.returncode == 0, result.stderr
+    assert events[2:6] == [
+        "--config", "--option enable-audio [N]",
+        "--option whitelist [10.0.0.0/8,172.16.254.0/24]", "--option note [two words]",
+    ]
+    assert events.index("--option note [two words]") < events.index("kickstart system/com.carriez.RustDesk_service")
+    assert events[-2:] == ["--password", "--get-id"]
 
 
 @pytest.mark.parametrize("arch,asset", [("arm64", "aarch64"), ("x86_64", "x86_64")])
