@@ -797,3 +797,17 @@ def test_provisioning_output_redaction_pattern_removes_password_lines():
     assert "Building package" in redacted and "Done" in redacted
     for secret in ("admin_password", "wifi_password", "bulk_token", "'password'"):
         assert secret in helpers.split("function Protect-MyPortalProvisioningOutput", 1)[1].split("\n}\n", 1)[0]
+
+
+def test_icd_command_line_quotes_values_like_the_documented_syntax():
+    helpers = _build_agent_script("New-MyPortalProvisioningPackage.ps1")
+
+    # ICD rejects ArgumentList's "/Name:C:\Program Files\..." quoting with
+    # "Command-line has too many parameters".
+    assert ".ArgumentList.Add(" not in helpers
+    assert (
+        "'/Build-ProvisioningPackage /CustomizationXML:\"{0}\" /PackagePath:\"{1}\" "
+        "/StoreFile:\"{2}\" +Encrypted'"
+    ) in helpers
+    assert "+Overwrite" not in helpers.split("function Get-MyPortalIcdArguments", 1)[1].split("\n}\n", 1)[0]
+    assert "$startInfo.Arguments = Get-MyPortalIcdArguments $xmlPath $PackagePath $storeFile" in helpers
