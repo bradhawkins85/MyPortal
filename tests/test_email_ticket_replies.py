@@ -822,7 +822,7 @@ class TestSameCompanyReplyMerge:
 
         async def mock_fetch_all(query, params):
             queries.append((query, params))
-            if "t.company_id IN" in query:
+            if "t.company_id = %s" in query:
                 return [_company_ticket_row()]
             return []
 
@@ -836,7 +836,7 @@ class TestSameCompanyReplyMerge:
 
         assert result is not None
         assert result["id"] == 42
-        company_query, params = next(q for q in queries if "t.company_id IN" in q[0])
+        company_query, params = next(q for q in queries if "t.company_id = %s" in q[0])
         assert params == (7,)
         assert "status <> 'closed'" in company_query
 
@@ -845,7 +845,7 @@ class TestSameCompanyReplyMerge:
         from app.core import database
 
         async def mock_fetch_all(query, params):
-            if "t.company_id IN" in query:
+            if "t.company_id = %s" in query:
                 return [_company_ticket_row(subject="Printer not working")]
             return []
 
@@ -864,7 +864,7 @@ class TestSameCompanyReplyMerge:
         from app.core import database
 
         async def mock_fetch_all(query, params):
-            assert "t.company_id IN" not in query
+            assert "t.company_id = %s" not in query
             return []
 
         monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
@@ -882,7 +882,7 @@ class TestSameCompanyReplyMerge:
         from app.core import database
 
         async def mock_fetch_all(query, params):
-            if "t.company_id IN" in query:
+            if "t.company_id = %s" in query:
                 return [
                     _company_ticket_row(id=1, subject="RE: Something else entirely"),
                     _company_ticket_row(id=2, status="closed"),

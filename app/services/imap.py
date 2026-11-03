@@ -1664,15 +1664,19 @@ async def _find_existing_ticket_for_reply(
     if not company_ids or not _subject_is_reply_or_forward(subject):
         return None
     try:
-        # Placeholders are generated from the company id count only; values stay bound.
-        placeholders = ", ".join(["%s"] * len(company_ids))
-        company_query = (
-            "SELECT t.* FROM tickets t WHERE t.status <> 'closed'"
-            " AND t.company_id IN (" + placeholders + ")"
-            " ORDER BY t.updated_at DESC, t.id DESC"
-        )
-        rows = await db.fetch_all(company_query, tuple(company_ids))
-        return _first_ticket_with_normalized_subject(rows, normalized_subject)
+        for company_id in company_ids:
+            rows = await db.fetch_all(
+                """
+                SELECT t.*
+                FROM tickets t
+                WHERE t.status <> 'closed' AND t.company_id = %s
+                ORDER BY t.updated_at DESC, t.id DESC
+                """,
+                (company_id,),
+            )
+            match = _first_ticket_with_normalized_subject(rows, normalized_subject)
+            if match is not None:
+                return match
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error(
             "Failed to search for existing ticket by subject",
