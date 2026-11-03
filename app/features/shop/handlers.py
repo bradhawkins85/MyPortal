@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 import aiomysql
 from fastapi import File, Form, HTTPException, Query, Request, UploadFile, status
@@ -3177,10 +3177,82 @@ async def admin_bulk_refresh_shop_product_descriptions(request: Request):
     )
 
 
-async def admin_refresh_shop_product_description(request: Request, product_id: int):
+def _wants_json_response(request: Request) -> bool:
+    accept = request.headers.get("accept", "").lower()
+    requested_with = request.headers.get("x-requested-with", "").lower()
+    return "application/json" in accept or requested_with == "xmlhttprequest"
+
+
+def _safe_shop_return_url(request: Request, product_id: int) -> str:
+    """Return the same-origin page the admin came from, reopening the product.
+
+    Only relative paths under ``/shop`` or ``/admin/shop`` are accepted so the
+    Referer header cannot be used as an open redirect.
+    """
+
+    referer = request.headers.get("referer", "")
+    path = "/shop"
+    query: list[tuple[str, str]] = []
+    if referer:
+        parsed = urlparse(referer)
+        same_host = not parsed.netloc or parsed.netloc == request.url.netloc
+        if same_host and (
+            parsed.path == "/shop"
+            or parsed.path.startswith("/shop/")
+            or parsed.path == "/admin/shop"
+        ):
+            path = parsed.path
+            query = [
+                (key, value)
+                for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+                if key != "product"
+            ]
+    query.append(("product", str(product_id)))
+    return path + "?" + urlencode(query)
+
+
+async def _run_shop_product_description_refresh(
+    product_id: int,
+    *,
+    before: dict[str, Any],
+    user_id: int | None,
+    request: Request | None,
+) -> None:
+    from app.repositories import shop as shop_repo
     from app.services import audit as audit_service
     from app.services import product_descriptions
+
+    result = await product_descriptions.improve_product_description(product_id)
+    if result is None:
+        _main().log_info(
+            "Shop product description refresh skipped; product no longer exists",
+            product_id=product_id,
+        )
+        return
+
+    refreshed = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    await audit_service.record(
+        action="shop.product.description_refresh",
+        request=request,
+        user_id=user_id,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before=before,
+        after=refreshed or result,
+        sensitive_extra_keys=("buy_price",),
+    )
+    _main().log_info(
+        "Shop product description refreshed",
+        product_id=product_id,
+        refreshed_by=user_id,
+    )
+
+
+async def admin_refresh_shop_product_description(request: Request, product_id: int):
+    from uuid import uuid4
+
     from app.repositories import shop as shop_repo
+    from app.services import background as background_tasks
 
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -3190,26 +3262,32 @@ async def admin_refresh_shop_product_description(request: Request, product_id: i
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
-    result = await product_descriptions.improve_product_description(product_id)
-    if result is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-
-    refreshed = await shop_repo.get_product_by_id(product_id, include_archived=True)
-    await audit_service.record(
-        action="shop.product.description_refresh",
-        request=request,
-        entity_type="shop.product",
-        entity_id=product_id,
-        before=product,
-        after=refreshed or result,
-        sensitive_extra_keys=("buy_price",),
+    user_id = current_user["id"] if current_user else None
+    task_id = uuid4().hex
+    background_tasks.queue_background_task(
+        lambda: _run_shop_product_description_refresh(
+            product_id, before=product, user_id=user_id, request=request
+        ),
+        task_id=task_id,
+        description="shop-product-description-refresh",
     )
     _main().log_info(
-        "Shop product description refreshed",
+        "Queued shop product description refresh",
         product_id=product_id,
-        refreshed_by=current_user["id"] if current_user else None,
+        task_id=task_id,
+        refreshed_by=user_id,
     )
-    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+    message = (
+        "Product refresh queued and will run in the background. "
+        "Reopen the product in a moment to see the updated details."
+    )
+    if _wants_json_response(request):
+        return JSONResponse(
+            {"status": "queued", "taskId": task_id, "productId": product_id, "message": message},
+            status_code=status.HTTP_202_ACCEPTED,
+        )
+    return flash_redirect(_safe_shop_return_url(request, product_id), message, "success")
 
 
 async def _handle_shop_product_archive(
