@@ -73,6 +73,45 @@ async def test_successful_download_is_cached(monkeypatch, tmp_path):
     assert tray_installer.get_cached_latest_release_info()["release_tag"] == "v0.8.1"
 
 
+def _cache_previous_msi(tmp_path) -> None:
+    (tmp_path / "myportal-tray.msi").write_bytes(b"old")
+    (tmp_path / "myportal-tray.msi.json").write_text(
+        '{"release_id": 0, "release_tag": "v0.8.0", "asset_id": 6}', encoding="utf-8"
+    )
+
+
+@pytest.mark.anyio
+async def test_failed_download_keeps_previous_installer(monkeypatch, tmp_path):
+    monkeypatch.setattr(tray_installer, "_TRAY_STATIC_DIR", tmp_path)
+    _cache_previous_msi(tmp_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/releases/latest"):
+            return httpx.Response(200, json=RELEASE)
+        return httpx.Response(500)
+
+    _patch_client(monkeypatch, handler)
+    with pytest.raises(tray_installer.TrayInstallerDownloadError):
+        await tray_installer.fetch_latest_tray_installers(repo="owner/repo")
+    assert (tmp_path / "myportal-tray.msi").read_bytes() == b"old"
+    assert not (tmp_path / "myportal-tray.msi.tmp").exists()
+
+
+@pytest.mark.anyio
+async def test_release_without_msi_yet_keeps_previous_installer(monkeypatch, tmp_path):
+    # A new release is "latest" before its Windows build has uploaded the MSI.
+    monkeypatch.setattr(tray_installer, "_TRAY_STATIC_DIR", tmp_path)
+    _cache_previous_msi(tmp_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": 2, "tag_name": "v0.9.0", "assets": []})
+
+    _patch_client(monkeypatch, handler)
+    results = await tray_installer.fetch_latest_tray_installers(repo="owner/repo")
+    assert results["myportal-tray.msi"] is False
+    assert (tmp_path / "myportal-tray.msi").read_bytes() == b"old"
+
+
 def test_tray_mount_serves_installers_linked_outside_the_release(tmp_path):
     shared = tmp_path / "shared" / "tray-installers"
     shared.mkdir(parents=True)

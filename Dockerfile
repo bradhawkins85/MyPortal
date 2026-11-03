@@ -76,13 +76,17 @@ COPY --chown=root:root . /app
 RUN printf '%s\n' "${MYPORTAL_VERSION}" > /app/version.txt \
  && rm -f /app/.env \
  && install -d -m 0750 -o myportal -g myportal \
-      /app/private_uploads /app/app/static/uploads /app/var /app/var/state /app/var/data \
+      /app/private_uploads /app/app/static/uploads /app/app/static/tray \
+      /app/var /app/var/state /app/var/data \
  && chmod 0755 /app/docker/entrypoint.sh \
  && python -m compileall -q /app/app /app/manage.py >/dev/null
 
 USER myportal
 EXPOSE 8000
-VOLUME ["/app/private_uploads", "/app/app/static/uploads", "/app/var"]
+# app/static/tray holds the tray installers cached from GitHub Releases. It is
+# a volume so an upgrade keeps serving the previous installers until the new
+# release's files have downloaded and replaced them.
+VOLUME ["/app/private_uploads", "/app/app/static/uploads", "/app/app/static/tray", "/app/var"]
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
   CMD python -c "import os,sys,urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\",\"8000\")}/readyz', timeout=8); sys.exit(0)"

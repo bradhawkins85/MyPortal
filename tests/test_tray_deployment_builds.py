@@ -147,6 +147,32 @@ async def test_upload_and_complete_supersedes_old_build(sqlite_db):
 
 
 @pytest.mark.anyio
+async def test_previous_installer_stays_downloadable_until_new_build_is_ready(sqlite_db):
+    first = await builds.queue_build(7)
+    await builds.claim_next_build(PORTAL)
+    for kind in ("msi", "exe"):
+        await builds.save_artifact(first, kind, _chunks(b"old-" + kind.encode()))
+    await builds.complete_build(first)
+
+    # Queued, building, part-uploaded and failed rebuilds all leave the old
+    # installer on the deployment URL.
+    second = await builds.queue_build(7)
+    assert (await builds.ready_artifact(7, "exe")).read_bytes() == b"old-exe"
+    await builds.claim_next_build(PORTAL)
+    await builds.save_artifact(second, "exe", _chunks(b"new-exe"))
+    await builds.save_artifact_part(second, "msi", _chunks(b"new"), offset=0, total=7)
+    assert (await builds.ready_artifact(7, "exe")).read_bytes() == b"old-exe"
+    assert (await builds.ready_artifact(7, "msi")).read_bytes() == b"old-msi"
+    with pytest.raises(builds.BuildStateError):
+        await builds.complete_build(second)
+    await builds.fail_build(second, "signing failed")
+
+    assert await _status(first) == "ready"
+    assert (await builds.ready_artifact(7, "exe")).read_bytes() == b"old-exe"
+    assert (await builds.ready_artifact(7, "msi")).read_bytes() == b"old-msi"
+
+
+@pytest.mark.anyio
 async def test_complete_requires_both_artifacts(sqlite_db):
     build_id = await builds.queue_build(7)
     await builds.claim_next_build(PORTAL)

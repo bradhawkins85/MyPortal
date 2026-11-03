@@ -345,6 +345,9 @@ def test_compose_file_publishes_the_port_only_on_the_proxy(tmp_path):
         assert app["environment"]["PORT"] == "8000"
         assert app["environment"]["TRUSTED_PROXIES"] == "${APP_TRUSTED_PROXIES}"
     assert services["app_blue"]["volumes"] == services["app_green"]["volumes"]
+    # Cached tray installers outlive a container upgrade, so devices keep a
+    # working download until the new release's installers replace them.
+    assert "tray_installers:/app/app/static/tray" in services["app_blue"]["volumes"]
     assert "ports" not in services["redis"]
     assert services["redis"]["volumes"] == ["redis_data:/data"]
     assert services["redis"]["healthcheck"]["test"] == ["CMD", "redis-cli", "ping"]
@@ -1077,3 +1080,10 @@ def test_upgrade_renames_public_repository_to_public_files(tmp_path):
     log = calls.read_text()
     assert 'PATCH /repos/myportal/Public {"name":"Public-Files"}' in log
     assert "POST /user/repos" not in log
+
+
+def test_dockerfile_keeps_tray_installers_on_a_writable_volume():
+    dockerfile = (SCRIPT.parents[1] / "Dockerfile").read_text(encoding="utf-8")
+    volume_line = next(line for line in dockerfile.splitlines() if line.startswith("VOLUME "))
+    assert '"/app/app/static/tray"' in volume_line
+    assert "/app/app/static/tray" in dockerfile.split("install -d", 1)[1].split("&&", 1)[0]
