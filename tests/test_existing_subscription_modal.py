@@ -22,8 +22,17 @@ def test_existing_subscription_modal_has_all_api_fields():
 
     for field in ("customerId", "productId", "startDate", "quantity", "autoRenew"):
         assert f'name="{field}"' in modal
-    assert "creation_companies" in modal
     assert "creation_products" in modal
+
+
+def test_existing_subscription_modal_uses_active_company():
+    modal_start = TEMPLATE.index('id="existing-subscription-dialog"')
+    modal = TEMPLATE[modal_start : TEMPLATE.index("</dialog>", modal_start)]
+
+    assert "creation_companies" not in modal
+    assert 'id="existing-customer"' not in modal
+    assert 'type="hidden" name="customerId" value="{{ company.id' in modal
+    assert "company.name" in modal
 
 
 def test_existing_subscription_modal_calls_existing_api_with_csrf():
