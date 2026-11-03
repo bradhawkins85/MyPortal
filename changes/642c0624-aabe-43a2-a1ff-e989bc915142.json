@@ -1,0 +1,7 @@
+{
+  "guid": "642c0624-aabe-43a2-a1ff-e989bc915142",
+  "occurred_at": "2026-11-03T23:23Z",
+  "change_type": "Improvement",
+  "summary": "Links in shop product and package details now open in a new tab, so you stay on the shop.",
+  "content_hash": "28342941b8d2b3aaeea9b5d8f7a0f84c5878c478d56bca860194421782b2ab4a"
+}

@@ -12,6 +12,17 @@
     }
   }
 
+  function openDescriptionLinksInNewTab(root) {
+    root.querySelectorAll('a[href]').forEach((link) => {
+      const href = (link.getAttribute('href') || '').trim().toLowerCase();
+      if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) {
+        return;
+      }
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+    });
+  }
+
   function openModal(modal) {
     if (!modal) {
       return;
@@ -227,6 +238,7 @@
       descriptionDiv.className = 'modal__description rich-text-viewer';
       if (descriptionHtml) {
         descriptionDiv.innerHTML = descriptionHtml;
+        openDescriptionLinksInNewTab(descriptionDiv);
       } else {
         descriptionDiv.textContent = descriptionText;
       }
