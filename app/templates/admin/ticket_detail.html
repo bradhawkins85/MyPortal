@@ -1509,6 +1509,21 @@
                 <p class="form-help">You can upload multiple files. Server limit: 50MB per file.</p>
               </div>
               <div class="ticket-reply-flags">
+              <fieldset class="ticket-reply-recipients" data-reply-email-recipients>
+                <legend class="form-label">Email this reply to</legend>
+                <input type="hidden" name="replyEmailChoices" value="1" />
+                <div class="ticket-reply-flags--inline">
+                  <label class="checkbox">
+                    <input type="checkbox" name="emailRequester" value="true" checked />
+                    <span>Requester</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" name="emailWatchers" value="true" checked />
+                    <span>Watchers{% if ticket_watchers %} ({{ ticket_watchers | length }}){% endif %}</span>
+                  </label>
+                </div>
+                <p class="form-help" data-reply-email-recipients-help>Untick Watchers when the reply is only meant for the requester.</p>
+              </fieldset>
               <div class="form-field form-field--checkbox">
                 <label class="checkbox">
                   <input type="checkbox" name="isInternal" value="true" />

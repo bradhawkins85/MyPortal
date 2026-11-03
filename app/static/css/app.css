@@ -13787,15 +13787,10 @@ a.service-card__ai-icon:hover {
   max-width: 98%;
 }
 
-@media (min-width: 961px) {
-  .ticket-reply-composer {
-    position: sticky;
-    top: 1rem;
-    z-index: 4;
-    max-height: calc(100vh - 2rem);
-    overflow-y: auto;
-    scrollbar-gutter: stable;
-  }
+/* The reply composer grows with its content: a long reply must never push the
+ * reply options or the Send button into an inner scroll area. */
+.ticket-reply-composer {
+  overflow: visible;
 }
 
 .ticket-reply-context {
@@ -14212,6 +14207,28 @@ a.service-card__ai-icon:hover {
 
 .ticket-reply-flags .form-help {
   margin: 0 0 0 1.6rem;
+}
+
+.ticket-reply-recipients {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.ticket-reply-recipients > legend {
+  padding: 0;
+  margin-bottom: 0.3rem;
+}
+
+.ticket-reply-recipients:disabled {
+  opacity: 0.6;
+}
+
+.ticket-reply-recipients .form-help {
+  margin: 0;
 }
 
 .ticket-reply-flags--inline {

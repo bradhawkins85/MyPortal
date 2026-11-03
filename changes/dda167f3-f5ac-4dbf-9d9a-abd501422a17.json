@@ -1,0 +1,7 @@
+{
+  "guid": "dda167f3-f5ac-4dbf-9d9a-abd501422a17",
+  "occurred_at": "2026-11-03T23:14Z",
+  "change_type": "Fix",
+  "summary": "The Add a reply box now grows with long replies instead of hiding the reply options and Send button behind an inner scroll bar.",
+  "content_hash": "0c230a80b1eeff2b4a3194ba433159297f096788e0757b70a28f16b508547a5f"
+}

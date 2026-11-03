@@ -1,0 +1,7 @@
+{
+  "guid": "6604ea7b-fdb5-4d64-b086-6ae609caaf27",
+  "occurred_at": "2026-11-03T23:14Z",
+  "change_type": "Feature",
+  "summary": "Ticket replies now have Email Requester and Email Watchers tick boxes (both ticked by default), so a reply meant only for the requester no longer goes to watchers.",
+  "content_hash": "8136e36f9f4015dbcf8af43ddbe8866bbe97f7c9e625faf6153a6202c4a93f9b"
+}

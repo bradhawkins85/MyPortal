@@ -34,6 +34,8 @@ When configuring email notifications in automation actions, you can use the foll
 - `{{ticket.watchers.email}}` - Comma-separated list of all watcher email addresses, useful for CC fields
 - `{{ticket.watchers_count}}` - Number of watchers
 
+When a technician unticks **Requester** or **Watchers** under *Email this reply to* on the ticket's *Add a reply* box, the SMTP and SMTP2Go modules drop those addresses from To/CC/BCC for that reply's emails (the excluded addresses are in `{{reply.email_excluded_recipients}}`). If the To list becomes empty, the remaining CC recipients are moved to To; if nobody is left, the email is skipped.
+
 ### Timestamps
 - `{{ticket.created_at}}` - When the ticket was created (ISO format)
 - `{{ticket.updated_at}}` - When the ticket was last updated (ISO format)

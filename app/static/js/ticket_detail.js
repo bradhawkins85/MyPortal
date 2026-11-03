@@ -3421,6 +3421,8 @@
     const visibility = document.querySelector('[data-reply-visibility]');
     const submit = document.querySelector('[data-reply-submit-label]');
     const error = form && form.querySelector('[data-ticket-reply-error]');
+    const recipients = form && form.querySelector('[data-reply-email-recipients]');
+    const recipientsHelp = form && form.querySelector('[data-reply-email-recipients-help]');
     if (!(form instanceof HTMLFormElement) || !(internal instanceof HTMLInputElement)) return;
     const assignmentError = () => {
       const hasCompany = form.dataset.hasCompany === 'true';
@@ -3444,6 +3446,14 @@
     const update = () => {
       if (visibility) visibility.innerHTML = `<strong>Visibility:</strong> ${internal.checked ? 'Internal only' : 'Public reply'}`;
       if (submit) submit.textContent = internal.checked ? 'Add internal note' : 'Send reply';
+      if (recipients instanceof HTMLFieldSetElement) {
+        recipients.disabled = internal.checked;
+        if (recipientsHelp) {
+          recipientsHelp.textContent = internal.checked
+            ? 'Internal notes are not emailed.'
+            : 'Untick Watchers when the reply is only meant for the requester.';
+        }
+      }
       showError(assignmentError());
     };
     form.addEventListener('submit', (event) => {

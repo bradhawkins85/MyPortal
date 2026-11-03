@@ -2210,6 +2210,19 @@ async def admin_list_ticket_canned_responses(ticket_id: int, request: Request):
         })
     return JSONResponse({"responses": responses})
 
+def _reply_email_choice(form: Any, field: str) -> bool:
+    """Read an "Email requester/watchers" tick box, defaulting to sending.
+
+    The composer posts ``replyEmailChoices`` alongside the tick boxes, so an
+    absent box only means "unticked" when that marker is present; other
+    clients that never offered the choice keep emailing everyone.
+    """
+
+    if not form.get("replyEmailChoices"):
+        return True
+    return str(form.get(field, "")).lower() in {"1", "true", "on", "yes"}
+
+
 @router.post("/admin/tickets/{ticket_id:int}/replies", response_class=HTMLResponse)
 async def admin_create_ticket_reply(ticket_id: int, request: Request):
     main_module = _main()
@@ -2224,6 +2237,8 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     is_not_resolution_step = str(form.get("isNotResolutionStep", "")).lower() in {"1", "true", "on", "yes"}
     if is_not_resolution_step:
         is_resolution_step = False
+    email_requester = _reply_email_choice(form, "emailRequester")
+    email_watchers = _reply_email_choice(form, "emailWatchers")
     minutes_input_raw = form.get("minutesSpent", "")
     minutes_input = str(minutes_input_raw).strip() if isinstance(minutes_input_raw, str) else ""
     minutes_spent: int | None = None
@@ -2434,6 +2449,8 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         tickets_service.schedule_ticket_ai_refresh(ticket_id)
         await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
         reply_event_payload = dict(created_reply)
+        reply_event_payload["email_requester"] = email_requester
+        reply_event_payload["email_watchers"] = email_watchers
         if reply_attachments:
             reply_event_payload["attachments"] = reply_attachments
         await tickets_service.emit_ticket_updated_event(
