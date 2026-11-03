@@ -936,7 +936,7 @@
     inputList.replaceChildren();
     inputs.forEach((item) => {
       const row = el('div');
-      const label = item.kind === 'command' ? item.name : (item.kind === 'env' ? '$env:' : '-') + item.name;
+      const label = inputLabel(item);
       const value = el('dd', null, item.kind === 'command' ? null : item.value);
       if (item.kind === 'command') value.append(el('pre', { className: 'rmm-output' }, item.value));
       if (item.resolved !== undefined) {
@@ -953,6 +953,15 @@
     resultModal.querySelector('[data-rmm-abort-run]').hidden = !(config.can_run && ABORTABLE.has(run.status));
     resultModal.querySelector('[data-rmm-retry-run]').hidden = !(config.can_run && RETRYABLE.has(run.status) && run.script_id && run.asset_id);
     updateRunRow(run);
+  }
+
+  // Script parameters are stored as {kind, name}; built-in jobs (patching,
+  // Chocolatey installs, Windows updates) store plain {key, label} summaries.
+  function inputLabel(item) {
+    if (item.kind === 'command') return item.name;
+    if (item.kind === 'env') return '$env:' + item.name;
+    if (item.kind === 'param') return '-' + item.name;
+    return item.label || item.name || item.key || '';
   }
 
   function updateRunRow(run) {
