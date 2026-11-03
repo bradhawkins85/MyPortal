@@ -59,7 +59,7 @@ def test_row_menu_groups_the_asset_page_options_with_icons(page):
     headings = [part.split("<", 1)[0] for part in menu.split('class="header-menu__heading" role="presentation">')[1:]]
     assert headings == ["Asset", "Remote access", "RMM", "Agent maintenance", "Go to"]
     labels = re.findall(r"<span>([^<]+)</span>", menu)
-    for label in ("Open asset", "Start process", "Customer preview", "RustDesk remote desktop", "RustDesk remote desktop (Prompt)", "Check in now",
+    for label in ("Open asset", "Start process", "Customer preview", "RustDesk", "Remote desktop", "Remote desktop (Prompt)", "Check in now",
                   "Run health check", "Run script", "Execute command", "Install Choco package",
                   "Repair RMM agent", "Repair tray agent", "Company credentials", "Uninstall agents", "Delete"):
         assert label in labels
@@ -95,10 +95,13 @@ def test_meshcentral_functions_stay_in_row_actions_without_a_connect_shortcut(pa
     menu = _menu(html, 10)
     assert menu.count('data-rmm-remote="meshcentral"') == 4
     assert menu.count('data-rmm-remote-asset="10"') == 4
-    for mode, label in (("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal"),
-                        ("registry", "registry")):
-        assert f'data-rmm-remote-mode="{mode}"' in menu
-        assert f"MeshCentral {label}" in menu
+    assert 'id="asset-actions-10-sub-' in menu and 'aria-label="MeshCentral"' in menu
+    sub = menu.split('data-header-submenu-panel', 1)[1].split("</div>", 1)[0]
+    assert sub.count('data-rmm-remote="meshcentral"') == 4
+    for mode, label in (("remote", "Remote desktop"), ("file_transfer", "File transfer"), ("terminal", "Terminal"),
+                        ("registry", "Registry")):
+        assert f'data-rmm-remote-mode="{mode}"' in sub
+        assert f"<span>{label}</span>" in sub
     assert 'data-rmm-remote="meshcentral"' not in _menu(html, 11)
 
 

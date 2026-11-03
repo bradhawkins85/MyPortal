@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -49,8 +50,13 @@ def test_rmm_actions_join_the_grouped_actions_menu_with_icons(header):
     menu = html.split('id="asset-detail-actions"', 1)[1]
     for item in RMM_ITEMS:
         assert item in menu
-    assert "RustDesk remote desktop (Prompt)" in menu and 'data-rmm-remote-mode="remote_prompt"' in menu
-    assert "RustDesk remote desktop" in menu and 'data-rmm-remote-mode="terminal"' in menu
+    # RustDesk's functions fold into one submenu instead of four top-level rows.
+    sub = menu.split('id="asset-detail-actions-sub-', 1)[1].split("</div>", 1)[0]
+    assert 'data-header-submenu-toggle' in menu and 'aria-label="RustDesk"' in sub
+    for mode, label in (("remote", "Remote desktop"), ("remote_prompt", "Remote desktop (Prompt)"),
+                        ("file_transfer", "File transfer"), ("terminal", "Terminal")):
+        assert f'data-rmm-remote-mode="{mode}"' in sub and f"<span>{label}</span>" in sub
+    assert "RustDesk remote desktop" not in re.findall(r"<span>([^<]+)</span>", menu)
     headings = [part.split("<", 1)[0] for part in menu.split('class="header-menu__heading" role="presentation">')[1:]]
     assert headings == ["Asset", "Remote access", "RMM", "Agent maintenance", "Go to"]
     # The super admin's destructive actions close the menu in an unlabelled group.
@@ -94,10 +100,13 @@ def test_meshcentral_functions_stay_in_actions_without_a_connect_shortcut(header
     menu = html.split('id="asset-detail-actions"', 1)[1]
     assert menu.count('data-rmm-remote="meshcentral"') == 4
     assert menu.count('data-rmm-remote-asset="10"') == 4
-    for mode, label in (("remote", "remote desktop"), ("file_transfer", "file transfer"), ("terminal", "terminal"),
-                        ("registry", "registry")):
-        assert f'data-rmm-remote-mode="{mode}"' in menu
-        assert f"MeshCentral {label}" in menu
+    sub = menu.split('data-header-submenu-panel', 1)[1].split("</div>", 1)[0]
+    assert sub.count('data-rmm-remote="meshcentral"') == 4
+    for mode, label in (("remote", "Remote desktop"), ("file_transfer", "File transfer"), ("terminal", "Terminal"),
+                        ("registry", "Registry")):
+        assert f'data-rmm-remote-mode="{mode}"' in sub
+        assert f"<span>{label}</span>" in sub
+        assert f'title="MeshCentral {label.lower()}"' in sub
 
     for values in (_values(agent=None, remote_control=providers),
                    {**_values(remote_control=providers), "customer_safe": True}):
@@ -110,3 +119,14 @@ def test_wake_available_without_an_agent_only_to_authorised_staff(header, can_wa
     assert ('data-wol-asset-id="10"' in html) is visible
     if visible:
         assert "Wake on LAN" in html and "data-confirm=" in html
+
+
+def test_each_remote_tool_gets_its_own_submenu(header):
+    providers = [{"provider": "rustdesk", "label": "RustDesk"}, {"provider": "meshcentral", "label": "MeshCentral"}]
+    menu = header.render(**_values(remote_control=providers)).split('id="asset-detail-actions"', 1)[1]
+    assert menu.count("data-header-submenu-toggle") == 2
+    assert 'aria-controls="asset-detail-actions-sub-' in menu
+    toggles = re.findall(r'data-header-submenu-toggle.*?<span>([^<]+)</span>', menu, re.S)
+    assert toggles == ["RustDesk", "MeshCentral"]
+    ids = re.findall(r'id="(asset-detail-actions-sub-\d+)"', menu)
+    assert len(ids) == len(set(ids)) == 2

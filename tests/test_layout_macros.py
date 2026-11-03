@@ -87,6 +87,37 @@ def test_page_header_actions_single_action_renders_inline(env):
     assert 'href="/admin/x"' in html
 
 
+def test_page_header_actions_submenu_nests_items_in_a_flyout(env):
+    html = _render(
+        env,
+        "{% from 'macros/header.html' import page_header_actions %}"
+        "{{ page_header_actions(actions, menu_id='hdr') }}",
+        actions=[
+            {"type": "section", "label": "Remote access"},
+            {"type": "submenu", "label": "Tool", "items": [
+                {"label": "Desktop", "attrs": {"data-mode": "remote"}},
+                {"label": "Terminal", "type": "link", "href": "/t"},
+            ]},
+            {"type": "submenu", "label": "Empty", "items": []},
+            {"label": "Other"},
+        ],
+    )
+    assert 'data-header-submenu-toggle' in html and 'aria-controls="hdr-sub-2"' in html
+    assert 'id="hdr-sub-2"' in html and 'aria-label="Tool"' in html
+    sub = html.split('id="hdr-sub-2"', 1)[1].split("</div>", 1)[0]
+    assert 'data-mode="remote"' in sub and 'href="/t"' in sub
+    assert "Empty" not in html
+
+
+def test_page_header_actions_lone_submenu_still_uses_the_menu(env):
+    html = _render(
+        env,
+        "{% from 'macros/header.html' import page_header_actions %}"
+        "{{ page_header_actions([{'type': 'submenu', 'label': 'Tool', 'items': [{'label': 'Go'}]}]) }}",
+    )
+    assert 'data-header-menu' in html and 'data-header-submenu-panel' in html
+
+
 # --- counters.html --------------------------------------------------------------
 
 

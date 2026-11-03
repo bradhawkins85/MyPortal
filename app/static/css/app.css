@@ -15215,6 +15215,46 @@ a.stat-strip__stat:focus-visible {
   color: var(--color-text-muted);
 }
 
+/* Submenus: one row per family of options (e.g. a remote-access tool) that
+   opens a flyout beside the menu, or expands inline on narrow screens. */
+.header-menu__sub {
+  display: flex;
+  flex-direction: column;
+}
+
+.header-menu__item--submenu .header-menu__subchevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.header-menu__sub--open > .header-menu__item--submenu {
+  background: rgba(148, 163, 184, 0.15);
+}
+
+.header-menu__subpanel {
+  top: 0;
+  right: auto;
+  min-width: 12rem;
+}
+
+.header-menu__subpanel:not(.header-menu__subpanel--inline) .header-menu__item {
+  white-space: nowrap;
+}
+
+.header-menu__subpanel--inline {
+  position: static;
+  min-width: 0;
+  max-width: none;
+  margin: 0 0 0.15rem 1.25rem;
+  padding: 0 0 0 0.35rem;
+  border: 0;
+  border-left: 1px solid var(--color-border);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
 .header-menu__divider {
   height: 1px;
   margin: 0.3rem 0.25rem;

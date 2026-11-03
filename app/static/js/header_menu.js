@@ -10,6 +10,16 @@
  * Behaviour: click toggles open/closed; Esc closes; click outside closes;
  * focus moves to the panel when opened.
  *
+ * Submenus (render_submenu in macros/header.html) nest inside a panel:
+ *   <div data-header-submenu>
+ *     <button data-header-submenu-toggle aria-expanded="false" aria-controls="SUB">…</button>
+ *     <div id="SUB" data-header-submenu-panel hidden>…items…</div>
+ *   </div>
+ * They open on hover (pointer devices), click, Enter/Space or ArrowRight, and
+ * close on ArrowLeft or Esc (which returns focus to the submenu's toggle). The
+ * flyout sits beside the menu, on whichever side has room, or expands inline
+ * under its toggle when the screen is too narrow for either.
+ *
  * Native <details> menus can opt into the same floating placement with
  *   <details data-floating-menu [data-floating-menu-placement="top"]>
  *     <summary>…</summary>
@@ -106,6 +116,185 @@
     panel.style.zIndex = '';
   }
 
+  var HOVER_CLOSE_DELAY = 200;
+  var HOVER_CLICK_GRACE = 600;
+
+  function getSubmenuParts(sub) {
+    return {
+      toggle: sub.querySelector('[data-header-submenu-toggle]'),
+      panel: sub.querySelector('[data-header-submenu-panel]'),
+    };
+  }
+
+  function submenuItems(panel) {
+    return Array.prototype.slice.call(panel.querySelectorAll('a, button')).filter(function (item) {
+      return !item.disabled && !item.hasAttribute('disabled') && !item.closest('[hidden]');
+    });
+  }
+
+  // Place the flyout beside the parent menu panel (its containing block), on
+  // the left when there is room since Actions menus hug the right edge,
+  // otherwise on the right, otherwise inline beneath the toggle.
+  function placeSubmenu(sub) {
+    var parts = getSubmenuParts(sub);
+    var host = sub.closest('[data-header-menu-panel], [data-header-submenu-panel]');
+    if (!parts.toggle || !parts.panel || !host) {
+      return;
+    }
+    var panel = parts.panel;
+    panel.classList.remove('header-menu__subpanel--inline');
+    panel.style.top = '';
+    panel.style.left = '';
+    panel.style.right = '';
+    var gap = 4;
+    var margin = 8;
+    var hostRect = host.getBoundingClientRect();
+    var width = panel.offsetWidth;
+    if (hostRect.left - width - gap >= margin) {
+      panel.style.right = 'calc(100% + ' + gap + 'px)';
+    } else if (hostRect.right + width + gap <= window.innerWidth - margin) {
+      panel.style.left = 'calc(100% + ' + gap + 'px)';
+    } else {
+      panel.classList.add('header-menu__subpanel--inline');
+      return;
+    }
+    var padTop = parseFloat(window.getComputedStyle(panel).paddingTop) || 0;
+    var top = parts.toggle.offsetTop - padTop;
+    panel.style.top = top + 'px';
+    // Keep the flyout on screen when its toggle sits near the viewport edge.
+    var rect = panel.getBoundingClientRect();
+    var shift = 0;
+    if (rect.bottom > window.innerHeight - margin) {
+      shift = window.innerHeight - margin - rect.bottom;
+    }
+    if (rect.top + shift < margin) {
+      shift = margin - rect.top;
+    }
+    if (shift) {
+      panel.style.top = (top + shift) + 'px';
+    }
+  }
+
+  function setSubmenuState(sub, open) {
+    var parts = getSubmenuParts(sub);
+    if (!parts.toggle || !parts.panel) {
+      return;
+    }
+    if (sub.__submenuTimer) {
+      clearTimeout(sub.__submenuTimer);
+      sub.__submenuTimer = null;
+    }
+    if (open) {
+      var host = sub.parentElement;
+      if (host) {
+        host.querySelectorAll(':scope > [data-header-submenu].header-menu__sub--open').forEach(function (other) {
+          if (other !== sub) {
+            setSubmenuState(other, false);
+          }
+        });
+      }
+      parts.panel.hidden = false;
+      placeSubmenu(sub);
+      parts.toggle.setAttribute('aria-expanded', 'true');
+      sub.classList.add('header-menu__sub--open');
+    } else {
+      parts.panel.hidden = true;
+      parts.panel.classList.remove('header-menu__subpanel--inline');
+      parts.panel.style.top = '';
+      parts.panel.style.left = '';
+      parts.panel.style.right = '';
+      parts.toggle.setAttribute('aria-expanded', 'false');
+      sub.classList.remove('header-menu__sub--open');
+    }
+  }
+
+  function closeSubmenus(root) {
+    root.querySelectorAll('[data-header-submenu].header-menu__sub--open').forEach(function (sub) {
+      setSubmenuState(sub, false);
+    });
+  }
+
+  function focusItem(items, index) {
+    if (!items.length) {
+      return;
+    }
+    var target = items[(index + items.length) % items.length];
+    if (typeof target.focus === 'function') {
+      target.focus();
+    }
+  }
+
+  function attachSubmenu(sub) {
+    if (sub.__headerSubmenuBound) {
+      return;
+    }
+    var parts = getSubmenuParts(sub);
+    if (!parts.toggle || !parts.panel) {
+      return;
+    }
+    sub.__headerSubmenuBound = true;
+    var canHover = window.matchMedia ? window.matchMedia('(hover: hover) and (pointer: fine)') : null;
+
+    parts.toggle.addEventListener('click', function (event) {
+      event.preventDefault();
+      // A mouse click lands just after hovering opened the submenu, so keep
+      // it open then rather than toggling it straight back shut.
+      var isOpen = sub.classList.contains('header-menu__sub--open');
+      var justHovered = sub.__hoverOpenedAt && Date.now() - sub.__hoverOpenedAt < HOVER_CLICK_GRACE;
+      setSubmenuState(sub, justHovered ? true : !isOpen);
+    });
+
+    sub.addEventListener('mouseenter', function () {
+      if (!canHover || !canHover.matches) {
+        return;
+      }
+      if (!sub.classList.contains('header-menu__sub--open')) {
+        sub.__hoverOpenedAt = Date.now();
+      }
+      setSubmenuState(sub, true);
+    });
+    sub.addEventListener('mouseleave', function () {
+      if (!canHover || !canHover.matches || parts.panel.classList.contains('header-menu__subpanel--inline')) {
+        return;
+      }
+      if (sub.__submenuTimer) {
+        clearTimeout(sub.__submenuTimer);
+      }
+      sub.__submenuTimer = setTimeout(function () {
+        sub.__submenuTimer = null;
+        if (!sub.contains(document.activeElement)) {
+          setSubmenuState(sub, false);
+        }
+      }, HOVER_CLOSE_DELAY);
+    });
+
+    parts.toggle.addEventListener('keydown', function (event) {
+      if (event.key === 'ArrowRight' || event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        setSubmenuState(sub, true);
+        focusItem(submenuItems(parts.panel), 0);
+      }
+    });
+
+    parts.panel.addEventListener('keydown', function (event) {
+      var items = submenuItems(parts.panel);
+      var index = items.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        focusItem(items, index + 1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        focusItem(items, index - 1);
+      } else if (event.key === 'ArrowLeft' || event.key === 'Escape') {
+        // Close only this submenu, not the whole Actions menu.
+        event.preventDefault();
+        event.stopPropagation();
+        setSubmenuState(sub, false);
+        parts.toggle.focus();
+      }
+    });
+  }
+
   function setMenuState(menu, open) {
     var toggle = menu.querySelector('[data-header-menu-toggle]');
     var panel = getMenuPanel(menu);
@@ -122,6 +311,7 @@
       menu.classList.add('header-menu--open');
       openMenu = menu;
     } else {
+      closeSubmenus(menu);
       panel.hidden = true;
       resetPanelPosition(panel);
       toggle.setAttribute('aria-expanded', 'false');
@@ -168,10 +358,11 @@
         }
       }
     });
-    // Close the menu when a menu item (but not a checkbox toggle) is clicked.
+    panel.querySelectorAll('[data-header-submenu]').forEach(attachSubmenu);
+    // Close the menu when a menu item (but not a checkbox or submenu toggle) is clicked.
     panel.addEventListener('click', function (event) {
       var item = event.target.closest('.header-menu__item, .header-title-menu__item');
-      if (item && !item.closest('.header-menu__check')) {
+      if (item && !item.closest('.header-menu__check') && !item.hasAttribute('data-header-submenu-toggle')) {
         setMenuState(menu, false);
       }
     });
