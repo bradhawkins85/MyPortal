@@ -1328,6 +1328,160 @@ def _normalize_subject_for_matching(subject: str) -> str:
     return normalized
 
 
+def _first_ticket_with_normalized_subject(
+    rows: list[Mapping[str, Any]] | None,
+    normalized_subject: str,
+) -> dict[str, Any] | None:
+    """Return the first non-closed ticket whose normalized subject matches."""
+
+    if not rows:
+        return None
+    from app.repositories.tickets import _normalise_ticket
+
+    target = normalized_subject.lower()
+    for row in rows:
+        ticket = _normalise_ticket(row)
+        if _ticket_is_closed(ticket):
+            continue
+        ticket_normalized = _normalize_subject_for_matching(ticket.get("subject", "") or "")
+        if ticket_normalized.lower() == target:
+            return ticket
+    return None
+
+
+_REPLY_PREFIX_PATTERN = re.compile(r"^\s*(?:\[[^\]]*\]\s*)*(?:re|fw|fwd)\s*:", re.IGNORECASE)
+
+
+def _subject_is_reply_or_forward(subject: str | None) -> bool:
+    """Return True when the subject carries a RE:/FW:/FWD: prefix."""
+
+    return bool(subject) and bool(_REPLY_PREFIX_PATTERN.match(subject))
+
+
+async def _resolve_sender_company_ids(from_email: str | None) -> set[int]:
+    """Return the companies the sender address belongs to.
+
+    Only sender-derived evidence is used (portal user company, company email
+    domain, staff contact records); the mailbox default company is never used,
+    so an unrelated sender cannot be scoped into a mailbox's company.
+    """
+
+    address = _normalise_email_address(from_email)
+    if not address:
+        return set()
+    company_ids: set[int] = set()
+    try:
+        user = await users_repo.get_user_by_email(address)
+    except Exception:  # pragma: no cover - defensive lookup
+        user = None
+    if isinstance(user, Mapping):
+        user_company_id = _int_or_none(user.get("company_id"))
+        if user_company_id is not None:
+            company_ids.add(user_company_id)
+    if "@" in address:
+        domain = address.rsplit("@", 1)[1]
+        try:
+            company = await company_repo.get_company_by_email_domain(domain)
+        except Exception:  # pragma: no cover - defensive lookup
+            company = None
+        if isinstance(company, Mapping):
+            domain_company_id = _int_or_none(company.get("id"))
+            if domain_company_id is not None:
+                company_ids.add(domain_company_id)
+    try:
+        staff_records = await staff_repo.list_staff_by_email(address)
+    except Exception:  # pragma: no cover - defensive lookup
+        staff_records = []
+    for staff_record in staff_records or []:
+        staff_company_id = _int_or_none(staff_record.get("company_id"))
+        if staff_company_id is not None:
+            company_ids.add(staff_company_id)
+    return company_ids
+
+
+async def _add_reply_sender_as_watcher(
+    ticket: Mapping[str, Any],
+    from_email: str | None,
+    sender_company_ids: set[int],
+) -> bool:
+    """Add a same-company reply sender as an email-only watcher on the ticket.
+
+    Customers often reply-all to a thread that already produced a ticket. When
+    the new sender belongs to the ticket's company they are added as a watcher
+    so they receive future updates. Senders from other companies are never
+    added, and watchers are email-only so no ticket access is granted.
+    """
+
+    address = _normalise_email_address(from_email)
+    ticket_id = _int_or_none(ticket.get("id"))
+    ticket_company_id = _int_or_none(ticket.get("company_id"))
+    if (
+        not address
+        or ticket_id is None
+        or ticket_company_id is None
+        or ticket_company_id not in sender_company_ids
+    ):
+        return False
+
+    requester_id = _int_or_none(ticket.get("requester_id"))
+    if requester_id is not None:
+        try:
+            requester = await users_repo.get_user_by_id(requester_id)
+        except Exception:  # pragma: no cover - defensive lookup
+            requester = None
+        if isinstance(requester, Mapping) and (
+            _normalise_email_address(requester.get("email")) == address
+        ):
+            return False
+    requester_staff_id = _int_or_none(ticket.get("requester_staff_id"))
+    if requester_staff_id is not None:
+        try:
+            staff_member = await staff_repo.get_staff_by_id(requester_staff_id)
+        except Exception:  # pragma: no cover - defensive lookup
+            staff_member = None
+        if isinstance(staff_member, Mapping) and (
+            _normalise_email_address(staff_member.get("email")) == address
+        ):
+            return False
+    if _normalise_email_address(ticket.get("requester_email")) == address:
+        return False
+
+    try:
+        watchers = await tickets_repo.list_watchers(ticket_id)
+    except Exception:  # pragma: no cover - defensive lookup
+        watchers = []
+    for watcher in watchers:
+        if _normalise_email_address(watcher.get("email")) == address:
+            return False
+        watcher_user_id = _int_or_none(watcher.get("user_id"))
+        if watcher_user_id is not None:
+            try:
+                watcher_user = await users_repo.get_user_by_id(watcher_user_id)
+            except Exception:  # pragma: no cover - defensive lookup
+                watcher_user = None
+            if isinstance(watcher_user, Mapping) and (
+                _normalise_email_address(watcher_user.get("email")) == address
+            ):
+                return False
+
+    try:
+        await tickets_repo.add_watcher(ticket_id, email=address)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to add reply sender as ticket watcher",
+            ticket_id=ticket_id,
+            email=address,
+            error=str(exc),
+        )
+        return False
+    log_info(
+        "Added reply sender as ticket watcher",
+        ticket_id=ticket_id,
+        email=address,
+    )
+    return True
+
+
 async def _find_existing_ticket_for_reply(
     subject: str,
     from_email: str,
@@ -1335,6 +1489,7 @@ async def _find_existing_ticket_for_reply(
     requester_id: int | None = None,
     related_message_ids: list[str] | None = None,
     message_body: str | None = None,
+    sender_company_ids: set[int] | None = None,
 ) -> dict[str, Any] | None:
     """
     Find an existing ticket that this email is likely a reply to.
@@ -1343,12 +1498,17 @@ async def _find_existing_ticket_for_reply(
     1. Extract ticket number from subject
     2. Match In-Reply-To/References message IDs against ticket and reply external references
     3. Normalized subject match for non-closed tickets involving the sender.
+    4. For RE:/FW: subjects, normalized subject match for non-closed tickets
+       belonging to one of the sender's companies (a colleague replying-all
+       to a thread that already produced a ticket).
 
     Args:
         subject: Email subject line
         from_email: Sender email address
         requester_id: ID of the requester user if resolved
         related_message_ids: Message IDs from In-Reply-To/References headers
+        sender_company_ids: Companies derived from the sender's own identity
+            (never the mailbox default), used for the same-company match.
     
     Returns:
         Non-closed ticket record if found, None otherwise. A closed ticket is
@@ -1486,22 +1646,33 @@ async def _find_existing_ticket_for_reply(
         query += " ORDER BY t.updated_at DESC, t.id DESC"
 
         rows = await db.fetch_all(query, tuple(params))
-        
-        if not rows:
-            return None
-        
-        # Now check which tickets have matching normalized subjects
-        from app.repositories.tickets import _normalise_ticket
-        
-        for row in rows:
-            ticket = _normalise_ticket(row)
-            ticket_subject = ticket.get("subject", "")
-            ticket_normalized = _normalize_subject_for_matching(ticket_subject)
-            
-            # Check if normalized subjects match (case insensitive)
-            if ticket_normalized.lower() == normalized_subject.lower():
-                return ticket
-        
+        match = _first_ticket_with_normalized_subject(rows, normalized_subject)
+        if match is not None:
+            return match
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to search for existing ticket by subject",
+            subject=subject,
+            from_email=from_email,
+            error=str(exc),
+        )
+
+    # A reply from a colleague who was not on the original email still belongs
+    # to the same conversation. Only explicit replies/forwards qualify, and only
+    # tickets for a company the sender itself belongs to.
+    company_ids = sorted({int(cid) for cid in (sender_company_ids or set())})
+    if not company_ids or not _subject_is_reply_or_forward(subject):
+        return None
+    try:
+        # Placeholders are generated from the company id count only; values stay bound.
+        placeholders = ", ".join(["%s"] * len(company_ids))
+        company_query = (
+            "SELECT t.* FROM tickets t WHERE t.status <> 'closed'"
+            " AND t.company_id IN (" + placeholders + ")"
+            " ORDER BY t.updated_at DESC, t.id DESC"
+        )
+        rows = await db.fetch_all(company_query, tuple(company_ids))
+        return _first_ticket_with_normalized_subject(rows, normalized_subject)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error(
             "Failed to search for existing ticket by subject",
@@ -1883,12 +2054,14 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             # Check if this email is a reply to an existing ticket
             from_email = _extract_email_addresses(from_address)
             from_email_addr = from_email[0] if from_email else None
+            sender_company_ids = await _resolve_sender_company_ids(from_email_addr)
             existing_ticket = await _find_existing_ticket_for_reply(
                 subject=subject,
                 from_email=from_email_addr or "",
                 requester_id=requester_id,
                 related_message_ids=related_message_ids,
                 message_body=body,
+                sender_company_ids=sender_company_ids,
             )
             campaign_reply: dict[str, Any] | None = None
             if not existing_ticket:
@@ -1913,6 +2086,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         uid=uid,
                         ticket_id=ticket_id,
                         subject=subject,
+                    )
+                    await _add_reply_sender_as_watcher(
+                        ticket, from_email_addr, sender_company_ids
                     )
                 else:
                     # Create a new ticket
