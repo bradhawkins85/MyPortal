@@ -763,3 +763,37 @@ async def test_api_validation_errors_never_reflect_bootstrap_secrets(path, paylo
     assert response.status_code == 422
     assert all(secret not in response.text for secret in secrets)
     assert all("input" not in error and "ctx" not in error for error in response.json()["detail"])
+
+
+def _build_agent_script(name: str) -> str:
+    return (Path(__file__).resolve().parents[1] / "tray" / "build-agent" / name).read_text(encoding="utf-8")
+
+
+def test_provisioning_failures_keep_their_safe_reason():
+    agent = _build_agent_script("MyPortalBuildAgent.ps1")
+    helpers = _build_agent_script("New-MyPortalProvisioningPackage.ps1")
+
+    # The helper's own messages (exit code, missing password) reach the log
+    # and portal; anything else is redacted instead of replaced wholesale.
+    assert "-not (Test-MyPortalProvisioningMessage $message)" in agent
+    assert "Protect-MyPortalProvisioningOutput $message $job.provisioning" in agent
+    assert "DiagnosticsPath (Join-Path $WorkDir 'provisioning-diagnostics.log')" in agent
+    assert "(Protect-MyPortalProvisioningOutput $output $Settings)" in helpers
+    # The completion request carries the package password; its errors are fixed text.
+    assert "MyPortal did not accept the completed provisioning build (HTTP $code)." in agent
+
+
+def test_provisioning_output_redaction_pattern_removes_password_lines():
+    import re
+
+    helpers = _build_agent_script("New-MyPortalProvisioningPackage.ps1")
+    match = re.search(r"\[regex\]::Replace\(\$Output, '([^']+)', '\$1\[redacted\]'\)", helpers)
+    assert match
+    pattern = re.compile(match.group(1).replace("(?im)", ""), re.IGNORECASE | re.MULTILINE)
+    output = "Building package\nPackage password: Sup3rSecretValue\npassword = other-secret\nDone"
+    redacted = pattern.sub(lambda m: m.group(1) + "[redacted]", output)
+    assert "Sup3rSecretValue" not in redacted
+    assert "other-secret" not in redacted
+    assert "Building package" in redacted and "Done" in redacted
+    for secret in ("admin_password", "wifi_password", "bulk_token", "'password'"):
+        assert secret in helpers.split("function Protect-MyPortalProvisioningOutput", 1)[1].split("\n}\n", 1)[0]
