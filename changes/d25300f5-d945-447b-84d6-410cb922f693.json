@@ -1,0 +1,7 @@
+{
+  "guid": "d25300f5-d945-447b-84d6-410cb922f693",
+  "occurred_at": "2026-11-03T10:11Z",
+  "change_type": "Fix",
+  "summary": "The shop no longer lists categories that have no products available to buy, so opening a category always shows products.",
+  "content_hash": "37ecbcd11531f55945a99d4af783d387d736395d6fd4c5ccbc5b670d14444510"
+}
