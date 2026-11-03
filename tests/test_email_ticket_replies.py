@@ -788,3 +788,204 @@ def test_extract_body_embeds_content_location_image():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def _company_ticket_row(**overrides):
+    row = {
+        "id": 42,
+        "ticket_number": "42",
+        "subject": "RE: Installation of VM1 - Labsolutions CS",
+        "status": "open",
+        "company_id": 7,
+        "requester_id": None,
+        "requester_staff_id": 11,
+        "created_at": None,
+        "updated_at": None,
+        "closed_at": None,
+        "ai_summary_updated_at": None,
+        "ai_tags": None,
+        "ai_tags_updated_at": None,
+    }
+    row.update(overrides)
+    return row
+
+
+@pytest.mark.anyio
+class TestSameCompanyReplyMerge:
+    """A colleague replying-all to a thread joins the existing company ticket."""
+
+    async def test_reply_from_same_company_non_participant_matches(self, monkeypatch):
+        from app.services import imap
+        from app.core import database
+
+        queries: list[tuple[str, tuple]] = []
+
+        async def mock_fetch_all(query, params):
+            queries.append((query, params))
+            if "t.company_id = %s" in query:
+                return [_company_ticket_row()]
+            return []
+
+        monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="RE: Installation of VM1 - Labsolutions CS",
+            from_email="saeed@bjplabs.example",
+            sender_company_ids={7},
+        )
+
+        assert result is not None
+        assert result["id"] == 42
+        company_query, params = next(q for q in queries if "t.company_id = %s" in q[0])
+        assert params == (7,)
+        assert "status <> 'closed'" in company_query
+
+    async def test_same_company_match_requires_reply_prefix(self, monkeypatch):
+        from app.services import imap
+        from app.core import database
+
+        async def mock_fetch_all(query, params):
+            if "t.company_id = %s" in query:
+                return [_company_ticket_row(subject="Printer not working")]
+            return []
+
+        monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="Printer not working",
+            from_email="colleague@bjplabs.example",
+            sender_company_ids={7},
+        )
+
+        assert result is None
+
+    async def test_no_company_match_without_sender_company(self, monkeypatch):
+        from app.services import imap
+        from app.core import database
+
+        async def mock_fetch_all(query, params):
+            assert "t.company_id = %s" not in query
+            return []
+
+        monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="RE: Installation of VM1 - Labsolutions CS",
+            from_email="stranger@elsewhere.example",
+            sender_company_ids=set(),
+        )
+
+        assert result is None
+
+    async def test_same_company_match_skips_different_subject_and_closed(self, monkeypatch):
+        from app.services import imap
+        from app.core import database
+
+        async def mock_fetch_all(query, params):
+            if "t.company_id = %s" in query:
+                return [
+                    _company_ticket_row(id=1, subject="RE: Something else entirely"),
+                    _company_ticket_row(id=2, status="closed"),
+                ]
+            return []
+
+        monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="RE: Installation of VM1 - Labsolutions CS",
+            from_email="saeed@bjplabs.example",
+            sender_company_ids={7},
+        )
+
+        assert result is None
+
+
+@pytest.mark.anyio
+class TestReplySenderWatcher:
+    async def _setup(self, monkeypatch, *, watchers=None, staff_email="bin@bjplabs.example"):
+        from app.services import imap
+
+        added: list[tuple[int, str]] = []
+
+        async def fake_list_watchers(ticket_id):
+            return list(watchers or [])
+
+        async def fake_add_watcher(ticket_id, user_id=None, email=None):
+            added.append((ticket_id, email))
+
+        async def fake_get_staff_by_id(staff_id):
+            return {"id": staff_id, "email": staff_email}
+
+        async def fake_get_user_by_id(user_id):
+            return None
+
+        monkeypatch.setattr(imap.tickets_repo, "list_watchers", fake_list_watchers)
+        monkeypatch.setattr(imap.tickets_repo, "add_watcher", fake_add_watcher)
+        monkeypatch.setattr(imap.staff_repo, "get_staff_by_id", fake_get_staff_by_id)
+        monkeypatch.setattr(imap.users_repo, "get_user_by_id", fake_get_user_by_id)
+        return added
+
+    async def test_same_company_sender_added_as_email_watcher(self, monkeypatch):
+        from app.services import imap
+
+        added = await self._setup(monkeypatch)
+        result = await imap._add_reply_sender_as_watcher(
+            _company_ticket_row(), "Saeed@BJPLabs.example", {7}
+        )
+        assert result is True
+        assert added == [(42, "saeed@bjplabs.example")]
+
+    async def test_other_company_sender_not_added(self, monkeypatch):
+        from app.services import imap
+
+        added = await self._setup(monkeypatch)
+        result = await imap._add_reply_sender_as_watcher(
+            _company_ticket_row(), "someone@other.example", {99}
+        )
+        assert result is False
+        assert added == []
+
+    async def test_requester_not_added_as_watcher(self, monkeypatch):
+        from app.services import imap
+
+        added = await self._setup(monkeypatch)
+        result = await imap._add_reply_sender_as_watcher(
+            _company_ticket_row(), "bin@bjplabs.example", {7}
+        )
+        assert result is False
+        assert added == []
+
+    async def test_existing_watcher_not_duplicated(self, monkeypatch):
+        from app.services import imap
+
+        added = await self._setup(
+            monkeypatch, watchers=[{"user_id": None, "email": "saeed@bjplabs.example"}]
+        )
+        result = await imap._add_reply_sender_as_watcher(
+            _company_ticket_row(), "saeed@bjplabs.example", {7}
+        )
+        assert result is False
+        assert added == []
+
+
+@pytest.mark.anyio
+async def test_resolve_sender_company_ids_ignores_mailbox_default(monkeypatch):
+    from app.services import imap
+
+    async def fake_get_user_by_email(email):
+        return None
+
+    async def fake_get_company_by_email_domain(domain):
+        return {"id": 7} if domain == "bjplabs.example" else None
+
+    async def fake_list_staff_by_email(email):
+        return [{"id": 3, "company_id": 8}]
+
+    monkeypatch.setattr(imap.users_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(
+        imap.company_repo, "get_company_by_email_domain", fake_get_company_by_email_domain
+    )
+    monkeypatch.setattr(imap.staff_repo, "list_staff_by_email", fake_list_staff_by_email)
+
+    assert await imap._resolve_sender_company_ids("saeed@bjplabs.example") == {7, 8}
+    assert await imap._resolve_sender_company_ids("") == set()
