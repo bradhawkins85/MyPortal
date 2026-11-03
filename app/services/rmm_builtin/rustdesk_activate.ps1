@@ -46,6 +46,39 @@ function Invoke-RustDeskCommand {
     }
 }
 
+function Get-InnermostMessage {
+    param($ErrorRecord)
+    $exception = $ErrorRecord.Exception
+    while ($exception.InnerException) { $exception = $exception.InnerException }
+    return $exception.Message
+}
+
+# A fresh install keeps starting (or re-registering) the service in the background
+# after the installer exits, so a single Stop()/Start() races it and fails with
+# "Cannot start service RustDesk". Re-read the live state each time and retry.
+function Restart-RustDeskService {
+    $stopped = $false
+    $lastError = 'it did not reach the running state'
+    for ($attempt = 0; $attempt -lt 30 -and (Get-Date) -lt $activationDeadline; $attempt++) {
+        $service = Get-Service -Name 'RustDesk' -ErrorAction SilentlyContinue
+        if (-not $service) {
+            $lastError = 'the service is not registered'
+        } elseif (-not $stopped) {
+            if ($service.Status -eq 'Stopped') { $stopped = $true; continue }
+            if ($service.Status -eq 'Running') {
+                try { $service.Stop() } catch { $lastError = Get-InnermostMessage $_ }
+            }
+        } else {
+            if ($service.Status -eq 'Running') { return }
+            if ($service.Status -eq 'Stopped') {
+                try { $service.Start(); continue } catch { $lastError = Get-InnermostMessage $_ }
+            }
+        }
+        Start-Sleep -Seconds 2
+    }
+    throw "The RustDesk service did not start: $lastError"
+}
+
 if (-not $env:MYPORTAL_RUSTDESK_PASSWORD) { throw 'The RustDesk session password is missing.' }
 Write-Output 'Checking whether RustDesk is installed'
 $exe = Find-RustDesk
@@ -80,6 +113,12 @@ if (-not $exe) {
             Start-Sleep -Seconds 2
         } while ((Get-Date) -lt $deadline -and (Get-Date) -lt $activationDeadline)
         if (-not $exe) { throw 'RustDesk did not finish installing.' }
+        # The installer registers the service itself; give it time before falling
+        # back to --install-service so the two do not race.
+        for ($attempt = 0; $attempt -lt 15 -and (Get-Date) -lt $activationDeadline; $attempt++) {
+            if (Get-Service -Name 'RustDesk' -ErrorAction SilentlyContinue) { break }
+            Start-Sleep -Seconds 2
+        }
     } finally {
         Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
     }
@@ -101,14 +140,7 @@ if ($env:RUSTDESK_CFG) {
 
 Write-Output 'Starting the RustDesk service'
 Set-Service -Name 'RustDesk' -StartupType Automatic
-# Use non-blocking service operations and explicitly bound the state waits.
-$service = Get-Service -Name 'RustDesk'
-if ($service.Status -ne 'Stopped') {
-    $service.Stop()
-    $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(15))
-}
-$service.Start()
-$service.WaitForStatus('Running', [TimeSpan]::FromSeconds(15))
+Restart-RustDeskService
 Start-Sleep -Seconds 3
 
 Write-Output 'Setting a new session password'
