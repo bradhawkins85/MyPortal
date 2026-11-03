@@ -23,6 +23,7 @@ _ALLOWED_COMPANY_COLUMNS = frozenset({
     "defender_auto_ticket_antivirus_off", "defender_auto_ticket_realtime_off",
     "defender_auto_ticket_tamper_off", "defender_auto_ticket_threat_detected",
     "classic_outlook_signatures_enabled", "pending_approval", "rmm_agent_auto_deploy",
+    "rustdesk_unattended_access",
     "signature_delivery_mode", "outlook_addin_id", "sso_mode",
 })
 _ALLOWED_COMPANY_INPUTS = _ALLOWED_COMPANY_COLUMNS | frozenset({"email_domains"})

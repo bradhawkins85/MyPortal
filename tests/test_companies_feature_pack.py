@@ -37,6 +37,7 @@ EXPECTED = {
     ("GET", "/admin/companies/{company_id}/m365-discover"),
     ("POST", "/admin/companies/{company_id}/m365-credentials"),
     ("POST", "/admin/companies/{company_id}/m365-credentials/delete"),
+    ("POST", "/admin/companies/{company_id}/remote-control"),
     ("GET", "/admin/companies/{company_id}/tray"),
     ("POST", "/admin/companies/{company_id}/tray"),
     ("POST", "/admin/companies/{company_id}/tray/tokens"),

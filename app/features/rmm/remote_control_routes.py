@@ -105,7 +105,7 @@ async def _company_user(request: Request, company_id: int) -> dict:
     return user
 
 
-async def providers_for_company(request: Request, user: dict, company_id: int | None) -> list[dict[str, str]]:
+async def providers_for_company(request: Request, user: dict, company_id: int | None) -> list[dict]:
     """Remote control buttons to show for a company's assets (the ticket page)."""
 
     main_module = _assets_routes()._main()
@@ -113,7 +113,7 @@ async def providers_for_company(request: Request, user: dict, company_id: int | 
         return []
     if not await _can_connect(request, user, int(company_id)):
         return []
-    return await remote_control.enabled_providers()
+    return await remote_control.enabled_providers(int(company_id))
 
 
 class StartRequest(BaseModel):

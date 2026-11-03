@@ -151,3 +151,30 @@ test('RustDesk prompt option sends its mode and launches without a password', as
   assert.equal(app.window.location.href, 'rustdesk://connection/new/123');
   assert.match(app.message.textContent, /remote desktop \(prompt\)/);
 });
+
+test('RustDesk menu offers only the sessions the company allows', () => {
+  class Node {
+    constructor(tag) { this.tag = tag; this.children = []; this.attributes = {}; this.classList = {add() {}}; }
+    setAttribute(key, value) { this.attributes[key] = value; }
+    append(...items) { this.children.push(...items.filter(item => typeof item === 'object')); }
+    prepend(...items) { this.children.unshift(...items.filter(item => typeof item === 'object')); }
+    querySelector(selector) { return selector === 'summary' ? this.children.find(child => child.tag === 'summary') : null; }
+  }
+  const window = {};
+  const document = {createElement: tag => new Node(tag), addEventListener() {}, querySelector: () => null, querySelectorAll: () => []};
+  vm.runInNewContext(fs.readFileSync('app/static/js/rmm_remote_control.js', 'utf8'), {window, document, Element: Node});
+  const modesOf = providers => {
+    const wrapper = window.MyPortalRmm.assetActions(7, 'PC', providers);
+    const panel = wrapper.children[0].children.find(child => child.tag === 'div');
+    return panel.children.map(item => item.attributes['data-rmm-remote-mode']);
+  };
+  const restricted = [{provider: 'rustdesk', label: 'RustDesk', modes: [
+    {mode: 'remote_prompt', label: 'Remote desktop (Prompt)'},
+    {mode: 'file_transfer', label: 'File transfer'},
+    {mode: 'terminal', label: 'Terminal'},
+  ]}];
+  assert.deepEqual(modesOf(restricted), ['remote_prompt', 'file_transfer', 'terminal']);
+  // Older payloads without modes keep every session.
+  assert.deepEqual(modesOf([{provider: 'rustdesk', label: 'RustDesk'}]),
+    ['remote', 'remote_prompt', 'file_transfer', 'terminal']);
+});
