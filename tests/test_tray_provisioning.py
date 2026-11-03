@@ -541,6 +541,9 @@ def test_build_agent_finds_wcd_outside_the_default_location():
     agent = (root / "MyPortalBuildAgent.ps1").read_text(encoding="utf-8")
 
     assert "KitsRoot10" in helpers
+    # Strict mode throws when a property is read from a missing registry key.
+    assert ").KitsRoot10" not in helpers
+    assert "PSObject.Properties['KitsRoot10']" in helpers
     assert "'x86', 'amd64'" in helpers
     assert "function Get-MyPortalIcdProblem" in helpers
     assert "supports_ppkg=' + $(if ($Icd) { 'true' } else { 'false' })" in agent
