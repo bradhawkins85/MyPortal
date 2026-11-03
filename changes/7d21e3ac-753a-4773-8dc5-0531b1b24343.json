@@ -1,0 +1,7 @@
+{
+  "guid": "7d21e3ac-753a-4773-8dc5-0531b1b24343",
+  "occurred_at": "2026-11-03T06:31Z",
+  "change_type": "Fix",
+  "summary": "Run results now label the values sent for Chocolatey installs, patch policies, software updates and Windows updates (Applications, Action, Force\u2026) instead of showing \"-undefined\".",
+  "content_hash": "6c3ce79f4a1f1c944953693e268ba2f495b55ae6eb5e64badef567bd639be5fb"
+}
