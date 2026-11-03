@@ -216,6 +216,14 @@ _add(
     response_class=HTMLResponse,
 )
 
+# --- Remote control (per-company) ---------------------------------------------
+_add(
+    "/admin/companies/{company_id}/remote-control",
+    handlers.admin_company_remote_control_save,
+    ["POST"],
+    response_class=HTMLResponse,
+)
+
 # --- Tray integration (per-company) ------------------------------------------
 _add(
     "/admin/companies/{company_id}/tray",

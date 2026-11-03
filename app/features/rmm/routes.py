@@ -188,7 +188,7 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
         "can_run": can_run,
         "agent_state": rmm_scripts.agent_state(agent),
         # RustDesk and MeshCentral are switched on through the agent, so they need one.
-        "remote_control": await rmm_remote_control.enabled_providers() if can_run and agent else [],
+        "remote_control": await rmm_remote_control.enabled_providers(company_id) if can_run and agent else [],
         "command_languages": rmm_commands.languages_for(agent) if can_run and agent else [],
         "tray_repair": bool(can_run and rmm_tray_repair.supported(agent)),
         "uninstall": bool(can_run and rmm_agent_uninstall.supported(agent)),

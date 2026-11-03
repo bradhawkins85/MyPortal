@@ -45,6 +45,11 @@ and otherwise at the device list filtered to the asset's name.
 Each session is a remote desktop, file transfer, terminal or (MeshCentral only)
 registry session (``mode``), which only changes the launch link. The asset and
 ticket pages open the link for the technician as soon as it is ready.
+
+A company can turn off RustDesk unattended access
+(``companies.rustdesk_unattended_access``) so that the person at the device
+approves every remote desktop: technicians then only get the Prompt session,
+while file transfer and terminal stay available.
 """
 
 from __future__ import annotations
@@ -77,6 +82,11 @@ PROVIDERS = remote_repo.PROVIDERS
 PROVIDER_LABELS = {"rustdesk": "RustDesk", "meshcentral": "MeshCentral"}
 MODES = remote_repo.MODES
 MODE_LABELS = {"remote": "Remote desktop", "remote_prompt": "Remote desktop (Prompt)", "file_transfer": "File transfer", "terminal": "Terminal", "registry": "Registry"}
+# Sessions offered per provider, in menu order.
+_PROVIDER_MODES = {
+    "rustdesk": ("remote", "remote_prompt", "file_transfer", "terminal"),
+    "meshcentral": ("remote", "file_transfer", "terminal", "registry"),
+}
 # rustdesk://<action>/<id> per session type (RustDesk 1.4.1 or later for terminal).
 _RUSTDESK_ACTIONS = {"remote": "connection/new", "remote_prompt": "connection/new", "file_transfer": "file-transfer", "terminal": "terminal"}
 # MeshCentral's device view: 11 desktop, 12 terminal, 13 files, 9 registry.
@@ -276,12 +286,39 @@ async def load_settings() -> list[dict[str, Any]]:
     return public
 
 
-async def enabled_providers() -> list[dict[str, str]]:
+def provider_modes(provider: str, *, unattended: bool = True) -> list[dict[str, str]]:
+    """The sessions a technician can start with ``provider``, as menu entries.
+
+    Without unattended access, RustDesk's only remote desktop is the Prompt
+    session the person at the device accepts."""
+
+    modes = _PROVIDER_MODES.get(provider, ())
+    if provider == "rustdesk" and not unattended:
+        modes = tuple(mode for mode in modes if mode != "remote")
+    return [{"mode": mode, "label": MODE_LABELS[mode]} for mode in modes]
+
+
+async def rustdesk_unattended_allowed(company_id: int | None) -> bool:
+    """Whether ``company_id`` allows unattended RustDesk remote desktop."""
+
+    if company_id is None:
+        return True
+    company = await companies_repo.get_company_by_id(int(company_id))
+    if not company:
+        return True
+    value = company.get("rustdesk_unattended_access")
+    return value is None or bool(int(value))
+
+
+async def enabled_providers(company_id: int | None = None) -> list[dict[str, Any]]:
+    """The enabled providers with the sessions ``company_id`` allows."""
+
     providers = await remote_repo.list_providers()
+    enabled = [name for name in PROVIDERS if providers[name]["is_enabled"]]
+    unattended = await rustdesk_unattended_allowed(company_id) if "rustdesk" in enabled else True
     return [
-        {"provider": name, "label": PROVIDER_LABELS[name]}
-        for name in PROVIDERS
-        if providers[name]["is_enabled"]
+        {"provider": name, "label": PROVIDER_LABELS[name], "modes": provider_modes(name, unattended=unattended)}
+        for name in enabled
     ]
 
 
@@ -515,6 +552,11 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
         raise RemoteControlError("Prompt sessions are only available for RustDesk.")
     if mode == "registry" and provider != "meshcentral":
         raise RemoteControlError("Registry sessions are only available for MeshCentral.")
+    if provider == "rustdesk" and mode == "remote" and not await rustdesk_unattended_allowed(company_id):
+        raise RemoteControlError(
+            "This company does not allow unattended RustDesk access. Use Remote desktop (Prompt) "
+            "so the person at the device can accept the session."
+        )
     settings = await _provider(provider)
     label = PROVIDER_LABELS[provider]
     agent = await rmm_repo.get_asset_agent(asset_id)

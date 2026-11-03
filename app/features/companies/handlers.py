@@ -2884,6 +2884,34 @@ async def admin_company_tray_settings_page(
     )
 
 
+async def admin_company_remote_control_save(company_id: int, request: Request):
+    """Save whether technicians may use RustDesk without the user approving."""
+
+    from app.repositories import companies as companies_repo
+    from app.services import audit as audit_service
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company = await companies_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    form = await request.form()
+    unattended = 1 if form.get("rustdesk_unattended_access") else 0
+    await companies_repo.update_company(company_id, rustdesk_unattended_access=unattended)
+    await audit_service.record(
+        action="company.remote_control.settings",
+        request=request,
+        user_id=current_user.get("id"),
+        entity_type="company",
+        entity_id=company_id,
+        metadata={"rustdesk_unattended_access": bool(unattended)},
+    )
+    response = _main()._company_edit_redirect(company_id=company_id, success="Remote control settings saved.")
+    response.headers["location"] = f"/admin/companies/{company_id}/edit#ce-remote-control"
+    return response
+
+
 async def admin_company_tray_settings_save(company_id: int, request: Request):
     from app.repositories import companies as companies_repo
 

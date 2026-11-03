@@ -124,17 +124,20 @@
    other RMM action.
    rmm_remote_control.js starts the sessions; ticket_detail.js builds the same
    markup when it redraws the list (window.MyPortalRmm.assetActions).
-   rustdesk_in_menu offers the RustDesk sessions under the RMM menu instead. #}
+   rustdesk_in_menu offers the RustDesk sessions under the RMM menu instead.
+   Each remote_control entry lists the sessions its company allows (modes). #}
 {% set REMOTE_MODES = [("remote", "Remote desktop"), ("file_transfer", "File transfer"), ("terminal", "Terminal"), ("registry", "Registry")] %}
-{% set RUSTDESK_MODES = [("remote", "Remote desktop"), ("remote_prompt", "Remote desktop (Prompt)"), ("file_transfer", "File transfer"), ("terminal", "Terminal")] %}
+{% set RUSTDESK_DEFAULT_MODES = [{"mode": "remote", "label": "Remote desktop"}, {"mode": "remote_prompt", "label": "Remote desktop (Prompt)"}, {"mode": "file_transfer", "label": "File transfer"}, {"mode": "terminal", "label": "Terminal"}] %}
 {% macro asset_menu(asset_id, asset_name, remote_control, run_script=false, rustdesk_in_menu=false, choco_install=false, run_command=false, tray_repair=false) -%}
 {%- set providers = remote_control | map(attribute="provider") | list -%}
+{%- set rustdesk_modes = (remote_control | selectattr("provider", "equalto", "rustdesk") | map(attribute="modes", default=none) | first) -%}
+{%- if rustdesk_modes is none or rustdesk_modes is undefined %}{% set rustdesk_modes = RUSTDESK_DEFAULT_MODES %}{% endif -%}
 <div class="rmm-asset-actions">
   {%- if "rustdesk" in providers and not rustdesk_in_menu %}
   <details class="rmm-menu" data-rmm-menu>
     <summary class="button button--ghost button--small rmm-menu__toggle rmm-menu__toggle--icon" title="RustDesk actions" aria-label="RustDesk actions for {{ asset_name }}"><img class="rmm-rustdesk__icon" src="/static/images/rustdesk.svg" alt="" width="16" height="16"> <span aria-hidden="true">▾</span></summary>
     <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RustDesk actions for {{ asset_name }}">
-      {%- for mode, label in RUSTDESK_MODES %}
+      {%- for entry in rustdesk_modes %}{% set mode = entry.mode %}{% set label = entry.label %}
       <button type="button" class="dropdown__item" role="menuitem" data-rmm-remote="rustdesk" data-rmm-remote-mode="{{ mode }}" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}">{{ label }}</button>
       {%- endfor %}
     </div>
@@ -149,7 +152,7 @@
     {%- endif %}
     <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RMM actions for {{ asset_name }}">
       {%- if rustdesk_in_menu and "rustdesk" in providers %}
-      {%- for mode, label in RUSTDESK_MODES %}
+      {%- for entry in rustdesk_modes %}{% set mode = entry.mode %}{% set label = entry.label %}
       <button type="button" class="dropdown__item" role="menuitem" data-rmm-remote="rustdesk" data-rmm-remote-mode="{{ mode }}" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}">RustDesk: {{ label | lower }}</button>
       {%- endfor %}
       {%- endif %}

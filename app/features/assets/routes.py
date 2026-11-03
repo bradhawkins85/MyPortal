@@ -427,7 +427,7 @@ async def assets_page(request: Request):
     rmm_install_attempts: dict[int, dict[str, Any]] = {}
     # Technicians who run scripts get the RMM actions (run a script, remote
     # sessions) in the Actions menu of each device with an RMM agent.
-    rmm_remote_providers: list[dict[str, str]] = []
+    rmm_remote_providers: list[dict[str, Any]] = []
     if show_rmm_agent or can_push_rmm_agent:
         from app.services import rmm_agent_deploy
 
@@ -440,7 +440,7 @@ async def assets_page(request: Request):
         from app.services.rmm_agent_deploy import TRAY_PLATFORMS
 
         if rmm_agent_asset_ids:
-            rmm_remote_providers = await rmm_remote_control.enabled_providers()
+            rmm_remote_providers = await rmm_remote_control.enabled_providers(company_id)
 
     for record in prepared:
         tray_device = (

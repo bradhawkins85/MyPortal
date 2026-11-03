@@ -158,6 +158,7 @@
             ("microsoft-365", "ce-microsoft-365", "Microsoft 365", "", is_super_admin),
             ("trello", "ce-trello", "Trello", "", ce_trello),
             ("tray", "ce-tray", "Tray icon", tray_tokens | length if is_super_admin else "", is_super_admin),
+            ("remote-control", "ce-remote-control", "Remote control", "", is_super_admin and feature_pack_available('rmm')),
           ]),
           ("People & access", [
             ("memberships", "ce-memberships", "Memberships", assignments | length, is_super_admin),
@@ -1840,6 +1841,34 @@
           {% include "admin/tray/_company_settings.html" %}
         </div>
       </section>
+
+      {% if feature_pack_available('rmm') %}
+      <section class="card card--panel ce-section" id="ce-remote-control" data-company-edit-section="remote-control" aria-labelledby="ce-remote-control-title">
+        <header class="ce-section__header">
+          <div class="ce-section__heading">
+            <h2 class="card__title" id="ce-remote-control-title">Remote control</h2>
+            <p class="card__subtitle">Choose whether technicians can connect to this company's computers without someone approving the session.</p>
+          </div>
+        </header>
+        <div class="ce-section__body">
+          <form method="post" action="/admin/companies/{{ company.id }}/remote-control" class="form">
+            {% include "partials/csrf.html" %}
+            <div class="form-field">
+              <label class="form-label form-label--checkbox">
+                <input type="checkbox" name="rustdesk_unattended_access" value="1"
+                  {% if company.rustdesk_unattended_access is not defined or company.rustdesk_unattended_access is none or company.rustdesk_unattended_access %}checked{% endif %}
+                />
+                Allow unattended RustDesk remote desktop
+              </label>
+              <p class="form-helper">When turned off, technicians only see <strong>Remote desktop (Prompt)</strong> for RustDesk, so the person at the computer must accept before anyone can see or control it. RustDesk file transfer and terminal stay available.</p>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button button--primary">Save remote control settings</button>
+            </div>
+          </form>
+        </div>
+      </section>
+      {% endif %}
 
       <section class="card card--panel ce-section" id="ce-automations" data-company-automations data-company-edit-section="automations" aria-labelledby="ce-automations-title">
         <header class="ce-section__header">

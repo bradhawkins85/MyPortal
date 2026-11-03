@@ -110,7 +110,9 @@ async def test_activation_script_runs_and_session_returns_the_launch_link(sqlite
         "is_enabled": "1", "activation_script_id": str(script["id"]),
         "entry:param:RelayKey": "{{company.variables.Tenant}}", "entry:param:Password": "",
     }, user_id=9)
-    assert await remote.enabled_providers() == [{"provider": "rustdesk", "label": "RustDesk"}]
+    assert await remote.enabled_providers() == [
+        {"provider": "rustdesk", "label": "RustDesk", "modes": remote.provider_modes("rustdesk")}
+    ]
 
     _r, agent = await _enrol(sqlite_db)
     session = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9, mode=mode)
@@ -393,7 +395,9 @@ async def test_ticket_buttons_follow_the_tickets_company_permission(sqlite_db, m
     monkeypatch.setattr(routes, "_assets_routes", lambda: SimpleNamespace(_main=lambda: main))
     await remote.save_settings("rustdesk", {"is_enabled": "1", "id_field": "RustDesk ID"}, user_id=9)
     tech = {"id": 9, "is_super_admin": False}
-    assert await routes.providers_for_company(None, tech, 1) == [{"provider": "rustdesk", "label": "RustDesk"}]
+    assert await routes.providers_for_company(None, tech, 1) == [
+        {"provider": "rustdesk", "label": "RustDesk", "modes": remote.provider_modes("rustdesk")}
+    ]
     # Read-only access, no company, or the feature pack turned off: no buttons.
     assert await routes.providers_for_company(None, tech, 2) == []
     assert await routes.providers_for_company(None, tech, None) == []
@@ -567,7 +571,9 @@ async def test_remote_control_needs_the_devices_rmm_agent(sqlite_db, monkeypatch
     await _enrol(sqlite_db)
     with_agent = await routes.asset_rmm_context(1, 10, can_run=True)
     assert with_agent["agent_state"] == "connected"
-    assert with_agent["remote_control"] == [{"provider": "rustdesk", "label": "RustDesk"}]
+    assert with_agent["remote_control"] == [
+        {"provider": "rustdesk", "label": "RustDesk", "modes": remote.provider_modes("rustdesk")}
+    ]
     assert await routes.company_agent_states(1) == {10: "connected"}
     details = await routes.company_agent_details(1)
     assert details[10]["state"] == "connected"
@@ -644,3 +650,55 @@ async def test_mesh_rejects_incompatible_agent_before_downloading(monkeypatch, s
              'shells': ['powershell'], 'script_files_supported': supported}
     with pytest.raises(remote.RemoteControlError, match=message):
         await remote._queue_builtin_meshcentral(agent, 'group', 9)
+
+
+def test_provider_modes_drop_unattended_rustdesk_desktop_only():
+    assert [m["mode"] for m in remote.provider_modes("rustdesk")] == ["remote", "remote_prompt", "file_transfer", "terminal"]
+    assert [m["mode"] for m in remote.provider_modes("rustdesk", unattended=False)] == [
+        "remote_prompt", "file_transfer", "terminal",
+    ]
+    # MeshCentral is unaffected by the RustDesk setting.
+    assert remote.provider_modes("meshcentral", unattended=False) == remote.provider_modes("meshcentral")
+
+
+@pytest.mark.anyio
+async def test_company_without_unattended_access_only_gets_prompt_sessions(sqlite_db, monkeypatch):
+    await sqlite_db.execute(
+        "ALTER TABLE companies ADD COLUMN rustdesk_unattended_access INTEGER NOT NULL DEFAULT 1"
+    )
+    await sqlite_db.execute("UPDATE companies SET rustdesk_unattended_access = 0 WHERE id = 1")
+    await remote.save_settings("rustdesk", {"is_enabled": "1", "id_field": "RustDesk ID"}, user_id=9)
+
+    assert await remote.rustdesk_unattended_allowed(1) is False
+    assert await remote.rustdesk_unattended_allowed(2) is True
+    restricted = (await remote.enabled_providers(1))[0]["modes"]
+    assert [m["mode"] for m in restricted] == ["remote_prompt", "file_transfer", "terminal"]
+    assert [m["mode"] for m in (await remote.enabled_providers(2))[0]["modes"]][0] == "remote"
+
+    with pytest.raises(remote.RemoteControlError, match="does not allow unattended RustDesk"):
+        await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9, mode="remote")
+
+    # Prompt, file transfer and terminal sessions still start.
+    await _enrol(sqlite_db)
+    for mode in ("remote_prompt", "file_transfer", "terminal"):
+        session = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9, mode=mode)
+        assert session["mode"] == mode
+
+
+def test_asset_menu_offers_only_the_companys_rustdesk_sessions():
+    template = _environment().from_string(
+        '{% import "rmm/_macros.html" as rmm_ui %}{{ rmm_ui.asset_menu(7, "PC", providers) }}'
+    )
+    providers = [{"provider": "rustdesk", "label": "RustDesk", "modes": remote.provider_modes("rustdesk", unattended=False)}]
+    html = template.render(providers=providers)
+    assert 'data-rmm-remote-mode="remote"' not in html
+    for mode in ("remote_prompt", "file_transfer", "terminal"):
+        assert f'data-rmm-remote="rustdesk" data-rmm-remote-mode="{mode}"' in html
+
+
+def test_company_remote_control_setting_migration_defaults_to_allowed():
+    from pathlib import Path
+
+    sql = (Path(__file__).resolve().parents[1] / "migrations" / "539_rustdesk_unattended_access.sql").read_text()
+    assert "-- phase: expand" in sql
+    assert "ADD COLUMN IF NOT EXISTS rustdesk_unattended_access TINYINT(1) NOT NULL DEFAULT 1" in sql

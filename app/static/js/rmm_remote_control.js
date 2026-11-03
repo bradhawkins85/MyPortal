@@ -73,7 +73,15 @@
       toggle.classList.add('rmm-menu__toggle--icon');
       toggle.title = 'RustDesk actions';
       toggle.prepend(icon('rmm-rustdesk__icon', '/static/images/rustdesk.svg'), ' ');
-      RUSTDESK_MODES.forEach(function (entry) {
+      // Each provider lists the sessions its company allows (no unattended
+      // remote desktop when the company wants to approve every session).
+      const rustdeskEntry = (providers || []).filter(function (item) {
+        return item && item.provider === 'rustdesk';
+      })[0];
+      const modes = rustdeskEntry && Array.isArray(rustdeskEntry.modes)
+        ? rustdeskEntry.modes.map(function (item) { return [item.mode, item.label]; })
+        : RUSTDESK_MODES;
+      modes.forEach(function (entry) {
         rustdesk.panel.append(menuItem('rustdesk', entry[0], entry[1], String(assetId), assetName));
       });
       wrapper.append(rustdesk.menu);
