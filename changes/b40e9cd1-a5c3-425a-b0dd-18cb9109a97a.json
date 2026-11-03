@@ -1,0 +1,7 @@
+{
+  "guid": "b40e9cd1-a5c3-425a-b0dd-18cb9109a97a",
+  "occurred_at": "2026-11-03T06:03Z",
+  "change_type": "Improvement",
+  "summary": "The Actions menu on the asset page and in the assets list now groups RustDesk and MeshCentral options into their own submenus, so the menu is shorter and easier to scan.",
+  "content_hash": "f526619e31b5a4067b8d8f5b533dfc069c00702bf8fc23fcd7fe033af1cec20d"
+}
