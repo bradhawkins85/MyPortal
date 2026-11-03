@@ -9,20 +9,33 @@
     output stays in memory because it contains the generated package password.
 #>
 
-function Resolve-MyPortalIcd([string]$RequestedPath) {
-    $candidates = @()
-    if ($RequestedPath) {
-        $candidates += $RequestedPath
-    } else {
-        $command = Get-Command 'icd.exe' -ErrorAction SilentlyContinue
-        if ($command) { $candidates += $command.Source }
-        foreach ($base in ${env:ProgramFiles(x86)}, $env:ProgramFiles) {
-            if ($base) {
-                $candidates += Join-Path $base 'Windows Kits\10\Assessment and Deployment Kit\Imaging and Configuration Designer\x86\ICD.exe'
-            }
+function Get-MyPortalIcdCandidates([string]$RequestedPath) {
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    # A configured path comes first, but a stale one (the ADK was reinstalled
+    # or moved) must not hide an installation in a standard location.
+    if ($RequestedPath) { $candidates.Add($RequestedPath) }
+    $command = Get-Command 'icd.exe' -ErrorAction SilentlyContinue
+    if ($command) { $candidates.Add($command.Source) }
+    $roots = [System.Collections.Generic.List[string]]::new()
+    # The ADK can be installed outside Program Files; its root is recorded here.
+    foreach ($key in 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots',
+                     'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots') {
+        $root = (Get-ItemProperty -LiteralPath $key -Name 'KitsRoot10' -ErrorAction SilentlyContinue).KitsRoot10
+        if ($root) { $roots.Add([string]$root) }
+    }
+    foreach ($base in ${env:ProgramFiles(x86)}, $env:ProgramFiles) {
+        if ($base) { $roots.Add((Join-Path $base 'Windows Kits\10')) }
+    }
+    foreach ($root in $roots) {
+        foreach ($arch in 'x86', 'amd64') {
+            $candidates.Add((Join-Path $root "Assessment and Deployment Kit\Imaging and Configuration Designer\$arch\ICD.exe"))
         }
     }
-    foreach ($candidate in $candidates) {
+    return $candidates | Select-Object -Unique
+}
+
+function Resolve-MyPortalIcd([string]$RequestedPath) {
+    foreach ($candidate in Get-MyPortalIcdCandidates $RequestedPath) {
         if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
         $candidatePath = (Resolve-Path -LiteralPath $candidate).Path
         # The common settings store omits desktop-specific customizations.
@@ -32,6 +45,18 @@ function Resolve-MyPortalIcd([string]$RequestedPath) {
         }
     }
     return $null
+}
+
+# Explains why Resolve-MyPortalIcd found nothing, for the agent log.
+function Get-MyPortalIcdProblem([string]$RequestedPath) {
+    $found = @(Get-MyPortalIcdCandidates $RequestedPath | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+    if ($found) {
+        return "ICD.exe was found at $($found -join ', ') but Microsoft-Desktop-Provisioning.dat is not next to it. " +
+            'Repair or reinstall the Windows ADK Configuration Designer component (the Microsoft Store app is not supported).'
+    }
+    $hint = if ($RequestedPath) { "IcdPath in config.json ($RequestedPath) does not exist, and " } else { '' }
+    return "${hint}Windows Configuration Designer (ICD.exe) was not found. Install the Configuration Designer " +
+        'component of the Windows ADK, or set IcdPath in config.json to the full path of ICD.exe.'
 }
 
 function Get-MyPortalProvisioningProperty($Settings, [string]$Name) {

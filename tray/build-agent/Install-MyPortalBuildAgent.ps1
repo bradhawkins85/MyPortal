@@ -111,7 +111,7 @@ Write-Host "MyPortal build agent installed. Logs: $(Join-Path $WorkDir 'agent.lo
 if ($resolvedIcd) {
     Write-Host 'Windows provisioning package builds are enabled (Windows Configuration Designer found).'
 } else {
-    Write-Host 'Provisioning package builds are disabled. Install Windows ADK Configuration Designer or rerun this installer with -IcdPath to enable them.'
+    Write-Host "Provisioning package builds are disabled. $(Get-MyPortalIcdProblem $IcdPath) Then rerun this installer (with -IcdPath if ICD.exe is elsewhere)."
 }
 if ($RunNow) {
     Start-ScheduledTask -TaskName 'MyPortal Build Agent'

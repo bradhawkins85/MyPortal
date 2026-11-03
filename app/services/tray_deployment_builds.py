@@ -187,11 +187,12 @@ async def claim_next_build(portal_url: str, *, supports_ppkg: bool = False) -> d
         return job
 
 
-async def idle_reason(*, supports_ppkg: bool = False) -> str:
+async def idle_reason(*, supports_ppkg: bool | None = False) -> str:
     """Explain why :func:`claim_next_build` has nothing for the agent.
 
     Sent to the build agent with an empty claim so its log says what to fix
-    rather than staying silent.
+    rather than staying silent. ``supports_ppkg`` is ``None`` when the agent
+    did not say, which only agents older than provisioning support do.
     """
 
     release_tag = current_release_tag()
@@ -208,9 +209,16 @@ async def idle_reason(*, supports_ppkg: bool = False) -> str:
             _stale_before(), supports_ppkg=True
         )
         if pending:
+            if supports_ppkg is None:
+                return (
+                    "Provisioning builds are waiting, but this build agent is too old to build them. "
+                    "Rerun Install-MyPortalBuildAgent.ps1 from the latest MyPortal source on the build "
+                    "server, with Windows Configuration Designer from the Windows ADK installed."
+                )
             return (
-                "Provisioning builds need the updated build agent and Windows Configuration Designer "
-                "from the Windows ADK. Install it or configure IcdPath on the build server."
+                "Provisioning builds are waiting, but this build agent did not find Windows "
+                "Configuration Designer from the Windows ADK. Install it or configure IcdPath "
+                "on the build server."
             )
     active_ids = {int(link["id"]) for link in links}
     newest: dict[int, dict[str, Any]] = {}
