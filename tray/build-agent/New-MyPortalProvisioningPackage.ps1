@@ -20,8 +20,12 @@ function Get-MyPortalIcdCandidates([string]$RequestedPath) {
     # The ADK can be installed outside Program Files; its root is recorded here.
     foreach ($key in 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots',
                      'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots') {
-        $root = (Get-ItemProperty -LiteralPath $key -Name 'KitsRoot10' -ErrorAction SilentlyContinue).KitsRoot10
-        if ($root) { $roots.Add([string]$root) }
+        # Either key, or the value, is often absent. Under strict mode reading
+        # a property of a missing result throws, so read it defensively.
+        $item = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+        if ($item -and $item.PSObject.Properties['KitsRoot10'] -and $item.KitsRoot10) {
+            $roots.Add([string]$item.KitsRoot10)
+        }
     }
     foreach ($base in ${env:ProgramFiles(x86)}, $env:ProgramFiles) {
         if ($base) { $roots.Add((Join-Path $base 'Windows Kits\10')) }
