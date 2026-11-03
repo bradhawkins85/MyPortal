@@ -291,6 +291,11 @@ function Protect-MyPortalProvisioningOutput([string]$Output, $Settings) {
     return [regex]::Replace($Output, '(?im)(password\s*(?::|=|\bis\b\s*:?)\s*)[^\r\n]+', '$1[redacted]')
 }
 
+function Get-MyPortalIcdArguments([string]$CustomizationXml, [string]$PackagePath, [string]$StoreFile) {
+    return ('/Build-ProvisioningPackage /CustomizationXML:"{0}" /PackagePath:"{1}" /StoreFile:"{2}" +Encrypted' -f
+        $CustomizationXml, $PackagePath, $StoreFile)
+}
+
 function New-MyPortalProvisioningPackage(
     $Settings,
     [string]$MsiPath,
@@ -330,11 +335,17 @@ exit /b %RESULT%
         $startInfo.CreateNoWindow = $true
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true
-        foreach ($argument in @(
-            '/Build-ProvisioningPackage', "/CustomizationXML:$xmlPath", "/PackagePath:$PackagePath",
-            "/StoreFile:$(Join-Path (Split-Path -Parent $IcdPath) 'Microsoft-Desktop-Provisioning.dat')",
-            '+Encrypted', '+Overwrite'
-        )) { $startInfo.ArgumentList.Add($argument) }
+        # ICD parses its own command line and rejects the "/Name:value" quoting
+        # that ProcessStartInfo.ArgumentList produces for paths with spaces
+        # ("Command-line has too many parameters"). Quote only the value, as
+        # Microsoft documents. +Overwrite is not passed: the package path is
+        # removed first, and ICD rejects some longer switch combinations.
+        $storeFile = Join-Path (Split-Path -Parent $IcdPath) 'Microsoft-Desktop-Provisioning.dat'
+        foreach ($path in $xmlPath, $PackagePath, $storeFile) {
+            if ($path.Contains('"')) { throw 'WCD paths must not contain quotation marks.' }
+        }
+        Remove-Item -LiteralPath $PackagePath -Force -ErrorAction SilentlyContinue
+        $startInfo.Arguments = Get-MyPortalIcdArguments $xmlPath $PackagePath $storeFile
         $process = [System.Diagnostics.Process]::new()
         $process.StartInfo = $startInfo
         [void]$process.Start()
