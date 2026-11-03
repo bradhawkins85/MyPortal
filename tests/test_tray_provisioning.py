@@ -510,6 +510,43 @@ async def test_legacy_agent_skips_provisioning_jobs_without_blocking_other_links
 
 
 @pytest.mark.anyio
+async def test_idle_reason_tells_old_agents_from_agents_without_wcd(provisioning_db):
+    await builds.queue_build(7)
+    assert (await builds.claim_next_build(PORTAL))["deployment_link_id"] == 8
+
+    assert await builds.claim_next_build(PORTAL) is None
+    assert "too old" in await builds.idle_reason(supports_ppkg=None)
+    missing_wcd = await builds.idle_reason(supports_ppkg=False)
+    assert "did not find Windows Configuration Designer" in missing_wcd
+    assert "too old" not in missing_wcd
+
+
+@pytest.mark.anyio
+async def test_claim_route_passes_unreported_ppkg_support_as_unknown(monkeypatch):
+    claim = AsyncMock(return_value=None)
+    reason = AsyncMock(return_value="idle")
+    monkeypatch.setattr(builds, "claim_next_build", claim)
+    monkeypatch.setattr(builds, "idle_reason", reason)
+    monkeypatch.setattr(tray_deployment, "resolve_portal_url", lambda request: PORTAL)
+
+    await deploy_routes.build_agent_claim(None, _api_key={})
+
+    assert claim.await_args.kwargs["supports_ppkg"] is False
+    assert reason.await_args.kwargs["supports_ppkg"] is None
+
+
+def test_build_agent_finds_wcd_outside_the_default_location():
+    root = Path(__file__).resolve().parents[1] / "tray" / "build-agent"
+    helpers = (root / "New-MyPortalProvisioningPackage.ps1").read_text(encoding="utf-8")
+    agent = (root / "MyPortalBuildAgent.ps1").read_text(encoding="utf-8")
+
+    assert "KitsRoot10" in helpers
+    assert "'x86', 'amd64'" in helpers
+    assert "function Get-MyPortalIcdProblem" in helpers
+    assert "supports_ppkg=' + $(if ($Icd) { 'true' } else { 'false' })" in agent
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("directory_join", [_entra_join(), _ad_join()])
 async def test_build_agent_claim_receives_decrypted_directory_join_settings(
     provisioning_db, directory_join

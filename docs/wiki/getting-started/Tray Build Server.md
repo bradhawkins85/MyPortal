@@ -56,8 +56,12 @@ Install them machine-wide so the agent, which runs as SYSTEM, can find them.
 For provisioning packages, also install the **Configuration Designer**
 component of the [Windows ADK](https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install).
 The agent needs its `ICD.exe` command-line tool, not just a desktop shortcut.
-It looks in the ADK's usual installation location; use `-IcdPath` when
-installing the agent if ICD is elsewhere. WCD is optional for MSI/EXE builds.
+It finds ICD in the ADK folder recorded in the registry (including a custom
+install location) and in the usual Program Files folders; use `-IcdPath` when
+installing the agent if ICD is elsewhere. A configured `IcdPath` that no
+longer exists falls back to those locations. `ICD.exe` must have
+`Microsoft-Desktop-Provisioning.dat` beside it, which the ADK component
+provides and the Microsoft Store app does not. WCD is optional for MSI/EXE builds.
 Agents without it leave provisioning jobs queued so a capable agent can
 claim them. Update older agents before enabling provisioning.
 
@@ -322,7 +326,7 @@ a wrong package password and a revoked MyPortal enrolment token.
 | Uploads fail with *413 Request Entity Too Large* | A proxy in front of MyPortal rejected the upload; MyPortal itself never answers 413 here. Run `Install-MyPortalBuildAgent.ps1` again from the latest `tray/build-agent` folder so the agent uploads in 8 MB parts, then press **Rebuild**. |
 | *WiX setup failed: wix extension failed* with a NuGet error | The agent downloads the WiX Burn extension from `api.nuget.org` using its own NuGet.Config, so check the server can reach `api.nuget.org` over HTTPS (through any proxy the SYSTEM account uses). |
 | Builds stay *Queued* | Check the scheduled task's last result and `agent.log`. A 401 or 403 means the API key, its IP allow list or its path permissions are wrong. |
-| Only provisioning builds stay *Queued* | Update the agent and install the ADK Configuration Designer component. Check `IcdPath` in `config.json` if ICD is installed outside its usual location. An agent without WCD can still build ordinary installers. |
+| Only provisioning builds stay *Queued* | The agent log's *No builds to run:* line says which applies. *Too old*: rerun `Install-MyPortalBuildAgent.ps1` from current source. *Did not find Windows Configuration Designer*: the rest of the line says whether `ICD.exe` is missing or lacks `Microsoft-Desktop-Provisioning.dat`; install or repair the ADK Configuration Designer component, or set `IcdPath` in `config.json`. An agent without WCD can still build ordinary installers. |
 | Provisioning build cannot retrieve the generated encryption password | The build fails instead of publishing a package without a usable password. Check the installed WCD version and update the agent; do not send ICD output or project XML to users, as they contain credentials. |
 | *Failed: Release … predates deployment URL support* | The cached tray release was tagged before this feature. Publish a new tray release, then press **Rebuild**. |
 | *Failed: go build / npm ci failed* | Check Go and Node.js are installed machine-wide and the server can reach `proxy.golang.org` and `registry.npmjs.org`. Delete the release's folder under `C:\MyPortalBuild\payloads` to force a clean build. |

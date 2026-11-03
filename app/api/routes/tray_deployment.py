@@ -394,12 +394,12 @@ def _build_error(exc: Exception) -> HTTPException:
 )
 async def build_agent_claim(
     request: Request,
-    supports_ppkg: bool = False,
+    supports_ppkg: bool | None = None,
     _api_key: dict = Depends(require_api_key),
 ):
     portal_url = tray_deployment.resolve_portal_url(request)
     try:
-        job = await builds.claim_next_build(portal_url, supports_ppkg=supports_ppkg)
+        job = await builds.claim_next_build(portal_url, supports_ppkg=bool(supports_ppkg))
     except ValueError as exc:
         log_error("Unable to hand out tray deployment build", error=str(exc))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc

@@ -39,6 +39,7 @@ $TimestampServer = if ($config.PSObject.Properties['TimestampServer']) { $config
 . (Join-Path $PSScriptRoot 'New-MyPortalProvisioningPackage.ps1')
 $requestedIcd = if ($config.PSObject.Properties['IcdPath']) { [string]$config.IcdPath } else { '' }
 $Icd = Resolve-MyPortalIcd $requestedIcd
+$IcdProblem = if ($Icd) { '' } else { Get-MyPortalIcdProblem $requestedIcd }
 
 $PayloadDir = Join-Path $WorkDir 'payloads'
 $JobsDir = Join-Path $WorkDir 'jobs'
@@ -293,11 +294,16 @@ function Invoke-Queue {
     while ($true) {
         # Older agents and machines without WCD must not claim provisioning
         # jobs. They can continue to serve the ordinary installer queue.
-        $claimPath = '/api/tray/build-agent/jobs/claim'
-        if ($Icd) { $claimPath += '?supports_ppkg=true' }
+        # Send false explicitly so MyPortal can tell this agent apart from an
+        # older one that predates provisioning support.
+        $claimPath = '/api/tray/build-agent/jobs/claim?supports_ppkg=' + $(if ($Icd) { 'true' } else { 'false' })
         $response = Invoke-Portal Post $claimPath $null
         if ($response.StatusCode -eq 204) {
-            Write-IdleStatus ([string]$response.Headers['X-MyPortal-Build-Status'])
+            $status = [string]$response.Headers['X-MyPortal-Build-Status']
+            if ($status -and $IcdProblem -and $status -match 'Windows Configuration Designer') {
+                $status = "$status $IcdProblem"
+            }
+            Write-IdleStatus $status
             return
         }
         Write-IdleStatus ''
