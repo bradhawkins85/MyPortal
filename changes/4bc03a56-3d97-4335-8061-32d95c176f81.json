@@ -1,0 +1,7 @@
+{
+  "guid": "4bc03a56-3d97-4335-8061-32d95c176f81",
+  "occurred_at": "2026-11-03T02:56Z",
+  "change_type": "Fix",
+  "summary": "Add existing subscription on the Subscriptions page now adds the subscription to the active company instead of showing an empty customer list.",
+  "content_hash": "cd9b50d4f355d09d5800ef7541534a8d98dc127179a91f37e57cd718d98a82ae"
+}

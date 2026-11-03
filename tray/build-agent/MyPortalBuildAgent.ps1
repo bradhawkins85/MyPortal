@@ -261,7 +261,8 @@ function Invoke-Build($Job) {
         if ($provisioning) {
             $ppkg = Join-Path $out 'myportal-tray.ppkg'
             $package = New-MyPortalProvisioningPackage -Settings $provisioning -MsiPath $msi `
-                -PackagePath $ppkg -IcdPath $Icd -BuildId ([int]$Job.id)
+                -PackagePath $ppkg -IcdPath $Icd -BuildId ([int]$Job.id) `
+                -DiagnosticsPath (Join-Path $WorkDir 'provisioning-diagnostics.log')
             # Only the encrypted package is uploaded as an artifact. Its
             # generated decryption password goes over the authenticated API
             # separately, and must never be written to the agent log.
@@ -270,7 +271,18 @@ function Invoke-Build($Job) {
         }
         Send-Artifact $Job.id 'msi' $msi
         Send-Artifact $Job.id 'exe' $exe
-        Invoke-Portal Post "/api/tray/build-agent/jobs/$($Job.id)/complete" $completion | Out-Null
+        try {
+            Invoke-Portal Post "/api/tray/build-agent/jobs/$($Job.id)/complete" $completion | Out-Null
+        } catch {
+            # The request carries the package password, which an error
+            # response could echo back.
+            if (-not $provisioning) { throw }
+            $code = 0
+            if ($_.Exception.PSObject.Properties['Response'] -and $_.Exception.Response) {
+                $code = [int]$_.Exception.Response.StatusCode
+            }
+            throw "MyPortal did not accept the completed provisioning build (HTTP $code)."
+        }
     } finally {
         # The working folder holds the company's install token.
         Remove-Item -LiteralPath $out -Recurse -Force -ErrorAction SilentlyContinue
@@ -314,10 +326,12 @@ function Invoke-Queue {
             Write-Log "Job $($job.id) complete"
         } catch {
             $message = $_.Exception.Message
-            if ($job.PSObject.Properties['provisioning'] -and $job.provisioning) {
-                # HTTP validation or WCD diagnostics may echo request/source
-                # values. Do not log a raw exception for a job with secrets.
-                $message = 'Provisioning build failed. Validate the Windows ADK/WCD installation, desktop settings store and provisioning settings, then rebuild.'
+            if ($job.PSObject.Properties['provisioning'] -and $job.provisioning -and
+                -not (Test-MyPortalProvisioningMessage $message)) {
+                # Other exceptions could echo a provisioning secret. Remove
+                # them rather than hide the error, so WiX, signing and Git
+                # failures stay diagnosable.
+                $message = Protect-MyPortalProvisioningOutput $message $job.provisioning
             }
             Write-Log "Job $($job.id) failed: $message"
             try {

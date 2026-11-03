@@ -267,12 +267,37 @@ function Get-MyPortalProvisioningPassword([string]$Output) {
     return [string](@($passwords)[0])
 }
 
+# Messages this file throws on purpose. They never contain settings values,
+# so they are safe to show in the agent log and on the admin page.
+function Test-MyPortalProvisioningMessage([string]$Message) {
+    return $Message -match '^(WCD |Install Windows Configuration Designer|The provisioning |Provisioning Wi-Fi|A provisioning Wi-Fi)'
+}
+
+# Removes every secret from WCD's console output so it can be kept locally
+# for troubleshooting.
+function Protect-MyPortalProvisioningOutput([string]$Output, $Settings) {
+    $secrets = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in 'admin_password', 'wifi_password') { $secrets.Add((Get-MyPortalProvisioningValue $Settings $name)) }
+    $join = Get-MyPortalProvisioningProperty $Settings 'directory_join'
+    if ($null -ne $join) {
+        foreach ($name in 'bulk_token', 'password') { $secrets.Add((Get-MyPortalProvisioningValue $join $name)) }
+    }
+    foreach ($secret in @($secrets | Where-Object { $_ })) {
+        foreach ($form in @($secret, [System.Security.SecurityElement]::Escape($secret)) | Select-Object -Unique) {
+            $Output = $Output.Replace($form, '[redacted]')
+        }
+    }
+    # The generated package password, if WCD printed one.
+    return [regex]::Replace($Output, '(?im)(password\s*(?::|=|\bis\b\s*:?)\s*)[^\r\n]+', '$1[redacted]')
+}
+
 function New-MyPortalProvisioningPackage(
     $Settings,
     [string]$MsiPath,
     [string]$PackagePath,
     [string]$IcdPath,
-    [int]$BuildId
+    [int]$BuildId,
+    [string]$DiagnosticsPath
 ) {
     if (-not $IcdPath) { throw 'Install Windows Configuration Designer from the Windows ADK to build provisioning packages.' }
     $project = Join-Path (Split-Path -Parent $PackagePath) 'provisioning-source'
@@ -321,19 +346,37 @@ exit /b %RESULT%
             throw 'WCD exceeded the provisioning package build timeout.'
         }
         $output = $stdout.GetAwaiter().GetResult() + "`n" + $stderr.GetAwaiter().GetResult()
-        if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) {
-            # Diagnostics may contain administrator/Wi-Fi passwords and must
-            # not be propagated to the portal or the persistent agent log.
-            throw "WCD failed to build the encrypted provisioning package (exit code $($process.ExitCode)). Validate the ADK/WCD installation and provisioning settings."
+        $details = ''
+        if ($DiagnosticsPath) {
+            # Raw output may contain administrator/Wi-Fi/join secrets and must
+            # never reach the portal or the agent log. A redacted copy stays
+            # in the work folder, which only SYSTEM and Administrators can read.
+            try {
+                Set-Content -LiteralPath $DiagnosticsPath -Encoding utf8 -Value @(
+                    "Build $BuildId, ICD $IcdPath, exit code $($process.ExitCode)"
+                    (Protect-MyPortalProvisioningOutput $output $Settings)
+                )
+                $details = " WCD output (secrets removed) is in $DiagnosticsPath."
+            } catch {
+                $details = ''
+            }
         }
-        $packagePassword = Get-MyPortalProvisioningPassword $output
+        if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) {
+            $reason = if ($process.ExitCode -ne 0) { "exit code $($process.ExitCode)" } else { 'no package was written' }
+            throw "WCD failed to build the encrypted provisioning package ($reason).$details"
+        }
+        try {
+            $packagePassword = Get-MyPortalProvisioningPassword $output
+        } catch {
+            throw "$($_.Exception.Message)$details"
+        }
         return [pscustomobject]@{ Path = $PackagePath; Password = $packagePassword }
     } catch {
         Remove-Item -LiteralPath $PackagePath -Force -ErrorAction SilentlyContinue
         # File/process/XML exceptions can include source values. Return only
         # our deliberate diagnostic messages, never a raw inner exception.
         $message = $_.Exception.Message
-        if ($message -notmatch '^(WCD |Install Windows Configuration Designer|The provisioning |Provisioning Wi-Fi|A provisioning Wi-Fi)') {
+        if (-not (Test-MyPortalProvisioningMessage $message)) {
             $message = 'The encrypted provisioning package could not be built. Validate the ADK/WCD installation and provisioning settings.'
         }
         throw $message
