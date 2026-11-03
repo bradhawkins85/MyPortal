@@ -319,10 +319,17 @@ async def shop_page(
     is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
 
     categories_task = asyncio.create_task(shop_repo.list_categories())
-    available_category_ids_task = asyncio.create_task(
-        shop_repo.get_category_ids_with_available_products(
-            company_id=company_id,
-            include_out_of_stock=show_out_of_stock,
+    # Every product the customer could see, across all categories. Categories
+    # are only listed when at least one of these survives the same price and
+    # DBP filters the product grid applies, so no category opens empty.
+    all_products_task = asyncio.create_task(
+        shop_repo.list_products_summary(
+            shop_repo.ProductFilters(
+                include_archived=False,
+                company_id=company_id,
+                in_stock_only=not show_out_of_stock,
+                sort="name_asc",
+            )
         )
     )
 
@@ -484,7 +491,12 @@ async def shop_page(
     products = cast(list[dict[str, Any]], _main()._serialise_for_json(products))
 
     categories = await categories_task
-    available_category_ids = await available_category_ids_task
+    category_preview_products = _prepare_customer_products(await all_products_task)
+    available_category_ids = {
+        int(product["category_id"])
+        for product in category_preview_products
+        if product.get("category_id") is not None
+    }
 
     def _filter_categories(
         cats: list[dict[str, Any]], available_ids: set[int]
@@ -499,16 +511,6 @@ async def shop_page(
     categories = _filter_categories(categories, available_category_ids)
 
     if showing_category_cards:
-        category_preview_products = _prepare_customer_products(
-            await shop_repo.list_products_summary(
-                shop_repo.ProductFilters(
-                    include_archived=False,
-                    company_id=company_id,
-                    in_stock_only=not show_out_of_stock,
-                    sort="name_asc",
-                )
-            )
-        )
         preview_by_category: dict[int, dict[str, Any]] = {}
         for product in category_preview_products:
             product_category_id = product.get("category_id")
