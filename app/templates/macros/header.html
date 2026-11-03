@@ -19,6 +19,11 @@
        "attrs":   {"data-x": "y", ...},     # extra attributes
      }
 
+   Submenus: {"type": "submenu", "label": "RustDesk", "icon": "<svg …>",
+   "items": [action, …]} renders one item that opens a nested flyout menu
+   holding `items` (plain actions, no sections). Use it to fold a family of
+   related options (one remote-access tool's functions) into a single row.
+
    Menu grouping: {"type": "section", "label": "Remote access"} starts a
    new group in the overflow menu (a divider, plus the label as a small
    heading when given). Groups left empty by conditional actions are
@@ -45,6 +50,34 @@
   {%- if variant == 'ghost' %} button--ghost{% endif -%}
   {%- if variant == 'danger' %} button--danger{% endif -%}
   {%- if action.get('size') == 'small' %} button--small{% endif -%}
+{%- endmacro %}
+
+{% macro render_submenu(action, submenu_id) -%}
+  <div class="header-menu__sub" data-header-submenu>
+    <button type="button"
+            class="header-menu__item header-menu__item--submenu"
+            data-header-submenu-toggle
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls="{{ submenu_id }}"
+            {{- _render_attrs(action.get('attrs')) }}>
+      {%- if action.get('icon') %}<span class="header-menu__icon" aria-hidden="true">{{ action.icon | safe }}</span>{% endif -%}
+      <span>{{ action.label }}</span>
+      <svg class="header-menu__subchevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+        <path fill="currentColor" d="M7.5 5.5 12 10l-4.5 4.5z" />
+      </svg>
+    </button>
+    <div id="{{ submenu_id }}"
+         class="header-menu__panel header-menu__subpanel"
+         role="menu"
+         aria-label="{{ action.label }}"
+         data-header-submenu-panel
+         hidden>
+      {%- for item in action.get('items') or [] -%}
+        {{ render_action(item, in_menu=True) }}
+      {%- endfor -%}
+    </div>
+  </div>
 {%- endmacro %}
 
 {% macro render_action(action, in_menu=False) -%}
@@ -109,7 +142,7 @@
     {# no actions, render nothing #}
   {%- elif item_count == 0 -%}
     {{ render_action(primary.action) }}
-  {%- elif item_count == 1 and primary.action is none -%}
+  {%- elif item_count == 1 and primary.action is none and menu_items[0].get('type') != 'submenu' -%}
     {{ render_action(menu_items[0]) }}
   {%- else -%}
     <div class="header-actions">
@@ -151,8 +184,12 @@
             {%- if group.section.get('label') %}<div class="header-menu__heading" role="presentation">{{ group.section.label }}</div>{% endif -%}
             {%- set group.section = None -%}
           {%- endif -%}
-          {{ render_action(action, in_menu=True) }}
-          {%- set group.rendered = True -%}
+          {%- if action.get('type') == 'submenu' -%}
+            {%- if action.get('items') %}{{ render_submenu(action, menu_id ~ '-sub-' ~ loop.index) }}{% set group.rendered = True %}{% endif -%}
+          {%- else -%}
+            {{ render_action(action, in_menu=True) }}
+            {%- set group.rendered = True -%}
+          {%- endif -%}
         {%- endif -%}
       {%- endfor -%}
     </div>
