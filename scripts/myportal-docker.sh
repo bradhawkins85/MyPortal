@@ -737,6 +737,7 @@ services:
     volumes:
       - private_uploads:/app/private_uploads
       - uploads:/app/app/static/uploads
+      - tray_installers:/app/app/static/tray
       - state:/app/var
 
   app_green:
@@ -755,6 +756,7 @@ services:
     volumes:
       - private_uploads:/app/private_uploads
       - uploads:/app/app/static/uploads
+      - tray_installers:/app/app/static/tray
       - state:/app/var
 
   proxy:
@@ -772,6 +774,7 @@ volumes:
   db_data:
   private_uploads:
   uploads:
+  tray_installers:
   state:
 YAML
   chmod 0644 "$COMPOSE_FILE"

@@ -1,0 +1,7 @@
+{
+  "guid": "f5acb1fe-f295-4b57-84b2-2a4984f56feb",
+  "occurred_at": "2026-11-03T01:49Z",
+  "change_type": "Fix",
+  "summary": "Docker installs now keep the downloaded tray installers through an upgrade, so the previous Windows installer stays available on its download URL until the new release's installer has arrived to replace it.",
+  "content_hash": "df43ebeaaf619ff7ed41882c243045515b4dc063ada9a740681fe1cab55b1bbb"
+}
