@@ -229,13 +229,8 @@
     </header>
     <div class="dialog__body">
       <div class="alert alert--danger" role="alert" data-existing-subscription-errors hidden></div>
-      <div class="form-field">
-        <label class="form-field__label" for="existing-customer">Customer</label>
-        <select class="form-input" id="existing-customer" name="customerId" required>
-          <option value="">Select a customer</option>
-          {% for item in creation_companies %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}
-        </select>
-      </div>
+      <input type="hidden" name="customerId" value="{{ company.id if company else '' }}" data-existing-subscription-company>
+      <p class="form-field__hint">Adding to <strong>{{ company.name if company else 'the active company' }}</strong>.</p>
       <div class="form-field">
         <label class="form-field__label" for="existing-product">Subscription product</label>
         <select class="form-input" id="existing-product" name="productId" required>
@@ -588,6 +583,10 @@
       existingForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         if (!existingForm.reportValidity()) return;
+        if (!Number(new FormData(existingForm).get('customerId'))) {
+          showExistingErrors(['Select an active company before adding a subscription.']);
+          return;
+        }
         existingErrors.hidden = true;
         existingSubmit.disabled = true;
         const form = new FormData(existingForm);
