@@ -1,0 +1,7 @@
+{
+  "guid": "ae0c0310-bfcd-477d-9334-594fd6ee6946",
+  "occurred_at": "2026-11-03T03:03Z",
+  "change_type": "Fix",
+  "summary": "Subscription renewals no longer create a new invoice every day when sending the renewal invoice to Xero fails; each renewal is invoiced once and any delivery problem is recorded for follow-up.",
+  "content_hash": "1f0ea52ff7d40d73b5804a87f4d7be422950c702ed03cdbccfb35e489b9a10a5"
+}
