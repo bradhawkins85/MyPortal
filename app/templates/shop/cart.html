@@ -153,6 +153,18 @@
             </div>
           </dl>
         </div>
+        {% if can_order_on_behalf %}
+        <div class="form-field">
+          <label class="form-label" for="cart-requested-on-behalf-of">Requested by</label>
+          <select class="form-input" id="cart-requested-on-behalf-of" name="requestedOnBehalfOfStaffId" data-searchable="on">
+            <option value="">Me ({{ ((current_user.first_name or '') ~ ' ' ~ (current_user.last_name or ''))|trim or current_user.email }})</option>
+            {% for member in order_requester_options %}
+              <option value="{{ member.id }}">{{ ((member.first_name or '') ~ ' ' ~ (member.last_name or ''))|trim or member.email }} ({{ member.email }})</option>
+            {% endfor %}
+          </select>
+          <p class="form-help">Choose the staff member who asked for this order. It is recorded against the order and its ticket so you can see who requested it.</p>
+        </div>
+        {% endif %}
         <div class="form-field">
           <label class="form-label" for="cart-po-number">PO number{% if not require_po %} (optional){% endif %}</label>
           <input

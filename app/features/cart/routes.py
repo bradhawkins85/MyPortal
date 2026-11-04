@@ -57,6 +57,64 @@ def _main():
     return main_module
 
 
+def _staff_display_name(member: Mapping[str, Any]) -> str | None:
+    name = " ".join(
+        part
+        for part in (
+            str(member.get("first_name") or "").strip(),
+            str(member.get("last_name") or "").strip(),
+        )
+        if part
+    )
+    return name or (str(member.get("email") or "").strip() or None)
+
+
+async def _list_order_requester_options(company_id: int) -> list[dict[str, Any]]:
+    """Return the active staff a technician may place an order on behalf of.
+
+    Uses the same choices as the staff onboarding "Requested by" selector: enabled,
+    current staff with an email on one of the company's domains.
+    """
+    from app.features.staff.helpers import _filter_staff_for_offboarding_choices
+
+    main_module = _main()
+    company_record = await main_module.company_repo.get_company_by_id(company_id)
+    return _filter_staff_for_offboarding_choices(
+        await main_module.staff_repo.list_active_staff_for_offboarding(company_id),
+        list((company_record or {}).get("email_domains") or []),
+    )
+
+
+async def _resolve_order_requester(
+    raw_value: Any, user: Mapping[str, Any], request: Request, company_id: int
+) -> dict[str, Any] | None:
+    """Validate the staff member a technician is placing an order on behalf of."""
+    main_module = _main()
+    value = str(raw_value or "").strip()
+    if not value:
+        return None
+    if not await main_module._has_admin_technician_access(user, request):
+        raise main_module.HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only technicians can place orders on behalf of another staff member",
+        )
+    try:
+        staff_id = int(value)
+    except ValueError:
+        staff_id = 0
+    for member in await _list_order_requester_options(company_id):
+        try:
+            member_id = int(member.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if staff_id > 0 and member_id == staff_id:
+            return dict(member)
+    raise main_module.HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Select an active staff member with an email address as the requester",
+    )
+
+
 @router.post("/cart/add", response_class=RedirectResponse, include_in_schema=False)
 async def add_to_cart(request: Request) -> RedirectResponse:
     main_module = _main()
@@ -707,6 +765,16 @@ async def view_cart(
             raise
         company_addresses = []
 
+    can_order_on_behalf = False
+    order_requester_options: list[dict[str, Any]] = []
+    if company_id and await main_module._has_admin_technician_access(user, request):
+        can_order_on_behalf = True
+        try:
+            order_requester_options = await _list_order_requester_options(company_id)
+        except RuntimeError as exc:  # Supports route tests without an initialised database pool.
+            if "not initialised" not in str(exc):
+                raise
+
     extra = {
         "title": "Cart",
         "cart_items": cart_items,
@@ -723,6 +791,8 @@ async def view_cart(
         "payment_method": (company.get("payment_method") or "invoice_prepay") if company else "invoice_prepay",
         "require_po": bool(company.get("require_po")) if company else False,
         "company_addresses": company_addresses,
+        "can_order_on_behalf": can_order_on_behalf,
+        "order_requester_options": order_requester_options,
     }
     response = await main_module._render_template("shop/cart.html", request, user, extra=extra)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -1059,6 +1129,36 @@ async def place_order(request: Request) -> RedirectResponse:
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    try:
+        on_behalf_of = await _resolve_order_requester(
+            form.get("requestedOnBehalfOfStaffId"), user, request, company_id
+        )
+    except main_module.HTTPException as exc:
+        if exc.status_code != status.HTTP_400_BAD_REQUEST:
+            raise
+        message = quote(str(exc.detail))
+        return RedirectResponse(
+            url=f"{request.url_for('cart_page')}?orderMessage={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    requester_portal_user_id: int | None = None
+    if on_behalf_of is not None:
+        requested_by_staff_id: int | None = int(on_behalf_of["id"])
+        requested_by_name = _staff_display_name(on_behalf_of)
+        requested_by_email = str(on_behalf_of.get("email") or "").strip() or None
+        portal_user = (
+            await main_module.user_repo.get_user_by_email(requested_by_email)
+            if requested_by_email
+            else None
+        )
+        if portal_user and portal_user.get("id") is not None:
+            requester_portal_user_id = int(portal_user["id"])
+    else:
+        requested_by_staff_id = None
+        placing_user = await main_module.user_repo.get_user_by_id(int(user["id"])) or user
+        requested_by_name = _staff_display_name(placing_user)
+        requested_by_email = str(placing_user.get("email") or "").strip() or None
+
     _valid_shipping_options = {"specific_address", "local_pickup"}
     shipping_option_raw = form.get("shippingOption")
     shipping_option = str(shipping_option_raw).strip() if shipping_option_raw else "specific_address"
@@ -1185,6 +1285,12 @@ async def place_order(request: Request) -> RedirectResponse:
                     "orderNumber": order_number,
                     "companyId": company_id,
                     "shipping": shipping_payload,
+                    "requestedBy": {
+                        "staffId": requested_by_staff_id,
+                        "name": requested_by_name,
+                        "email": requested_by_email,
+                    },
+                    "placedByUserId": user.get("id"),
                 },
                 headers={
                     "x-api-key": main_module.settings.shop_webhook_api_key,
@@ -1213,6 +1319,9 @@ async def place_order(request: Request) -> RedirectResponse:
                 shipping_state=shipping_state,
                 shipping_postcode=shipping_postcode,
                 shipping_country=shipping_country,
+                requested_by_staff_id=requested_by_staff_id,
+                requested_by_name=requested_by_name,
+                requested_by_email=requested_by_email,
             )
         except ValueError as exc:
             message = quote(str(exc))
@@ -1227,6 +1336,28 @@ async def place_order(request: Request) -> RedirectResponse:
         )
 
     await main_module.cart_repo.clear_cart(session.id)
+
+    if on_behalf_of is not None:
+        try:
+            await main_module.audit_service.log_action(
+                user_id=int(user["id"]),
+                action="shop.order.placed_on_behalf",
+                entity_type="shop_order",
+                entity_id=None,
+                metadata={
+                    "company_id": company_id,
+                    "order_number": order_number,
+                    "requested_by_staff_id": requested_by_staff_id,
+                    "requested_by_user_id": requester_portal_user_id,
+                },
+                request=request,
+            )
+        except Exception as exc:  # pragma: no cover - audit safety
+            main_module.log_error(
+                "Failed to audit order placed on behalf of staff",
+                order_number=order_number,
+                error=str(exc),
+            )
 
     try:
         await main_module.subscription_shop_integration.create_subscriptions_from_order(
@@ -1243,9 +1374,9 @@ async def place_order(request: Request) -> RedirectResponse:
             error=str(exc),
         )
 
+    user_name: str | None = None
     try:
         user_record = await main_module.user_repo.get_user_by_id(int(user["id"]))
-        user_name = None
         if user_record:
             first_name = user_record.get("first_name", "").strip()
             last_name = user_record.get("last_name", "").strip()
@@ -1288,7 +1419,7 @@ async def place_order(request: Request) -> RedirectResponse:
         invoice_result = await invoice_generator_service.generate_order_invoice(
             order_number=order_number,
             company_id=company_id,
-            user_name=user_name,
+            user_name=requested_by_name if on_behalf_of is not None else user_name,
             order_items=physical_items,
             freight_amount=freight_amount,
         )
@@ -1350,12 +1481,21 @@ async def place_order(request: Request) -> RedirectResponse:
             "local_pickup": "Local pickup",
         }.get(shipping_option, shipping_option)
 
+        placed_by_label = user_name or f"User #{user.get('id')}"
+        requested_by_label = requested_by_name or requested_by_email or placed_by_label
+        if requested_by_email and requested_by_email != requested_by_label:
+            requested_by_label = f"{requested_by_label} ({requested_by_email})"
+        if on_behalf_of is not None:
+            requested_by_label = f"{requested_by_label} (placed on their behalf)"
+
         description_lines = [
             "## Cart Order Submitted",
             "",
             f"- Order number: {order_number}",
             f"- Company ID: {company_id}",
             f"- User ID: {user.get('id')}",
+            f"- Placed by: {placed_by_label}",
+            f"- Requested by: {requested_by_label}",
             f"- PO number: {po_number or 'Not provided'}",
             f"- Shipping option: {shipping_label}",
             f"- Order total: ${order_total}",
@@ -1381,7 +1521,12 @@ async def place_order(request: Request) -> RedirectResponse:
         await main_module.tickets_service.create_ticket(
             subject=f"Cart order {order_number} requires processing",
             description=ticket_description_html,
-            requester_id=int(user["id"]),
+            requester_id=(
+                requester_portal_user_id
+                if requester_portal_user_id is not None
+                else int(user["id"])
+            ),
+            requester_staff_id=requested_by_staff_id,
             company_id=company_id,
             assigned_user_id=None,
             priority="normal",

@@ -13,6 +13,9 @@ class OrderSummaryResponse(BaseModel):
     shipping_status: str = Field(default="", alias="shippingStatus", max_length=50)
     notes: str | None = None
     po_number: str | None = Field(default=None, alias="poNumber", max_length=50)
+    requested_by_staff_id: int | None = Field(default=None, alias="requestedByStaffId")
+    requested_by_name: str | None = Field(default=None, alias="requestedByName")
+    requested_by_email: str | None = Field(default=None, alias="requestedByEmail")
     consignment_id: str | None = Field(default=None, alias="consignmentId", max_length=100)
     order_date: datetime | None = Field(default=None, alias="orderDate")
     eta: datetime | None = None
