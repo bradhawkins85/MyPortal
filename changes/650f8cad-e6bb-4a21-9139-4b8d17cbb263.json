@@ -1,0 +1,7 @@
+{
+  "guid": "650f8cad-e6bb-4a21-9139-4b8d17cbb263",
+  "occurred_at": "2026-11-04T22:49Z",
+  "change_type": "Improvement",
+  "summary": "Monthly subscription customers now get a single renewal reminder 14 days before renewal and their invoice 8 days before, instead of 30 and 21 days; annual subscription reminders and invoices are unchanged.",
+  "content_hash": "23f619ecb1102dbbdcff0329fc64a9f60d40ff1b980c52e33920085b7bedbf8c"
+}
