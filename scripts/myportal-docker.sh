@@ -1415,6 +1415,47 @@ backup_stats() {
   backup_secondary_database STATS stats "stats" "$1"
 }
 
+backup_skipped() {
+  # backup_skipped KEY -> success when KEY (e.g. SKIP_FILES_BACKUP) is true in
+  # the application environment file.
+  local value
+  value=$(get_setting "$APP_ENV" "$1")
+  case "${value,,}" in 1|true|yes|on) return 0 ;; *) return 1 ;; esac
+}
+
+backup_files() {
+  # backup_files LABEL -> prints the uploads archive path, or nothing with
+  # SKIP_FILES_BACKUP=true.
+  local label="$1" file
+  if backup_skipped SKIP_FILES_BACKUP; then
+    info "Skipping the uploaded files backup (SKIP_FILES_BACKUP=true)."
+    return 0
+  fi
+  install -d -m 0700 "$BACKUP_DIR"
+  file="${BACKUP_DIR}/files-${label}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+  info "Backing up uploaded files to ${file}…"
+  app_exec tar -czf - -C /app private_uploads app/static/uploads var >"$file"
+  chmod 0600 "$file"
+  printf '%s' "$file"
+}
+
+backup_gitea() {
+  # backup_gitea LABEL -> prints the Gitea archive path, or nothing when this
+  # installation has no Gitea or SKIP_GITEA_BACKUP=true.
+  local label="$1" file
+  if backup_skipped SKIP_GITEA_BACKUP; then
+    info "Skipping the Gitea script library backup (SKIP_GITEA_BACKUP=true)."
+    return 0
+  fi
+  [[ -n "$(service_container gitea)" ]] || return 0
+  install -d -m 0700 "$BACKUP_DIR"
+  file="${BACKUP_DIR}/gitea-${label}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+  info "Backing up the Gitea script library to ${file}…"
+  compose exec -T gitea tar -czf - -C /data . >"$file"
+  chmod 0600 "$file"
+  printf '%s' "$file"
+}
+
 prune_backups() {
   local keep="$MYPORTAL_BACKUPS_TO_KEEP"
   [[ -d "$BACKUP_DIR" ]] || return 0
@@ -1736,25 +1777,17 @@ cmd_backup() {
   db=$(backup_database "$version")
   eventlog=$(backup_event_logs "$version")
   stats=$(backup_stats "$version")
-  files="${BACKUP_DIR}/files-${version}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
-  info "Backing up uploaded files to ${files}…"
-  app_exec tar -czf - -C /app private_uploads app/static/uploads var >"$files"
-  chmod 0600 "$files"
+  files=$(backup_files "$version")
   save_erasure_ledger
-  local gitea=""
-  if [[ -n "$(service_container gitea)" ]]; then
-    gitea="${BACKUP_DIR}/gitea-${version}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
-    info "Backing up the Gitea script library to ${gitea}…"
-    compose exec -T gitea tar -czf - -C /data . >"$gitea"
-    chmod 0600 "$gitea"
-  fi
+  local gitea
+  gitea=$(backup_gitea "$version")
   prune_backups
   cat <<EOF
 Backups written:
   ${db}${eventlog:+
   ${eventlog}}${stats:+
-  ${stats}}
-  ${files}${gitea:+
+  ${stats}}${files:+
+  ${files}}${gitea:+
   ${gitea}}
 Also keep a copy of ${APP_ENV} (it holds the encryption keys).
 EOF

@@ -20,6 +20,8 @@ def _run_backup(args: list[str], env_overrides: dict | None = None) -> subproces
         env.pop("STATS_" + key, None)
     env.pop("EVENT_LOG_DB_BACKUP", None)
     env.pop("STATS_DB_BACKUP", None)
+    env.pop("SKIP_FILES_BACKUP", None)
+    env.pop("SKIP_GITEA_BACKUP", None)
     if env_overrides:
         env.update(env_overrides)
     return subprocess.run(
@@ -394,3 +396,49 @@ def test_files_backup_skips_gitea_when_absent(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert not list(backup_dir.glob("gitea-*"))
+
+
+def _files_backup_env(tmp_path: Path, **settings) -> tuple[dict, Path]:
+    env_file = _make_env_file(tmp_path / "myportal.env", **settings)
+    shared_root = tmp_path / "shared"
+    (shared_root / "uploads").mkdir(parents=True)
+    (shared_root / "uploads" / "logo.png").write_text("x")
+    gitea_home = tmp_path / "gitea"
+    (gitea_home / "data").mkdir(parents=True)
+    backup_dir = tmp_path / "backups"
+    return (
+        {
+            "MYPORTAL_ENV_FILE": str(env_file),
+            "BACKUP_DIR": str(backup_dir),
+            "MYPORTAL_SHARED_ROOT": str(shared_root),
+            "MYPORTAL_GITEA_HOME": str(gitea_home),
+            "MYPORTAL_GITEA_CONFIG_DIR": str(tmp_path / "no-config"),
+        },
+        backup_dir,
+    )
+
+
+def test_files_backup_skipped_when_configured_in_env_file(tmp_path):
+    env, backup_dir = _files_backup_env(tmp_path, SKIP_FILES_BACKUP="true")
+    result = _run_backup(["--files-only", "--label", "test"], env)
+    assert result.returncode == 0, result.stderr
+    assert "SKIP_FILES_BACKUP=true" in result.stdout
+    assert not list(backup_dir.glob("files-*"))
+    assert len(list(backup_dir.glob("gitea-test-*.tar.gz"))) == 1
+
+
+def test_gitea_backup_skipped_when_configured_in_env_file(tmp_path):
+    env, backup_dir = _files_backup_env(tmp_path, SKIP_GITEA_BACKUP="yes")
+    result = _run_backup(["--files-only", "--label", "test"], env)
+    assert result.returncode == 0, result.stderr
+    assert "SKIP_GITEA_BACKUP=true" in result.stdout
+    assert not list(backup_dir.glob("gitea-*"))
+    assert len(list(backup_dir.glob("files-test-*.tar.gz"))) == 1
+
+
+def test_files_and_gitea_backups_made_by_default(tmp_path):
+    env, backup_dir = _files_backup_env(tmp_path, SKIP_FILES_BACKUP="false")
+    result = _run_backup(["--files-only", "--label", "test"], env)
+    assert result.returncode == 0, result.stderr
+    assert len(list(backup_dir.glob("files-test-*.tar.gz"))) == 1
+    assert len(list(backup_dir.glob("gitea-test-*.tar.gz"))) == 1

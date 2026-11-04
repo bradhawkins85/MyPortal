@@ -32,8 +32,8 @@ sudo myportal-backup --label manual
 | Database | `db-<label>-<UTC timestamp>.sql.gz` | Full `mysqldump` of the configured database (single-transaction, routines, triggers, events) |
 | Event logs | `eventlog-<label>-<UTC timestamp>.sql.gz` | Only with `EVENT_LOG_DB_BACKUP=true`: `mysqldump` of the [RMM event log database](RMM%20Event%20Logs.md). Made with the database backup. |
 | Stats | `stats-<label>-<UTC timestamp>.sql.gz` | Only with `STATS_DB_BACKUP=true`: `mysqldump` of the [RMM stats database](RMM%20Checks.md#machine-stats-and-the-stats-database). Made with the database backup. |
-| Files | `files-<label>-<UTC timestamp>.tar.gz` | Archive of `private_uploads/` and `uploads/` under the shared root |
-| Gitea | `gitea-<label>-<UTC timestamp>.tar.gz` | The RMM script library: `/var/lib/gitea` and `/etc/gitea`, when this host runs Gitea. Made with the files backup. |
+| Files | `files-<label>-<UTC timestamp>.tar.gz` | Archive of `private_uploads/` and `uploads/` under the shared root. Left out with `SKIP_FILES_BACKUP=true`. |
+| Gitea | `gitea-<label>-<UTC timestamp>.tar.gz` | The RMM script library: `/var/lib/gitea` and `/etc/gitea`, when this host runs Gitea. Made with the files backup; left out with `SKIP_GITEA_BACKUP=true`. |
 
 The RMM event log database (`EVENT_LOG_DB_*`) is left out by default: it is
 large and agents can send the logs again. Set `EVENT_LOG_DB_BACKUP=true` in the
@@ -124,6 +124,8 @@ tar -xzf /opt/myportal/backups/files-scheduled-20260101T000000Z.tar.gz -C /opt/m
 | `EVENT_LOG_DB_BACKUP` | `false` | Set `true` to also back up the RMM event log database (`eventlog-*.sql.gz`) |
 | `STATS_DB_BACKUP` | `false` | Set `true` to also back up the RMM stats database (`stats-*.sql.gz`) |
 | `SKIP_PRE_UPGRADE_BACKUP` | `false` | Set `true` to skip the pre-upgrade database backup |
+| `SKIP_FILES_BACKUP` | `false` | Set `true` to leave the uploaded files archive (`files-*.tar.gz`) out of backups, e.g. when the files are backed up another way |
+| `SKIP_GITEA_BACKUP` | `false` | Set `true` to leave the Gitea script library archive (`gitea-*.tar.gz`) out of backups |
 | `MYPORTAL_SHARED_ROOT` | `/opt/myportal/shared` | Shared data root containing upload directories |
 | `PRIVACY_ERASURE_LEDGER_PATH` | `$MYPORTAL_SHARED_ROOT/data/privacy/erasure-ledger.jsonl` | Erasure ledger saved with each database backup |
 
@@ -140,7 +142,9 @@ runs Gitea, its data (`gitea-*.tar.gz`), and with `EVENT_LOG_DB_BACKUP=true` in
 `myportal.env` the RMM event log database (`eventlog-*.sql.gz`, dumped from the
 `db` container, which must be able to reach `EVENT_LOG_DB_HOST`) and with
 `STATS_DB_BACKUP=true` the RMM stats database (`stats-*.sql.gz`, likewise), then prunes old backups using the same
-`MYPORTAL_BACKUPS_TO_KEEP` setting. Backups are
+`MYPORTAL_BACKUPS_TO_KEEP` setting. `SKIP_FILES_BACKUP=true` and
+`SKIP_GITEA_BACKUP=true` in `myportal.env` leave out the files and Gitea
+archives, as on systemd installs. Backups are
 stored in the directory configured for the Docker deployment.
 
 To restore a database backup in a Docker install:
