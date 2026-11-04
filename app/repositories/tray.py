@@ -552,11 +552,11 @@ async def touch_device_websocket(device_id: int) -> None:
 
 async def record_overseer_report(device_id: int, *, overseer_version: str | None) -> None:
     """Record that the device's overseer reported, and which version it runs."""
-    p = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # A static statement: the MySQL adapter turns the ``?`` placeholders into ``%s``.
     await db.execute(
-        "UPDATE tray_devices SET overseer_last_seen_utc = " + p + ", "
-        "overseer_version = COALESCE(" + p + ", overseer_version) WHERE id = " + p,
+        "UPDATE tray_devices SET overseer_last_seen_utc = ?, "
+        "overseer_version = COALESCE(?, overseer_version) WHERE id = ?",
         (now, overseer_version, device_id),
     )
 
