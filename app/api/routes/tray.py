@@ -60,6 +60,8 @@ from app.schemas.tray import (
     TrayEnrolRequest,
     TrayEnrolResponse,
     TrayHeartbeatRequest,
+    TrayOverseerReport,
+    TrayOverseerStatus,
     TrayOutlookSignaturesRequest,
     TrayOutlookSignaturesResponse,
     NetworkScanRequest,
@@ -87,6 +89,7 @@ from app.schemas.tray import (
 from app.services import ai_consent
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
+from app.services import tray_overseer
 from app.services import chat_ntfy_notifications
 from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import matrix as matrix_service
@@ -811,6 +814,25 @@ async def heartbeat(
     if not device.get("asset_id") or not device.get("setup_ticket_processed", 1):
         await tray_service.provision_device_for_checkin(device)
     return JSONResponse({"status": "ok"})
+
+
+@router.post(
+    "/overseer/report",
+    response_model=TrayOverseerStatus,
+    summary="Overseer report: local agent state and recoveries; returns agent connectivity",
+    description=(
+        "Called every few minutes by the device's overseer service with the tray device token. "
+        "Records the overseer's version, audits each start or restart it performed, and returns "
+        "how many seconds ago MyPortal last heard from the tray's WebSocket and the device's RMM "
+        "agent so the overseer can restart an agent that has lost its connection."
+    ),
+)
+async def overseer_report(
+    payload: TrayOverseerReport,
+    device: dict = Depends(get_current_tray_device),
+) -> TrayOverseerStatus:
+    status_payload = await tray_overseer.record_report(device, payload.model_dump())
+    return TrayOverseerStatus(**status_payload)
 
 
 @router.get(

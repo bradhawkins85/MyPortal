@@ -30,6 +30,22 @@ Update the tray and RMM agents to receive these changes; deploying server code
 alone does not change an older agent's hardcoded timers. Older RMM agents show
 an upgrade message in the new task's result rather than claiming success.
 
+## Overseer
+
+`myportal-tray-service overseer` runs as a separate service (**MyPortal
+Overseer**: `MyPortalOverseer` on Windows and Linux, `io.myportal.overseer`
+on macOS) installed by the MSI, the pkg and `install.sh` alongside the tray
+service. Every minute it starts the tray service or RMM agent if either has
+stayed stopped for 3 minutes; every 5 minutes it reports to
+`/api/tray/overseer/report` with the tray device token and restarts a running
+agent MyPortal has not heard from for 5 minutes on two consecutive reports.
+It never restarts anything while MyPortal is unreachable, backs off repeated
+restarts up to 2 hours, and reports every recovery (audited as
+`tray.overseer.recover`). See `internal/overseer` and the *Overseer* section
+of `docs/wiki/getting-started/Tray App.md`. Deploy MyPortal and migration
+541 before updating trays; an overseer talking to an older MyPortal gets 404s
+and only performs the local "is it running" check.
+
 ## Repository layout
 
 ```
@@ -45,6 +61,7 @@ tray/
 │   ├── ipc/          Local IPC between service and UI agent
 │   ├── logger/       Structured logger with file rotation
 │   ├── notify/       Push-notification helpers
+│   ├── overseer/     Overseer service: keeps the tray and RMM agent connected
 │   └── updater/      Auto-update checker (6-hour timer, deferred install)
 ├── chat-shell/       Minimal Electron chat window (dedicated app for support chat)
 │   ├── main.js       Electron main process — session isolation + window management

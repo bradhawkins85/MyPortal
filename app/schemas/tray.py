@@ -55,6 +55,45 @@ class TrayHeartbeatRequest(BaseModel):
     last_ip: Optional[str] = Field(default=None, max_length=64)
 
 
+class TrayOverseerServiceState(BaseModel):
+    service: Literal["tray", "rmm"]
+    installed: bool = False
+    enabled: bool = False
+    running: bool = False
+
+
+class TrayOverseerAction(BaseModel):
+    service: Literal["tray", "rmm"]
+    action: Literal["start", "restart"]
+    reason: str = Field(default="", max_length=500)
+    occurred_at: Optional[datetime] = None
+    succeeded: bool = False
+    error: Optional[str] = Field(default=None, max_length=500)
+
+
+class TrayOverseerReport(BaseModel):
+    """What the device's overseer saw and did since its last report."""
+
+    overseer_version: Optional[str] = Field(default=None, max_length=32)
+    services: list[TrayOverseerServiceState] = Field(default_factory=list, max_length=4)
+    actions: list[TrayOverseerAction] = Field(default_factory=list, max_length=20)
+
+
+class TrayOverseerAgentStatus(BaseModel):
+    enrolled: bool
+    last_seen_age_seconds: Optional[int] = Field(
+        default=None, description="Seconds since MyPortal last heard from the agent; null if never."
+    )
+
+
+class TrayOverseerStatus(BaseModel):
+    """MyPortal's view of the device's agent connections, measured on the server."""
+
+    tray: TrayOverseerAgentStatus
+    rmm: TrayOverseerAgentStatus
+    check_interval_seconds: int
+
+
 class TrayMenuNode(BaseModel):
     """One node in the tray menu tree.
 

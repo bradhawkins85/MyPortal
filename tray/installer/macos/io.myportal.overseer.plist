@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchDaemon for the MyPortal Overseer, run from the tray service binary.
+  It restarts the tray service and the RMM agent when MyPortal stops hearing
+  from them, and starts them if they stay stopped.
+  Installed to /Library/LaunchDaemons/io.myportal.overseer.plist and loaded by
+  the package postinstall script.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.myportal.overseer</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/MyPortal/Tray/myportal-tray-service</string>
+    <string>overseer</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>UserName</key>
+  <string>root</string>
+
+  <key>StandardOutPath</key>
+  <string>/Library/Logs/MyPortal/tray/overseer.stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Library/Logs/MyPortal/tray/overseer.stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

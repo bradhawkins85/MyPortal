@@ -6,7 +6,7 @@
 # still running: the script writes the removal steps to /var/tmp and starts them
 # outside the RMM agent's service (a transient systemd unit on Linux, a one-off
 # LaunchDaemon on macOS), then exits. They wait for the RMM agent to report this
-# run to MyPortal, remove the tray (service, files, settings and enrolment) and
+# run to MyPortal, remove the overseer and tray (services, files, settings and enrolment) and
 # then the RMM agent (service, files and enrolment). Their log is kept at
 # /var/tmp/myportal-uninstall.log.
 set -u
@@ -30,7 +30,10 @@ log 'Waiting for the RMM agent to report the uninstall run'
 sleep 20
 
 if [ "$(uname -s)" = Darwin ]; then
-	# 1. The tray, first, so it cannot reinstall the RMM agent.
+	# 1. The overseer, so it cannot restart the services being removed, then
+	# the tray, so it cannot reinstall the RMM agent.
+	/bin/launchctl bootout system/io.myportal.overseer 2>/dev/null || /bin/launchctl unload /Library/LaunchDaemons/io.myportal.overseer.plist 2>/dev/null
+	/bin/rm -f /Library/LaunchDaemons/io.myportal.overseer.plist
 	agent_plist=/Library/LaunchAgents/io.myportal.tray.agent.plist
 	daemon_plist=/Library/LaunchDaemons/io.myportal.tray.service.plist
 	for uid in $(/bin/ps -axo uid= 2>/dev/null | /usr/bin/sort -u); do
@@ -61,7 +64,10 @@ if [ "$(uname -s)" = Darwin ]; then
 	exit 0
 fi
 
-# Linux. 1. The tray, first, so it cannot reinstall the RMM agent.
+# Linux. 1. The overseer, so it cannot restart the services being removed,
+# then the tray, so it cannot reinstall the RMM agent.
+systemctl disable --now MyPortalOverseer >/dev/null 2>&1
+rm -f /etc/systemd/system/MyPortalOverseer.service
 systemctl disable --now MyPortalTrayService >/dev/null 2>&1
 [ -x /opt/myportal-tray/myportal-tray-service ] && /opt/myportal-tray/myportal-tray-service uninstall >/dev/null 2>&1
 pkill -f /opt/myportal-tray/ 2>/dev/null

@@ -8,6 +8,7 @@ set -eu
 
 PREFIX=/opt/myportal-tray
 SERVICE=MyPortalTrayService
+OVERSEER=MyPortalOverseer
 purge=0
 with_rmm=0
 
@@ -22,11 +23,14 @@ done
 
 [ "$(id -u)" -eq 0 ] || { echo "uninstall.sh: run as root (sudo)" >&2; exit 1; }
 
+# The overseer first, so it cannot restart the services being removed.
+systemctl stop "$OVERSEER" 2>/dev/null || true
 systemctl stop "$SERVICE" 2>/dev/null || true
 if [ -x "$PREFIX/myportal-tray-service" ]; then
+	"$PREFIX/myportal-tray-service" overseer uninstall || true
 	"$PREFIX/myportal-tray-service" uninstall || true
 fi
-rm -f "/etc/systemd/system/$SERVICE.service" /etc/xdg/autostart/myportal-tray.desktop
+rm -f "/etc/systemd/system/$OVERSEER.service" "/etc/systemd/system/$SERVICE.service" /etc/xdg/autostart/myportal-tray.desktop
 systemctl daemon-reload 2>/dev/null || true
 pkill -f "$PREFIX/myportal-tray-ui" 2>/dev/null || true
 

@@ -10,6 +10,8 @@
 # computer. On a computer with a desktop the tray UI is added too, and XDG
 # autostart opens it in each user's session. Without --headless or --desktop
 # the installer adds the UI when an X11 or Wayland desktop session is installed.
+# The overseer (MyPortalOverseer, the same binary run as "myportal-tray-service
+# overseer") restarts the tray service and RMM agent when they lose MyPortal.
 #
 # Options: --no-auto-update turns off automatic tray updates (AUTO_UPDATE=false).
 set -eu
@@ -19,6 +21,7 @@ CONF_DIR=/etc/myportal-tray
 ENV_FILE="$CONF_DIR/tray.env"
 AUTOSTART=/etc/xdg/autostart/myportal-tray.desktop
 SERVICE=MyPortalTrayService
+OVERSEER=MyPortalOverseer
 
 die() { echo "install.sh: $*" >&2; exit 1; }
 
@@ -37,7 +40,7 @@ while [ $# -gt 0 ]; do
 	--desktop) mode=desktop; shift ;;
 	--upgrade) upgrade=1; shift ;;
 	--no-auto-update) auto_update=false; shift ;;
-	-h | --help) sed -n '2,16p' "$0"; exit 0 ;;
+	-h | --help) sed -n '2,18p' "$0"; exit 0 ;;
 	*) die "unknown option: $1" ;;
 	esac
 done
@@ -101,6 +104,8 @@ else
 fi
 
 echo "Installing the MyPortal tray ($mode, $arch) in $PREFIX"
+# The overseer first, so it does not start the tray while it is replaced.
+systemctl stop "$OVERSEER" 2>/dev/null || true
 systemctl stop "$SERVICE" 2>/dev/null || true
 
 install -d -m 0755 "$PREFIX"
@@ -131,12 +136,17 @@ fi
 if [ ! -f "/etc/systemd/system/$SERVICE.service" ]; then
 	"$PREFIX/myportal-tray-service" install
 fi
+if [ ! -f "/etc/systemd/system/$OVERSEER.service" ]; then
+	"$PREFIX/myportal-tray-service" overseer install
+fi
 systemctl daemon-reload
 systemctl enable "$SERVICE" >/dev/null 2>&1 || true
 systemctl restart "$SERVICE"
+systemctl enable "$OVERSEER" >/dev/null 2>&1 || true
+systemctl restart "$OVERSEER"
 
 if [ "$mode" = desktop ]; then
 	echo "The tray icon appears the next time each user signs in to the desktop."
 	echo "GNOME needs the AppIndicator extension (gnome-shell-extension-appindicator) to show tray icons."
 fi
-echo "Done. Logs: journalctl -u $SERVICE and $PREFIX/logs/service.log"
+echo "Done. Logs: journalctl -u $SERVICE, journalctl -u $OVERSEER and $PREFIX/logs/"

@@ -152,6 +152,39 @@
           Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Network\MyPortalTrayService"
           Type="string"
           Value="Service" />
+        <!--
+          The overseer: a separate service run from the same executable
+          ("myportal-tray-service.exe overseer"). It restarts the tray service
+          and the RMM agent when MyPortal stops hearing from them, and starts
+          them if they stay stopped. It sets its own recovery actions on start.
+        -->
+        <ServiceInstall
+          Id="OverseerServiceInstall"
+          Name="MyPortalOverseer"
+          DisplayName="MyPortal Overseer"
+          Description="Keeps the MyPortal tray service and RMM agent connected to MyPortal, restarting them when they lose their connection."
+          Type="ownProcess"
+          Start="auto"
+          Account="LocalSystem"
+          ErrorControl="normal"
+          Arguments="overseer" />
+        <ServiceControl
+          Id="OverseerServiceStart"
+          Name="MyPortalOverseer"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="yes" />
+        <RegistryValue
+          Root="HKLM"
+          Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\MyPortalOverseer"
+          Type="string"
+          Value="Service" />
+        <RegistryValue
+          Root="HKLM"
+          Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Network\MyPortalOverseer"
+          Type="string"
+          Value="Service" />
       </Component>
       <Component Id="UIExeComponent" Guid="D3E4F5A6-B7C8-9012-DEF0-123456789012">
         <File Id="UIExe"
