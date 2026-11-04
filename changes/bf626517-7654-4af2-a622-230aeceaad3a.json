@@ -1,0 +1,7 @@
+{
+  "guid": "bf626517-7654-4af2-a622-230aeceaad3a",
+  "occurred_at": "2026-11-03T23:56Z",
+  "change_type": "Feature",
+  "summary": "RustDesk client settings (such as turning off audio, camera and update checks, or limiting connections to an IP whitelist) can now be set once in the server's .env file as RUSTDESK_OPTIONS and are applied to every device when RustDesk is switched on, before a technician connects.",
+  "content_hash": "089add88670cfd7773548dc6d0b8469b9858427bd5e42a4d3c5558f2501e2c7f"
+}

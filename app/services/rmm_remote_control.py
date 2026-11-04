@@ -25,7 +25,8 @@ When a technician clicks Connect on an asset:
 
 Without a chosen script, RustDesk uses MyPortal's built-in one
 (``rmm_builtin/rustdesk_activate*``): on Windows and macOS it installs RustDesk
-when it is missing, then it applies ``RUSTDESK_CFG`` from the .env file,
+when it is missing, then it applies ``RUSTDESK_CFG`` and the client options in
+``RUSTDESK_OPTIONS`` from the .env file (so technicians cannot change them),
 starts the RustDesk service, sets a one-time password MyPortal generates and
 reports the ID. A device without the RMM agent falls back to an
 asset custom field holding its ID.
@@ -102,6 +103,9 @@ SESSION_VALUE_NAMES = {"id", "password", "node_id"}
 
 _SESSION_MARKER = re.compile(r"^(\s*##myportal\[session\.([^\]]+)\]=)(.*?)\s*$")
 _RUSTDESK_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# RustDesk option names ("enable-audio") and printable values without quotes.
+_RUSTDESK_OPTION_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_RUSTDESK_OPTION_VALUE = re.compile(r"^[^\x00-\x1f\x7f\"]{0,1024}$")
 _MESH_NODE_ID = re.compile(r"^[A-Za-z0-9@$/_+=.-]{1,256}$")
 _HEX = re.compile(r"^[0-9a-fA-F]+$")
 
@@ -227,12 +231,43 @@ def _public_provider(row: Mapping[str, Any], script: Mapping[str, Any] | None = 
     }
 
 
-def rustdesk_environment() -> dict[str, bool]:
-    """Whether RUSTDESK_CFG and the installer URLs are set (never their values)."""
+def rustdesk_options(raw: str | None = None) -> list[tuple[str, str]]:
+    """RUSTDESK_OPTIONS as ``(key, value)`` pairs, in order; later keys win.
+
+    Raises :class:`RemoteControlError` naming the first entry that is not a
+    valid ``key=value`` pair so the .env mistake is found before a session.
+    """
+
+    text = get_settings().rustdesk_options if raw is None else raw
+    options: dict[str, str] = {}
+    for entry in re.split(r"[;\r\n]", text or ""):
+        entry = entry.strip()
+        if not entry:
+            continue
+        key, separator, value = entry.partition("=")
+        key, value = key.strip(), value.strip()
+        if not separator or not _RUSTDESK_OPTION_KEY.match(key):
+            raise RemoteControlError(f"RUSTDESK_OPTIONS has an invalid entry: {entry[:80]!r}. Use key=value pairs separated by semicolons.")
+        if not _RUSTDESK_OPTION_VALUE.match(value):
+            raise RemoteControlError(f"RUSTDESK_OPTIONS has an invalid value for {key}.")
+        options.pop(key, None)
+        options[key] = value
+    return list(options.items())
+
+
+def rustdesk_environment() -> dict[str, Any]:
+    """Whether RUSTDESK_CFG and the installer URLs are set (never their values),
+    and how many RUSTDESK_OPTIONS will be applied."""
 
     settings = get_settings()
+    try:
+        options_count, options_error = len(rustdesk_options()), ""
+    except RemoteControlError as exc:
+        options_count, options_error = 0, str(exc)
     return {
         "cfg_set": bool((settings.rustdesk_cfg or "").strip()),
+        "options_count": options_count,
+        "options_error": options_error,
         "installer_set": bool((settings.rustdesk_installer_url or "").strip()),
         "macos_installer_set": bool((settings.rustdesk_macos_installer_url or "").strip()),
     }
@@ -436,6 +471,10 @@ async def _queue_builtin_rustdesk(agent: Mapping[str, Any], password: str, user_
     env = {"MYPORTAL_RUSTDESK_PASSWORD": password}
     if (config.rustdesk_cfg or "").strip():
         env["RUSTDESK_CFG"] = config.rustdesk_cfg.strip()
+    options = rustdesk_options()
+    if options:
+        # One key=value per line; each script applies them with --option.
+        env["RUSTDESK_OPTIONS"] = "\n".join(f"{key}={value}" for key, value in options)
     # Each script reads its own platform's installer override.
     installer_url = {
         "builtin/rustdesk_activate.ps1": config.rustdesk_installer_url,

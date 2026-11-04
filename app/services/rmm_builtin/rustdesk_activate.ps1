@@ -1,7 +1,8 @@
 # MyPortal built-in: switch RustDesk on for a remote session (Windows).
 # Detect an existing installation, otherwise install the latest stable GitHub
 # release (RUSTDESK_INSTALLER_URL optionally overrides the download URL).
-# Then apply RUSTDESK_CFG, start the service and set MYPORTAL_RUSTDESK_PASSWORD.
+# Then apply RUSTDESK_CFG and RUSTDESK_OPTIONS (one key=value per line), start
+# the service and set MYPORTAL_RUSTDESK_PASSWORD.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $activationDeadline = (Get-Date).AddSeconds(280)
@@ -136,6 +137,18 @@ if (-not (Get-Service -Name 'RustDesk' -ErrorAction SilentlyContinue)) {
 if ($env:RUSTDESK_CFG) {
     Write-Output 'Applying the RustDesk server config'
     Invoke-RustDeskCommand -File $exe -Arguments @('--config', $env:RUSTDESK_CFG) -Step 'server configuration' | Out-Null
+}
+
+if ($env:RUSTDESK_OPTIONS) {
+    Write-Output 'Applying the RustDesk options'
+    foreach ($line in ($env:RUSTDESK_OPTIONS -split "`r?`n")) {
+        if (-not $line.Trim()) { continue }
+        $separator = $line.IndexOf('=')
+        if ($separator -lt 1) { throw "Invalid RustDesk option: $line." }
+        $key = $line.Substring(0, $separator).Trim()
+        $value = $line.Substring($separator + 1).Trim()
+        Invoke-RustDeskCommand -File $exe -Arguments @('--option', $key, $value) -Step "option $key" | Out-Null
+    }
 }
 
 Write-Output 'Starting the RustDesk service'
