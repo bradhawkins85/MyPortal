@@ -106,6 +106,7 @@
           <tr>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Order</th>
             <th scope="col" data-sort="string" data-mobile-priority="supporting">PO Number</th>
+            <th scope="col" data-sort="string" data-mobile-priority="supporting">Requested by</th>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Shipping</th>
             <th scope="col" data-sort="date" data-mobile-priority="essential">Placed</th>
@@ -126,6 +127,14 @@
                 </button>
               </td>
               <td data-label="PO Number">{{ order.po_number or '—' }}</td>
+              <td data-label="Requested by">
+                {% if order.requested_by_name or order.requested_by_email %}
+                  {{ order.requested_by_name or order.requested_by_email }}
+                  {% if order.requested_by_email and order.requested_by_name and order.requested_by_name != order.requested_by_email %}<div class="text-muted text-small">{{ order.requested_by_email }}</div>{% endif %}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
               <td data-label="Status">
                 <span class="badge {{ order.status_badge }}">{{ order.status_label }}</span>
               </td>
@@ -164,7 +173,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="{% if current_user and current_user.is_super_admin %}9{% else %}7{% endif %}" class="table__empty">No orders available.</td>
+              <td colspan="{% if current_user and current_user.is_super_admin %}10{% else %}8{% endif %}" class="table__empty">No orders available.</td>
             </tr>
           {% endfor %}
         </tbody>

@@ -1565,6 +1565,9 @@ async def create_order(
     shipping_state: str | None = None,
     shipping_postcode: str | None = None,
     shipping_country: str | None = None,
+    requested_by_staff_id: int | None = None,
+    requested_by_name: str | None = None,
+    requested_by_email: str | None = None,
 ) -> tuple[int | None, int | None]:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -1604,8 +1607,11 @@ async def create_order(
                         shipping_city,
                         shipping_state,
                         shipping_postcode,
-                        shipping_country
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        shipping_country,
+                        requested_by_staff_id,
+                        requested_by_name,
+                        requested_by_email
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         user_id,
@@ -1622,6 +1628,9 @@ async def create_order(
                         shipping_state,
                         shipping_postcode,
                         shipping_country,
+                        requested_by_staff_id,
+                        requested_by_name[:255] if requested_by_name else None,
+                        requested_by_email[:255] if requested_by_email else None,
                     ),
                 )
                 if not is_subscription:
@@ -1647,6 +1656,9 @@ async def list_order_summaries(company_id: int) -> list[dict[str, Any]]:
             MAX(shipping_status) AS shipping_status,
             MAX(notes) AS notes,
             MAX(po_number) AS po_number,
+            MAX(requested_by_staff_id) AS requested_by_staff_id,
+            MAX(requested_by_name) AS requested_by_name,
+            MAX(requested_by_email) AS requested_by_email,
             MAX(consignment_id) AS consignment_id,
             MAX(eta) AS eta
         FROM shop_orders
@@ -1678,6 +1690,9 @@ async def get_order_summary(
             MAX(shipping_state) AS shipping_state,
             MAX(shipping_postcode) AS shipping_postcode,
             MAX(shipping_country) AS shipping_country,
+            MAX(requested_by_staff_id) AS requested_by_staff_id,
+            MAX(requested_by_name) AS requested_by_name,
+            MAX(requested_by_email) AS requested_by_email,
             MAX(consignment_id) AS consignment_id,
             MAX(eta) AS eta
         FROM shop_orders
@@ -2900,6 +2915,9 @@ def _normalise_order_summary(row: dict[str, Any]) -> dict[str, Any]:
     summary["shipping_status"] = str(row.get("shipping_status") or "").strip()
     summary["notes"] = row.get("notes")
     summary["po_number"] = row.get("po_number")
+    summary["requested_by_staff_id"] = _coerce_optional_int(row.get("requested_by_staff_id"))
+    summary["requested_by_name"] = row.get("requested_by_name")
+    summary["requested_by_email"] = row.get("requested_by_email")
     summary["consignment_id"] = row.get("consignment_id")
     summary["order_date"] = _normalise_datetime(row.get("order_date"))
     summary["eta"] = _normalise_datetime(row.get("eta"))
