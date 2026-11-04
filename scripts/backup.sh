@@ -11,6 +11,8 @@
 # EVENT_LOG_DB_BACKUP=true, when it is dumped to its own eventlog-* file; the
 # RMM stats database (STATS_DB_*) likewise with STATS_DB_BACKUP=true, to
 # stats-* files.
+# SKIP_FILES_BACKUP=true leaves out the uploads archive and SKIP_GITEA_BACKUP=true
+# the Gitea script library, for hosts that back those up another way.
 # Designed to be called directly, by the pre-upgrade hook in
 # scripts/upgrade.sh, or by the myportal-backup.timer systemd timer.
 #
@@ -60,6 +62,10 @@ Environment:
                              back up the RMM event log database
   STATS_DB_BACKUP            Set to true (in the environment file) to also
                              back up the RMM stats database
+  SKIP_FILES_BACKUP          Set to true (in the environment file) to skip
+                             the uploads archive
+  SKIP_GITEA_BACKUP          Set to true (in the environment file) to skip
+                             the Gitea script library archive
   SKIP_PRE_UPGRADE_BACKUP    Set to true to skip the pre-upgrade
                              database backup (not recommended)
 EOF
@@ -153,6 +159,9 @@ STATS_DB_PORT="${STATS_DB_PORT:-$(read_env_var STATS_DB_PORT 3306)}"
 STATS_DB_USER="${STATS_DB_USER:-$(read_env_var STATS_DB_USER "")}"
 STATS_DB_PASSWORD="${STATS_DB_PASSWORD:-$(read_env_var STATS_DB_PASSWORD "")}"
 STATS_DB_NAME="${STATS_DB_NAME:-$(read_env_var STATS_DB_NAME "")}"
+
+SKIP_FILES_BACKUP="${SKIP_FILES_BACKUP:-$(read_env_var SKIP_FILES_BACKUP false)}"
+SKIP_GITEA_BACKUP="${SKIP_GITEA_BACKUP:-$(read_env_var SKIP_GITEA_BACKUP false)}"
 
 is_true() {
   case "${1,,}" in
@@ -355,6 +364,10 @@ backup_stats() {
 
 backup_uploads() {
   local label="$1"
+  if is_true "$SKIP_FILES_BACKUP"; then
+    info "Skipping the uploads backup (SKIP_FILES_BACKUP=true)."
+    return 0
+  fi
   local file="${BACKUP_DIR}/files-${label}-${TIMESTAMP}.tar.gz"
   info "Backing up uploads to ${file}…"
 
@@ -380,6 +393,10 @@ backup_uploads() {
 backup_gitea() {
   # The RMM script library (scripts/provision_gitea.sh), when this host runs it.
   local label="$1"
+  if is_true "$SKIP_GITEA_BACKUP"; then
+    info "Skipping the Gitea backup (SKIP_GITEA_BACKUP=true)."
+    return 0
+  fi
   [[ -d "$GITEA_HOME" ]] || return 0
   local file="${BACKUP_DIR}/gitea-${label}-${TIMESTAMP}.tar.gz"
   info "Backing up the Gitea script library to ${file}…"
@@ -450,7 +467,7 @@ if [[ "$DRY_RUN" == true ]]; then
   else
     info "[dry-run] Stats:     not backed up (STATS_DB_BACKUP is off or STATS_DB_* is not set)"
   fi
-  info "[dry-run] Files:     ${SHARED_ROOT}  (back up: ${DO_FILES})"
+  info "[dry-run] Files:     ${SHARED_ROOT}  (back up: ${DO_FILES}, skip uploads: ${SKIP_FILES_BACKUP}, skip Gitea: ${SKIP_GITEA_BACKUP})"
   info "[dry-run] Label:     ${LABEL}"
   info "[dry-run] Retain:    ${MYPORTAL_BACKUPS_TO_KEEP} per kind"
 fi

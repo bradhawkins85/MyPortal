@@ -1087,3 +1087,39 @@ def test_dockerfile_keeps_tray_installers_on_a_writable_volume():
     volume_line = next(line for line in dockerfile.splitlines() if line.startswith("VOLUME "))
     assert '"/app/app/static/tray"' in volume_line
     assert "/app/app/static/tray" in dockerfile.split("install -d", 1)[1].split("&&", 1)[0]
+
+
+def _files_backup_harness(tmp_path, settings: str) -> str:
+    (tmp_path / "myportal.env").write_text(settings, encoding="utf-8")
+    return (
+        f'APP_ENV="{tmp_path}/myportal.env"\nBACKUP_DIR="{tmp_path}/backups"\n'
+        f'app_exec() {{ echo "app_exec $*" >>"{tmp_path}/calls"; echo archive; }}\n'
+        f'compose() {{ echo "compose $*" >>"{tmp_path}/calls"; echo archive; }}\n'
+        "service_container() { echo gitea-1; }\n"
+        "info() { :; }\n"
+    )
+
+
+@pytest.mark.parametrize(("function", "kind"), [("backup_files", "files"), ("backup_gitea", "gitea")])
+def test_files_and_gitea_backups_made_by_default(tmp_path, function, kind):
+    result = _run(_files_backup_harness(tmp_path, "") + f"{function} v1")
+    assert result.returncode == 0, result.stderr
+    path = Path(result.stdout)
+    assert path.name.startswith(f"{kind}-v1-") and path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize(
+    ("function", "setting"),
+    [("backup_files", "SKIP_FILES_BACKUP"), ("backup_gitea", "SKIP_GITEA_BACKUP")],
+)
+def test_files_and_gitea_backups_skipped_when_configured(tmp_path, function, setting):
+    result = _run(_files_backup_harness(tmp_path, f"{setting}=true\n") + f"{function} v1")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "" and not (tmp_path / "calls").exists()
+
+
+def test_gitea_backup_skipped_without_gitea_container(tmp_path):
+    harness = _files_backup_harness(tmp_path, "") + "service_container() { :; }\n"
+    result = _run(harness + "backup_gitea v1")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "" and not (tmp_path / "calls").exists()
