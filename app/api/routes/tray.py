@@ -2637,7 +2637,10 @@ async def upload_diagnostics(
     raw_device_uid = device_uid_value if device_uid_value is not None else device_uid
     safe_device_uid = tray_service.normalise_device_uid(raw_device_uid)
     filename = f"{safe_device_uid}_{_uuid.uuid4().hex}.zip"
-    stored_path = os.path.join(diag_dir, filename)
+    diag_root = os.path.realpath(diag_dir)
+    stored_path = os.path.realpath(os.path.join(diag_root, filename))
+    if not stored_path.startswith(diag_root + os.sep):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid device identifier.")
     with open(stored_path, "wb") as f:
         f.write(body)
 

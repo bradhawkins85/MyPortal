@@ -718,6 +718,8 @@ _GRAPH_ALLOWED_ROOTS = {"users", "me"}
 _GRAPH_ALLOWED_RESOURCE_SEGMENTS = {"mailFolders", "messages"}
 _GRAPH_ALLOWED_LEAF_SEGMENTS = {"childFolders", "attachments", "$value"}
 _INVALID_PERCENT_ENCODING_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+# Characters RFC 3986 allows in a URL path and query once percent-encoded.
+_SAFE_GRAPH_RELATIVE_URL_RE = re.compile(r"[A-Za-z0-9\-._~%!$&'()*+,;=:@/?]+")
 _MIN_FOLDER_ID_LENGTH = 20
 _WELL_KNOWN_MAIL_FOLDERS = {
     "archive",
@@ -823,7 +825,10 @@ def _validate_graph_request_url(url: str, *, method: str) -> str:
     # the constant base, so the request can never be redirected to a different
     # origin even if a crafted value slips through the checks above.
     query = f"?{parsed_url.query}" if parsed_url.query else ""
-    return _GRAPH_BASE + relative_path + query
+    relative_url = relative_path + query
+    if not re.fullmatch(_SAFE_GRAPH_RELATIVE_URL_RE, relative_url):
+        raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+    return _GRAPH_BASE + relative_url
 
 
 async def _graph_get(access_token: str, url: str) -> dict[str, Any]:

@@ -142,7 +142,7 @@
       document.getElementById('edit-category-form').style.display = 'block';
       
       // Set the form action
-      document.getElementById('edit-form').action = '/shop/admin/subscription-category/' + categoryId + '/update';
+      document.getElementById('edit-form').action = '/shop/admin/subscription-category/' + encodeURIComponent(categoryId) + '/update';
       
       // Populate the form fields
       document.getElementById('edit-category-name').value = categoryName;

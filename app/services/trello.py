@@ -41,17 +41,9 @@ class TrelloAuthError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
-_TRELLO_ID_RE = re.compile(r"^[0-9a-f]{24}$")
-
-
-def _is_valid_trello_id(value: str) -> bool:
-    """Return True only if *value* looks like a valid Trello object ID.
-
-    Trello IDs are 24-character lowercase hexadecimal strings.  Rejecting any
-    value that does not match this pattern prevents user-supplied data from
-    altering the URL path (partial SSRF).
-    """
-    return bool(_TRELLO_ID_RE.match(value))
+# Trello IDs are 24-character lowercase hex strings; checking them with
+# ``fullmatch`` stops user-supplied data from altering the URL path.
+_TRELLO_ID_RE = re.compile(r"[0-9a-f]{24}")
 
 
 async def _get_credentials_for_company(company: dict[str, Any]) -> tuple[str, str]:
@@ -280,7 +272,7 @@ async def add_comment_to_card(
     if not company:
         logger.debug("Trello add_comment_to_card skipped: no company provided")
         return None
-    if not _is_valid_trello_id(card_id):
+    if not isinstance(card_id, str) or not _TRELLO_ID_RE.fullmatch(card_id):
         logger.error("Trello add_comment_to_card skipped: invalid card_id {}", card_id)
         return None
     try:
@@ -324,7 +316,7 @@ async def get_card(
     if not company:
         logger.debug("Trello get_card skipped: no company provided")
         return None
-    if not _is_valid_trello_id(card_id):
+    if not isinstance(card_id, str) or not _TRELLO_ID_RE.fullmatch(card_id):
         logger.error("Trello get_card skipped: invalid card_id {}", card_id)
         return None
     try:

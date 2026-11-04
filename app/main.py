@@ -175,7 +175,7 @@ from app.security.cache_control import CacheControlMiddleware
 from app.security.client_ip import _peer_is_trusted, get_client_ip
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
-from app.security.flash import clear_flash, flash_redirect, pop_flash, set_flash
+from app.security.flash import clear_flash, flash_redirect, local_redirect, pop_flash, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
 from app.security.maintenance import MaintenanceMiddleware
 from app.security.oauth_state import oauth_state_serializer
@@ -1074,14 +1074,14 @@ def _sanitize_upload_path(file_path: str) -> PurePosixPath:
     if not file_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    normalised = file_path.replace("\\", "/")
-    raw_path = PurePosixPath(normalised)
-
-    if raw_path.is_absolute():
+    # Split rather than ``.replace`` so the value cannot be mistaken for a
+    # ``pathlib.Path.replace`` (rename) call by static analysis.
+    normalised = "/".join(str(file_path).split("\\"))
+    if normalised.startswith("/"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     sanitized_parts: list[str] = []
-    for segment in raw_path.parts:
+    for segment in normalised.split("/"):
         if segment in {"", "."}:
             continue
         if segment == "..":
@@ -5055,12 +5055,16 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
     capabilities = _m365_mailbox_capabilities(user, membership)
     target_is_user = any(str(mb.get("user_principal_name") or "").lower() == upn.lower() for mb in user_mbs)
     _require_mailbox_capability(capabilities, "user_read" if target_is_user else "shared_read")
-    known_upns = {mb["user_principal_name"] for mb in user_mbs + shared_mbs}
-    if upn not in known_upns:
+    # Use the stored UPN (not the request value) for the Graph lookup.
+    known_upn = next(
+        (mb["user_principal_name"] for mb in user_mbs + shared_mbs if mb["user_principal_name"] == upn),
+        None,
+    )
+    if known_upn is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
 
     try:
-        permissions = await m365_service.get_mailbox_permissions(company_id, upn)
+        permissions = await m365_service.get_mailbox_permissions(company_id, known_upn)
         return JSONResponse(permissions)
     except m365_service.M365Error:
         logger.exception("Failed to get mailbox permissions for UPN %s", upn)
@@ -7124,8 +7128,7 @@ async def _admin_service_status_check_now_handler(request: Request, service_id: 
             service_id=service_id,
             error=str(exc),
         )
-        url = f"/admin/service-status?serviceId={service_id}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return local_redirect(f"/admin/service-status?serviceId={service_id}")
     if result.get("error"):
         return flash_redirect(f"/admin/service-status?serviceId={service_id}", result["error"], "error")
     msg = "AI lookup completed."

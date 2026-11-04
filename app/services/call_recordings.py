@@ -600,11 +600,6 @@ def _validate_recordings_path(
     Returns the resolved :class:`~pathlib.Path` on success.
     Raises :class:`ValueError` if the path is invalid or outside the safe root.
     """
-    try:
-        base_path = Path(recordings_path).expanduser().resolve()
-    except (ValueError, OSError) as exc:
-        raise ValueError(f"Invalid recordings path: {recordings_path}") from exc
-
     _safe_root_str = (trusted_base or os.environ.get("CALL_RECORDINGS_PATH", "")).strip()
     if not _safe_root_str:
         raise ValueError(
@@ -612,14 +607,19 @@ def _validate_recordings_path(
         )
 
     try:
-        _safe_root = Path(_safe_root_str).expanduser().resolve()
-        base_path.relative_to(_safe_root)
-    except ValueError as exc:
+        safe_root = os.path.realpath(os.path.expanduser(_safe_root_str))
+        candidate = os.path.realpath(os.path.expanduser(str(recordings_path)))
+    except (ValueError, OSError) as exc:
+        raise ValueError(f"Invalid recordings path: {recordings_path}") from exc
+
+    if candidate == safe_root:
+        return Path(safe_root)
+    if not candidate.startswith(safe_root.rstrip(os.sep) + os.sep):
         raise ValueError(
             "Access denied: path is outside the allowed recordings directory"
-        ) from exc
+        )
 
-    return base_path
+    return Path(candidate)
 
 
 async def sync_recordings_from_filesystem(

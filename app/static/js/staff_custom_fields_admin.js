@@ -255,7 +255,7 @@
     const fields = Array.isArray(data.fields) ? data.fields : [];
     const standardFields = Array.isArray(data.standardFields) ? data.standardFields : [];
     const fieldsById = new Map(fields.map((field) => [String(field.id), field]));
-    const baseUrl = `/admin/companies/${companyId}/staff-custom-fields`;
+    const baseUrl = `/admin/companies/${encodeURIComponent(companyId)}/staff-custom-fields`;
 
     const form = modal.querySelector('[data-scf-form]');
     const deleteForm = document.querySelector('[data-scf-delete-form]');
@@ -1355,7 +1355,7 @@
       if (mode === 'edit') {
         titleEl.textContent = `Edit “${field.display_name || field.name}”`;
         subtitleEl.textContent = `${TYPE_LABELS[field.field_type] || field.field_type} field · key ${field.name}`;
-        form.action = `${baseUrl}/${field.id}`;
+        form.action = `${baseUrl}/${encodeURIComponent(field.id)}`;
         deleteButton.hidden = false;
         form.querySelector('[data-scf-submit]').textContent = 'Save changes';
       } else {
@@ -1482,7 +1482,7 @@
       if (!window.confirm(`Delete “${name}”? Answers already saved on staff records for this field will no longer be shown.`)) {
         return;
       }
-      deleteForm.action = `${baseUrl}/${state.id}/delete`;
+      deleteForm.action = `${baseUrl}/${encodeURIComponent(state.id)}/delete`;
       deleteForm.submit();
     });
 

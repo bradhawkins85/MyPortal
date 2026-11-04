@@ -132,6 +132,12 @@ async def import_outlook_signature(
     )
 
 
+PASTED_SIGNATURE_TOO_LARGE_MESSAGE = (
+    "The pasted signature is too large (10 MB limit). "
+    "Reduce the image sizes, or export the signature from Outlook and import the ZIP."
+)
+
+
 def clean_pasted_signature_html(html_content: str) -> tuple[str, list[str]]:
     """Convert signature HTML copied to the clipboard into editor-ready HTML.
 
@@ -143,10 +149,7 @@ def clean_pasted_signature_html(html_content: str) -> tuple[str, list[str]]:
     without a ``src`` so the editor can ask for the files.
     """
     if len(html_content.encode("utf-8")) > _MAX_PASTE_BYTES:
-        raise ValueError(
-            "The pasted signature is too large (10 MB limit). "
-            "Reduce the image sizes, or export the signature from Outlook and import the ZIP."
-        )
+        raise ValueError(PASTED_SIGNATURE_TOO_LARGE_MESSAGE)
     missing_images: list[str] = []
     converted = _convert_outlook_html(html_content, {}, missing_images)
     return _sanitize_signature_html(converted), missing_images

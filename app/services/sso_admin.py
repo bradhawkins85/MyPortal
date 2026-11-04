@@ -63,10 +63,6 @@ def utc_display(value: Any) -> str | None:
     return f"{moment.day} {moment:%b %Y, %H:%M} UTC"
 
 
-def is_guid(value: str) -> bool:
-    return bool(_GUID_PATTERN.fullmatch(value or ""))
-
-
 def _object_id_hash(object_id: str) -> str:
     return hashlib.sha256(object_id.encode()).hexdigest()[:16]
 
@@ -101,7 +97,7 @@ async def link_identity(
     managed_company_ids: set[int],
     request: Request | None,
 ) -> dict[str, Any]:
-    if not is_guid(object_id):
+    if not isinstance(object_id, str) or not _GUID_PATTERN.fullmatch(object_id):
         raise SsoAdminError(400, "That is not a valid Microsoft user ID.")
     object_id = object_id.lower()
     target = await _load_manageable_user(actor, target_user_id, company_id, managed_company_ids)
@@ -230,6 +226,8 @@ async def search_directory(company_id: int, query: str) -> list[dict[str, Any]]:
     term = re.sub(r'["\\]', "", query or "").strip()
     if len(term) < 2:
         raise SsoAdminError(400, "Enter at least two characters to search.")
+    if not re.fullmatch(r'[^\x00-\x1f\x7f"\\]{2,200}', term):
+        raise SsoAdminError(400, "Enter a shorter search without control characters.")
     await _require_tenant(company_id)
     expression = '"displayName:' + term + '" OR "userPrincipalName:' + term + '"'
     url = (

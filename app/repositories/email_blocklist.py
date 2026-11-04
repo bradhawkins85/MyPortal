@@ -6,6 +6,15 @@ from typing import Any, Literal
 from app.core.database import db
 
 _ALLOWED_SORTS = {"email", "created_at", "updated_at", "source", "last_event_type"}
+_ORDER_BY_CLAUSES: dict[tuple[str, str], str] = {
+    (column, direction): "ORDER BY " + column + " " + direction + ", id " + direction
+    for column in ("email", "created_at", "updated_at", "source", "last_event_type")
+    for direction in ("ASC", "DESC")
+}
+_SEARCH_WHERE = (
+    "WHERE email LIKE :search OR COALESCE(reason, '') LIKE :search "
+    "OR COALESCE(last_event_type, '') LIKE :search"
+)
 
 
 def normalize_email(address: str) -> str:
@@ -26,33 +35,31 @@ async def list_entries(*, search: str | None = None, limit: int = 100, offset: i
     direction_key = str(direction).lower()
     if direction_key not in {"asc", "desc"}:
         raise ValueError("Unsupported sort direction")
-    sort_column = sort
-    sort_direction = direction_key.upper()
+    order_by = _ORDER_BY_CLAUSES[(sort, direction_key.upper())]
     params: dict[str, Any] = {"limit": max(1, min(int(limit), 500)), "offset": max(0, int(offset))}
     where = ""
     if search:
-        where = "WHERE email LIKE :search OR COALESCE(reason, '') LIKE :search OR COALESCE(last_event_type, '') LIKE :search"
+        where = _SEARCH_WHERE
         params["search"] = f"%{search.strip().lower()}%"
-    return await db.fetch_all(
-        f"""
-        SELECT id, email, reason, source, last_event_type, last_event_payload,
-               created_by_user_id, created_at, updated_at
-        FROM email_blocklist
-        {where}
-        ORDER BY {sort_column} {sort_direction}, id {sort_direction}
-        LIMIT :limit OFFSET :offset
-        """,  # nosec B608
-        params,
+    query = (
+        "SELECT id, email, reason, source, last_event_type, last_event_payload, "  # nosec B608 - static clauses only
+        "created_by_user_id, created_at, updated_at FROM email_blocklist "
+        + where
+        + " "
+        + order_by
+        + " LIMIT :limit OFFSET :offset"
     )
+    return await db.fetch_all(query, params)
 
 
 async def count_entries(*, search: str | None = None) -> int:
     params: dict[str, Any] = {}
     where = ""
     if search:
-        where = "WHERE email LIKE :search OR COALESCE(reason, '') LIKE :search OR COALESCE(last_event_type, '') LIKE :search"
+        where = _SEARCH_WHERE
         params["search"] = f"%{search.strip().lower()}%"
-    row = await db.fetch_one(f"SELECT COUNT(*) AS count FROM email_blocklist {where}", params)  # nosec B608
+    query = "SELECT COUNT(*) AS count FROM email_blocklist " + where  # nosec B608 - static clauses only
+    row = await db.fetch_one(query, params)
     return int((row or {}).get("count") or 0)
 
 

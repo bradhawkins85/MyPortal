@@ -17,7 +17,7 @@ from .routes import router as ui_router
 
 PACK = FeaturePack(
     slug="m365_admin",
-    version="1.7.1",
+    version="1.7.2",
     routers=(api_router, oof_router, addin_router, ui_router, group_cleanup_router),
 )
 

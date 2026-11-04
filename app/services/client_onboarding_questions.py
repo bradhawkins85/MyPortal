@@ -68,7 +68,9 @@ ANSWER_LIMITS = {
 _TRUE_VALUES = frozenset({"1", "true", "on", "yes"})
 _FALSE_VALUES = frozenset({"", "0", "false", "off", "no"})
 _NUMBER = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
-_PHONE = re.compile(r"\+?[0-9().\- ]+(?: *(?:x|ext\.?) *[0-9]{1,8})?", re.IGNORECASE)
+# The leading character class already absorbs spaces before "x"/"ext", so
+# no separate " *" is needed there (it would allow polynomial backtracking).
+_PHONE = re.compile(r"\+?[0-9().\- ]+(?:(?:x|ext\.?) *[0-9]{1,8})?", re.IGNORECASE)
 
 
 def _string(value: Any) -> str:
