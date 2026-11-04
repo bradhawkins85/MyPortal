@@ -1,0 +1,7 @@
+{
+  "guid": "5fbcc1ea-88c4-4c9b-9345-a1a0e94688fb",
+  "occurred_at": "2026-11-04T05:03Z",
+  "change_type": "Fix",
+  "summary": "Tickets created by the Create Ticket step in onboarding and offboarding workflows are now linked to the requester even when they were requested on behalf of a staff member without a portal login, so the requester is kept updated when replies are added.",
+  "content_hash": "9627854c484e35a852cff2547cbdca0b94da6c530903a185f08c5e66135a2751"
+}
