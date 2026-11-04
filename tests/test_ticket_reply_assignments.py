@@ -149,3 +149,16 @@ async def _async(value):
 
 async def _raise_async(error):
     raise error
+
+
+def test_reply_form_guards_against_duplicate_submissions():
+    from pathlib import Path
+
+    script = Path("app/static/js/ticket_detail.js").read_text(encoding="utf-8")
+    guard = script.split("function initialiseReplySubmitGuard", 1)[1].split("\n  }\n", 1)[0]
+
+    assert "initialiseReplySubmitGuard(form, submit, update);" in script
+    assert "if (submitting) {\n        event.preventDefault();" in guard
+    assert "if (event.defaultPrevented) return;" in guard
+    assert "control.disabled = busy;" in guard
+    assert "event.persisted" in guard

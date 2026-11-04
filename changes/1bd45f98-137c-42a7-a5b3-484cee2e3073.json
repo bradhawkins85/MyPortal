@@ -1,0 +1,7 @@
+{
+  "guid": "1bd45f98-137c-42a7-a5b3-484cee2e3073",
+  "occurred_at": "2026-11-04T05:17Z",
+  "change_type": "Fix",
+  "summary": "Send reply and Add internal note on a ticket now disable while the update is being saved, so clicking again on a slow response no longer posts the reply or note twice.",
+  "content_hash": "899501cdada7ec1300e1035b6609697d317c32e6999d999774b2c7109a318e72"
+}
