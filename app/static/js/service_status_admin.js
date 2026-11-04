@@ -612,7 +612,7 @@
       const isEdit = Boolean(service);
       form.reset();
       form.dataset.submitted = 'false';
-      form.action = isEdit ? `/admin/service-status/${service.id}` : '/admin/service-status';
+      form.action = isEdit ? `/admin/service-status/${encodeURIComponent(service.id)}` : '/admin/service-status';
       title.textContent = isEdit ? `Edit ${service.name}` : 'Add service';
       subtitle.textContent = isEdit
         ? 'Changes show on the dashboard as soon as you save.'
@@ -717,7 +717,7 @@
         return;
       }
       const target = document.getElementById(formId);
-      target.action = `/admin/service-status/${current.id}/${action}`;
+      target.action = `/admin/service-status/${encodeURIComponent(current.id)}/${action}`;
       target.submit();
     }
     refreshTagsButton.addEventListener('click', () => {
@@ -734,7 +734,7 @@
         return;
       }
       const target = document.getElementById('ssa-delete-form');
-      target.action = `/admin/service-status/${current.id}/delete`;
+      target.action = `/admin/service-status/${encodeURIComponent(current.id)}/delete`;
       target.submit();
     });
 

@@ -38,7 +38,7 @@ from app.core.database import db
 from app.core.logging import log_debug, log_error, log_info
 from app.features.tickets.form_helpers import get_last_form_value
 from app.security.csrf import parse_csrf_form
-from app.security.flash import _safe_redirect_target, flash_redirect
+from app.security.flash import _safe_redirect_target, flash_redirect, local_redirect
 from app.repositories import assets as assets_repo
 from app.repositories import automations as automation_repo
 from app.repositories import companies as company_repo
@@ -2178,7 +2178,7 @@ async def admin_create_ticket_canned_response(ticket_id: int, request: Request):
             error_message=error_message,
             status_code=status.HTTP_400_BAD_REQUEST,
         )
-    return RedirectResponse(f"/admin/tickets/{ticket_id}", status_code=status.HTTP_303_SEE_OTHER)
+    return local_redirect(f"/admin/tickets/{ticket_id}")
 
 
 @router.get("/admin/tickets/{ticket_id:int}/canned-responses", response_class=JSONResponse)

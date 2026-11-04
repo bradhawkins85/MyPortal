@@ -328,7 +328,10 @@
     details.replaceChildren();
     const header = element('div', null, 'nm-details__header');
     const icon = element('img');
-    icon.src = info.icon;
+    const iconPrefix = '/static/images/asset-types/';
+    if (typeof info.icon === 'string' && info.icon.startsWith(iconPrefix)) {
+      icon.src = iconPrefix + encodeURIComponent(info.icon.slice(iconPrefix.length));
+    }
     icon.alt = '';
     icon.width = 36;
     icon.height = 36;

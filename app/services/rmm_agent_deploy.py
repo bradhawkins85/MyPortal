@@ -238,8 +238,7 @@ def _cache_versioned_package(name: str, source: Path, metadata: dict[str, Any]) 
 async def fetch_latest_agent(*, repo: str | None = None, github_token: str | None = None, force: bool = False, version: str | None = None) -> dict[str, bool]:
     """Cache agent builds, retaining newest builds by version too for offline fallback."""
 
-    if version:
-        version = release_version(version)
+    version = release_version(version) if version else None
     settings = get_settings()
     repo = release_repo(repo or settings.github_tray_msi_repo)
     github_token = github_token if github_token is not None else settings.github_token

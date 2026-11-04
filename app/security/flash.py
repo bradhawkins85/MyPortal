@@ -34,6 +34,13 @@ from app.core.config import get_settings
 _COOKIE_NAME = "_flash"
 _MAX_AGE = 60  # seconds – cookie is only needed until the next page load
 _VALID_VARIANTS = frozenset({"info", "success", "warning", "error"})
+# Map to constant strings so the cookie never carries a caller-supplied variant.
+_VARIANT_CONSTANTS: dict[str, str] = {
+    "info": "info",
+    "success": "success",
+    "warning": "warning",
+    "error": "error",
+}
 
 
 def _secret() -> bytes:
@@ -75,7 +82,7 @@ def set_flash(
     The cookie is ``HttpOnly``, ``SameSite=Lax``, and expires after 60 s.
     It is readable only by the server (``pop_flash``).
     """
-    safe_variant = variant if variant in _VALID_VARIANTS else "info"
+    safe_variant = _VARIANT_CONSTANTS.get(str(variant), "info")
     safe_message = _sanitize_flash_message(message)
     payload = json.dumps({"message": safe_message, "variant": safe_variant})
     signed = _sign(payload)
@@ -148,6 +155,21 @@ def _safe_redirect_target(url: str, *, fallback: str = "/") -> str:
     return candidate
 
 
+def _local_redirect_url(url: str) -> str:
+    """Return *url* when it is a same-site path, otherwise ``/``."""
+    # Decode percent-encoding and normalise backslashes before validating.
+    decoded = unquote(str(url or "").strip()).replace("\\", "/")
+    parsed = urlparse(decoded)
+    if decoded and not parsed.scheme and not parsed.netloc and decoded.startswith("/") and not decoded.startswith("//"):
+        return decoded
+    return "/"
+
+
+def local_redirect(url: str, *, status_code: int = HTTP_303_SEE_OTHER) -> RedirectResponse:
+    """Return a ``RedirectResponse`` that only ever targets a same-site path."""
+    return RedirectResponse(url=_local_redirect_url(url), status_code=status_code)
+
+
 def flash_redirect(
     url: str,
     message: str,
@@ -161,13 +183,6 @@ def flash_redirect(
 
         return flash_redirect("/admin/foo", "Saved.", "success")
     """
-    # Decode percent-encoding and normalise backslashes before validating.
-    decoded = unquote(str(url or "").strip()).replace("\\", "/")
-    parsed = urlparse(decoded)
-    if decoded and not parsed.scheme and not parsed.netloc and decoded.startswith("/") and not decoded.startswith("//"):
-        safe_url = decoded
-    else:
-        safe_url = "/"
-    response = RedirectResponse(url=safe_url, status_code=status_code)
+    response = local_redirect(url, status_code=status_code)
     set_flash(response, message, variant)
     return response

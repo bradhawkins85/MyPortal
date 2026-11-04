@@ -654,7 +654,7 @@ def is_valid_alert_id(alert_id: str | None) -> bool:
 
 
 async def get_reported_alert(company_id: int, alert_id: str) -> dict[str, Any]:
-    if not is_valid_alert_id(alert_id):
+    if not isinstance(alert_id, str) or not _ALERT_ID_PATTERN.fullmatch(alert_id):
         raise LookupError("Alert not found")
     if alert_id.startswith(AUDIT_PREFIX):
         return await _get_audit_record(company_id, alert_id[len(AUDIT_PREFIX):])

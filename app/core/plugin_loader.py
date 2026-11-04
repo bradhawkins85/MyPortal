@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import shutil
 import sys
 import tempfile
@@ -163,9 +164,14 @@ class PluginLoader:
 
     async def install_from_directory(self, source_path: str) -> list[str]:
         target_root = self._target_root()
-        source = Path(source_path).expanduser().resolve()
-        if not source.is_relative_to(target_root):
+        root_real = os.path.realpath(target_root)
+        try:
+            source_real = os.path.realpath(os.path.expanduser(str(source_path)))
+        except (ValueError, OSError) as exc:
+            raise ValueError("Plugin source directory is not a valid path.") from exc
+        if not source_real.startswith(root_real.rstrip(os.sep) + os.sep):
             raise ValueError("Plugin source directory must be inside the plugin root.")
+        source = Path(source_real)
         if not source.exists() or not source.is_dir():
             raise ValueError("Plugin source directory does not exist.")
         if not (source / "__init__.py").exists():

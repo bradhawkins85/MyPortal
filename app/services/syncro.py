@@ -670,9 +670,12 @@ async def get_ticket(
 ) -> dict[str, Any] | None:
     """Return a single Syncro ticket payload or ``None`` if not found."""
 
+    ticket_key = str(ticket_id).strip()
+    if not ticket_key.isdigit():
+        raise ValueError("Syncro ticket IDs must be numeric")
     payload = await _request(
         "GET",
-        f"/tickets/{ticket_id}",
+        f"/tickets/{ticket_key}",
         rate_limiter=rate_limiter,
     )
     if not payload:

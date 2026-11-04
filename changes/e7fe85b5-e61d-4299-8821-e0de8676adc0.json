@@ -1,0 +1,7 @@
+{
+  "guid": "e7fe85b5-e61d-4299-8821-e0de8676adc0",
+  "occurred_at": "2026-11-04T07:28Z",
+  "change_type": "Security",
+  "summary": "Tightened input checks on admin searches, redirects, file paths and connections to Microsoft 365, Syncro, Trello and GitHub so crafted values can no longer reach the database, the file system or another site.",
+  "content_hash": "2763543c91521881fa2a30d52ea044d3a84e29d9462bda346aabbefe06a42ddd"
+}

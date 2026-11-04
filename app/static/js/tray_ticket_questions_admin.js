@@ -61,7 +61,12 @@
       if (!protocolOk || resolved.origin !== window.location.origin) {
         return '/';
       }
-      return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+      // Rebuild the path from encoded segments: the base is only ever a path
+      // that "/new" or "/{id}/edit" is appended to, so query and hash are dropped.
+      return resolved.pathname
+        .split('/')
+        .map((segment) => encodeURIComponent(decodeURIComponent(segment)))
+        .join('/');
     } catch (error) {
       return '/';
     }
@@ -853,7 +858,7 @@
       if (!window.confirm(`Delete “${name}”? It will no longer be asked, and rules that depend on it will stop matching.`)) {
         return;
       }
-      deleteForm.action = `${baseUrl}/${state.id}/delete`;
+      deleteForm.action = `${baseUrl}/${encodeURIComponent(state.id)}/delete`;
       deleteForm.submit();
     });
 
@@ -873,7 +878,7 @@
         }
         return;
       }
-      form.action = state.mode === 'edit' ? `${baseUrl}/${state.id}/edit` : `${baseUrl}/new`;
+      form.action = state.mode === 'edit' ? `${baseUrl}/${encodeURIComponent(state.id)}/edit` : `${baseUrl}/new`;
       optionsOutput.value = currentType() === 'select' ? cleanOptions().join('\n') : '';
       conditionOutputs.textContent = '';
       state.conditions.forEach((condition) => {

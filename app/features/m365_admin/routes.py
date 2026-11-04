@@ -25,7 +25,11 @@ from app.services import m365_signatures as signatures_service
 from app.services import m365_spam_purge as purge_service
 from app.services import m365_out_of_office as oof_service
 from app.services import m365_reported_emails as reported_service
-from app.services.m365_signature_import import clean_pasted_signature_html, import_outlook_signature
+from app.services.m365_signature_import import (
+    PASTED_SIGNATURE_TOO_LARGE_MESSAGE,
+    clean_pasted_signature_html,
+    import_outlook_signature,
+)
 
 
 router = APIRouter(tags=["Office365 Spam Purge"])
@@ -598,8 +602,8 @@ async def clean_signature_html(request: Request):
         return JSONResponse({"error": "Send the pasted HTML as {\"html\": \"...\"}."}, status_code=400)
     try:
         cleaned, missing_images = clean_pasted_signature_html(html_content)
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=413)
+    except ValueError:
+        return JSONResponse({"error": PASTED_SIGNATURE_TOO_LARGE_MESSAGE}, status_code=413)
     return JSONResponse({"html": cleaned, "missing_images": missing_images})
 
 
