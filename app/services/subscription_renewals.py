@@ -32,8 +32,8 @@ from app.services import xero as xero_service
 
 _ANNUAL_REMINDER_WINDOW_DAYS = 60
 _ANNUAL_INVOICE_WINDOW_DAYS = 30
-_MONTHLY_REMINDER_WINDOW_DAYS = 30
-_MONTHLY_INVOICE_WINDOW_DAYS = 21
+_MONTHLY_REMINDER_WINDOW_DAYS = 14
+_MONTHLY_INVOICE_WINDOW_DAYS = 8
 _MAX_REMINDER_WINDOW_DAYS = max(
     _ANNUAL_REMINDER_WINDOW_DAYS, _MONTHLY_REMINDER_WINDOW_DAYS
 )
@@ -51,8 +51,8 @@ _DEFAULT_RENEWAL_TEMPLATE = """\
 """
 _DEFAULT_MONTHLY_RENEWAL_TEMPLATE = """\
 <p>Hi {{ recipient.name }},</p>
-<p>This is your 30-day reminder that the monthly services listed below are due for renewal.</p>
-<p>We will generate an invoice 21 days before the renewal date. Services with invoices that remain unpaid on their expiry date will not be renewed and may incur additional charges to reinstate their licences.</p>
+<p>This is your 14-day reminder that the monthly services listed below are due for renewal.</p>
+<p>We will generate an invoice 8 days before the renewal date. Services with invoices that remain unpaid on their expiry date will not be renewed and may incur additional charges to reinstate their licences.</p>
 {{ renewal.items_table }}
 <p>Kind regards,<br>MyPortal Accounts Team</p>
 """
@@ -963,7 +963,7 @@ def build_churn_risk_report(
 
 
 async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
-    """Process annual 60/30-day and monthly 30/21-day renewal windows.
+    """Process annual 60/30-day and monthly 14/8-day renewal windows.
 
     Args:
         target_date: The application-local date for the scheduler run.

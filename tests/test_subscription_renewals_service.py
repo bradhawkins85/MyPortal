@@ -244,8 +244,8 @@ async def test_monthly_renewal_uses_its_own_message_template(monkeypatch):
     )
 
     assert requested_slugs == ["monthly-subscription-renewal-reminder"]
-    assert "30-day reminder" in text_message
-    assert "invoice 21 days before" in text_message
+    assert "14-day reminder" in text_message
+    assert "invoice 8 days before" in text_message
 
 
 def _install_scheduled_invoice_mocks(
@@ -348,9 +348,9 @@ async def test_no_subscriptions_returns_zero_counts(monkeypatch):
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     ("days_before", "expected_reminders", "expected_invoices"),
-    [(31, 0, 0), (30, 1, 0), (22, 0, 0), (21, 0, 1)],
+    [(30, 0, 0), (15, 0, 0), (14, 1, 0), (9, 0, 0), (8, 0, 1)],
 )
-async def test_monthly_renewal_uses_30_day_reminder_and_21_day_invoice_windows(
+async def test_monthly_renewal_uses_14_day_reminder_and_8_day_invoice_windows(
     monkeypatch, days_before, expected_reminders, expected_invoices
 ):
     target = date(2025, 1, 1)
@@ -362,12 +362,12 @@ async def test_monthly_renewal_uses_30_day_reminder_and_21_day_invoice_windows(
         commitment_type="monthly",
     )
     state = _scheduled_invoice_state(customer_id=20, renewal_date=renewal_date)
-    if days_before < 30:
+    if days_before < 14:
         state["reminder_sent_at"] = datetime.now(timezone.utc)
         state["reminder_email_sent_at"] = datetime.now(timezone.utc)
     _install_scheduled_invoice_mocks(
-        monkeypatch, state if days_before <= 30 else None,
-        tracked_subscription_ids=("monthly-sub",) if days_before < 30 else (),
+        monkeypatch, state if days_before <= 14 else None,
+        tracked_subscription_ids=("monthly-sub",) if days_before < 14 else (),
     )
     monkeypatch.setattr(
         subscriptions_repo, "list_subscriptions", AsyncMock(return_value=[subscription])
