@@ -50,6 +50,39 @@ Every endpoint runs **two** cooperating components:
   background (RDP/SSH) sessions — chat is delivered **only** to the
   **active console session**.
 
+### Overseer
+
+A third service, **MyPortal Overseer** (`MyPortalOverseer` on Windows and
+Linux, `io.myportal.overseer` on macOS), runs next to the tray service and the
+RMM agent. Its only job is to keep both of them connected to MyPortal. It is
+installed and updated with the tray (it is the same executable started as
+`myportal-tray-service overseer`) but runs as its own process, so it keeps
+working when the tray service is stopped or stuck.
+
+| Check | How often | What it does |
+| --- | --- | --- |
+| Is each service running? | Every minute | A tray service or RMM agent that is installed and enabled but has been stopped for 3 minutes is started. The wait lets installers, updates and repairs stop and replace a service without interference. A service set to **Disabled** is left alone. |
+| Is MyPortal hearing from it? | Every 5 minutes | The overseer reports to `POST /api/tray/overseer/report` with the tray device's token. MyPortal answers with how long ago it last heard from the tray's live connection and from the RMM agent (worked out on the server, so a wrong device clock does not matter). A running service MyPortal has not heard from for 5 minutes, on two reports at least 5 minutes apart, is restarted. On Windows a service that does not stop within 45 seconds has its process ended. |
+
+The overseer never restarts anything while it cannot reach MyPortal itself:
+when the network or the server is down a restart cannot help. Repeated
+recoveries of the same service back off (10 minutes, then 20, 40 … up to 2
+hours) and the back-off resets once the service is connected again. Before
+the tray has enrolled, and for an RMM agent MyPortal does not know about, only
+the "is it running" check applies.
+
+Every start and restart is sent with the next report and recorded in the
+audit log as `tray.overseer.recover` against the tray device, with the
+service, the reason (for example "MyPortal last heard from the RMM agent
+20m0s ago") and whether it worked. **Admin → Tray → Devices** shows each
+device's overseer version and when it last reported; *Not reporting* means
+the device runs a tray release without the overseer or the overseer cannot
+reach MyPortal.
+
+Logs: `overseer.log`, in the same folder as the tray service's `service.log`,
+and `journalctl -u MyPortalOverseer` on Linux. Uninstalling the tray removes the
+overseer first, so it cannot restart services that are being removed.
+
 ---
 
 ## Reporting frequency and Check in now
@@ -119,6 +152,7 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/enrol` | POST | Install token in JSON body | Exchange the install token for a per-device `auth_token` |
 | `/api/tray/config` | GET | Bearer auth_token | Resolved menu + branding + env-var allowlist + chat toggle |
 | `/api/tray/heartbeat` | POST | Bearer auth_token | Liveness ping; updates console user, IP, agent version |
+| `/api/tray/overseer/report` | POST | Bearer auth_token | Overseer report: local service state and recoveries (audited); returns seconds since MyPortal last heard from the tray WebSocket and the RMM agent |
 | `/ws/tray/{device_uid}` | WS | Bearer/`X-Tray-Token` header | Bidirectional command channel |
 | `/api/tray/{device_uid}/chat/start` | POST | Authenticated technician | Create a Matrix room and push `chat_open` |
 | `/api/tray/admin/install-tokens` | GET / POST | Super admin | List / create install tokens |
@@ -532,6 +566,7 @@ See `tray/README.md` for build instructions.
 | Tray shows the default icon instead of the branded one | The UI could not download or decode the icon | The tray uses the configuration's **Branding icon URL** (.ico or PNG), then the icon uploaded under **Admin > Tray**. Check the UI log for `Tray icon` lines naming each URL tried and why it failed |
 | "Chat with this device" button missing | Company has `tray_chat_enabled = 0`, or Matrix is disabled | Toggle on the company edit page; verify `MATRIX_ENABLED=true` |
 | `env_var` menu node returns "not allowed" | Variable not in the configuration's allowlist | Add it on the configuration editor |
+| The tray or RMM agent keeps being restarted | The overseer sees the service running but MyPortal is not hearing from it (for example a proxy that blocks WebSocket upgrades) | Check the `tray.overseer.recover` audit entries for the reason and the service's own log for why it cannot connect; restarts back off to once every 2 hours |
 | Devices show as **Unlinked** | Hostname / serial didn't match an existing asset | Manually associate via the Devices admin page (coming in Phase 2.x) |
 
 ---

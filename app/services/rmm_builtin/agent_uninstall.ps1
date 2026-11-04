@@ -4,7 +4,7 @@
 # still running: the script writes the removal steps to a file in the Windows
 # temp folder and starts them as a one-off SYSTEM scheduled task, outside the RMM
 # agent's process tree, then exits. The task waits for the RMM agent to report
-# this run to MyPortal, removes the tray (its MSI, service, files, settings and
+# this run to MyPortal, removes the overseer and tray (its MSI, services, files, settings and
 # enrolment) and then the RMM agent (service, files and enrolment), and deletes
 # itself. Its log is kept at %WINDIR%\Temp\myportal-uninstall.log.
 $taskName = 'MyPortal Agent Uninstall'
@@ -63,7 +63,11 @@ function Remove-Folder([string]$path) {
 Log 'Waiting for the RMM agent to report the uninstall run'
 Start-Sleep -Seconds 20
 
-# 1. The tray, first, so it cannot reinstall the RMM agent.
+# 1. The overseer, so it cannot restart the services being removed, then the
+# tray, so it cannot reinstall the RMM agent. The tray's MSI also removes the
+# overseer; removing it first closes the gap while msiexec runs.
+Remove-Service 'MyPortalOverseer'
+Remove-SafeBoot 'MyPortalOverseer'
 Get-Process -Name 'myportal-tray-ui', 'myportal-tray-chat' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 $uninstallKeys = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',

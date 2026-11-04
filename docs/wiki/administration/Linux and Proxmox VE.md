@@ -60,5 +60,5 @@ the desktop or headless choice.
 Remove the tray with `/opt/myportal-tray/uninstall.sh`. Add `--with-rmm` to remove the RMM agent too
 and `--purge` to forget the enrolment and settings.
 
-Logs: `journalctl -u MyPortalTrayService`, `/opt/myportal-tray/logs/service.log` and, for the
+Logs: `journalctl -u MyPortalTrayService`, `journalctl -u MyPortalOverseer`, `/opt/myportal-tray/logs/service.log`, `/opt/myportal-tray/logs/overseer.log` and, for the
 desktop UI, `~/.local/state/myportal-tray/ui.log`.

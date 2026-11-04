@@ -37,6 +37,7 @@ chmod +x "$PAYLOAD_DIR$INSTALL_LOCATION/uninstall.sh"
 
 # Plists.
 cp io.myportal.tray.service.plist "$PAYLOAD_DIR/Library/LaunchDaemons/"
+cp io.myportal.overseer.plist     "$PAYLOAD_DIR/Library/LaunchDaemons/"
 cp io.myportal.tray.agent.plist   "$PAYLOAD_DIR/Library/LaunchAgents/"
 
 UNSIGNED_PKG="myportal-tray-${VERSION}-unsigned.pkg"

@@ -23,7 +23,8 @@ def test_scripts_hand_the_removal_to_a_process_outside_the_agent():
     content = windows["content"]
     assert "schtasks.exe /Create" in content and "/RU SYSTEM" in content and "schtasks.exe /Run" in content
     # The tray goes first, so it cannot reinstall the RMM agent, then the RMM agent.
-    order = [content.index(step) for step in ("Start-Sleep -Seconds 20", "msiexec.exe", "Remove-Service 'MyPortalTrayService'",
+    order = [content.index(step) for step in ("Start-Sleep -Seconds 20", "Remove-Service 'MyPortalOverseer'", "msiexec.exe",
+                                              "Remove-Service 'MyPortalTrayService'",
                                               "& $rmm uninstall", "Remove-Service 'MyPortalRMMAgent'")]
     assert order == sorted(order)
     for path in ("'MyPortalTray'", "'MyPortal\\tray'", "'MyPortal RMM'", "HKLM:\\SOFTWARE\\MyPortal\\Tray"):
@@ -34,6 +35,9 @@ def test_scripts_hand_the_removal_to_a_process_outside_the_agent():
         assert script["language"] == "bash" and script["path"] == "builtin/agent_uninstall.sh"
     content = rmm_agent_uninstall.builtin_script({"os": "linux"})["content"]
     assert "systemd-run" in content and "launchctl bootstrap system" in content
+    # The overseer goes before the tray so it cannot restart what is being removed.
+    assert content.index("disable --now MyPortalOverseer") < content.index("disable --now MyPortalTrayService")
+    assert content.index("bootout system/io.myportal.overseer") < content.index("bootout system \"$daemon_plist\"")
     for path in ("/opt/myportal-tray", "/var/lib/myportal-tray", "/opt/myportal-rmm", "/var/lib/myportal-rmm",
                  "/Library/MyPortal/Tray", "/Library/Application Support/MyPortal RMM"):
         assert path in content

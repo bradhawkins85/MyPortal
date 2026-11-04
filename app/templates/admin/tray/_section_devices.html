@@ -74,6 +74,7 @@
               <th scope="col" data-sort="string">Console user</th>
               <th scope="col" data-sort="date">Last seen</th>
               <th scope="col" data-sort="string">Agent</th>
+              <th scope="col" data-sort="date">Overseer</th>
               <th scope="col" class="data-table__col--actions">Actions</th>
             </tr>
           </thead>
@@ -100,6 +101,14 @@
                   {% if device.last_seen_utc %}<span data-utc="{{ device.last_seen_utc }}">{{ device.last_seen_utc }}</span>{% else %}—{% endif %}
                 </td>
                 <td data-value="{{ (device.agent_version or '')|lower }}">{{ device.agent_version or '—' }}</td>
+                <td data-value="{{ device.overseer_last_seen_utc or '' }}">
+                  {% if device.overseer_last_seen_utc %}
+                    {{ device.overseer_version or '' }}
+                    <div class="data-table__sub">Reported <span data-utc="{{ device.overseer_last_seen_utc }}">{{ device.overseer_last_seen_utc }}</span></div>
+                  {% else %}
+                    <span class="status status--neutral">Not reporting</span>
+                  {% endif %}
+                </td>
                 <td class="data-table__col--actions">
                   {% if not is_super_admin %}
                     —

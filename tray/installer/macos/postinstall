@@ -7,11 +7,13 @@ PKG_PATH_ARG="${1:-}"
 BIN_DIR="/Library/MyPortal/Tray"
 DAEMON_PLIST="/Library/LaunchDaemons/io.myportal.tray.service.plist"
 AGENT_PLIST="/Library/LaunchAgents/io.myportal.tray.agent.plist"
+OVERSEER_PLIST="/Library/LaunchDaemons/io.myportal.overseer.plist"
 LOG_DIR="/Library/Logs/MyPortal/tray"
 STATE_DIR="/Library/Application Support/MyPortal/Tray"
 ENV_FILE="/Library/Preferences/io.myportal.tray.env"
 DAEMON_LABEL="io.myportal.tray.service"
 AGENT_LABEL="io.myportal.tray.agent"
+OVERSEER_LABEL="io.myportal.overseer"
 # Deployment-URL zips ship this file next to myportal-tray.pkg so that
 # double-clicking the pkg configures the tray without the .command launcher.
 BUNDLED_ENV_NAME="myportal-tray.env"
@@ -136,8 +138,8 @@ ensure_configuration
 # plists that are not root-owned or are group/world-writable, and a quarantine
 # flag inherited from a downloaded package can stop the binaries launching.
 chmod +x "$BIN_DIR/myportal-tray-service" "$BIN_DIR/myportal-tray-ui" "$BIN_DIR/uninstall.sh" 2>/dev/null || true
-chown root:wheel "$DAEMON_PLIST" "$AGENT_PLIST" 2>/dev/null || true
-chmod 644 "$DAEMON_PLIST" "$AGENT_PLIST" 2>/dev/null || true
+chown root:wheel "$DAEMON_PLIST" "$AGENT_PLIST" "$OVERSEER_PLIST" 2>/dev/null || true
+chmod 644 "$DAEMON_PLIST" "$AGENT_PLIST" "$OVERSEER_PLIST" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$BIN_DIR" 2>/dev/null || true
 
 # Wait for launchd to finish removing a job after bootout. Bootstrapping
@@ -192,6 +194,13 @@ if bootstrap_job system "$DAEMON_PLIST" "$DAEMON_LABEL"; then
     echo "Started $DAEMON_LABEL."
 else
     warn "failed to load $DAEMON_PLIST; the service should start after reboot or can be loaded with: sudo launchctl bootstrap system $DAEMON_PLIST"
+fi
+
+# The overseer starts after the tray service so it finds it running.
+if bootstrap_job system "$OVERSEER_PLIST" "$OVERSEER_LABEL"; then
+    echo "Started $OVERSEER_LABEL."
+else
+    warn "failed to load $OVERSEER_PLIST; the overseer should start after reboot or can be loaded with: sudo launchctl bootstrap system $OVERSEER_PLIST"
 fi
 
 # Register the agent for the active console user and any other GUI sessions.

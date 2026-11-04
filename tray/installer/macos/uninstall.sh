@@ -27,9 +27,14 @@ fi
 BIN_DIR="/Library/MyPortal/Tray"
 DAEMON_PLIST="/Library/LaunchDaemons/io.myportal.tray.service.plist"
 AGENT_PLIST="/Library/LaunchAgents/io.myportal.tray.agent.plist"
+OVERSEER_PLIST="/Library/LaunchDaemons/io.myportal.overseer.plist"
 ENV_FILE="/Library/Preferences/io.myportal.tray.env"
 STATE_DIR="/Library/Application Support/MyPortal/Tray"
 LOG_DIR="/Library/Logs/MyPortal/tray"
+
+# Stop the overseer first so it cannot restart the services being removed.
+/bin/launchctl bootout system "$OVERSEER_PLIST" 2>/dev/null || true
+/bin/launchctl unload "$OVERSEER_PLIST" 2>/dev/null || true
 
 # Stop currently running per-user agents first so they do not reconnect while
 # the daemon is being removed. Ignore all launchctl errors because labels may
@@ -46,7 +51,7 @@ done
 /bin/launchctl bootout system "$DAEMON_PLIST" 2>/dev/null || true
 /bin/launchctl unload "$DAEMON_PLIST" 2>/dev/null || true
 
-/bin/rm -f "$DAEMON_PLIST" "$AGENT_PLIST"
+/bin/rm -f "$DAEMON_PLIST" "$AGENT_PLIST" "$OVERSEER_PLIST"
 /bin/rm -rf "$BIN_DIR"
 
 # Remove empty parent directories left by the package payload.

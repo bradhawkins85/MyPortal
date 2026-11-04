@@ -303,6 +303,15 @@ async def get_agent_by_token_hash(token_hash: str) -> dict[str, Any] | None:
     )
 
 
+async def get_tray_device_agent(tray_device_id: int) -> dict[str, Any] | None:
+    """The active RMM agent enrolled with this tray device (latest check-in)."""
+    return await db.fetch_one(
+        "SELECT id, last_seen_utc FROM rmm_agents WHERE tray_device_id = %s AND status = 'active' "
+        "ORDER BY last_seen_utc DESC, id DESC LIMIT 1",
+        (tray_device_id,),
+    )
+
+
 async def get_agent(agent_id: int) -> dict[str, Any] | None:
     return await db.fetch_one("SELECT * FROM rmm_agents WHERE id = %s", (agent_id,))
 

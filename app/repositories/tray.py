@@ -550,6 +550,17 @@ async def touch_device_websocket(device_id: int) -> None:
     )
 
 
+async def record_overseer_report(device_id: int, *, overseer_version: str | None) -> None:
+    """Record that the device's overseer reported, and which version it runs."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # A static statement: the MySQL adapter turns the ``?`` placeholders into ``%s``.
+    await db.execute(
+        "UPDATE tray_devices SET overseer_last_seen_utc = ?, "
+        "overseer_version = COALESCE(?, overseer_version) WHERE id = ?",
+        (now, overseer_version, device_id),
+    )
+
+
 async def link_device_to_asset(device_id: int, asset_id: int | None) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     # Backend placeholder token is selected from the active DB adapter; values remain bound.
