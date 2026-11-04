@@ -3465,6 +3465,49 @@
     });
     internal.addEventListener('change', update);
     update();
+    initialiseReplySubmitGuard(form, submit, update);
+  }
+
+  function initialiseReplySubmitGuard(form, label, restoreLabel) {
+    const submitControls = () => Array.from(
+      form.querySelectorAll('[data-ticket-reply-submit] button[type="submit"], [data-ticket-reply-submit] summary'),
+    );
+    let submitting = false;
+    const setBusy = (busy) => {
+      submitting = busy;
+      form.toggleAttribute('aria-busy', busy);
+      submitControls().forEach((control) => {
+        if (control instanceof HTMLButtonElement) {
+          control.disabled = busy;
+        } else {
+          control.setAttribute('aria-disabled', String(busy));
+          control.style.pointerEvents = busy ? 'none' : '';
+        }
+      });
+      const menu = form.querySelector('[data-ticket-reply-submit] details');
+      if (busy && menu instanceof HTMLDetailsElement) menu.open = false;
+      if (busy && label instanceof HTMLElement) {
+        label.textContent = label.textContent.trim() === 'Add internal note' ? 'Adding note…' : 'Sending…';
+      } else if (!busy) {
+        restoreLabel();
+      }
+    };
+    // Listen on the document so every form-level submit handler (validation,
+    // editor sync) has already run and may have cancelled the submission.
+    document.addEventListener('submit', (event) => {
+      if (event.target !== form) return;
+      if (submitting) {
+        event.preventDefault();
+        return;
+      }
+      if (event.defaultPrevented) return;
+      submitting = true;
+      // Disable after the browser has captured the form data for this submission.
+      window.setTimeout(() => { if (submitting) setBusy(true); }, 0);
+    });
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) setBusy(false);
+    });
   }
 
 
