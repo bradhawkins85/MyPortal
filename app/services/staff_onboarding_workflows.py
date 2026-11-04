@@ -2206,7 +2206,9 @@ async def _execute_policy_step(
         description = str(
             _resolve_template_value(step.get("description"), vars_map=vars_map) or ""
         ).strip()
-        requester_id = _coerce_positive_int(staff.get("requested_by_user_id"))
+        requester_id, requester_staff_id = await _resolve_workflow_ticket_requester(
+            company_id, staff
+        )
         assigned_user_id = _coerce_positive_int(
             _resolve_template_value(step.get("assigned_user_id"), vars_map=vars_map)
         )
@@ -2217,6 +2219,7 @@ async def _execute_policy_step(
             subject=subject,
             description=description or subject,
             requester_id=requester_id,
+            requester_staff_id=requester_staff_id,
             company_id=company_id,
             assigned_user_id=assigned_user_id,
             priority=str(
@@ -4287,6 +4290,27 @@ async def _execute_policy_steps(
             max_retries=max_retries,
         )
     return {"paused": False}
+
+
+async def _resolve_workflow_ticket_requester(
+    company_id: int, staff: dict[str, Any]
+) -> tuple[int | None, int | None]:
+    """Return (requester user id, requester staff id) for a workflow-created ticket.
+
+    The requester is linked so they receive updates when replies are added. A
+    staff member requested on behalf of by a technician may have no portal login;
+    their staff record (matched on the stored requester email) is linked instead.
+    """
+    requester_id = _coerce_positive_int(staff.get("requested_by_user_id"))
+    if requester_id is not None:
+        return requester_id, None
+    requester_email = str(staff.get("requested_by_email") or "").strip()
+    if not requester_email:
+        return None, None
+    requester_staff = await staff_repo.get_staff_by_company_and_email(
+        company_id, requester_email
+    )
+    return None, _coerce_positive_int((requester_staff or {}).get("id"))
 
 
 async def _resolve_requestor_email(staff: dict[str, Any]) -> str | None:

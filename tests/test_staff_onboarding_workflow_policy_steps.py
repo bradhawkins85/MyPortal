@@ -1545,6 +1545,67 @@ async def test_create_ticket_step_uses_requester_and_returns_ticket_number(monke
 
 
 @pytest.mark.anyio
+async def test_create_ticket_step_links_requester_staff_without_portal_login(monkeypatch):
+    monkeypatch.setattr(
+        workflows.tickets_service,
+        "resolve_status_or_default",
+        AsyncMock(return_value="open"),
+    )
+    create_ticket = AsyncMock(return_value={"id": 124, "ticket_number": "HD-124"})
+    monkeypatch.setattr(workflows.tickets_service, "create_ticket", create_ticket)
+    lookup = AsyncMock(return_value={"id": 61, "email": "manager@example.com"})
+    monkeypatch.setattr(workflows.staff_repo, "get_staff_by_company_and_email", lookup)
+
+    await workflows._execute_policy_step(
+        step={"type": "create_ticket", "subject": "Offboard"},
+        company_id=9,
+        staff={
+            "id": 5,
+            "requested_by_user_id": None,
+            "requested_by_email": "Manager@Example.com",
+        },
+        policy_config={},
+        vars_map={},
+        step_name="Create Ticket",
+    )
+
+    lookup.assert_awaited_once_with(9, "Manager@Example.com")
+    kwargs = create_ticket.await_args.kwargs
+    assert kwargs["requester_id"] is None
+    assert kwargs["requester_staff_id"] == 61
+
+
+@pytest.mark.anyio
+async def test_create_ticket_step_prefers_requester_portal_user(monkeypatch):
+    monkeypatch.setattr(
+        workflows.tickets_service,
+        "resolve_status_or_default",
+        AsyncMock(return_value="open"),
+    )
+    create_ticket = AsyncMock(return_value={"id": 125})
+    monkeypatch.setattr(workflows.tickets_service, "create_ticket", create_ticket)
+    lookup = AsyncMock()
+    monkeypatch.setattr(workflows.staff_repo, "get_staff_by_company_and_email", lookup)
+
+    await workflows._execute_policy_step(
+        step={"type": "create_ticket", "subject": "Onboard"},
+        company_id=9,
+        staff={
+            "id": 5,
+            "requested_by_user_id": 17,
+            "requested_by_email": "tech@example.com",
+        },
+        policy_config={},
+        vars_map={},
+        step_name="Create Ticket",
+    )
+
+    lookup.assert_not_awaited()
+    assert create_ticket.await_args.kwargs["requester_id"] == 17
+    assert create_ticket.await_args.kwargs["requester_staff_id"] is None
+
+
+@pytest.mark.anyio
 async def test_update_and_reply_ticket_steps_use_created_ticket_variable(monkeypatch):
     ticket = {
         "id": 123,
