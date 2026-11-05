@@ -192,7 +192,9 @@ async def update_scheduled_invoice_status(invoice_id: int, status: str) -> None:
     )
 
 
-async def patch_scheduled_invoice(invoice_id: int, **updates: Any) -> dict[str, Any]:
+async def patch_scheduled_invoice(
+    invoice_id: int, /, **updates: Any
+) -> dict[str, Any]:
     """Patch allowed scheduled invoice fields."""
     unknown = set(updates) - _ALLOWED_PATCH_COLUMNS
     if unknown:
