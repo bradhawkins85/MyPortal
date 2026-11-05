@@ -327,3 +327,129 @@ async def set_user_power_level(
         headers=_bot_headers(),
         json=updated,
     )
+
+
+# ---------------------------------------------------------------------------
+# Media (photos, videos and file attachments)
+# ---------------------------------------------------------------------------
+
+_MXC_RE = re.compile(r"^mxc://([A-Za-z0-9.\-]+(?::[0-9]{1,5})?)/([A-Za-z0-9_\-]+)$")
+
+
+def parse_mxc_uri(uri: str) -> tuple[str, str] | None:
+    """Split ``mxc://server/media_id`` into its parts, or return None if invalid."""
+    match = _MXC_RE.fullmatch(str(uri or "").strip())
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+async def upload_media(data: bytes, *, content_type: str, filename: str) -> str:
+    """Upload ``data`` to the homeserver media store and return its ``mxc://`` URI."""
+    headers = {
+        "Authorization": _bot_headers()["Authorization"],
+        "Content-Type": content_type or "application/octet-stream",
+    }
+    client = _get_client(timeout=120.0)
+    try:
+        resp = await client.post(
+            _base_url() + "/_matrix/media/v3/upload",
+            headers=headers,
+            params={"filename": filename},
+            content=data,
+            timeout=120.0,
+            # Binary payloads are not useful in the webhook monitor log.
+            extensions={"myportal.skip_monitor": True},
+        )
+    except httpx.RequestError as exc:
+        raise MatrixError("M_UNKNOWN", str(exc)) from exc
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = {}
+    if resp.is_error:
+        raise MatrixError(
+            payload.get("errcode", "M_UNKNOWN"),
+            payload.get("error", resp.text[:200]),
+            resp.status_code,
+        )
+    content_uri = str(payload.get("content_uri") or "")
+    if not parse_mxc_uri(content_uri):
+        raise MatrixError("M_UNKNOWN", "Homeserver returned an invalid content URI")
+    return content_uri
+
+
+class MatrixMediaTooLarge(MatrixError):
+    """Raised when a media download exceeds the caller's size limit."""
+
+
+async def download_media(mxc_uri: str, *, max_bytes: int) -> tuple[bytes, str]:
+    """Download media by ``mxc://`` URI as the bot; return ``(data, content_type)``.
+
+    Uses the authenticated media endpoint first and falls back to the legacy
+    unauthenticated one for homeservers that do not support it yet.
+    """
+    parts = parse_mxc_uri(mxc_uri)
+    if not parts:
+        raise MatrixError("M_INVALID_PARAM", "Invalid media URI")
+    server_name, media_id = parts
+    headers = {"Authorization": _bot_headers()["Authorization"]}
+    client = _get_client(timeout=120.0)
+    last_error: MatrixError | None = None
+    for prefix in ("/_matrix/client/v1/media/download/", "/_matrix/media/v3/download/"):
+        url = _base_url() + prefix + server_name + "/" + media_id
+        try:
+            async with client.stream(
+                "GET",
+                url,
+                headers=headers,
+                params={"allow_redirect": "true"},
+                timeout=120.0,
+                extensions={"myportal.skip_monitor": True},
+            ) as resp:
+                if resp.status_code in (400, 404, 405) and prefix.startswith("/_matrix/client/"):
+                    last_error = MatrixError("M_UNRECOGNIZED", "Authenticated media unsupported", resp.status_code)
+                    continue
+                if resp.is_error:
+                    raise MatrixError("M_UNKNOWN", "Media download failed", resp.status_code)
+                declared = resp.headers.get("Content-Length")
+                if declared and declared.isdigit() and int(declared) > max_bytes:
+                    raise MatrixMediaTooLarge("M_TOO_LARGE", "Media is too large", 413)
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise MatrixMediaTooLarge("M_TOO_LARGE", "Media is too large", 413)
+                    chunks.append(chunk)
+                content_type = resp.headers.get("Content-Type", "application/octet-stream")
+                return b"".join(chunks), content_type
+        except httpx.RequestError as exc:
+            raise MatrixError("M_UNKNOWN", str(exc)) from exc
+    raise last_error or MatrixError("M_NOT_FOUND", "Media not found", 404)
+
+
+async def send_media_message(
+    room_id: str,
+    *,
+    msgtype: str,
+    filename: str,
+    content_uri: str,
+    info: dict[str, Any],
+    transaction_id: str | None = None,
+) -> dict[str, Any]:
+    """Send an ``m.image``/``m.video``/``m.audio``/``m.file`` message. Returns {event_id}."""
+    txn_id = transaction_id or uuid.uuid4().hex
+    content: dict[str, Any] = {
+        "msgtype": msgtype,
+        "body": filename,
+        "filename": filename,
+        "url": content_uri,
+        "info": info,
+    }
+    return await _request(
+        "PUT",
+        f"/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn_id}",
+        headers=_bot_headers(),
+        json=content,
+    )

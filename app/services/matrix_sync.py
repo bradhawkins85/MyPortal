@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.core.logging import log_error
 from app.repositories import chat as chat_repo
 from app.services import matrix as matrix_service
+from app.services import chat_media
 from app.services import chat_ticket_sync
 from app.services import tray_chat_notifications
 from app.services import matrix_ai_waiting_assistant
@@ -70,6 +71,7 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
                 sender_user_id=portal_user_id,
                 sender_display_name=sender_display_name,
                 sent_at=sent_at,
+                media_json=chat_media.dump_media(chat_media.media_from_content(msgtype, content)),
             )
 
             await chat_repo.update_room(room["id"], last_message_at=sent_at, updated_at=sent_at)

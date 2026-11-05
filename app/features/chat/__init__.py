@@ -19,7 +19,7 @@ from .routes import router as chat_router
 
 PACK = FeaturePack(
     slug="chat",
-    version="1.0.0",
+    version="1.1.0",
     routers=(chat_router,),
 )
 

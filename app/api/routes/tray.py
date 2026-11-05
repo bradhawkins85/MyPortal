@@ -30,8 +30,8 @@ from urllib.parse import quote
 
 import httpx
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app.api.dependencies.auth import (
     get_current_tray_device,
@@ -88,6 +88,7 @@ from app.schemas.tray import (
 )
 from app.services import ai_consent
 from app.services import audit as audit_service
+from app.services import chat_media
 from app.services import chat_ticket_sync
 from app.services import tray_overseer
 from app.services import chat_ntfy_notifications
@@ -3155,6 +3156,7 @@ async def popup_chat_get_room(
         )
 
     messages = await chat_repo.get_messages(room_id, limit=50)
+    messages = [chat_media.popup_message_view(message) for message in messages]
 
     return JSONResponse(
         {
@@ -3163,6 +3165,67 @@ async def popup_chat_get_room(
             "csrf_token": session.get("csrf"),
         }
     )
+
+
+async def _after_popup_chat_message(
+    *,
+    room: dict[str, Any],
+    room_id: int,
+    msg: dict[str, Any],
+    sent_at: datetime,
+    text: str,
+) -> dict[str, Any]:
+    """Run the follow-up work for a message sent from the tray chat window.
+
+    Updates the room, wakes the waiting assistant, mirrors the message to a
+    linked ticket, refreshes portal viewers and sends ntfy notifications.
+    Returns the JSON-ready message for the chat window.
+    """
+    await chat_repo.update_room(room_id, last_message_at=sent_at, updated_at=sent_at)
+    await matrix_ai_waiting_assistant.handle_user_message(room_id, sent_at, text)
+
+    try:
+        await chat_ticket_sync.sync_chat_message_to_ticket(
+            room=room,
+            message=msg,
+            author_id=None,
+        )
+    except Exception as exc:
+        log_error(
+            "popup_chat_send_message: failed to sync chat message to linked ticket",
+            room_id=room_id,
+            error=str(exc),
+        )
+
+    # Notify portal users of new message.
+    try:
+        from app.services.realtime import refresh_notifier
+
+        await refresh_notifier.broadcast_refresh(
+            topics=[f"chat:room:{room_id}"],
+            data={
+                "message": {
+                    k: (v.isoformat() if isinstance(v, datetime) else v)
+                    for k, v in msg.items()
+                },
+                "room_id": room_id,
+            },
+        )
+    except Exception as exc:
+        log_error(
+            "popup_chat_send_message: failed to broadcast refresh",
+            room_id=room_id,
+            error=str(exc),
+        )
+
+    msg_data = {
+        k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()
+    }
+    await chat_ntfy_notifications.notify_chat_reply(
+        room=room, message=msg_data, actor=None
+    )
+
+    return _serialise_popup_chat_value(chat_media.popup_message_view(msg))
 
 
 @router.post(
@@ -3252,51 +3315,204 @@ async def popup_chat_send_message(
         sender_display_name=hostname,
         sent_at=sent_at,
     )
-    await chat_repo.update_room(room_id, last_message_at=sent_at, updated_at=sent_at)
-    await matrix_ai_waiting_assistant.handle_user_message(room_id, sent_at, message_body)
-
-    try:
-        await chat_ticket_sync.sync_chat_message_to_ticket(
-            room=room,
-            message=msg,
-            author_id=None,
-        )
-    except Exception as exc:
-        log_error(
-            "popup_chat_send_message: failed to sync chat message to linked ticket",
-            room_id=room_id,
-            error=str(exc),
-        )
-
-    # Notify portal users of new message.
-    try:
-        from app.services.realtime import refresh_notifier
-
-        await refresh_notifier.broadcast_refresh(
-            topics=[f"chat:room:{room_id}"],
-            data={
-                "message": {
-                    k: (v.isoformat() if isinstance(v, datetime) else v)
-                    for k, v in msg.items()
-                },
-                "room_id": room_id,
-            },
-        )
-    except Exception as exc:
-        log_error(
-            "popup_chat_send_message: failed to broadcast refresh",
-            room_id=room_id,
-            error=str(exc),
-        )
-
-    msg_data = {
-        k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()
-    }
-    await chat_ntfy_notifications.notify_chat_reply(
-        room=room, message=msg_data, actor=None
+    msg_data = await _after_popup_chat_message(
+        room=room, room_id=room_id, msg=msg, sent_at=sent_at, text=message_body
     )
 
     return JSONResponse(
         msg_data,
         status_code=status.HTTP_201_CREATED,
+    )
+
+
+def _require_popup_room_session(request: Request, room_id: int) -> dict[str, Any]:
+    session = _parse_popup_session(request)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session"
+        )
+    if session.get("room_id") != room_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Room mismatch"
+        )
+    return session
+
+
+async def _read_upload_limited(upload: UploadFile, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Attachments can be up to "
+                + str(max_bytes // (1024 * 1024))
+                + " MB",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@router.post(
+    "/popup-chat/{room_id}/attachments",
+    summary="Send a photo, video or file from the popup (popup-session cookie auth)",
+    status_code=status.HTTP_201_CREATED,
+)
+async def popup_chat_send_attachment(
+    request: Request,
+    room_id: int,
+    file: UploadFile = File(..., description="The photo, video or file to send"),
+) -> JSONResponse:
+    """Upload an attachment to the chat server and post it to the room.
+
+    Authenticated by the ``tray_popup`` session cookie and the ``X-Tray-CSRF``
+    header.  Attachments are stored in the Matrix media repository so that
+    technicians receive them in their Matrix client like any other photo or
+    file.
+    """
+    session = _require_popup_room_session(request, room_id)
+    csrf_header = request.headers.get("X-Tray-CSRF", "")
+    if not secrets.compare_digest(csrf_header, session.get("csrf", "")):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed"
+        )
+
+    room = await chat_repo.get_room(room_id)
+    if not room:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Room not found"
+        )
+    if room.get("status") != "open":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Chat room is closed"
+        )
+    matrix_room_id = room.get("matrix_room_id") or ""
+    if not (matrix_room_id and _settings.matrix_enabled):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Attachments are not available for this chat",
+        )
+
+    data = await _read_upload_limited(file, chat_media.MAX_UPLOAD_BYTES)
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="The file is empty"
+        )
+    filename = chat_media.clean_filename(file.filename)
+    mimetype = chat_media.clean_mimetype(file.content_type) or "application/octet-stream"
+    msgtype = chat_media.msgtype_for_mimetype(mimetype)
+    info: dict[str, Any] = {"mimetype": mimetype, "size": len(data)}
+
+    try:
+        content_uri = await matrix_service.upload_media(
+            data, content_type=mimetype, filename=filename
+        )
+        event = await matrix_service.send_media_message(
+            matrix_room_id,
+            msgtype=msgtype,
+            filename=filename,
+            content_uri=content_uri,
+            info=info,
+        )
+    except (matrix_service.MatrixError, matrix_service.MatrixConfigError) as exc:
+        log_error(
+            "popup_chat_send_attachment: Matrix upload failed",
+            room_id=room_id,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The attachment could not be sent. Please try again.",
+        ) from exc
+
+    device_id = int(session["device_id"])
+    device = await tray_repo.get_device_by_id(device_id)
+    hostname = (device or {}).get("hostname") or "Tray Device"
+    sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    msg = await chat_repo.add_message(
+        room_id=room_id,
+        matrix_event_id=event.get("event_id"),
+        sender_matrix_id=f"@tray-device-{device_id}:tray",
+        body=filename,
+        msgtype=msgtype,
+        sender_user_id=None,
+        sender_display_name=hostname,
+        sent_at=sent_at,
+        media_json=chat_media.dump_media({"url": content_uri, "filename": filename, **info}),
+    )
+    msg_data = await _after_popup_chat_message(
+        room=room, room_id=room_id, msg=msg, sent_at=sent_at, text=filename
+    )
+    return JSONResponse(msg_data, status_code=status.HTTP_201_CREATED)
+
+
+@router.get(
+    "/popup-chat/{room_id}/messages/{message_id}/media",
+    summary="Download a chat attachment for the popup (popup-session cookie auth)",
+)
+async def popup_chat_get_media(
+    request: Request,
+    room_id: int,
+    message_id: int,
+    download: bool = Query(False, description="Save the file instead of showing it"),
+) -> Response:
+    """Relay a photo, video or file from the chat server to the chat window.
+
+    Only attachments of messages in the popup session's own room are served.
+    Types that are not safe to show inline are always sent as downloads.
+    """
+    _require_popup_room_session(request, room_id)
+    message = await chat_repo.get_room_message(room_id, message_id)
+    public = chat_media.public_media(message or {}, media_url="")
+    media = chat_media.load_media(message or {})
+    if not message or not public or not media or public.get("kind") == "location":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
+        )
+
+    try:
+        data, served_type = await matrix_service.download_media(
+            str(media.get("url") or ""), max_bytes=chat_media.MAX_DOWNLOAD_BYTES
+        )
+    except matrix_service.MatrixMediaTooLarge as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="This attachment is too large to open here",
+        ) from exc
+    except (matrix_service.MatrixError, matrix_service.MatrixConfigError) as exc:
+        log_error(
+            "popup_chat_get_media: Matrix download failed",
+            room_id=room_id,
+            message_id=message_id,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The attachment could not be loaded",
+        ) from exc
+
+    mimetype = public.get("mimetype") or chat_media.clean_mimetype(served_type)
+    inline = not download and chat_media.inline_mimetype(mimetype)
+    filename = str(public.get("filename") or "attachment")
+    ascii_name = filename.encode("ascii", "ignore").decode().replace('"', "") or "attachment"
+    disposition = (
+        ("inline" if inline else "attachment")
+        + '; filename="'
+        + ascii_name
+        + "\"; filename*=UTF-8''"
+        + quote(filename, safe="")
+    )
+    return Response(
+        content=data,
+        media_type=mimetype if inline else "application/octet-stream",
+        headers={
+            "Content-Disposition": disposition,
+            "Cache-Control": "private, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox; default-src 'none'",
+        },
     )

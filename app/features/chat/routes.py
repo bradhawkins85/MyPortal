@@ -21,6 +21,7 @@ from app.repositories import users as user_repo
 from app.security.encryption import encrypt_secret
 from app.security.session import SessionData
 from app.services import chat_access
+from app.services import chat_media
 from app.services import matrix as matrix_service
 from app.services import role_switching
 from app.services import tray as tray_service
@@ -451,12 +452,13 @@ def _render_popup(
 
     return tmpl.render(
         room=_serial(dict(room)),
-        messages=[_serial(m) for m in messages],
+        messages=[_serial(chat_media.popup_message_view(m)) for m in messages],
         csrf_token=csrf_token,
         room_id=room_id,
         device_id=device_id,
         hostname=hostname,
         branding_display_name=(branding_display_name or "MyPortal Helpdesk"),
+        max_upload_bytes=chat_media.MAX_UPLOAD_BYTES,
     )
 
 
