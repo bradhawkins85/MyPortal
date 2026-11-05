@@ -86,7 +86,20 @@
           <div><dt>Processes</dt><dd data-live-proc-count>—</dd></div>
           <div><dt>Uptime</dt><dd data-live-uptime>—</dd></div>
         </dl>
-        <canvas class="rmm-live__chart" data-live-chart height="120" aria-hidden="true"></canvas>
+        <figure class="rmm-live__trend" aria-labelledby="live-trend-title">
+          <figcaption class="rmm-live__trend-head">
+            <h3 id="live-trend-title">CPU and memory use, last 2 minutes</h3>
+            <ul class="rmm-live__legend">
+              <li><span class="rmm-live__swatch rmm-live__swatch--cpu" aria-hidden="true"></span>CPU</li>
+              <li><span class="rmm-live__swatch rmm-live__swatch--mem" aria-hidden="true"></span>Memory</li>
+            </ul>
+          </figcaption>
+          <div class="rmm-live__trend-plot">
+            <div class="rmm-live__trend-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>
+            <canvas class="rmm-live__chart" data-live-chart height="120" aria-hidden="true"></canvas>
+          </div>
+          <p class="rmm-live__meter-note">Sampled every second; the newest reading is on the right.</p>
+        </figure>
       </section>
 
       {# Terminal #}

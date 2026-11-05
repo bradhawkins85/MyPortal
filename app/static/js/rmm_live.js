@@ -329,7 +329,10 @@
       const height = chart.height;
       ctx.clearRect(0, 0, width, height);
       if (history.length < 2) return;
-      const styles = getComputedStyle(document.documentElement);
+      const styles = getComputedStyle(chart);
+      ctx.strokeStyle = (styles.getPropertyValue('--color-border') || '#d8dce3').trim();
+      ctx.lineWidth = 1;
+      [0.5].forEach((f) => { ctx.beginPath(); ctx.moveTo(0, height * f); ctx.lineTo(width, height * f); ctx.stroke(); });
       const draw = (key, color) => {
         ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
         history.forEach((point, i) => {

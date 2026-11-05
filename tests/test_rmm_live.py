@@ -150,6 +150,27 @@ async def test_live_tools_header_class_is_not_reused_by_other_rules():
 
 
 @pytest.mark.anyio
+async def test_live_tools_colour_tokens_are_defined_for_the_dark_theme():
+    """``--color-surface-alt`` and friends are not defined by the shared theme,
+    so the overview stat tiles fell back to a light grey behind the theme's
+    near-white text and the Network/Processes/Uptime values were invisible."""
+
+    import re
+
+    css = (ROOT / "app/static/css/rmm_live.css").read_text()
+    shared = "".join(
+        p.read_text() for p in (ROOT / "app/static/css").glob("*.css") if p.name != "rmm_live.css"
+    )
+    used = set(re.findall(r"var\((--color-[a-z-]+)", css))
+    for token in used:
+        defined = re.search(re.escape(token) + r"\s*:", css) or re.search(
+            r"^\s*" + re.escape(token) + r"\s*:", shared, flags=re.M
+        )
+        assert defined, f"{token} is used by rmm_live.css but never defined"
+    assert re.search(r"\.rmm-live__stats dd \{[^}]*color: var\(--color-text", css)
+
+
+@pytest.mark.anyio
 async def test_live_tools_page_retries_hello_until_the_agent_answers():
     """A Redis relay drops frames sent before the agent has dialled in, so the
     browser must repeat ``hello`` rather than wait on the first one forever,
@@ -160,3 +181,18 @@ async def test_live_tools_page_retries_hello_until_the_agent_answers():
     assert "request('hello', {}, HELLO_RETRY_MS)" in js
     assert "hello = await client.handshake();" in js
     assert "if (canStart) connect();" in js
+
+
+@pytest.mark.anyio
+async def test_live_tools_trend_chart_is_titled_and_has_a_legend():
+    """The overview chart once drew two unlabelled lines, so viewers could not
+    tell it plotted CPU and memory use or what scale it used."""
+
+    template = (ROOT / "app/templates/rmm/live_tools.html").read_text()
+    assert 'aria-labelledby="live-trend-title"' in template
+    assert "CPU and memory use, last 2 minutes" in template
+    assert "rmm-live__swatch--cpu" in template and "rmm-live__swatch--mem" in template
+    assert "<span>100%</span>" in template and "<span>0%</span>" in template
+    js = (ROOT / "app/static/js/rmm_live.js").read_text()
+    # Line colours must come from the same scoped tokens the legend uses.
+    assert "getComputedStyle(chart)" in js
