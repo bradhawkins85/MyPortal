@@ -16,7 +16,9 @@ devices also send their event logs to MyPortal (see [RMM Event Logs](RMM%20Event
 every device sends its hardware and installed software (see [RMM Inventory](RMM%20Inventory.md)), and
 [RMM Checks](RMM%20Checks.md) watch disk space, CPU, memory, services and more.
 [Patch management](RMM%20Patch%20Management.md) configures scoped Windows Update,
-Chocolatey application updates and reboot policies.
+Chocolatey application updates and reboot policies. [Live tools](RMM%20Live%20Tools.md)
+open a real-time terminal, task manager, service manager, file browser, registry editor,
+disk usage scanner and CPU/memory monitor on a device.
 
 ## Gitea
 
