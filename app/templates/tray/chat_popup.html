@@ -559,7 +559,7 @@
   const fileInput  = document.getElementById('chat-file-input');
   const attachBtn  = document.getElementById('chat-attach');
   const uploadStatusEl = document.getElementById('chat-upload-status');
-  const MAX_UPLOAD_BYTES = {{ max_upload_bytes | int }};
+  const MAX_UPLOAD_BYTES = {{ max_upload_bytes | default(52428800) | int }};
 
   function setUploadStatus(text) {
     if (uploadStatusEl) uploadStatusEl.textContent = text || '';
