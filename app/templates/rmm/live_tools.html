@@ -23,15 +23,15 @@
          data-live-supported="{{ 'true' if live_supported else 'false' }}">
   {% include "partials/csrf.html" %}
 
-  <div class="rmm-live__bar">
-    <div class="rmm-live__status">
-      <span class="status status--neutral" data-live-connection>Not connected</span>
+  <div class="rmm-live__header">
+    <div class="rmm-live__device">
       <span class="rmm-live__host" data-live-host>{{ asset_name }}</span>
-      <span class="rmm-live__meta" data-live-os></span>
+      <span class="rmm-live__meta" data-live-os>{{ {'windows': 'Windows', 'linux': 'Linux', 'darwin': 'macOS'}.get(agent_os, agent_os) if agent_os else 'RMM agent' }}{% if agent_version %} · agent {{ agent_version }}{% endif %}</span>
     </div>
-    <div class="rmm-live__bar-actions">
-      <button type="button" class="button button--primary" data-live-connect hidden>Connect</button>
-      <button type="button" class="button button--secondary" data-live-disconnect hidden>Disconnect</button>
+    <div class="rmm-live__header-actions">
+      <span class="status status--neutral" role="status" aria-live="polite" data-live-connection>Not connected</span>
+      <button type="button" class="button button--primary button--small" data-live-connect hidden>Connect</button>
+      <button type="button" class="button button--secondary button--small" data-live-disconnect hidden>Disconnect</button>
     </div>
   </div>
 
@@ -172,7 +172,7 @@
         <nav class="rmm-live__crumbs" data-live-du-crumbs aria-label="Scanned folder"></nav>
         <div class="rmm-live__table-wrap">
           <table class="table rmm-live__table" data-live-du-table>
-            <thead><tr><th>Name</th><th class="rmm-live__num">Size</th><th class="rmm-live__bar-col">Share</th><th class="rmm-live__num">Items</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th class="rmm-live__num">Size</th><th class="rmm-live__share-col">Share</th><th class="rmm-live__num">Items</th><th></th></tr></thead>
             <tbody data-live-du-body><tr><td colspan="5" class="text-muted">Scan a drive or folder to find what is using space.</td></tr></tbody>
           </table>
         </div>

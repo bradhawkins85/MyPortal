@@ -126,3 +126,37 @@ async def test_agent_disconnect_reoffers_the_session(sqlite_db):
     session = await live_repo.get_session(started.session_id)
     assert session["status"] == "requested" and session["offered_at"] is None
     assert [item["id"] for item in await rmm_live.sessions_for_agent(agent)] == [started.session_id]
+
+
+def _css_rule_selectors(css: str) -> list[str]:
+    import re
+
+    without_comments = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return [s.strip() for s in re.findall(r"([^{}]+)\{", without_comments)]
+
+
+@pytest.mark.anyio
+async def test_live_tools_header_class_is_not_reused_by_other_rules():
+    """The disk usage share bar once reused ``.rmm-live__bar``, collapsing the
+    page header (status, host and Connect button) into a 2px-wide blue box."""
+
+    css = (ROOT / "app/static/css/rmm_live.css").read_text()
+    selectors = _css_rule_selectors(css)
+    assert selectors.count(".rmm-live__header") == 1
+    assert ".rmm-live__share" in selectors
+    template = (ROOT / "app/templates/rmm/live_tools.html").read_text()
+    assert 'class="rmm-live__header"' in template
+    assert "rmm-live__bar" not in template
+
+
+@pytest.mark.anyio
+async def test_live_tools_page_retries_hello_until_the_agent_answers():
+    """A Redis relay drops frames sent before the agent has dialled in, so the
+    browser must repeat ``hello`` rather than wait on the first one forever,
+    and the page connects without needing a hidden Connect click."""
+
+    js = (ROOT / "app/static/js/rmm_live.js").read_text()
+    assert "async function handshake()" in js
+    assert "request('hello', {}, HELLO_RETRY_MS)" in js
+    assert "hello = await client.handshake();" in js
+    assert "if (canStart) connect();" in js
