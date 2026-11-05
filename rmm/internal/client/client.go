@@ -37,6 +37,7 @@ type Details struct {
 	RunAnywaySupported   bool              `json:"run_anyway_supported"`
 	RunAsUserSupported   bool              `json:"run_as_user_supported"`
 	ScriptFilesSupported bool              `json:"script_files_supported"`
+	LiveToolsSupported   bool              `json:"live_tools_supported"`
 }
 
 // Enrolment is MyPortal's answer to a successful enrolment.
@@ -200,6 +201,15 @@ func (c *Client) Checkin(ctx context.Context, details Details) error {
 type Poll struct {
 	Jobs []Job   `json:"jobs"`
 	Stop []int64 `json:"stop"`
+	// Live lists the live tools sessions technicians opened for this
+	// device that the agent has not connected to yet.
+	Live []LiveSession `json:"live"`
+}
+
+// LiveSession is a requested live tools session; the agent connects to it
+// over a WebSocket (see internal/live).
+type LiveSession struct {
+	ID int64 `json:"id"`
 }
 
 // Jobs long-polls for queued runs. executing lists the runs this agent is
