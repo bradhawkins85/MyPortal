@@ -389,7 +389,9 @@
       const tab = document.createElement('button');
       tab.type = 'button';
       tab.className = 'rmm-live__term-tab';
-      tab.innerHTML = '<span>' + (shellSelect.value || 'shell') + ' ' + counter + '</span>';
+      const label = document.createElement('span');
+      label.textContent = (shellSelect.value || 'shell') + ' ' + counter;
+      tab.appendChild(label);
       const close = document.createElement('span');
       close.className = 'rmm-live__term-close';
       close.textContent = '×';
