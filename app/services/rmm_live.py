@@ -33,8 +33,6 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from app.core.config import get_settings
-from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_live as live_repo
 from app.services.redis import get_redis_client
 from app.services.tray import hash_token
@@ -81,7 +79,9 @@ def _expired(session: dict[str, Any]) -> bool:
 # --------------------------------------------------------------------------- #
 
 _offer_states: dict[int, bool] = {}
-_offer_watcher: asyncio.Task | None = None
+# Holds the running cross-worker offer watcher(s) so the task is not garbage
+# collected and a second is not started on the same loop.
+_offer_watchers: set[asyncio.Task] = set()
 
 
 async def sessions_for_agent(agent: dict[str, Any]) -> list[dict[str, int]]:
@@ -95,7 +95,6 @@ async def sessions_for_agent(agent: dict[str, Any]) -> list[dict[str, int]]:
 
 
 async def _watch_offers() -> None:
-    global _offer_states
     while _offer_states:
         try:
             agents = await live_repo.agents_with_unoffered(reoffer_after=REOFFER_AFTER)
@@ -118,11 +117,12 @@ def watch_agent_for_offers(agent_id: int) -> None:
     """While an agent long-polls, have this worker wake it when a live session
     is requested for it from elsewhere."""
 
-    global _offer_watcher
     _offer_states[agent_id] = True
     loop = asyncio.get_running_loop()
-    if _offer_watcher is None or _offer_watcher.done() or _offer_watcher.get_loop() is not loop:
-        _offer_watcher = loop.create_task(_watch_offers())
+    if not any(not task.done() and task.get_loop() is loop for task in _offer_watchers):
+        task = loop.create_task(_watch_offers())
+        _offer_watchers.add(task)
+        task.add_done_callback(_offer_watchers.discard)
 
 
 def unwatch_agent_for_offers(agent_id: int) -> None:

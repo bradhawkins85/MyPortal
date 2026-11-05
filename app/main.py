@@ -1443,19 +1443,20 @@ async def _bridge_live_socket(
                 await on_activity()
     finally:
         outbound.cancel()
-        with suppress(Exception):
-            await outbound
+        # Wait for the cancelled pump task to unwind; gather swallows its
+        # CancelledError (and any other) rather than raising from the finally.
+        await asyncio.gather(outbound, return_exceptions=True)
 
 
 @app.websocket("/ws/rmm/agent/live/{session_id:int}")
 async def rmm_live_agent_socket(websocket: WebSocket, session_id: int) -> None:
     """The RMM agent's side of a live tools session (bearer token auth)."""
 
-    from app.features.rmm.routes import _bearer_ws
     from app.repositories import rmm_live as live_repo
+    from app.security.websocket_origin import bearer_token
     from app.services import rmm_live, rmm_scripts
 
-    agent = await rmm_scripts.authenticate_agent(_bearer_ws(websocket))
+    agent = await rmm_scripts.authenticate_agent(bearer_token(websocket))
     if not agent:
         await websocket.close(code=4401)
         return

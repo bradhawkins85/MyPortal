@@ -1010,15 +1010,6 @@ def _bearer(request: Request) -> str:
     return ""
 
 
-def _bearer_ws(websocket) -> str:
-    """The agent's bearer token from a WebSocket handshake header."""
-
-    header = websocket.headers.get("Authorization", "")
-    if header.lower().startswith("bearer "):
-        return header.split(" ", 1)[1].strip()
-    return ""
-
-
 async def get_current_rmm_agent(request: Request) -> dict[str, Any]:
     agent = await rmm_scripts.authenticate_agent(_bearer(request))
     if not agent:
