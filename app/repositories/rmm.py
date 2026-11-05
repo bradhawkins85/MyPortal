@@ -330,14 +330,15 @@ async def create_agent(
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_agents (agent_uid, tray_device_id, company_id, asset_id, auth_token_hash, "
         "auth_token_prefix, hostname, os, os_version, arch, agent_version, shells, last_ip, last_seen_utc, "
-        "status, created_at, updated_at, script_files_supported, run_anyway_supported, run_as_user_supported) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s, %s, %s)",
+        "status, created_at, updated_at, script_files_supported, run_anyway_supported, run_as_user_supported, "
+        "live_tools_supported) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s, %s, %s, %s)",
         (
             agent_uid, tray_device_id, company_id, asset_id, auth_token_hash, auth_token_prefix,
             details.get("hostname"), details.get("os"), details.get("os_version"), details.get("arch"),
             details.get("agent_version"), details.get("shells"), details.get("last_ip"), now, now, now,
             bool(details.get("script_files_supported")), bool(details.get("run_anyway_supported")),
-            bool(details.get("run_as_user_supported")),
+            bool(details.get("run_as_user_supported")), bool(details.get("live_tools_supported")),
         ),
     )
 
@@ -357,13 +358,14 @@ async def reenrol_agent(
         "UPDATE rmm_agents SET tray_device_id = %s, company_id = %s, asset_id = %s, auth_token_hash = %s, "
         "auth_token_prefix = %s, hostname = %s, os = %s, os_version = %s, arch = %s, agent_version = %s, "
         "shells = %s, last_ip = %s, last_seen_utc = %s, status = 'active', updated_at = %s, "
-        "script_files_supported = %s, run_anyway_supported = %s, run_as_user_supported = %s WHERE id = %s",
+        "script_files_supported = %s, run_anyway_supported = %s, run_as_user_supported = %s, "
+        "live_tools_supported = %s WHERE id = %s",
         (
             tray_device_id, company_id, asset_id, auth_token_hash, auth_token_prefix,
             details.get("hostname"), details.get("os"), details.get("os_version"), details.get("arch"),
             details.get("agent_version"), details.get("shells"), details.get("last_ip"), now, now,
             bool(details.get("script_files_supported")), bool(details.get("run_anyway_supported")),
-            bool(details.get("run_as_user_supported")), agent_id,
+            bool(details.get("run_as_user_supported")), bool(details.get("live_tools_supported")), agent_id,
         ),
     )
 
@@ -377,6 +379,7 @@ async def record_agent_checkin(agent_id: int, details: dict[str, Any]) -> None:
         now, details.get("last_ip"), details.get("agent_version"), details.get("shells"),
         details.get("hostname"), details.get("os_version"), now, details.get("script_files_supported"),
         details.get("run_anyway_supported"), details.get("run_as_user_supported"),
+        details.get("live_tools_supported"),
     )
     if thermal is not None:
         await db.execute(
@@ -386,6 +389,7 @@ async def record_agent_checkin(agent_id: int, details: dict[str, Any]) -> None:
             "script_files_supported = COALESCE(%s, script_files_supported), "
             "run_anyway_supported = COALESCE(%s, run_anyway_supported), "
             "run_as_user_supported = COALESCE(%s, run_as_user_supported), "
+            "live_tools_supported = COALESCE(%s, live_tools_supported), "
             "thermal_json = %s WHERE id = %s",
             base_params
             + (json.dumps(thermal, default=lambda value: value.isoformat()),)
@@ -398,7 +402,8 @@ async def record_agent_checkin(agent_id: int, details: dict[str, Any]) -> None:
             "hostname = COALESCE(%s, hostname), os_version = COALESCE(%s, os_version), updated_at = %s, "
             "script_files_supported = COALESCE(%s, script_files_supported), "
             "run_anyway_supported = COALESCE(%s, run_anyway_supported), "
-            "run_as_user_supported = COALESCE(%s, run_as_user_supported) WHERE id = %s",
+            "run_as_user_supported = COALESCE(%s, run_as_user_supported), "
+            "live_tools_supported = COALESCE(%s, live_tools_supported) WHERE id = %s",
             base_params + (agent_id,),
         )
 

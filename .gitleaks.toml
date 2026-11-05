@@ -19,6 +19,11 @@ paths = [
   '''(?i)^docs/.*''',
   '''(?i)^tests/.*''',
   '''(?i)^changes/.*''',
+  # Vendored third-party assets are reviewed by SHA-256 digest in
+  # tests/test_frontend_dependencies.py, not a place for our own secrets.
+  # Minified bundles (e.g. xterm.js) carry high-entropy tokens that trip the
+  # generic-api-key rule.
+  '''(?i)^app/static/vendor/.*''',
 ]
 
 regexes = [

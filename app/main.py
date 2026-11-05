@@ -1283,28 +1283,12 @@ async def refresh_updates(websocket: WebSocket) -> None:
     only delivered to users who can access the room.
     """
 
-    from urllib.parse import urlsplit
-
+    from app.security.websocket_origin import origin_allowed
     from app.services.realtime import ConnectionAccess
 
-    origin = (websocket.headers.get("origin") or "").strip()
-    if origin:
-        origin_host = urlsplit(origin).netloc.lower()
-        allowed_hosts = {(websocket.headers.get("host") or "").strip().lower()}
-        # X-Forwarded-Host is only honoured from configured trusted proxies,
-        # mirroring the X-Forwarded-For handling in get_client_ip; otherwise
-        # an attacker-controlled header would whitelist any Origin host.
-        peer_ip = websocket.client.host if websocket.client else None
-        if peer_ip and _peer_is_trusted(peer_ip, settings.trusted_proxy_networks()):
-            allowed_hosts.add(
-                (websocket.headers.get("x-forwarded-host") or "").split(",")[0].strip().lower()
-            )
-        if settings.portal_url:
-            allowed_hosts.add(urlsplit(settings.portal_url.unicode_string()).netloc.lower())
-        allowed_hosts.discard("")
-        if not origin_host or origin_host not in allowed_hosts:
-            await websocket.close(code=4403)
-            return
+    if not origin_allowed(websocket, settings):
+        await websocket.close(code=4403)
+        return
 
     try:
         session = await session_manager.load_session(websocket)  # type: ignore[arg-type]
@@ -1417,6 +1401,107 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
             # are handled by feature-specific services in follow-up phases.
     finally:
         tray_service.unregister_connection(device_uid, websocket)
+
+
+async def _bridge_live_socket(
+    websocket: WebSocket, session_id: int, *, send_direction: str, receive_direction: str,
+    on_activity=None,
+) -> None:
+    """Relay JSON frames between one live tools socket and its peer.
+
+    Frames the client sends are forwarded in ``send_direction``; frames
+    arriving in ``receive_direction`` are written back to the client. The two
+    directions run concurrently until either side closes.
+    """
+
+    from app.services.rmm_live import Relay
+
+    relay = Relay(session_id)
+    await websocket.accept()
+
+    async def pump_out() -> None:
+        async def deliver(payload: str) -> bool:
+            try:
+                await websocket.send_text(payload)
+            except Exception:  # noqa: BLE001 - client gone
+                return False
+            return True
+
+        await relay.receive(receive_direction, deliver)
+
+    outbound = asyncio.ensure_future(pump_out())
+    try:
+        while True:
+            try:
+                message = await websocket.receive_text()
+            except (WebSocketDisconnect, RuntimeError):
+                break
+            if len(message) > 1_200_000:
+                continue
+            await relay.send(send_direction, message)
+            if on_activity is not None:
+                await on_activity()
+    finally:
+        outbound.cancel()
+        # Wait for the cancelled pump task to unwind; gather swallows its
+        # CancelledError (and any other) rather than raising from the finally.
+        await asyncio.gather(outbound, return_exceptions=True)
+
+
+@app.websocket("/ws/rmm/agent/live/{session_id:int}")
+async def rmm_live_agent_socket(websocket: WebSocket, session_id: int) -> None:
+    """The RMM agent's side of a live tools session (bearer token auth)."""
+
+    from app.repositories import rmm_live as live_repo
+    from app.security.websocket_origin import bearer_token
+    from app.services import rmm_live, rmm_scripts
+
+    agent = await rmm_scripts.authenticate_agent(bearer_token(websocket))
+    if not agent:
+        await websocket.close(code=4401)
+        return
+    session = await rmm_live.authorize_agent_session(session_id, agent)
+    if not session:
+        await websocket.close(code=4404)
+        return
+    await live_repo.mark_agent_connected(session_id)
+    try:
+        await _bridge_live_socket(
+            websocket, session_id, send_direction="to_browser", receive_direction="to_agent",
+        )
+    finally:
+        await live_repo.mark_agent_disconnected(session_id)
+
+
+@app.websocket("/ws/rmm/live/{session_id:int}")
+async def rmm_live_browser_socket(websocket: WebSocket, session_id: int) -> None:
+    """The technician's browser side of a live tools session.
+
+    Authenticated by the one-time token issued when the session was started
+    (query string, as a browser WebSocket cannot set Authorization headers),
+    plus the usual cross-site Origin check.
+    """
+
+    from app.security.websocket_origin import origin_allowed
+    from app.repositories import rmm_live as live_repo
+    from app.services import rmm_live
+
+    if not origin_allowed(websocket, settings):
+        await websocket.close(code=4403)
+        return
+    token = (websocket.query_params.get("token") or "").strip()
+    session = await rmm_live.authorize_browser(session_id, token)
+    if not session:
+        await websocket.close(code=4401)
+        return
+    await live_repo.mark_browser_connected(session_id)
+
+    async def touch() -> None:
+        await live_repo.touch(session_id)
+
+    await _bridge_live_socket(
+        websocket, session_id, send_direction="to_agent", receive_direction="to_browser", on_activity=touch,
+    )
 
 
 # MCP WebSocket endpoint (only enabled if MCP_ENABLED is true)

@@ -108,6 +108,7 @@ func details(r *runner.Runner) client.Details {
 		ScriptFilesSupported: true,
 		RunAnywaySupported:   true,
 		RunAsUserSupported:   true,
+		LiveToolsSupported:   true,
 	}
 }
 
@@ -349,6 +350,7 @@ func loop(ctx context.Context) {
 	r.DownloadFile = api.DownloadRunFile
 	slots := make(chan struct{}, maxConcurrent)
 	runs := newRunTracker()
+	lives := &sync.Map{}
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	wg.Add(1)
@@ -405,6 +407,9 @@ func loop(ctx context.Context) {
 			continue
 		}
 		backoff = 5 * time.Second
+		for _, session := range poll.Live {
+			startLiveSession(ctx, &wg, lives, st, session.ID)
+		}
 		for _, id := range runs.stop(poll.Stop) {
 			log.Printf("run %d: aborted in MyPortal; stopping the script", id)
 		}

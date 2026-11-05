@@ -52,8 +52,8 @@ from __future__ import annotations
 
 from app.core.features import FeaturePack
 
-from app.services import (rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_scripts, rmm_patching,
-                          rmm_software_updates, rmm_ticket_scripts, rmm_windows_updates)
+from app.services import (rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_live, rmm_scripts,
+                          rmm_patching, rmm_software_updates, rmm_ticket_scripts, rmm_windows_updates)
 
 from .agent_deploy_routes import router as agent_deploy_router
 from .automation_routes import router as automation_router
@@ -80,6 +80,13 @@ rmm_automation.register_tick_job(rmm_windows_updates.tick)
 rmm_automation.register_tick_job(rmm_findings.tick)
 # Ticket automation runs that expire or are cancelled are posted to their ticket.
 rmm_automation.register_tick_job(rmm_ticket_scripts.tick)
+# Live tools sessions are offered to agents through the job poll, and expired
+# sessions and stale relay frames are swept on the automation tick.
+rmm_scripts.register_poll_provider(
+    "live", rmm_live.sessions_for_agent,
+    watch=rmm_live.watch_agent_for_offers, unwatch=rmm_live.unwatch_agent_for_offers,
+)
+rmm_automation.register_tick_job(rmm_live.sweep)
 # Onboarding steps can install Chocolatey packages through the patch job.
 rmm_automation.register_package_steps(validate=rmm_software_updates.package_ids, queue=rmm_software_updates.queue_apps)
 

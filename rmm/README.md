@@ -142,11 +142,45 @@ before company sources are synced and applications are installed. See
 `docs/wiki/administration/RMM Patch Management.md` for scope, schedule and reboot behavior.
 Deploy MyPortal and migration 491 to enable policies; no agent upgrade is required.
 
+## Live tools
+
+A technician can open **Live tools** on a device's asset page for an
+interactive session without RustDesk or MeshCentral (remote desktop is not
+part of this). MyPortal lists requested sessions in the job poll (`live`); the
+agent connects back over a WebSocket to `/ws/rmm/agent/live/{id}` with its
+bearer token and MyPortal relays JSON between it and the technician's browser.
+The agent advertises `live_tools_supported: true` on enrolment and check-in;
+MyPortal only offers sessions to agents that do. See `internal/live`.
+
+One session serves all of these, each streamed over the same socket:
+
+- **Terminal** — a real shell on a pseudo console (PTY on Linux and macOS,
+  ConPTY on Windows), running as the agent account. Up to four at once.
+- **Task manager** — running processes with CPU, memory, user and threads,
+  and ending a process (optionally its whole tree). The agent and PID 0/1/4
+  are protected.
+- **Service manager** — list services and start, stop, restart or change the
+  start type (Windows services, systemd units, launchd jobs).
+- **File browser** — browse drives and folders, rename, delete, make folders,
+  and upload/download files in verified chunks (SHA-256).
+- **Registry editor** (Windows) — browse hives, read and write values and
+  create or delete keys, with the hive roots and top-level keys protected.
+- **Disk usage** — a concurrent, ncdu/gncdu-style scan that totals every
+  folder so large files and folders are easy to find, with drill-down and
+  delete. Stays on the starting drive/filesystem by default.
+- **Real-time CPU and memory** — per-core CPU, memory and swap/page-file use,
+  network throughput, process count and uptime, sampled once a second.
+
+Deploy MyPortal with migration 544 before updating agents. Nothing in a
+session is stored beyond the live relay; only that a session happened, who
+started it and when is audited.
+
 ## Develop
 
 ```sh
 go test ./...
 GOOS=windows go vet ./...
+GOOS=darwin go vet ./...
 go build ./cmd/myportal-rmm
 ```
 

@@ -42,6 +42,7 @@ from loguru import logger
 from app.api.dependencies.auth import get_current_tray_device, get_optional_user
 from app.repositories import assets as assets_repo
 from app.repositories import rmm as rmm_repo
+from app.repositories import rmm_live as rmm_live_repo
 from app.repositories import rmm_script_result_rules as result_rules_repo
 from app.security.client_ip import get_client_ip
 from app.security.flash import flash_redirect
@@ -53,6 +54,7 @@ from app.services import rmm_agent_uninstall
 from app.services import rmm_automation
 from app.services import rmm_checks
 from app.services import rmm_commands
+from app.services import rmm_live
 from app.services import rmm_remote_control
 from app.services import rmm_script_parser as parser
 from app.services import rmm_script_result_rules
@@ -65,7 +67,7 @@ from app.services import tray as tray_service
 router = APIRouter(tags=["RMM scripts"])
 
 PERMISSION = "menu.rmm_scripts"
-_AGENT_PUBLIC_FIELDS = ("id", "hostname", "os", "os_version", "arch", "agent_version", "shells", "last_seen_utc", "status", "thermal")
+_AGENT_PUBLIC_FIELDS = ("id", "hostname", "os", "os_version", "arch", "agent_version", "shells", "last_seen_utc", "status", "thermal", "live_tools_supported")
 
 
 def _assets_routes():
@@ -192,6 +194,8 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
         "command_languages": rmm_commands.languages_for(agent) if can_run and agent else [],
         "tray_repair": bool(can_run and rmm_tray_repair.supported(agent)),
         "uninstall": bool(can_run and rmm_agent_uninstall.supported(agent)),
+        # Live tools need a connected agent that advertises support.
+        "live_tools": bool(can_run and agent and agent.get("live_tools_supported")),
     }
 
 
@@ -907,6 +911,94 @@ async def abort_run_api(run_id: int, request: Request, asset_id: int | None = Qu
 
 
 # --------------------------------------------------------------------------- #
+# Live tools (terminal, task manager, services, files, registry, disk usage,
+# real-time CPU and memory) served by the agent, no RustDesk or MeshCentral.
+# --------------------------------------------------------------------------- #
+
+
+async def _live_agent(asset_id: int, company_id: int) -> dict[str, Any]:
+    agent = await rmm_repo.get_asset_agent(asset_id)
+    if not agent or int(agent.get("company_id") or 0) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No RMM agent is installed on this device.")
+    return agent
+
+
+@router.get("/rmm/assets/{asset_id:int}/live", response_class=HTMLResponse, summary="Open the live tools page for a device")
+async def live_tools_page(asset_id: int, request: Request):
+    context = await _context(request, write=True, asset_id=asset_id)
+    if isinstance(context, RedirectResponse):
+        return context
+    user, company, company_id, _can_run = context
+    agent = await rmm_repo.get_asset_agent(asset_id)
+    if agent and int(agent.get("company_id") or 0) != int(company_id):
+        agent = None
+    asset = await assets_repo.get_asset_by_id(asset_id)
+    if not asset or int(asset.get("company_id") or 0) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    state = rmm_scripts.agent_state(agent)
+    return await _assets_routes()._main()._render_template(
+        "rmm/live_tools.html",
+        request,
+        user,
+        extra={
+            "title": "Live tools",
+            "company": company,
+            "asset": _serialise(asset),
+            "asset_name": asset.get("name") or f"Asset {asset_id}",
+            "agent_state": state,
+            "agent_os": str((agent or {}).get("os") or "").lower(),
+            "live_supported": bool(agent and agent.get("live_tools_supported")),
+            "agent_version": (agent or {}).get("agent_version"),
+            "recent_sessions": [
+                _serialise(item) for item in await rmm_live_repo.recent_sessions(asset_id, limit=10)
+            ],
+            "is_super_admin": bool(user.get("is_super_admin")),
+        },
+    )
+
+
+@router.post("/api/rmm/assets/{asset_id:int}/live-session", summary="Start a live tools session on a device")
+async def start_live_session_api(asset_id: int, request: Request):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
+    agent = await _live_agent(asset_id, company_id)
+    if rmm_scripts.agent_state(agent) != "connected":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The RMM agent is not connected right now.")
+    try:
+        started = await rmm_live.start_session(
+            agent={**agent, "company_id": int(company_id), "asset_id": asset_id},
+            company_id=int(company_id),
+            asset_id=asset_id,
+            requested_by_user_id=user.get("id"),
+        )
+    except rmm_live.LiveToolsUnsupported as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await audit_service.record(
+        action="rmm.live.start",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="asset",
+        entity_id=asset_id,
+        metadata={"company_id": company_id, "session_id": started.session_id},
+    )
+    return {
+        "session_id": started.session_id,
+        "token": started.browser_token,
+        "ws_url": f"/ws/rmm/live/{started.session_id}",
+        "expires_at": started.expires_at.isoformat(),
+    }
+
+
+@router.post("/api/rmm/assets/{asset_id:int}/live-session/{session_id:int}/close", summary="Close a live tools session")
+async def close_live_session_api(asset_id: int, session_id: int, request: Request):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True, asset_id=asset_id)
+    session = await rmm_live_repo.get_session(session_id)
+    if not session or int(session.get("asset_id") or 0) != asset_id or int(session.get("company_id") or 0) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    await rmm_live.close_session(session_id, f"closed by {user.get('email') or 'technician'}")
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
 # Agent API
 # --------------------------------------------------------------------------- #
 
@@ -948,6 +1040,7 @@ class AgentDetails(BaseModel):
     script_files_supported: bool | None = None
     run_anyway_supported: bool | None = None
     run_as_user_supported: bool | None = None
+    live_tools_supported: bool | None = None
     thermal: ThermalSnapshot | None = None
 
 
