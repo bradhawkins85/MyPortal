@@ -39,6 +39,12 @@
   }
 
   /* ----- WebSocket RPC client ----- */
+  const HELLO_RETRY_MS = 3000;
+  const HANDSHAKE_TIMEOUT_MS = 60000;
+  class RequestTimeout extends Error {
+    constructor() { super('The device did not respond in time.'); }
+  }
+
   function createClient() {
     let socket = null;
     let seq = 0;
@@ -56,17 +62,38 @@
         try { handler(data); } catch (err) { /* keep other listeners alive */ }
       });
     }
-    function request(op, args) {
+    function request(op, args, timeoutMs) {
       return new Promise((resolve, reject) => {
         if (!socket || socket.readyState !== WebSocket.OPEN) {
-          reject(new Error('Not connected to the device.'));
+          reject(new Error('Not connected to the device. Select Connect to start a live session.'));
           return;
         }
         seq += 1;
         const id = 'c' + seq;
-        pending.set(id, { resolve, reject });
+        let timer = null;
+        const settle = (fn) => (value) => { if (timer) clearTimeout(timer); fn(value); };
+        pending.set(id, { resolve: settle(resolve), reject: settle(reject) });
+        if (timeoutMs) {
+          timer = setTimeout(() => {
+            if (pending.delete(id)) reject(new RequestTimeout());
+          }, timeoutMs);
+        }
         socket.send(JSON.stringify({ id: id, op: op, args: args || {} }));
       });
+    }
+    /* The agent dials in only after its job poll hears about the session, and
+       a Redis relay drops frames sent before the agent is listening. Repeat
+       the (idempotent) hello until the agent answers or we give up. */
+    async function handshake() {
+      const deadline = Date.now() + HANDSHAKE_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        try {
+          return await request('hello', {}, HELLO_RETRY_MS);
+        } catch (err) {
+          if (!(err instanceof RequestTimeout)) throw err;
+        }
+      }
+      throw new Error('The device did not answer. Check the RMM agent is running and connected, then try again.');
     }
     function send(op, args) {
       if (socket && socket.readyState === WebSocket.OPEN) {
@@ -120,11 +147,12 @@
       }
       if (socket) { try { socket.close(); } catch (e) { /* ignore */ } }
     }
-    return { on, request, send, connect, close, state };
+    return { on, request, send, connect, handshake, close, state };
   }
 
   const client = createClient();
   let hello = null;
+  let ready = false;
   const views = [];
 
   /* ----- Connect / disconnect ----- */
@@ -145,24 +173,33 @@
     if (connectBtn) connectBtn.disabled = true;
     try {
       await client.connect();
-      hello = await client.request('hello');
+      setConnection('Waiting for the device…', 'warning');
+      hello = await client.handshake();
+      ready = true;
       setConnection('Connected', 'success');
       if (connectBtn) connectBtn.hidden = true;
       if (disconnectBtn) disconnectBtn.hidden = false;
-      el('[data-live-os]').textContent = hello.os + ' · ' + hello.arch + ' · agent ' + hello.version;
+      const osNames = { windows: 'Windows', linux: 'Linux', darwin: 'macOS' };
+      el('[data-live-os]').textContent = (osNames[hello.os] || hello.os) + ' · ' + hello.arch + ' · agent ' + hello.version;
       els('[data-live-windows-only]').forEach((node) => { node.hidden = (hello.os !== 'windows'); });
       views.forEach((view) => view.onConnect && view.onConnect(hello));
       activateTab(currentTab);
     } catch (err) {
+      ready = false;
+      client.close();
       setConnection('Not connected', 'neutral');
       showError(err.message);
       if (connectBtn) { connectBtn.hidden = false; connectBtn.disabled = false; }
     }
   }
   function disconnect() {
+    ready = false;
     client.close();
   }
   client.on('close', () => {
+    const wasReady = ready;
+    ready = false;
+    if (wasReady) showError('The live session ended. Select Connect to start a new one.');
     setConnection('Not connected', 'neutral');
     if (connectBtn) { connectBtn.hidden = false; connectBtn.disabled = false; }
     if (disconnectBtn) disconnectBtn.hidden = true;
@@ -185,6 +222,7 @@
       tab.setAttribute('aria-current', active ? 'true' : 'false');
     });
     els('[data-live-panel]').forEach((panel) => { panel.hidden = panel.dataset.livePanel !== name; });
+    if (!ready) return;
     views.forEach((view) => { if (view.tab === name && view.onShow) view.onShow(); });
   }
   els('[data-live-tab]').forEach((tab) => tab.addEventListener('click', () => activateTab(tab.dataset.liveTab)));
@@ -258,6 +296,8 @@
   initRegistry(client, views, { el, els, openPrompt, confirmAction });
 
   if (!canStart && workspace) workspace.hidden = true;
+  // Opening the page is the request to connect; start straight away.
+  if (canStart) connect();
 
   /* =====================================================================
      Overview — real-time CPU, memory and network
@@ -844,8 +884,8 @@
         if (item.skipped) { const note = document.createElement('span'); note.className = 'text-muted'; note.textContent = ' — ' + item.skipped; name.appendChild(note); }
         tr.appendChild(name);
         const size = document.createElement('td'); size.className = 'rmm-live__num'; size.textContent = h.fmtBytes(item.size); tr.appendChild(size);
-        const bar = document.createElement('td'); bar.className = 'rmm-live__bar-col';
-        bar.innerHTML = '<span class="rmm-live__bar" style="--pct:' + (item.percent || 0).toFixed(1) + '"></span><span class="rmm-live__bar-label">' + (item.percent || 0).toFixed(1) + '%</span>';
+        const bar = document.createElement('td'); bar.className = 'rmm-live__share-col';
+        bar.innerHTML = '<span class="rmm-live__share" style="--pct:' + (item.percent || 0).toFixed(1) + '"></span><span class="rmm-live__share-label">' + (item.percent || 0).toFixed(1) + '%</span>';
         tr.appendChild(bar);
         const items = document.createElement('td'); items.className = 'rmm-live__num';
         items.textContent = item.type === 'dir' ? (item.files + ' files') : ''; tr.appendChild(items);
