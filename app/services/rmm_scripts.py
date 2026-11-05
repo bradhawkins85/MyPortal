@@ -641,6 +641,23 @@ def notify_agent(agent_id: int) -> None:
         event.set()
 
 
+# Extra job-poll payloads (e.g. live tools sessions) plug in here so this
+# module does not import feature services. A provider maps a response key to a
+# coroutine returning that agent's items; watchers wake long-polls when items
+# are requested from another worker.
+_poll_providers: dict[str, Any] = {}
+_poll_watchers: list[Any] = []
+_poll_unwatchers: list[Any] = []
+
+
+def register_poll_provider(key: str, provider, *, watch=None, unwatch=None) -> None:
+    _poll_providers[key] = provider
+    if watch is not None:
+        _poll_watchers.append(watch)
+    if unwatch is not None:
+        _poll_unwatchers.append(unwatch)
+
+
 def device_problem(script: Mapping[str, Any], agent: Mapping[str, Any]) -> str | None:
     """Why ``script`` cannot run on ``agent``'s device, or ``None`` when it can."""
 
@@ -927,6 +944,7 @@ def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[st
         "script_files_supported": bool(payload.get("script_files_supported")) if payload.get("agent_version") is not None else payload.get("script_files_supported"),
         "run_anyway_supported": bool(payload.get("run_anyway_supported")) if payload.get("agent_version") is not None else payload.get("run_anyway_supported"),
         "run_as_user_supported": bool(payload.get("run_as_user_supported")) if payload.get("agent_version") is not None else payload.get("run_as_user_supported"),
+        "live_tools_supported": bool(payload.get("live_tools_supported")) if payload.get("agent_version") is not None else payload.get("live_tools_supported"),
         "shells": (str(shells).strip()[:255] or None) if shells else None,
         "last_ip": (client_ip or "")[:64] or None,
     }
@@ -1241,6 +1259,10 @@ async def poll_jobs(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max(0.0, min(float(wait_seconds), POLL_WAIT_SECONDS))
     event = _agent_events.setdefault(agent_id, asyncio.Event())
+    # Other work the poll also delivers and wakes on, such as live tools
+    # sessions, registers a provider that returns items for this agent.
+    for start_watcher in _poll_watchers:
+        start_watcher(agent_id)
     try:
         while True:
             event.clear()
@@ -1249,9 +1271,12 @@ async def poll_jobs(
             _queue_seen[agent_id] = _queue_states.get(agent_id)
             jobs = await claim_jobs(agent)
             stop = await rmm_repo.stopped_agent_runs(agent_id, executing) if executing else []
+            extra: dict[str, Any] = {}
+            for key, provider in _poll_providers.items():
+                extra[key] = await provider(agent)
             remaining = deadline - loop.time()
-            if jobs or stop or remaining <= 0:
-                return {"jobs": jobs, "stop": stop}
+            if jobs or stop or any(extra.values()) or remaining <= 0:
+                return {"jobs": jobs, "stop": stop, **extra}
             _ensure_queue_watcher()
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(event.wait(), timeout=remaining)
@@ -1259,6 +1284,8 @@ async def poll_jobs(
         if _agent_events.get(agent_id) is event and not event.is_set():
             _agent_events.pop(agent_id, None)
             _queue_seen.pop(agent_id, None)
+            for stop_watcher in _poll_unwatchers:
+                stop_watcher(agent_id)
 
 
 async def wait_for_jobs(agent: Mapping[str, Any], *, wait_seconds: float) -> list[dict[str, Any]]:

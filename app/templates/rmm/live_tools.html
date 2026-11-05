@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% import "rmm/_macros.html" as rmm %}
+{% block title %}Live tools · {{ asset_name }}{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">
+  <link rel="stylesheet" href="{{ static_url('/static/vendor/xterm/xterm-5.5.0.css') }}">
+  <link rel="stylesheet" href="{{ static_url('/static/css/rmm_live.css') }}">
+{% endblock %}
+{% block header_title %}<span class="header__title-text">Live tools</span><span class="header__title-meta">{{ asset_name }}</span>{% endblock %}
+{% block header_actions %}
+  {% set actions = [] %}
+  {% set _ = actions.append({"label": "Back to device", "type": "link", "href": "/assets/" ~ asset.id}) %}
+  {% set _ = actions.append({"label": "Scripts", "type": "link", "href": "/rmm/scripts"}) %}
+  {{ page_header_actions(actions, menu_id="rmm-live-actions") }}
+{% endblock %}
+{% block content %}
+<section class="rmm-live" data-rmm-live
+         data-asset-id="{{ asset.id }}"
+         data-asset-name="{{ asset_name }}"
+         data-agent-os="{{ agent_os }}"
+         data-agent-state="{{ agent_state }}"
+         data-live-supported="{{ 'true' if live_supported else 'false' }}">
+  {% include "partials/csrf.html" %}
+
+  <div class="rmm-live__bar">
+    <div class="rmm-live__status">
+      <span class="status status--neutral" data-live-connection>Not connected</span>
+      <span class="rmm-live__host" data-live-host>{{ asset_name }}</span>
+      <span class="rmm-live__meta" data-live-os></span>
+    </div>
+    <div class="rmm-live__bar-actions">
+      <button type="button" class="button button--primary" data-live-connect hidden>Connect</button>
+      <button type="button" class="button button--secondary" data-live-disconnect hidden>Disconnect</button>
+    </div>
+  </div>
+
+  {% if agent_state != 'connected' %}
+    <p class="alert alert--warning" role="status" data-live-offline>
+      The RMM agent on this device is not connected right now, so live tools cannot start. It needs the agent
+      installed and checking in. <a href="/assets/{{ asset.id }}#scripts">Open the device's Scripts section</a>.
+    </p>
+  {% elif not live_supported %}
+    <p class="alert alert--warning" role="status" data-live-unsupported>
+      This device's RMM agent ({{ agent_version or 'unknown version' }}) does not support live tools yet.
+      Upgrade the agent from the device's <a href="/assets/{{ asset.id }}#scripts">Scripts section</a>.
+    </p>
+  {% endif %}
+
+  <p class="rmm-live__error alert alert--error" role="alert" data-live-error hidden></p>
+
+  <div class="rmm-live__layout" data-live-workspace{% if agent_state != 'connected' or not live_supported %} hidden{% endif %}>
+    <nav class="rmm-live__nav" aria-label="Live tools" data-live-nav>
+      <button type="button" class="rmm-live__tab" data-live-tab="overview" aria-current="true">Overview</button>
+      <button type="button" class="rmm-live__tab" data-live-tab="terminal">Terminal</button>
+      <button type="button" class="rmm-live__tab" data-live-tab="processes">Task manager</button>
+      <button type="button" class="rmm-live__tab" data-live-tab="services">Services</button>
+      <button type="button" class="rmm-live__tab" data-live-tab="files">Files</button>
+      <button type="button" class="rmm-live__tab" data-live-tab="diskusage">Disk usage</button>
+      <button type="button" class="rmm-live__tab" data-live-tab="registry" data-live-windows-only hidden>Registry</button>
+    </nav>
+
+    <div class="rmm-live__panels">
+      {# Overview: real-time CPU, memory and network #}
+      <section class="rmm-live__panel" data-live-panel="overview" aria-label="Overview">
+        <div class="rmm-live__meters">
+          <div class="rmm-live__meter">
+            <h3>CPU</h3>
+            <div class="rmm-live__gauge" data-live-cpu-gauge><span data-live-cpu-value>—</span></div>
+            <div class="rmm-live__cores" data-live-cores></div>
+          </div>
+          <div class="rmm-live__meter">
+            <h3>Memory</h3>
+            <div class="rmm-live__gauge" data-live-mem-gauge><span data-live-mem-value>—</span></div>
+            <p class="rmm-live__meter-note" data-live-mem-note></p>
+          </div>
+          <div class="rmm-live__meter">
+            <h3>Swap / page file</h3>
+            <div class="rmm-live__gauge" data-live-swap-gauge><span data-live-swap-value>—</span></div>
+            <p class="rmm-live__meter-note" data-live-swap-note></p>
+          </div>
+        </div>
+        <dl class="rmm-live__stats">
+          <div><dt>Network in</dt><dd data-live-net-rx>—</dd></div>
+          <div><dt>Network out</dt><dd data-live-net-tx>—</dd></div>
+          <div><dt>Processes</dt><dd data-live-proc-count>—</dd></div>
+          <div><dt>Uptime</dt><dd data-live-uptime>—</dd></div>
+        </dl>
+        <canvas class="rmm-live__chart" data-live-chart height="120" aria-hidden="true"></canvas>
+      </section>
+
+      {# Terminal #}
+      <section class="rmm-live__panel" data-live-panel="terminal" aria-label="Terminal" hidden>
+        <div class="rmm-live__toolbar">
+          <label class="visually-hidden" for="live-shell">Shell</label>
+          <select id="live-shell" class="form-input form-input--compact" data-live-shell></select>
+          <button type="button" class="button button--secondary button--small" data-live-term-new>New terminal</button>
+          <div class="rmm-live__tabs" role="tablist" aria-label="Open terminals" data-live-term-tabs></div>
+        </div>
+        <div class="rmm-live__term" data-live-term-host></div>
+        <p class="rmm-live__hint">Each terminal runs as the agent account (SYSTEM / root). Closing the tab ends the shell.</p>
+      </section>
+
+      {# Task manager #}
+      <section class="rmm-live__panel" data-live-panel="processes" aria-label="Task manager" hidden>
+        <div class="rmm-live__toolbar">
+          <input type="search" class="form-input form-input--compact" placeholder="Filter processes…" data-live-proc-filter aria-label="Filter processes">
+          <label class="rmm-live__check"><input type="checkbox" data-live-proc-auto checked> Auto-refresh</label>
+          <button type="button" class="button button--secondary button--small" data-live-proc-refresh>Refresh</button>
+        </div>
+        <div class="rmm-live__table-wrap">
+          <table class="table rmm-live__table" data-live-proc-table>
+            <thead><tr>
+              <th data-live-sort="name">Name</th>
+              <th data-live-sort="pid">PID</th>
+              <th data-live-sort="user">User</th>
+              <th data-live-sort="cpu_percent" class="rmm-live__num">CPU %</th>
+              <th data-live-sort="memory_bytes" class="rmm-live__num">Memory</th>
+              <th class="rmm-live__num">Threads</th>
+              <th></th>
+            </tr></thead>
+            <tbody data-live-proc-body><tr><td colspan="7" class="text-muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      {# Services #}
+      <section class="rmm-live__panel" data-live-panel="services" aria-label="Services" hidden>
+        <div class="rmm-live__toolbar">
+          <input type="search" class="form-input form-input--compact" placeholder="Filter services…" data-live-svc-filter aria-label="Filter services">
+          <button type="button" class="button button--secondary button--small" data-live-svc-refresh>Refresh</button>
+        </div>
+        <div class="rmm-live__table-wrap">
+          <table class="table rmm-live__table" data-live-svc-table>
+            <thead><tr>
+              <th>Service</th><th>Status</th><th>Start</th><th>Account</th><th></th>
+            </tr></thead>
+            <tbody data-live-svc-body><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      {# File browser #}
+      <section class="rmm-live__panel" data-live-panel="files" aria-label="Files" hidden>
+        <div class="rmm-live__toolbar">
+          <select class="form-input form-input--compact" data-live-fs-roots aria-label="Drive or root"></select>
+          <input type="text" class="form-input rmm-live__path" data-live-fs-path aria-label="Path" placeholder="/path/to/folder">
+          <button type="button" class="button button--secondary button--small" data-live-fs-go>Go</button>
+          <button type="button" class="button button--secondary button--small" data-live-fs-up>Up</button>
+          <button type="button" class="button button--secondary button--small" data-live-fs-mkdir>New folder</button>
+          <label class="button button--secondary button--small rmm-live__upload">Upload<input type="file" data-live-fs-upload hidden></label>
+        </div>
+        <p class="rmm-live__progress" data-live-fs-progress hidden></p>
+        <div class="rmm-live__table-wrap">
+          <table class="table rmm-live__table" data-live-fs-table>
+            <thead><tr><th>Name</th><th class="rmm-live__num">Size</th><th>Modified</th><th></th></tr></thead>
+            <tbody data-live-fs-body><tr><td colspan="4" class="text-muted">Choose a drive or enter a path.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      {# Disk usage (gncdu-style) #}
+      <section class="rmm-live__panel" data-live-panel="diskusage" aria-label="Disk usage" hidden>
+        <div class="rmm-live__toolbar">
+          <select class="form-input form-input--compact" data-live-du-roots aria-label="Drive or root"></select>
+          <input type="text" class="form-input rmm-live__path" data-live-du-path aria-label="Folder to scan" placeholder="/ or C:\">
+          <label class="rmm-live__check"><input type="checkbox" data-live-du-samefs checked> Stay on this drive</label>
+          <button type="button" class="button button--primary button--small" data-live-du-scan>Scan</button>
+          <button type="button" class="button button--secondary button--small" data-live-du-cancel hidden>Cancel</button>
+        </div>
+        <p class="rmm-live__progress" data-live-du-progress hidden></p>
+        <nav class="rmm-live__crumbs" data-live-du-crumbs aria-label="Scanned folder"></nav>
+        <div class="rmm-live__table-wrap">
+          <table class="table rmm-live__table" data-live-du-table>
+            <thead><tr><th>Name</th><th class="rmm-live__num">Size</th><th class="rmm-live__bar-col">Share</th><th class="rmm-live__num">Items</th><th></th></tr></thead>
+            <tbody data-live-du-body><tr><td colspan="5" class="text-muted">Scan a drive or folder to find what is using space.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      {# Registry (Windows only) #}
+      <section class="rmm-live__panel" data-live-panel="registry" aria-label="Registry" hidden>
+        <div class="rmm-live__toolbar">
+          <input type="text" class="form-input rmm-live__path" data-live-reg-path aria-label="Registry key" placeholder="HKLM\SOFTWARE\…">
+          <button type="button" class="button button--secondary button--small" data-live-reg-go>Open</button>
+          <button type="button" class="button button--secondary button--small" data-live-reg-up>Up</button>
+          <button type="button" class="button button--secondary button--small" data-live-reg-newkey>New key</button>
+          <button type="button" class="button button--secondary button--small" data-live-reg-newvalue>New value</button>
+        </div>
+        <div class="rmm-live__reg">
+          <div class="rmm-live__table-wrap">
+            <table class="table rmm-live__table" data-live-reg-keys>
+              <thead><tr><th>Keys</th></tr></thead>
+              <tbody data-live-reg-keys-body><tr><td class="text-muted">Open a hive to begin.</td></tr></tbody>
+            </table>
+          </div>
+          <div class="rmm-live__table-wrap">
+            <table class="table rmm-live__table" data-live-reg-values>
+              <thead><tr><th>Value</th><th>Type</th><th>Data</th><th></th></tr></thead>
+              <tbody data-live-reg-values-body><tr><td colspan="4" class="text-muted">—</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  {% if recent_sessions %}
+  <details class="rmm-live__history">
+    <summary>Recent live sessions <span class="text-muted">· {{ recent_sessions | length }}</span></summary>
+    <div class="rmm-live__table-wrap"><table class="table">
+      <thead><tr><th>Started</th><th>By</th><th>Status</th><th>Ended</th></tr></thead>
+      <tbody>
+        {% for s in recent_sessions %}
+        <tr>
+          <td>{% if s.created_at %}<span data-utc="{{ s.created_at }}">{{ s.created_at }}</span>{% else %}—{% endif %}</td>
+          <td>{{ s.requested_by_email or '—' }}</td>
+          <td>{{ s.status | title }}{% if s.close_reason %} <span class="text-muted">({{ s.close_reason }})</span>{% endif %}</td>
+          <td>{% if s.closed_at %}<span data-utc="{{ s.closed_at }}">{{ s.closed_at }}</span>{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+  </details>
+  {% endif %}
+</section>
+
+<div class="modal" id="live-prompt" role="dialog" aria-modal="true" aria-labelledby="live-prompt-title" hidden>
+  <div class="modal__backdrop" data-live-prompt-cancel></div>
+  <div class="modal__dialog">
+    <header class="modal__header"><h2 class="modal__title" id="live-prompt-title" data-live-prompt-title>Edit</h2></header>
+    <form class="modal__body" data-live-prompt-form>
+      <p data-live-prompt-message></p>
+      <div data-live-prompt-fields></div>
+      <p class="form-error" data-live-prompt-error hidden></p>
+    </form>
+    <footer class="modal__footer">
+      <button type="button" class="button button--secondary" data-live-prompt-cancel>Cancel</button>
+      <button type="button" class="button button--primary" data-live-prompt-ok>Save</button>
+    </footer>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ static_url('/static/vendor/xterm/xterm-5.5.0.js') }}" defer></script>
+  <script src="{{ static_url('/static/vendor/xterm/xterm-addon-fit-0.10.0.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/rmm_live.js') }}" defer></script>
+{% endblock %}
