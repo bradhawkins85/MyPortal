@@ -41,6 +41,9 @@ var (
 	notificationActionBaseURL string
 	notificationActionMu      sync.Mutex
 	notificationActions       = map[string]notificationAction{}
+
+	announcedChatRoomsMu sync.Mutex
+	announcedChatRooms   = map[int]bool{}
 )
 
 type notificationAction struct {
@@ -48,29 +51,63 @@ type notificationAction struct {
 	ExpiresAt time.Time
 }
 
+// handleChatOpen runs when a technician starts a chat.  The chat window and
+// the notification wait until the technician has written something: a chat
+// started without a first message is announced by the first chat_message
+// instead, so the user is never shown an empty conversation.
 func handleChatOpen(payload chatOpenPayload) {
-	actionURL := registerChatOpenAction(payload.RoomID)
-	if actionURL == "" {
-		logger.Warn("handleChatOpen: could not register chat notification action for room_id=%d", payload.RoomID)
+	if strings.TrimSpace(payload.Message) == "" {
+		logger.Info("handleChatOpen: room_id=%d has no message yet; waiting for the technician's first message", payload.RoomID)
+		return
 	}
-
-	if chatURL := chatOpenURL(payload.RoomID); chatURL != "" {
-		go openChatWindowFunc(chatURL, gConfig)
+	if !markChatRoomAnnounced(payload.RoomID) {
+		return
 	}
-
 	title, body := chatNotificationText(payload)
-	showChatSessionNotificationFunc(title, body, actionURL)
+	announceChatRoom(payload.RoomID, title, body)
 }
 
 func handleChatMessage(payload chatMessagePayload) {
-	// Incoming chat replies should open or focus the tray chat window without
-	// also displaying a desktop popup. The chat window itself is the active
-	// conversation surface and continues polling the room while open. Closed
-	// rooms are rejected by the popup/token endpoints so stale messages do not
-	// create a fresh "Chat from <device>" room.
+	// The first technician message in a room opens the chat window and shows
+	// a notification.  Later replies only open or focus the chat window: it is
+	// the active conversation surface and keeps polling the room while open.
+	// Closed rooms are rejected by the popup/token endpoints so stale messages
+	// do not create a fresh "Chat from <device>" room.
+	if markChatRoomAnnounced(payload.RoomID) {
+		title, body := chatMessageNotificationText(payload)
+		announceChatRoom(payload.RoomID, title, body)
+		return
+	}
 	if chatURL := chatOpenURL(payload.RoomID); chatURL != "" {
 		go openChatWindowFunc(chatURL, gConfig)
 	}
+}
+
+func announceChatRoom(roomID int, title, body string) {
+	chatURL := chatOpenURL(roomID)
+	if chatURL == "" {
+		// The portal refused a token (for example, the room was closed), so
+		// there is no chat to show.
+		return
+	}
+	actionURL := registerChatOpenAction(roomID)
+	if actionURL == "" {
+		logger.Warn("announceChatRoom: could not register chat notification action for room_id=%d", roomID)
+	}
+	go openChatWindowFunc(chatURL, gConfig)
+	showChatSessionNotificationFunc(title, body, actionURL)
+}
+
+// markChatRoomAnnounced records that roomID has been announced to the user and
+// reports whether this call was the first to do so.
+func markChatRoomAnnounced(roomID int) bool {
+	announcedChatRoomsMu.Lock()
+	defer announcedChatRoomsMu.Unlock()
+	if announcedChatRooms[roomID] {
+		return false
+	}
+	announcedChatRooms[roomID] = true
+	return true
 }
 
 func chatNotificationText(payload chatOpenPayload) (string, string) {
@@ -88,6 +125,22 @@ func chatNotificationText(payload chatOpenPayload) (string, string) {
 		body += ": " + subject
 	}
 	if message != "" {
+		body += "\n" + message
+	}
+	return title, body
+}
+
+func chatMessageNotificationText(payload chatMessagePayload) (string, string) {
+	sender := strings.TrimSpace(payload.Sender)
+	if sender == "" {
+		sender = "A technician"
+	}
+	title := "New MyPortal chat"
+	body := sender + " sent you a message"
+	if subject := strings.TrimSpace(payload.Subject); subject != "" {
+		body += ": " + subject
+	}
+	if message := summarizeChatMessage(payload.Message); message != "" {
 		body += "\n" + message
 	}
 	return title, body
