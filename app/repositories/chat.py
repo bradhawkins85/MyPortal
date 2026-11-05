@@ -317,7 +317,7 @@ async def add_participant(
 
 _MESSAGES_SELECT_MYSQL = """
     SELECT m.id, m.room_id, m.matrix_event_id, m.sender_matrix_id, m.sender_user_id,
-           m.body, m.msgtype, m.sent_at, m.redacted_at,
+           m.body, m.msgtype, m.media_json, m.sent_at, m.redacted_at,
            COALESCE(
                NULLIF(m.sender_display_name, ''),
                NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), '')
@@ -328,7 +328,7 @@ _MESSAGES_SELECT_MYSQL = """
 
 _MESSAGES_SELECT_SQLITE = """
     SELECT m.id, m.room_id, m.matrix_event_id, m.sender_matrix_id, m.sender_user_id,
-           m.body, m.msgtype, m.sent_at, m.redacted_at,
+           m.body, m.msgtype, m.media_json, m.sent_at, m.redacted_at,
            COALESCE(
                NULLIF(m.sender_display_name, ''),
                NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '')
@@ -373,6 +373,15 @@ async def get_messages(
     return [normalise_agent_message(r) for r in rows]
 
 
+async def get_room_message(room_id: int, message_id: int) -> dict[str, Any] | None:
+    """Return one visible message, only when it belongs to ``room_id``."""
+    row = await db.fetch_one(
+        "SELECT * FROM chat_messages WHERE id = %s AND room_id = %s AND redacted_at IS NULL",
+        (message_id, room_id),
+    )
+    return dict(row) if row else None
+
+
 async def get_message_by_event_id(matrix_event_id: str) -> dict[str, Any] | None:
     row = await db.fetch_one(
         "SELECT * FROM chat_messages WHERE matrix_event_id = %s",
@@ -391,6 +400,7 @@ async def add_message(
     sender_user_id: int | None = None,
     sender_display_name: str | None = None,
     sent_at: datetime | None = None,
+    media_json: str | None = None,
 ) -> dict[str, Any]:
     if sent_at is None:
         sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -399,10 +409,10 @@ async def add_message(
         msg_id = await db.execute_returning_lastrowid(
             """INSERT OR IGNORE INTO chat_messages
                (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
-                sender_display_name, body, msgtype, sent_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                sender_display_name, body, msgtype, sent_at, media_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
-             sender_display_name, body, msgtype, sent_at),
+             sender_display_name, body, msgtype, sent_at, media_json),
         )
         if msg_id:
             row = await db.fetch_one("SELECT * FROM chat_messages WHERE id = ?", (msg_id,))
@@ -415,10 +425,10 @@ async def add_message(
         msg_id = await db.execute_returning_lastrowid(
             """INSERT IGNORE INTO chat_messages
                (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
-                sender_display_name, body, msgtype, sent_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                sender_display_name, body, msgtype, sent_at, media_json)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
-             sender_display_name, body, msgtype, sent_at),
+             sender_display_name, body, msgtype, sent_at, media_json),
         )
         if msg_id:
             row = await db.fetch_one("SELECT * FROM chat_messages WHERE id = %s", (msg_id,))

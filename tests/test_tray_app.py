@@ -1533,12 +1533,12 @@ def test_tray_chat_start_auto_assigns_created_room():
     assert "handle_technician_takeover(room_id, user_id)" in source
 
 
-def test_empty_chat_message_mentions_matrix_client_app():
+def test_empty_chat_message_wording():
     room_template = Path("app/templates/chat/room.html").read_text()
     popup_template = Path("app/templates/tray/chat_popup.html").read_text()
-    expected = "No messages yet, say hello from your Matrix client app"
-    assert expected in room_template
-    assert expected in popup_template
+    assert "No messages yet, say hello from your Matrix client app" in room_template
+    assert '<div id="chat-empty">No messages yet, say hello</div>' in popup_template
+    assert "Matrix client app" not in popup_template
     assert "No messages yet. Say hello!" not in room_template
     assert "No messages yet. Say hello!" not in popup_template
 
