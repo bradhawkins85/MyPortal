@@ -1637,7 +1637,11 @@ async def _exchange_new_connection_token(
 
 
 async def activate_connection_candidate(company_id: int, connection_id: int) -> dict[str, Any]:
-    return await connection_repo.activate(company_id, connection_id)
+    active = await connection_repo.activate(company_id, connection_id)
+    from app.services import m365_sync_schedule
+
+    await m365_sync_schedule.ensure_sync_tasks_and_refresh(company_id)
+    return active
 
 
 async def rollback_connection(company_id: int) -> dict[str, Any]:

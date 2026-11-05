@@ -1,0 +1,7 @@
+{
+  "guid": "ab235205-b15d-46cf-8830-1d200b1be1ef",
+  "occurred_at": "2026-11-05T23:21Z",
+  "change_type": "Feature",
+  "summary": "When a Microsoft 365 tenant is connected, MyPortal now schedules the daily contact, mailbox and license syncs at random times automatically (and adds any that are missing for tenants already connected), and new scheduled tasks start at a random time of day instead of 2am so you can adjust them as needed.",
+  "content_hash": "432070926bf23dfaca97117b87fe4b62c810ba2697c9fabe6eb6041a4f328292"
+}

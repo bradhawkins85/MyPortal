@@ -5,7 +5,6 @@ import base64
 import hashlib
 from importlib import import_module
 import json
-import random
 import re
 import secrets
 from contextlib import suppress
@@ -206,6 +205,7 @@ from app.services import user_m365_contacts as user_m365_contacts_service
 from app.services import m365_oauth_transactions
 from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
+from app.services import m365_sync_schedule as m365_sync_schedule_service
 from app.services.m365_connection_health import build_connection_health
 from app.repositories import m365_connections as m365_connection_repo
 from app.services import cis_benchmark as cis_benchmark_service
@@ -440,9 +440,7 @@ _PWA_ICON_SOURCES = [
 
 def _random_daily_cron() -> str:
     """Return a randomised daily cron expression (``MM HH * * *``)."""
-    minute = random.randint(0, 59)
-    hour = random.randint(0, 23)
-    return f"{minute} {hour} * * *"
+    return m365_sync_schedule_service.random_daily_cron()
 
 
 def _build_xero_redirect_uri() -> str:
@@ -3434,6 +3432,11 @@ async def on_startup() -> None:
         if migrated:
             log_info("sync_m365_data migration complete", companies_migrated=migrated)
 
+    async def _migrate_and_backfill_m365_sync_tasks() -> None:
+        # Sequential so the backfill sees the split tasks the migration made.
+        await _migrate_sync_m365_data_tasks()
+        await m365_sync_schedule_service.backfill_sync_tasks()
+
     async def _seed_demo_data_once() -> None:
         from app.services import demo_seeding as demo_seeding_service
 
@@ -3451,7 +3454,7 @@ async def on_startup() -> None:
         ("ensure_default_modules", modules_service.ensure_default_modules()),
         ("refresh_all_schedules", automations_service.refresh_all_schedules()),
         ("bootstrap_default_bcp_template", _bootstrap_default_bcp_template()),
-        ("migrate_sync_m365_data_tasks", _migrate_sync_m365_data_tasks()),
+        ("migrate_sync_m365_data_tasks", _migrate_and_backfill_m365_sync_tasks()),
         ("seed_demo_data_once", _seed_demo_data_once()),
     ]
 
@@ -6793,6 +6796,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 company_id=company_id,
             )
     log_info("Microsoft 365 OAuth callback processed", company_id=company_id)
+    await m365_sync_schedule_service.ensure_sync_tasks_and_refresh(company_id)
     asyncio.create_task(
         _best_effort_sync_m365_email_domains(company_id),
         name=f"sync_m365_email_domains_{company_id}",
