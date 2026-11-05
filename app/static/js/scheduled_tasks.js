@@ -1212,6 +1212,14 @@
     return fallback;
   }
 
+  // New tasks start at a random time of day so they do not all run at once;
+  // the technician can change it before saving.
+  function randomDailyCron() {
+    const minute = Math.floor(Math.random() * 60);
+    const hour = Math.floor(Math.random() * 24);
+    return `${minute} ${hour} * * *`;
+  }
+
   function builderToCron(state) {
     const [hour, minute] = (state.time || '00:00').split(':').map((value) => Number(value) || 0);
     switch (state.mode) {
@@ -1544,7 +1552,7 @@
         payloadField.dispatchEvent(new Event('input', { bubbles: true }));
       }
 
-      builder.load(record.cron || defaults[commandField.value] || '0 2 * * *');
+      builder.load(record.cron || defaults[commandField.value] || randomDailyCron());
       activeField.checked = record.active !== false;
       hideField.checked = Boolean(record.exclude_from_calendar);
       const retries = Number(record.max_retries);
