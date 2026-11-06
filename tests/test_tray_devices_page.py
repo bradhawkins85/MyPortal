@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from starlette.requests import Request
@@ -351,10 +351,11 @@ async def test_issue_chat_token_rejects_closed_explicit_room(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_tray_bulk_update_outdated_devices_sends_tray_update_command(monkeypatch):
+async def test_tray_bulk_update_outdated_devices_starts_sequential_rollout(monkeypatch):
     import app.repositories.tray as tray_repo
     from app.services import tray as tray_service
     from app.services import tray_installer as tray_installer_service
+    from app.services import tray_update_rollout as rollout_service
 
     monkeypatch.setattr(
         main, "_require_super_admin_page", AsyncMock(return_value=({"id": 1}, None))
@@ -376,13 +377,10 @@ async def test_tray_bulk_update_outdated_devices_sends_tray_update_command(monke
             ]
         ),
     )
-    monkeypatch.setattr(tray_repo, "get_queued_commands_for_device", AsyncMock(return_value=[]))
-    log_mock = AsyncMock(side_effect=[101, 102])
-    monkeypatch.setattr(tray_repo, "log_command", log_mock)
-    mark_mock = AsyncMock()
-    monkeypatch.setattr(tray_repo, "mark_command_delivered", mark_mock)
-    send_mock = AsyncMock(side_effect=[True, False])
-    monkeypatch.setattr(tray_service, "send_to_device", send_mock)
+    dispatch_mock = AsyncMock()
+    monkeypatch.setattr(tray_service, "dispatch_update_command", dispatch_mock)
+    start_mock = MagicMock(return_value=True)
+    monkeypatch.setattr(rollout_service, "start_rollout", start_mock)
 
     response = await main.admin_tray_bulk_update_outdated_devices(
         _make_request("/admin/tray/devices/bulk-update-outdated")
@@ -391,16 +389,41 @@ async def test_tray_bulk_update_outdated_devices_sends_tray_update_command(monke
     assert response.status_code == 303
     assert response.headers["location"] == "/admin/tray#devices"
     tray_repo.list_devices.assert_awaited_once_with()
-    assert [call.kwargs["device_id"] for call in log_mock.await_args_list] == [1, 3]
-    assert all(call.kwargs["command"] == "update" for call in log_mock.await_args_list)
-    assert all(call.kwargs["status"] == "queued" for call in log_mock.await_args_list)
-    sent = [call.args for call in send_mock.await_args_list]
-    assert sent[0][0] == "u1"
-    assert sent[0][1]["type"] == "update"
-    assert sent[0][1]["command_id"] == 101
-    assert sent[1][0] == "u3"
-    # Only the live delivery is marked delivered; the offline one stays queued.
-    mark_mock.assert_awaited_once_with(101)
+    # The request no longer fans the command out to every device at once.
+    dispatch_mock.assert_not_called()
+    start_mock.assert_called_once()
+    assert [d["id"] for d in start_mock.call_args.args[0]] == [1, 3]
+    assert start_mock.call_args.kwargs["target_version"] == "2.0.0"
+    assert start_mock.call_args.kwargs["initiated_by_user_id"] == 1
+
+
+@pytest.mark.anyio
+async def test_tray_bulk_update_outdated_devices_reports_running_rollout(monkeypatch):
+    import app.repositories.tray as tray_repo
+    from app.services import tray_installer as tray_installer_service
+    from app.services import tray_update_rollout as rollout_service
+
+    monkeypatch.setattr(
+        main, "_require_super_admin_page", AsyncMock(return_value=({"id": 1}, None))
+    )
+    monkeypatch.setattr(
+        tray_installer_service,
+        "get_cached_latest_release_info",
+        lambda: {"version": "2.0.0"},
+    )
+    monkeypatch.setattr(
+        tray_repo,
+        "list_devices",
+        AsyncMock(return_value=[{"id": 1, "device_uid": "u1", "status": "active", "agent_version": "1.0.0"}]),
+    )
+    monkeypatch.setattr(rollout_service, "start_rollout", MagicMock(return_value=False))
+
+    response = await main.admin_tray_bulk_update_outdated_devices(
+        _make_request("/admin/tray/devices/bulk-update-outdated")
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/tray#devices"
 
 
 @pytest.mark.anyio
