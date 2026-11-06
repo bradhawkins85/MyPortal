@@ -322,25 +322,50 @@
       node.classList.toggle('rmm-live__gauge--high', pct >= 90);
       node.classList.toggle('rmm-live__gauge--warn', pct >= 70 && pct < 90);
     }
-    function drawChart() {
-      if (!chart || !chart.getContext) return;
-      const ctx = chart.getContext('2d');
-      const width = chart.width = chart.clientWidth || 600;
-      const height = chart.height;
+    const netChart = h.el('[data-live-net-chart]');
+    const netAxisMax = h.el('[data-live-net-axis-max]');
+    const netAxisMid = h.el('[data-live-net-axis-mid]');
+
+    // Round a byte rate up to 1, 2 or 5 x 10^n of the unit fmtBytes will
+    // show (B, KB, MB…), so the axis reads e.g. "5 MB/s" rather than "4.77 MB/s".
+    function niceCeiling(value) {
+      if (!(value > 0)) return 1024;
+      const unit = Math.pow(1024, Math.min(5, Math.floor(Math.log(value) / Math.log(1024))));
+      const scaled = value / unit;
+      const power = Math.pow(10, Math.floor(Math.log10(scaled)));
+      const step = [1, 2, 5, 10].find((f) => scaled <= f * power);
+      const top = step * power;
+      return (top > 512 ? 1024 : top) * unit;
+    }
+    function plot(canvas, series, maxValue) {
+      if (!canvas || !canvas.getContext) return;
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width = canvas.clientWidth || 600;
+      const height = canvas.height;
       ctx.clearRect(0, 0, width, height);
       if (history.length < 2) return;
-      const styles = getComputedStyle(document.documentElement);
-      const draw = (key, color) => {
-        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+      const styles = getComputedStyle(canvas);
+      const colour = (name, fallback) => (styles.getPropertyValue(name) || fallback).trim();
+      ctx.strokeStyle = colour('--color-border', '#d8dce3');
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, height / 2); ctx.lineTo(width, height / 2); ctx.stroke();
+      series.forEach(([key, token, fallback]) => {
+        ctx.strokeStyle = colour(token, fallback); ctx.lineWidth = 2; ctx.beginPath();
         history.forEach((point, i) => {
           const x = (i / (history.length - 1)) * width;
-          const y = height - (Math.max(0, Math.min(100, point[key])) / 100) * height;
+          const y = height - (Math.max(0, Math.min(maxValue, point[key] || 0)) / maxValue) * height;
           if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
         ctx.stroke();
-      };
-      draw('cpu', (styles.getPropertyValue('--color-primary') || '#4f46e5').trim());
-      draw('mem', (styles.getPropertyValue('--color-success') || '#16a34a').trim());
+      });
+    }
+    function drawChart() {
+      plot(chart, [['cpu', '--color-primary', '#4f46e5'], ['mem', '--color-success', '#16a34a']], 100);
+      const peak = history.reduce((max, p) => Math.max(max, p.rx || 0, p.tx || 0), 0);
+      const top = niceCeiling(peak);
+      if (netAxisMax) netAxisMax.textContent = h.fmtBytes(top) + '/s';
+      if (netAxisMid) netAxisMid.textContent = h.fmtBytes(top / 2) + '/s';
+      plot(netChart, [['rx', '--rmm-live-net-in', '#c084fc'], ['tx', '--rmm-live-net-out', '#fb923c']], top);
     }
     client.on('metrics', (m) => {
       cpuValue.textContent = Math.round(m.cpu_percent) + '%';
@@ -365,7 +390,7 @@
       h.el('[data-live-net-tx]').textContent = h.fmtBytes(m.net_tx_bps) + '/s';
       h.el('[data-live-proc-count]').textContent = m.processes || '—';
       h.el('[data-live-uptime]').textContent = h.fmtDuration(m.uptime_seconds);
-      history.push({ cpu: m.cpu_percent, mem: memPct });
+      history.push({ cpu: m.cpu_percent, mem: memPct, rx: m.net_rx_bps || 0, tx: m.net_tx_bps || 0 });
       if (history.length > 120) history.shift();
       drawChart();
     });
