@@ -8839,6 +8839,7 @@ async def _tray_devices_context(
 ) -> dict[str, Any]:
     from app.repositories import tray as tray_repo
     from app.services import tray_installer as tray_installer_service
+    from app.services import tray_update_rollout as tray_update_rollout_service
 
     devices = await tray_repo.list_devices_with_company(status=(status or None))
     if search:
@@ -8864,6 +8865,7 @@ async def _tray_devices_context(
         "matrix_enabled": settings.matrix_enabled,
         "tray_release": tray_release,
         "outdated_device_count": outdated_device_count,
+        "update_rollout": tray_update_rollout_service.rollout_status(),
     }
 
 
@@ -8955,6 +8957,7 @@ async def admin_tray_bulk_update_outdated_devices(request: Request):
     from app.repositories import tray as tray_repo
     from app.services import tray as tray_service
     from app.services import tray_installer as tray_installer_service
+    from app.services import tray_update_rollout as tray_update_rollout_service
 
     tray_release = tray_installer_service.get_cached_latest_release_info()
     latest_tray_version = tray_release.get("version") if isinstance(tray_release, dict) else None
@@ -8979,31 +8982,25 @@ async def admin_tray_bulk_update_outdated_devices(request: Request):
             "info",
         )
 
-    sent_count = 0
-    queued_count = 0
-    already_queued_count = 0
-    for device in outdated_devices:
-        command_id, delivered = await tray_service.dispatch_update_command(
-            device,
-            initiated_by_user_id=current_user.get("id") if current_user else None,
-            extra_payload={
-                "latest_tray_version": latest_tray_version,
-                "current_agent_version": device.get("agent_version"),
-            },
+    started = tray_update_rollout_service.start_rollout(
+        outdated_devices,
+        target_version=latest_tray_version,
+        initiated_by_user_id=current_user.get("id") if current_user else None,
+        is_outdated=_is_tray_agent_outdated,
+    )
+    if not started:
+        return flash_redirect(
+            "/admin/tray#devices",
+            "An update rollout is already running. Devices are being updated one at a time.",
+            "info",
         )
-        if command_id is None:
-            already_queued_count += 1
-        elif delivered:
-            sent_count += 1
-        else:
-            queued_count += 1
-
-    message = f"Sent the update to {sent_count} outdated tray device(s)."
-    if queued_count:
-        message += f" Queued for {queued_count} offline device(s) until they reconnect."
-    if already_queued_count:
-        message += f" {already_queued_count} already had an update queued."
-    return flash_redirect("/admin/tray#devices", message, "success")
+    count = len(outdated_devices)
+    return flash_redirect(
+        "/admin/tray#devices",
+        f"Updating {count} outdated tray device(s) one at a time. Each device finishes "
+        "before the next one starts; offline devices update when they reconnect.",
+        "success",
+    )
 
 
 @app.post("/admin/tray/devices/{device_id}/revoke", response_class=HTMLResponse)
