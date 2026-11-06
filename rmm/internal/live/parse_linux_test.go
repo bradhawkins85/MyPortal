@@ -61,3 +61,49 @@ func TestMergeSystemdServices(t *testing.T) {
 		t.Fatal("unit name validation")
 	}
 }
+
+func TestParseMountsKeepsOneEntryPerBlockDevice(t *testing.T) {
+	mounts := parseMounts(`/dev/sda2 / ext4 rw 0 0
+proc /proc proc rw 0 0
+tmpfs /run tmpfs rw 0 0
+/dev/sda1 /boot/efi vfat rw 0 0
+/dev/sda2 /var/lib/docker ext4 rw 0 0
+/dev/loop0 /snap/core/1 squashfs ro 0 0
+/dev/sr0 /media/cd iso9660 ro 0 0
+/dev/sdb1 /mnt/My\040Data xfs rw 0 0
+`)
+	want := []mountEntry{
+		{device: "/dev/sda2", mount: "/", fsType: "ext4"},
+		{device: "/dev/sda1", mount: "/boot/efi", fsType: "vfat"},
+		{device: "/dev/sdb1", mount: "/mnt/My Data", fsType: "xfs"},
+	}
+	if len(mounts) != len(want) {
+		t.Fatalf("mounts = %+v", mounts)
+	}
+	for i := range want {
+		if mounts[i] != want[i] {
+			t.Fatalf("mounts[%d] = %+v, want %+v", i, mounts[i], want[i])
+		}
+	}
+}
+
+func TestDiskSpaceCountsReservedAsUsed(t *testing.T) {
+	if disk := diskSpace("/", "", "ext4", 1000, 250); disk.Used != 750 {
+		t.Fatalf("used = %d", disk.Used)
+	}
+	if disk := diskSpace("/", "", "ext4", 100, 200); disk.Used != 0 {
+		t.Fatalf("used = %d", disk.Used)
+	}
+}
+
+func TestReadDisksReportsConsistentSizes(t *testing.T) {
+	disks, err := readDisks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, disk := range disks {
+		if disk.Total == 0 || disk.Used > disk.Total {
+			t.Fatalf("disk = %+v", disk)
+		}
+	}
+}

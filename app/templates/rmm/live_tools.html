@@ -61,7 +61,7 @@
     </nav>
 
     <div class="rmm-live__panels">
-      {# Overview: real-time CPU, memory and network #}
+      {# Overview: real-time CPU, memory, disks and network #}
       <section class="rmm-live__panel" data-live-panel="overview" aria-label="Overview">
         <div class="rmm-live__meters">
           <div class="rmm-live__meter">
@@ -79,6 +79,14 @@
             <div class="rmm-live__gauge" data-live-swap-gauge><span data-live-swap-value>—</span></div>
             <p class="rmm-live__meter-note" data-live-swap-note></p>
           </div>
+          {# One meter per fixed disk is added here from each metrics sample. #}
+          <template data-live-disk-template>
+            <div class="rmm-live__meter" data-live-disk>
+              <h3 data-live-disk-title></h3>
+              <div class="rmm-live__gauge" data-live-disk-gauge><span data-live-disk-value>—</span></div>
+              <p class="rmm-live__meter-note" data-live-disk-note></p>
+            </div>
+          </template>
         </div>
         <dl class="rmm-live__stats">
           <div><dt>Network in</dt><dd data-live-net-rx>—</dd></div>
