@@ -4260,6 +4260,31 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
 .ticket-assets-linked__remote[hidden] { display: none; }
 .ticket-assets-linked__remote.is-error { color: var(--hf-danger); }
 
+/* Close control on the remote control status box (asset and ticket pages). */
+.rmm-remote__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  margin-inline-start: auto;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.rmm-remote__dismiss:hover,
+.rmm-remote__dismiss:focus-visible {
+  border-color: var(--hf-line);
+  opacity: 1;
+}
+
 .ticket-assets-linked__action[disabled],
 .ticket-assets-linked__action[aria-disabled="true"] {
   opacity: 0.45;
