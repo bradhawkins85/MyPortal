@@ -312,6 +312,8 @@
     const swapValue = h.el('[data-live-swap-value]');
     const swapGauge = h.el('[data-live-swap-gauge]');
     const swapNote = h.el('[data-live-swap-note]');
+    const diskTemplate = h.el('[data-live-disk-template]');
+    const diskMeters = new Map();
     const chart = h.el('[data-live-chart]');
     const history = [];
     let running = false;
@@ -321,6 +323,35 @@
       node.style.setProperty('--pct', pct.toFixed(1));
       node.classList.toggle('rmm-live__gauge--high', pct >= 90);
       node.classList.toggle('rmm-live__gauge--warn', pct >= 70 && pct < 90);
+    }
+    // Fixed disks: one gauge each, kept in the agent's order beside swap.
+    // Agents that predate disk reporting send no list and show none.
+    function renderDisks(disks) {
+      if (!diskTemplate || !Array.isArray(disks)) return;
+      const keep = new Set();
+      let after = diskTemplate;
+      disks.forEach((disk) => {
+        if (!disk || !disk.mount || !disk.total) return;
+        keep.add(disk.mount);
+        let meter = diskMeters.get(disk.mount);
+        if (!meter) {
+          meter = diskTemplate.content.firstElementChild.cloneNode(true);
+          diskMeters.set(disk.mount, meter);
+        }
+        if (after.nextElementSibling !== meter) after.after(meter);
+        after = meter;
+        const title = 'Disk ' + disk.mount + (disk.label ? ' (' + disk.label + ')' : '');
+        meter.querySelector('[data-live-disk-title]').textContent = title;
+        meter.title = disk.fs_type ? title + ' · ' + disk.fs_type : title;
+        const pct = (disk.used / disk.total) * 100;
+        meter.querySelector('[data-live-disk-value]').textContent = Math.round(pct) + '%';
+        gauge(meter.querySelector('[data-live-disk-gauge]'), pct);
+        meter.querySelector('[data-live-disk-note]').textContent =
+          h.fmtBytes(disk.used) + ' / ' + h.fmtBytes(disk.total) + ' · ' + h.fmtBytes(disk.total - disk.used) + ' free';
+      });
+      diskMeters.forEach((meter, mount) => {
+        if (!keep.has(mount)) { meter.remove(); diskMeters.delete(mount); }
+      });
     }
     const netChart = h.el('[data-live-net-chart]');
     const netAxisMax = h.el('[data-live-net-axis-max]');
@@ -386,6 +417,7 @@
       swapValue.textContent = m.swap_total ? Math.round(swapPct) + '%' : 'n/a';
       gauge(swapGauge, swapPct);
       swapNote.textContent = m.swap_total ? h.fmtBytes(m.swap_used) + ' / ' + h.fmtBytes(m.swap_total) : 'No swap in use';
+      renderDisks(m.disks);
       h.el('[data-live-net-rx]').textContent = h.fmtBytes(m.net_rx_bps) + '/s';
       h.el('[data-live-net-tx]').textContent = h.fmtBytes(m.net_tx_bps) + '/s';
       h.el('[data-live-proc-count]').textContent = m.processes || '—';

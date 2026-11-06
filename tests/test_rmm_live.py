@@ -212,3 +212,17 @@ async def test_live_tools_trend_chart_plots_network_in_and_out():
     assert "['rx', '--rmm-live-net-in'" in js and "['tx', '--rmm-live-net-out'" in js
     css = (ROOT / "app/static/css/rmm_live.css").read_text()
     assert "--rmm-live-net-in:" in css and "--rmm-live-net-out:" in css
+
+
+@pytest.mark.anyio
+async def test_live_tools_overview_shows_a_gauge_per_fixed_disk():
+    """Fixed disks get a gauge each in the meter row beside swap, filled from
+    the ``disks`` list in every metrics sample; older agents send none."""
+
+    template = (ROOT / "app/templates/rmm/live_tools.html").read_text()
+    meters = template.split('class="rmm-live__meters"', 1)[1].split("</template>", 1)[0]
+    assert "data-live-swap-gauge" in meters and "data-live-disk-template" in meters
+    assert "data-live-disk-gauge" in meters and "data-live-disk-note" in meters
+    js = (ROOT / "app/static/js/rmm_live.js").read_text()
+    assert "renderDisks(m.disks);" in js
+    assert "if (!diskTemplate || !Array.isArray(disks)) return;" in js
