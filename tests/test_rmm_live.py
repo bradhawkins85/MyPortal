@@ -189,10 +189,26 @@ async def test_live_tools_trend_chart_is_titled_and_has_a_legend():
     tell it plotted CPU and memory use or what scale it used."""
 
     template = (ROOT / "app/templates/rmm/live_tools.html").read_text()
-    assert 'aria-labelledby="live-trend-title"' in template
+    assert 'aria-labelledby="live-trend-title live-net-trend-title"' in template
     assert "CPU and memory use, last 2 minutes" in template
     assert "rmm-live__swatch--cpu" in template and "rmm-live__swatch--mem" in template
     assert "<span>100%</span>" in template and "<span>0%</span>" in template
     js = (ROOT / "app/static/js/rmm_live.js").read_text()
     # Line colours must come from the same scoped tokens the legend uses.
-    assert "getComputedStyle(chart)" in js
+    assert "getComputedStyle(canvas)" in js
+
+
+@pytest.mark.anyio
+async def test_live_tools_trend_chart_plots_network_in_and_out():
+    """Network throughput is plotted as separate In and Out lines on its own
+    byte-rate axis, under the CPU and memory chart's 2-minute window."""
+
+    template = (ROOT / "app/templates/rmm/live_tools.html").read_text()
+    assert "Network throughput, last 2 minutes" in template
+    assert "data-live-net-chart" in template and "data-live-net-axis-max" in template
+    assert "rmm-live__swatch--net-in" in template and "rmm-live__swatch--net-out" in template
+    js = (ROOT / "app/static/js/rmm_live.js").read_text()
+    assert "rx: m.net_rx_bps || 0, tx: m.net_tx_bps || 0" in js
+    assert "['rx', '--rmm-live-net-in'" in js and "['tx', '--rmm-live-net-out'" in js
+    css = (ROOT / "app/static/css/rmm_live.css").read_text()
+    assert "--rmm-live-net-in:" in css and "--rmm-live-net-out:" in css
