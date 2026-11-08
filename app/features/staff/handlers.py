@@ -3832,6 +3832,68 @@ async def resume_workflow_execution(execution_id: int, request: Request):
     return JSONResponse(result)
 
 
+def _form_flag(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "on", "yes"}
+
+
+async def _create_staff_without_onboarding(
+    *,
+    company_id: int,
+    acting_user_id: int | None,
+    first_name: str,
+    last_name: str,
+    email: str | None,
+    mobile_phone: str | None,
+    date_onboarded: datetime | None,
+    department: str | None,
+    custom_values: dict[str, Any],
+) -> dict[str, Any]:
+    """Add an existing staff member directly, bypassing approval and onboarding.
+
+    Technicians use this when recording people who already work at the company,
+    so no onboarding request, approval notification or workflow run is created.
+    """
+    if email:
+        for candidate in await staff_repo.list_staff_by_email(email.lower()):
+            if int(candidate.get("company_id") or 0) == int(company_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A staff member with this email address already exists",
+                )
+    now = datetime.now(tz=timezone.utc)
+    created = await staff_repo.create_staff(
+        company_id=company_id,
+        first_name=first_name,
+        last_name=last_name,
+        email=email or "",
+        mobile_phone=mobile_phone,
+        date_onboarded=date_onboarded,
+        department=department,
+        enabled=True,
+        onboarding_status=staff_onboarding_workflow_service.STATE_COMPLETED,
+        onboarding_complete=True,
+        onboarding_completed_at=now,
+        approval_status="approved",
+        approved_by_user_id=acting_user_id,
+        approved_at=now,
+    )
+    staff_id = int(created["id"])
+    if custom_values:
+        await staff_custom_fields_repo.set_staff_field_values_by_name(
+            company_id=company_id,
+            staff_id=staff_id,
+            values=custom_values,
+        )
+    await audit_service.log_action(
+        user_id=acting_user_id,
+        action="staff.created_without_onboarding",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={"company_id": company_id, "onboarding_workflow_skipped": True},
+    )
+    return created
+
+
 async def _resolve_on_behalf_of_staff(
     raw_value: Any, user: Mapping[str, Any], request: Request, company_id: int
 ) -> dict[str, Any] | None:
@@ -3987,6 +4049,25 @@ async def create_staff_member(request: Request):
             custom_values[key] = str(raw_value or "").strip() or None
 
     submitter_id = int(user["id"]) if user.get("id") is not None else None
+    if _form_flag(submitted.get("skip_onboarding_workflow")):
+        if not await main_module._has_admin_technician_access(user, request):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only technicians can add staff without running the onboarding workflow",
+            )
+        await _create_staff_without_onboarding(
+            company_id=company_id,
+            acting_user_id=submitter_id,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            mobile_phone=mobile_phone,
+            date_onboarded=date_onboarded,
+            department=department,
+            custom_values=custom_values,
+        )
+        return RedirectResponse(url="/staff", status_code=status.HTTP_303_SEE_OTHER)
+
     requester_id = submitter_id
     requested_by_name, requested_by_email = (
         staff_onboarding_workflow_service.requested_by_details(user)
