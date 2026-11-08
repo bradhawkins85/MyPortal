@@ -1,0 +1,7 @@
+{
+  "guid": "6afcb691-d037-43d6-9b6a-84643e4f4adb",
+  "occurred_at": "2026-11-08T23:48Z",
+  "change_type": "Improvement",
+  "summary": "The Add staff member form now shows an Email field and treats Mobile phone as optional, and technicians can tick Skip onboarding workflow to add existing staff straight to the list without an approval request or onboarding run.",
+  "content_hash": "3c49c750940a10bb1fad709e56959cb2302d0ac3d27bee6f9c4d8a144d7c41ef"
+}
