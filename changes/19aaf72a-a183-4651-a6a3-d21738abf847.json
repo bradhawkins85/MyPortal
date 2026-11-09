@@ -1,0 +1,7 @@
+{
+  "guid": "19aaf72a-a183-4651-a6a3-d21738abf847",
+  "occurred_at": "2026-11-09T01:02Z",
+  "change_type": "Improvement",
+  "summary": "Microsoft 365 setup is simpler: Grant Microsoft consent now also assigns the Compliance Administrator role and captures Security & Compliance access, so the separate Configure Compliance Administrator and Capture Security & Compliance access buttons are gone, and diagnostics Repair uses the same single sign-in.",
+  "content_hash": "f2cf980e829c51b038f8ea7cde0df1f4971a3280697f4caf44b86ec5adf6af0a"
+}

@@ -210,7 +210,8 @@ PROVISION_SCOPE = (
 # owner of its app registration (required for automatic credential renewal),
 # Directory.Read.All to look up service principals (including the Teams SP for
 # Teams.ManageAsApp grants), and RoleManagement.ReadWrite.Directory to assign the
-# Exchange Administrator and Teams Service Administrator directory roles.
+# Exchange Administrator, Teams Service Administrator and Compliance
+# Administrator directory roles.
 # Using explicit Graph scopes instead of ``/.default`` ensures the admin grants
 # those delegated permissions even if they are not statically configured on the
 # enterprise app registration (Microsoft Entra ID dynamic consent).
@@ -2110,9 +2111,8 @@ def _scc_delegated_reconnect_error(reason: str) -> M365Error:
         "Spam search and purge run under the delegated permissions of the "
         "Microsoft admin who last reconnected this company, not the MyPortal "
         "application. " + reason +
-        " Use the Configure Compliance Administrator action (Microsoft 365 "
-        "settings page) or reconnect from Microsoft 365 settings, sign in "
-        "with an account that is a Compliance Administrator in the customer "
+        " Reconnect from Microsoft 365 settings (Grant Microsoft consent), "
+        "sign in with an account that is a Compliance Administrator in the customer "
         "tenant (eDiscoveryManager membership for search; Search And Purge "
         "for purge), consent to the Security & Compliance permission when "
         "prompted, then retry the request.",
@@ -2759,7 +2759,7 @@ async def _scc_invoke_command(
                 interpretation = (
                     "adminconsenttoken missing = the tenant granted user "
                     "consent, not admin consent; have a Global Administrator "
-                    "re-capture Security & Compliance access or grant admin "
+                    "reconnect the company or grant admin "
                     "consent for the app's Microsoft Exchange Online "
                     "Protection delegated permissions"
                 )

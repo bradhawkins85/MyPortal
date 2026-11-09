@@ -5374,9 +5374,10 @@ async def run_m365_diagnostics_check(request: Request):
         return redirect
     if not user.get("is_super_admin"):
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+    # The diagnostics page recomputes the required-access inventory on load,
+    # so only the stored enterprise-app results need refreshing here.
     try:
         await m365_service.check_enterprise_app_permissions(company_id)
-        await m365_service.diagnose_required_m365_access(company_id)
     except m365_service.M365Error as exc:
         return flash_redirect("/m365/diagnostics", str(exc), "error")
     return flash_redirect("/m365/diagnostics", "Permission check completed", "success")
@@ -5405,26 +5406,12 @@ async def repair_m365_permissions(request: Request):
         # permissions and then return to the diagnostics page.
         credentials = await m365_service.get_credentials(company_id)
         if credentials:
-            redirect_uri = _build_m365_redirect_uri(request)
-            state = await _new_m365_oauth_state(
-                request, company_id=company_id, flow="connect",
-                return_to="diagnostics", tenant_id=credentials["tenant_id"],
-                client_id=credentials["client_id"], redirect_uri=redirect_uri,
+            return await _start_m365_connect_authorize(
+                request,
+                company_id=company_id,
+                credentials=credentials,
+                return_to="diagnostics",
             )
-            params = {
-                "client_id": credentials["client_id"],
-                "response_type": "code",
-                "redirect_uri": redirect_uri,
-                "response_mode": "query",
-                "scope": m365_service.CONNECT_SCOPE,
-                "state": state,
-                "prompt": "consent",
-            }
-            authorize_url = (
-                f"https://login.microsoftonline.com/{credentials['tenant_id']}"
-                f"/oauth2/v2.0/authorize?{urlencode(params)}"
-            )
-            return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
         return flash_redirect("/m365/diagnostics", "No credentials configured", "error")
     except m365_service.M365Error as exc:
         return flash_redirect("/m365/diagnostics", str(exc), "error")
@@ -5660,28 +5647,31 @@ async def sync_m365(request: Request):
     return JSONResponse({"success": True, "mailboxes_synced": mailboxes_synced})
 
 
-@app.get("/m365/connect")
-async def m365_connect(request: Request):
-    user, membership, _, company_id, redirect = await _load_license_context(request)
-    if redirect:
-        return redirect
-    credentials = await m365_service.get_credentials(company_id)
-    if not credentials:
-        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+async def _start_m365_connect_authorize(
+    request: Request,
+    *,
+    company_id: int,
+    credentials: Mapping[str, Any],
+    return_to: str | None = None,
+) -> RedirectResponse:
+    """Redirect to Microsoft for the single connect/repair consent.
+
+    The callback grants missing application permissions, assigns the
+    directory roles MyPortal needs (including Compliance Administrator), and
+    chains the eDiscovery and Security & Compliance consents only when they
+    are still missing.  ``return_to="diagnostics"`` also re-checks
+    permissions and repairs the Purview configuration afterwards.
+    """
     redirect_uri = _build_m365_redirect_uri(request)
-    state_payload = {
+    state_payload: dict[str, Any] = {
         "company_id": company_id,
         "flow": "connect",
         "tenant_id": credentials["tenant_id"],
         "client_id": credentials["client_id"],
         "redirect_uri": redirect_uri,
     }
-    if request.query_params.get("setup") == "compliance_role":
-        state_payload["setup"] = "compliance_role"
-        requested_return = request.query_params.get("return_to", "m365")
-        state_payload["return_to"] = (
-            requested_return if requested_return in {"m365", "diagnostics"} else "m365"
-        )
+    if return_to == "diagnostics":
+        state_payload["return_to"] = "diagnostics"
     state = await _new_m365_oauth_state(request, **state_payload)
     params = {
         "client_id": credentials["client_id"],
@@ -5699,22 +5689,25 @@ async def m365_connect(request: Request):
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.get("/m365/connect/scc")
-async def m365_connect_scc(request: Request):
-    """Start the standalone Security & Compliance consent step.
+@app.get("/m365/connect")
+async def m365_connect(request: Request):
+    """Grant Microsoft consent, or reconnect to repair access.
 
-    Reconnects chain this consent automatically after the main Graph consent
-    (see :func:`_complete_connect_with_scc_consent`).  This endpoint exists so
-    an administrator can capture the consent when a reconnect ended before
-    the second consent screen, or when they denied it the first time.
+    This is the only interactive consent entry point.  Older links that pass
+    ``setup=compliance_role`` still work: the Compliance Administrator role is
+    now assigned by every connect.
     """
     user, membership, _, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
-    requested_return = request.query_params.get("return_to", "m365")
-    destination = "/m365/diagnostics" if requested_return == "diagnostics" else "/m365"
-    return await _start_scc_consent_authorize(
-        request, company_id=company_id, destination=destination
+    credentials = await m365_service.get_credentials(company_id)
+    if not credentials:
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+    return await _start_m365_connect_authorize(
+        request,
+        company_id=company_id,
+        credentials=credentials,
+        return_to=request.query_params.get("return_to"),
     )
 
 
@@ -6192,7 +6185,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             # problem (AADSTS65001, AADSTS700021, ...) that retrying will
             # never fix.  Flash messages are capped at 200 characters, so
             # the base text is kept short and the detail is bounded.
-            aad_detail = " ".join(message.split())[:94]
+            aad_detail = " ".join(message.split())[:92]
             if "AADSTS650057" in message:
                 # The app registration does not list the Purview resource.
                 # A full reconnect adds it (ensure_scc_delegated_permission).
@@ -6202,9 +6195,10 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                     "Reconnect the company to add it, then consent."
                 )
             else:
+                # Reconnecting re-chains this consent whenever it is missing.
                 message = (
                     "Security & Compliance access was not captured; the "
-                    "connection is unaffected; retry the capture. "
+                    "connection is unaffected; reconnect to retry. "
                     f"AAD error: {aad_detail}"
                 )
         if "AADSTS700016" in message:
@@ -6739,36 +6733,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         access_token=None,
         token_expires_at=None,
     )
-    compliance_role_result = None
-    compliance_role_error = None
-    compliance_setup = state_data.get("setup") == "compliance_role"
-    if compliance_setup:
-        if not access_token:
-            compliance_role_error = (
-                "Microsoft did not return the delegated administrator token "
-                "required for Compliance Administrator setup. Reconnect and consent "
-                "RoleManagement.ReadWrite.Directory."
-            )
-        else:
-            try:
-                compliance_role_result = await m365_service.ensure_compliance_administrator_role(
-                    company_id=company_id,
-                    access_token=access_token,
-                )
-            except m365_service.M365Error as exc:
-                compliance_role_error = str(exc)
-                log_error(
-                    "Compliance Administrator remediation failed",
-                    company_id=company_id,
-                    error=str(exc),
-                )
-
-    # Best-effort: grant any newly-required app role assignments (e.g. the
-    # permissions added for mailbox sync) using the admin's delegated token.
-    # This ensures existing deployments pick up new permissions automatically
-    # when an administrator re-runs "Authorize portal access".
-    # The focused Purview remediation intentionally does not grant other API
-    # permissions or administrator roles; those remain separate setup checks.
+    # One consent performs every delegated setup step, so guided setup,
+    # reconnects and diagnostics repair all leave the tenant in the same
+    # state.  Each step is best-effort: a failure is reported, never allowed
+    # to undo the connection that was just authorised.
+    grant_failures: list[str] = []
+    compliance_role_error: str | None = None
     if access_token:
         # The chained Security & Compliance consent requests the Purview
         # ``/.default`` scope, which fails with AADSTS650057 unless the app
@@ -6779,12 +6749,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # in _complete_connect_with_scc_consent grant it.
         await m365_service.ensure_ediscovery_delegated_permission(company_id, access_token)
         await m365_service.ensure_ediscovery_download_permission(company_id, access_token)
-    grant_failures: list[str] = []
-    if access_token and not compliance_setup:
         # List every baseline application permission on the app registration
         # so Entra shows it as configured and admin consent covers it.
         await m365_service.ensure_graph_app_roles_on_manifest(company_id, access_token)
         await m365_service.ensure_exchange_manage_as_app_on_manifest(company_id, access_token)
+        # Grant newly-required application permissions and the Exchange and
+        # Teams administrator roles so existing deployments pick them up.
         new_permissions_granted = await m365_service.try_grant_missing_permissions(
             company_id=company_id,
             access_token=access_token,
@@ -6795,40 +6765,40 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "Granted missing M365 permissions via connect flow",
                 company_id=company_id,
             )
+        # The Purview diagnostics probes run app-only and need Compliance
+        # Administrator (or Exchange Administrator) on the enterprise app.
+        try:
+            await m365_service.ensure_compliance_administrator_role(
+                company_id=company_id,
+                access_token=access_token,
+            )
+        except Exception as exc:  # noqa: BLE001 - must not block the connection
+            compliance_role_error = (
+                str(exc)
+                if isinstance(exc, m365_service.M365Error)
+                else "Compliance Administrator could not be assigned."
+            )
+            log_error(
+                "Compliance Administrator assignment failed during connect",
+                company_id=company_id,
+                error=str(exc),
+            )
     log_info("Microsoft 365 OAuth callback processed", company_id=company_id)
     await m365_sync_schedule_service.ensure_sync_tasks_and_refresh(company_id)
     asyncio.create_task(
         _best_effort_sync_m365_email_domains(company_id),
         name=f"sync_m365_email_domains_{company_id}",
     )
-    if compliance_setup:
-        destination = (
-            "/m365/diagnostics"
-            if state_data.get("return_to") == "diagnostics"
-            else "/m365"
+    problems: list[str] = []
+    if grant_failures:
+        problems.append(
+            "These Microsoft Graph permissions could not be granted: "
+            + "; ".join(grant_failures)[:1500]
+            + ". Grant them in Entra (App registrations > API permissions > "
+            "Grant admin consent) or reconnect as a Global Administrator."
         )
-        if compliance_role_error:
-            return flash_redirect(
-                destination,
-                compliance_role_error,
-                "error",
-            )
-        role_status = str((compliance_role_result or {}).get("status") or "")
-        role_message = (
-            "Compliance Administrator was already assigned."
-            if role_status == "existing"
-            else "Compliance Administrator was assigned and verified."
-        )
-        return await _complete_connect_with_scc_consent(
-            request,
-            company_id=company_id,
-            destination=destination,
-            message=(
-                role_message
-                + " Reconnect is complete; Purview provisioning and search support "
-                "must still be verified separately."
-            ),
-        )
+    if compliance_role_error:
+        problems.append(compliance_role_error)
     if state_data.get("return_to") == "diagnostics":
         # Re-run all diagnostics and complete the Purview-native setup now that
         # delegated consent and the EOP role assignment are available.
@@ -6846,22 +6816,16 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             company_id=company_id,
             destination="/m365/diagnostics",
             message=(
-                "Permissions and Purview configuration repaired and re-checked"
-                if not grant_failures
-                else "Re-checked, but these Microsoft Graph permissions could not be granted: "
-                + "; ".join(grant_failures)[:1500]
+                "Re-checked with warnings. " + " ".join(problems)
+                if problems
+                else "Permissions and Purview configuration repaired and re-checked"
             ),
-            variant="warning" if grant_failures else "success",
+            variant="warning" if problems else "success",
         )
-    if grant_failures:
+    if problems:
         return await _complete_connect_with_scc_consent(
             request, company_id=company_id, destination="/m365",
-            message=(
-                "Connected, but these Microsoft Graph permissions could not be "
-                "granted: " + "; ".join(grant_failures)[:1500]
-                + ". Grant them in Entra (App registrations > API permissions > "
-                "Grant admin consent) or reconnect as a Global Administrator."
-            ),
+            message="Connected with warnings. " + " ".join(problems),
             variant="warning",
         )
     return await _complete_connect_with_scc_consent(

@@ -159,7 +159,7 @@
               {% endif %}
             </div>
             <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">2</span><span class="m365-step__title">Review access</span></div><p>Review the combined permission delta and enabled workload justification before consent.</p><a href="/m365/diagnostics" class="button button--ghost">Review permissions</a></div>
-            <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">3</span><span class="m365-step__title">Grant consent</span></div><p>Grant all reviewable Microsoft consent together. Separate directory or Purview RBAC is shown and can be resumed.</p>{% if has_credentials %}<a href="/m365/connect" class="button">Grant Microsoft consent</a>{% else %}<button type="button" class="button button--secondary" disabled>Confirm tenant first</button>{% endif %}</div>
+            <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">3</span><span class="m365-step__title">Grant consent</span></div><p>One sign-in grants Microsoft permissions, assigns the Exchange, Teams and Compliance Administrator roles, and captures Security &amp; Compliance access. Run it again to repair access.</p>{% if has_credentials %}<a href="/m365/connect" class="button">Grant Microsoft consent</a>{% else %}<button type="button" class="button button--secondary" disabled>Confirm tenant first</button>{% endif %}</div>
             <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">4</span><span class="m365-step__title">Verify and activate</span></div><p>Run the readiness checks in the overview, then activate the staged connection. Successful sync jobs do not complete this setup step.</p>{% if connection_health.has_pending_candidate %}<form method="post" action="/m365/connection/complete">{% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}<button type="submit" class="button">Complete setup</button></form>{% else %}<a href="{{ connection_health.next_action_url }}" class="button button--ghost">{{ connection_health.next_action_label }}</a>{% endif %}</div>
           </div>
         </div>
@@ -208,20 +208,14 @@
       <section class="card card--panel ce-section" id="m365-permissions" data-ae-section="permissions" aria-labelledby="m365-permissions-title">
         <header class="ce-section__header"><div class="ce-section__heading">
           <h2 class="card__title" id="m365-permissions-title">Permissions and checks</h2>
-          <p class="card__subtitle">Extra Microsoft roles and consents that some features need, and a check that usage reports are not hidden.</p>
+          <p class="card__subtitle">See what Microsoft has granted to MyPortal, repair anything missing, and check that usage reports are not hidden.</p>
         </div></header>
         <div class="ce-section__body">
-          <div class="ce-subsection" aria-labelledby="m365-purview-title">
-            <h3 id="m365-purview-title">Purview role setup</h3>
-            <p class="form-help">Assign the Compliance Administrator role required by compliance searches.</p>
-            <div class="m365-actions"><a href="/m365/connect?setup=compliance_role&amp;return_to=m365" class="button button--ghost">Configure Compliance Administrator</a></div>
-            <p class="form-help">Requires a signed-in administrator with an active supported role and delegated <code>RoleManagement.ReadWrite.Directory</code> consent. This does not grant API consent or provision Purview.</p>
-          </div>
-          <div class="ce-subsection" aria-labelledby="m365-scc-title">
-            <h3 id="m365-scc-title">Security &amp; Compliance access</h3>
-            <p class="form-help">Required for spam search and purge to run under this administrator's permissions.</p>
-            <div class="m365-actions"><a href="/m365/connect/scc" class="button button--ghost">Capture Security &amp; Compliance access</a></div>
-            <p class="form-help">Reconnects capture this consent automatically after the Microsoft Graph consent screen. Use this step if a reconnect ended before the Security &amp; Compliance consent screen or if it was denied.</p>
+          <div class="ce-subsection" aria-labelledby="m365-access-title">
+            <h3 id="m365-access-title">Permissions, roles and Purview access</h3>
+            <p class="form-help">Granting Microsoft consent in guided setup already assigns the Compliance Administrator role and captures Security &amp; Compliance access for spam search and purge. There is nothing extra to run here.</p>
+            <div class="m365-actions"><a href="/m365/diagnostics" class="button button--ghost">Review and repair permissions</a></div>
+            <p class="form-help">Diagnostics lists every permission and role. <strong>Repair</strong> fixes anything missing and only asks a Microsoft admin to sign in again when it has to.</p>
           </div>
           <div class="ce-subsection" aria-labelledby="m365-privacy-title">
             <h3 id="m365-privacy-title">Mailbox report privacy</h3>
