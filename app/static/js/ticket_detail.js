@@ -62,10 +62,13 @@
         const name = root.dataset.requesterName || '';
         const response = await fetch(
           `/api/profile/m365-contacts/phones?name=${encodeURIComponent(name)}`,
-          { method: 'POST' },
+          { method: 'POST', headers: { Accept: 'application/json' } },
         );
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload.detail || 'Unable to check Outlook contacts');
+        if (!response.ok) {
+          throw new Error(formatApiErrorDetail(payload.detail)
+            || `Unable to check Outlook contacts (HTTP ${response.status}).`);
+        }
         const phones = Array.isArray(payload.phones) ? payload.phones : [];
         status.textContent = phones.length ? 'Outlook contact options:' : 'No matching Outlook contact phone numbers found.';
         phones.forEach((item) => {
@@ -282,7 +285,10 @@
           headers: { Accept: 'application/json' },
         });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(formatApiErrorDetail(payload.detail) || 'Unable to send the contact to Outlook.');
+        if (!response.ok) {
+          throw new Error(formatApiErrorDetail(payload.detail)
+            || `Unable to send the contact to Outlook (HTTP ${response.status}).`);
+        }
         showTicketPhoneStatus(payload.message || 'Contact saved to Outlook.', 'success');
       } catch (err) {
         showTicketPhoneStatus(err.message || 'Unable to send the contact to Outlook.', 'error');
