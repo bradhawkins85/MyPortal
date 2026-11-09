@@ -445,14 +445,33 @@ def _named_value(context: Mapping[str, Any], scope: str, name: str) -> str:
     return ""
 
 
-async def render_value(template: str, context: Mapping[str, Any]) -> str:
-    """Fill MyPortal variables in a technician's value for one device."""
+_NAMED_VALUE_SLOT = re.compile("\ue000(\\d+)\ue001")
 
-    text = _NAMED_VALUE_TOKEN.sub(lambda match: _named_value(context, match.group(1), match.group(2)), template)
-    if not _TOKEN.search(text):
-        return text
-    rendered = await value_templates.render_string_async(text, context, include_templates=False)
-    return "" if rendered is None else str(rendered)
+
+async def render_value(template: str, context: Mapping[str, Any]) -> str:
+    """Fill MyPortal variables in a technician's value for one device.
+
+    Custom field, variable and result values can be written by devices, so
+    they are inserted after the template is rendered and are never rendered
+    themselves: a value of ``{{tray.deployment_url}}`` stays literal text.
+    """
+
+    named: list[str] = []
+
+    def hold(match: re.Match[str]) -> str:
+        named.append(_named_value(context, match.group(1), match.group(2)))
+        return "\ue000" + str(len(named) - 1) + "\ue001"
+
+    text = _NAMED_VALUE_SLOT.sub("", template)
+    text = _NAMED_VALUE_TOKEN.sub(hold, text)
+    if _TOKEN.search(text):
+        rendered = await value_templates.render_string_async(text, context, include_templates=False)
+        text = "" if rendered is None else str(rendered)
+    def fill(match: re.Match[str]) -> str:
+        index = int(match.group(1))
+        return named[index] if index < len(named) else ""
+
+    return _NAMED_VALUE_SLOT.sub(fill, text)
 
 
 def _coerce(field_def: Mapping[str, Any], raw: str) -> tuple[Any, str | None]:
@@ -1511,13 +1530,45 @@ def normalise_custom_values(raw: Any) -> list[dict[str, str]]:
     return cleaned
 
 
+_DECLARED_VALUE = re.compile(r"##myportal\[\s*(asset|company)\.([^\]\r\n]+?)\s*\]", re.IGNORECASE)
+
+
+def declared_values(script_content: str | None) -> set[tuple[str, str]]:
+    """The ``(scope, name)`` pairs a script may set, from its own source.
+
+    A script declares a value by containing its ``##myportal[scope.Name]``
+    marker, either where it prints it or in a comment. The list comes from
+    the script MyPortal sent, never from the device's report.
+    """
+
+    return {
+        (match.group(1).lower(), match.group(2).strip().casefold())
+        for match in _DECLARED_VALUE.finditer(script_content or "")
+    }
+
+
 async def apply_custom_values(run: Mapping[str, Any], values: list[dict[str, str]]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     if not values:
         return results
     asset_definitions = await asset_fields_repo.list_field_definitions()
     company_definitions = await company_variables_repo.list_definitions()
+    declared = declared_values(run.get("script_content"))
     for item in values:
+        if (item["scope"], item["name"].strip().casefold()) not in declared:
+            log_warning(
+                "RMM script value not declared by the script",
+                run_id=run.get("id"),
+                scope=item["scope"],
+                name=item["name"],
+            )
+            results.append({
+                **item,
+                "applied": False,
+                "message": "The script does not declare this value. Add "
+                f"##myportal[{item['scope']}.{item['name']}] to the script to allow it.",
+            })
+            continue
         if item["scope"] == "asset":
             problem = await _apply_asset_value(run.get("asset_id"), item["name"], item["value"], asset_definitions)
         else:

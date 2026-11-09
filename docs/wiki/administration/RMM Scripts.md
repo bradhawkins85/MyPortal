@@ -312,6 +312,18 @@ or grouped by scope:
 {"asset": {"BitLocker Status": "On"}, "company": {"Tenant ID": "contoso"}}
 ```
 
+A script can only set values it declares: its own source must contain the
+`##myportal[scope.Name]` marker for each value, as in the `Write-Output` lines above. A script
+that writes the result file instead declares its values in a comment:
+
+```powershell
+# ##myportal[asset.BitLocker Status] ##myportal[company.Tenant ID]
+```
+
+Undeclared values are skipped and listed on the run, so a compromised device cannot change
+other fields or variables. MyPortal fills field and variable values into a script's inputs as
+plain text, so a value that looks like `{{…}}` is never expanded.
+
 Names match the field or variable name, ignoring case. Checkbox fields take `true`/`false`,
 and date fields take a `YYYY-MM-DD` date. Values for names that don't exist, and image fields,
 are skipped and listed on the run, so create the field or variable first.
