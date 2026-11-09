@@ -282,6 +282,47 @@
 
 .rmm-timeout__row .form-input { max-width: 7rem; }
 
+/* Run script: Now / Later */
+.rmm-when { display: grid; gap: var(--space-gap-tight); }
+.rmm-when__input { max-width: 16rem; }
+
+.rmm-segmented {
+  display: inline-flex;
+  justify-self: start;
+  padding: 0.2rem;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-bg-sunken);
+}
+
+.rmm-segmented__option { position: relative; cursor: pointer; }
+
+.rmm-segmented__option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rmm-segmented__option span {
+  display: block;
+  padding: 0.35rem 0.9rem;
+  border-radius: var(--hf-radius-sm);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--hf-muted);
+}
+
+.rmm-segmented__option input:checked + span {
+  color: var(--hf-accent-strong);
+  background: var(--hf-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--hf-accent-ring);
+}
+
+.rmm-segmented__option input:focus-visible + span {
+  outline: 2px solid var(--hf-focus);
+  outline-offset: 1px;
+}
+
 .rmm-preview__summary { margin: 0; }
 
 .rmm-preview__command,

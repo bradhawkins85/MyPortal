@@ -17,6 +17,7 @@
 
   const STATUS = {
     queued: ['info', 'Waiting for device'],
+    scheduled: ['info', 'Scheduled'],
     dispatched: ['info', 'Sent to device'],
     running: ['warning', 'Running'],
     completed: ['success', 'Completed'],
@@ -156,6 +157,10 @@
   const enabledBox = runModal.querySelector('[data-rmm-enabled]');
   const continueBox = runModal.querySelector('[data-rmm-continue]');
   const skipExistingBox = runModal.querySelector('[data-rmm-skip-existing]');
+  const whenSection = runModal.querySelector('[data-rmm-when-section]');
+  const whenRadios = Array.from(runModal.querySelectorAll('[data-rmm-when]'));
+  const laterField = runModal.querySelector('[data-rmm-later-field]');
+  const scheduledInput = runModal.querySelector('[data-rmm-scheduled-for]');
 
   // mode: 'run' pushes the script now; 'schedule' and 'onboarding' save it
   // with its values for later (on /rmm/automation). item is the record being edited.
@@ -282,6 +287,58 @@
     return powershell ? "'" + text.replace(/'/g, "''") + "'" : "'" + text.replace(/'/g, "'\\''") + "'";
   }
 
+  // ------------------------------------------------------------------ //
+  // Run now or later
+  // ------------------------------------------------------------------ //
+
+  function pad(value) {
+    return String(value).padStart(2, '0');
+  }
+
+  // datetime-local inputs take local wall-clock time as YYYY-MM-DDTHH:MM.
+  function localInputValue(date) {
+    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+      + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+  }
+
+  function runLater() {
+    return state.mode === 'run' && whenRadios.some((radio) => radio.checked && radio.value === 'later');
+  }
+
+  // The chosen "later" time, or null when it is missing or not a valid date.
+  function scheduledDate() {
+    if (!scheduledInput.value) return null;
+    const date = new Date(scheduledInput.value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function applyWhen() {
+    const later = runLater();
+    laterField.hidden = !later;
+    if (later) {
+      const now = new Date();
+      scheduledInput.min = localInputValue(now);
+      if (!scheduledInput.value) {
+        // Start on the next whole hour; techs usually pick a time like 4am.
+        const next = new Date(now.getTime());
+        next.setMinutes(0, 0, 0);
+        next.setHours(next.getHours() + 1);
+        scheduledInput.value = localInputValue(next);
+      }
+    }
+  }
+
+  function resetWhen() {
+    whenRadios.forEach((radio) => { radio.checked = radio.value === 'now'; });
+    scheduledInput.value = '';
+    applyWhen();
+  }
+
+  whenRadios.forEach((radio) => radio.addEventListener('change', () => {
+    applyWhen();
+    if (runLater()) scheduledInput.focus();
+  }));
+
   function updatePreview() {
     const detail = state.detail;
     if (!detail) {
@@ -354,10 +411,20 @@
       submitButton.disabled = (mode === 'assets' && !count) || (mode === 'tags' && !tagCount);
       return;
     }
-    summary.textContent = count ? 'Runs on ' + count + ' device' + (count === 1 ? '' : 's') + envText + '.' : 'Choose at least one device.';
-    submitButton.disabled = !count;
+    const later = runLater();
+    const when = later ? scheduledDate() : null;
+    const whenText = later ? (when ? ' at ' + when.toLocaleString() : '') : '';
+    summary.textContent = count ? 'Runs on ' + count + ' device' + (count === 1 ? '' : 's') + whenText + envText + '.' : 'Choose at least one device.';
+    if (later && !when) {
+      summary.textContent = 'Choose the date and time to run the script.';
+    }
+    submitButton.disabled = !count || (later && !when);
     const retry = state.item && state.item.retry && Number(state.item.script_id) === Number(detail.script.id);
-    submitButton.textContent = count > 1 ? 'Run on ' + count + ' devices' : (retry ? 'Retry script' : 'Run script');
+    if (later) {
+      submitButton.textContent = count > 1 ? 'Schedule on ' + count + ' devices' : 'Schedule script';
+    } else {
+      submitButton.textContent = count > 1 ? 'Run on ' + count + ' devices' : (retry ? 'Retry script' : 'Run script');
+    }
   }
 
   // ------------------------------------------------------------------ //
@@ -410,6 +477,7 @@
     if (state.detail) {
       devicesSection.hidden = automated && !(state.mode === 'schedule' && targetMode.value === 'assets');
     }
+    whenSection.hidden = automated || !state.detail;
   }
 
   let previewTimer = null;
@@ -500,7 +568,8 @@
     state.dirty = false;
     state.done = false;
     fieldsHost.replaceChildren();
-    [devicesSection, fieldsSection, timeoutSection, runAsSection, previewSection].forEach((section) => { section.hidden = true; });
+    [devicesSection, fieldsSection, timeoutSection, runAsSection, previewSection, whenSection].forEach((section) => { section.hidden = true; });
+    resetWhen();
     formError.hidden = true;
     assetsError.hidden = true;
     runModal.querySelector('[data-rmm-retry-help]').hidden = true;
@@ -733,6 +802,12 @@
         return;
       }
     }
+    const later = runLater();
+    const when = later ? scheduledDate() : null;
+    if (later && !when) {
+      showErrors({ scheduled_for: 'Choose the date and time to run the script.' });
+      return;
+    }
     submitButton.disabled = true;
     const minutes = Number(timeoutInput.value) || 10;
     if (state.mode !== 'run') {
@@ -744,6 +819,7 @@
         method: 'POST',
         body: {
           asset_ids: selectedAssets(), values: collectValues(), timeout_seconds: Math.round(minutes * 60), queue_timeout_seconds: queueTimeoutInput.value === '' ? null : Math.round(Number(queueTimeoutInput.value) * 60), run_as: runAsSelect.value,
+          scheduled_for: when ? when.toISOString() : null,
         },
       });
       const queued = result.queued || [];
@@ -756,7 +832,8 @@
       }
       const lines = [];
       if (queued.length) {
-        lines.push('Sent to ' + queued.length + ' device' + (queued.length === 1 ? '' : 's') + '.');
+        const devices = queued.length + ' device' + (queued.length === 1 ? '' : 's');
+        lines.push(when ? 'Scheduled on ' + devices + ' for ' + when.toLocaleString() + '.' : 'Sent to ' + devices + '.');
       }
       problems.forEach((problem) => {
         lines.push((problem.asset_name || 'Device ' + problem.asset_id) + ': ' + problem.message);
@@ -892,13 +969,17 @@
     resultModal.querySelector('[data-rmm-result-subtitle]').textContent =
       (run.asset_name ? 'On ' + run.asset_name : 'Device removed') + source;
     const stats = resultModal.querySelector('[data-rmm-result-stats]');
+    const waitingForTime = Boolean(run.scheduled);
     stats.replaceChildren(
-      stat('Status', statusPill(run.status)),
+      stat('Status', statusPill(waitingForTime ? 'scheduled' : run.status)),
       stat('Exit code', run.exit_code === null || run.exit_code === undefined ? '–' : String(run.exit_code)),
       stat('Run as', run.run_as === 'user' ? 'Logged in user' : 'System'),
       stat('Queued', formatDate(run.queued_at)),
-      stat('Finished', formatDate(run.completed_at)),
     );
+    if (run.scheduled_for) {
+      stats.append(stat('Scheduled for', formatDate(run.scheduled_for)));
+    }
+    stats.append(stat('Finished', formatDate(run.completed_at)));
     const error = resultModal.querySelector('[data-rmm-result-error]');
     error.textContent = run.error_message || '';
     error.hidden = !run.error_message;
@@ -926,9 +1007,10 @@
 
     const active = ACTIVE.has(run.status);
     updateOutput(resultModal.querySelector('[data-rmm-result-stdout]'),
-      run.stdout || (active ? 'Waiting for script output…' : 'The script printed nothing.'));
+      run.stdout || (waitingForTime ? 'Waiting until the scheduled time…'
+        : (active ? 'Waiting for script output…' : 'The script printed nothing.')));
     updateOutput(resultModal.querySelector('[data-rmm-result-stderr]'), run.stderr || '');
-    resultModal.querySelector('[data-rmm-output-state]').textContent = active ? 'Live · updates every second' : '';
+    resultModal.querySelector('[data-rmm-output-state]').textContent = active && !waitingForTime ? 'Live · updates every second' : '';
     resultModal.querySelector('[data-rmm-result-stderr-section]').hidden = !run.stderr;
 
     const inputs = run.inputs || [];
@@ -968,7 +1050,10 @@
     const row = document.querySelector('[data-rmm-run-row="' + Number(run.id) + '"]');
     if (!row) return;
     const status = row.querySelector('[data-column-key="status"]');
-    status.replaceChildren(statusPill(run.status));
+    status.replaceChildren(statusPill(run.scheduled ? 'scheduled' : run.status));
+    if (run.scheduled && run.scheduled_for) {
+      status.append(' ', el('span', { className: 'text-muted' }, 'for ' + formatDate(run.scheduled_for)));
+    }
     status.setAttribute('data-sort-value', run.status);
     const actions = row.querySelector('[data-column-key="actions"]');
     if (config.can_run && RETRYABLE.has(run.status) && run.script_id && run.asset_id && !actions.querySelector('[data-rmm-retry-run-id]')) {
@@ -1114,7 +1199,8 @@
       if (generation !== pollGeneration || resultModal.hidden) return;
       renderRun(data.run);
       if (ACTIVE.has(data.run.status) && !resultModal.hidden) {
-        pollTimer = window.setTimeout(() => refreshRun(runId), 1000);
+        // A run waiting for its scheduled time has nothing to stream yet.
+        pollTimer = window.setTimeout(() => refreshRun(runId), data.run.scheduled ? 15000 : 1000);
       }
     } catch (error) {
       if (generation !== pollGeneration || resultModal.hidden) return;

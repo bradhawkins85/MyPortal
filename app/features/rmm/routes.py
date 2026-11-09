@@ -695,6 +695,11 @@ class RunRequest(BaseModel):
     timeout_seconds: int | None = None
     queue_timeout_seconds: int | None = Field(default=None, ge=0, le=rmm_scripts.MAX_QUEUE_TIMEOUT_SECONDS)
     run_as: Literal["system", "user"] | None = None
+    scheduled_for: datetime | None = Field(
+        default=None,
+        description="Run later: the ISO 8601 date and time to send the script to the devices. "
+        "Times without an offset are UTC. Omit to run now.",
+    )
 
 
 @router.post("/api/rmm/scripts/{script_id:int}/runs", summary="Push a script to one or more devices")
@@ -712,6 +717,7 @@ async def run_script_api(
             queue_timeout_seconds=payload.queue_timeout_seconds,
             requested_by_user_id=user.get("id"),
             run_as=payload.run_as,
+            scheduled_for=payload.scheduled_for,
         )
     except rmm_scripts.RunRequestError as exc:
         return JSONResponse({"detail": "Check the highlighted fields.", "errors": exc.errors}, status_code=400)
@@ -728,6 +734,7 @@ async def run_script_api(
                 "runs": [item["run_id"] for item in result["queued"]],
                 "assets": [item["asset_id"] for item in result["queued"]],
                 "run_as": result["run_as"],
+                "scheduled_for": result["scheduled_for"],
             },
         )
     return result
