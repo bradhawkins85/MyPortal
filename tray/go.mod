@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	fyne.io/systray v1.11.0
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/getlantern/systray v1.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/kardianos/service v1.2.2
