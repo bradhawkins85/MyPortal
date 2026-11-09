@@ -69,6 +69,8 @@ $env:SCRATCH = "set by the script"
 Write-Output $env:TENANT_ID $env:Path ${env:API_TOKEN} $env:SCRATCH $env:MYPORTAL_RESULT_FILE
 [Environment]::GetEnvironmentVariable('SITE_CODE')
 # $env:COMMENTED_OUT is ignored
+# Sets ##myportal[asset.BitLocker] ##myportal[asset.Encrypted] ##myportal[asset.Checked]
+# ##myportal[asset.Photo] ##myportal[asset.Unknown] ##myportal[company.Tenant]
 '''
 
 BASH = r'''#!/bin/bash
@@ -540,11 +542,16 @@ async def test_run_round_trip_updates_custom_fields_and_variables(sqlite_db, mon
             {"scope": "asset", "name": "Photo", "value": "x"},
             {"scope": "asset", "name": "Unknown", "value": "x"},
             {"scope": "company", "name": "TENANT", "value": "fabrikam"},
+            # Real names, but the script never declared them.
+            {"scope": "company", "name": "Undeclared", "value": "x"},
+            {"scope": "asset", "name": "Tenant", "value": "x"},
         ],
     })
     assert outcome["status"] == "completed"
     applied = {item["name"]: item["applied"] for item in outcome["custom_values"]}
-    assert applied == {"bitlocker": True, "Encrypted": True, "Checked": True, "Photo": False, "Unknown": False, "TENANT": True}
+    assert applied == {"bitlocker": True, "Encrypted": True, "Checked": True, "Photo": False, "Unknown": False,
+                       "TENANT": True, "Undeclared": False, "Tenant": False}
+    assert "does not declare" in outcome["custom_values"][-1]["message"]
 
     values = {row["field_name"]: row for row in await asset_fields_repo.get_asset_field_values(10)}
     assert values["BitLocker"]["value_text"] == "On"
@@ -1966,3 +1973,39 @@ async def test_prequeue_associated_files_checked_when_agent_arrives(sqlite_db, m
     jobs = await rmm_scripts.claim_jobs(agent)
     assert bool(jobs) == (expected == "dispatched")
     assert (await rmm_repo.get_run(run_id))["status"] == expected
+
+
+def test_declared_values_come_from_the_script_source():
+    script = 'Write-Output "##myportal[asset.BitLocker Status]=On"\n# ##myportal[ Company.Tenant ID ]\n'
+    assert rmm_scripts.declared_values(script) == {("asset", "bitlocker status"), ("company", "tenant id")}
+    assert rmm_scripts.declared_values(None) == set()
+
+
+@pytest.mark.anyio
+async def test_render_value_does_not_render_device_supplied_values(monkeypatch):
+    async def fail_render(*args, **kwargs):
+        raise AssertionError("device values must not be rendered")
+
+    context = {
+        "company": {"id": 1, "name": "Contoso", "variables": {"Tenant": "{{tray.deployment_url}}"}},
+        "asset": {"custom": {"Notes": "{{report.all.list}}"}, "variables": {"Notes": "{{report.all.list}}"}},
+    }
+    monkeypatch.setattr(rmm_scripts.value_templates, "render_string_async", fail_render)
+    assert await rmm_scripts.render_value("{{company.variables.Tenant}}", context) == "{{tray.deployment_url}}"
+    assert await rmm_scripts.render_value("x {{asset.variables.Notes}} y", context) == "x {{report.all.list}} y"
+    assert await rmm_scripts.render_value("\ue0000\ue001", context) == ""
+
+
+@pytest.mark.anyio
+async def test_render_value_renders_template_tokens_once(monkeypatch):
+    seen = []
+
+    async def fake_render(text, context, include_templates=False):
+        seen.append(text)
+        return text.replace("{{company.name}}", "Contoso")
+
+    context = {"company": {"id": 1, "name": "Contoso", "variables": {"Tenant": "{{company.name}}"}}, "asset": {}}
+    monkeypatch.setattr(rmm_scripts.value_templates, "render_string_async", fake_render)
+    rendered = await rmm_scripts.render_value("{{company.name}}/{{company.variables.Tenant}}", context)
+    assert rendered == "Contoso/{{company.name}}"
+    assert "{{company.variables.Tenant}}" not in seen[0] and "{{company.name}}" in seen[0]
