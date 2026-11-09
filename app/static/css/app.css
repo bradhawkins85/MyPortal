@@ -14101,6 +14101,25 @@ a.service-card__ai-icon:hover {
   align-self: flex-start;
 }
 
+.ticket-details-contact__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+}
+
+.ticket-phone-modal {
+  width: min(92vw, 32rem);
+}
+
+.ticket-phone-modal__eyebrow {
+  margin: 0 0 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--hf-muted);
+}
+
 /* AI summary header: keep the actions on one line beside the title. */
 .ticket-ai-summary__heading {
   display: flex;

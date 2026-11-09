@@ -124,6 +124,178 @@
 
   initialiseOutlookContactLookup();
 
+  const PHONE_KIND_LABELS = { mobile: 'Mobile', landline: 'Landline', company: 'Company' };
+
+  function showTicketPhoneStatus(message, variant) {
+    const status = document.querySelector('[data-ticket-phone-status]');
+    if (status) {
+      status.hidden = false;
+      status.textContent = message;
+    }
+    if (window.__portalToast) {
+      window.__portalToast.show(message, { variant: variant || 'success' });
+    }
+  }
+
+  function initialiseTicketPhoneAdd() {
+    const trigger = document.querySelector('[data-ticket-phone-add]');
+    const modal = document.querySelector('[data-ticket-phone-modal]');
+    if (!trigger || !modal) return;
+    const form = modal.querySelector('[data-ticket-phone-form]');
+    const input = modal.querySelector('[data-ticket-phone-number]');
+    const error = modal.querySelector('[data-ticket-phone-error]');
+    const help = modal.querySelector('[data-ticket-phone-help]');
+    const submit = modal.querySelector('[data-ticket-phone-submit]');
+    const lines = document.querySelector('[data-ticket-requester-phone-lines]');
+    const ticketId = modal.dataset.ticketId;
+    if (!form || !input || !submit || !ticketId) return;
+    const kindInputs = () => Array.from(modal.querySelectorAll('[data-ticket-phone-kind]'));
+    const selectedKind = () => kindInputs().find((radio) => radio.checked)?.value || '';
+    let dirty = false;
+
+    function syncKindCards() {
+      kindInputs().forEach((radio) => {
+        radio.closest('.scf-type-card')?.classList.toggle('is-selected', radio.checked);
+      });
+      if (help) {
+        help.textContent = selectedKind() === 'company'
+          ? "Saved on the company record and shown on every ticket for this company."
+          : "Saved on the requester's contact record and shown on their tickets.";
+      }
+    }
+
+    function setError(message) {
+      if (!error) return;
+      error.hidden = !message;
+      error.textContent = message || '';
+      input.setAttribute('aria-invalid', message ? 'true' : 'false');
+    }
+
+    function open() {
+      form.reset();
+      dirty = false;
+      setError('');
+      const first = kindInputs()[0];
+      if (first) first.checked = true;
+      syncKindCards();
+      modal.hidden = false;
+      trigger.setAttribute('aria-expanded', 'true');
+      input.focus();
+    }
+
+    function close(force) {
+      if (!force && dirty && input.value.trim() && !window.confirm('Discard this phone number?')) return;
+      modal.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.focus();
+    }
+
+    function addLine(kind, display) {
+      if (!lines) return;
+      lines.querySelector('[data-ticket-phone-empty]')?.remove();
+      const line = document.createElement('p');
+      line.className = 'form-help';
+      line.dataset.ticketPhoneLine = kind;
+      line.textContent = `${PHONE_KIND_LABELS[kind] || 'Phone'}: ${display}`;
+      const order = ['mobile', 'landline', 'company'];
+      const next = Array.from(lines.querySelectorAll('[data-ticket-phone-line]'))
+        .find((existing) => order.indexOf(existing.dataset.ticketPhoneLine) > order.indexOf(kind));
+      lines.insertBefore(line, next || null);
+    }
+
+    function refreshAfterSave(kind) {
+      const radio = kindInputs().find((item) => item.value === kind);
+      radio?.closest('.scf-type-card')?.remove();
+      const hasMobile = Boolean(lines?.querySelector('[data-ticket-phone-line="mobile"]'));
+      const hasCompany = Boolean(lines?.querySelector('[data-ticket-phone-line="company"]'));
+      if ((hasMobile && hasCompany) || !kindInputs().length) {
+        trigger.hidden = true;
+      }
+    }
+
+    trigger.addEventListener('click', open);
+    modal.querySelectorAll('[data-ticket-phone-close]').forEach((button) => {
+      button.addEventListener('click', () => close(false));
+    });
+    modal.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close(false);
+      }
+    });
+    modal.addEventListener('change', (event) => {
+      if (event.target.matches('[data-ticket-phone-kind]')) syncKindCards();
+    });
+    input.addEventListener('input', () => {
+      dirty = true;
+      setError('');
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const kind = selectedKind();
+      const phone = input.value.trim();
+      const digits = phone.replace(/[^0-9+]/g, '');
+      if (!kind) {
+        setError('Choose which number this is.');
+        return;
+      }
+      if (!/^\+?[0-9]{3,15}$/.test(digits)) {
+        setError('Enter a valid phone number.');
+        input.focus();
+        return;
+      }
+      submit.disabled = true;
+      setError('');
+      try {
+        const response = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/requester/phone`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ kind, phone }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(formatApiErrorDetail(payload.detail) || 'Unable to save the phone number.');
+        addLine(kind, payload.display || phone);
+        refreshAfterSave(kind);
+        close(true);
+        showTicketPhoneStatus(`${PHONE_KIND_LABELS[kind]} number saved.`, 'success');
+      } catch (err) {
+        setError(err.message || 'Unable to save the phone number.');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  }
+
+  function initialiseSendToOutlook() {
+    const button = document.querySelector('[data-ticket-send-outlook]');
+    if (!button) return;
+    button.addEventListener('click', async () => {
+      const ticketId = button.dataset.ticketId;
+      if (!ticketId) return;
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Sending…';
+      try {
+        const response = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/requester/outlook`, {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(formatApiErrorDetail(payload.detail) || 'Unable to send the contact to Outlook.');
+        showTicketPhoneStatus(payload.message || 'Contact saved to Outlook.', 'success');
+      } catch (err) {
+        showTicketPhoneStatus(err.message || 'Unable to send the contact to Outlook.', 'error');
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    });
+  }
+
+  initialiseTicketPhoneAdd();
+  initialiseSendToOutlook();
+
   const TICKET_SECTION_STATE_STORAGE_KEY = 'myportal.admin.ticketDetail.sectionState.v1';
 
   function formatApiErrorDetail(detail) {

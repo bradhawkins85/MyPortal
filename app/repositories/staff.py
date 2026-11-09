@@ -296,6 +296,7 @@ async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
             COALESCE(NULLIF(u.first_name, ''), s.first_name) AS first_name,
             COALESCE(NULLIF(u.last_name, ''), s.last_name) AS last_name,
             s.mobile_phone AS mobile_phone,
+            s.landline_phone AS landline_phone,
             s.company_id AS company_id,
             s.created_at AS created_at,
             s.updated_at AS updated_at,
@@ -545,6 +546,14 @@ async def update_mobile_phone(staff_id: int, mobile_phone: str) -> None:
     await db.execute(
         "UPDATE staff SET mobile_phone = %s WHERE id = %s",
         (mobile_phone, staff_id),
+    )
+
+
+async def update_landline_phone(staff_id: int, landline_phone: str) -> None:
+    """Update only the landline / direct-line number on an existing staff record."""
+    await db.execute(
+        "UPDATE staff SET landline_phone = %s WHERE id = %s",
+        (landline_phone, staff_id),
     )
 
 

@@ -225,14 +225,46 @@
               </div>
               <div class="form-field ticket-details-contact">
                 <span class="form-label">Requester phone</span>
-                {% if ticket_requester_phone_display %}
-                  <p class="form-help">Mobile: {{ ticket_requester_phone_display }}</p>
-                {% endif %}
-                {% if ticket_company_phone_display %}
-                  <p class="form-help">Company: {{ ticket_company_phone_display }}</p>
-                {% endif %}
-                {% if not ticket_requester_phone_display and not ticket_company_phone_display %}
-                  <p class="form-help">—</p>
+                <div data-ticket-requester-phone-lines>
+                  {% if ticket_requester_phone_display %}
+                    <p class="form-help" data-ticket-phone-line="mobile">Mobile: {{ ticket_requester_phone_display }}</p>
+                  {% endif %}
+                  {% if ticket_requester_landline_display %}
+                    <p class="form-help" data-ticket-phone-line="landline">Landline: {{ ticket_requester_landline_display }}</p>
+                  {% endif %}
+                  {% if ticket_company_phone_display %}
+                    <p class="form-help" data-ticket-phone-line="company">Company: {{ ticket_company_phone_display }}</p>
+                  {% endif %}
+                  {% if not ticket_requester_phone_display and not ticket_requester_landline_display and not ticket_company_phone_display %}
+                    <p class="form-help" data-ticket-phone-empty>—</p>
+                  {% endif %}
+                </div>
+                {% set ticket_phone_can_add_mobile = ticket.requester_staff_id and not ticket_requester_phone_display %}
+                {% set ticket_phone_can_add_landline = ticket.requester_staff_id and not ticket_requester_landline_display %}
+                {% set ticket_phone_can_add_company = ticket.company_id and not ticket_company_phone_display %}
+                {% set ticket_phone_show_add = not (ticket_requester_phone_display and ticket_company_phone_display) and (ticket_phone_can_add_mobile or ticket_phone_can_add_landline or ticket_phone_can_add_company) %}
+                {% set ticket_phone_show_outlook = (ticket.requester_staff_id or ticket.requester_id) and feature_pack_available('outlook_contacts') %}
+                {% if ticket_phone_show_add or ticket_phone_show_outlook %}
+                  <div class="ticket-details-contact__actions">
+                    {% if ticket_phone_show_add %}
+                      <button
+                        type="button"
+                        class="button button--ghost button--small"
+                        data-ticket-phone-add
+                        aria-haspopup="dialog"
+                        aria-controls="ticket-phone-modal"
+                      >Add Phone</button>
+                    {% endif %}
+                    {% if ticket_phone_show_outlook %}
+                      <button
+                        type="button"
+                        class="button button--ghost button--small"
+                        data-ticket-send-outlook
+                        data-ticket-id="{{ ticket.id }}"
+                      >Send To Outlook</button>
+                    {% endif %}
+                  </div>
+                  <p class="form-help" data-ticket-phone-status role="status" aria-live="polite" hidden></p>
                 {% endif %}
                 {% if ticket_requester_lookup_name and feature_pack_available('outlook_contacts') %}
                   <div
@@ -2091,6 +2123,74 @@
       </div>
     </div>
   </div>
+
+  {% if ticket_phone_show_add %}
+    <div
+      class="modal"
+      id="ticket-phone-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="ticket-phone-modal-title"
+      aria-describedby="ticket-phone-modal-subtitle"
+      hidden
+      data-ticket-phone-modal
+      data-ticket-id="{{ ticket.id }}"
+    >
+      <div class="modal__backdrop" data-ticket-phone-close></div>
+      <div class="modal__panel ticket-phone-modal">
+        <header class="modal__header">
+          <div>
+            <p class="ticket-phone-modal__eyebrow">Requester phone</p>
+            <h2 class="modal__title" id="ticket-phone-modal-title">Add a phone number</h2>
+            <p class="form-help" id="ticket-phone-modal-subtitle">
+              {% if ticket_requester_lookup_name %}For {{ ticket_requester_lookup_name }}.{% else %}For the ticket requester.{% endif %}
+              Existing numbers are not changed.
+            </p>
+          </div>
+          <button type="button" class="modal__close" data-ticket-phone-close aria-label="Close">&times;</button>
+        </header>
+        <form class="modal__body" data-ticket-phone-form novalidate>
+          <fieldset class="scf-fieldset">
+            <legend class="form-label">Which number is this?</legend>
+            <div class="scf-type-grid">
+              {% for kind_value, kind_label, kind_help, kind_enabled in [
+                ('mobile', 'Mobile', "The requester's own mobile", ticket_phone_can_add_mobile),
+                ('landline', 'Landline', 'Their desk or direct line', ticket_phone_can_add_landline),
+                ('company', 'Company', 'Main number for the whole company', ticket_phone_can_add_company),
+              ] if kind_enabled %}
+                <label class="scf-type-card">
+                  <input type="radio" name="ticket_phone_kind" value="{{ kind_value }}" data-ticket-phone-kind {% if loop.first %}checked{% endif %} />
+                  <span class="scf-type-card__label">{{ kind_label }}</span>
+                  <span class="scf-type-card__help">{{ kind_help }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <div class="form-field">
+            <label class="form-label" for="ticket-phone-number">Phone number</label>
+            <input
+              id="ticket-phone-number"
+              class="form-input"
+              type="tel"
+              inputmode="tel"
+              autocomplete="off"
+              maxlength="32"
+              required
+              placeholder="0400 000 000"
+              data-ticket-phone-number
+            />
+            <p class="form-help" data-ticket-phone-help>Saved on the requester's contact record and shown on their tickets.</p>
+            <p class="form-help form-help--error" role="alert" data-ticket-phone-error hidden></p>
+          </div>
+          <footer class="modal__footer scf-editor__footer">
+            <span class="scf-editor__spacer"></span>
+            <button type="button" class="button button--ghost" data-ticket-phone-close>Cancel</button>
+            <button type="submit" class="button" data-ticket-phone-submit>Save number</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  {% endif %}
 
   {% include "tickets/_email_recipients_modal.html" %}
 {% endblock %}

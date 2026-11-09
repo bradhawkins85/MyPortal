@@ -7699,6 +7699,158 @@ async def attach_ticket_requester_mobile(request: Request, ticket_id: int):
     return JSONResponse({"ok": True, "staff_id": staff_id, "mobile_phone": phone})
 
 
+_TICKET_REQUESTER_PHONE_KINDS = ("mobile", "landline", "company")
+
+
+@app.post("/api/tickets/{ticket_id}/requester/phone", response_class=JSONResponse)
+async def add_ticket_requester_phone(request: Request, ticket_id: int):
+    """Record a mobile, landline or company number for the ticket requester.
+
+    Body: ``{"kind": "mobile" | "landline" | "company", "phone": "..."}``.
+    Mobile and landline numbers are stored on the requester's staff record;
+    a company number is stored on the ticket's linked company. Existing
+    numbers are never overwritten from this dialog.
+    """
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid request body")
+    kind = str(payload.get("kind") or "").strip().lower()
+    if kind not in _TICKET_REQUESTER_PHONE_KINDS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Choose mobile, landline or company")
+    phone = str(payload.get("phone") or "").strip()
+    normalized = re.sub(r"[^0-9+]", "", phone)
+    if len(phone) > 32 or not re.fullmatch(r"\+?[0-9]{3,15}", normalized):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Enter a valid phone number")
+
+    if kind == "company":
+        company_id = ticket.get("company_id")
+        company = await company_repo.get_company_by_id(int(company_id)) if company_id is not None else None
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link a company to the ticket first")
+        if str(company.get("phone") or "").strip():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The company already has a phone number")
+        await company_repo.update_company(int(company["id"]), phone=phone)
+        await audit_service.record(
+            action="ticket.requester.company_phone_added",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="company",
+            entity_id=int(company["id"]),
+            before={"phone": None},
+            after={"phone": phone},
+            metadata={"ticket_id": ticket_id},
+        )
+        return JSONResponse({
+            "ok": True, "kind": kind, "company_id": int(company["id"]), "phone": phone,
+            "display": _format_ticket_requester_phone(phone),
+        })
+
+    if ticket.get("requester_staff_id") is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
+    staff_id = int(ticket["requester_staff_id"])
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
+    column = "mobile_phone" if kind == "mobile" else "landline_phone"
+    if str(staff.get(column) or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"The requester already has a {kind} number",
+        )
+    if kind == "mobile":
+        await staff_repo.update_mobile_phone(staff_id, phone)
+    else:
+        await staff_repo.update_landline_phone(staff_id, phone)
+    await audit_service.record(
+        action=f"ticket.requester.{kind}_phone_added",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="staff",
+        entity_id=staff_id,
+        before={column: None},
+        after={column: phone},
+        metadata={"ticket_id": ticket_id},
+    )
+    return JSONResponse({
+        "ok": True, "kind": kind, "staff_id": staff_id, "phone": phone,
+        "display": _format_ticket_requester_phone(phone),
+    })
+
+
+async def _ticket_requester_contact_details(ticket: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Collect the requester details MyPortal holds for an Outlook contact."""
+    details: dict[str, Any] = {}
+    staff_id = ticket.get("requester_staff_id")
+    if staff_id is not None:
+        staff = await staff_repo.get_staff_by_id(int(staff_id))
+        if staff:
+            details = {
+                "first_name": staff.get("first_name"),
+                "last_name": staff.get("last_name"),
+                "email": staff.get("email"),
+                "mobile_phone": staff.get("mobile_phone"),
+                "landline_phone": staff.get("landline_phone"),
+                "job_title": staff.get("job_title") or staff.get("position"),
+            }
+    if not details and ticket.get("requester_id") is not None:
+        user = await user_repo.get_user_by_id(int(ticket["requester_id"]))
+        if user:
+            details = {
+                "first_name": user.get("first_name"),
+                "last_name": user.get("last_name"),
+                "email": user.get("email"),
+                "mobile_phone": user.get("mobile_phone"),
+            }
+    if not details:
+        return None
+    company_id = ticket.get("company_id")
+    if company_id is not None:
+        company = await company_repo.get_company_by_id(int(company_id))
+        if company:
+            details["company_name"] = company.get("name")
+            details["company_phone"] = company.get("phone")
+    return details
+
+
+@app.post("/api/tickets/{ticket_id}/requester/outlook", response_class=JSONResponse)
+async def send_ticket_requester_to_outlook(request: Request, ticket_id: int):
+    """Create or update the ticket requester in the technician's Outlook contacts."""
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not _feature_pack_available("outlook_contacts"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Outlook contacts are not available")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    details = await _ticket_requester_contact_details(ticket)
+    if not details:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester not found")
+    try:
+        result = await user_m365_contacts_service.upsert_contact(int(current_user["id"]), details)
+    except user_m365_contacts_service.ReconnectRequired as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    verb = "updated in" if result["action"] == "updated" else "added to"
+    return JSONResponse({
+        "ok": True,
+        "action": result["action"],
+        "message": f"{result['display_name']} {verb} your Outlook contacts.",
+    })
+
+
 @app.get("/api/rag/relationships/metrics", response_class=JSONResponse)
 async def rag_relationship_metrics(_: dict = Depends(require_super_admin)):
     from app.repositories import rag_relationships as rel_repo
@@ -12016,6 +12168,7 @@ async def _render_ticket_detail(
         requester_options.sort(key=_requester_sort_key)
 
     ticket_requester_phone_display: str | None = None
+    ticket_requester_landline_display: str | None = None
     requester_staff_id = ticket.get("requester_staff_id")
     requester_user_id = ticket.get("requester_id")
     def _same_identifier(left: Any, right: Any) -> bool:
@@ -12034,6 +12187,9 @@ async def _render_ticket_detail(
         ):
             ticket_requester_phone_display = _format_ticket_requester_phone(
                 requester_option.get("mobile_phone")
+            )
+            ticket_requester_landline_display = _format_ticket_requester_phone(
+                requester_option.get("landline_phone")
             )
             break
     if ticket_requester_phone_display is None:
@@ -12259,6 +12415,7 @@ async def _render_ticket_detail(
         "ticket_user_options": technician_users,
         "ticket_requester_options": requester_options,
         "ticket_requester_phone_display": ticket_requester_phone_display,
+        "ticket_requester_landline_display": ticket_requester_landline_display,
         "ticket_company_phone_display": ticket_company_phone_display,
         "ticket_requester_lookup_name": ticket_requester_lookup_name,
         "ticket_watcher_staff_options": watcher_staff_options,

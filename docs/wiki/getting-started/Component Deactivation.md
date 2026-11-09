@@ -117,7 +117,7 @@ one with its current status.
 | GMP/GLP Compliance Checks | `gmp_glp` | — (content filter) | — |
 
 My Profile components: `outlook_contacts` removes the Outlook contacts card
-and the ticket "Check Outlook contacts" button; `click_to_call` removes the
+and the ticket "Check Outlook contacts" and "Send To Outlook" buttons; `click_to_call` removes the
 click-to-call card and stops phone numbers being turned into call links;
 `notification_contact` and `email_signature` remove their My Profile cards
 only. Stored values are kept, so an existing email signature remains available
