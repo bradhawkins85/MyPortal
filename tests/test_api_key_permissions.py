@@ -185,3 +185,46 @@ def test_ip_restriction_ignores_spoofed_forwarded_headers(test_app, usage_calls,
     # ignored and the real peer address is outside the allowed range.
     assert response.status_code == 403
     assert usage_calls == []
+
+
+@pytest.fixture
+def scoped_app():
+    app = FastAPI()
+
+    @app.post("/scoped")
+    async def scoped(_: dict = Depends(api_key_dependency.require_scoped_api_key)):
+        return {"status": "ok"}
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    yield app
+    app.dependency_overrides.clear()
+
+
+def test_scoped_endpoint_refuses_key_without_permissions(scoped_app, usage_calls, monkeypatch):
+    async def fake_get_api_key_record(_: str):
+        return {"id": 7, "permissions": [], "ip_restrictions": []}
+
+    monkeypatch.setattr(api_key_repo, "get_api_key_record", fake_get_api_key_record)
+
+    with TestClient(scoped_app) as client:
+        response = client.post("/scoped", headers={"x-api-key": "unscoped"})
+
+    assert response.status_code == 403
+    assert "limited to it" in response.json()["detail"]
+
+
+def test_scoped_endpoint_accepts_key_limited_to_it(scoped_app, usage_calls, monkeypatch):
+    async def fake_get_api_key_record(_: str):
+        return {
+            "id": 8,
+            "permissions": [{"path": "/scoped", "methods": ["POST"]}],
+            "ip_restrictions": [],
+        }
+
+    monkeypatch.setattr(api_key_repo, "get_api_key_record", fake_get_api_key_record)
+
+    with TestClient(scoped_app) as client:
+        response = client.post("/scoped", headers={"x-api-key": "scoped"})
+
+    assert response.status_code == 200
+    assert usage_calls == [(8, "testclient")]

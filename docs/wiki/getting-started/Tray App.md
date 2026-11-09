@@ -495,8 +495,11 @@ https://portal.example.com/api/tray/ticket-form/url-action?TrayAgentID={{agent.T
 ```
 
 The variable name is case-sensitive. Tactical RMM URL-encodes the custom-field
-value. MyPortal accepts only an active tray device that is linked to an asset,
-then redirects the browser to a short-lived encrypted MyPortal ticket form.
+value. The URL Action needs a signed-in MyPortal helpdesk technician (or super
+admin): anyone else is sent to the login page first and returns to the form
+afterwards, because a device UID alone is not a secret. MyPortal accepts only
+an active tray device that is linked to an asset, then redirects the browser
+to a short-lived encrypted MyPortal ticket form.
 The URL Action never exposes the internal asset or device database ID.
 
 ### Windows (PowerShell)
@@ -504,8 +507,11 @@ The URL Action never exposes the internal asset or device database ID.
 ```powershell
 $url   = 'https://portal.example.com'
 $token = 'PASTE-INSTALL-TOKEN-HERE'
-Invoke-WebRequest -Uri "$url/static/tray/myportal-tray.msi" -OutFile $env:TEMP\myportal-tray.msi
-msiexec.exe /i $env:TEMP\myportal-tray.msi `
+$dir   = Join-Path $env:TEMP ('myportal-tray-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $dir | Out-Null
+icacls.exe $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+Invoke-WebRequest -Uri "$url/static/tray/myportal-tray.msi" -OutFile "$dir\myportal-tray.msi"
+msiexec.exe /i "$dir\myportal-tray.msi" `
     MYPORTAL_URL="$url" ENROL_TOKEN="$token" /qn
 ```
 
@@ -514,16 +520,22 @@ msiexec.exe /i $env:TEMP\myportal-tray.msi `
 ```bash
 URL='https://portal.example.com'
 TOKEN='PASTE-INSTALL-TOKEN-HERE'
-curl -fsSL "$URL/static/tray/myportal-tray.pkg" -o /tmp/myportal-tray.pkg
+DIR="$(mktemp -d)"
+curl -fsSL --proto =https "$URL/static/tray/myportal-tray.pkg" -o "$DIR/myportal-tray.pkg"
 sudo /bin/sh -c "
+    umask 077
     echo MYPORTAL_URL=$URL  >  /Library/Preferences/io.myportal.tray.env
     echo ENROL_TOKEN=$TOKEN >> /Library/Preferences/io.myportal.tray.env
 "
-sudo installer -pkg /tmp/myportal-tray.pkg -target /
+sudo installer -pkg "$DIR/myportal-tray.pkg" -target /
 ```
 
 The admin **Install tokens** page generates these snippets pre-filled
-with the portal URL and a freshly-minted token (shown once).
+with the portal URL and a freshly-minted token (shown once). They download
+into a new folder with a random name that other local users cannot change:
+a fixed path such as `C:\Windows\Temp\myportal-tray.msi` or
+`/tmp/myportal-tray.pkg` could be swapped for another installer before it runs
+with administrator rights.
 
 ### Uninstall
 

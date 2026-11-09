@@ -562,11 +562,13 @@
         const tr = document.createElement('tr');
         tr.innerHTML =
           '<td title="' + escapeHtml(p.path || p.command || '') + '">' + escapeHtml(p.name || '') + '</td>' +
-          '<td class="rmm-live__num">' + p.pid + '</td>' +
+          // Every value comes from the device, so even "numeric" fields are
+          // coerced or escaped before they reach innerHTML.
+          '<td class="rmm-live__num">' + escapeHtml(String(p.pid ?? '')) + '</td>' +
           '<td>' + escapeHtml(p.user || '') + '</td>' +
-          '<td class="rmm-live__num">' + (p.cpu_percent || 0).toFixed(1) + '</td>' +
-          '<td class="rmm-live__num">' + h.fmtBytes(p.memory_bytes) + '</td>' +
-          '<td class="rmm-live__num">' + (p.threads || '') + '</td>' +
+          '<td class="rmm-live__num">' + (Number(p.cpu_percent) || 0).toFixed(1) + '</td>' +
+          '<td class="rmm-live__num">' + escapeHtml(h.fmtBytes(p.memory_bytes)) + '</td>' +
+          '<td class="rmm-live__num">' + escapeHtml(String(p.threads || '')) + '</td>' +
           '<td class="rmm-live__num"></td>';
         const actions = tr.lastChild;
         const end = document.createElement('button');
@@ -942,7 +944,8 @@
         tr.appendChild(name);
         const size = document.createElement('td'); size.className = 'rmm-live__num'; size.textContent = h.fmtBytes(item.size); tr.appendChild(size);
         const bar = document.createElement('td'); bar.className = 'rmm-live__share-col';
-        bar.innerHTML = '<span class="rmm-live__share" style="--pct:' + (item.percent || 0).toFixed(1) + '"></span><span class="rmm-live__share-label">' + (item.percent || 0).toFixed(1) + '%</span>';
+        const pct = (Number(item.percent) || 0).toFixed(1);
+        bar.innerHTML = '<span class="rmm-live__share" style="--pct:' + pct + '"></span><span class="rmm-live__share-label">' + pct + '%</span>';
         tr.appendChild(bar);
         const items = document.createElement('td'); items.className = 'rmm-live__num';
         items.textContent = item.type === 'dir' ? (item.files + ' files') : ''; tr.appendChild(items);

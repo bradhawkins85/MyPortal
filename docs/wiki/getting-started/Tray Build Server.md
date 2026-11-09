@@ -99,7 +99,9 @@ certificate appears in **Local Machine → Personal** with a private key.
 
 The claim response contains company install tokens and, for provisioning
 jobs, the administrator and Wi-Fi credentials. Keep the key restricted to
-these paths and the server's IP. The API uses HTTPS; the build work folder
+these paths and the server's IP. MyPortal refuses a key with no path
+permissions on these endpoints (HTTP 403), so a key made for another job
+cannot claim builds. The API uses HTTPS; the build work folder
 is restricted to SYSTEM and Administrators and transient files are deleted
 after each job.
 
