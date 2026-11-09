@@ -6,11 +6,14 @@
 
 {% block styles %}
 <style>
-  .m365-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+  .m365-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; margin: 0; padding: 0; list-style: none; }
   .m365-step { display: flex; flex-direction: column; gap: .65rem; padding: .85rem; border-radius: .7rem; background: rgba(15, 23, 42, .42); border: 1px solid rgba(148, 163, 184, .12); }
   .m365-step__top { display: flex; align-items: center; gap: .55rem; }
   .m365-step__number { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; color: #bfdbfe; background: rgba(59, 130, 246, .2); font-size: .72rem; font-weight: 800; }
   .m365-step__title { font-size: .85rem; font-weight: 700; }
+  .m365-step__status { margin-left: auto; }
+  .m365-step--done { border-color: var(--color-success); }
+  .m365-step--done .m365-step__number { color: var(--color-surface); background: var(--color-success); }
   .m365-step p { margin: 0; color: rgba(226, 232, 240, .62); font-size: .76rem; line-height: 1.4; }
   .m365-step .button { align-self: flex-start; margin-top: auto; }
   .m365-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
@@ -149,9 +152,13 @@
         </div></header>
         <div class="ce-section__body">
           <p class="alert alert--{{ connection_health.variant }}" role="status">{{ connection_health.message }}</p>
-          <div class="m365-steps">
-            <div class="m365-step">
-              <div class="m365-step__top"><span class="m365-step__number">1</span><span class="m365-step__title">Confirm tenant</span></div>
+          {% set tenant_done = has_credentials %}
+          {% set consent_done = has_credentials and consent_granted %}
+          {% set activate_done = connection_health.state in ('healthy', 'degraded') and not connection_health.has_pending_candidate %}
+          {% macro step_top(number, title, done) %}<div class="m365-step__top"><span class="m365-step__number" aria-hidden="true">{{ '✓' if done else number }}</span><span class="m365-step__title"><span class="visually-hidden">Step {{ number }}: </span>{{ title }}</span>{% if done %}<span class="status status--success m365-step__status">Completed</span>{% endif %}</div>{% endmacro %}
+          <ol class="m365-steps" role="list">
+            <li class="m365-step{% if tenant_done %} m365-step--done{% endif %}">
+              {{ step_top(1, "Confirm tenant", tenant_done) }}
               <p>Sign in as a Global Administrator of the customer's tenant, then check its name before confirming.</p>
               {% if discovered_tenant %}
               {% include "m365/_discovered_tenant.html" %}
@@ -159,11 +166,10 @@
               {% else %}
               <a href="/m365/discover" class="button">Sign in with Microsoft</a>
               {% endif %}
-            </div>
-            <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">2</span><span class="m365-step__title">Review access</span></div><p>Review the combined permission delta and enabled workload justification before consent.</p><a href="/m365/diagnostics" class="button button--ghost">Review permissions</a></div>
-            <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">3</span><span class="m365-step__title">Grant consent</span></div><p>One sign-in grants Microsoft permissions, assigns the Exchange, Teams and Compliance Administrator roles, and captures Security &amp; Compliance access. Run it again to repair access.</p>{% if has_credentials %}<a href="/m365/connect" class="button">Grant Microsoft consent</a>{% else %}<button type="button" class="button button--secondary" disabled>Confirm tenant first</button>{% endif %}</div>
-            <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">4</span><span class="m365-step__title">Verify and activate</span></div><p>Run the readiness checks in the overview, then activate the staged connection. Successful sync jobs do not complete this setup step.</p>{% if connection_health.has_pending_candidate %}<form method="post" action="/m365/connection/complete">{% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}<button type="submit" class="button">Complete setup</button></form>{% else %}<a href="{{ connection_health.next_action_url }}" class="button button--ghost">{{ connection_health.next_action_label }}</a>{% endif %}</div>
-          </div>
+            </li>
+            <li class="m365-step{% if consent_done %} m365-step--done{% endif %}">{{ step_top(2, "Grant consent", consent_done) }}<p>One sign-in grants Microsoft permissions, assigns the Exchange, Teams and Compliance Administrator roles, and captures Security &amp; Compliance access. Run it again to repair access.</p>{% if has_credentials %}<a href="/m365/connect" class="button">Grant Microsoft consent</a>{% else %}<button type="button" class="button button--secondary" disabled>Confirm tenant first</button>{% endif %}</li>
+            <li class="m365-step{% if activate_done %} m365-step--done{% endif %}">{{ step_top(3, "Verify and activate", activate_done) }}<p>Run the readiness checks in the overview, then activate the staged connection. Successful sync jobs do not complete this setup step.</p>{% if connection_health.has_pending_candidate %}<form method="post" action="/m365/connection/complete">{% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}<button type="submit" class="button">Complete setup</button></form>{% else %}<a href="{{ connection_health.next_action_url }}" class="button button--ghost">{{ connection_health.next_action_label }}</a>{% endif %}</li>
+          </ol>
         </div>
       </section>
 

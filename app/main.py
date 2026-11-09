@@ -4178,6 +4178,8 @@ async def m365_page(request: Request):
         "discovered_tenant": (
             _m365_discovered_tenant(request, company_id) if user.get("is_super_admin") else None
         ),
+        # A stored delegated sign-in means an administrator granted consent.
+        "consent_granted": bool((credentials or {}).get("refresh_token")),
     }
     return await _render_template("m365/index.html", request, user, extra=extra)
 
