@@ -312,6 +312,18 @@ or grouped by scope:
 {"asset": {"BitLocker Status": "On"}, "company": {"Tenant ID": "contoso"}}
 ```
 
+A script can only set values it declares: its own source must contain the
+`##myportal[scope.Name]` marker for each value, as in the `Write-Output` lines above. A script
+that writes the result file instead declares its values in a comment:
+
+```powershell
+# ##myportal[asset.BitLocker Status] ##myportal[company.Tenant ID]
+```
+
+Undeclared values are skipped and listed on the run, so a compromised device cannot change
+other fields or variables. MyPortal fills field and variable values into a script's inputs as
+plain text, so a value that looks like `{{…}}` is never expanded.
+
 Names match the field or variable name, ignoring case. Checkbox fields take `true`/`false`,
 and date fields take a `YYYY-MM-DD` date. Values for names that don't exist, and image fields,
 are skipped and listed on the run, so create the field or variable first.
@@ -720,6 +732,12 @@ cancel, abort, AI summary and change to a schedule or onboarding step is recorde
 The RMM agent (`myportal-rmm`) is a separate program from the tray app, built for Windows,
 macOS and Linux by the **Build RMM agent** workflow. It enrols with the tray device's token so
 it joins the same company and asset, then waits for runs.
+
+Each tray device has one RMM agent. While that agent is connected, MyPortal refuses to enrol a
+second agent for the device, and re-enrolling the agent needs its own saved token (which a
+redeploy from the tray app sends automatically). If the agent was reinstalled without its saved
+state, the new agent takes over once the old one has been offline for 30 minutes; the old
+agent is marked *replaced* and its token stops working.
 
 ### Removing PawnIO
 

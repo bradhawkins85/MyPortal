@@ -399,8 +399,13 @@ re-enable the configuration.
   URL-safe random values. Only their SHA-256 hashes are stored (column
   `*_hash`); a 12-character `*_prefix` is kept for display so admins can
   identify which token is which without exposing the secret.
-* **Token rotation.** Calling `/api/tray/enrol` again with the same
-  `device_uid` rotates the auth token; the previous token is invalidated.
+* **Re-enrolment.** An install token is shared by every device in the
+  company, so it cannot re-key a device that is already in use. Calling
+  `/api/tray/enrol` again with the same `device_uid` only works for a device
+  that enrolled in the last 7 days and has never checked in (a tray retrying
+  after a lost response); it returns 409 otherwise. To enrol a machine again,
+  revoke and delete its device in MyPortal first. Once enrolled, the Windows
+  tray removes the install token from `HKLM\Software\MyPortal\Tray`.
 * **Scoped auth.** Tray tokens authenticate **only** the `/api/tray/*`
   device endpoints and the `/ws/tray/*` socket. They cannot call any
   other API. Admin endpoints require an authenticated user with the
@@ -574,6 +579,7 @@ See `tray/README.md` for build instructions.
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | `/api/tray/enrol` returns 401 | Install token expired / revoked / typo | Generate a new token in admin UI |
+| `/api/tray/enrol` returns 409 "Device is already enrolled" | The device ID belongs to a device that has already checked in | Revoke and delete the device on the Devices admin page, then reinstall |
 | Tray icon never appears after install | UI agent could not be launched in the active console session | Check service logs; ensure the user has logged in interactively at least once |
 | Tray shows the default icon instead of the branded one | The UI could not download or decode the icon | The tray uses the configuration's **Branding icon URL** (.ico or PNG), then the icon uploaded under **Admin > Tray**. Check the UI log for `Tray icon` lines naming each URL tried and why it failed |
 | "Chat with this device" button missing | Company has `tray_chat_enabled = 0`, or Matrix is disabled | Toggle on the company edit page; verify `MATRIX_ENABLED=true` |

@@ -144,13 +144,18 @@ func enrol(args []string) error {
 	prepareStateDir()
 	existing, err := state.Load()
 	uid := existing.AgentUID
+	currentToken := ""
+	if existing.PortalURL == strings.TrimRight(*portal, "/") {
+		currentToken = existing.AuthToken
+	}
 	if err != nil || uid == "" {
 		uid = newUID()
+		currentToken = ""
 	}
 	r := runner.New(os.TempDir())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	result, err := client.Enrol(ctx, *portal, token, uid, details(r))
+	result, err := client.Enrol(ctx, *portal, token, uid, currentToken, details(r))
 	if err != nil {
 		return err
 	}

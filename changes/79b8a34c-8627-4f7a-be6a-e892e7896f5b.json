@@ -1,0 +1,7 @@
+{
+  "guid": "79b8a34c-8627-4f7a-be6a-e892e7896f5b",
+  "occurred_at": "2026-11-09T09:53Z",
+  "change_type": "Security",
+  "summary": "Live Tools now escapes every process-list value from the device, a Live Tools connection link works only once and the session ends when the browser disconnects, the Tactical RMM ticket URL Action needs a signed-in technician, the Windows build agent needs an API key limited to its endpoints, and install snippets download into a private folder.",
+  "content_hash": "43d8444556101706ed6b15123985330b0dd46545f8b1ff56594601c237e3a7d5"
+}

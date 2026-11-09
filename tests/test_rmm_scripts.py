@@ -69,6 +69,8 @@ $env:SCRATCH = "set by the script"
 Write-Output $env:TENANT_ID $env:Path ${env:API_TOKEN} $env:SCRATCH $env:MYPORTAL_RESULT_FILE
 [Environment]::GetEnvironmentVariable('SITE_CODE')
 # $env:COMMENTED_OUT is ignored
+# Sets ##myportal[asset.BitLocker] ##myportal[asset.Encrypted] ##myportal[asset.Checked]
+# ##myportal[asset.Photo] ##myportal[asset.Unknown] ##myportal[company.Tenant]
 '''
 
 BASH = r'''#!/bin/bash
@@ -430,11 +432,12 @@ async def _sync(monkeypatch, files: dict[str, str], shas: dict[str, str] | None 
     return summary, fetched
 
 
-async def _enrol(fake, *, tray_id=5, asset_id=10, uid="agent-uid-0001", os_name="windows"):
+async def _enrol(fake, *, tray_id=5, asset_id=10, uid="agent-uid-0001", os_name="windows", current_token=None):
     tray_device = {"id": tray_id, "company_id": 1, "asset_id": asset_id}
     result = await rmm_scripts.enrol_agent(
         tray_device=tray_device,
-        payload={"agent_uid": uid, "hostname": "PC", "os": os_name, "shells": ["powershell", "bash"]},
+        payload={"agent_uid": uid, "hostname": "PC", "os": os_name, "shells": ["powershell", "bash"],
+                 "current_auth_token": current_token},
         client_ip="203.0.113.5",
     )
     return result, await rmm_scripts.authenticate_agent(result["auth_token"])
@@ -485,11 +488,15 @@ async def test_enrolment_links_tray_device_and_rejects_takeover(sqlite_db):
     result, agent = await _enrol(sqlite_db)
     assert agent["company_id"] == 1 and agent["asset_id"] == 10 and agent["tray_device_id"] == 5
     assert agent["auth_token_hash"] != result["auth_token"]
-    again, agent_again = await _enrol(sqlite_db)
+    # Re-keying a connected agent needs its current token.
+    with pytest.raises(PermissionError):
+        await _enrol(sqlite_db)
+    assert await rmm_scripts.authenticate_agent(result["auth_token"]) is not None
+    again, agent_again = await _enrol(sqlite_db, current_token=result["auth_token"])
     assert agent_again["id"] == agent["id"]
     assert await rmm_scripts.authenticate_agent(result["auth_token"]) is None
     with pytest.raises(PermissionError):
-        await _enrol(sqlite_db, tray_id=6)
+        await _enrol(sqlite_db, tray_id=6, current_token=again["auth_token"])
     with pytest.raises(PermissionError):
         await rmm_scripts.enrol_agent(tray_device={"id": 7, "company_id": None}, payload={"agent_uid": "x" * 10}, client_ip=None)
     with pytest.raises(ValueError):
@@ -540,11 +547,16 @@ async def test_run_round_trip_updates_custom_fields_and_variables(sqlite_db, mon
             {"scope": "asset", "name": "Photo", "value": "x"},
             {"scope": "asset", "name": "Unknown", "value": "x"},
             {"scope": "company", "name": "TENANT", "value": "fabrikam"},
+            # Real names, but the script never declared them.
+            {"scope": "company", "name": "Undeclared", "value": "x"},
+            {"scope": "asset", "name": "Tenant", "value": "x"},
         ],
     })
     assert outcome["status"] == "completed"
     applied = {item["name"]: item["applied"] for item in outcome["custom_values"]}
-    assert applied == {"bitlocker": True, "Encrypted": True, "Checked": True, "Photo": False, "Unknown": False, "TENANT": True}
+    assert applied == {"bitlocker": True, "Encrypted": True, "Checked": True, "Photo": False, "Unknown": False,
+                       "TENANT": True, "Undeclared": False, "Tenant": False}
+    assert "does not declare" in outcome["custom_values"][-1]["message"]
 
     values = {row["field_name"]: row for row in await asset_fields_repo.get_asset_field_values(10)}
     assert values["BitLocker"]["value_text"] == "On"
@@ -1966,3 +1978,59 @@ async def test_prequeue_associated_files_checked_when_agent_arrives(sqlite_db, m
     jobs = await rmm_scripts.claim_jobs(agent)
     assert bool(jobs) == (expected == "dispatched")
     assert (await rmm_repo.get_run(run_id))["status"] == expected
+
+
+def test_declared_values_come_from_the_script_source():
+    script = 'Write-Output "##myportal[asset.BitLocker Status]=On"\n# ##myportal[ Company.Tenant ID ]\n'
+    assert rmm_scripts.declared_values(script) == {("asset", "bitlocker status"), ("company", "tenant id")}
+    assert rmm_scripts.declared_values(None) == set()
+
+
+@pytest.mark.anyio
+async def test_render_value_does_not_render_device_supplied_values(monkeypatch):
+    async def fail_render(*args, **kwargs):
+        raise AssertionError("device values must not be rendered")
+
+    context = {
+        "company": {"id": 1, "name": "Contoso", "variables": {"Tenant": "{{tray.deployment_url}}"}},
+        "asset": {"custom": {"Notes": "{{report.all.list}}"}, "variables": {"Notes": "{{report.all.list}}"}},
+    }
+    monkeypatch.setattr(rmm_scripts.value_templates, "render_string_async", fail_render)
+    assert await rmm_scripts.render_value("{{company.variables.Tenant}}", context) == "{{tray.deployment_url}}"
+    assert await rmm_scripts.render_value("x {{asset.variables.Notes}} y", context) == "x {{report.all.list}} y"
+    assert await rmm_scripts.render_value("\ue0000\ue001", context) == ""
+
+
+@pytest.mark.anyio
+async def test_render_value_renders_template_tokens_once(monkeypatch):
+    seen = []
+
+    async def fake_render(text, context, include_templates=False):
+        seen.append(text)
+        return text.replace("{{company.name}}", "Contoso")
+
+    context = {"company": {"id": 1, "name": "Contoso", "variables": {"Tenant": "{{company.name}}"}}, "asset": {}}
+    monkeypatch.setattr(rmm_scripts.value_templates, "render_string_async", fake_render)
+    rendered = await rmm_scripts.render_value("{{company.name}}/{{company.variables.Tenant}}", context)
+    assert rendered == "Contoso/{{company.name}}"
+    assert "{{company.variables.Tenant}}" not in seen[0] and "{{company.name}}" in seen[0]
+
+@pytest.mark.anyio
+async def test_one_rmm_agent_per_tray_device(sqlite_db):
+    first, agent = await _enrol(sqlite_db)
+    # A second agent for the same tray device is refused while the first is connected.
+    with pytest.raises(PermissionError):
+        await _enrol(sqlite_db, uid="agent-uid-rogue")
+    assert await rmm_scripts.authenticate_agent(first["auth_token"]) is not None
+
+    # Once the first has been silent long enough (e.g. reinstalled without its
+    # state), a new agent replaces it and the old token stops working.
+    await sqlite_db.execute(
+        "UPDATE rmm_agents SET last_seen_utc = %s WHERE id = %s",
+        ("2020-01-01 00:00:00", agent["id"]),
+    )
+    _second, replacement = await _enrol(sqlite_db, uid="agent-uid-0003")
+    assert replacement["id"] != agent["id"]
+    assert await rmm_scripts.authenticate_agent(first["auth_token"]) is None
+    assert (await rmm_repo.get_agent(int(agent["id"])))["status"] == "replaced"
+    assert [a["id"] for a in await rmm_repo.list_tray_device_agents(5)] == [replacement["id"]]

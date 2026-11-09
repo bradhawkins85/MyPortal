@@ -1,0 +1,7 @@
+{
+  "guid": "12d2cc8a-b959-4c59-9e61-e4ffa019257e",
+  "occurred_at": "2026-11-09T09:48Z",
+  "change_type": "Security",
+  "summary": "The tray and RMM agents now keep their Windows data folders private to the service, only open web and email links, refuse redirects that could leak their token, and the install scripts download into a private folder over https.",
+  "content_hash": "93cad92ddeb15cd6ea3ff9af74994ad26a664d391c034df37132fa7a651270e1"
+}

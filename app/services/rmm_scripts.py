@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import hmac
 import json
 import random
 import re
@@ -444,14 +445,33 @@ def _named_value(context: Mapping[str, Any], scope: str, name: str) -> str:
     return ""
 
 
-async def render_value(template: str, context: Mapping[str, Any]) -> str:
-    """Fill MyPortal variables in a technician's value for one device."""
+_NAMED_VALUE_SLOT = re.compile("\ue000(\\d+)\ue001")
 
-    text = _NAMED_VALUE_TOKEN.sub(lambda match: _named_value(context, match.group(1), match.group(2)), template)
-    if not _TOKEN.search(text):
-        return text
-    rendered = await value_templates.render_string_async(text, context, include_templates=False)
-    return "" if rendered is None else str(rendered)
+
+async def render_value(template: str, context: Mapping[str, Any]) -> str:
+    """Fill MyPortal variables in a technician's value for one device.
+
+    Custom field, variable and result values can be written by devices, so
+    they are inserted after the template is rendered and are never rendered
+    themselves: a value of ``{{tray.deployment_url}}`` stays literal text.
+    """
+
+    named: list[str] = []
+
+    def hold(match: re.Match[str]) -> str:
+        named.append(_named_value(context, match.group(1), match.group(2)))
+        return "\ue000" + str(len(named) - 1) + "\ue001"
+
+    text = _NAMED_VALUE_SLOT.sub("", template)
+    text = _NAMED_VALUE_TOKEN.sub(hold, text)
+    if _TOKEN.search(text):
+        rendered = await value_templates.render_string_async(text, context, include_templates=False)
+        text = "" if rendered is None else str(rendered)
+    def fill(match: re.Match[str]) -> str:
+        index = int(match.group(1))
+        return named[index] if index < len(named) else ""
+
+    return _NAMED_VALUE_SLOT.sub(fill, text)
 
 
 def _coerce(field_def: Mapping[str, Any], raw: str) -> tuple[Any, str | None]:
@@ -989,6 +1009,37 @@ def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[st
     }
 
 
+AGENT_REPLACE_AFTER = timedelta(minutes=30)
+
+
+def _may_replace_agent(agent: Mapping[str, Any], current_token: str) -> bool:
+    """Whether an enrolment may take over ``agent``'s identity or device.
+
+    Allowed when the caller proves it holds the agent's token, when the agent
+    is not active (uninstalled or replaced), or when it has been silent long
+    enough that it is no longer running.
+    """
+
+    if agent.get("status") != "active":
+        return True
+    stored = str(agent.get("auth_token_hash") or "")
+    if current_token and stored and hmac.compare_digest(
+        tray_service.hash_token(current_token), stored
+    ):
+        return True
+    last_seen = agent.get("last_seen_utc")
+    if isinstance(last_seen, str):
+        try:
+            last_seen = datetime.fromisoformat(last_seen)
+        except ValueError:
+            return True
+    if not isinstance(last_seen, datetime):
+        return True
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - last_seen > AGENT_REPLACE_AFTER
+
+
 async def enrol_agent(
     *, tray_device: Mapping[str, Any], payload: Mapping[str, Any], client_ip: str | None
 ) -> dict[str, Any]:
@@ -1017,9 +1068,44 @@ async def enrol_agent(
         "auth_token_prefix": tray_service.token_prefix(token),
         "details": details,
     }
+    tray_device_id = int(tray_device["id"])
+    current_token = str(payload.get("current_auth_token") or "").strip()
     if existing:
-        if existing.get("tray_device_id") not in (None, int(tray_device["id"])):
+        if existing.get("tray_device_id") not in (None, tray_device_id):
             raise PermissionError("This RMM agent is enrolled to a different device.")
+        if not _may_replace_agent(existing, current_token):
+            log_warning(
+                "RMM re-enrolment refused for agent in use",
+                agent_id=existing.get("id"),
+                tray_device_id=tray_device_id,
+            )
+            raise PermissionError(
+                "This RMM agent is already connected. Re-enrol it from its own "
+                "installation, or wait until it has been offline for 30 minutes."
+            )
+    # One RMM agent per tray device: a second agent would race the first for
+    # scripts and live sessions, so it may only replace an agent that has
+    # gone quiet (for example after a reinstall that lost its state).
+    others = [
+        agent
+        for agent in await rmm_repo.list_tray_device_agents(tray_device_id)
+        if not existing or int(agent["id"]) != int(existing["id"])
+    ]
+    for other in others:
+        if not _may_replace_agent(other, ""):
+            log_warning(
+                "Second RMM agent refused for tray device",
+                agent_id=other.get("id"),
+                tray_device_id=tray_device_id,
+            )
+            raise PermissionError(
+                "Another RMM agent is already connected for this device. Remove "
+                "it in MyPortal, or wait until it has been offline for 30 minutes."
+            )
+    for other in others:
+        await rmm_repo.set_agent_status(int(other["id"]), "replaced")
+        log_info("RMM agent replaced", agent_id=other.get("id"), tray_device_id=tray_device_id)
+    if existing:
         await rmm_repo.reenrol_agent(int(existing["id"]), **common)
         agent_id = int(existing["id"])
     else:
@@ -1444,13 +1530,45 @@ def normalise_custom_values(raw: Any) -> list[dict[str, str]]:
     return cleaned
 
 
+_DECLARED_VALUE = re.compile(r"##myportal\[\s*(asset|company)\.([^\]\r\n]+?)\s*\]", re.IGNORECASE)
+
+
+def declared_values(script_content: str | None) -> set[tuple[str, str]]:
+    """The ``(scope, name)`` pairs a script may set, from its own source.
+
+    A script declares a value by containing its ``##myportal[scope.Name]``
+    marker, either where it prints it or in a comment. The list comes from
+    the script MyPortal sent, never from the device's report.
+    """
+
+    return {
+        (match.group(1).lower(), match.group(2).strip().casefold())
+        for match in _DECLARED_VALUE.finditer(script_content or "")
+    }
+
+
 async def apply_custom_values(run: Mapping[str, Any], values: list[dict[str, str]]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     if not values:
         return results
     asset_definitions = await asset_fields_repo.list_field_definitions()
     company_definitions = await company_variables_repo.list_definitions()
+    declared = declared_values(run.get("script_content"))
     for item in values:
+        if (item["scope"], item["name"].strip().casefold()) not in declared:
+            log_warning(
+                "RMM script value not declared by the script",
+                run_id=run.get("id"),
+                scope=item["scope"],
+                name=item["name"],
+            )
+            results.append({
+                **item,
+                "applied": False,
+                "message": "The script does not declare this value. Add "
+                f"##myportal[{item['scope']}.{item['name']}] to the script to allow it.",
+            })
+            continue
         if item["scope"] == "asset":
             problem = await _apply_asset_value(run.get("asset_id"), item["name"], item["value"], asset_definitions)
         else:
