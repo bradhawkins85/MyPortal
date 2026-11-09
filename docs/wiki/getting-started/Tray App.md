@@ -180,7 +180,7 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/admin/configs/targeting/fields` | GET | Super admin | Advanced rule fields and operators (same catalogue as RMM checks) |
 | `/api/tray/admin/configs/targeting/preview` | POST | Super admin | Preview active tray devices matching a scope + an item's rule tree |
 | `/api/tray/admin/devices` | GET | Helpdesk technician | List enrolled devices |
-| `/api/tray/admin/devices/{id}/revoke` | POST | Super admin | Revoke a device |
+| `/api/tray/admin/devices/{id}/revoke` | POST | Super admin | Revoke a device, its RMM agents, its open connection and popup chat sessions |
 | `/api/tray/{device_uid}/troubleshoot` | POST | Helpdesk / super admin | Ask an active device to run the AI troubleshooting agent for a ticket (queues + pushes a `troubleshoot` WS command) |
 | `/api/tickets/{ticket_id}/troubleshoot-complete` | POST | Device bearer | AI agent reports generated guidance + sanitized log bundle for a ticket (multipart) |
 | `/api/health-checks/{id}/device-status` | POST | Device bearer | Health check progress (see [Health Check](../administration/Health%20Check.md)) |
@@ -196,7 +196,7 @@ All endpoints appear in the Swagger UI at `/docs` per project convention.
 * `{"type": "chat_open", "room_id": <int>, "matrix_room_id": "...", "subject": "..."}`
 * `{"type": "show_notification", "title": "...", "body": "..."}`
 * `{"type": "run_menu_action", "node_id": "..."}` *(only for whitelisted server-defined actions)*
-* `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "prompt": "...", "llm_base_url": "...", "llm_model": "...", "llm_api_key": "..."}` *(AI troubleshooting: the device collects sanitized local logs, asks a local LLM for guidance, then POSTs the result back to `troubleshoot-complete`. Fields are flat top-level JSON.)*
+* `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "prompt": "...", "llm_base_url": "...", "llm_model": "..."}` *(AI troubleshooting: the device collects sanitized local logs, asks a local LLM for guidance, then POSTs the result back to `troubleshoot-complete`. Fields are flat top-level JSON. MyPortal never sends its LLM API key to devices, so this direct mode only works with an LLM the device can reach without one; the ticket AI troubleshooter calls the LLM from the server instead.)*
 * `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "mode": "collect_logs", "log_requests": [{"source": "System", "reason": "...", "hours": 24}]}` *(Multi-stage troubleshooter: the device collects only the allowlisted log sources named, scrubs them and uploads them to `troubleshoot-complete`; the server analyses them. No LLM credentials are sent.)*
 * `{"type": "health_check", "command_id": <int>, "health_check_id": <int>, "phase": "snapshot"|"logs", "log_requests": [...], "extra_log_folders": [...], "extra_event_logs": [...], "allow_pawnio": <bool>, "event_days": <int>}` *(AI health check: the device reads a read-only health snapshot (and, on physical Windows hardware when allowed, hardware sensors through a temporarily installed PawnIO driver), collects the named allowlisted logs and uploads them to `/api/health-checks/{id}/device-result`. See [Health Check](../administration/Health%20Check.md).)*
 
@@ -406,8 +406,13 @@ re-enable the configuration.
   URL-safe random values. Only their SHA-256 hashes are stored (column
   `*_hash`); a 12-character `*_prefix` is kept for display so admins can
   identify which token is which without exposing the secret.
-* **Token rotation.** Calling `/api/tray/enrol` again with the same
-  `device_uid` rotates the auth token; the previous token is invalidated.
+* **Re-enrolment.** An install token is shared by every device in the
+  company, so it cannot re-key a device that is already in use. Calling
+  `/api/tray/enrol` again with the same `device_uid` only works for a device
+  that enrolled in the last 7 days and has never checked in (a tray retrying
+  after a lost response); it returns 409 otherwise. To enrol a machine again,
+  revoke and delete its device in MyPortal first. Once enrolled, the Windows
+  tray removes the install token from `HKLM\Software\MyPortal\Tray`.
 * **Scoped auth.** Tray tokens authenticate **only** the `/api/tray/*`
   device endpoints and the `/ws/tray/*` socket. They cannot call any
   other API. Admin endpoints require an authenticated user with the
@@ -581,6 +586,7 @@ See `tray/README.md` for build instructions.
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | `/api/tray/enrol` returns 401 | Install token expired / revoked / typo | Generate a new token in admin UI |
+| `/api/tray/enrol` returns 409 "Device is already enrolled" | The device ID belongs to a device that has already checked in | Revoke and delete the device on the Devices admin page, then reinstall |
 | Tray icon never appears after install | UI agent could not be launched in the active console session | Check service logs; ensure the user has logged in interactively at least once |
 | Tray shows the default icon instead of the branded one | The UI could not download or decode the icon | The tray uses the configuration's **Branding icon URL** (.ico or PNG), then the icon uploaded under **Admin > Tray**. Check the UI log for `Tray icon` lines naming each URL tried and why it failed |
 | "Chat with this device" button missing | Company has `tray_chat_enabled = 0`, or Matrix is disabled | Toggle on the company edit page; verify `MATRIX_ENABLED=true` |
@@ -821,7 +827,7 @@ raw log data is never uploaded unsanitised.
    the configured LLM, queues the job in `tray_command_log`, and pushes a
    `troubleshoot` command over the device WebSocket (see §3). The command
    carries the `ticket_id` / `command_id` identifiers, the `prompt`, and the
-   local LLM endpoint (`llm_base_url` / `llm_model` / `llm_api_key`).
+   local LLM endpoint (`llm_base_url` / `llm_model`; no API key is sent).
 2. The service runs the Go agent (`tray/internal/agent/`) in a background
    goroutine: it collects up to 24 h of platform logs (Windows Event Log
    + common app logs on Windows; `log` / `Console` subsystem logs and

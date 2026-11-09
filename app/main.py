@@ -1341,8 +1341,9 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
         await websocket.close(code=4401)
         return
 
-    device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
-    if not device or device.get("device_uid") != device_uid:
+    token_hash = tray_service.hash_token(token)
+    device = await tray_repo.get_device_by_auth_hash(token_hash)
+    if not device or device.get("device_uid") != device_uid or device.get("status") != "active":
         await websocket.close(code=4401)
         return
 
@@ -1380,6 +1381,10 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
             now = loop.time()
             if now - last_drain >= tray_service.QUEUED_COMMAND_DRAIN_INTERVAL_SECONDS:
                 last_drain = now
+                current = await tray_repo.get_device_by_id(int(device["id"]))
+                if not tray_service.connection_still_valid(current, token_hash):
+                    await websocket.close(code=4401)
+                    break
                 await tray_service.mark_websocket_alive(device)
                 try:
                     await tray_service.deliver_queued_commands(device)
@@ -9209,9 +9214,9 @@ async def admin_tray_revoke_device(device_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    from app.repositories import tray as tray_repo
+    from app.services import tray as tray_service
 
-    await tray_repo.revoke_device(device_id)
+    await tray_service.revoke_device(device_id)
     return RedirectResponse(url="/admin/tray#devices", status_code=303)
 
 

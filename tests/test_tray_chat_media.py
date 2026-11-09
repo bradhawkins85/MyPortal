@@ -166,6 +166,11 @@ def _session(monkeypatch, *, room_id: int = 42):
         "_parse_popup_session",
         lambda request: {"device_id": 7, "room_id": room_id, "company_id": 3, "csrf": "csrf-token"},
     )
+    monkeypatch.setattr(
+        tray_routes.tray_repo,
+        "get_device_by_id",
+        AsyncMock(return_value={"id": 7, "hostname": "PC-1", "status": "active"}),
+    )
 
 
 class _Request:
@@ -183,7 +188,7 @@ async def test_send_attachment_uploads_to_matrix_and_stores_media(monkeypatch):
     monkeypatch.setattr(tray_routes._settings, "matrix_enabled", True, raising=False)
     room = {"id": 42, "status": "open", "matrix_room_id": "!room:hs"}
     monkeypatch.setattr(tray_routes.chat_repo, "get_room", AsyncMock(return_value=room))
-    monkeypatch.setattr(tray_routes.tray_repo, "get_device_by_id", AsyncMock(return_value={"hostname": "PC-1"}))
+    monkeypatch.setattr(tray_routes.tray_repo, "get_device_by_id", AsyncMock(return_value={"hostname": "PC-1", "status": "active"}))
     upload_media = AsyncMock(return_value="mxc://hs/up1")
     send_media = AsyncMock(return_value={"event_id": "$sent"})
     monkeypatch.setattr(tray_routes.matrix_service, "upload_media", upload_media)

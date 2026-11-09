@@ -595,6 +595,7 @@ func (d *daemon) ensureEnrolled() error {
 		// Ensure the device UID is present in HKLM for the UI agent and
 		// any external tools that read HKLM\Software\MyPortal\Tray.
 		saveDeviceUIDToRegistry(s.DeviceUID)
+		forgetEnrolToken()
 		return nil
 	}
 
@@ -640,6 +641,7 @@ func (d *daemon) ensureEnrolled() error {
 	}
 	_ = os.Remove(filepath.Join(stateDir(), pendingStateFileName))
 	saveDeviceUIDToRegistry(resp.DeviceUID)
+	forgetEnrolToken()
 	logger.Info("Enrolled: device_uid=%s", resp.DeviceUID)
 	return nil
 }
