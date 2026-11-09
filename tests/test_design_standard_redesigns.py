@@ -751,6 +751,7 @@ def _scheduled_tasks_context(**overrides):
         "company_options": [{"value": "", "label": "All companies"}, {"value": "42", "label": "Acme"}],
         "bulk_company_options": [{"value": "42", "label": "Acme"}],
         "schedule_timezone": "Australia/Brisbane",
+        "command_default_crons": {"generate_invoice": "1 0 L * *", "sync_to_xero": "2 15 L * *"},
         "csrf_token": "t",
     }
     context.update(overrides)
@@ -795,6 +796,8 @@ def test_scheduled_tasks_render_grouped_list_with_editor_modals():
     assert data["timezone"] == "Australia/Brisbane"
     assert data["tasks"][0]["cron"] == "1 15 L * *"
     assert data["commandDefaults"]["generate_invoice"] == "1 0 L * *"
+    assert data["commandDefaults"]["sync_to_xero"] == "2 15 L * *"
+    assert "generate_invoice" in data["sequentialCommands"]
     assert "scheduled_tasks.js" in html and "automation.js" not in html
     # The stat strip filters the list: each tile is a toggle button keyed to a row attribute.
     assert 'data-sch-filter-strip' in html

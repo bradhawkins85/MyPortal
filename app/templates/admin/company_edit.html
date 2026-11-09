@@ -1895,6 +1895,7 @@
               {{ 'Hide' if show_inactive_tasks else 'Show' }} inactive
             </button>
             <button type="button" class="button" data-task-create>+ New automation</button>
+            <script type="application/json" id="automation-command-defaults">{{ automation_command_default_crons | default({}) | tojson }}</script>
           </div>
           <div class="table-wrapper">
             <table class="table" id="company-automation-tasks" data-table data-table-id="company-automation-tasks">
