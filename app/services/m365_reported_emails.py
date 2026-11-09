@@ -34,7 +34,7 @@ from app.services import m365_spam_purge as purge_service
 
 REPORTED_TITLE_PREFIX = "email reported by user as"
 SEARCH_WINDOW = timedelta(hours=1)
-DEFAULT_LOOKBACK_DAYS = 30
+DEFAULT_LOOKBACK_DAYS = 1
 MAX_LOOKBACK_DAYS = 90
 _MAX_PAGES = 10
 _ALERTS_URL = "https://graph.microsoft.com/v1.0/security/alerts_v2"
