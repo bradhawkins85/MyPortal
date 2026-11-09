@@ -36,7 +36,6 @@ from zoneinfo import ZoneInfo
 from app.repositories import rmm as rmm_repo
 from app.security.encryption import encrypt_secret
 from app.services import rmm_automation, rmm_scripts
-from app.services.rmm_scripts import RunRequestError
 
 TYPES = {
     "create_ticket": "Create a ticket",
