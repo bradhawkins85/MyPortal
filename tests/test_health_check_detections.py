@@ -517,7 +517,9 @@ async def test_event_log_rule_form_is_filled_in_from_a_monitor(store, monkeypatc
     monkeypatch.setattr(rule_routes.event_logs, "logs_for", logs_for)
     rule, problem = await rule_routes._suggested_rule(1, 10, "slow_boot", None, None)
     assert problem is None and rule["scope"] == "company" and rule["asset_id"] == 10
-    assert rule["action"] == "create_ticket" and rule["name"] == "Slow start-up"
+    # The suggested rule takes one action, raising a ticket.
+    assert rule["action"] == "actions" and [step["type"] for step in rule["actions"]] == ["create_ticket"]
+    assert rule["name"] == "Slow start-up"
     assert rule["conditions"][0] == {"field": "log_name", "operator": "is",
                                      "value": "Microsoft-Windows-Diagnostics-Performance/Operational"}
     assert rule["suggestion"]["log_collected"] is False

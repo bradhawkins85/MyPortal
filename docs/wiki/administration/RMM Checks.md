@@ -132,30 +132,45 @@ overrides. A pending script action is dropped if the check no longer applies.
 
 ## What happens when a check fails
 
-Checks offer these failure actions:
+The result always shows on the asset page and the Checks page. Under **What happens when it
+fails**, add the actions to take as well, in any combination. They run one after another in the
+order listed, so a check can, for example, create a ticket, run a clean-up script, then schedule a
+second script for out of hours. Use **+ Add an action** to add one, the arrows to move it up or
+down, and **Remove** to take it out. Add as many scripts as you need (up to 10 actions); a check
+creates at most one ticket, because one ticket per device follows the problem. If one action fails,
+for example ticketing is unavailable, the actions after it still run and the check summary says
+which failed.
 
-* **Show the result only**: the result shows on the asset page and the Checks page.
-* **Run a script**: queue a Gitea script on the device. Its values can use
-  `{{check.name}}`, `{{check.type}}`, `{{check.target}}`, `{{check.result}}` and
-  `{{check.device}}` as well as the usual variables. While the check keeps failing the script runs
-  again every **cooldown** minutes; a cooldown of 0 runs it once each time the check fails.
-* **Schedule a script**: run the script on the device later, either after a delay or at the next
-  time of day in a time zone, such as a clean-up at 02:00 out of hours. One run is scheduled each
-  time the check starts failing; if the check passes again before then, the run is dropped. The
-  asset page shows when a scheduled run is waiting.
-* **Install a Chocolatey package**: enter an exact package ID, such as `googlechrome`.
-  Active Windows devices install it through the company's enabled Chocolatey sources,
-  installing Chocolatey if needed. Jobs appear in patch run history and never automatically
-  reboot. While the check keeps failing, the action repeats after its cooldown; 0 attempts it
-  once per failure. A busy patch queue or unavailable source is recorded in the check summary.
-  Use **Only act on these results** with `Not installed` to avoid installation on an Unknown
-  result. Already installed Chocolatey packages are skipped.
 * **Create a ticket**: raise a ticket for the device's company with the device linked. While that
   ticket is not closed, a later failure on the same device adds an internal update to it instead of
   raising another, and the ticket gets an internal update when the check passes again.
   Enable **Auto-close when resolved** to also move the ticket to **Resolved** when that status
   exists, or **Closed** otherwise. This option is off by default. With it enabled, a later
   failure raises a new ticket, and tickets already resolved or closed are left in that state.
+* **Run a script**: queue a Gitea script on the device. Its values can use
+  `{{check.name}}`, `{{check.type}}`, `{{check.target}}`, `{{check.result}}` and
+  `{{check.device}}` as well as the usual variables. Each script action has its own script,
+  values and timeout; after you choose a script and save, its parameters appear in that action.
+* **Schedule a script**: run the script on the device later, either after a delay or at the next
+  time of day in a time zone, such as a clean-up at 02:00 out of hours. Each scheduled script has
+  its own timing. One run is scheduled for each such action each time the check starts failing; if
+  the check passes again before then, the waiting runs are dropped. The asset page shows when the
+  next scheduled run is waiting.
+* **Install a Chocolatey package**: enter an exact package ID, such as `googlechrome`.
+  Active Windows devices install it through the company's enabled Chocolatey sources,
+  installing Chocolatey if needed. Jobs appear in patch run history and never automatically
+  reboot. A busy patch queue or unavailable source is recorded in the check summary.
+  Use **Only act on these results** with `Not installed` to avoid installation on an Unknown
+  result. Already installed Chocolatey packages are skipped.
+
+While the check keeps failing, its scripts and package installs run again, in the same order,
+every **cooldown** minutes (**Run scripts and installs again while failing every**); a cooldown of
+0 runs them once each time the check fails. Tickets and scheduled scripts happen once per failure.
+**Only act on these results** applies to every action: nothing is done until the check's result
+contains one of the listed results.
+
+Checks saved before actions could be combined keep their one action and work as before; it
+appears as the only action in the list.
 
 Script runs started by checks show as **Check** in run history.
 

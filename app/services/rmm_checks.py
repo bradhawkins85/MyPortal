@@ -29,18 +29,19 @@ How each type is checked:
   ``duration_minutes`` on the server (:func:`evaluate_offline`).
 
 A problem must last ``duration_minutes`` before the check fails (status
-``warning`` until then). When a check starts failing it can run a script on the
-device (again each ``cooldown_minutes`` while it keeps failing, or once when
-the cooldown is 0), schedule a script for later (dropped if the check passes
-before it runs; :func:`run_due_scheduled_checks`) or raise a ticket for the
-device, or install a Chocolatey package using the company’s enabled sources
-(on Windows, with the same cooldown as script actions). Checks can optionally
-resolve that ticket on recovery. While that ticket
-is open, later failures and the recovery are added to it as internal updates.
-An action can be limited to some results (:func:`action_allowed`), such as
-installing an app only when a check says "Not installed" and not "Unknown": the
-check still fails with any other result but nothing is done until the result
-matches, which can be later in the same failure.
+``warning`` until then). When a check starts failing it takes its actions in
+the order they are listed (:mod:`app.services.rmm_action_steps`), in any
+combination: raise a ticket for the device, run scripts on the device (again
+each ``cooldown_minutes`` while it keeps failing, or once when the cooldown is
+0), schedule scripts for later (dropped if the check passes before they run;
+:func:`run_due_scheduled_checks`) or install Chocolatey packages using the
+company’s enabled sources (on Windows, with the same cooldown as scripts). The
+ticket can optionally be resolved on recovery. While that ticket is open, later
+failures and the recovery are added to it as internal updates. The actions can
+be limited to some results (:func:`action_allowed`), such as installing an app
+only when a check says "Not installed" and not "Unknown": the check still fails
+with any other result but nothing is done until the result matches, which can
+be later in the same failure.
 
 While a device has disk, ping, CPU, memory or network checks, the values it
 reports are kept in the separate stats database (:mod:`app.core.stats_database`)
@@ -67,9 +68,15 @@ from app.repositories import rmm_checks as repo
 from app.repositories import rmm_stats as stats_repo
 from app.repositories import rmm_targeting as targeting_repo
 from app.security.encryption import encrypt_secret
-from app.services import rmm_actions, rmm_automation, rmm_event_log_rules, rmm_scripts, rmm_targeting
 from app.services import rmm_proxmox
 from app.services.rmm_scripts import RunRequestError
+
+
+def _service_modules():
+    # Lazy-load peer service modules to avoid import-time cycles.
+    from app.services import rmm_action_steps, rmm_actions, rmm_automation, rmm_scripts, rmm_targeting
+
+    return rmm_action_steps, rmm_actions, rmm_automation, rmm_scripts, rmm_targeting
 
 RUN_SOURCE = "check"
 CHECK_TYPES = {
@@ -96,6 +103,8 @@ ACTIONS = {
     "install_choco": "Install a Chocolatey package",
 }
 SCRIPT_ACTIONS = ("run_script", "schedule_script")
+# What a check can do when it fails, as listed actions in order.
+ACTION_TYPES = ("create_ticket", "run_script", "schedule_script", "install_choco")
 STATUSES = {"pending": "Waiting", "passing": "Passing", "warning": "Problem", "failing": "Failing"}
 REPORT_INTERVAL_SECONDS = 60
 CONFIG_REFRESH_SECONDS = 300
@@ -423,7 +432,7 @@ def describe_action_results(check: Mapping[str, Any]) -> str:
     """The action's result limit in words, or "" when it has none."""
 
     wanted = action_results(check)
-    if not wanted or check.get("action") in (None, "", "none"):
+    if not wanted or not rmm_action_steps.steps(check):
         return ""
     quoted = [f"“{value}”" for value in wanted]
     listed = quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + f" or {quoted[-1]}"
@@ -597,24 +606,6 @@ def parse_settings(check_type: str, form: Mapping[str, Any]) -> tuple[str, dict[
     return target, settings, duration, errors
 
 
-async def _script_entries(form: Mapping[str, Any], prefix: str, script: Mapping[str, Any],
-                          previous_blob: Any, same_script: bool) -> dict[str, str]:
-    previous = rmm_automation.decrypt_entries(previous_blob) if same_script else {}
-    entries: dict[str, str] = {}
-    # A newly chosen script's fields appear after saving; only the current
-    # script's values are read from the form.
-    if not same_script:
-        return entries
-    for field_def in rmm_scripts.script_fields(script):
-        key = field_def["key"]
-        text = str(form.get(prefix + key) or "")[:65535]
-        if not text.strip() and field_def["sensitive"] and previous.get(key):
-            text = previous[key]  # a blank secret keeps the saved one
-        if text.strip():
-            entries[key] = text
-    return entries
-
-
 async def save_check(
     *,
     check_id: int | None,
@@ -667,19 +658,16 @@ async def save_check(
     else:
         target, settings, duration, type_errors = parse_settings(check_type, form)
         errors.update(type_errors)
-    action = str(form.get("action") or "none")
-    if action not in ACTIONS:
+    legacy_action = str(form.get("action") or "none")
+    if not rmm_action_steps.form_list(form, "action_key") and legacy_action not in ACTIONS:
         errors["action"] = "Choose what happens when the check fails."
-    limited = parse_action_results(form.get("action_results"), errors) if action != "none" else []
+    actions = await rmm_action_steps.parse_steps(
+        form, types=ACTION_TYPES, company_id=check_company_id, existing=rmm_action_steps.steps(existing),
+        errors=errors, legacy_action=legacy_action,
+    )
+    limited = parse_action_results(form.get("action_results"), errors) if actions else []
     if limited:
         settings = {**settings, "action_results": limited}
-
-    if action == "install_choco":
-        from app.services.rmm_software_updates import package_ids
-        try:
-            settings["package_id"] = package_ids([form.get("package_id")])[0]
-        except RunRequestError as exc:
-            errors.update(exc.errors)
 
     check_script: dict[str, Any] | None = None
     check_entries: dict[str, str] = {}
@@ -691,23 +679,20 @@ async def save_check(
         if check_script is not None:
             target = str(check_script["id"])
             same = bool(existing) and existing.get("check_script_id") == check_script["id"]
-            check_entries = await _script_entries(
+            check_entries = rmm_action_steps.script_entries(
                 form, "check_entry:", check_script, (existing or {}).get("check_entries_encrypted"), same)
-
-    schedule = rmm_event_log_rules.parse_schedule(form if action == "schedule_script" else None, errors)
-    script: dict[str, Any] | None = None
-    entries: dict[str, str] = {}
-    if action in SCRIPT_ACTIONS:
-        try:
-            script = await rmm_automation._scoped_script(form.get("script_id"), check_company_id)
-        except RunRequestError as exc:
-            errors.update(exc.errors)
-        if script is not None:
-            same = bool(existing) and existing.get("script_id") == script["id"]
-            entries = await _script_entries(form, "entry:", script, (existing or {}).get("entries_encrypted"), same)
     if errors:
         raise CheckError(errors)
 
+    # The older single-action columns follow the first action of each kind.
+    legacy = rmm_action_steps.legacy_columns(actions, none="none")
+    if legacy["package_id"]:
+        settings = {**settings, "package_id": legacy["package_id"]}
+    if check_script is not None:
+        timeout = rmm_scripts.clamp_timeout(form.get("timeout_seconds"),
+                                            int(check_script.get("default_timeout_seconds") or 600))
+    else:
+        timeout = int(legacy["script_timeout_seconds"] or 600)
     values = {
         "name": name,
         "company_id": check_company_id,
@@ -720,18 +705,18 @@ async def save_check(
         "check_script_id": int(check_script["id"]) if check_script else None,
         "check_entries_encrypted": encrypt_secret(json.dumps(check_entries)) if check_entries else None,
         "check_inputs": rmm_scripts.stored_inputs(check_script, check_entries) if check_script else [],
-        "action": action,
-        "auto_close_when_resolved": action == "create_ticket" and str(
-            form.get("auto_close_when_resolved") or "").lower() in {"1", "on", "true", "yes"},
-        "script_id": int(script["id"]) if script else None,
-        "entries_encrypted": encrypt_secret(json.dumps(entries)) if entries else None,
-        "inputs": rmm_scripts.stored_inputs(script, entries) if script else [],
-        "timeout_seconds": rmm_scripts.clamp_timeout(
-            form.get("timeout_seconds"),
-            int(((check_script if check_type == "script" else script) or {}).get("default_timeout_seconds") or 600),
-        ),
+        "action": legacy["action"],
+        "auto_close_when_resolved": legacy["auto_close_when_resolved"],
+        "script_id": legacy["script_id"],
+        "entries_encrypted": legacy["entries_encrypted"],
+        "inputs": legacy["inputs"],
+        "timeout_seconds": timeout,
         "cooldown_minutes": _int(form.get("cooldown_minutes"), DEFAULT_COOLDOWN_MINUTES, 0, MAX_COOLDOWN_MINUTES),
-        **schedule,
+        "schedule_mode": legacy["schedule_mode"],
+        "delay_minutes": legacy["delay_minutes"],
+        "run_time": legacy["run_time"],
+        "schedule_timezone": legacy["schedule_timezone"],
+        "actions": actions,
         "is_enabled": str(form.get("is_enabled") or "").lower() in {"1", "on", "true", "yes"},
         "user_id": user_id,
     }
@@ -742,20 +727,19 @@ async def save_check(
 
 
 def script_values(check: Mapping[str, Any] | None, script: Mapping[str, Any] | None, *,
-                  own: bool = False) -> list[dict[str, Any]]:
+                  own: bool = False, action_key: str | None = None) -> list[dict[str, Any]]:
     """A script's fields with the check's saved values; secrets are never sent back.
 
-    ``own`` reads the values of a script check's own script, else the action's."""
+    ``own`` reads the values of a script check's own script, else those of the
+    action ``action_key`` (the first script action when not given)."""
 
     if not check or not script:
         return []
-    entries = rmm_automation.decrypt_entries(check.get("check_entries_encrypted" if own else "entries_encrypted"))
-    fields = []
-    for field_def in rmm_scripts.script_fields(script):
-        value = entries.get(field_def["key"], "")
-        secret = bool(field_def["sensitive"]) and not rmm_scripts._TOKEN.search(value)
-        fields.append({**field_def, "value": "" if secret else value, "value_set": bool(value)})
-    return fields
+    if own:
+        return rmm_action_steps.script_values({"entries_encrypted": check.get("check_entries_encrypted")}, script)
+    step = (rmm_action_steps.find(check, action_key) if action_key
+            else next((item for item in rmm_action_steps.steps(check) if item["type"] in SCRIPT_ACTIONS), None))
+    return rmm_action_steps.script_values(step, script)
 
 
 # --------------------------------------------------------------------------- #
@@ -773,47 +757,49 @@ def check_context(check: Mapping[str, Any], agent: Mapping[str, Any], result: st
     }}
 
 
-async def _act_on_failure(check: Mapping[str, Any], agent: Mapping[str, Any], state: dict[str, Any],
-                          result: str, now: datetime, *, repeat: bool = False) -> datetime | None:
-    """Take the check's action. Returns when a scheduled script should run, which
-    the caller stores once the device's state row exists."""
+async def _script_name(step: Mapping[str, Any]) -> str:
+    if step.get("script_name"):
+        return str(step["script_name"])
+    names = await rmm_repo.script_names([step.get("script_id")]) if step.get("script_id") else {}
+    return names.get(int(step.get("script_id") or 0)) or "the script"
 
-    check_id = int(check["id"])
-    agent_id = int(agent["id"])
+
+async def _take_action(step: Mapping[str, Any], check: Mapping[str, Any], agent: Mapping[str, Any],
+                       state: dict[str, Any], result: str, now: datetime,
+                       scheduled: list[tuple[str, datetime]]) -> str:
+    """Take one action; returns what it did, in words."""
+
+    check_id, agent_id = int(check["id"]), int(agent["id"])
     device = rmm_actions.device_label(agent)
-    summary = f"Failed on {device}: {result}"
-    action = check.get("action")
-    if action == "run_script":
+    kind = step["type"]
+    if kind == "run_script":
         run_id, ran, attempted = await rmm_actions.run_script(
-            script_id=check.get("script_id"),
-            entries_encrypted=check.get("entries_encrypted"),
-            inputs=check.get("inputs"),
-            timeout_seconds=check.get("timeout_seconds"),
+            script_id=step.get("script_id"),
+            entries_encrypted=step.get("entries_encrypted"),
+            inputs=step.get("inputs"),
+            timeout_seconds=step.get("timeout_seconds"),
             agent=agent,
             run_source=RUN_SOURCE,
             extra_context=check_context(check, agent, result),
         )
-        state["last_action_at"] = now
-        summary += f". {ran}{'.' if run_id is not None else ''}"
-        log_info("RMM check ran a script", check_id=check_id, agent_id=agent_id, run_id=run_id, attempted=attempted)
-    elif action == "install_choco":
+        log_info("RMM check ran a script", check_id=check_id, agent_id=agent_id, run_id=run_id, attempted=attempted,
+                 action_key=step["key"])
+        return ran if ran.endswith(".") else ran + "."
+    if kind == "install_choco":
         from app.services import rmm_software_updates
         try:
-            ids = rmm_software_updates.package_ids([(check.get("settings") or {}).get("package_id")])
+            ids = rmm_software_updates.package_ids([step.get("package_id")])
             run_id = await rmm_software_updates.queue_apps(dict(agent), ids, "install", None)
-            summary += f". Queued Chocolatey installation of {ids[0]} (run {run_id})."
+            return f"Queued Chocolatey installation of {ids[0]} (run {run_id})."
         except RunRequestError as exc:
-            summary += f". Could not install: {'; '.join(exc.errors.values())}"
-        state["last_action_at"] = now
-    elif action == "schedule_script" and not repeat:
-        run_at = rmm_event_log_rules.scheduled_time(check, now)
-        name = check.get("script_name") or "the script"
-        summary += f". Scheduled {name} for {run_at.isoformat(timespec='minutes')} UTC."
-        state["last_action_at"] = now
-        await repo.record_failure(check_id, summary)
-        log_info("RMM check scheduled a script", check_id=check_id, agent_id=agent_id, run_at=run_at.isoformat())
-        return run_at
-    elif action == "create_ticket" and not repeat:
+            return f"Could not install: {'; '.join(exc.errors.values())}."
+    if kind == "schedule_script":
+        run_at = rmm_action_steps.scheduled_time(step, now)
+        scheduled.append((step["key"], run_at))
+        log_info("RMM check scheduled a script", check_id=check_id, agent_id=agent_id, run_at=run_at.isoformat(),
+                 action_key=step["key"])
+        return f"Scheduled {await _script_name(step)} for {run_at.isoformat(timespec='minutes')} UTC."
+    if kind == "create_ticket":
         reference = f"rmm-check:{check_id}:{agent_id}"
         body = (f"<p>Check <strong>{rmm_actions.escape(check['name'])}</strong> is failing on "
                 f"{rmm_actions.escape(device)}.</p><p>{rmm_actions.escape(describe(check))}.</p>"
@@ -821,23 +807,47 @@ async def _act_on_failure(check: Mapping[str, Any], agent: Mapping[str, Any], st
         ticket = await rmm_actions.open_ticket(state.get("ticket_id"))
         if ticket:
             await rmm_actions.add_ticket_update(ticket, body=body, reference=reference)
-            summary += f". Updated ticket {rmm_actions.ticket_label(ticket)}."
-        else:
-            created = await rmm_actions.raise_ticket(
-                agent=agent, subject=f"{check['name']}: {device}", description=body, reference=reference)
-            state["ticket_id"] = int(created["id"])
-            summary += f". Raised ticket {rmm_actions.ticket_label(created)}."
+            return f"Updated ticket {rmm_actions.ticket_label(ticket)}."
+        created = await rmm_actions.raise_ticket(
+            agent=agent, subject=f"{check['name']}: {device}", description=body, reference=reference)
+        state["ticket_id"] = int(created["id"])
+        return f"Raised ticket {rmm_actions.ticket_label(created)}."
+    return ""
+
+
+async def _act_on_failure(check: Mapping[str, Any], agent: Mapping[str, Any], state: dict[str, Any],
+                          result: str, now: datetime, *, repeat: bool = False) -> list[tuple[str, datetime]]:
+    """Take the check's actions in order. Returns the scripts to schedule (action
+    key and when), which the caller stores once the device's state row exists.
+
+    ``repeat`` (still failing once the cooldown has passed) only runs scripts
+    and installs packages again. One action failing does not stop the next."""
+
+    check_id = int(check["id"])
+    done = [f"Failed on {rmm_actions.device_label(agent)}: {result}."]
+    scheduled: list[tuple[str, datetime]] = []
+    for step in rmm_action_steps.steps(check):
+        if repeat and step["type"] not in rmm_action_steps.REPEATABLE_TYPES:
+            continue
+        try:
+            done.append(await _take_action(step, check, agent, state, result, now, scheduled))
+        except Exception as exc:  # noqa: BLE001 - the next action still runs
+            log_error("RMM check action failed", check_id=check_id, agent_id=agent.get("id"),
+                      action=step["type"], action_key=step["key"], error=str(exc))
+            done.append(f"{rmm_action_steps.describe(step)} failed.")
         state["last_action_at"] = now
-    await repo.record_failure(check_id, summary)
-    return None
+    await repo.record_failure(check_id, " ".join(text for text in done if text))
+    return scheduled
 
 
 async def _on_recovery(check: Mapping[str, Any], agent: Mapping[str, Any], state: dict[str, Any], result: str) -> None:
     device = rmm_actions.device_label(agent)
     summary = f"Passing again on {device}."
-    if check.get("action") == "schedule_script" and await repo.clear_scheduled(int(check["id"]), int(agent["id"])):
-        summary += " Dropped the scheduled script."
-    ticket = await rmm_actions.open_ticket(state.get("ticket_id")) if check.get("action") == "create_ticket" else None
+    dropped = await repo.clear_scheduled(int(check["id"]), int(agent["id"]))
+    if dropped:
+        summary += " Dropped the scheduled script." if dropped == 1 else f" Dropped the {dropped} scheduled scripts."
+    ticket_step = next((step for step in rmm_action_steps.steps(check) if step["type"] == "create_ticket"), None)
+    ticket = await rmm_actions.open_ticket(state.get("ticket_id")) if ticket_step else None
     if ticket:
         await rmm_actions.add_ticket_update(
             ticket,
@@ -846,7 +856,7 @@ async def _on_recovery(check: Mapping[str, Any], agent: Mapping[str, Any], state
             reference=f"rmm-check:{int(check['id'])}:{int(agent['id'])}",
         )
         summary += f" Noted on ticket {rmm_actions.ticket_label(ticket)}."
-        if check.get("auto_close_when_resolved"):
+        if ticket_step.get("auto_close_when_resolved"):
             from app.repositories import ticket_statuses as ticket_statuses_repo
             from app.repositories import tickets as tickets_repo
             from app.services import tickets as tickets_service
@@ -866,7 +876,7 @@ def _action_waiting(check: Mapping[str, Any], state: Mapping[str, Any]) -> bool:
     """A failing check limited to some results that has not acted since it
     started failing, because the result did not match until now."""
 
-    if check.get("action") in (None, "", "none") or not action_results(check):
+    if not rmm_action_steps.steps(check) or not action_results(check):
         return False
     last, since = state.get("last_action_at"), state.get("changed_at")
     return last is None or (since is not None and last < since)
@@ -891,7 +901,7 @@ async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], prob
     previous = state["status"]
     state["checked_at"] = now
     state["value_text"] = result[:512]
-    run_at: datetime | None = None
+    scheduled: list[tuple[str, datetime]] = []
     duration = timedelta(minutes=int(check.get("duration_minutes") or 0) if duration_minutes is None else duration_minutes)
     try:
         if problem:
@@ -902,15 +912,16 @@ async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], prob
                 if previous != "failing":
                     state["status"], state["changed_at"] = "failing", now
                     if allowed:
-                        run_at = await _act_on_failure(check, agent, state, result, now)
+                        scheduled = await _act_on_failure(check, agent, state, result, now)
                     else:
                         await repo.record_failure(check_id, f"Failed on {rmm_actions.device_label(agent)}: {result}. "
                                                             f"No action: the result does not match.")
                 elif not allowed:
                     pass  # waits for a result the action is limited to
                 elif _action_waiting(check, state):
-                    run_at = await _act_on_failure(check, agent, state, result, now)
-                elif check.get("action") in ("run_script", "install_choco") and int(check.get("cooldown_minutes") or 0) > 0:
+                    scheduled = await _act_on_failure(check, agent, state, result, now)
+                elif (rmm_action_steps.has_type(check, *rmm_action_steps.REPEATABLE_TYPES)
+                      and int(check.get("cooldown_minutes") or 0) > 0):
                     last = state.get("last_action_at")
                     if last is None or now - last >= timedelta(minutes=int(check["cooldown_minutes"])):
                         await _act_on_failure(check, agent, state, result, now, repeat=True)
@@ -932,12 +943,14 @@ async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], prob
         state["checked_at"] = last_written
         return state
     await repo.save_state(check_id, agent_id, state)
-    if run_at is not None:
+    for action_key, run_at in scheduled:
         try:
-            if await repo.schedule_action(check_id, agent_id, run_at):
-                state["scheduled_at"] = run_at
+            if await repo.schedule_step(check_id, agent_id, action_key, run_at):
+                current = state.get("scheduled_at")
+                state["scheduled_at"] = run_at if current is None else min(current, run_at)
         except Exception as exc:  # noqa: BLE001 - the result is already stored
-            log_error("RMM check could not schedule its script", check_id=check_id, agent_id=agent_id, error=str(exc))
+            log_error("RMM check could not schedule its script", check_id=check_id, agent_id=agent_id,
+                      action_key=action_key, error=str(exc))
     return state
 
 
@@ -1429,19 +1442,23 @@ async def run_due_scheduled_checks(now: datetime | None = None) -> int:
     queued = 0
     for pending in pending_checks:
         check_id, agent_id = int(pending["check_id"]), int(pending["agent_id"])
-        if not await repo.claim_scheduled(check_id, agent_id, now):
+        action_key = pending.get("action_key")
+        if not await repo.claim_scheduled(check_id, agent_id, now, action_key):
             continue  # another instance took it
         try:
             check = applicable.get(agent_id, {}).get(check_id)
             agent = agents.get(agent_id)
-            if (not check or not check.get("is_enabled") or check.get("action") != "schedule_script" or not agent
+            # A run scheduled by an earlier release belongs to the first scheduled script.
+            step = (rmm_action_steps.find(check, action_key) if action_key is not None
+                    else rmm_action_steps.first_scheduled(check))
+            if (not check or not check.get("is_enabled") or not step or step["type"] != "schedule_script" or not agent
                     or pending.get("status") != "failing"):
                 continue  # no longer applicable, changed, passing again or removed
             run_id, summary, attempted = await rmm_actions.run_script(
-                script_id=check.get("script_id"),
-                entries_encrypted=check.get("entries_encrypted"),
-                inputs=check.get("inputs"),
-                timeout_seconds=check.get("timeout_seconds"),
+                script_id=step.get("script_id"),
+                entries_encrypted=step.get("entries_encrypted"),
+                inputs=step.get("inputs"),
+                timeout_seconds=step.get("timeout_seconds"),
                 agent=agent,
                 run_source=RUN_SOURCE,
                 extra_context=check_context(check, agent, str(pending.get("value_text") or "")),
@@ -1451,7 +1468,7 @@ async def run_due_scheduled_checks(now: datetime | None = None) -> int:
                 summary += " as scheduled."
             await repo.set_summary(check_id, summary)
             log_info("RMM check ran its scheduled script", check_id=check_id, agent_id=agent_id, run_id=run_id,
-                     attempted=attempted)
+                     attempted=attempted, action_key=step["key"])
         except Exception as exc:  # noqa: BLE001 - one failure must not stop the others
             log_error("RMM check scheduled run failed", check_id=check_id, agent_id=agent_id, error=str(exc))
     return queued
