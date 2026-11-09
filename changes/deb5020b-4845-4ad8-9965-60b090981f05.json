@@ -1,0 +1,7 @@
+{
+  "guid": "deb5020b-4845-4ad8-9965-60b090981f05",
+  "occurred_at": "2026-11-09T02:18Z",
+  "change_type": "Fix",
+  "summary": "Microsoft 365 connections now request and grant the Policy.ReadWrite.ConsentRequest permission automatically, so the admin consent request check no longer fails diagnostics; diagnostics Repair also adds any missing permission to the MyPortal app registration.",
+  "content_hash": "28b792be5df365d612e6b8d0bb3dad858ea466a0eefb0e04ec6920b1dc29c492"
+}

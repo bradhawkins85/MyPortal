@@ -6132,6 +6132,10 @@ async def repair_enterprise_app_permissions(
             "Please use 'Authorize portal access' on the Office 365 page first."
         )
 
+    # Diagnostics checks the app registration as well as the grant, so list
+    # every baseline permission on it before granting.
+    await ensure_graph_app_roles_on_manifest(company_id, access_token)
+    await ensure_exchange_manage_as_app_on_manifest(company_id, access_token)
     granted = await try_grant_missing_permissions(
         company_id=company_id,
         access_token=access_token,

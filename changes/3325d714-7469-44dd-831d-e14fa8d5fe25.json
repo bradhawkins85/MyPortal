@@ -1,0 +1,7 @@
+{
+  "guid": "3325d714-7469-44dd-831d-e14fa8d5fe25",
+  "occurred_at": "2026-11-09T02:09Z",
+  "change_type": "Improvement",
+  "summary": "Microsoft 365 guided setup now has three steps (the Review access step that always showed failures before consent is gone), and each step shows a green tick and Completed once it is done.",
+  "content_hash": "e60519a4bbcc10e356493adcd0885b978a4728ae7d522b863c32731b216a661e"
+}

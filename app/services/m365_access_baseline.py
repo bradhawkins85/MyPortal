@@ -101,6 +101,9 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
     "Policy.ReadWrite.DeviceConfiguration": "230fb2d5-aa21-49c1-bfa7-ae1be179d867",
     # Microsoft 365 policy templates: create and assign Intune compliance policies.
     "DeviceManagementConfiguration.ReadWrite.All": "9241abd9-d0e6-425a-bd4f-47ba86e767a4",
+    # Admin consent request policy (best-practice check and remediation).
+    # Identifier from the Microsoft Graph permissions reference.
+    "Policy.ReadWrite.ConsentRequest": "999f8c63-0a38-4f1b-91fd-ed1947bdd1a9",
 }
 
 # Permissions from the legacy provisioning inventory that the named baseline
@@ -163,9 +166,10 @@ def _entry(resource: str, permission_type: str, name: str) -> RequiredPermission
                               "Tenant administrator/admin consent", modes, disposition)
 
 
-# These permissions are resolved by name from the tenant's Graph service
-# principal; they do not need a static fallback role ID.
-GRAPH_APPLICATION_DYNAMIC_PERMISSIONS = frozenset({"Policy.ReadWrite.ConsentRequest"})
+# Permissions resolved only by name from the tenant's Graph service principal
+# because no verified static role ID is known.  Policy.ReadWrite.ConsentRequest
+# used to be here, which left it off newly provisioned app registrations.
+GRAPH_APPLICATION_DYNAMIC_PERMISSIONS: frozenset[str] = frozenset()
 
 _named_baseline = [
     _entry("Microsoft Graph", "Application", name)
