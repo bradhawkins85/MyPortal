@@ -68,15 +68,9 @@ from app.repositories import rmm_checks as repo
 from app.repositories import rmm_stats as stats_repo
 from app.repositories import rmm_targeting as targeting_repo
 from app.security.encryption import encrypt_secret
+from app.services import rmm_action_steps, rmm_actions, rmm_automation, rmm_scripts, rmm_targeting
 from app.services import rmm_proxmox
 from app.services.rmm_scripts import RunRequestError
-
-
-def _service_modules():
-    # Lazy-load peer service modules to avoid import-time cycles.
-    from app.services import rmm_action_steps, rmm_actions, rmm_automation, rmm_scripts, rmm_targeting
-
-    return rmm_action_steps, rmm_actions, rmm_automation, rmm_scripts, rmm_targeting
 
 RUN_SOURCE = "check"
 CHECK_TYPES = {
