@@ -14,7 +14,7 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 )
 
-func openBrowser(url string) {
+func launchURL(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

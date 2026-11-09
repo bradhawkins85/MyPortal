@@ -130,8 +130,29 @@ func New(baseURL, token string) *Client {
 	return &Client{
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		Token:   token,
-		HTTP:    &http.Client{Timeout: 60 * time.Second},
+		HTTP:    &http.Client{Timeout: 60 * time.Second, CheckRedirect: sameOriginHTTPSRedirect},
 	}
+}
+
+// sameOriginHTTPSRedirect follows a redirect only to https on the same host
+// (and, once on https, the same port) as the original request. Go's own policy keeps
+// the Authorization header on a redirect to the same host over plain http or
+// another port, which would hand the agent's bearer token to anyone who can
+// answer there.
+func sameOriginHTTPSRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return http.ErrUseLastResponse
+	}
+	first := via[0].URL
+	if !strings.EqualFold(req.URL.Scheme, "https") || !strings.EqualFold(req.URL.Hostname(), first.Hostname()) {
+		return http.ErrUseLastResponse
+	}
+	// An http -> https upgrade on the same host may change the port; once on
+	// https, stay on the same port.
+	if strings.EqualFold(first.Scheme, "https") && req.URL.Port() != first.Port() {
+		return http.ErrUseLastResponse
+	}
+	return nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body, out interface{}) error {

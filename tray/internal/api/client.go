@@ -37,8 +37,29 @@ type Client struct {
 func New(portalURL string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(portalURL, "/"),
-		http:    &http.Client{Timeout: 30 * time.Second},
+		http:    &http.Client{Timeout: 30 * time.Second, CheckRedirect: sameOriginHTTPSRedirect},
 	}
+}
+
+// sameOriginHTTPSRedirect follows a redirect only to https on the same host
+// (and, once on https, the same port) as the original request. Go's own policy keeps
+// the Authorization header on a redirect to the same host over plain http or
+// another port, which would hand the device token to anyone who can answer
+// there.
+func sameOriginHTTPSRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return http.ErrUseLastResponse
+	}
+	first := via[0].URL
+	if !strings.EqualFold(req.URL.Scheme, "https") || !strings.EqualFold(req.URL.Hostname(), first.Hostname()) {
+		return http.ErrUseLastResponse
+	}
+	// An http -> https upgrade on the same host may change the port; once on
+	// https, stay on the same port.
+	if strings.EqualFold(first.Scheme, "https") && req.URL.Port() != first.Port() {
+		return http.ErrUseLastResponse
+	}
+	return nil
 }
 
 // SetAuth configures the per-device auth token after enrolment.

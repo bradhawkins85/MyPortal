@@ -21,12 +21,19 @@ import (
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
+	"golang.org/x/sys/windows"
 )
 
-func openBrowser(url string) {
-	cmd := exec.Command("cmd", "/c", "start", url)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
-	_ = cmd.Start()
+// launchURL hands a validated link to the shell's URL handler directly.
+// It never goes through cmd.exe, which would treat & | < > in the link as
+// command separators.
+func launchURL(url string) {
+	verb, _ := windows.UTF16PtrFromString("open")
+	target, err := windows.UTF16PtrFromString(url)
+	if err != nil {
+		return
+	}
+	_ = windows.ShellExecute(0, verb, target, nil, nil, windows.SW_SHOWNORMAL)
 }
 
 func showTextWindow(title, text string) {

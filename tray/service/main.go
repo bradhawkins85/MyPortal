@@ -1279,12 +1279,17 @@ var _ = fmt.Sprintf
 func main() {
 	// The overseer is a separate service run from this executable; dispatch
 	// before any tray-service setup so a tray fault cannot stop it.
+	// Lock the state folder down before anything is read from or logged to it.
+	stateNotes := secureStateDirs()
 	if len(os.Args) > 1 && os.Args[1] == overseerCommand {
 		runOverseer(os.Args[2:])
 		return
 	}
 	if err := logger.Init("service"); err != nil {
 		logger.Error("logger init: %v", err)
+	}
+	for _, note := range stateNotes {
+		logger.Warn("%s", note)
 	}
 
 	// Handle install/uninstall subcommands before loading config so

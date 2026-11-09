@@ -22,7 +22,7 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 )
 
-func openBrowser(url string) {
+func launchURL(url string) {
 	if err := exec.Command("open", url).Start(); err != nil {
 		logger.Warn("openBrowser: failed to open %s: %v", url, err)
 	}

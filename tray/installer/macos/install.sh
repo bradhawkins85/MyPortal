@@ -12,14 +12,35 @@ set -euo pipefail
 : "${ENROL_TOKEN:?ENROL_TOKEN must be set}"
 : "${AUTO_UPDATE:=true}"
 
+case "$MYPORTAL_URL" in
+  https://*) ;;
+  *)
+    if [ "${MYPORTAL_ALLOW_HTTP:-}" != "1" ]; then
+      echo "MYPORTAL_URL must start with https:// (set MYPORTAL_ALLOW_HTTP=1 to override)" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+# Files created from here on are readable by root only.
+umask 077
+
 PKG_URL="${MYPORTAL_URL}/static/tray/myportal-tray.pkg"
-PKG_PATH="/tmp/myportal-tray.pkg"
+# A fresh, root-only folder: a fixed name in /tmp could be created or swapped
+# by another local user between the download and the install.
+WORK_DIR="$(mktemp -d /tmp/myportal-tray.XXXXXXXX)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+PKG_PATH="$WORK_DIR/myportal-tray.pkg"
 ENV_FILE="/Library/Preferences/io.myportal.tray.env"
 
+CURL_PROTO="=https"
+[ "${MYPORTAL_ALLOW_HTTP:-}" = "1" ] && CURL_PROTO="=https,http"
+
 echo "Downloading MyPortal Tray from $PKG_URL ..."
-curl -fsSL "$PKG_URL" -o "$PKG_PATH"
+curl -fsSL --proto "$CURL_PROTO" --proto-redir "$CURL_PROTO" "$PKG_URL" -o "$PKG_PATH"
 
 echo "Writing configuration to $ENV_FILE ..."
+rm -f "$ENV_FILE"
 cat > "$ENV_FILE" <<EOF
 MYPORTAL_URL=${MYPORTAL_URL}
 ENROL_TOKEN=${ENROL_TOKEN}

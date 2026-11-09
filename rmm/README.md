@@ -11,6 +11,11 @@ the tray app, with its own version, build workflow
 | macOS | LaunchDaemon (root) | `/Library/Application Support/MyPortal RMM` |
 | Linux | systemd unit (root), binary in `/opt/myportal-rmm` | `/var/lib/myportal-rmm` |
 
+The state folder holds the agent's token, so only the service account and
+Administrators can use it. On Windows the agent gives it a protected access list
+at start-up, and removes anything in it that the service did not create (a link,
+or a file owned by another user) before reading its state.
+
 ## Install
 
 The tray app installs the agent when MyPortal pushes it: from the Assets page
