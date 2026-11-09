@@ -202,12 +202,17 @@ func (c *Client) do(ctx context.Context, method, path string, body, out interfac
 }
 
 // Enrol registers this agent using the tray device's token.
-func Enrol(ctx context.Context, baseURL, trayToken, agentUID string, details Details) (Enrolment, error) {
+//
+// currentToken is the agent's existing auth token, if it has one. MyPortal
+// only re-keys an agent that is still connected when the request proves it
+// holds that token.
+func Enrol(ctx context.Context, baseURL, trayToken, agentUID, currentToken string, details Details) (Enrolment, error) {
 	var result Enrolment
 	payload := struct {
 		Details
-		AgentUID string `json:"agent_uid"`
-	}{details, agentUID}
+		AgentUID         string `json:"agent_uid"`
+		CurrentAuthToken string `json:"current_auth_token,omitempty"`
+	}{details, agentUID, currentToken}
 	err := New(baseURL, trayToken).do(ctx, http.MethodPost, "/api/rmm/agent/enrol", payload, &result)
 	return result, err
 }

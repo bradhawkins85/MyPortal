@@ -1053,6 +1053,11 @@ class AgentDetails(BaseModel):
 
 class AgentEnrolRequest(AgentDetails):
     agent_uid: str = Field(min_length=8, max_length=64)
+    current_auth_token: str | None = Field(
+        default=None,
+        max_length=200,
+        description="The agent's existing auth token, proving it is the agent being re-enrolled.",
+    )
 
 
 @router.post("/api/rmm/agent/enrol", summary="Enrol the RMM agent installed with a tray device")

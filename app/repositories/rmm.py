@@ -338,6 +338,16 @@ async def get_tray_device_agent(tray_device_id: int) -> dict[str, Any] | None:
     )
 
 
+async def list_tray_device_agents(tray_device_id: int) -> list[dict[str, Any]]:
+    """Every active RMM agent enrolled with this tray device."""
+    rows = await db.fetch_all(
+        "SELECT id, status, auth_token_hash, last_seen_utc FROM rmm_agents "
+        "WHERE tray_device_id = %s AND status = 'active'",
+        (tray_device_id,),
+    )
+    return [dict(row) for row in rows or []]
+
+
 async def get_agent(agent_id: int) -> dict[str, Any] | None:
     return await db.fetch_one("SELECT * FROM rmm_agents WHERE id = %s", (agent_id,))
 
