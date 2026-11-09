@@ -259,6 +259,9 @@ SCC_CONNECT_SCOPE = (
 
 # Minimal scopes used for the tenant-discovery sign-in step
 DISCOVER_SCOPE = "openid profile"
+# Guided setup also reads the signed-in tenant's name (GET /organization needs
+# only delegated User.Read) so the administrator can confirm it by name.
+DISCOVER_TENANT_SCOPE = f"{DISCOVER_SCOPE} https://graph.microsoft.com/User.Read"
 
 # Module slug used to store the admin app credentials for PKCE bootstrap flows
 _M365_ADMIN_MODULE_SLUG = "m365-admin"
@@ -5001,6 +5004,48 @@ async def sync_email_domains(company_id: int) -> dict[str, Any]:
         )
 
     return {"added": new_domains, "existing": existing_domains}
+
+
+async def describe_signed_in_tenant(access_token: str, tenant_id: str) -> dict[str, str] | None:
+    """Return the display name and default domain of the signed-in tenant.
+
+    Guided setup shows these so the administrator can confirm the tenant by
+    name rather than by ID.  Best-effort: ``None`` when Microsoft Graph cannot
+    be read or returns a different tenant than the verified ID token.
+    """
+    try:
+        payload = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/organization?$select=id,displayName,verifiedDomains",
+        )
+    except Exception as exc:  # noqa: BLE001 - display-only lookup
+        log_warning(
+            "Could not read the signed-in Microsoft 365 tenant name",
+            tenant_id=tenant_id,
+            error=str(exc),
+        )
+        return None
+    organization = next(
+        (
+            row
+            for row in payload.get("value") or []
+            if isinstance(row, dict)
+            and str(row.get("id") or "").strip().lower() == tenant_id.strip().lower()
+        ),
+        None,
+    )
+    if not organization:
+        return None
+    domains = [
+        row for row in organization.get("verifiedDomains") or [] if isinstance(row, dict)
+    ]
+    domain = next(
+        (str(row.get("name") or "") for row in domains if row.get("isDefault")), ""
+    ) or next((str(row.get("name") or "") for row in domains if row.get("isInitial")), "")
+    return {
+        "name": " ".join(str(organization.get("displayName") or "").split())[:256],
+        "domain": domain.strip()[:255],
+    }
 
 
 async def test_connectivity(company_id: int) -> dict[str, Any]:

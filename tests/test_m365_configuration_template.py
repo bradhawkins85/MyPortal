@@ -40,10 +40,11 @@ def test_m365_sensitive_actions_retain_csrf_and_safe_secret_fields() -> None:
 
 def test_confirm_tenant_uses_navigation_for_oauth_redirect() -> None:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    partial = (TEMPLATE_PATH.parent / "_discovered_tenant.html").read_text(encoding="utf-8")
 
-    expected_link = (
-        'href="/m365/provision?tenant_id={{ '
-        "request.query_params.get('m365_discovered_tenant') | urlencode }}\""
-    )
-    assert expected_link in source
-    assert 'action="/m365/provision"' not in source
+    assert '{% include "m365/_discovered_tenant.html" %}' in source
+    expected_link = 'href="/m365/provision?tenant_id={{ discovered_tenant.tenant_id | urlencode }}"'
+    assert expected_link in partial
+    assert 'action="/m365/provision"' not in source + partial
+    # The tenant is shown from the signed hand-off, never from the raw URL.
+    assert "request.query_params.get('m365_discovered_tenant')" not in source

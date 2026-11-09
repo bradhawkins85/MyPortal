@@ -1,0 +1,25 @@
+{# Tenant found by guided setup's Microsoft sign-in, shown by name so the
+   administrator can confirm it before provisioning. Expects `discovered_tenant`
+   with tenant_id, name, domain and account. #}
+<div class="m365-tenant" role="group" aria-labelledby="m365-tenant-label">
+  <p class="m365-tenant__label" id="m365-tenant-label">Discovered tenant</p>
+  {% if discovered_tenant.name %}
+  <p class="m365-tenant__name" data-m365-tenant-name>{{ discovered_tenant.name }}</p>
+  {% else %}
+  <p class="m365-tenant__name m365-tenant__name--missing">Tenant name not available</p>
+  {% endif %}
+  {% if discovered_tenant.domain or discovered_tenant.account %}
+  <ul class="scf-item__chips" aria-label="How this tenant was found">
+    {% if discovered_tenant.domain %}<li class="scf-chip">{{ discovered_tenant.domain }}</li>{% endif %}
+    {% if discovered_tenant.account %}<li class="scf-chip scf-chip--muted">Signed in as {{ discovered_tenant.account }}</li>{% endif %}
+  </ul>
+  {% endif %}
+  {% if discovered_tenant.name %}
+  <p class="form-help">Check this is the right organisation before you confirm.</p>
+  {% else %}
+  <p class="form-help">Microsoft did not return the tenant's name. Check the tenant ID <code>{{ discovered_tenant.tenant_id }}</code> before you confirm.</p>
+  {% endif %}
+  {# Use a navigation link because /m365/provision redirects to Microsoft;
+     CSP form-action also checks a form submission's redirect chain. #}
+  <a class="button" href="/m365/provision?tenant_id={{ discovered_tenant.tenant_id | urlencode }}">Confirm tenant</a>
+</div>

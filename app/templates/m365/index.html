@@ -14,6 +14,12 @@
   .m365-step p { margin: 0; color: rgba(226, 232, 240, .62); font-size: .76rem; line-height: 1.4; }
   .m365-step .button { align-self: flex-start; margin-top: auto; }
   .m365-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
+  .m365-tenant { display: grid; gap: var(--space-gap-base); padding: var(--space-gap-roomy); border: 1px solid var(--color-border); border-radius: var(--hf-radius-md); background: var(--hf-accent-soft); }
+  .m365-tenant .m365-tenant__label { color: var(--color-text-muted); font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  .m365-tenant .m365-tenant__name { color: var(--color-text); font-size: 1.05rem; font-weight: 700; overflow-wrap: anywhere; }
+  .m365-tenant .m365-tenant__name--missing { color: var(--hf-warning); }
+  .m365-tenant .scf-item__chips { margin: 0; }
+  .m365-tenant .button { justify-self: start; margin-top: var(--space-gap-tight); }
   .m365-checklist { display: grid; gap: .65rem; margin: 0; padding: 0; list-style: none; }
   .m365-checklist li { position: relative; padding-left: 1.45rem; color: rgba(226, 232, 240, .78); font-size: .8rem; line-height: 1.4; }
   .m365-checklist li::before { content: "✓"; position: absolute; left: 0; color: #60a5fa; font-weight: 800; }
@@ -146,16 +152,12 @@
           <div class="m365-steps">
             <div class="m365-step">
               <div class="m365-step__top"><span class="m365-step__number">1</span><span class="m365-step__title">Confirm tenant</span></div>
-              <p>One Global Administrator sign-in discovers and binds the expected tenant.</p>
+              <p>Sign in as a Global Administrator of the customer's tenant, then check its name before confirming.</p>
+              {% if discovered_tenant %}
+              {% include "m365/_discovered_tenant.html" %}
+              <a href="/m365/discover" class="button button--ghost">Sign in with a different account</a>
+              {% else %}
               <a href="/m365/discover" class="button">Sign in with Microsoft</a>
-              {% if request.query_params.get('m365_discovered_tenant') %}
-              <div class="form-field__group">
-                <label for="confirmed-tenant-id" class="form-label">Discovered tenant</label>
-                <input id="confirmed-tenant-id" class="form-input" value="{{ request.query_params.get('m365_discovered_tenant') }}" readonly>
-                {# Use a navigation link because /m365/provision redirects to Microsoft;
-                   CSP form-action also checks a form submission's redirect chain. #}
-                <a class="button" href="/m365/provision?tenant_id={{ request.query_params.get('m365_discovered_tenant') | urlencode }}">Confirm tenant</a>
-              </div>
               {% endif %}
             </div>
             <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">2</span><span class="m365-step__title">Review access</span></div><p>Review the combined permission delta and enabled workload justification before consent.</p><a href="/m365/diagnostics" class="button button--ghost">Review permissions</a></div>

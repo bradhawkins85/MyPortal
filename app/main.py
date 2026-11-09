@@ -177,7 +177,11 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import clear_flash, flash_redirect, local_redirect, pop_flash, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
 from app.security.maintenance import MaintenanceMiddleware
-from app.security.oauth_state import oauth_state_serializer
+from app.security.oauth_state import (
+    DISCOVERED_TENANT_MAX_AGE_SECONDS,
+    discovered_tenant_serializer,
+    oauth_state_serializer,
+)
 from app.security.rate_limiter import (
     EndpointRateLimiter,
     EndpointRateLimiterMiddleware,
@@ -4077,6 +4081,39 @@ async def switch_role(request: Request):
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
+def _m365_discovered_tenant(request: Request, company_id: int) -> dict[str, str] | None:
+    """Return the tenant found by guided setup's sign-in, for confirmation.
+
+    The signed ``m365_discovered`` token carries the tenant name, so it is only
+    trusted when its signature is valid, it is recent and it was issued for
+    this company.  A bare ``m365_discovered_tenant`` ID from an older redirect
+    is still accepted, without a name.
+    """
+    token = request.query_params.get("m365_discovered")
+    if token:
+        try:
+            data = discovered_tenant_serializer.loads(
+                token, max_age=DISCOVERED_TENANT_MAX_AGE_SECONDS
+            )
+        except BadSignature:
+            return None
+        if not isinstance(data, dict) or data.get("company_id") != company_id:
+            return None
+        tenant_id = str(data.get("tenant_id") or "").strip()
+        if not tenant_id:
+            return None
+        return {
+            "tenant_id": tenant_id,
+            "name": str(data.get("name") or "").strip(),
+            "domain": str(data.get("domain") or "").strip(),
+            "account": str(data.get("account") or "").strip(),
+        }
+    legacy_tenant_id = str(request.query_params.get("m365_discovered_tenant") or "").strip()
+    if legacy_tenant_id:
+        return {"tenant_id": legacy_tenant_id, "name": "", "domain": "", "account": ""}
+    return None
+
+
 @app.get("/m365", response_class=HTMLResponse)
 async def m365_page(request: Request):
     user, membership, company, company_id, redirect = await _load_license_context(request)
@@ -4137,6 +4174,9 @@ async def m365_page(request: Request):
         "connection_health": connection_health,
         "has_admin_credentials": bool(admin_credential_view),
         "admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
+        "discovered_tenant": (
+            _m365_discovered_tenant(request, company_id) if user.get("is_super_admin") else None
+        ),
     }
     return await _render_template("m365/index.html", request, user, extra=extra)
 
@@ -5836,6 +5876,8 @@ async def m365_discover(request: Request):
         "code_verifier": code_verifier,
         "client_id": oauth_client_id,
         "redirect_uri": redirect_uri,
+        # Also read the tenant's name so the admin can confirm it by name.
+        "scope": m365_service.DISCOVER_TENANT_SCOPE,
     }
 
     state = await _new_m365_oauth_state(request, **state_payload)
@@ -5844,7 +5886,7 @@ async def m365_discover(request: Request):
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
-        "scope": m365_service.DISCOVER_SCOPE,
+        "scope": m365_service.DISCOVER_TENANT_SCOPE,
         "state": state,
         "prompt": "select_account",
         "code_challenge": code_challenge,
@@ -6330,6 +6372,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         code_verifier = str(state_data.get("code_verifier") or "")
         if not code_verifier:
             return _discover_error("The sign-in verifier is missing or expired.")
+        # Redeem the code for the scopes it was issued for: guided setup also
+        # asks for User.Read to read the tenant name; other entry points don't.
+        discover_scope = (
+            m365_service.DISCOVER_TENANT_SCOPE
+            if state_data.get("scope") == m365_service.DISCOVER_TENANT_SCOPE
+            else m365_service.DISCOVER_SCOPE
+        )
         token_endpoint = "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         token_data = {
             "client_id": str(state_data.get("client_id") or ""),
@@ -6337,7 +6386,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             "code": code,
             "redirect_uri": str(state_data.get("redirect_uri") or ""),
             "code_verifier": code_verifier,
-            "scope": m365_service.DISCOVER_SCOPE,
+            "scope": discover_scope,
         }
         async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
@@ -6388,8 +6437,21 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 f"{urlencode({'m365_discovered_tenant': discovered_tenant_id})}",
                 status_code=status.HTTP_303_SEE_OTHER,
             )
+        tenant_profile = None
+        graph_token = str(token_payload.get("access_token") or "")
+        if discover_scope == m365_service.DISCOVER_TENANT_SCOPE and graph_token:
+            tenant_profile = await m365_service.describe_signed_in_tenant(
+                graph_token, discovered_tenant_id
+            )
+        discovered = discovered_tenant_serializer.dumps({
+            "company_id": company_id,
+            "tenant_id": discovered_tenant_id,
+            "name": (tenant_profile or {}).get("name") or "",
+            "domain": (tenant_profile or {}).get("domain") or "",
+            "account": str(identity.get("preferred_username") or "")[:320],
+        })
         return RedirectResponse(
-            url=f"/m365?{urlencode({'m365_discovered_tenant': discovered_tenant_id})}",
+            url=f"/m365?{urlencode({'m365_discovered': discovered})}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
