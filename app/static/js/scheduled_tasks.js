@@ -1729,8 +1729,8 @@
     const submit = form.querySelector('[data-sch-bulk-submit]');
     let snapshot = '';
     let cronEdited = false;
-    const bulkDefaults = (data && data.commandDefaults) || {};
-    const bulkSequential = data && Array.isArray(data.sequentialCommands) ? data.sequentialCommands : [];
+    const bulkDefaults = data.commandDefaults || {};
+    const bulkSequential = Array.isArray(data.sequentialCommands) ? data.sequentialCommands : [];
 
     // Month-end billing tasks queue one minute apart after the latest
     // existing task, so pre-fill the stagger from that next free slot.
