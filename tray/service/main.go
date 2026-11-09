@@ -243,7 +243,7 @@ func (d *daemon) run() {
 	var err error
 	if headless() {
 		logger.Info("Headless install: no tray UI, so chat and notifications are not shown on this device")
-	} else if d.ipcSrv, err = ipc.NewServer(); err != nil {
+	} else if d.ipcSrv, err = d.startIPCServer(); err != nil {
 		logger.Error("IPC server: %v — chat delivery disabled", err)
 	} else {
 		d.ipcSrv.On("refresh_config", func(msg ipc.Message) {
@@ -558,6 +558,29 @@ func retryEnrolment(stopCh chan struct{}, enrol func() error, delay func(int) ti
 			wait := delay(attempt)
 			logger.Error("Enrolment failed: %v — retry in %v", err, wait)
 			sleep(stopCh, wait)
+		}
+	}
+}
+
+// startIPCServer retries the UI channel for a couple of minutes: after an
+// update or crash the old pipe or socket can take a moment to go away, and
+// on Windows the pipe is refused while another process holds its name.
+func (d *daemon) startIPCServer() (*ipc.Server, error) {
+	wait := time.Second
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		srv, err := ipc.NewServer()
+		if err == nil || time.Now().After(deadline) {
+			return srv, err
+		}
+		logger.Warn("IPC server: %v — retry in %v", err, wait)
+		select {
+		case <-d.stopCh:
+			return nil, err
+		case <-time.After(wait):
+		}
+		if wait < 30*time.Second {
+			wait *= 2
 		}
 	}
 }

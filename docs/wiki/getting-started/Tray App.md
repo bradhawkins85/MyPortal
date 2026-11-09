@@ -34,6 +34,13 @@ Every endpoint runs **two** cooperating components:
                                   └────────────────────┘
 ```
 
+On Windows the service and UI talk over the `\\.\pipe\myportal-tray` named
+pipe. Only SYSTEM and Administrators can create or own it, signed-in users can
+only connect, and the UI checks that the process serving the pipe runs as
+LocalSystem before it trusts any chat or notification from it. If another
+process already holds the pipe name, the service retries for two minutes and
+then logs `IPC server: … chat delivery disabled`.
+
 ### Why split service from UI?
 
 * On Windows, services run in **session 0** which cannot draw UI in the
