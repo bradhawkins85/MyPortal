@@ -1482,7 +1482,7 @@ async def rmm_live_browser_socket(websocket: WebSocket, session_id: int) -> None
 
     Authenticated by the one-time token issued when the session was started
     (query string, as a browser WebSocket cannot set Authorization headers),
-    plus the usual cross-site Origin check.
+    plus the usual cross-site Origin check. The token is used up on connect.
     """
 
     from app.security.websocket_origin import origin_allowed
@@ -1493,18 +1493,24 @@ async def rmm_live_browser_socket(websocket: WebSocket, session_id: int) -> None
         await websocket.close(code=4403)
         return
     token = (websocket.query_params.get("token") or "").strip()
-    session = await rmm_live.authorize_browser(session_id, token)
+    # The token works once: it is used up here, so a copy in a proxy or
+    # access log, or a second socket, cannot join the session.
+    session = await rmm_live.claim_browser(session_id, token)
     if not session:
         await websocket.close(code=4401)
         return
-    await live_repo.mark_browser_connected(session_id)
 
     async def touch() -> None:
         await live_repo.touch(session_id)
 
-    await _bridge_live_socket(
-        websocket, session_id, send_direction="to_agent", receive_direction="to_browser", on_activity=touch,
-    )
+    try:
+        await _bridge_live_socket(
+            websocket, session_id, send_direction="to_agent", receive_direction="to_browser", on_activity=touch,
+        )
+    finally:
+        # Nothing can rejoin with the used token, so end the session (and the
+        # device's shell) as soon as the technician's socket goes away.
+        await rmm_live.close_session(session_id, "browser disconnected")
 
 
 # MCP WebSocket endpoint (only enabled if MCP_ENABLED is true)

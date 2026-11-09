@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
 
-from app.api.dependencies.api_keys import require_api_key
+from app.api.dependencies.api_keys import require_scoped_api_key
 from app.api.dependencies.auth import require_super_admin
 from app.core.logging import log_error, log_info
 from app.repositories import tray as tray_repo
@@ -375,8 +375,11 @@ async def rebuild_deployment_link(
 # ---------------------------------------------------------------------------
 # Windows build agent API
 #
-# Called by tray/build-agent/MyPortalBuildAgent.ps1 with an API key. Restrict
-# the key to these paths (and the build server's IP) on the API keys page.
+# Called by tray/build-agent/MyPortalBuildAgent.ps1 with an API key. The key
+# must be restricted to these paths (and should be restricted to the build
+# server's IP) on the API keys page: claimed jobs carry install tokens and
+# provisioning secrets, and uploads replace installers customers download, so
+# keys with no endpoint permissions are refused here.
 # ---------------------------------------------------------------------------
 
 
@@ -395,7 +398,7 @@ def _build_error(exc: Exception) -> HTTPException:
 async def build_agent_claim(
     request: Request,
     supports_ppkg: bool | None = None,
-    _api_key: dict = Depends(require_api_key),
+    _api_key: dict = Depends(require_scoped_api_key),
 ):
     portal_url = tray_deployment.resolve_portal_url(request)
     try:
@@ -424,7 +427,7 @@ async def build_agent_upload(
     request: Request,
     offset: int | None = Query(default=None, ge=0, description="Bytes already sent when uploading in parts"),
     total: int | None = Query(default=None, ge=1, description="The whole file's size when uploading in parts"),
-    _api_key: dict = Depends(require_api_key),
+    _api_key: dict = Depends(require_scoped_api_key),
 ) -> dict:
     try:
         if offset is None and total is None:
@@ -449,7 +452,7 @@ async def build_agent_upload(
 async def build_agent_complete(
     build_id: int,
     payload: TrayDeploymentBuildComplete | None = None,
-    _api_key: dict = Depends(require_api_key),
+    _api_key: dict = Depends(require_scoped_api_key),
 ) -> dict:
     try:
         password = payload.provisioning_password.get_secret_value() if payload and payload.provisioning_password else None
@@ -466,7 +469,7 @@ async def build_agent_complete(
 async def build_agent_fail(
     build_id: int,
     payload: TrayDeploymentBuildFailure,
-    _api_key: dict = Depends(require_api_key),
+    _api_key: dict = Depends(require_scoped_api_key),
 ) -> dict:
     try:
         await builds.fail_build(build_id, payload.error)

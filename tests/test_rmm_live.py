@@ -75,6 +75,29 @@ async def test_session_lifecycle_and_browser_auth(sqlite_db):
 
 
 @pytest.mark.anyio
+async def test_browser_token_works_once(sqlite_db):
+    agent = await _capable_agent(sqlite_db)
+    started = await rmm_live.start_session(agent=agent, company_id=1, asset_id=10, requested_by_user_id=9)
+
+    assert await rmm_live.claim_browser(started.session_id, "wrong-token") is None
+    session = await rmm_live.claim_browser(started.session_id, started.browser_token)
+    assert session and session["id"] == started.session_id
+    assert (await live_repo.get_session(started.session_id))["browser_connected_at"] is not None
+
+    # A second socket, or a token copied from a log, is refused.
+    assert await rmm_live.claim_browser(started.session_id, started.browser_token) is None
+    assert await rmm_live.authorize_browser(started.session_id, started.browser_token) is None
+
+
+@pytest.mark.anyio
+async def test_browser_token_cannot_join_a_closed_session(sqlite_db):
+    agent = await _capable_agent(sqlite_db)
+    started = await rmm_live.start_session(agent=agent, company_id=1, asset_id=10, requested_by_user_id=9)
+    await rmm_live.close_session(started.session_id, "done")
+    assert await rmm_live.claim_browser(started.session_id, started.browser_token) is None
+
+
+@pytest.mark.anyio
 async def test_expired_sessions_are_closed(sqlite_db):
     agent = await _capable_agent(sqlite_db)
     started = await rmm_live.start_session(agent=agent, company_id=1, asset_id=10, requested_by_user_id=9)
@@ -226,3 +249,15 @@ async def test_live_tools_overview_shows_a_gauge_per_fixed_disk():
     js = (ROOT / "app/static/js/rmm_live.js").read_text()
     assert "renderDisks(m.disks);" in js
     assert "if (!diskTemplate || !Array.isArray(disks)) return;" in js
+
+
+@pytest.mark.anyio
+async def test_process_list_escapes_device_supplied_fields():
+    """The process list is filled from device data with innerHTML, so even the
+    numeric-looking fields must be escaped (a device could send markup)."""
+
+    js = (ROOT / "app/static/js/rmm_live.js").read_text()
+    assert "'<td class=\"rmm-live__num\">' + p.pid" not in js
+    assert "' + (p.threads || '') + '" not in js
+    assert "escapeHtml(String(p.pid ?? ''))" in js
+    assert "escapeHtml(String(p.threads || ''))" in js

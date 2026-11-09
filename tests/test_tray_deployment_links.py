@@ -583,3 +583,10 @@ async def test_admin_page_hides_revoked_links(monkeypatch):
     assert links[0]["url"] == f"{PORTAL}/deploy/{SLUG}"
     assert extra["hidden_revoked_count"] == 1
     assert links[0]["build"]["release_tag"] == "v1.2.3"
+
+
+def test_windows_script_downloads_into_a_private_random_folder():
+    script = tray_deployment.windows_script(PORTAL, TOKEN)
+    assert "[guid]::NewGuid()" in script
+    assert "/inheritance:r" in script
+    assert "Join-Path $env:TEMP 'myportal-tray.msi'" not in script

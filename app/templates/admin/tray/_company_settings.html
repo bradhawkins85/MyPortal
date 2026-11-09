@@ -90,23 +90,28 @@
             <summary>Windows (PowerShell) install snippet</summary>
             <pre class="code-block"><code>$url = '{{ portal_url }}'
 $token = '{{ new_token }}'
-Invoke-WebRequest -Uri "$url/static/tray/myportal-tray.msi" -OutFile $env:TEMP\myportal-tray.msi
-msiexec.exe /i $env:TEMP\myportal-tray.msi MYPORTAL_URL="$url" ENROL_TOKEN="$token" /qn</code></pre>
+$dir = Join-Path $env:TEMP ('myportal-tray-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $dir | Out-Null
+icacls.exe $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+Invoke-WebRequest -Uri "$url/static/tray/myportal-tray.msi" -OutFile "$dir\myportal-tray.msi"
+msiexec.exe /i "$dir\myportal-tray.msi" MYPORTAL_URL="$url" ENROL_TOKEN="$token" /qn</code></pre>
           </details>
           <details>
             <summary>macOS (bash) install snippet</summary>
             <pre class="code-block"><code>URL='{{ portal_url }}'
 TOKEN='{{ new_token }}'
-curl -fsSL "$URL/static/tray/myportal-tray.pkg" -o /tmp/myportal-tray.pkg
-sudo /bin/sh -c "echo MYPORTAL_URL=$URL > /Library/Preferences/io.myportal.tray.env; echo ENROL_TOKEN=$TOKEN >> /Library/Preferences/io.myportal.tray.env"
-sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
+DIR="$(mktemp -d)"
+curl -fsSL --proto =https "$URL/static/tray/myportal-tray.pkg" -o "$DIR/myportal-tray.pkg"
+sudo /bin/sh -c "umask 077; echo MYPORTAL_URL=$URL > /Library/Preferences/io.myportal.tray.env; echo ENROL_TOKEN=$TOKEN >> /Library/Preferences/io.myportal.tray.env"
+sudo installer -pkg "$DIR/myportal-tray.pkg" -target /</code></pre>
           </details>
           <details>
             <summary>Linux (bash) install snippet, for servers such as Proxmox VE and desktops</summary>
             <pre class="code-block"><code>URL='{{ portal_url }}'
 TOKEN='{{ new_token }}'
-curl -fsSL "$URL/static/tray/myportal-tray-linux.tar.gz" | tar -xz -C /tmp
-sudo /tmp/myportal-tray/install.sh --url "$URL" --token "$TOKEN"</code></pre>
+DIR="$(mktemp -d)"
+curl -fsSL --proto =https "$URL/static/tray/myportal-tray-linux.tar.gz" | tar -xz -C "$DIR"
+sudo "$DIR/myportal-tray/install.sh" --url "$URL" --token "$TOKEN"</code></pre>
             <p class="form-help">Adds the tray icon when the computer has a desktop and installs only the background service otherwise. Add <code>--headless</code> or <code>--desktop</code> to choose.</p>
           </details>
         </div>

@@ -36,6 +36,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from app.api.dependencies.auth import (
     get_current_tray_device,
     get_current_user,
+    get_optional_user,
     require_helpdesk_technician,
     require_super_admin,
 )
@@ -1373,6 +1374,7 @@ async def tacticalrmm_ticket_url_action(
     tray_agent_id: str | None = Query(
         default=None, alias="TrayAgentID", min_length=1, max_length=255
     ),
+    current_user: dict | None = Depends(get_optional_user),
 ) -> RedirectResponse:
     """Launch an asset-linked ticket form from a Tactical RMM URL Action.
 
@@ -1380,9 +1382,24 @@ async def tacticalrmm_ticket_url_action(
     RMM asset sync.  Exchange it for the same short-lived encrypted form token
     used by the tray application rather than exposing an internal device ID in
     the form URL.
+
+    A device UID is not a secret (it appears in the TRMM custom field, the
+    device's registry and WebSocket URLs), so the device-bound form is only
+    issued to a signed-in helpdesk technician. URL Actions open in the
+    technician's browser, where they are normally signed in already; anyone
+    else is sent to the login page and back.
     """
 
     device_uid = (tray_agent_id or "").strip()
+    if current_user is None:
+        target = "/api/tray/ticket-form/url-action"
+        if device_uid:
+            target += "?TrayAgentID=" + quote(device_uid, safe="")
+        return RedirectResponse(
+            url="/login?next=" + quote(target, safe=""),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    await require_helpdesk_technician(current_user)
     device = await tray_repo.get_device_by_uid(device_uid)
     if not device or device.get("status") == "revoked":
         log_info("Tactical RMM URL Action using unauthenticated ticket fallback")

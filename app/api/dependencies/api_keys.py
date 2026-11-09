@@ -132,6 +132,25 @@ async def require_api_key(
     return record
 
 
+async def require_scoped_api_key(record: dict = Depends(require_api_key)) -> dict:
+    """Like :func:`require_api_key`, but refuse keys with no endpoint permissions.
+
+    Use it on endpoints that hand out secrets or accept files other devices
+    will run (the Windows build agent). An unscoped key is a key someone
+    created for something else, and must never reach these endpoints, whatever
+    ``API_KEYS_DEFAULT_DENY_WHEN_UNSCOPED`` says.
+    """
+    if not record.get("permissions"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "This endpoint needs an API key that is limited to it. "
+                "Add the endpoint to the key's permissions on the API keys page."
+            ),
+        )
+    return record
+
+
 async def get_optional_api_key(
     request: Request,
     _: None = Depends(require_database),
