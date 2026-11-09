@@ -721,6 +721,12 @@ The RMM agent (`myportal-rmm`) is a separate program from the tray app, built fo
 macOS and Linux by the **Build RMM agent** workflow. It enrols with the tray device's token so
 it joins the same company and asset, then waits for runs.
 
+Each tray device has one RMM agent. While that agent is connected, MyPortal refuses to enrol a
+second agent for the device, and re-enrolling the agent needs its own saved token (which a
+redeploy from the tray app sends automatically). If the agent was reinstalled without its saved
+state, the new agent takes over once the old one has been offline for 30 minutes; the old
+agent is marked *replaced* and its token stops working.
+
 ### Removing PawnIO
 
 RMM agents released before the PawnIO fix installed the PawnIO driver, which caused

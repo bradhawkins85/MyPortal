@@ -227,6 +227,33 @@ async def _validate_tray_answers(
 # ---------------------------------------------------------------------------
 
 
+_UNCLAIMED_ENROLMENT_WINDOW = timedelta(days=7)
+
+
+def _is_unclaimed_enrolment(device: dict[str, Any]) -> bool:
+    """Return whether ``device`` was enrolled recently and never checked in.
+
+    Such a row belongs to a tray whose enrolment response was lost, so the
+    install token may re-issue its auth token. Any device that has ever
+    reported in has proven possession of its token and is not re-keyable.
+    """
+
+    for key in ("last_seen_utc", "ws_last_seen_utc", "overseer_last_seen_utc"):
+        if device.get(key):
+            return False
+    created_at = device.get("created_at")
+    if isinstance(created_at, str):
+        try:
+            created_at = datetime.fromisoformat(created_at)
+        except ValueError:
+            return False
+    if not isinstance(created_at, datetime):
+        return False
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - created_at <= _UNCLAIMED_ENROLMENT_WINDOW
+
+
 @router.post(
     "/enrol",
     response_model=TrayEnrolResponse,
@@ -284,6 +311,24 @@ async def enrol_device(
             )
             raise HTTPException(
                 status_code=409, detail="Device is already enrolled to another company"
+            )
+        # An install token is shared by every machine in the company, so it
+        # must not re-key a device that is already in use. The only
+        # legitimate re-enrolment is a tray retrying after a timed-out
+        # request, before it has ever used the token it was issued.
+        if not _is_unclaimed_enrolment(existing):
+            log_warning(
+                "Tray re-enrolment refused for device already in use",
+                device_uid=device_uid,
+                device_id=existing.get("id"),
+                install_token_id=token_record.get("id"),
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Device is already enrolled. Revoke and delete it in "
+                    "MyPortal before enrolling it again."
+                ),
             )
         await tray_repo.update_device_auth(
             int(existing["id"]),
