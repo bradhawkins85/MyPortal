@@ -248,7 +248,7 @@ def parse_schedule(form: Mapping[str, Any] | None, errors: dict[str, str], *, pr
         schedule["run_time"] = run_time
         try:
             schedule["schedule_timezone"] = rmm_automation.validate_timezone(form.get(prefix + "schedule_timezone"))
-        except RunRequestError as exc:
+        except rmm_scripts.RunRequestError as exc:
             errors.update(exc.errors)
     return schedule
 
@@ -330,7 +330,7 @@ async def _parse_step(form: Mapping[str, Any], *, key: str, kind: str, prefix: s
         script: dict[str, Any] | None = None
         try:
             script = await rmm_automation._scoped_script(form.get(prefix + "script_id"), company_id)
-        except RunRequestError as exc:
+        except rmm_scripts.RunRequestError as exc:
             problems.update(exc.errors)
         entries: dict[str, str] = {}
         if script is not None:
@@ -350,7 +350,7 @@ async def _parse_step(form: Mapping[str, Any], *, key: str, kind: str, prefix: s
 
         try:
             step["package_id"] = package_ids([form.get(prefix + "package_id")])[0]
-        except RunRequestError as exc:
+        except rmm_scripts.RunRequestError as exc:
             problems.update(exc.errors)
             step["package_id"] = str(form.get(prefix + "package_id") or "").strip()[:128]
     elif kind == "create_ticket":
