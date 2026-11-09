@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import hmac
 import json
 import random
 import re
@@ -1008,6 +1009,37 @@ def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[st
     }
 
 
+AGENT_REPLACE_AFTER = timedelta(minutes=30)
+
+
+def _may_replace_agent(agent: Mapping[str, Any], current_token: str) -> bool:
+    """Whether an enrolment may take over ``agent``'s identity or device.
+
+    Allowed when the caller proves it holds the agent's token, when the agent
+    is not active (uninstalled or replaced), or when it has been silent long
+    enough that it is no longer running.
+    """
+
+    if agent.get("status") != "active":
+        return True
+    stored = str(agent.get("auth_token_hash") or "")
+    if current_token and stored and hmac.compare_digest(
+        tray_service.hash_token(current_token), stored
+    ):
+        return True
+    last_seen = agent.get("last_seen_utc")
+    if isinstance(last_seen, str):
+        try:
+            last_seen = datetime.fromisoformat(last_seen)
+        except ValueError:
+            return True
+    if not isinstance(last_seen, datetime):
+        return True
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - last_seen > AGENT_REPLACE_AFTER
+
+
 async def enrol_agent(
     *, tray_device: Mapping[str, Any], payload: Mapping[str, Any], client_ip: str | None
 ) -> dict[str, Any]:
@@ -1036,9 +1068,44 @@ async def enrol_agent(
         "auth_token_prefix": tray_service.token_prefix(token),
         "details": details,
     }
+    tray_device_id = int(tray_device["id"])
+    current_token = str(payload.get("current_auth_token") or "").strip()
     if existing:
-        if existing.get("tray_device_id") not in (None, int(tray_device["id"])):
+        if existing.get("tray_device_id") not in (None, tray_device_id):
             raise PermissionError("This RMM agent is enrolled to a different device.")
+        if not _may_replace_agent(existing, current_token):
+            log_warning(
+                "RMM re-enrolment refused for agent in use",
+                agent_id=existing.get("id"),
+                tray_device_id=tray_device_id,
+            )
+            raise PermissionError(
+                "This RMM agent is already connected. Re-enrol it from its own "
+                "installation, or wait until it has been offline for 30 minutes."
+            )
+    # One RMM agent per tray device: a second agent would race the first for
+    # scripts and live sessions, so it may only replace an agent that has
+    # gone quiet (for example after a reinstall that lost its state).
+    others = [
+        agent
+        for agent in await rmm_repo.list_tray_device_agents(tray_device_id)
+        if not existing or int(agent["id"]) != int(existing["id"])
+    ]
+    for other in others:
+        if not _may_replace_agent(other, ""):
+            log_warning(
+                "Second RMM agent refused for tray device",
+                agent_id=other.get("id"),
+                tray_device_id=tray_device_id,
+            )
+            raise PermissionError(
+                "Another RMM agent is already connected for this device. Remove "
+                "it in MyPortal, or wait until it has been offline for 30 minutes."
+            )
+    for other in others:
+        await rmm_repo.set_agent_status(int(other["id"]), "replaced")
+        log_info("RMM agent replaced", agent_id=other.get("id"), tray_device_id=tray_device_id)
+    if existing:
         await rmm_repo.reenrol_agent(int(existing["id"]), **common)
         agent_id = int(existing["id"])
     else:

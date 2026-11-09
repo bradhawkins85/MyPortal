@@ -18,14 +18,14 @@ func TestEnrolSendsTrayTokenAndUID(t *testing.T) {
 		}
 		var body map[string]interface{}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["agent_uid"] != "uid-12345678" || body["hostname"] != "pc1" {
+		if body["agent_uid"] != "uid-12345678" || body["hostname"] != "pc1" || body["current_auth_token"] != "old-agent-token" {
 			http.Error(w, "bad body", http.StatusBadRequest)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"agent_uid": "uid-12345678", "auth_token": "agent-token"})
 	}))
 	defer server.Close()
-	result, err := Enrol(context.Background(), server.URL+"/", "tray-token", "uid-12345678", Details{Hostname: "pc1"}) // gitleaks:allow (test value)
+	result, err := Enrol(context.Background(), server.URL+"/", "tray-token", "uid-12345678", "old-agent-token", Details{Hostname: "pc1"}) // gitleaks:allow (test value)
 	if err != nil || result.AuthToken != "agent-token" {
 		t.Fatalf("Enrol = %#v, %v", result, err)
 	}

@@ -85,3 +85,41 @@ async def test_enrol_refuses_foreign_or_revoked_device(monkeypatch, existing, ex
     with pytest.raises(HTTPException) as exc_info:
         await tray_routes.enrol_device(payload, SimpleNamespace(headers={}))  # type: ignore[arg-type]
     assert exc_info.value.status_code == expected_status
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "existing",
+    [
+        # Checked in over HTTPS, the WebSocket, or from the overseer.
+        {"id": 7, "company_id": 10, "status": "active", "last_seen_utc": "2026-11-01 00:00:00",
+         "created_at": "2026-11-01 00:00:00"},
+        {"id": 7, "company_id": 10, "status": "active", "ws_last_seen_utc": "2026-11-01 00:00:00",
+         "created_at": "2026-11-01 00:00:00"},
+        {"id": 7, "company_id": 10, "status": "active", "overseer_last_seen_utc": "2026-11-01 00:00:00",
+         "created_at": "2026-11-01 00:00:00"},
+        # Never checked in, but too old to be a lost enrolment response.
+        {"id": 7, "company_id": 10, "status": "active", "created_at": "2020-01-01 00:00:00"},
+        {"id": 7, "company_id": 10, "status": "active"},
+    ],
+)
+async def test_enrol_refuses_to_rekey_device_in_use(monkeypatch, existing):
+    from app.schemas.tray import TrayEnrolRequest
+
+    tray_routes = _enrol_stubs(monkeypatch, existing)
+    payload = TrayEnrolRequest(install_token="install-token-value", device_uid="device-abc", os="windows")
+    with pytest.raises(HTTPException) as exc_info:
+        await tray_routes.enrol_device(payload, SimpleNamespace(headers={}))  # type: ignore[arg-type]
+    assert exc_info.value.status_code == 409
+
+
+def test_unclaimed_enrolment_allows_recent_never_seen_device():
+    from datetime import datetime, timedelta, timezone
+
+    from app.api.routes.tray import _is_unclaimed_enrolment
+
+    recent = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)
+    assert _is_unclaimed_enrolment({"created_at": recent})
+    assert _is_unclaimed_enrolment({"created_at": recent.isoformat(sep=" ")})
+    assert not _is_unclaimed_enrolment({"created_at": recent, "last_seen_utc": recent})
+    assert not _is_unclaimed_enrolment({"created_at": "not a date"})
