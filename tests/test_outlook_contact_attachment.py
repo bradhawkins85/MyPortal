@@ -80,3 +80,13 @@ def test_outlook_results_use_portal_click_to_call_and_offer_attachment():
     assert "window.__portalClickToCall" in script
     assert "Attach to contact" in script
     assert "link.href = `tel:" not in script
+
+
+def test_outlook_contact_lookup_asks_for_json_errors():
+    """Without Accept: application/json the API error is rendered as an HTML page,
+    hiding the reason (for example a Microsoft Graph refusal) from the technician."""
+    script = Path("app/static/js/ticket_detail.js").read_text(encoding="utf-8")
+    start = script.index("/api/profile/m365-contacts/phones")
+    lookup_request = script[start:script.index(");", start)]
+
+    assert "Accept: 'application/json'" in lookup_request

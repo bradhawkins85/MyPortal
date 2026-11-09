@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 import httpx
 
+from app.core.logging import log_warning
 from app.services.monitored_http import monitored_client
 
 from app.repositories import user_m365_contacts as contacts_repo
@@ -59,7 +60,39 @@ async def store_tokens(user_id: int, *, tenant_id: str, account_email: str | Non
 
 
 class ReconnectRequired(ValueError):
-    """The stored Outlook connection predates write access to contacts."""
+    """The stored Outlook connection must be reconnected before it can be used."""
+
+
+def _graph_error_code(response: httpx.Response) -> str:
+    try:
+        error = response.json().get("error")
+    except (AttributeError, ValueError):
+        return ""
+    return str(error.get("code") or "").strip() if isinstance(error, Mapping) else ""
+
+
+def _contacts_read_error(response: httpx.Response) -> ValueError:
+    """Explain why Microsoft Graph refused to list the technician's contacts."""
+    status_code = response.status_code
+    code = _graph_error_code(response)
+    log_warning(
+        "Microsoft Graph refused to list Outlook contacts",
+        status_code=status_code, graph_error=code or None,
+    )
+    reference = f"Microsoft Graph HTTP {status_code}" + (f" {code}" if code else "")
+    if status_code in (401, 403):
+        return ReconnectRequired(
+            "Microsoft would not let MyPortal read your Outlook contacts. Reconnect Outlook contacts "
+            f"from your profile and accept the contacts permission ({reference})"
+        )
+    if status_code == 404 or code == "MailboxNotEnabledForRESTAPI":
+        return ValueError(
+            "Microsoft 365 found no Exchange Online mailbox for the connected account. Reconnect "
+            f"Outlook contacts from your profile with the account that has your mailbox ({reference})"
+        )
+    if status_code == 429 or status_code >= 500:
+        return ValueError(f"Outlook is busy right now; try again in a minute ({reference})")
+    return ValueError(f"Unable to read Outlook contacts ({reference})")
 
 
 def scopes_allow_write(scopes: str | None) -> bool:
@@ -143,7 +176,7 @@ async def lookup_phones(user_id: int, requester_name: str) -> list[dict[str, str
             visited_urls.add(next_url)
             response = await client.get(next_url, headers={"Authorization": f"Bearer {token}"})
             if response.status_code != 200:
-                raise ValueError("Unable to read Outlook contacts")
+                raise _contacts_read_error(response)
             payload = response.json()
             contacts.extend(payload.get("value") or [])
             next_url = payload.get("@odata.nextLink")
@@ -222,7 +255,7 @@ async def upsert_contact(user_id: int, details: Mapping[str, Any]) -> dict[str, 
             visited_urls.add(next_url)
             response = await client.get(next_url, headers=headers)
             if response.status_code != 200:
-                raise ValueError("Unable to read Outlook contacts")
+                raise _contacts_read_error(response)
             payload = response.json()
             contacts.extend(payload.get("value") or [])
             next_url = payload.get("@odata.nextLink")

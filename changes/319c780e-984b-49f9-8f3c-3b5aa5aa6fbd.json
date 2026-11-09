@@ -1,0 +1,7 @@
+{
+  "guid": "319c780e-984b-49f9-8f3c-3b5aa5aa6fbd",
+  "occurred_at": "2026-11-09T01:24Z",
+  "change_type": "Fix",
+  "summary": "Check Outlook contacts and Send To Outlook now explain why Microsoft refused to read your Outlook contacts, such as a missing contacts permission or no mailbox for the connected account, instead of a generic error.",
+  "content_hash": "d93dcbf41ae8dc08a7c67a6102b28ad9b240b900766ae1d4e351662a2c7f9ad9"
+}
