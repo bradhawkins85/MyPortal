@@ -210,6 +210,15 @@
   {%- endfor %}
 {%- endmacro %}
 
+{# What a check or event log rule does: its action, or its actions as an
+   ordered list when it takes several (rmm_action_steps). #}
+{% macro action_summary(item) -%}
+{%- if item.action_steps and item.action_steps | length > 1 -%}
+<ol class="rmm-step-list" aria-label="Actions, in order">{% for text in item.action_steps %}<li>{{ text }}</li>{% endfor %}</ol>
+{%- if item.action_limit %}<span class="text-muted">{{ item.action_limit[:1] | upper }}{{ item.action_limit[1:] }}</span>{% endif -%}
+{%- else -%}{{ item.action_label }}{%- endif -%}
+{%- endmacro %}
+
 {# One event log rule's Action menu (rules page and the asset page's Event log
    automations). asset_id sends the technician back to that asset page. #}
 {% macro event_log_rule_menu(rule, csrf_token=none, asset_id=none) -%}

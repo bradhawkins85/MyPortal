@@ -136,8 +136,8 @@ def test_event_log_rules_open_the_editor_or_run_now():
 
     base = dict(company={"name": "Contoso"}, rules=[], can_edit=True, is_super_admin=False, errors={}, conditions=[],
                 fields=rules.FIELDS, operators=rules.OPERATORS, field_operators=rules.FIELD_OPERATORS,
-                actions=rules.ACTIONS, schedule_modes=rules.SCHEDULE_MODES, devices=[], scripts=[], script=None,
-                script_fields=[], variables=[], csrf_token="tok")
+                actions=rules.ACTIONS, schedule_modes=rules.SCHEDULE_MODES, devices=[], scripts=[],
+                variables=[], csrf_token="tok")
     listing = _env().get_template("rmm/event_log_rules.html").render(**base, editing=None, run_now=None)
     _assert_workspace(listing, ["rules"])
     editing = {"id": None, "name": "", "scope": "company", "asset_id": None, "action": "drop", "target_mode": "all",

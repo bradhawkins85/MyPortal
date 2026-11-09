@@ -12,8 +12,8 @@ from app.features.rmm import check_routes
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_checks as checks_repo
 from app.repositories import rmm_stats as stats_repo
+from app.services import rmm_action_steps
 from app.services import rmm_checks as checks
-from app.services import rmm_event_log_rules as event_log_rules
 from app.services import rmm_proxmox
 from app.services import rmm_scripts
 from app.services import rmm_stats
@@ -555,43 +555,77 @@ def test_checks_page_and_asset_sections_render():
 
     row = {"id": 3, "name": "<b>Disk</b>", "check_type": "disk", "type_label": "Disk space", "scope_label": "Company: Contoso",
            "description": "Free space on C: is below 10%", "action": "run_script", "action_label": "Run Cleanup",
+           "action_steps": ["Run Cleanup"], "action_types": ["run_script"], "repeats": True,
            "cooldown_minutes": 0, "counts": {"failing": 2, "passing": 1}, "last_summary": "Failed on PC",
            "is_enabled": True, "can_edit": True, "replaced": True, "asset_id": None}
-    editing = {**check_routes._blank_check(10, "service"), "id": None, "name": ""}
+    several = {**row, "id": 4, "name": "Spooler", "action_steps": ["Create a ticket", "Run Fix", "Run Report 2 hours later"],
+               "action_types": ["create_ticket", "run_script", "schedule_script"], "cooldown_minutes": 30}
+    editing = {**check_routes._blank_check(10, "service"), "id": None, "name": "",
+               "actions": [{**rmm_action_steps.blank_steps(["create_ticket"], "aa11")["create_ticket"],
+                            "auto_close_when_resolved": True},
+                           {**rmm_action_steps.blank_steps(["schedule_script"], "bb22")["schedule_script"],
+                            "script_id": 7, "schedule_mode": "time"}]}
     assert check_routes._blank_check(None, "disk")["disk_threshold"] == "10"
     assert check_routes._blank_check(None, "cpu")["cpu_threshold"] == "80"
+    assert check_routes._blank_check(None, "cpu")["actions"] == []
     html = env.get_template("rmm/checks.html").render(
-        company={"name": "Contoso"}, checks=[row], can_edit=True, is_super_admin=False, editing=editing,
-        errors={"service_name": "Enter the service's name."}, check_types=checks.CHECK_TYPES, actions=checks.ACTIONS,
-        script_actions=checks.SCRIPT_ACTIONS, schedule_modes=event_log_rules.SCHEDULE_MODES,
+        company={"name": "Contoso"}, checks=[row, several], can_edit=True, is_super_admin=False, editing=editing,
+        errors={"service_name": "Enter the service's name.", "action-bb22-script": "Choose a script."},
+        check_types=checks.CHECK_TYPES,
+        actions={kind: rmm_action_steps.TYPES[kind] for kind in checks.ACTION_TYPES},
+        schedule_modes=rmm_action_steps.SCHEDULE_MODES, blank_actions=rmm_action_steps.blank_steps(checks.ACTION_TYPES),
+        step_scripts={"bb22": {"script": {"id": 7, "name": "Report"}, "saved": True, "fields": [
+            {"key": "param:Reason", "name": "Reason", "value": "{{check.result}}", "sensitive": False,
+             "mandatory": False, "default": None, "help": None, "value_set": True}]}},
+        add_action_key="cc33", max_actions=rmm_action_steps.MAX_STEPS,
         disk_metrics=checks.DISK_METRICS, memory_metrics=checks.MEMORY_METRICS, comparisons=checks.COMPARISONS,
         network_directions=checks.NETWORK_DIRECTIONS, service_states=checks.SERVICE_STATES,
         service_fixes=checks.SERVICE_FIXES, file_states=checks.FILE_STATES, process_states=checks.PROCESS_STATES,
         program_states=checks.PROGRAM_STATES, proxmox_conditions=rmm_proxmox.CONDITIONS,
         version_operators=checks.VERSION_OPERATORS,
         script_expectations=checks.SCRIPT_EXPECTATIONS, result_examples=checks.RESULT_EXAMPLES, statuses=checks.STATUSES,
-        devices=[{"asset_id": 10, "asset_name": "PC-01"}], scripts=[], script=None, script_fields=[],
+        devices=[{"asset_id": 10, "asset_name": "PC-01"}],
+        scripts=[{"id": 7, "name": "Report", "path": "rmm/Common/Report.ps1"}],
         check_script=None, check_script_fields=[], variables=[], csrf_token="tok",
     )
     assert "&lt;b&gt;Disk&lt;/b&gt;" in html and "<b>Disk</b>" not in html
     assert "[Add check][Scripts]" in html and "Enter the service&#39;s name." in html
     assert "2 failing" in html and "once per failure" in html
+    # A check with several actions lists them in order.
+    assert ('<ol class="rmm-step-list" aria-label="Actions, in order"><li>Create a ticket</li><li>Run Fix</li>'
+            '<li>Run Report 2 hours later</li></ol>') in html
+    assert "scripts and installs again every 30 min while failing" in html
     assert 'data-rmm-check-devices-open="3" data-rmm-check-devices-status="failing"' in html
     assert 'id="rmm-check-devices-modal"' in html and "/static/js/rmm_check_devices.js" in html and "Some devices have their own" in html
     assert 'id="rmm-check-type-service" name="check_type" value="service" data-rmm-check-type checked' in html
     assert 'value="global"' not in html and 'id="rmm-check-target-all" name="target_mode" value="all" data-rmm-check-target-mode checked' in html
-    assert 'name="schedule_mode"' in html and 'name="action" value="schedule_script" data-rmm-check-action >' in html
     # The service error is summarised, linked to its field and shown beside it.
     assert '<a href="#rmm-check-service-name">' in html and 'id="rmm-check-error-service_name"' in html
     assert 'aria-invalid="true" aria-describedby="rmm-check-service-name-help rmm-check-error-service_name"' in html
-    assert 'name="auto_close_when_resolved" value="1"' in html
+    # Each action is a card in order, with its own settings, errors and script values.
+    assert html.index('name="action_key" value="aa11"') < html.index('name="action_key" value="bb22"')
+    assert 'name="action:aa11:type" value="create_ticket"' in html
+    assert 'name="action:aa11:auto_close_when_resolved" value="1" checked' in html
+    assert 'aria-describedby="rmm-check-action-aa11-auto-close-help"' in html
+    assert "Auto-close when resolved" in html and "otherwise Closed" in html
+    assert 'name="action:bb22:schedule_mode"' in html and 'name="action:bb22:run_time" type="time"' in html
+    assert '<a href="#rmm-check-action-bb22-script">Choose a script.</a>' in html
+    assert 'id="rmm-check-error-action-bb22-script"' in html
+    assert 'name="action:bb22:entry:param:Reason"' in html and 'value="{{check.result}}"' in html
+    assert 'name="action_order" value="aa11,bb22"' in html
+    # New actions come from templates; without JavaScript one more can be added per save.
+    for kind in checks.ACTION_TYPES:
+        assert f'<template data-rmm-step-template="{kind}">' in html
+        assert f'data-rmm-step-add-type="{kind}"' in html
+    assert 'name="action:__KEY__:type"' in html
+    assert 'name="action_key" value="cc33"' in html and 'name="action:cc33:type"' in html
+    assert 'name="action:aa11:remove"' in html
     assert 'id="rmm-check-type-file"' in html and 'id="rmm-check-type-process"' in html
     assert 'name="file_path"' in html and '<option value="missing" >Does not exist</option>' in html
     assert 'name="process_name"' in html and '<option value="not_running" >Not running</option>' in html
-    assert 'aria-describedby="rmm-check-auto-close-help"' in html
-    assert "Auto-close when resolved" in html and "otherwise Closed" in html
     assert 'name="action_results"' in html and 'data-rmm-result-example="Not installed"' in html
     assert 'action="/rmm/checks/3/enabled"' in html and "/static/js/rmm_checks.js" in html
+    assert html.index("/static/js/rmm_action_steps.js") < html.index("/static/js/rmm_checks.js")
 
     detail = (ROOT / "app/templates/assets/detail.html").read_text()
     env.parse(detail)  # compiles
@@ -684,8 +718,8 @@ async def test_auto_close_ticket_on_recovery(sqlite_db, stats_db, tickets, monke
     check_id = await _save(form)
     saved = await checks_repo.get_check(check_id)
     assert saved["auto_close_when_resolved"] is True
-    assert check_routes.form_values(saved)["auto_close_when_resolved"] is True
-    assert check_routes._posted(form, check_id)["auto_close_when_resolved"] is True
+    assert check_routes.form_values(saved)["actions"][0]["auto_close_when_resolved"] is True
+    assert check_routes._posted(form, check_id)["actions"][0]["auto_close_when_resolved"] is True
 
     await checks.ingest_report(agent, {"cpu_percent": 95})
     assert tickets["tickets"][100]["status"] == "open"
@@ -875,7 +909,7 @@ async def test_program_failure_installs_chocolatey_with_filters_and_cooldown(sql
     check_id = await _save(form)
     check = await checks_repo.get_check(check_id)
     assert check["settings"]["package_id"] == "googlechrome"
-    assert check_routes.form_values(check)["package_id"] == "googlechrome"
+    assert check_routes.form_values(check)["actions"][0]["package_id"] == "googlechrome"
     calls = []
 
     async def queue_apps(device, ids, mode, user_id):

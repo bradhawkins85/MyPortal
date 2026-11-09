@@ -120,6 +120,21 @@ async def list_scripts(*, company_id: int | None = None) -> list[dict[str, Any]]
     return [_script_row(row) for row in rows or []]
 
 
+async def script_names(script_ids: Iterable[Any]) -> dict[int, str]:
+    """The names of these scripts, active or not, by ID."""
+
+    ids = sorted({int(script_id) for script_id in script_ids if script_id})
+    if not ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(ids))
+    # Only "%s" placeholders are interpolated; the IDs are bound parameters.
+    rows = await db.fetch_all(
+        "SELECT id, name FROM rmm_scripts WHERE id IN (" + placeholders + ")",  # nosec B608
+        tuple(ids),
+    )
+    return {int(row["id"]): str(row["name"]) for row in rows or []}
+
+
 def script_available_to(script: dict[str, Any] | None, company_id: int) -> bool:
     """True when ``script`` is active and may run on ``company_id``'s devices."""
 

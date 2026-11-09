@@ -1,26 +1,28 @@
-"""Event log rules: drop incoming event log entries, or run an RMM script when one arrives.
+"""Event log rules: drop incoming event log entries, or act when one arrives.
 
 A rule applies to every company (super admins only), one company, or one
 device. Its conditions compare an entry's fields (:data:`FIELDS`); every
-condition must match. When an agent sends a batch (:func:`apply`):
+condition must match. A rule either drops the events it matches or takes its
+actions in the order they are listed (:mod:`app.services.rmm_action_steps`),
+in any combination. When an agent sends a batch (:func:`apply`):
 
 * entries matching an enabled **drop** rule are not stored, and do not start
-  scripts;
-* for each enabled **run script** rule that some stored entry matches, the
-  rule's Gitea script is queued on the device that sent it, as an ordinary
-  RMM run (``run_source = 'event_log'``). Its values are saved encrypted like a
-  schedule's and may use ``{{event.*}}`` variables (:data:`EVENT_VARIABLES`)
-  from the first matching entry. A rule runs at most once per device per
-  ``cooldown_minutes``, so a burst of events queues one run;
-* for each enabled **schedule a script** rule that some stored entry matches,
-  the rule's script is queued later on that device, after ``delay_minutes``
-  or at the next ``run_time`` in ``schedule_timezone``
-  (:func:`_schedule_rule`). One run waits per rule and device; the RMM
-  automation loop queues it when due (:func:`run_due_scheduled`);
-* for each enabled **create ticket** rule that some stored entry matches, a
-  ticket is raised for the device's company with the device's asset linked.
-  While that ticket is not closed, later matches on the same device add an
-  internal update to it instead (:func:`_ticket_rule`).
+  any actions;
+* for each enabled rule with actions that some stored entry matches, the
+  actions run in order for the device that sent it (:func:`_act`):
+
+  * **create a ticket** raises a ticket for the device's company with the
+    device's asset linked. While that ticket is not closed, later matches on
+    the same device add an internal update to it instead (:func:`_ticket_step`);
+  * **run a script** queues a Gitea script on the device as an ordinary RMM
+    run (``run_source = 'event_log'``). Its values are saved encrypted like a
+    schedule's and may use ``{{event.*}}`` variables (:data:`EVENT_VARIABLES`)
+    from the first matching entry. A rule's scripts run at most once per
+    device per ``cooldown_minutes``, so a burst of events queues one run each;
+  * **schedule a script** queues the script later on that device, after
+    ``delay_minutes`` or at the next ``run_time`` in ``schedule_timezone``
+    (:func:`_schedule_step`). One run waits per action and device; the RMM
+    automation loop queues it when due (:func:`run_due_scheduled`).
 
 A drop rule can also be run now (:func:`drop_stored`), deleting the entries
 already stored that it matches.
@@ -33,7 +35,6 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
-from zoneinfo import ZoneInfo
 
 from app.core.logging import log_error, log_info
 from app.repositories import assets as assets_repo
@@ -41,8 +42,15 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_event_log_rules as rules_repo
 from app.repositories import rmm_event_logs as event_log_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
-from app.services import rmm_actions, rmm_automation, rmm_device_targeting, rmm_scripts
-from app.services.rmm_scripts import RunRequestError
+from app.services import rmm_action_steps, rmm_actions, rmm_device_targeting
+from app.services.rmm_action_steps import (  # noqa: F401 - shared with checks, kept importable here
+    DEFAULT_DELAY_MINUTES,
+    MAX_DELAY_MINUTES,
+    SCHEDULE_MODES,
+    describe_schedule,
+    parse_schedule,
+    scheduled_time,
+)
 
 RUN_SOURCE = "event_log"
 ACTIONS = {
@@ -52,10 +60,10 @@ ACTIONS = {
     "create_ticket": "Create a ticket",
 }
 SCRIPT_ACTIONS = ("run_script", "schedule_script")
-SCHEDULE_MODES = {"delay": "After a delay", "time": "At the next time of day"}
-DEFAULT_DELAY_MINUTES = 60
-MAX_DELAY_MINUTES = 7 * 24 * 60
-_RUN_TIME = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+# What a rule that does not drop events can do, as listed actions in order.
+ACTION_TYPES = ("create_ticket", "run_script", "schedule_script")
+# The rules form's choice between dropping events and acting on them.
+MODES = {"drop": "Drop the event", "actions": "Take actions"}
 TICKET_EVENTS_LISTED = 10
 FIELDS = {
     "log_name": "Log",
@@ -233,33 +241,6 @@ def _int(value: Any, default: int, low: int, high: int) -> int:
     return max(low, min(high, number))
 
 
-def parse_schedule(form: Mapping[str, Any] | None, errors: dict[str, str]) -> dict[str, Any]:
-    """When a "Schedule a script" action runs, from a rule or check form.
-
-    No ``form`` gives the empty schedule of other actions; problems go in ``errors``."""
-
-    schedule: dict[str, Any] = {"schedule_mode": None, "delay_minutes": None, "run_time": None,
-                                "schedule_timezone": None}
-    if form is None:
-        return schedule
-    mode = str(form.get("schedule_mode") or "delay")
-    if mode not in SCHEDULE_MODES:
-        errors["schedule_mode"] = "Choose when the script runs."
-    schedule["schedule_mode"] = mode
-    if mode == "delay":
-        schedule["delay_minutes"] = _int(form.get("delay_minutes"), DEFAULT_DELAY_MINUTES, 1, MAX_DELAY_MINUTES)
-    else:
-        run_time = str(form.get("run_time") or "").strip()[:5]
-        if not _RUN_TIME.match(run_time):
-            errors["run_time"] = "Enter the time as HH:MM, such as 02:00."
-        schedule["run_time"] = run_time
-        try:
-            schedule["schedule_timezone"] = rmm_automation.validate_timezone(form.get("schedule_timezone"))
-        except RunRequestError as exc:
-            errors.update(exc.errors)
-    return schedule
-
-
 async def save_rule(
     *,
     rule_id: int | None,
@@ -299,50 +280,40 @@ async def save_rule(
         errors["target_mode"] = "Choose all devices in scope or device rules."
     target_rules = rmm_device_targeting.parse_rules(form, errors)
     action = str(form.get("action") or "")
-    if action not in ACTIONS:
+    if action not in ACTIONS and action not in MODES:
         errors["action"] = "Choose what the rule does."
-
-    script: dict[str, Any] | None = None
-    entries: dict[str, str] = {}
-    schedule = parse_schedule(form, errors) if action == "schedule_script" else parse_schedule(None, errors)
-    if action in SCRIPT_ACTIONS:
-        try:
-            script = await rmm_automation._scoped_script(form.get("script_id"), rule_company_id)
-        except RunRequestError as exc:
-            errors.update(exc.errors)
-        if script is not None:
-            same_script = bool(existing) and existing.get("script_id") == script["id"]
-            previous = rmm_automation.decrypt_entries(existing.get("entries_encrypted")) if same_script else {}
-            # A newly chosen script's fields appear after saving; only the
-            # current script's values are read from the form.
-            if same_script:
-                for field_def in rmm_scripts.script_fields(script):
-                    key = field_def["key"]
-                    text = str(form.get("entry:" + key) or "")[:65535]
-                    if not text.strip() and field_def["sensitive"] and previous.get(key):
-                        text = previous[key]  # a blank secret keeps the saved one
-                    if text.strip():
-                        entries[key] = text
+    actions: list[dict[str, Any]] = []
+    if action != "drop":
+        actions = await rmm_action_steps.parse_steps(
+            form, types=ACTION_TYPES, company_id=rule_company_id, existing=rmm_action_steps.steps(existing),
+            errors=errors, legacy_action=action,
+        )
+        if not actions and "action" not in errors and not any(key.startswith("action-") for key in errors):
+            errors["actions"] = "Add at least one action, or choose to drop the event."
     if errors:
         raise RuleError(errors)
 
+    # The older single-action columns follow the first action of each kind.
+    legacy = rmm_action_steps.legacy_columns(actions, none="drop")
     values = {
         "name": name,
         "company_id": rule_company_id,
         "asset_id": asset_id,
-        "action": action,
+        "action": legacy["action"],
         "conditions": conditions,
         "target_rules": target_rules,
-        "script_id": int(script["id"]) if script else None,
-        "entries_encrypted": encrypt_secret(json.dumps(entries)) if entries else None,
-        "inputs": rmm_scripts.stored_inputs(script, entries) if script else [],
-        "timeout_seconds": rmm_scripts.clamp_timeout(
-            form.get("timeout_seconds"), int((script or {}).get("default_timeout_seconds") or 600)
-        ),
+        "script_id": legacy["script_id"],
+        "entries_encrypted": legacy["entries_encrypted"],
+        "inputs": legacy["inputs"],
+        "timeout_seconds": int(legacy["script_timeout_seconds"] or 600),
         "cooldown_minutes": _int(form.get("cooldown_minutes"), DEFAULT_COOLDOWN_MINUTES, 0, MAX_COOLDOWN_MINUTES),
         "is_enabled": str(form.get("is_enabled") or "").lower() in {"1", "on", "true", "yes"},
         "user_id": user_id,
-        **schedule,
+        "schedule_mode": legacy["schedule_mode"],
+        "delay_minutes": legacy["delay_minutes"],
+        "run_time": legacy["run_time"],
+        "schedule_timezone": legacy["schedule_timezone"],
+        "actions": actions if action != "drop" else None,
     }
     if existing is None:
         return await rules_repo.create_rule(values)
@@ -350,18 +321,16 @@ async def save_rule(
     return int(existing["id"])
 
 
-def script_values(rule: Mapping[str, Any] | None, script: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    """The rule's script fields with saved values; secrets are never sent back."""
+def script_values(rule: Mapping[str, Any] | None, script: Mapping[str, Any] | None, *,
+                  action_key: str | None = None) -> list[dict[str, Any]]:
+    """A script action's fields with saved values (the first script action when
+    ``action_key`` is not given); secrets are never sent back."""
 
     if not rule or not script:
         return []
-    entries = rmm_automation.decrypt_entries(rule.get("entries_encrypted"))
-    fields = []
-    for field_def in rmm_scripts.script_fields(script):
-        value = entries.get(field_def["key"], "")
-        secret = bool(field_def["sensitive"]) and not rmm_scripts._TOKEN.search(value)
-        fields.append({**field_def, "value": "" if secret else value, "value_set": bool(value)})
-    return fields
+    step = (rmm_action_steps.find(rule, action_key) if action_key
+            else next((item for item in rmm_action_steps.steps(rule) if item["type"] in SCRIPT_ACTIONS), None))
+    return rmm_action_steps.script_values(step, script)
 
 
 def can_edit(rule: Mapping[str, Any], *, company_id: int, is_super_admin: bool) -> bool:
@@ -389,35 +358,6 @@ def event_context(entry: Mapping[str, Any]) -> dict[str, Any]:
     }}
 
 
-async def _run_rule(rule: Mapping[str, Any], agent: Mapping[str, Any], entry: Mapping[str, Any], matched: int) -> int | None:
-    rule_id = int(rule["id"])
-    agent_id = int(agent["id"])
-    now = _utcnow()
-    cooldown = timedelta(minutes=int(rule.get("cooldown_minutes") or 0))
-    last = await rules_repo.last_triggered(rule_id, agent_id)
-    if last is not None and cooldown and now - last < cooldown:
-        await rules_repo.record_matches(rule_id, matched)
-        return None
-    run_id, summary, attempted = await rmm_actions.run_script(
-        script_id=rule.get("script_id"),
-        entries_encrypted=rule.get("entries_encrypted"),
-        inputs=rule.get("inputs"),
-        timeout_seconds=rule.get("timeout_seconds"),
-        agent=agent,
-        run_source=RUN_SOURCE,
-        extra_context=event_context(entry),
-    )
-    if not attempted:
-        await rules_repo.record_matches(rule_id, matched, summary=summary)
-        return None
-    if run_id is not None:
-        summary += f" (event {entry.get('event_id')} in {entry.get('log_name')})."
-    await rules_repo.record_trigger(rule_id, agent_id, run_id)
-    await rules_repo.record_matches(rule_id, matched, summary=summary)
-    log_info("RMM event log rule matched", rule_id=rule_id, agent_id=agent_id, run_id=run_id)
-    return run_id
-
-
 def _entry_html(entry: Mapping[str, Any]) -> str:
     event = event_context(entry)["event"]
     details = "<br>".join(
@@ -432,10 +372,10 @@ def _entry_html(entry: Mapping[str, Any]) -> str:
     return body
 
 
-async def _ticket_rule(rule: Mapping[str, Any], agent: Mapping[str, Any], matched: list[dict[str, Any]]) -> tuple[int | None, bool]:
+async def _ticket_step(rule: Mapping[str, Any], agent: Mapping[str, Any], matched: list[dict[str, Any]]) -> tuple[str, bool]:
     """Raise a ticket for the device, or update the one still open.
 
-    Returns the ticket ID and whether it is new."""
+    Returns what it did, in words, and whether the ticket is new."""
 
     rule_id = int(rule["id"])
     agent_id = int(agent["id"])
@@ -454,9 +394,7 @@ async def _ticket_rule(rule: Mapping[str, Any], agent: Mapping[str, Any], matche
                   f"{count} more event{'s' if count != 1 else ''} on {html.escape(str(device))}.</p>{listed}"),
             reference=reference,
         )
-        summary = f"Updated ticket {rmm_actions.ticket_label(ticket)} for {device}."
-        await rules_repo.record_matches(rule_id, count, summary=summary)
-        return int(ticket["id"]), False
+        return f"Updated ticket {rmm_actions.ticket_label(ticket)} for {device}.", False
 
     created = await rmm_actions.raise_ticket(
         agent=agent,
@@ -467,59 +405,91 @@ async def _ticket_rule(rule: Mapping[str, Any], agent: Mapping[str, Any], matche
     )
     new_id = int(created["id"])
     await rules_repo.set_rule_ticket(rule_id, agent_id, new_id)
-    summary = f"Raised ticket {rmm_actions.ticket_label(created)} for {device}."
-    await rules_repo.record_matches(rule_id, count, summary=summary)
     log_info("RMM event log rule raised a ticket", rule_id=rule_id, agent_id=agent_id, ticket_id=new_id)
-    return new_id, True
+    return f"Raised ticket {rmm_actions.ticket_label(created)} for {device}.", True
 
 
-def describe_schedule(rule: Mapping[str, Any]) -> str:
-    if rule.get("schedule_mode") == "time":
-        return f"at {rule.get('run_time')} ({rule.get('schedule_timezone') or 'UTC'})"
-    minutes = int(rule.get("delay_minutes") or DEFAULT_DELAY_MINUTES)
-    if minutes % 60 == 0:
-        hours = minutes // 60
-        return f"{hours} hour{'s' if hours != 1 else ''} later"
-    return f"{minutes} minute{'s' if minutes != 1 else ''} later"
-
-
-def scheduled_time(rule: Mapping[str, Any], now: datetime | None = None) -> datetime:
-    """When a schedule-a-script rule matched at ``now`` runs (naive UTC)."""
-
-    now = now or _utcnow()
-    if rule.get("schedule_mode") != "time":
-        return now + timedelta(minutes=int(rule.get("delay_minutes") or DEFAULT_DELAY_MINUTES))
-    zone = ZoneInfo(str(rule.get("schedule_timezone") or "UTC"))
-    hour, minute = (int(part) for part in str(rule.get("run_time") or "00:00").split(":"))
-    local_now = now.replace(tzinfo=timezone.utc).astimezone(zone)
-    target = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if target <= local_now:
-        target = (local_now + timedelta(days=1)).replace(hour=hour, minute=minute, second=0, microsecond=0)
-    # Re-attach the zone so a daylight saving change on the way is respected.
-    target = datetime(target.year, target.month, target.day, hour, minute, tzinfo=zone)
-    return target.astimezone(timezone.utc).replace(tzinfo=None)
-
-
-async def _schedule_rule(rule: Mapping[str, Any], agent: Mapping[str, Any], entry: Mapping[str, Any],
-                         matched: int) -> bool:
-    """Schedule the rule's script on the device; one run waits per rule and device."""
+async def _schedule_step(rule: Mapping[str, Any], step: Mapping[str, Any], agent: Mapping[str, Any],
+                         entry: Mapping[str, Any], now: datetime) -> str | None:
+    """Schedule one of the rule's scripts on the device; one run waits per action
+    and device. Returns what it did, or None when a run was already waiting."""
 
     rule_id = int(rule["id"])
     agent_id = int(agent["id"])
-    device = agent.get("hostname") or f"device {agent.get('asset_id') or agent_id}"
-    pending = await rules_repo.get_pending(rule_id, agent_id)
+    pending = await rules_repo.get_pending(rule_id, agent_id, step["key"])
+    first = rmm_action_steps.first_scheduled(rule)
+    if not pending and first is not None and first["key"] == step["key"]:
+        pending = await rules_repo.get_pending(rule_id, agent_id)  # scheduled by an earlier release
     if pending:
-        await rules_repo.record_matches(rule_id, matched)
-        return False
-    run_at = scheduled_time(rule)
-    event = event_context(entry)
-    await rules_repo.add_pending(rule_id, agent_id, run_at, encrypt_secret(json.dumps(event)))
-    name = rule.get("script_name") or "the script"
-    await rules_repo.record_matches(
-        rule_id, matched, summary=f"Scheduled {name} on {device} for {run_at.isoformat(timespec='minutes')} UTC."
-    )
-    log_info("RMM event log rule scheduled a script", rule_id=rule_id, agent_id=agent_id, run_at=run_at.isoformat())
-    return True
+        return None
+    run_at = scheduled_time(step, now)
+    await rules_repo.add_pending(rule_id, agent_id, run_at, encrypt_secret(json.dumps(event_context(entry))),
+                                 action_key=step["key"])
+    name = step.get("script_name")
+    if not name and step.get("script_id"):
+        name = (await rmm_repo.script_names([step["script_id"]])).get(int(step["script_id"]))
+    log_info("RMM event log rule scheduled a script", rule_id=rule_id, agent_id=agent_id, run_at=run_at.isoformat(),
+             action_key=step["key"])
+    return f"Scheduled {name or 'the script'} on {rmm_actions.device_label(agent)} for {run_at.isoformat(timespec='minutes')} UTC."
+
+
+async def _act(rule: Mapping[str, Any], agent: Mapping[str, Any], matched: list[dict[str, Any]]) -> dict[str, int]:
+    """Take a rule's actions in order for the events one device sent.
+
+    Scripts run at most once per ``cooldown_minutes`` on a device; within it the
+    matches are only counted. One action failing does not stop the next."""
+
+    rule_id = int(rule["id"])
+    agent_id = int(agent["id"])
+    now = _utcnow()
+    entry = matched[0]
+    stats = {"runs": 0, "scheduled": 0, "tickets": 0}
+    actions = rmm_action_steps.steps(rule)
+    scripts_due = True
+    if any(step["type"] == "run_script" for step in actions):
+        cooldown = timedelta(minutes=int(rule.get("cooldown_minutes") or 0))
+        last = await rules_repo.last_triggered(rule_id, agent_id)
+        scripts_due = last is None or not cooldown or now - last >= cooldown
+    done: list[str] = []
+    ran = False
+    last_run_id: int | None = None
+    for step in actions:
+        try:
+            if step["type"] == "create_ticket":
+                text, is_new = await _ticket_step(rule, agent, matched)
+                done.append(text)
+                stats["tickets"] += 1 if is_new else 0
+            elif step["type"] == "schedule_script":
+                text = await _schedule_step(rule, step, agent, entry, now)
+                if text:
+                    done.append(text)
+                    stats["scheduled"] += 1
+            elif step["type"] == "run_script" and scripts_due:
+                run_id, text, attempted = await rmm_actions.run_script(
+                    script_id=step.get("script_id"),
+                    entries_encrypted=step.get("entries_encrypted"),
+                    inputs=step.get("inputs"),
+                    timeout_seconds=step.get("timeout_seconds"),
+                    agent=agent,
+                    run_source=RUN_SOURCE,
+                    extra_context=event_context(entry),
+                )
+                ran = ran or attempted
+                if run_id is not None:
+                    last_run_id = run_id
+                    stats["runs"] += 1
+                    text += f" (event {entry.get('event_id')} in {entry.get('log_name')})."
+                    log_info("RMM event log rule matched", rule_id=rule_id, agent_id=agent_id, run_id=run_id,
+                             action_key=step["key"])
+                done.append(text)
+        except Exception as exc:  # noqa: BLE001 - the next action still runs
+            log_error("RMM event log rule action failed", rule_id=rule_id, agent_id=agent_id, action=step["type"],
+                      action_key=step["key"], error=str(exc))
+            done.append(f"{rmm_action_steps.describe(step)} failed.")
+    if ran:
+        await rules_repo.record_trigger(rule_id, agent_id, last_run_id)
+    await rules_repo.record_matches(rule_id, len(matched), summary=" ".join(done) if done else None)
+    return stats
 
 
 async def run_due_scheduled(now: datetime | None = None) -> int:
@@ -528,12 +498,17 @@ async def run_due_scheduled(now: datetime | None = None) -> int:
     queued = 0
     for pending in await rules_repo.due_pending(now or _utcnow()):
         rule_id, agent_id = int(pending["rule_id"]), int(pending["agent_id"])
-        if not await rules_repo.claim_pending(rule_id, agent_id):
+        action_key = pending.get("action_key")
+        if not await rules_repo.claim_pending(rule_id, agent_id, action_key):
             continue  # another instance took it
         try:
             rule = await rules_repo.get_rule(rule_id, with_secrets=True)
             agent = await rmm_repo.get_agent(agent_id)
-            if not rule or not rule.get("is_enabled") or rule.get("action") != "schedule_script" or not agent:
+            # A run scheduled by an earlier release belongs to the first scheduled script.
+            step = (rmm_action_steps.find(rule, action_key) if action_key is not None
+                    else rmm_action_steps.first_scheduled(rule))
+            if (not rule or not rule.get("is_enabled") or rule.get("action") == "drop" or not step
+                    or step["type"] != "schedule_script" or not agent):
                 continue  # turned off, changed or removed since it was scheduled
             if rule.get("company_id") is not None and rule["company_id"] != agent.get("company_id"):
                 continue
@@ -546,10 +521,10 @@ async def run_due_scheduled(now: datetime | None = None) -> int:
             except (ValueError, TypeError):
                 event = {}
             run_id, summary, attempted = await rmm_actions.run_script(
-                script_id=rule.get("script_id"),
-                entries_encrypted=rule.get("entries_encrypted"),
-                inputs=rule.get("inputs"),
-                timeout_seconds=rule.get("timeout_seconds"),
+                script_id=step.get("script_id"),
+                entries_encrypted=step.get("entries_encrypted"),
+                inputs=step.get("inputs"),
+                timeout_seconds=step.get("timeout_seconds"),
                 agent=agent,
                 run_source=RUN_SOURCE,
                 extra_context=event if isinstance(event, dict) else {},
@@ -594,7 +569,7 @@ async def apply(agent: Mapping[str, Any], entries: list[dict[str, Any]]) -> tupl
                 continue
         rules = eligible
     drop_rules = [rule for rule in rules if rule["action"] == "drop"]
-    act_rules = [rule for rule in rules if rule["action"] in (*SCRIPT_ACTIONS, "create_ticket")]
+    act_rules = [rule for rule in rules if rule["action"] != "drop" and rmm_action_steps.steps(rule)]
     drop_counts: dict[int, int] = {}
     act_matches: dict[int, list[dict[str, Any]]] = {}
     kept: list[dict[str, Any]] = []
@@ -615,14 +590,9 @@ async def apply(agent: Mapping[str, Any], entries: list[dict[str, Any]]) -> tupl
         if not matched:
             continue
         try:
-            if rule["action"] == "create_ticket":
-                _ticket_id, is_new = await _ticket_rule(rule, agent, matched)
-                stats["tickets"] += 1 if is_new else 0
-            elif rule["action"] == "schedule_script":
-                if await _schedule_rule(rule, agent, matched[0], len(matched)):
-                    stats["scheduled"] += 1
-            elif await _run_rule(rule, agent, matched[0], len(matched)):
-                stats["runs"] += 1
+            done = await _act(rule, agent, matched)
+            for key, value in done.items():
+                stats[key] += value
         except Exception as exc:  # noqa: BLE001 - a rule must never lose the batch
             log_error("RMM event log rule failed", rule_id=rule["id"], error=str(exc))
     return kept, stats

@@ -40,6 +40,7 @@ from app.repositories import rmm_event_logs as event_log_repo
 from app.repositories import rmm_event_log_rules as rules_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
+from app.services import rmm_action_steps
 from app.services import rmm_event_log_rules as event_log_rules
 from app.services import rmm_event_logs as event_logs
 
@@ -138,15 +139,17 @@ def rule_summary(rule: dict[str, Any]) -> dict[str, Any]:
         scope = "Every company"
     if rule.get("target_rules") is not None:
         scope += " (matching device rules)"
-    action = event_log_rules.ACTIONS.get(rule.get("action"), rule.get("action"))
-    if rule.get("action") == "run_script":
-        action = f"Run {rule.get('script_name') or 'a removed script'}"
-    elif rule.get("action") == "schedule_script":
-        action = f"Run {rule.get('script_name') or 'a removed script'} {event_log_rules.describe_schedule(rule)}"
+    actions = [] if rule.get("action") == "drop" else rmm_action_steps.steps(rule)
+    if rule.get("action") == "drop":
+        action = event_log_rules.ACTIONS["drop"]
+    else:
+        action = rmm_action_steps.describe_all(actions) or "Nothing"
     return {
         **(_serialise(rule) or {}),
         "scope_label": scope,
         "action_label": action,
+        "action_steps": [rmm_action_steps.describe(step) for step in actions],
+        "action_types": [step["type"] for step in actions],
         "conditions_text": [event_log_rules.describe_condition(item) for item in rule.get("conditions") or []],
     }
 
@@ -166,7 +169,7 @@ async def asset_event_log_context(company_id: int, asset_id: int, *, can_edit: b
     rules = [
         {**rule_summary(rule), "can_edit": can_edit and event_log_rules.can_edit(
             rule, company_id=company_id, is_super_admin=is_super_admin)}
-        for rule in await rules_repo.list_rules_for_device(company_id, asset_id)
+        for rule in await rmm_action_steps.with_script_names(await rules_repo.list_rules_for_device(company_id, asset_id))
     ]
     company_settings = await event_log_repo.get_settings(company_id=company_id)
     company_logs = company_settings["extra_logs"]

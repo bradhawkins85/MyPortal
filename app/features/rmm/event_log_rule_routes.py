@@ -29,7 +29,7 @@ from app.repositories import rmm_event_log_rules as rules_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import health_check_detections
-from app.services import rmm_automation
+from app.services import rmm_action_steps
 from app.services import rmm_event_log_rules as event_log_rules
 from app.services import rmm_event_logs as event_logs
 from app.services import rmm_scripts
@@ -46,10 +46,8 @@ EMPTY_CONDITION_ROWS = 3
 def _blank_rule(asset_id: int | None) -> dict[str, Any]:
     return {
         "id": None, "name": "", "scope": "asset" if asset_id else "company", "asset_id": asset_id,
-        "action": "drop", "conditions": [], "script_id": None, "timeout_seconds": 600,
+        "action": "drop", "conditions": [], "actions": [],
         "cooldown_minutes": event_log_rules.DEFAULT_COOLDOWN_MINUTES, "is_enabled": True,
-        "schedule_mode": "delay", "delay_minutes": event_log_rules.DEFAULT_DELAY_MINUTES, "run_time": "02:00",
-        "schedule_timezone": rmm_automation.default_timezone(),
     }
 
 
@@ -60,13 +58,12 @@ def _form_rule(rule: dict[str, Any]) -> dict[str, Any]:
         scope = "global"
     else:
         scope = rule.get("scope") or "company"
+    actions = [] if rule.get("action") == "drop" else rmm_action_steps.steps(rule)
     return {
         **rule, "scope": scope,
         "target_mode": "rules" if rule.get("target_rules") is not None else "all",
-        "schedule_mode": rule.get("schedule_mode") or "delay",
-        "delay_minutes": rule.get("delay_minutes") or event_log_rules.DEFAULT_DELAY_MINUTES,
-        "run_time": rule.get("run_time") or "02:00",
-        "schedule_timezone": rule.get("schedule_timezone") or rmm_automation.default_timezone(),
+        "action": "drop" if rule.get("action") == "drop" else "actions",
+        "actions": rmm_action_steps.form_steps(actions),
     }
 
 
@@ -83,9 +80,9 @@ async def _render(
     run_now: dict[str, Any] | None = None,
 ):
     is_super_admin = bool(user.get("is_super_admin"))
-    listed = await rules_repo.list_rules_for_company(company_id)
+    listed = await rmm_action_steps.with_script_names(await rules_repo.list_rules_for_company(company_id))
     pending = await rules_repo.list_pending_for_rules(
-        [int(rule["id"]) for rule in listed if rule["action"] == "schedule_script"])
+        [int(rule["id"]) for rule in listed if rmm_action_steps.has_type(rule, "schedule_script")])
     rules = [
         {**rule_summary(rule), "can_edit": can_edit and event_log_rules.can_edit(
             rule, company_id=company_id, is_super_admin=is_super_admin),
@@ -93,13 +90,11 @@ async def _render(
                      for item in pending.get(int(rule["id"]), [])]}
         for rule in listed
     ]
-    script = None
-    fields: list[dict[str, Any]] = []
-    if editing and editing.get("script_id"):
-        script = await rmm_repo.get_script(int(editing["script_id"]))
-        stored = await rules_repo.get_rule(int(editing["id"]), with_secrets=True) if editing.get("id") else None
-        if stored and stored.get("script_id") == editing.get("script_id"):
-            fields = event_log_rules.script_values(stored, script)
+    action_counts = {"drop": sum(1 for rule in rules if rule["action"] == "drop")}
+    for kind in event_log_rules.ACTION_TYPES:
+        action_counts[kind] = sum(1 for rule in rules if kind in rule["action_types"])
+    stored = await rules_repo.get_rule(int(editing["id"]), with_secrets=True) if editing and editing.get("id") else None
+    step_scripts = await rmm_action_steps.script_details((editing or {}).get("actions") or [], stored)
     conditions = list((editing or {}).get("conditions") or [])
     conditions += [{"field": "event_id", "operator": "is", "value": ""}] * EMPTY_CONDITION_ROWS
     variables = [{"group": "Event", "label": label, "token": token} for label, token in event_log_rules.EVENT_VARIABLES]
@@ -118,13 +113,16 @@ async def _render(
             "fields": event_log_rules.FIELDS,
             "operators": event_log_rules.OPERATORS,
             "field_operators": event_log_rules.FIELD_OPERATORS,
-            "actions": event_log_rules.ACTIONS,
-            "script_actions": event_log_rules.SCRIPT_ACTIONS,
-            "schedule_modes": event_log_rules.SCHEDULE_MODES,
+            "actions": {kind: rmm_action_steps.TYPES[kind] for kind in event_log_rules.ACTION_TYPES},
+            "action_counts": action_counts,
+            "modes": event_log_rules.MODES,
+            "schedule_modes": rmm_action_steps.SCHEDULE_MODES,
+            "step_scripts": step_scripts,
+            "blank_actions": rmm_action_steps.blank_steps(event_log_rules.ACTION_TYPES),
+            "add_action_key": rmm_action_steps.new_key(step["key"] for step in (editing or {}).get("actions") or []),
+            "max_actions": rmm_action_steps.MAX_STEPS,
             "devices": [agent for agent in await rmm_repo.list_company_agents(company_id) if agent.get("asset_id")],
             "scripts": await rmm_repo.list_scripts(company_id=company_id),
-            "script": script,
-            "script_fields": fields,
             "variables": variables,
             "can_edit": can_edit,
             "is_super_admin": is_super_admin,
@@ -184,7 +182,9 @@ async def _suggested_rule(
         collected = await event_logs.logs_for(company_id, asset_id)
     except Exception:  # noqa: BLE001 - the notice falls back to the default logs
         collected = event_logs.default_logs()
-    rule = {**_blank_rule(asset_id), "scope": "company", "name": prefill["name"], "action": prefill["action"],
+    rule = {**_blank_rule(asset_id), "scope": "company", "name": prefill["name"],
+            "action": "drop" if prefill["action"] == "drop" else "actions",
+            "actions": rmm_action_steps.form_steps(rmm_action_steps.legacy_steps({"action": prefill["action"]})),
             "conditions": prefill["conditions"],
             "suggestion": {"why": str(item.get("why") or ""), "log": prefill["log"],
                            "log_collected": prefill["log"].casefold() in {name.casefold() for name in collected}}}
@@ -236,6 +236,7 @@ async def _save(request: Request, rule_id: int | None):
     if isinstance(context, RedirectResponse):
         return context
     user, company, company_id, can_edit = context
+    previous = await rules_repo.get_rule(rule_id) if rule_id is not None else None
     if rule_id is not None:
         await _editable_rule(rule_id, user, company_id)
     form = await request.form()
@@ -259,10 +260,6 @@ async def _save(request: Request, rule_id: int | None):
             if str(value).strip()
         ]
         try:
-            script_id = int(str(form.get("script_id") or ""))
-        except ValueError:
-            script_id = None
-        try:
             posted_asset = int(str(form.get("asset_id") or ""))
         except ValueError:
             posted_asset = None
@@ -270,17 +267,14 @@ async def _save(request: Request, rule_id: int | None):
             target_rules = json.loads(str(form.get("target_rules") or "null"))
         except (ValueError, TypeError, RecursionError):
             target_rules = None
+        posted_action = str(form.get("action") or "")
         editing = {
             "target_rules": target_rules, "target_mode": str(form.get("target_mode") or "all"),
             "id": rule_id, "name": str(form.get("name") or ""), "scope": str(form.get("scope") or "company"),
-            "asset_id": posted_asset, "action": str(form.get("action") or ""), "conditions": posted,
-            "script_id": script_id, "timeout_seconds": form.get("timeout_seconds") or 600,
+            "asset_id": posted_asset, "action": "drop" if posted_action == "drop" else "actions", "conditions": posted,
+            "actions": rmm_action_steps.posted_steps(form, event_log_rules.ACTION_TYPES, legacy_action=posted_action),
             "cooldown_minutes": form.get("cooldown_minutes") or event_log_rules.DEFAULT_COOLDOWN_MINUTES,
             "is_enabled": bool(form.get("is_enabled")),
-            "schedule_mode": str(form.get("schedule_mode") or "delay"),
-            "delay_minutes": form.get("delay_minutes") or event_log_rules.DEFAULT_DELAY_MINUTES,
-            "run_time": str(form.get("run_time") or ""),
-            "schedule_timezone": str(form.get("schedule_timezone") or ""),
         }
         return await _render(request, user=user, company=company, company_id=company_id, can_edit=can_edit,
                              editing=editing, errors=errors, status_code=400)
@@ -294,11 +288,13 @@ async def _save(request: Request, rule_id: int | None):
         metadata={
             "name": saved["name"], "action": saved["action"], "company_id": saved.get("company_id"),
             "asset_id": saved.get("asset_id"), "script_id": saved.get("script_id"), "conditions": conditions,
+            "actions": [{key: value for key, value in step.items() if key in ("key", "type", "script_id")}
+                        for step in rmm_action_steps.steps(saved)],
         },
     )
     message = f"Saved {saved['name']}."
-    if saved["action"] in event_log_rules.SCRIPT_ACTIONS and saved.get("script_id") and rule_id is None:
-        message += " Fill in the script's values below if it needs any."
+    if await rmm_action_steps.script_changed(rmm_action_steps.steps(saved), rmm_action_steps.steps(previous)):
+        message += " Fill in the script's values below."
     return flash_redirect(f"{RULES_PATH}?rule={saved_id}", message, "success")
 
 

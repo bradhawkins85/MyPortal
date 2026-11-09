@@ -8,6 +8,7 @@ import pytest
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_event_log_rules as rules_repo
 from app.repositories import rmm_event_logs as event_log_repo
+from app.services import rmm_action_steps
 from app.services import rmm_event_log_rules as rules
 from app.services import rmm_event_logs as event_logs
 from app.services import rmm_scripts
@@ -178,25 +179,41 @@ def test_rules_page_and_asset_sections_render():
     rule = {"id": 3, "name": "<b>Noise</b>", "action": "drop", "scope_label": "Company: Contoso",
             "action_label": "Drop the event", "conditions_text": ["Event ID is “7036”"], "is_enabled": True,
             "match_count": 4, "last_matched_at": "2026-10-11T10:00:00", "last_run_summary": None,
-            "cooldown_minutes": 60, "asset_id": None, "can_edit": True}
+            "cooldown_minutes": 60, "asset_id": None, "can_edit": True, "action_steps": [], "action_types": []}
+    acting = {**rule, "id": 4, "name": "Disk errors", "action": "create_ticket",
+              "action_steps": ["Create a ticket", "Run Alert"], "action_types": ["create_ticket", "run_script"]}
+    steps = rmm_action_steps.blank_steps(rules.ACTION_TYPES, "ab12")
     html = env.get_template("rmm/event_log_rules.html").render(
-        company={"name": "Contoso"}, rules=[rule], can_edit=True, is_super_admin=False, errors={"name": "Give it a name."},
-        editing={"id": None, "name": "", "scope": "asset", "asset_id": 10, "action": "run_script", "script_id": 1,
-                 "timeout_seconds": 600, "cooldown_minutes": 60, "is_enabled": True},
+        company={"name": "Contoso"}, rules=[rule, acting], can_edit=True, is_super_admin=False,
+        errors={"name": "Give it a name."},
+        editing={"id": None, "name": "", "scope": "asset", "asset_id": 10, "action": "actions",
+                 "actions": [{**steps["run_script"], "script_id": 1}, {**rmm_action_steps.blank_steps(
+                     ["schedule_script"], "cd34")["schedule_script"], "script_id": 1}],
+                 "cooldown_minutes": 60, "is_enabled": True},
         conditions=[{"field": "event_id", "operator": "is", "value": ""}] * 3,
-        fields=rules.FIELDS, operators=rules.OPERATORS, field_operators=rules.FIELD_OPERATORS, actions=rules.ACTIONS,
-        script_actions=rules.SCRIPT_ACTIONS, schedule_modes=rules.SCHEDULE_MODES,
+        fields=rules.FIELDS, operators=rules.OPERATORS, field_operators=rules.FIELD_OPERATORS,
+        actions={kind: rmm_action_steps.TYPES[kind] for kind in rules.ACTION_TYPES},
+        action_counts={"drop": 1, "create_ticket": 1, "run_script": 1, "schedule_script": 0},
+        schedule_modes=rmm_action_steps.SCHEDULE_MODES, blank_actions=rmm_action_steps.blank_steps(rules.ACTION_TYPES),
+        add_action_key="ef56", max_actions=rmm_action_steps.MAX_STEPS,
         devices=[{"asset_id": 10, "asset_name": "PC-01"}], scripts=[{"id": 1, "name": "Alert", "path": "rmm/Common/Alert.ps1"}],
-        script={"id": 1, "name": "Alert"},
-        script_fields=[{"key": "param:Message", "name": "Message", "value": "{{event.message}}", "sensitive": False,
-                        "mandatory": False, "default": None, "help": None, "value_set": True}],
+        step_scripts={"ab12": {"script": {"id": 1, "name": "Alert"}, "saved": True, "fields": [
+            {"key": "param:Message", "name": "Message", "value": "{{event.message}}", "sensitive": False,
+             "mandatory": False, "default": None, "help": None, "value_set": True}]}},
         variables=[{"group": "Event", "label": "Message", "token": "{{event.message}}"}], csrf_token="tok",
     )
     assert "&lt;b&gt;Noise&lt;/b&gt;" in html and "<b>Noise</b>" not in html
     assert "[Add rule][Event logs]" in html and "Give it a name." in html
-    assert 'name="entry:param:Message"' in html and 'value="{{event.message}}"' in html
+    assert 'name="action:ab12:entry:param:Message"' in html and 'value="{{event.message}}"' in html
     assert 'value="global"' not in html  # only super admins add rules for every company
-    assert 'name="schedule_mode"' in html and 'name="run_time" type="time"' in html
+    assert 'name="action" value="drop" data-rmm-rule-mode >' in html
+    assert 'name="action" value="actions" data-rmm-rule-mode checked' in html
+    assert html.index('name="action_key" value="ab12"') < html.index('name="action_key" value="cd34"')
+    assert 'name="action:cd34:schedule_mode"' in html and 'name="action:cd34:run_time" type="time"' in html
+    assert '<template data-rmm-step-template="create_ticket">' in html
+    assert 'data-rmm-step-template="install_choco"' not in html  # rules do not install packages
+    assert '<li>Create a ticket</li><li>Run Alert</li>' in html and "(scripts cooldown 60 min)" in html
+    assert 'name="cooldown_minutes"' in html and "/static/js/rmm_event_rule_actions.js" in html
     assert 'action="/rmm/event-logs/rules/3/enabled"' in html and "/assets/10#event-log-rules" in html
 
 
@@ -450,7 +467,7 @@ async def test_schedule_script_rule_waits_runs_once_and_does_not_stack(sqlite_db
     stats = await event_logs.ingest(agent, [_entry(1, event_id=1074, message="Restart required")])
     assert stats["scheduled"] == 1 and stats["runs"] == 0
     assert await rmm_repo.list_runs(company_id=1) == []
-    pending = await rules_repo.get_pending(rule_id, agent["id"])
+    pending = await rules_repo.get_pending(rule_id, agent["id"], "1")  # the single action of the earlier form
     assert pending and "Restart required" not in str(pending["event_encrypted"])  # stored encrypted
     assert "Scheduled Alert" in (await rules_repo.get_rule(rule_id))["last_run_summary"]
 
@@ -472,7 +489,7 @@ async def test_schedule_script_rule_waits_runs_once_and_does_not_stack(sqlite_db
     await event_logs.ingest(agent, [_entry(3, event_id=1074)])
     await rules_repo.set_rule_enabled(rule_id, False, 9)
     assert await rules.run_due_scheduled(later + timedelta(hours=1)) == 0
-    assert await rules_repo.get_pending(rule_id, agent["id"]) is None
+    assert await rules_repo.get_pending(rule_id, agent["id"], "1") is None
 
 
 def test_scheduled_runs_are_queued_on_the_automation_tick():
