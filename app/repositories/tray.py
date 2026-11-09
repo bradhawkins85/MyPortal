@@ -599,6 +599,24 @@ async def revoke_device(device_id: int) -> None:
     )
 
 
+async def revoke_device_rmm_agents(device_id: int) -> int:
+    """Revoke the active RMM agents enrolled with a tray device."""
+    rows = await db.fetch_all(
+        "SELECT id FROM rmm_agents WHERE tray_device_id = ? AND status = 'active'",
+        (device_id,),
+    )
+    if not rows:
+        return 0
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # A static statement: the MySQL adapter turns the ``?`` placeholders into ``%s``.
+    await db.execute(
+        "UPDATE rmm_agents SET status = 'revoked', updated_at = ? "
+        "WHERE tray_device_id = ? AND status = 'active'",
+        (now, device_id),
+    )
+    return len(rows)
+
+
 async def reactivate_device(device_id: int) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     # Backend placeholder token is selected from the active DB adapter; values remain bound.

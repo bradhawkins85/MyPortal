@@ -1,0 +1,7 @@
+{
+  "guid": "c1ff5d95-169b-4bd5-8014-b99f2a4207a0",
+  "occurred_at": "2026-11-09T12:00Z",
+  "change_type": "Security",
+  "summary": "Tray devices no longer receive the AI provider API key, popup chat only opens chats started for that device, and revoking a device also revokes its RMM agents, closes its connection and ends its popup chat sessions.",
+  "content_hash": "5e3e4f9c3bb17f2ea2ee0da5a0237bbc111ddd2f45bf48ca3e4daabecc462a57"
+}

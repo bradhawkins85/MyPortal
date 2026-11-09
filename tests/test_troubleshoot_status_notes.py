@@ -396,3 +396,44 @@ def test_mark_websocket_alive_is_best_effort(monkeypatch):
 
     monkeypatch.setattr(tray_repo, "touch_device_websocket", boom)
     asyncio.run(tray_service.mark_websocket_alive(DEVICE))
+
+
+def test_device_troubleshoot_never_sends_llm_api_key(recorder, monkeypatch):
+    from app.api.routes import tray as tray_routes
+    from app.repositories import tray as tray_repo
+    from app.schemas.tray import TrayTroubleshootRequest
+
+    async def fake_device(uid):
+        return {**DEVICE, "status": "active"}
+
+    async def fake_ticket(ticket_id):
+        return {"id": ticket_id, "company_id": 3}
+
+    dispatched: list[dict] = []
+
+    async def fake_dispatch(**kwargs):
+        dispatched.append(kwargs["payload"])
+        return 11, True
+
+    async def fake_note(**kwargs):
+        return None
+
+    monkeypatch.setattr(tray_repo, "get_device_by_uid", fake_device)
+    monkeypatch.setattr(tray_routes.tickets_repo, "get_ticket", fake_ticket)
+    monkeypatch.setattr(
+        tray_service,
+        "build_troubleshoot_llm_config",
+        lambda override=None: {"base_url": "https://llm", "model": "m", "api_key": "sk-secret"},
+    )
+    monkeypatch.setattr(tray_service, "dispatch_troubleshoot_command", fake_dispatch)
+    monkeypatch.setattr(tray_service, "add_troubleshoot_requested_note", fake_note)
+    _patch_consent(monkeypatch, allowed=True)
+    asyncio.run(
+        tray_routes.run_troubleshoot(
+            device_uid="dev-uid",
+            payload=TrayTroubleshootRequest(ticket_id=77, prompt="Printer offline"),
+            current_user={"id": 1},
+        )
+    )
+    assert dispatched and "llm_api_key" not in dispatched[0]
+    assert "sk-secret" not in json.dumps(dispatched[0])

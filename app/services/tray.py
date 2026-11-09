@@ -23,7 +23,7 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 from weakref import WeakValueDictionary
 
 from app.core.ai_identity import TROUBLESHOOT_AGENT_EMAIL, get_agent_name, personalise_agent_text
@@ -1105,6 +1105,42 @@ def unregister_connection(device_uid: str, websocket: Any) -> None:
 
 def is_device_connected(device_uid: str) -> bool:
     return device_uid in _active_connections
+
+
+def connection_still_valid(device: Mapping[str, Any] | None, connected_token_hash: str) -> bool:
+    """Whether a device's open WebSocket may keep running.
+
+    Re-checked on every queue drain so a revoke or re-enrolment on any worker
+    ends sockets opened with the old token.
+    """
+
+    if not device or device.get("status") != "active":
+        return False
+    return secrets.compare_digest(str(device.get("auth_token_hash") or ""), connected_token_hash)
+
+
+async def revoke_device(device_id: int) -> None:
+    """Revoke a tray device and everything that acts for it.
+
+    Its RMM agents are revoked too, and a WebSocket held by this worker is
+    closed now; sockets on other workers close at their next queue drain.
+    """
+
+    device = await tray_repo.get_device_by_id(device_id)
+    await tray_repo.revoke_device(device_id)
+    try:
+        revoked_agents = await tray_repo.revoke_device_rmm_agents(device_id)
+    except Exception as exc:  # noqa: BLE001 - the RMM feature may not be installed
+        log_warning("Could not revoke RMM agents for tray device", device_id=device_id, error=str(exc))
+        revoked_agents = 0
+    device_uid = str((device or {}).get("device_uid") or "")
+    websocket = _active_connections.pop(device_uid, None) if device_uid else None
+    if websocket is not None:
+        try:
+            await websocket.close(code=4401)
+        except Exception:  # noqa: BLE001 - already closing
+            pass
+    log_info("Tray device revoked", device_id=device_id, rmm_agents_revoked=revoked_agents)
 
 
 # A device whose WebSocket touched ``ws_last_seen_utc`` within this window is
