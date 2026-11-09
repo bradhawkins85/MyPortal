@@ -18,6 +18,7 @@ import aiomysql
 
 from app.security.menu_permissions import MENU_PERMISSION_MAP
 from app.services import company_management
+from app.services import scheduled_task_slots
 
 
 def _role_contains_admin_only_permissions(role_record: dict[str, Any]) -> bool:
@@ -831,6 +832,7 @@ async def _render_company_edit_page(
     )
 
     company_automation_tasks: list[dict[str, Any]] = []
+    automation_command_default_crons: dict[str, str] = {}
     automation_command_options: list[dict[str, str]] = []
     automation_company_options: list[dict[str, str]] = []
 
@@ -923,6 +925,18 @@ async def _render_company_edit_page(
         ]
 
         company_automation_tasks.sort(key=lambda item: (item.get("name") or "").lower())
+
+        try:
+            slot_tasks = (
+                tasks
+                if show_inactive_tasks
+                else await scheduled_tasks_repo.list_tasks(include_inactive=True)
+            )
+        except Exception:  # pragma: no cover - fall back to the active list
+            slot_tasks = tasks
+        automation_command_default_crons = scheduled_task_slots.command_default_crons(
+            slot_tasks
+        )
 
     # Fetch recurring invoice items for the company
     recurring_invoice_items = []
@@ -1046,6 +1060,7 @@ async def _render_company_edit_page(
         "company_user_options": company_user_options,
         "assign_user_options": assign_user_options,
         "company_automation_tasks": company_automation_tasks,
+        "automation_command_default_crons": automation_command_default_crons,
         "automation_command_options": automation_command_options,
         "automation_company_options": automation_company_options,
         "recurring_invoice_items": recurring_invoice_items,

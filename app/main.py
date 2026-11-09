@@ -198,6 +198,7 @@ from app.services import background as background_tasks
 from app.services import automations as automations_service
 from app.services import change_log as change_log_service
 from app.services import cron_calendar as cron_calendar_service
+from app.services import scheduled_task_slots
 from app.services.cron_expression import validate as validate_cron_expression
 from app.services import company_access
 from app.services import dashboard as dashboard_service
@@ -8411,6 +8412,9 @@ async def admin_scheduled_tasks(
     if redirect:
         return redirect
     tasks = await scheduled_tasks_repo.list_tasks(include_inactive=show_inactive)
+    all_tasks = (
+        tasks if show_inactive else await scheduled_tasks_repo.list_tasks(include_inactive=True)
+    )
     companies = await company_repo.list_companies()
 
     company_lookup: dict[int, str] = {}
@@ -8518,6 +8522,7 @@ async def admin_scheduled_tasks(
         "company_options": company_options,
         "bulk_company_options": bulk_company_options,
         "schedule_timezone": settings.default_timezone or "UTC",
+        "command_default_crons": scheduled_task_slots.command_default_crons(all_tasks),
     }
     return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
 
@@ -8706,8 +8711,18 @@ async def admin_bulk_create_scheduled_tasks(request: Request):
     active = form.get("active") is not None
     exclude_from_calendar = form.get("excludeFromCalendar") is not None
     created_count = 0
+    month_end_crons: list[str] | None = None
+    if command in scheduled_task_slots.SEQUENTIAL_COMMANDS:
+        month_end_crons = scheduled_task_slots.allocate_month_end_crons(
+            command,
+            await scheduled_tasks_repo.list_tasks(include_inactive=True),
+            len(company_ids),
+            start_cron=cron or None,
+        )
     for offset, company_id in enumerate(company_ids):
-        if start_hour is None or start_minute is None:
+        if month_end_crons is not None:
+            task_cron = month_end_crons[offset]
+        elif start_hour is None or start_minute is None:
             task_cron = _random_daily_cron()
         else:
             fields = list(cron_fields)
