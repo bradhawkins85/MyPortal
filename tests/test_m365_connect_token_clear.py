@@ -125,6 +125,10 @@ def _patch_connect_common(
         AsyncMock(return_value=False),
     )
     monkeypatch.setattr(
+        "app.main.m365_service.ensure_compliance_administrator_role",
+        AsyncMock(return_value={"status": "existing", "verified": True}),
+    )
+    monkeypatch.setattr(
         "app.main.m365_service._acquire_ediscovery_download_token",
         AsyncMock(return_value="download-token"),
     )
@@ -692,3 +696,177 @@ async def test_last_admin_consent_step_continues_to_scc(async_client, monkeypatc
 
     assert "ps.compliance.protection.outlook.com%2F.default" in response.headers["location"]
     assert "report download access was granted" in new_states[-1]["chained_message"]
+
+
+# ---------------------------------------------------------------------------
+# One consent step: Compliance Administrator and repair are part of connect
+# ---------------------------------------------------------------------------
+
+
+def _connect_state(**extra: Any) -> dict[str, Any]:
+    return {
+        "company_id": 1, "flow": "connect", "tenant_id": "tenant-123",
+        "client_id": "app-client-id", "redirect_uri": "https://portal.example/m365/callback",
+        **extra,
+    }
+
+
+def _patch_delegated_token(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.main.httpx.AsyncClient",
+        _make_token_client({"access_token": "delegated", "refresh_token": "rt", "expires_in": 3600}),
+    )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_connect_assigns_compliance_administrator_alongside_permission_grants(
+    async_client, monkeypatch,
+):
+    """Guided setup's consent performs the Purview role setup itself, so no
+    separate Compliance Administrator step is needed."""
+    _patch_connect_common(monkeypatch, [])
+    _patch_callback_session(monkeypatch, _connect_state(), [])
+    _patch_delegated_token(monkeypatch)
+
+    response = await async_client.get("/m365/callback?code=c&state=s", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/m365"
+    assert _flash_from_cookie(response.headers.get("set-cookie", "")) is None
+    m365_service.try_grant_missing_permissions.assert_awaited_once()
+    m365_service.ensure_compliance_administrator_role.assert_awaited_once_with(
+        company_id=1, access_token="delegated",
+    )
+    m365_service.ensure_graph_app_roles_on_manifest.assert_awaited_once_with(1, "delegated")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_legacy_compliance_role_state_runs_the_full_connect(async_client, monkeypatch):
+    """A transaction started from an old ``setup=compliance_role`` link now
+    runs the same complete setup instead of a reduced variant."""
+    _patch_connect_common(monkeypatch, [])
+    _patch_callback_session(monkeypatch, _connect_state(setup="compliance_role"), [])
+    _patch_delegated_token(monkeypatch)
+
+    response = await async_client.get("/m365/callback?code=c&state=s", follow_redirects=False)
+
+    assert response.headers["location"] == "/m365"
+    m365_service.try_grant_missing_permissions.assert_awaited_once()
+    m365_service.ensure_compliance_administrator_role.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        m365_service.M365Error(
+            "Microsoft Graph denied the Compliance Administrator assignment.", http_status=403,
+        ),
+        RuntimeError("unexpected"),
+    ],
+)
+@pytest.mark.anyio("asyncio")
+async def test_compliance_role_failure_never_blocks_the_connection(
+    async_client, monkeypatch, failure,
+):
+    update_tokens_calls: list[dict] = []
+    _patch_connect_common(monkeypatch, update_tokens_calls)
+    monkeypatch.setattr(
+        "app.main.m365_service.ensure_compliance_administrator_role",
+        AsyncMock(side_effect=failure),
+    )
+    sync_tasks = AsyncMock()
+    monkeypatch.setattr(
+        "app.main.m365_sync_schedule_service.ensure_sync_tasks_and_refresh", sync_tasks,
+    )
+    _patch_callback_session(monkeypatch, _connect_state(), [])
+    _patch_delegated_token(monkeypatch)
+
+    response = await async_client.get("/m365/callback?code=c&state=s", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/m365"
+    assert decrypt_secret(update_tokens_calls[0]["refresh_token"]) == "rt"
+    sync_tasks.assert_awaited_once_with(1)
+    flash = _flash_from_cookie(response.headers.get("set-cookie", ""))
+    assert flash is not None and flash["variant"] == "warning"
+    assert flash["message"].startswith("Connected with warnings.")
+    assert "Compliance Administrator" in flash["message"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_connect_return_to_diagnostics_repairs_and_rechecks(async_client, monkeypatch):
+    """Reconnecting from diagnostics (Repair without a stored sign-in) does
+    the same work as Repair: grants, Compliance Administrator, re-check and
+    Purview repair."""
+    _patch_connect_common(monkeypatch, [])
+    check = AsyncMock(return_value=[])
+    preflight = AsyncMock(return_value={"checks": [], "repaired": []})
+    monkeypatch.setattr("app.main.m365_service.check_enterprise_app_permissions", check)
+    monkeypatch.setattr("app.main.m365_service.run_purview_preflight", preflight)
+    _patch_callback_session(monkeypatch, _connect_state(return_to="diagnostics"), [])
+    _patch_delegated_token(monkeypatch)
+
+    response = await async_client.get("/m365/callback?code=c&state=s", follow_redirects=False)
+
+    assert response.headers["location"] == "/m365/diagnostics"
+    m365_service.ensure_compliance_administrator_role.assert_awaited_once()
+    check.assert_awaited_once_with(1)
+    preflight.assert_awaited_once_with(1, repair=True)
+    flash = _flash_from_cookie(response.headers.get("set-cookie", ""))
+    assert flash is not None and flash["variant"] == "success"
+    assert flash["message"] == "Permissions and Purview configuration repaired and re-checked"
+
+
+def _patch_connect_route(monkeypatch, new_states: list[dict]) -> None:
+    async def fake_license_context(request):
+        return {"id": 1, "is_super_admin": True}, None, {"id": 1}, 1, None
+
+    async def fake_new_state(request, **context):
+        new_states.append(context)
+        return "connect-state"
+
+    monkeypatch.setattr("app.main._load_license_context", fake_license_context)
+    monkeypatch.setattr("app.main._new_m365_oauth_state", fake_new_state)
+    monkeypatch.setattr(
+        "app.main.m365_service.get_credentials",
+        AsyncMock(return_value={"tenant_id": "tenant-123", "client_id": "app-client-id", "client_secret": "s"}),
+    )
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_return_to"),
+    [
+        ("", None),
+        ("?return_to=diagnostics", "diagnostics"),
+        ("?return_to=https://evil.example", None),
+        ("?setup=compliance_role&return_to=m365", None),
+    ],
+)
+@pytest.mark.anyio("asyncio")
+async def test_connect_route_starts_the_single_consent(
+    async_client, monkeypatch, query, expected_return_to,
+):
+    new_states: list[dict] = []
+    _patch_connect_route(monkeypatch, new_states)
+
+    response = await async_client.get(f"/m365/connect{query}", follow_redirects=False)
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("https://login.microsoftonline.com/tenant-123/oauth2/v2.0/authorize?")
+    assert "prompt=consent" in location
+    assert len(new_states) == 1
+    assert new_states[0]["flow"] == "connect"
+    assert "setup" not in new_states[0]
+    assert new_states[0].get("return_to") == expected_return_to
+
+
+@pytest.mark.anyio("asyncio")
+async def test_standalone_scc_capture_route_is_removed(async_client, monkeypatch):
+    """Reconnecting chains the Security & Compliance consent whenever it is
+    missing, so the duplicate standalone capture route no longer exists."""
+    _patch_connect_route(monkeypatch, [])
+
+    response = await async_client.get("/m365/connect/scc", follow_redirects=False)
+
+    assert response.status_code == 404
