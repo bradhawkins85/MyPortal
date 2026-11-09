@@ -432,16 +432,16 @@ async def test_event_log_filters_for_source_dates_and_the_asset_page(sqlite_db, 
 
 def test_scheduled_time_after_a_delay_or_at_the_next_time_of_day():
     now = datetime(2026, 1, 10, 12, 0)
-    assert rules.scheduled_time({"schedule_mode": "delay", "delay_minutes": 90}, now) == datetime(2026, 1, 10, 13, 30)
+    assert rmm_action_steps.scheduled_time({"schedule_mode": "delay", "delay_minutes": 90}, now) == datetime(2026, 1, 10, 13, 30)
     # 02:00 in Sydney (UTC+11 in January) is 15:00 UTC: today's has not passed yet.
     sydney = {"schedule_mode": "time", "run_time": "02:00", "schedule_timezone": "Australia/Sydney"}
-    assert rules.scheduled_time(sydney, now) == datetime(2026, 1, 10, 15, 0)
-    assert rules.scheduled_time(sydney, datetime(2026, 1, 10, 15, 0)) == datetime(2026, 1, 11, 15, 0)
+    assert rmm_action_steps.scheduled_time(sydney, now) == datetime(2026, 1, 10, 15, 0)
+    assert rmm_action_steps.scheduled_time(sydney, datetime(2026, 1, 10, 15, 0)) == datetime(2026, 1, 11, 15, 0)
     utc = {"schedule_mode": "time", "run_time": "09:30", "schedule_timezone": "UTC"}
-    assert rules.scheduled_time(utc, now) == datetime(2026, 1, 11, 9, 30)
-    assert rules.describe_schedule(sydney) == "at 02:00 (Australia/Sydney)"
-    assert rules.describe_schedule({"schedule_mode": "delay", "delay_minutes": 120}) == "2 hours later"
-    assert rules.describe_schedule({"schedule_mode": "delay", "delay_minutes": 5}) == "5 minutes later"
+    assert rmm_action_steps.scheduled_time(utc, now) == datetime(2026, 1, 11, 9, 30)
+    assert rmm_action_steps.describe_schedule(sydney) == "at 02:00 (Australia/Sydney)"
+    assert rmm_action_steps.describe_schedule({"schedule_mode": "delay", "delay_minutes": 120}) == "2 hours later"
+    assert rmm_action_steps.describe_schedule({"schedule_mode": "delay", "delay_minutes": 5}) == "5 minutes later"
 
 
 @pytest.mark.anyio

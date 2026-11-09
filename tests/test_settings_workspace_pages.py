@@ -132,11 +132,12 @@ def test_rmm_automation_sections():
 
 
 def test_event_log_rules_open_the_editor_or_run_now():
+    from app.services import rmm_action_steps
     from app.services import rmm_event_log_rules as rules
 
     base = dict(company={"name": "Contoso"}, rules=[], can_edit=True, is_super_admin=False, errors={}, conditions=[],
                 fields=rules.FIELDS, operators=rules.OPERATORS, field_operators=rules.FIELD_OPERATORS,
-                actions=rules.ACTIONS, schedule_modes=rules.SCHEDULE_MODES, devices=[], scripts=[],
+                actions=rules.ACTIONS, schedule_modes=rmm_action_steps.SCHEDULE_MODES, devices=[], scripts=[],
                 variables=[], csrf_token="tok")
     listing = _env().get_template("rmm/event_log_rules.html").render(**base, editing=None, run_now=None)
     _assert_workspace(listing, ["rules"])
