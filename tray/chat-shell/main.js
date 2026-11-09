@@ -103,6 +103,27 @@ function closeInfoWindow() {
 // Extracted so that both app.whenReady() and the second-instance handler can
 // open a proper chat window without duplicating setup code.
 
+// Only web and mail links leave the shell. Other schemes (file:, UNC paths,
+// ms-* protocol handlers) can start programs, so a link in a chat message
+// must never reach them.
+const EXTERNAL_SCHEMES = new Set(['https:', 'http:', 'mailto:']);
+
+function openExternalSafely(target) {
+  let parsed;
+  try {
+    parsed = new URL(target);
+  } catch {
+    return;
+  }
+  if (!EXTERNAL_SCHEMES.has(parsed.protocol)) {
+    console.error('[MyPortal Chat] Refused to open a link with scheme', parsed.protocol);
+    return;
+  }
+  shell.openExternal(parsed.href).catch((err) => {
+    console.error('[MyPortal Chat] Failed to open external URL:', err);
+  });
+}
+
 function createChatWindow(url) {
   let parsedURL;
   try {
@@ -131,15 +152,14 @@ function createChatWindow(url) {
       } else {
         // Redirect off-origin navigations to the system browser.
         if (details.resourceType === 'mainFrame') {
-          shell.openExternal(details.url).catch((err) => {
-            console.error('[MyPortal Chat] Failed to open external URL:', err);
-          });
+          openExternalSafely(details.url);
         }
         callback({ cancel: true });
       }
     } catch (err) {
+      // Fail closed: a request we cannot parse is not loaded in the shell.
       console.error('[MyPortal Chat] webRequest filter error:', err);
-      callback({ cancel: false });
+      callback({ cancel: true });
     }
   });
 
@@ -165,7 +185,7 @@ function createChatWindow(url) {
 
   // Open target=_blank links in the system browser.
   mainWindow.webContents.setWindowOpenHandler(({ url: newUrl }) => {
-    shell.openExternal(newUrl).catch(() => {});
+    openExternalSafely(newUrl);
     return { action: 'deny' };
   });
 

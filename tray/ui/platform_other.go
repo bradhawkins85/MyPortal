@@ -8,7 +8,7 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 )
 
-func openBrowser(url string) {
+func launchURL(url string) {
 	_ = exec.Command("xdg-open", url).Start()
 }
 

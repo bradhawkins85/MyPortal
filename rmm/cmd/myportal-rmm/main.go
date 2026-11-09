@@ -141,6 +141,7 @@ func enrol(args []string) error {
 	if !strings.HasPrefix(strings.ToLower(*portal), "https://") && os.Getenv("MYPORTAL_RMM_ALLOW_HTTP") != "1" {
 		return errors.New("--url must use https://")
 	}
+	prepareStateDir()
 	existing, err := state.Load()
 	uid := existing.AgentUID
 	if err != nil || uid == "" {
@@ -328,8 +329,21 @@ func jitter(d time.Duration) time.Duration {
 	return d*3/4 + mrand.N(d/2+1)
 }
 
+// prepareStateDir locks the state folder down before anything is read from
+// it, and logs anything removed because the service did not create it.
+func prepareStateDir() {
+	removed, err := state.Prepare()
+	if err != nil {
+		log.Printf("could not secure the state folder %s: %v", state.Dir(), err)
+	}
+	for _, p := range removed {
+		log.Printf("removed %s from the state folder: it was a link or was not created by the service", p)
+	}
+}
+
 // loop polls MyPortal for runs until ctx is cancelled.
 func loop(ctx context.Context) {
+	prepareStateDir()
 	var st state.State
 	for {
 		var err error
