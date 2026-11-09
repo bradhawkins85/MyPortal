@@ -410,7 +410,22 @@ an asset's page. Then:
    `{{company.name}}`. Variables are filled in separately for each device, so one run can give
    every device its own value. Leaving an optional field empty uses the script's default.
 3. Set how long the script may run before the device stops it.
-4. Choose who it runs as under **Run as**, then run it.
+4. Choose who it runs as under **Run as**.
+5. Under **When**, keep **Now** to send it straight away, or choose **Later** and pick a
+   date and time (in your own time zone) — for example to reboot a server at 4am — then
+   select **Schedule script**.
+
+### Run a script later
+
+A script run with **When** set to **Later** is queued straight away, with the values
+and variables captured as usual, but no device collects it before the chosen time.
+Until then the run history shows it as **Scheduled for** that time, and it can be
+cancelled there like any queued run. At the chosen time it joins the device's queue
+like a script run then, following the script's execution mode; an offline device
+collects it when it next connects. The **Offline wait timeout** starts at the
+scheduled time, not when you scheduled it. A time can be chosen up to a year ahead.
+
+For a script that should run again and again, use a [schedule](#schedules) instead.
 
 ### Queue before the agent is installed
 
@@ -425,8 +440,8 @@ entered values and resolved variables are captured when queued. Platform, shell,
 associated file paths and agent capabilities are checked before execution; an
 incompatible script is not sent to the device.
 
-The **Offline wait timeout** starts when the script is queued, including time
-waiting for installation. Choose **Forever** (0) to wait indefinitely, or set a
+The **Offline wait timeout** starts when the script is queued (or at its
+scheduled time when run later), including time waiting for installation. Choose **Forever** (0) to wait indefinitely, or set a
 limit so the run expires if the agent does not collect it in time. The execution
 timeout starts separately when the agent collects the script.
 

@@ -73,6 +73,9 @@ RESULT_GRACE = timedelta(minutes=5)
 MAX_OUTPUT_CHARS = 1_000_000
 MAX_CUSTOM_VALUES = 200
 MAX_TARGETS_PER_RUN = 500
+# "Run later" times: a little clock skew is forgiven, and runs are held at most this long.
+SCHEDULE_PAST_GRACE = timedelta(minutes=1)
+SCHEDULE_MAX_AHEAD = timedelta(days=366)
 POLL_WAIT_SECONDS = 25
 # Agents long-poll for jobs every POLL_WAIT_SECONDS, so one that has missed a
 # few polls has lost its connection.
@@ -740,6 +743,7 @@ async def queue_for_agent(
     run_as: str | None = None,
     queue_timeout_seconds: Any = None,
     extra_env: Mapping[str, str] | None = None,
+    scheduled_for: datetime | None = None,
 ) -> int:
     """Resolve the values for one device and queue the run. Raises
     :class:`RunRequestError` with a ``device`` message when it cannot run there.
@@ -749,12 +753,14 @@ async def queue_for_agent(
     adds environment variables the script does not ask for, such as the
     previous run's result for a script result rule; the script's own values
     win. ``run_as`` is ``system`` or ``user`` (the user logged in to the device);
-    when omitted the script's default applies."""
+    when omitted the script's default applies. ``scheduled_for`` (naive UTC)
+    holds the run back until that time; its offline wait starts then."""
 
     run_as = script_run_as(script, run_as)
     queue_wait = queue_timeout(queue_timeout_seconds, int(script.get("default_queue_timeout_seconds") or 0))
     if expires_at is None and queue_wait:
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=queue_wait)
+        start = scheduled_for or datetime.now(timezone.utc).replace(tzinfo=None)
+        expires_at = start + timedelta(seconds=queue_wait)
     problem = device_problem(script, agent)
     if problem:
         raise RunRequestError({"device": problem})
@@ -790,10 +796,37 @@ async def queue_for_agent(
         schedule_id=schedule_id,
         onboarding_run_id=onboarding_run_id,
         run_as=run_as,
+        scheduled_for=scheduled_for,
     )
     if notify and agent.get("id") is not None:
         notify_agent(int(agent["id"]))
     return run_id
+
+
+def scheduled_time(value: Any, *, now: datetime | None = None) -> datetime | None:
+    """A "run later" time as naive UTC, or ``None`` to run now.
+
+    Accepts a datetime or an ISO 8601 string; times without an offset are UTC.
+    Raises :class:`RunRequestError` for times in the past or too far ahead."""
+
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        when = value
+    else:
+        try:
+            when = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise RunRequestError({"scheduled_for": "Enter a date and time."}) from exc
+    if when.tzinfo is not None:
+        when = when.astimezone(timezone.utc).replace(tzinfo=None)
+    when = when.replace(microsecond=0)
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    if when < now - SCHEDULE_PAST_GRACE:
+        raise RunRequestError({"scheduled_for": "Choose a time in the future, or run the script now."})
+    if when > now + SCHEDULE_MAX_AHEAD:
+        raise RunRequestError({"scheduled_for": f"Choose a time within {SCHEDULE_MAX_AHEAD.days} days."})
+    return when
 
 
 async def queue_runs(
@@ -806,8 +839,11 @@ async def queue_runs(
     requested_by_user_id: int | None,
     run_as: Any = None,
     queue_timeout_seconds: Any = None,
+    scheduled_for: Any = None,
 ) -> dict[str, Any]:
-    """Queue the script on each device. Returns the queued run ids and per-device problems."""
+    """Queue the script on each device. Returns the queued run ids and per-device problems.
+
+    ``scheduled_for`` runs the script later instead of now (see :func:`scheduled_time`)."""
 
     script = await rmm_repo.get_script(script_id, with_content=True)
     if not rmm_repo.script_available_to(script, company_id):
@@ -818,6 +854,7 @@ async def queue_runs(
     if len(targets) > MAX_TARGETS_PER_RUN:
         raise RunRequestError({"assets": f"Choose at most {MAX_TARGETS_PER_RUN} devices at a time."})
     entries = validate_entries(script, submitted)
+    run_at = scheduled_time(scheduled_for)
     run_as = script_run_as(script, run_as)
     timeout = clamp_timeout(timeout_seconds, int(script.get("default_timeout_seconds") or 600))
     queue_wait = queue_timeout(queue_timeout_seconds, int(script.get("default_queue_timeout_seconds") or 0))
@@ -846,6 +883,7 @@ async def queue_runs(
                 queue_timeout_seconds=queue_wait,
                 requested_by_user_id=requested_by_user_id,
                 run_as=run_as,
+                scheduled_for=run_at,
             )
         except RunRequestError as exc:
             problem: dict[str, Any] = {
@@ -859,6 +897,7 @@ async def queue_runs(
             continue
         queued.append({"run_id": run_id, "asset_id": asset_id, "asset_name": asset.get("name")})
     return {"queued": queued, "problems": problems, "run_as": run_as,
+            "scheduled_for": run_at.isoformat() + "Z" if run_at else None,
             "script": {"id": script["id"], "name": script["name"]}}
 
 

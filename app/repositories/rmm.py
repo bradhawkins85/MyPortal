@@ -72,6 +72,17 @@ def _run_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
         run["inputs"] = _decode_json(run.pop("inputs_json"), [])
     if "custom_values_json" in run:
         run["custom_values"] = _decode_json(run.pop("custom_values_json"), [])
+    if "scheduled_for" in run:
+        scheduled_for = run["scheduled_for"]
+        if isinstance(scheduled_for, str):
+            try:
+                scheduled_for = datetime.fromisoformat(scheduled_for)
+            except ValueError:
+                scheduled_for = None
+        # Waiting for its "run later" time rather than for the device.
+        run["scheduled"] = bool(
+            run.get("status") == "queued" and scheduled_for is not None and scheduled_for > _utcnow()
+        )
     return run
 
 
@@ -518,13 +529,14 @@ async def create_run(
     onboarding_run_id: int | None = None,
     run_as: str = "system",
     queue_timeout_seconds: int | None = None,
+    scheduled_for: datetime | None = None,
 ) -> int:
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_script_runs (script_id, script_name, script_path, language, script_content, "
         "content_sha256, agent_id, company_id, asset_id, requested_by_user_id, status, inputs_json, "
         "payload_encrypted, timeout_seconds, queued_at, expires_at, run_source, schedule_id, "
-        "onboarding_run_id, allow_parallel, run_anyway, run_as, queue_timeout_seconds) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "onboarding_run_id, allow_parallel, run_anyway, run_as, queue_timeout_seconds, scheduled_for) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             script["id"], script["name"], script["path"], script["language"], content,
             script["content_sha256"], agent_id, company_id, asset_id, requested_by_user_id,
@@ -532,7 +544,7 @@ async def create_run(
             run_source, schedule_id, onboarding_run_id,
             script_execution_mode(script) == "parallel" and run_source != "onboarding",
             script_execution_mode(script) == "run_anyway" and run_source != "onboarding",
-            run_as, queue_timeout_seconds,
+            run_as, queue_timeout_seconds, scheduled_for,
         ),
     )
 
@@ -542,7 +554,7 @@ async def get_run(run_id: int) -> dict[str, Any] | None:
         "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "
         "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, r.queue_timeout_seconds, "
         "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
-        "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email, "
+        "r.completed_at, r.expires_at, r.scheduled_for, a.name AS asset_name, u.email AS requested_by_email, "
         f"{_RUN_SOURCE_COLUMNS}, "  # nosec B608 - fixed column list
         "r.inputs_json, r.stdout, r.stderr, r.custom_values_json, r.content_sha256 FROM "
         f"rmm_script_runs r LEFT JOIN assets a ON a.id = r.asset_id {_RUN_SOURCE_JOINS} "  # nosec B608 - fixed joins
@@ -569,7 +581,7 @@ async def list_runs(
             "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "
             "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, r.queue_timeout_seconds, "
             "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
-            "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email, "
+            "r.completed_at, r.expires_at, r.scheduled_for, a.name AS asset_name, u.email AS requested_by_email, "
             f"{_RUN_SOURCE_COLUMNS} FROM "  # nosec B608 - fixed column list
             f"rmm_script_runs r LEFT JOIN assets a ON a.id = r.asset_id {_RUN_SOURCE_JOINS} "  # nosec B608 - fixed joins
             "WHERE r.company_id = %s ORDER BY r.queued_at DESC, r.id DESC "
@@ -581,7 +593,7 @@ async def list_runs(
             "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "
             "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, r.queue_timeout_seconds, "
             "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
-            "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email, "
+            "r.completed_at, r.expires_at, r.scheduled_for, a.name AS asset_name, u.email AS requested_by_email, "
             f"{_RUN_SOURCE_COLUMNS} FROM "  # nosec B608 - fixed column list
             f"rmm_script_runs r LEFT JOIN assets a ON a.id = r.asset_id {_RUN_SOURCE_JOINS} "  # nosec B608 - fixed joins
             "WHERE r.company_id = %s AND r.asset_id = %s ORDER BY r.queued_at "
@@ -617,10 +629,10 @@ async def next_jobs_for_agent(agent_id: int, *, limit: int = 5) -> list[dict[str
     rows = await db.fetch_all(
         "SELECT id, script_name, script_path, language, script_content, content_sha256, payload_encrypted, "
         "script_id, timeout_seconds, run_source, expires_at, allow_parallel, run_anyway, run_as FROM rmm_script_runs "
-        "WHERE agent_id = %s AND status = 'queued' "
+        "WHERE agent_id = %s AND status = 'queued' AND (scheduled_for IS NULL OR scheduled_for <= %s) "
         "ORDER BY CASE WHEN run_anyway = 1 AND run_source <> 'onboarding' THEN 0 ELSE 1 END, "
         "queued_at, id LIMIT %s",
-        (agent_id, limit),
+        (agent_id, _utcnow(), limit),
     )
     return [dict(row) for row in rows or []]
 
@@ -673,17 +685,20 @@ async def mark_dispatched(run_id: int, agent_id: int, *, expires_at: datetime | 
             return False
         candidate = await db.fetch_one(
             "SELECT id, allow_parallel, run_anyway, run_source FROM rmm_script_runs "
-            "WHERE id = %s AND agent_id = %s AND status = 'queued'",
-            (run_id, agent_id),
+            "WHERE id = %s AND agent_id = %s AND status = 'queued' "
+            "AND (scheduled_for IS NULL OR scheduled_for <= %s)",
+            (run_id, agent_id, _utcnow()),
         )
         if not candidate:
             return False
         run_anyway = bool(candidate.get("run_anyway")) and candidate.get("run_source") != "onboarding"
         if not run_anyway:
+            # Runs scheduled for later wait aside and do not hold the queue.
             first = await db.fetch_one(
                 "SELECT id FROM rmm_script_runs WHERE agent_id = %s AND status = 'queued' "
+                "AND (scheduled_for IS NULL OR scheduled_for <= %s) "
                 "AND (run_anyway = 0 OR run_source = 'onboarding') ORDER BY queued_at, id LIMIT 1",
-                (agent_id,),
+                (agent_id, _utcnow()),
             )
             if not first or int(first["id"]) != run_id:
                 return False
