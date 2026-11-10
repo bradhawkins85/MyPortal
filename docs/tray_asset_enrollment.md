@@ -58,7 +58,23 @@ The tray service retries failed initial enrolment with backoff before starting
 its authenticated workers. It persists its pending identity separately in
 `tray-enrolment-pending.json`, next to `tray-state.json`, so retries and service
 restarts reuse the same device UID. Only successful enrolment writes the normal
-state file used by the UI and installation scripts.
+state file used by installation scripts.
+
+### Tray UI token
+
+The tray UI runs as the signed-in user, so it does not get the device token.
+After enrolment the service calls `POST /api/tray/ui-token` with the device
+token and writes the result to `tray-ui-state.json` (device UID, portal URL and
+UI token), which local users can read. The portal accepts the UI token only on
+`/api/tray/chat-token`, `/api/tray/ticket-token`, `/api/tray/outlook-signatures`,
+`/api/tray/rmm-script` and `/api/tray/trmm-script`; every other device endpoint
+and the WebSocket still need the device token. Once the UI token is saved,
+`tray-state.json` is readable by SYSTEM/root and Administrators only.
+
+If the portal cannot issue a UI token yet (an older server, or it cannot be
+reached), `tray-state.json` stays readable as before so the UI keeps working,
+and the service tries again on its next config refresh. Re-enrolling a device
+clears its UI token on the server and the service requests a new one.
 
 For a v0.9.7 Mac already stuck after an enrolment timeout, deploy the server fix,
 then restart the service to trigger another enrolment attempt:

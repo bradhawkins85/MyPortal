@@ -411,6 +411,7 @@ async def update_device_auth(
     await db.execute(
         f"UPDATE tray_devices SET auth_token_hash = {placeholder}, "  # nosec B608
         f"auth_token_prefix = {placeholder}, status = 'active', "
+        "ui_token_hash = NULL, ui_token_prefix = NULL, "
         f"updated_at = {placeholder} WHERE id = {placeholder}",
         (auth_token_hash, auth_token_prefix, now, device_id),
     )
@@ -440,6 +441,33 @@ async def get_device_by_auth_hash(auth_token_hash: str) -> dict[str, Any] | None
         f"SELECT * FROM tray_devices WHERE auth_token_hash = {placeholder} "  # nosec B608
         "AND status = 'active'",
         (auth_token_hash,),
+    )
+    return dict(row) if row else None
+
+
+async def set_device_ui_token(
+    device_id: int,
+    *,
+    ui_token_hash: str,
+    ui_token_prefix: str,
+) -> None:
+    placeholder = "?" if db.is_sqlite() else "%s"
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
+    await db.execute(
+        f"UPDATE tray_devices SET ui_token_hash = {placeholder}, "  # nosec B608
+        f"ui_token_prefix = {placeholder}, updated_at = {placeholder} "
+        f"WHERE id = {placeholder}",
+        (ui_token_hash, ui_token_prefix, now, device_id),
+    )
+
+
+async def get_device_by_ui_token_hash(ui_token_hash: str) -> dict[str, Any] | None:
+    placeholder = "?" if db.is_sqlite() else "%s"
+    row = await db.fetch_one(
+        f"SELECT * FROM tray_devices WHERE ui_token_hash = {placeholder} "  # nosec B608
+        "AND status = 'active'",
+        (ui_token_hash,),
     )
     return dict(row) if row else None
 

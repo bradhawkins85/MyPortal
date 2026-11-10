@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -481,6 +482,35 @@ func (c *Client) Heartbeat(ctx context.Context, req HeartbeatRequest) error {
 		return fmt.Errorf("heartbeat: HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// ErrUITokenUnsupported means the portal predates UI tokens.
+var ErrUITokenUnsupported = errors.New("portal does not issue tray UI tokens")
+
+// IssueUIToken asks the portal for a new low-privilege token for the tray UI,
+// replacing any earlier one. It needs the device token.
+func (c *Client) IssueUIToken(ctx context.Context) (string, error) {
+	resp, err := c.post(ctx, "/api/tray/ui-token", []byte("{}"), true)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		return "", ErrUITokenUnsupported
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ui-token: HTTP %d", resp.StatusCode)
+	}
+	var out struct {
+		UIToken string `json:"ui_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("ui-token: %w", err)
+	}
+	if out.UIToken == "" {
+		return "", errors.New("ui-token: empty token")
+	}
+	return out.UIToken, nil
 }
 
 // VersionResponse mirrors the server's TrayVersionResponse schema.

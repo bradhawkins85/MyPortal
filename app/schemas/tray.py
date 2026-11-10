@@ -561,6 +561,10 @@ class TrayNotificationResponse(BaseModel):
     delivered: bool
 
 
+class TrayUITokenResponse(BaseModel):
+    ui_token: str
+
+
 class TrayChatTokenResponse(BaseModel):
     """Response returned by POST /api/tray/chat-token.
 

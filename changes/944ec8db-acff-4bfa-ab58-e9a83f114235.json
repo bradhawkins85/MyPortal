@@ -1,0 +1,7 @@
+{
+  "guid": "944ec8db-acff-4bfa-ab58-e9a83f114235",
+  "occurred_at": "2026-11-10T01:05Z",
+  "change_type": "Fix",
+  "summary": "Tray: the tray app now uses its own low-privilege token for chat, ticket forms, Outlook signatures and menu scripts, and the device token is readable by the tray service only",
+  "content_hash": "7573f61938e0c09f92eda1dae8bb63c2258648330a37e7728096ed64f015ce84"
+}
