@@ -67,12 +67,15 @@ import (
 )
 
 const (
-	heartbeatInterval     = time.Hour
-	configRefreshInterval = 6 * time.Hour
-	configCacheName       = "tray-config.json"
-	stateFileName         = "tray-state.json"
-	pendingStateFileName  = "tray-enrolment-pending.json"
-	uiStateFileName       = "tray-ui-state.json"
+	heartbeatInterval = time.Hour
+	// consoleUserCheckInterval is how often the logged-in user is checked;
+	// a heartbeat is only sent when it changes (or the routine one is due).
+	consoleUserCheckInterval = time.Minute
+	configRefreshInterval    = 6 * time.Hour
+	configCacheName          = "tray-config.json"
+	stateFileName            = "tray-state.json"
+	pendingStateFileName     = "tray-enrolment-pending.json"
+	uiStateFileName          = "tray-ui-state.json"
 	// defenderPolicyStateFileName records the Defender exclusions and scan
 	// schedule the agent applied, so it never removes settings it did not add.
 	defenderPolicyStateFileName = "defender-policy.json"
@@ -1374,17 +1377,29 @@ func (d *daemon) consumePendingUIMessage() *ipc.Message {
 	return &msg
 }
 
+// heartbeatLoop sends the routine heartbeat and also checks the console user
+// every consoleUserCheckInterval, reporting straight away when it changes so
+// the portal's "Logged in user" stays current between routine heartbeats.
 func (d *daemon) heartbeatLoop() {
+	lastUser := ""
+	var nextRoutine time.Time
 	for {
-		facts := collectFacts()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := d.client.Heartbeat(ctx, api.HeartbeatRequest{
-			ConsoleUser: facts.ConsoleUser, AgentVersion: updater.AgentVersion,
-		}); err != nil {
-			logger.Warn("Heartbeat: %v", err)
+		user := consoleUserName()
+		now := time.Now()
+		if now.After(nextRoutine) || user != lastUser {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := d.client.Heartbeat(ctx, api.HeartbeatRequest{
+				ConsoleUser: user, AgentVersion: updater.AgentVersion,
+			})
+			cancel()
+			if err != nil {
+				logger.Warn("Heartbeat: %v", err)
+			} else {
+				lastUser = user
+				nextRoutine = now.Add(routineInterval())
+			}
 		}
-		cancel()
-		timer := time.NewTimer(routineInterval())
+		timer := time.NewTimer(consoleUserCheckInterval)
 		select {
 		case <-d.stopCh:
 			timer.Stop()
