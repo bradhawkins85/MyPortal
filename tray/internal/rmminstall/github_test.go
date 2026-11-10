@@ -28,6 +28,8 @@ func TestGitHubReleaseAssetsAndNoCredentials(t *testing.T) {
 					switch r.URL.Path {
 					case "/releases/download/" + tag + "/" + name + ".sha256":
 						fmt.Fprintf(w, "%s  %s\n", digest(body), name)
+					case "/releases/download/" + tag + "/" + name + ".sig":
+						fmt.Fprintln(w, "c2lnbmF0dXJl")
 					case "/releases/download/" + tag + "/" + name:
 						_, _ = w.Write(body)
 					default:
@@ -44,7 +46,7 @@ func TestGitHubReleaseAssetsAndNoCredentials(t *testing.T) {
 				if err := g.DownloadRMMAgent(context.Background(), pkg.DownloadPath, &out); err != nil {
 					t.Fatal(err)
 				}
-				if pkg.Version != "1.2.3" || pkg.Sha256 != digest(body) || out.String() != string(body) {
+				if pkg.Version != "1.2.3" || pkg.Sha256 != digest(body) || pkg.Signature != "c2lnbmF0dXJl" || out.String() != string(body) {
 					t.Fatalf("package=%+v body=%q", pkg, out.String())
 				}
 			})

@@ -728,3 +728,30 @@ async def test_auto_install_waits_for_a_pending_tray_upgrade(sqlite_db, storage,
     assert await deploy.auto_deploy_device(device) is False  # the tray app is updating
     await deploy.tray_repo.mark_command_completed(command_id)
     assert await deploy.auto_deploy_device(device) is True
+
+
+@pytest.mark.anyio
+async def test_fetch_relays_the_release_signature_even_when_signed_later(storage, monkeypatch):
+    from app.features.rmm.agent_deploy_routes import agent_package
+
+    build = b"windows agent"
+    files = {
+        "myportal-rmm-windows-amd64.exe": build,
+        "myportal-rmm-windows-amd64.exe.sha256": f"{hashlib.sha256(build).hexdigest()}  x\n".encode(),
+    }
+    assets = [_asset(name, index) for index, name in enumerate(files)]
+    monkeypatch.setattr(deploy, "monitored_client", lambda cls, **kw: cls(transport=_github(assets, files), **kw))
+    await deploy.fetch_latest_agent(repo="o/r", github_token="")
+    assert deploy.cached_package("windows", "amd64")["signature"] is None
+
+    # The Sign release workflow uploads the signature after the builds.
+    files["myportal-rmm-windows-amd64.exe.sig"] = b"c2lnbmF0dXJl\n"
+    assets = [_asset(name, index) for index, name in enumerate(files)]
+    monkeypatch.setattr(deploy, "monitored_client", lambda cls, **kw: cls(transport=_github(assets, files), **kw))
+    results = await deploy.fetch_latest_agent(repo="o/r", github_token="")
+
+    assert results["myportal-rmm-windows-amd64.exe"] is True
+    assert deploy.cached_package("windows", "amd64")["signature"] == "c2lnbmF0dXJl"
+    assert deploy.cached_package("windows", "amd64", "1.9.0")["signature"] == "c2lnbmF0dXJl"
+    package = await agent_package(os="windows", arch="amd64", tray_device={}, version=None)
+    assert package["signature"] == "c2lnbmF0dXJl"

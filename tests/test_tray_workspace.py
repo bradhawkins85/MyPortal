@@ -267,3 +267,16 @@ async def test_workspace_redirects_other_users_home(monkeypatch):
 
     assert response.status_code == 303
     assert response.headers["location"] == "/"
+
+
+def test_server_installers_show_whether_they_are_signed():
+    installers = [
+        {"name": "myportal-tray.msi", "version": "1.2.3", "platform": "windows",
+         "download_url": "https://p/static/tray/myportal-tray.msi", "signature": "c2ln"},
+        {"name": "myportal-tray.pkg", "version": "1.2.3", "platform": "darwin",
+         "download_url": "https://p/static/tray/myportal-tray.pkg", "signature": None},
+    ]
+    html = _render(versions={"versions": [], "server_installers": installers})
+
+    assert html.count('<span class="status status--success">Signed</span>') == 1
+    assert "Not signed yet" in html

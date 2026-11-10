@@ -519,6 +519,9 @@ type VersionResponse struct {
 	DownloadURL string `json:"download_url,omitempty"`
 	Required    bool   `json:"required"`
 	Sha256      string `json:"sha256,omitempty"`
+	// Signature is the release key's signature over the installer, relayed
+	// by the portal from the GitHub release.
+	Signature string `json:"signature,omitempty"`
 }
 
 // GetVersion checks if a newer installer version is available.
