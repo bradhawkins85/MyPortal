@@ -141,6 +141,11 @@ func (s *Server) acceptLoop() {
 		if err != nil {
 			return // server closed
 		}
+		if err := checkPeer(conn); err != nil {
+			logger.Warn("ipc: refused a connection: %v", err)
+			conn.Close()
+			continue
+		}
 		s.mu.Lock()
 		s.clients = append(s.clients, conn)
 		clientCount := len(s.clients)

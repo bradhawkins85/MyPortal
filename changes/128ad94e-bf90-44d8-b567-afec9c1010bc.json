@@ -1,0 +1,7 @@
+{
+  "guid": "128ad94e-bf90-44d8-b567-afec9c1010bc",
+  "occurred_at": "2026-11-10T02:55Z",
+  "change_type": "Security",
+  "summary": "On Linux the tray service only talks to root and login accounts over its local socket, and old AI troubleshoot commands no longer keep the server's AI provider key in the tray command log",
+  "content_hash": "ed54b025e53476f89ec601698cf5a00a64ccbe80aeaebdc0754c0175ec366c55"
+}
