@@ -40,10 +40,7 @@ func (g *githubSource) GetRMMAgentPackage(ctx context.Context, goos, goarch stri
 	if (goos != "windows" && goos != "darwin" && goos != "linux") || (goarch != "amd64" && goarch != "arm64") {
 		return nil, fmt.Errorf("unsupported RMM platform %s/%s", goos, goarch)
 	}
-	name := "myportal-rmm-" + goos + "-" + goarch
-	if goos == "windows" {
-		name += ".exe"
-	}
+	name := agentAssetName(goos, goarch)
 	// Releases use v-prefixed tags today; support older bare numeric tags too.
 	for _, tag := range []string{"v" + version, version} {
 		assetURL := g.baseURL + tag + "/" + name
@@ -78,9 +75,35 @@ func (g *githubSource) GetRMMAgentPackage(ctx context.Context, goos, goarch stri
 		if len(fields) > 1 && strings.TrimPrefix(fields[1], "*") != name {
 			return nil, errors.New("GitHub checksum names a different agent")
 		}
-		return &api.RMMAgentPackage{FileName: name, Version: version, Sha256: fields[0], DownloadPath: assetURL}, nil
+		signature, err := g.signature(ctx, assetURL+".sig")
+		if err != nil {
+			return nil, err
+		}
+		return &api.RMMAgentPackage{FileName: name, Version: version, Sha256: fields[0], DownloadPath: assetURL, Signature: signature}, nil
 	}
 	return nil, fmt.Errorf("GitHub has no RMM build for %s/%s version %s", goos, goarch, version)
+}
+
+// signature reads the release key's signature published next to an asset.
+func (g *githubSource) signature(ctx context.Context, url string) (string, error) {
+	sigCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	resp, err := g.get(sigCtx, url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub signature: HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1025))
+	if err != nil {
+		return "", err
+	}
+	if len(body) > 1024 {
+		return "", errors.New("invalid GitHub signature file")
+	}
+	return strings.TrimSpace(string(body)), nil
 }
 
 func (g *githubSource) get(ctx context.Context, url string) (*http.Response, error) {

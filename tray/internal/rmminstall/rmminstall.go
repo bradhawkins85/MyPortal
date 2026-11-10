@@ -32,6 +32,7 @@ import (
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
+	"github.com/bradhawkins85/myportal-tray/internal/release"
 )
 
 // API is the part of the MyPortal client the installer uses.
@@ -326,6 +327,15 @@ func trim(out []byte) string {
 	return string(out)
 }
 
+// agentAssetName is the release asset holding the RMM agent for goos/goarch.
+func agentAssetName(goos, goarch string) string {
+	name := "myportal-rmm-" + goos + "-" + goarch
+	if goos == "windows" {
+		name += ".exe"
+	}
+	return name
+}
+
 // downloadPackage verifies the complete download before any service is stopped.
 func (in *Installer) downloadPackage(ctx context.Context, source PackageSource, version string) (*api.RMMAgentPackage, string, error) {
 	pkg, err := source.GetRMMAgentPackage(ctx, runtime.GOOS, runtime.GOARCH, version)
@@ -366,6 +376,11 @@ func (in *Installer) downloadPackage(ctx context.Context, source PackageSource, 
 	actual := hex.EncodeToString(digest.Sum(nil))
 	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
 		return nil, "", fmt.Errorf("agent download SHA-256 mismatch: got %s want %s", actual, expected)
+	}
+	// The SHA-256 only proves the download matches what the source listed.
+	// The release key's signature proves the project built it.
+	if err := release.Verify(agentAssetName(runtime.GOOS, runtime.GOARCH), pkg.Version, actual, pkg.Signature); err != nil {
+		return nil, "", fmt.Errorf("agent build: %w", err)
 	}
 	success = true
 	return pkg, tmpPath, nil

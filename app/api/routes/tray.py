@@ -2657,6 +2657,8 @@ async def get_tray_version(request: Request) -> JSONResponse:
             "download_url": row.get("download_url"),
             "required": bool(row.get("required")),
             "sha256": row.get("sha256"),
+            "signature": row.get("signature")
+            or tray_installer.cached_installer_signature(row.get("sha256")),
         }
     )
 

@@ -2,7 +2,10 @@ package rmminstall
 
 import (
 	"context"
+	"crypto/ed25519"
+	crand "crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -13,7 +16,28 @@ import (
 	"testing"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
+	"github.com/bradhawkins85/myportal-tray/internal/release"
 )
+
+// testSigningKey stands in for the release key in these tests.
+var testSigningKey ed25519.PrivateKey
+
+func TestMain(m *testing.M) {
+	pub, priv, err := ed25519.GenerateKey(crand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	testSigningKey = priv
+	restore := release.UseKeyForTesting(pub)
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
+
+func testSignature(version, sha string) string {
+	manifest := release.Manifest(agentAssetName(runtime.GOOS, runtime.GOARCH), version, sha)
+	return base64.StdEncoding.EncodeToString(ed25519.Sign(testSigningKey, manifest))
+}
 
 type fakeAPI struct {
 	body             []byte
@@ -25,6 +49,7 @@ type fakeAPI struct {
 	downloadErr      error
 	packageCalls     int
 	requestedVersion string
+	unsigned         bool
 }
 
 func (f *fakeAPI) BaseURL() string   { return "https://portal.example.com" }
@@ -39,7 +64,11 @@ func (f *fakeAPI) GetRMMAgentPackage(_ context.Context, goos, goarch string, ver
 	if f.packageErr != nil {
 		return nil, f.packageErr
 	}
-	return &api.RMMAgentPackage{Version: "1.2.3", Sha256: f.sha, DownloadPath: "/api/rmm/agent/package/download?os=x"}, nil
+	pkg := &api.RMMAgentPackage{Version: "1.2.3", Sha256: f.sha, DownloadPath: "/api/rmm/agent/package/download?os=x"}
+	if !f.unsigned {
+		pkg.Signature = testSignature(pkg.Version, f.sha)
+	}
+	return pkg, nil
 }
 
 func (f *fakeAPI) DownloadRMMAgent(_ context.Context, _ string, w io.Writer) error {
@@ -454,5 +483,16 @@ func TestEnsureVersionRepairsAnUnreadableExecutable(t *testing.T) {
 	}
 	if len(*calls) != 5 || (*calls)[2].args[0] != "enrol" || (*calls)[4].args[0] != "verify" {
 		t.Fatalf("calls=%+v", *calls)
+	}
+}
+
+func TestInstallRefusesABuildWithoutTheReleaseSignature(t *testing.T) {
+	body := []byte("agent")
+	in, calls := newInstaller(t, &fakeAPI{body: body, sha: digest(body), token: "t", unsigned: true}, "")
+	if _, err := in.Install(context.Background()); err == nil || !strings.Contains(err.Error(), "not signed") {
+		t.Fatalf("Install error = %v, want an unsigned build to be refused", err)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("an unsigned build was run: %v", *calls)
 	}
 }

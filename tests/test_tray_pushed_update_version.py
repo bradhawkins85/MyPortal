@@ -19,6 +19,7 @@ CACHED = {
     "version": "1.5.0",
     "download_url": "https://portal.example.com/static/tray/myportal-tray.msi",
     "sha256": "ab" * 32,
+    "signature": "c2lnbmF0dXJl",
 }
 
 
@@ -78,6 +79,7 @@ def test_pushed_update_offers_cached_release_newer_than_published(monkeypatch):
         "download_url": CACHED["download_url"],
         "required": False,
         "sha256": CACHED["sha256"],
+        "signature": CACHED["signature"],
     }
     assert completed == [42]
 
@@ -116,3 +118,22 @@ def test_tray_version_comparison():
     assert not tray._is_newer_tray_version("1.2.0-rc1", "1.2.0")
     assert tray._is_newer_tray_version("1.0.0", None)
     assert not tray._is_newer_tray_version("garbage", "1.0.0")
+
+
+def test_published_version_carries_the_signature_of_its_cached_installer(monkeypatch):
+    published = {**PUBLISHED, "sha256": "cd" * 32}
+    monkeypatch.setattr(
+        tray.tray_installer,
+        "cached_installer_signature",
+        lambda sha256: "c2lnbmF0dXJl" if sha256 == "cd" * 32 else None,
+    )
+    body, _ = _version(monkeypatch, published=published, pushed=None)
+
+    assert body["version"] == "1.2.0"
+    assert body["signature"] == "c2lnbmF0dXJl"
+
+
+def test_published_version_without_a_signed_installer_has_no_signature(monkeypatch):
+    body, _ = _version(monkeypatch, published=PUBLISHED, pushed=None)
+
+    assert body["signature"] is None

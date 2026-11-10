@@ -22,6 +22,8 @@ type RMMAgentPackage struct {
 	Sha256       string `json:"sha256"`
 	Size         int64  `json:"size"`
 	DownloadPath string `json:"download_path"`
+	// Signature is the release key's signature over the build.
+	Signature string `json:"signature,omitempty"`
 }
 
 // BaseURL returns the MyPortal address the client talks to.

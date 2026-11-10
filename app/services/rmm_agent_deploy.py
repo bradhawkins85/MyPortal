@@ -150,6 +150,7 @@ def cached_package(os_name: str, arch: str, version: str | None = None) -> dict[
         "sha256": str(metadata["sha256"]).lower(),
         "version": metadata.get("version"),
         "size": path.stat().st_size,
+        "signature": metadata.get("signature"),
     }
 
 
@@ -211,6 +212,32 @@ async def _published_sha256(client: httpx.AsyncClient, asset: dict[str, Any] | N
     response.raise_for_status()
     text = response.text.strip()
     return text.split()[0].lower() if text else None
+
+
+_MAX_SIGNATURE_BYTES = 1024
+
+
+async def _published_signature(client: httpx.AsyncClient, asset: dict[str, Any] | None, headers: dict[str, str]) -> str | None:
+    """The release key's signature for a build, uploaded by the Sign release workflow.
+
+    MyPortal only relays it: the tray app verifies it with the release public
+    key built into it, so a build without one is never installed.
+    """
+
+    if not asset or not asset.get("browser_download_url"):
+        return None
+    try:
+        response = await client.get(
+            asset["browser_download_url"], headers={**headers, "Accept": "application/octet-stream"}, timeout=30.0
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        log_warning("Could not download an RMM agent signature", asset=asset.get("name"), error=str(exc))
+        return None
+    text = response.content[: _MAX_SIGNATURE_BYTES + 1].decode("ascii", "replace").strip()
+    if not text or len(text) > _MAX_SIGNATURE_BYTES:
+        return None
+    return text
 
 
 def _cache_versioned_package(name: str, source: Path, metadata: dict[str, Any]) -> None:
@@ -281,6 +308,14 @@ async def fetch_latest_agent(*, repo: str | None = None, github_token: str | Non
                     cached = {}
                 dest = _package_dir(version) / name
                 if not force and dest.is_file() and all(cached.get(key) == value for key, value in marker.items()):
+                    # Releases are signed after their builds are uploaded, so
+                    # pick up a signature that appeared since the download.
+                    if not cached.get("signature"):
+                        signature = await _published_signature(client, assets.get(name + ".sig"), headers)
+                        if signature:
+                            cached = {**cached, "signature": signature}
+                            _metadata_path(name, version).write_text(json.dumps(cached, sort_keys=True), encoding="utf-8")
+                            results[name] = True
                     if version is None:
                         _cache_versioned_package(name, dest, cached)
                     continue
@@ -295,6 +330,9 @@ async def fetch_latest_agent(*, repo: str | None = None, github_token: str | Non
                     log_error("Failed to download the RMM agent", repo=repo, asset=name, error=str(exc))
                     continue
                 metadata = {**marker, "version": build_version, "sha256": actual}
+                signature = await _published_signature(client, assets.get(name + ".sig"), headers)
+                if signature:
+                    metadata["signature"] = signature
                 _metadata_path(name, version).write_text(json.dumps(metadata, sort_keys=True), encoding="utf-8")
                 if version is None:
                     _cache_versioned_package(name, dest, metadata)

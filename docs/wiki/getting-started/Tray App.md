@@ -621,7 +621,7 @@ chat-start and websocket plumbing. Subsequent PRs cover:
 The service polls this endpoint every 6 hours. Response:
 
 ```json
-{"version": "0.2.0", "download_url": "https://…/myportal-tray.msi", "required": false, "sha256": "…"}
+{"version": "0.2.0", "download_url": "https://…/myportal-tray.msi", "required": false, "sha256": "…", "signature": "…"}
 ```
 
 Publish a new version from the **Tray > Versions** admin page or via:
@@ -633,8 +633,8 @@ POST /api/tray/admin/versions
 
 The tray app updates itself, so no RMM script is needed to keep it current.
 When the published version is newer than the one it runs, the service
-downloads the installer, checks it against the published SHA-256, and runs
-it silently (`msiexec /qn` on Windows, `installer -pkg` on macOS). The
+downloads the installer, checks it against the published SHA-256 and the
+release signature (see *Release signing* below), and runs it silently (`msiexec /qn` on Windows, `installer -pkg` on macOS). The
 installer replaces and restarts the service. It never reinstalls the version
 it runs or moves to an older one. A technician can also send the `update`
 command to check straight away.
@@ -659,6 +659,48 @@ On both platforms the installer log is written to `update-installer.log` next
 to the service log (`/Library/Logs/MyPortal/tray` on macOS) and replaced by
 each update. On macOS it holds the `installer` output, including the package
 scripts' output.
+
+### Release signing
+
+Every release asset the tray app installs (the tray MSI, pkg and Linux
+tarball, and the six RMM agent builds) is signed by the **Sign release**
+workflow (`.github/workflows/sign-release.yml`). The workflow waits until the
+release's builds are uploaded, then asks a maintainer to approve the
+`release-signing` environment, which holds the Ed25519 private key as the
+`RELEASE_SIGNING_KEY` secret. It uploads an `<asset>.sig` file next to each
+asset.
+
+The public key is built into the tray app
+(`tray/internal/release/release-public-key.pem`). The tray updater and the
+RMM agent installer accept a build only when its signature covers that
+asset's name, the offered version and the SHA-256 of the downloaded bytes.
+MyPortal caches each `.sig` with the installer it belongs to and relays it in
+`/api/tray/version` and `/api/rmm/agent/package`, but it cannot make one. A
+compromised portal, or anyone between a device and GitHub, therefore cannot
+get a device to install a build the project did not release. Devices also
+refuse a version string they cannot compare, so they cannot be moved to an
+older release.
+
+What this means in practice:
+
+- Approve the **Sign release** run for each release. Devices do not update
+  to a release until its signatures are uploaded, and the **Update tray icon
+  installer** scheduled task picks them up on its next run (run it from
+  **Scheduled tasks** to do it straight away). The **Installers on this
+  server** list marks each installer *Signed* or *Not signed yet*.
+- A version you publish must point at a signed release installer, such as one
+  from the **Installers on this server** list. Devices refuse any other
+  installer.
+- If a run is missing a build, run **Sign release** again for that tag from
+  the Actions tab once the build is uploaded.
+- To replace the key, generate a new one, update
+  `release-public-key.pem` and the secret together, and release a tray
+  version signed with the *old* key first, so devices move to a build that
+  trusts the new key.
+
+Company installers from the local build server are not affected: they are
+only used for first installs from deployment links and keep the code-signing
+certificate described in *Tray Build Server*.
 
 Publish each platform's installer under its own platform. A version published
 for **All** is offered to Windows and macOS devices alike, and neither can

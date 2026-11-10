@@ -122,9 +122,33 @@ def cached_server_installers(portal_url: str) -> list[dict[str, Any]]:
                 "version": version,
                 "download_url": base + server_installer_path(name),
                 "sha256": metadata.get("sha256"),
+                "signature": metadata.get("signature"),
             }
         )
     return installers
+
+
+def cached_installer_signature(sha256: str | None) -> str | None:
+    """Return the release signature of the cached installer with ``sha256``.
+
+    The Sign release workflow publishes ``<asset>.sig`` next to each
+    installer. Devices verify it with the release public key built into the
+    tray app, so this server only relays it: a published version whose
+    installer is not a signed release asset gets no signature, and devices
+    refuse to install it.
+    """
+
+    digest = str(sha256 or "").strip().lower()
+    if not digest:
+        return None
+    for asset_name in _ASSET_NAMES:
+        try:
+            metadata = json.loads(_metadata_path(asset_name).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if str(metadata.get("sha256") or "").lower() == digest and metadata.get("signature"):
+            return str(metadata["signature"])
+    return None
 
 
 def _build_headers(github_token: str | None) -> dict[str, str]:
@@ -333,6 +357,13 @@ async def _fetch(
                 )
             except TrayInstallerDownloadError as exc:
                 failures.append(str(exc))
+            else:
+                await _refresh_signature(
+                    client=client,
+                    headers=headers,
+                    release=release,
+                    asset_name=asset_name,
+                )
 
     if failures:
         raise TrayInstallerDownloadError(
@@ -424,3 +455,62 @@ async def _download_asset(
         path=str(dest_path),
     )
     return True
+
+
+_MAX_SIGNATURE_BYTES = 1024
+
+
+async def _refresh_signature(
+    *,
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    release: dict[str, Any],
+    asset_name: str,
+) -> None:
+    """Store the release signature for a cached installer in its metadata.
+
+    The signature is uploaded by a separate, approved workflow after the
+    installer, so it is fetched whenever the cached metadata lacks it, even
+    when the installer itself is already current.
+    """
+
+    try:
+        metadata = json.loads(_metadata_path(asset_name).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if metadata.get("release_id") != release.get("id"):
+        return
+    sig_asset = next(
+        (a for a in release.get("assets") or [] if a.get("name") == asset_name + ".sig"),
+        None,
+    )
+    if not sig_asset:
+        if not metadata.get("signature"):
+            log_warning(
+                "Tray installer is not signed yet",
+                release=release.get("tag_name"),
+                asset=asset_name,
+            )
+        return
+    if metadata.get("signature") and metadata.get("signature_asset_id") == sig_asset.get("id"):
+        return
+    download_headers = dict(headers)
+    download_headers["Accept"] = "application/octet-stream"
+    try:
+        resp = await client.get(
+            sig_asset.get("browser_download_url", ""), headers=download_headers, timeout=30.0
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        log_warning(
+            "Could not download tray installer signature", asset=asset_name, error=str(exc)
+        )
+        return
+    signature = resp.content[: _MAX_SIGNATURE_BYTES + 1].decode("ascii", "replace").strip()
+    if not signature or len(signature) > _MAX_SIGNATURE_BYTES:
+        log_warning("Tray installer signature is malformed", asset=asset_name)
+        return
+    metadata["signature"] = signature
+    metadata["signature_asset_id"] = sig_asset.get("id")
+    _metadata_path(asset_name).write_text(json.dumps(metadata, sort_keys=True), encoding="utf-8")
+    log_info("Tray installer signature cached", release=release.get("tag_name"), asset=asset_name)
