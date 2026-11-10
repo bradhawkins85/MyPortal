@@ -220,6 +220,10 @@ async def _ensure_folders_once() -> None:
         await gitea_sign_in.reconcile_accounts()
     except gitea.GiteaError as exc:
         log_info("Script repository access not checked", reason=str(exc))
+    try:
+        await gitea_sign_in.protect_company_links()
+    except gitea.GiteaError as exc:
+        log_info("Company link files not protected", reason=str(exc))
 
 
 async def folder_maintenance_loop() -> None:
