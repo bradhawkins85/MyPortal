@@ -122,8 +122,14 @@ func announceChatRoom(roomID int, title, body string) {
 	if actionURL == "" {
 		logger.Warn("announceChatRoom: could not register chat notification action for room_id=%d", roomID)
 	}
-	go openChatWindowFunc(chatURL, gConfig)
-	showChatSessionNotificationFunc(title, body, actionURL)
+	go func() {
+		// A notification with its own "Open chat" button is enough; the
+		// window only opens itself when that could not be shown.
+		if showChatSessionNotificationFunc(title, body, actionURL) {
+			return
+		}
+		openChatWindowFunc(chatURL, gConfig)
+	}()
 }
 
 // markChatRoomAnnounced records that roomID has been announced to the user and
