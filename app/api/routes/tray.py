@@ -36,6 +36,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from app.api.dependencies.auth import (
     get_current_tray_device,
     get_current_user,
+    get_tray_ui_device,
     get_optional_user,
     require_helpdesk_technician,
     require_super_admin,
@@ -57,6 +58,7 @@ from app.schemas.tray import (
     TrayChatStartRequest,
     TrayChatStartResponse,
     TrayChatTokenResponse,
+    TrayUITokenResponse,
     TrayConfigResponse,
     TrayEnrolRequest,
     TrayEnrolResponse,
@@ -487,7 +489,7 @@ async def get_device_config(
 )
 async def get_outlook_signatures(
     payload: TrayOutlookSignaturesRequest,
-    device: dict = Depends(get_current_tray_device),
+    device: dict = Depends(get_tray_ui_device),
 ) -> TrayOutlookSignaturesResponse:
     """Return rendered signatures for Outlook accounts found on the device.
 
@@ -695,7 +697,7 @@ def _find_rmm_script_node(
 )
 async def run_rmm_script(
     payload: TrayRMMScriptRunRequest,
-    device: dict = Depends(get_current_tray_device),
+    device: dict = Depends(get_tray_ui_device),
 ) -> TrayRMMScriptRunResponse:
     """Queue a menu-approved MyPortal RMM script on this computer's RMM agent.
 
@@ -751,7 +753,7 @@ async def run_rmm_script(
 )
 async def run_trmm_script(
     payload: TrayTRMMScriptRunRequest,
-    device: dict = Depends(get_current_tray_device),
+    device: dict = Depends(get_tray_ui_device),
 ) -> TrayTRMMScriptRunResponse:
     """Run a menu-approved Tactical RMM script against the linked asset.
 
@@ -1390,7 +1392,7 @@ const form=document.querySelector('form');['name','email','phone'].forEach(k=>{{
 )
 async def issue_ticket_token(
     request: Request,
-    device: dict = Depends(get_current_tray_device),
+    device: dict = Depends(get_tray_ui_device),
 ) -> TrayTicketTokenResponse:
     body: dict[str, Any] = {}
     try:
@@ -3093,13 +3095,41 @@ def _parse_popup_session(request: Request) -> dict[str, Any] | None:
 
 
 @router.post(
+    "/ui-token",
+    response_model=TrayUITokenResponse,
+    summary="Issue the low-privilege token the tray UI uses (device authenticated)",
+    tags=["Tray App"],
+)
+async def issue_ui_token(
+    device: dict = Depends(get_current_tray_device),
+) -> TrayUITokenResponse:
+    """Issue a new UI token for this device, replacing any earlier one.
+
+    The tray service calls this with the device token and hands the result to
+    the tray UI, which runs as the signed-in user. The UI token only opens
+    chat, the ticket form, Outlook signatures and menu scripts, so the device
+    token can stay readable by SYSTEM/root alone. Re-enrolling the device
+    clears the UI token.
+    """
+
+    ui_token = tray_service.generate_auth_token()
+    await tray_repo.set_device_ui_token(
+        int(device["id"]),
+        ui_token_hash=tray_service.hash_token(ui_token),
+        ui_token_prefix=tray_service.token_prefix(ui_token),
+    )
+    log_info("Tray UI token issued", device_id=device.get("id"))
+    return TrayUITokenResponse(ui_token=ui_token)
+
+
+@router.post(
     "/chat-token",
     response_model=TrayChatTokenResponse,
     summary="Issue a one-time popup chat token (device authenticated)",
 )
 async def issue_chat_token(
     request: Request,
-    device: dict = Depends(get_current_tray_device),
+    device: dict = Depends(get_tray_ui_device),
 ) -> TrayChatTokenResponse:
     """Issue a short-lived one-time URL token so the tray client can open
     ``/tray/chat?token=<token>`` in a popup webview without requiring the end

@@ -28,6 +28,16 @@ func Secure(path string, access Access) error {
 	return os.Chmod(path, mode)
 }
 
+// SecureFile gives an existing file owner-only permissions, or world-readable
+// ones for UsersRead.
+func SecureFile(path string, access Access) error {
+	mode := os.FileMode(0o600)
+	if access == UsersRead {
+		mode = 0o644
+	}
+	return os.Chmod(path, mode)
+}
+
 // Sweep is not needed outside Windows: these folders sit under root-owned
 // locations that other users cannot create entries in.
 func Sweep(path string) []string { return nil }

@@ -65,3 +65,22 @@ func TestSecureRefusesSymlink(t *testing.T) {
 		t.Fatal("Secure accepted a symbolic link")
 	}
 }
+
+func TestSecureFileModes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SecureFile(path, Private); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Fatalf("private mode = %o, want 600", info.Mode().Perm())
+	}
+	if err := SecureFile(path, UsersRead); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o644 {
+		t.Fatalf("users-read mode = %o, want 644", info.Mode().Perm())
+	}
+}

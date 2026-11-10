@@ -19,6 +19,10 @@ const (
 	privateSDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
 	// As above, plus read and execute (never write) for local users.
 	usersReadSDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)"
+
+	// The same lists for a single file, which has nothing to pass them on to.
+	privateFileSDDL   = "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
+	usersReadFileSDDL = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
 )
 
 func sddlFor(access Access) string {
@@ -59,6 +63,27 @@ func Secure(path string, access Access) error {
 	if protected, _ := hasProtectedDACL(path); protected {
 		// Already set by an earlier start (or deliberately by an administrator).
 		return nil
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil)
+}
+
+// SecureFile replaces the access list of an existing file the service wrote
+// with a protected one for access, so it no longer inherits read access for
+// local users from its folder.
+func SecureFile(path string, access Access) error {
+	sddl := privateFileSDDL
+	if access == UsersRead {
+		sddl = usersReadFileSDDL
+	}
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return err
 	}
 	dacl, _, err := sd.DACL()
 	if err != nil {

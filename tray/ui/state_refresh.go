@@ -25,21 +25,10 @@ func refreshPortalURL() {
 		logger.Debug("refreshPortalURL: using MYPORTAL_URL env (%s)", envURL)
 		return
 	}
-	p := filepath.Join(stateDir(), "tray-state.json")
-	data, err := os.ReadFile(p)
-	if err == nil {
-		var state struct {
-			PortalURL string `json:"portal_url"`
-		}
-		if jsonErr := json.Unmarshal(data, &state); jsonErr != nil {
-			logger.Warn("Failed to parse tray-state.json: %v", jsonErr)
-		} else if state.PortalURL != "" {
-			gPortalURL = state.PortalURL
-			logger.Debug("refreshPortalURL: using portal_url from %s (%s)", p, state.PortalURL)
-			return
-		}
-	} else {
-		logger.Debug("refreshPortalURL: %s not readable yet (%v)", p, err)
+	if state, p := readSharedState(); state.PortalURL != "" {
+		gPortalURL = state.PortalURL
+		logger.Debug("refreshPortalURL: using portal_url from %s (%s)", p, state.PortalURL)
+		return
 	}
 	if installCfg, cfgErr := config.Load(); cfgErr != nil {
 		logger.Warn("refreshPortalURL: install config not readable (%v)", cfgErr)
@@ -65,38 +54,72 @@ func refreshDeviceUID() {
 		logger.Debug("refreshDeviceUID: using DeviceUID from registry (%s)", uid)
 		return
 	}
-	p := filepath.Join(stateDir(), "tray-state.json")
-	data, err := os.ReadFile(p)
-	if err == nil {
-		var state struct {
-			DeviceUID string `json:"device_uid"`
-		}
-		if jsonErr := json.Unmarshal(data, &state); jsonErr == nil && state.DeviceUID != "" {
-			gDeviceUID = state.DeviceUID
-			logger.Debug("refreshDeviceUID: using device_uid from %s (%s)", p, state.DeviceUID)
-			return
-		}
+	if state, p := readSharedState(); state.DeviceUID != "" {
+		gDeviceUID = state.DeviceUID
+		logger.Debug("refreshDeviceUID: using device_uid from %s (%s)", p, state.DeviceUID)
+		return
 	}
 	logger.Debug("refreshDeviceUID: device UID not available yet")
 }
 
-// refreshAuthToken reads the device auth token from tray-state.json so the UI
-// agent can authenticate with the portal when requesting chat tokens, ticket
-// questions, and ticket submission.
+// refreshAuthToken loads the token the UI agent uses with the portal when
+// requesting chat and ticket-form URLs, Outlook signatures and menu scripts.
+//
+// The service gives the UI its own low-privilege token in
+// tray-ui-state.json; the device token in tray-state.json is readable by the
+// service alone. A service from an older release (or one whose portal cannot
+// issue UI tokens yet) still leaves tray-state.json readable, so the device
+// token is used then.
 func refreshAuthToken() {
-	p := filepath.Join(stateDir(), "tray-state.json")
-	data, err := os.ReadFile(p)
-	if err != nil {
-		logger.Debug("refreshAuthToken: %s not readable (%v)", p, err)
+	state, p := readSharedState()
+	if state.UIToken != "" {
+		gAuthToken = state.UIToken
+		logger.Debug("refreshAuthToken: UI token loaded from %s", p)
 		return
 	}
-	var state struct {
-		AuthToken string `json:"auth_token"`
-	}
-	if jsonErr := json.Unmarshal(data, &state); jsonErr == nil && state.AuthToken != "" {
+	if state.AuthToken != "" {
 		gAuthToken = state.AuthToken
-		logger.Debug("refreshAuthToken: auth token loaded from %s", p)
+		logger.Debug("refreshAuthToken: device token loaded from %s (service has not issued a UI token)", p)
 		return
 	}
 	logger.Debug("refreshAuthToken: auth token not available yet")
+}
+
+// sharedState is what the UI may read from the service's state folder.
+type sharedState struct {
+	DeviceUID string `json:"device_uid"`
+	PortalURL string `json:"portal_url"`
+	UIToken   string `json:"ui_token"`
+	AuthToken string `json:"auth_token"`
+}
+
+// readSharedState returns tray-ui-state.json when the service has written
+// it, otherwise the legacy tray-state.json, with the path it read.
+func readSharedState() (sharedState, string) {
+	return readSharedStateFrom(stateDir())
+}
+
+func readSharedStateFrom(dir string) (sharedState, string) {
+	for _, name := range []string{"tray-ui-state.json", "tray-state.json"} {
+		p := filepath.Join(dir, name)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			logger.Debug("readSharedState: %s not readable (%v)", p, err)
+			continue
+		}
+		var state sharedState
+		if err := json.Unmarshal(data, &state); err != nil {
+			logger.Warn("Failed to parse %s: %v", p, err)
+			continue
+		}
+		if name == "tray-ui-state.json" {
+			// Only the UI token belongs here; never take a device token from it.
+			state.AuthToken = ""
+			if state.UIToken == "" {
+				continue
+			}
+		}
+		return state, p
+	}
+	return sharedState{}, ""
 }

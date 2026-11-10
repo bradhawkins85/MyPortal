@@ -60,6 +60,7 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/notify"
 	"github.com/bradhawkins85/myportal-tray/internal/rmminstall"
 	"github.com/bradhawkins85/myportal-tray/internal/scanner"
+	"github.com/bradhawkins85/myportal-tray/internal/secdir"
 	"github.com/bradhawkins85/myportal-tray/internal/updater"
 )
 
@@ -69,6 +70,7 @@ const (
 	configCacheName       = "tray-config.json"
 	stateFileName         = "tray-state.json"
 	pendingStateFileName  = "tray-enrolment-pending.json"
+	uiStateFileName       = "tray-ui-state.json"
 	// defenderPolicyStateFileName records the Defender exclusions and scan
 	// schedule the agent applied, so it never removes settings it did not add.
 	defenderPolicyStateFileName = "defender-policy.json"
@@ -132,34 +134,50 @@ func saveStateFile(s persistedState, name string) error {
 	}
 	data, _ := json.Marshal(s)
 	path := filepath.Join(dir, name)
-	mode := os.FileMode(0600)
-	if uiReadsState(runtime.GOOS) {
-		// The LaunchDaemon runs as root while the LaunchAgent runs as the
-		// interactive user. The UI needs the device token to request the
-		// short-lived chat and ticket-form URLs. macOS has no shared private
-		// group for every possible console user, so make this device-scoped
-		// credential readable (but never writable) by those local users.
-		mode = 0644
-	}
-	if err := os.WriteFile(path, data, mode); err != nil {
+	access := deviceStateAccess(runtime.GOOS, uiTokenReady(s))
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return err
 	}
-	// WriteFile preserves the permissions of an existing file. Apply the mode
+	// WriteFile preserves the permissions of an existing file. Apply them
 	// explicitly so upgrades repair state files created by older releases.
-	return os.Chmod(path, mode)
+	return secdir.SecureFile(path, access)
+}
+
+// deviceStateAccess says who may read the file holding the device token.
+//
+// The tray UI runs as the signed-in user. Once it has its own low-privilege
+// UI token (in tray-ui-state.json) the device token is kept for the service
+// alone. Until then (a portal too old to issue UI tokens, or one that could
+// not be reached yet) the UI still reads the device token, so on Windows,
+// macOS and Linux desktops local users keep read access, as before.
+func deviceStateAccess(goos string, uiTokenReady bool) secdir.Access {
+	if uiTokenReady {
+		return secdir.Private
+	}
+	if goos == "windows" || uiReadsState(goos) {
+		return secdir.UsersRead
+	}
+	return secdir.Private
+}
+
+func deviceStateMode(goos string, uiTokenReady bool) os.FileMode {
+	if deviceStateAccess(goos, uiTokenReady) == secdir.UsersRead {
+		return 0644
+	}
+	return 0600
 }
 
 // repairPersistedState rewrites the enrolled state when it lacks the current
-// portal URL or, on macOS, is not readable by the logged-in user. State is
-// otherwise only written at enrolment, so devices enrolled by older releases
-// kept a file the UI agent cannot get the portal URL from, and the UI could
-// never download the tray icon.
+// portal URL or its permissions do not match whether the UI has its own
+// token. State is otherwise only written at enrolment, so devices enrolled by
+// older releases kept a file the UI agent cannot get the portal URL from, and
+// the UI could never download the tray icon.
 func repairPersistedState(s *persistedState, portalURL string) {
 	var mode os.FileMode
 	if info, err := os.Stat(filepath.Join(stateDir(), stateFileName)); err == nil {
 		mode = info.Mode().Perm()
 	}
-	if !persistedStateNeedsRewrite(s, portalURL, mode, runtime.GOOS) {
+	if !persistedStateNeedsRewrite(s, portalURL, mode, runtime.GOOS, uiTokenReady(*s)) {
 		return
 	}
 	if portalURL != "" {
@@ -169,11 +187,109 @@ func repairPersistedState(s *persistedState, portalURL string) {
 	logger.Info("Updated persisted state for the UI agent (portal=%s)", s.PortalURL)
 }
 
-func persistedStateNeedsRewrite(s *persistedState, portalURL string, mode os.FileMode, goos string) bool {
+func persistedStateNeedsRewrite(s *persistedState, portalURL string, mode os.FileMode, goos string, uiTokenReady bool) bool {
 	if portalURL != "" && s.PortalURL != portalURL {
 		return true
 	}
-	return uiReadsState(goos) && mode != 0644
+	// Windows keeps access in the file's access list, not its mode bits, so
+	// saveStateFile sets it whenever the state is written.
+	if goos == "windows" {
+		return false
+	}
+	return mode != deviceStateMode(goos, uiTokenReady)
+}
+
+// -----------------------------------------------------------------
+// UI token (tray-ui-state.json)
+// -----------------------------------------------------------------
+
+// uiState is what the tray UI, running as the signed-in user, reads. It
+// holds a low-privilege token the portal accepts only for chat, the ticket
+// form, Outlook signatures and menu scripts, never the device token.
+type uiState struct {
+	DeviceUID string `json:"device_uid"`
+	PortalURL string `json:"portal_url"`
+	UIToken   string `json:"ui_token"`
+}
+
+func loadUIState() *uiState {
+	data, err := os.ReadFile(filepath.Join(stateDir(), uiStateFileName))
+	if err != nil {
+		return nil
+	}
+	var u uiState
+	if err := json.Unmarshal(data, &u); err != nil {
+		return nil
+	}
+	return &u
+}
+
+func saveUIState(u uiState) error {
+	dir := stateDir()
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	if uiReadsState(runtime.GOOS) {
+		_ = os.Chmod(dir, 0755)
+	}
+	data, _ := json.Marshal(u)
+	path := filepath.Join(dir, uiStateFileName)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	access := secdir.Private
+	if runtime.GOOS == "windows" || uiReadsState(runtime.GOOS) {
+		access = secdir.UsersRead
+	}
+	return secdir.SecureFile(path, access)
+}
+
+func forgetUIState() {
+	_ = os.Remove(filepath.Join(stateDir(), uiStateFileName))
+}
+
+// uiTokenReady reports whether the UI has its own token for this enrolment.
+func uiTokenReady(s persistedState) bool {
+	if s.AuthToken == "" {
+		return false
+	}
+	u := loadUIState()
+	return u != nil && u.UIToken != "" && u.DeviceUID == s.DeviceUID && u.PortalURL == s.PortalURL
+}
+
+// ensureUIToken gives the tray UI its own token when it does not have one for
+// this enrolment yet, then makes the device token readable by the service
+// alone. It returns whether the UI has a token. A portal that cannot issue UI
+// tokens (or cannot be reached) leaves the earlier behaviour in place, and the
+// service tries again on its next config refresh.
+func (d *daemon) ensureUIToken(s persistedState) bool {
+	if !uiReadsState(runtime.GOOS) && runtime.GOOS != "windows" {
+		// A headless install has no UI to give a token to.
+		return false
+	}
+	if uiTokenReady(s) {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	token, err := d.client.IssueUIToken(ctx)
+	if errors.Is(err, api.ErrUITokenUnsupported) {
+		logger.Info("Portal does not issue tray UI tokens yet; the UI keeps using the device token")
+		return false
+	}
+	if err != nil {
+		logger.Warn("Could not get a tray UI token: %v", err)
+		return false
+	}
+	if err := saveUIState(uiState{DeviceUID: s.DeviceUID, PortalURL: s.PortalURL, UIToken: token}); err != nil {
+		logger.Warn("Could not save the tray UI token: %v", err)
+		return false
+	}
+	if err := saveState(s); err != nil {
+		logger.Warn("Could not make the device token private: %v", err)
+	}
+	logger.Info("Tray UI now has its own token; the device token is readable by the service only")
+	return true
 }
 
 // -----------------------------------------------------------------
@@ -592,6 +708,7 @@ func (d *daemon) ensureEnrolled() error {
 		logger.Info("Restored persisted auth (device_uid=%s)", s.DeviceUID)
 		logger.Debug("ensureEnrolled: persisted state at %s, portal=%s", filepath.Join(stateDir(), stateFileName), s.PortalURL)
 		repairPersistedState(s, d.cfg.PortalURL)
+		d.ensureUIToken(*s)
 		// Ensure the device UID is present in HKLM for the UI agent and
 		// any external tools that read HKLM\Software\MyPortal\Tray.
 		saveDeviceUIDToRegistry(s.DeviceUID)
@@ -636,8 +753,13 @@ func (d *daemon) ensureEnrolled() error {
 	if err != nil {
 		return err
 	}
-	if err := saveState(persistedState{DeviceUID: resp.DeviceUID, AuthToken: resp.AuthToken, PortalURL: d.cfg.PortalURL}); err != nil {
-		return fmt.Errorf("persist enrolment credentials: %w", err)
+	// Re-enrolment revokes any earlier UI token on the server.
+	forgetUIState()
+	enrolled := persistedState{DeviceUID: resp.DeviceUID, AuthToken: resp.AuthToken, PortalURL: d.cfg.PortalURL}
+	if !d.ensureUIToken(enrolled) {
+		if err := saveState(enrolled); err != nil {
+			return fmt.Errorf("persist enrolment credentials: %w", err)
+		}
 	}
 	_ = os.Remove(filepath.Join(stateDir(), pendingStateFileName))
 	saveDeviceUIDToRegistry(resp.DeviceUID)
@@ -1196,6 +1318,9 @@ func routineInterval() time.Duration {
 func (d *daemon) configRefreshLoop() {
 	for {
 		wait := configRefreshInterval + time.Duration(rand.Int63n(int64(30*time.Minute)))
+		if s := loadState(); s != nil && s.AuthToken != "" {
+			d.ensureUIToken(*s)
+		}
 		if !d.refreshConfigAndNotify() {
 			wait = time.Minute + time.Duration(rand.Int63n(int64(4*time.Minute)))
 		}
