@@ -31,6 +31,34 @@ def _default_account_action(*, account_enabled: bool) -> str:
     return "Onboarded" if account_enabled else "Offboarded"
 
 
+def _names_match(member: dict[str, Any], *, first_name: str, last_name: str) -> bool:
+    member_first = (member.get("first_name") or "").strip().lower()
+    member_last = (member.get("last_name") or "").strip().lower()
+    return member_first == first_name.strip().lower() and member_last == last_name.strip().lower()
+
+
+def _find_pending_request_by_name(
+    existing_staff: list[dict[str, Any]],
+    *,
+    first_name: str,
+    last_name: str,
+) -> dict[str, Any] | None:
+    """Return the single staff record with no email that matches the name.
+
+    New staff requests are created before the directory account exists, so
+    they have no email address. When the account is later synced from the
+    directory it must be merged into that request rather than duplicated.
+    Ambiguous matches (more than one candidate) are ignored.
+    """
+    candidates = [
+        member
+        for member in existing_staff
+        if not (member.get("email") or "").strip()
+        and _names_match(member, first_name=first_name, last_name=last_name)
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _find_existing_staff(
     existing_staff: list[dict[str, Any]],
     *,
@@ -39,19 +67,58 @@ def _find_existing_staff(
     email: str | None,
 ) -> dict[str, Any] | None:
     email_lower = email.lower() if email else None
+    if email_lower:
+        for member in existing_staff:
+            member_email = member.get("email")
+            if member_email and member_email.lower() == email_lower:
+                return member
+        return _find_pending_request_by_name(
+            existing_staff, first_name=first_name, last_name=last_name
+        )
     for member in existing_staff:
-        member_email = member.get("email")
-        if email_lower and member_email and member_email.lower() == email_lower:
-            return member
-        member_first = member.get("first_name", "").lower()
-        member_last = member.get("last_name", "").lower()
-        if (
-            not email_lower
-            and member_first == first_name.lower()
-            and member_last == last_name.lower()
-        ):
+        if _names_match(member, first_name=first_name, last_name=last_name):
             return member
     return None
+
+
+async def _merge_m365_duplicate_into_request(
+    existing_staff: list[dict[str, Any]],
+    existing: dict[str, Any],
+    *,
+    first_name: str,
+    last_name: str,
+) -> dict[str, Any]:
+    """Fold a previously auto-created M365 duplicate into its staff request.
+
+    Earlier syncs created a second ``source='m365'`` record instead of
+    filling in the email on the original new staff request. The request holds
+    the onboarding details (groups, approvals, notes), so it is kept and the
+    M365 copy is removed; the caller then writes the directory details onto
+    the request.
+    """
+    if (existing.get("source") or "") != "m365":
+        return existing
+    request = _find_pending_request_by_name(
+        existing_staff, first_name=first_name, last_name=last_name
+    )
+    if not request or request.get("id") == existing.get("id"):
+        return existing
+    # Only a record created after the request can be its sync duplicate; an
+    # older M365 record with the same name is a different person.
+    try:
+        if int(existing["id"]) < int(request["id"]):
+            return existing
+    except (KeyError, TypeError, ValueError):
+        return existing
+    await staff_repo.delete_staff(int(existing["id"]))
+    existing_staff.remove(existing)
+    log_info(
+        "Merged duplicate M365 staff record into staff request",
+        company_id=request.get("company_id"),
+        staff_id=request.get("id"),
+        removed_staff_id=existing.get("id"),
+    )
+    return request
 
 
 async def import_contacts_for_company(
@@ -239,8 +306,16 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
         if email:
             seen_emails.add(email.lower())
 
+        if existing and email:
+            existing = await _merge_m365_duplicate_into_request(
+                existing_staff,
+                existing,
+                first_name=first_name or "Unknown",
+                last_name=last_name or "",
+            )
+
         if existing:
-            await staff_repo.update_staff(
+            updated_staff = await staff_repo.update_staff(
                 existing["id"],
                 company_id=company_id,
                 first_name=first_name or existing.get("first_name", ""),
@@ -265,6 +340,8 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 syncro_contact_id=existing.get("syncro_contact_id"),
                 m365_last_sign_in=m365_last_sign_in,
             )
+            if updated_staff:
+                existing.update(updated_staff)
             updated += 1
         else:
             created_staff = await staff_repo.create_staff(
