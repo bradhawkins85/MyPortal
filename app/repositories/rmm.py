@@ -348,6 +348,27 @@ async def list_tray_device_agents(tray_device_id: int) -> list[dict[str, Any]]:
     return [dict(row) for row in rows or []]
 
 
+async def register_agent_public_key(agent_id: int, public_key: str) -> bool:
+    """Store an agent's public key unless it already has one. Returns whether
+    this call stored it."""
+    now = _utcnow()
+    changed = await db.execute_rowcount(
+        "UPDATE rmm_agents SET public_key = %s, public_key_registered_at = %s, updated_at = %s "
+        "WHERE id = %s AND public_key IS NULL",
+        (public_key, now, now, agent_id),
+    )
+    return changed > 0
+
+
+async def set_agent_public_key(agent_id: int, public_key: str | None) -> None:
+    """Replace (or with ``None`` clear) an agent's public key."""
+    now = _utcnow()
+    await db.execute(
+        "UPDATE rmm_agents SET public_key = %s, public_key_registered_at = %s, updated_at = %s WHERE id = %s",
+        (public_key, now if public_key else None, now, agent_id),
+    )
+
+
 async def get_agent(agent_id: int) -> dict[str, Any] | None:
     return await db.fetch_one("SELECT * FROM rmm_agents WHERE id = %s", (agent_id,))
 

@@ -1420,6 +1420,7 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
 async def _bridge_live_socket(
     websocket: WebSocket, session_id: int, *, send_direction: str, receive_direction: str,
     on_activity=None,
+    authenticate=None,
 ) -> None:
     """Relay JSON frames between one live tools socket and its peer.
 
@@ -1432,6 +1433,11 @@ async def _bridge_live_socket(
 
     relay = Relay(session_id)
     await websocket.accept()
+    # Nothing is relayed until the peer has proved who it is.
+    if authenticate is not None and not await authenticate(websocket):
+        log_warning("Live tools socket refused: key challenge failed", session_id=session_id)
+        await websocket.close(code=4401)
+        return
 
     async def pump_out() -> None:
         async def deliver(payload: str) -> bool:
@@ -1478,10 +1484,18 @@ async def rmm_live_agent_socket(websocket: WebSocket, session_id: int) -> None:
     if not session:
         await websocket.close(code=4404)
         return
-    await live_repo.mark_agent_connected(session_id)
+    from app.services import rmm_agent_key
+
+    async def prove(socket: WebSocket) -> bool:
+        if not await rmm_agent_key.prove_live_session(socket, agent, session_id):
+            return False
+        await live_repo.mark_agent_connected(session_id)
+        return True
+
     try:
         await _bridge_live_socket(
             websocket, session_id, send_direction="to_browser", receive_direction="to_agent",
+            authenticate=prove,
         )
     finally:
         await live_repo.mark_agent_disconnected(session_id)

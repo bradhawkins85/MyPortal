@@ -89,6 +89,7 @@ type StartType struct {
 type Session struct {
 	ID      int64
 	version string
+	answer  func(nonce string) string
 
 	conn   *websocket.Conn
 	send   chan []byte
@@ -156,11 +157,14 @@ func socketURL(baseURL string, id int64) (string, error) {
 }
 
 // Serve runs the session on conn until either side closes it or ctx ends.
-func Serve(ctx context.Context, conn *websocket.Conn, id int64, version string) {
+// answer signs MyPortal's challenge nonce with the agent's key; MyPortal
+// relays nothing until an agent with a registered key has answered.
+func Serve(ctx context.Context, conn *websocket.Conn, id int64, version string, answer func(nonce string) string) {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
 		ID:        id,
 		version:   version,
+		answer:    answer,
 		conn:      conn,
 		send:      make(chan []byte, sendQueue),
 		ctx:       ctx,
@@ -221,6 +225,14 @@ func (s *Session) readLoop() {
 		}
 		_ = s.conn.SetReadDeadline(time.Now().Add(readTimeout))
 		if kind != websocket.TextMessage {
+			continue
+		}
+		var challenge struct {
+			Type  string `json:"type"`
+			Nonce string `json:"nonce"`
+		}
+		if json.Unmarshal(data, &challenge) == nil && challenge.Type == "challenge" {
+			s.answerChallenge(challenge.Nonce)
 			continue
 		}
 		var req Request
@@ -308,6 +320,21 @@ func (s *Session) event(name string, data interface{}) bool {
 
 // write queues a message, waiting while the socket is busy. It returns false
 // once the session has ended.
+func (s *Session) answerChallenge(nonce string) {
+	if s.answer == nil || nonce == "" {
+		log.Printf("live session %d: challenge received but this agent has no key to answer it", s.ID)
+		return
+	}
+	data, err := json.Marshal(map[string]string{"type": "auth", "signature": s.answer(nonce)})
+	if err != nil {
+		return
+	}
+	select {
+	case s.send <- data:
+	case <-s.ctx.Done():
+	}
+}
+
 func (s *Session) write(msg outbound) bool {
 	data, err := json.Marshal(msg)
 	if err != nil {

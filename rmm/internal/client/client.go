@@ -193,7 +193,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out interfac
 			Detail interface{} `json:"detail"`
 		}
 		_ = json.Unmarshal(payload, &detail)
-		return fmt.Errorf("%s %s: HTTP %d %v", method, path, resp.StatusCode, detail.Detail)
+		return &StatusError{Method: method, Path: path, Code: resp.StatusCode, Detail: detail.Detail}
 	}
 	if out == nil {
 		return nil
@@ -206,15 +206,59 @@ func (c *Client) do(ctx context.Context, method, path string, body, out interfac
 // currentToken is the agent's existing auth token, if it has one. MyPortal
 // only re-keys an agent that is still connected when the request proves it
 // holds that token.
-func Enrol(ctx context.Context, baseURL, trayToken, agentUID, currentToken string, details Details) (Enrolment, error) {
+//
+// key carries the agent's public key and, when re-keying an agent that has
+// already registered one, the old key's signature (see internal/agentkey).
+func Enrol(ctx context.Context, baseURL, trayToken, agentUID, currentToken string, key EnrolKey, details Details) (Enrolment, error) {
 	var result Enrolment
 	payload := struct {
 		Details
 		AgentUID         string `json:"agent_uid"`
 		CurrentAuthToken string `json:"current_auth_token,omitempty"`
-	}{details, agentUID, currentToken}
+		PublicKey        string `json:"public_key,omitempty"`
+		KeyProof         string `json:"key_proof,omitempty"`
+	}{details, agentUID, currentToken, key.PublicKey, key.Proof}
 	err := New(baseURL, trayToken).do(ctx, http.MethodPost, "/api/rmm/agent/enrol", payload, &result)
 	return result, err
+}
+
+// EnrolKey is the key material sent with an enrolment.
+type EnrolKey struct {
+	PublicKey string
+	Proof     string
+}
+
+// ErrKeyUnsupported means the portal predates RMM agent keys.
+var ErrKeyUnsupported = errors.New("MyPortal does not take RMM agent keys yet")
+
+// ErrKeyConflict means MyPortal holds a different key for this agent.
+var ErrKeyConflict = errors.New("MyPortal holds a different key for this RMM agent")
+
+// RegisterKey gives MyPortal the agent's public key. Registering the key it
+// already holds succeeds.
+func (c *Client) RegisterKey(ctx context.Context, publicKey string) error {
+	err := c.do(ctx, http.MethodPost, "/api/rmm/agent/key", map[string]string{"public_key": publicKey}, nil)
+	var status *StatusError
+	if errors.As(err, &status) {
+		switch status.Code {
+		case http.StatusNotFound, http.StatusMethodNotAllowed:
+			return ErrKeyUnsupported
+		case http.StatusConflict:
+			return ErrKeyConflict
+		}
+	}
+	return err
+}
+
+// StatusError is an HTTP error answer from MyPortal.
+type StatusError struct {
+	Method, Path string
+	Code         int
+	Detail       interface{}
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s %s: HTTP %d %v", e.Method, e.Path, e.Code, e.Detail)
 }
 
 // Checkin reports the device details.

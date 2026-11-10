@@ -27,6 +27,8 @@ type State struct {
 	PortalURL string `json:"portal_url"`
 	AgentUID  string `json:"agent_uid"`
 	AuthToken string `json:"auth_token"`
+	// PrivateKey is the agent's own Ed25519 key (see internal/agentkey).
+	PrivateKey string `json:"private_key,omitempty"`
 }
 
 // Dir returns the agent's data directory for this platform.

@@ -45,6 +45,7 @@ from app.repositories import rmm as rmm_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import gitea
 from app.services import gitea_sign_in
+from app.services import rmm_agent_key
 from app.services import rmm_script_parser as parser
 from app.services.rmm_output import readable_output
 from app.services import tray as tray_service
@@ -1060,6 +1061,9 @@ async def enrol_agent(
     agent_uid = str(payload.get("agent_uid") or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9._:-]{8,64}", agent_uid):
         raise ValueError("agent_uid must be 8-64 letters, digits, dots, dashes, colons or underscores.")
+    public_key = None
+    if payload.get("public_key"):
+        public_key = rmm_agent_key.normalise_public_key(str(payload.get("public_key")))
     token = tray_service.generate_auth_token()
     token_hash = tray_service.hash_token(token)
     details = _agent_details(payload, client_ip)
@@ -1086,6 +1090,22 @@ async def enrol_agent(
             raise PermissionError(
                 "This RMM agent is already connected. Re-enrol it from its own "
                 "installation, or wait until it has been offline for 30 minutes."
+            )
+        # An agent with a registered key that is still in use can only be
+        # re-keyed by its own installation: the token alone is not enough.
+        if (
+            existing.get("public_key")
+            and not _may_replace_agent(existing, "")
+            and not rmm_agent_key.valid_enrol_proof(existing, current_token, public_key, payload.get("key_proof"))
+        ):
+            log_warning(
+                "RMM re-enrolment refused without the agent's key",
+                agent_id=existing.get("id"),
+                tray_device_id=tray_device_id,
+            )
+            raise PermissionError(
+                "This RMM agent is already connected and has its own key. Re-enrol it from "
+                "its own installation, or wait until it has been offline for 30 minutes."
             )
     # One RMM agent per tray device: a second agent would race the first for
     # scripts and live sessions, so it may only replace an agent that has
@@ -1114,6 +1134,8 @@ async def enrol_agent(
         agent_id = int(existing["id"])
     else:
         agent_id = await rmm_repo.create_agent(agent_uid=agent_uid, **common)
+    if public_key or (existing and existing.get("public_key")):
+        await rmm_repo.set_agent_public_key(agent_id, public_key)
     log_info("RMM agent enrolled", agent_id=agent_id, tray_device_id=tray_device["id"], company_id=company_id)
     return {
         "agent_id": agent_id,
