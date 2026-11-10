@@ -68,6 +68,21 @@ if (Test-Path -LiteralPath $wix) {
 }
 if ($LASTEXITCODE -ne 0) { throw 'Installing WiX failed.' }
 
+# Build the release signature checker and keep the release public key from
+# this checkout, so the agent only builds releases signed by that key.
+$verifier = Join-Path $toolsDir 'myportal-verify-release.exe'
+$releaseKey = Join-Path $InstallDir 'release-public-key.pem'
+Push-Location (Join-Path $PSScriptRoot '..')
+try {
+    $env:CGO_ENABLED = '0'
+    go build -o $verifier ./build-agent/verify-release
+    if ($LASTEXITCODE -ne 0) { throw 'Building the release signature checker failed. Is Go installed?' }
+} finally {
+    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+    Pop-Location
+}
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\internal\release\release-public-key.pem') -Destination $releaseKey -Force
+
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'MyPortalBuildAgent.ps1') -Destination $InstallDir -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'New-MyPortalProvisioningPackage.ps1') -Destination $InstallDir -Force
 
@@ -83,6 +98,8 @@ $configPath = Join-Path $configDir 'config.json'
     WorkDir               = $WorkDir
     WixPath               = $wix
     IcdPath               = $resolvedIcd
+    VerifierPath          = $verifier
+    ReleaseKeyPath        = $releaseKey
 } | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding utf8
 
 # The config holds the API key and the work folder briefly holds install

@@ -44,3 +44,23 @@ def test_refuses_a_key_that_does_not_match_the_built_in_one():
     assert "openssl pkey -in \"$key\" -pubout" in text
     assert str(PUBLIC_KEY) in text
     assert PUBLIC_KEY.read_text().startswith("-----BEGIN PUBLIC KEY-----")
+
+
+def test_signs_the_release_source_for_the_build_server():
+    text = WORKFLOW.read_text()
+    assert "printf 'myportal-source-v1\\ntag=%s\\ncommit=%s\\n'" in text
+    assert "myportal-source.sig" in text
+    go = Path("tray/build-agent/verify-release/main.go").read_text()
+    assert '"myportal-source-v1\\ntag=" + tag + "\\ncommit=" + commit + "\\n"' in go
+
+
+def test_build_agent_checks_the_release_before_building():
+    agent = Path("tray/build-agent/MyPortalBuildAgent.ps1").read_text()
+    clone = agent.index('Invoke-Native "git clone of $Tag"')
+    check = agent.index("Assert-SignedRelease $Tag $src $dir")
+    build = agent.index("go build -ldflags $ldflags")
+    assert clone < check < build
+    installer = Path("tray/build-agent/Install-MyPortalBuildAgent.ps1").read_text()
+    assert "go build -o $verifier ./build-agent/verify-release" in installer
+    assert "release-public-key.pem" in installer
+    assert "VerifierPath" in installer and "ReleaseKeyPath" in installer
