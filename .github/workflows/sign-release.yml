@@ -85,9 +85,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-        with:
-          sparse-checkout: tray/internal/release
+      # No third-party actions run in this job: it holds the signing key.
       - name: Sign the builds
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,7 +105,8 @@ jobs:
 
           # Refuse to sign with a key the agents would not accept.
           openssl pkey -in "$key" -pubout > "$work/pub.pem"
-          built_in=$(cat tray/internal/release/release-public-key.pem)
+          built_in=$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$GITHUB_REPOSITORY/contents/tray/internal/release/release-public-key.pem?ref=$GITHUB_SHA")
           if [ "$(cat "$work/pub.pem")" != "$built_in" ]; then
             echo "RELEASE_SIGNING_KEY does not match the public key in tray/internal/release/release-public-key.pem." >&2
             exit 1

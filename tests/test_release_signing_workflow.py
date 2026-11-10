@@ -18,6 +18,8 @@ def test_only_the_approved_job_can_use_the_signing_key():
     assert users == ["sign"]
     assert jobs["sign"]["environment"] == "release-signing"
     assert "environment" not in jobs["wait"]
+    # The job holding the key runs no third-party actions.
+    assert all("uses" not in step for step in jobs["sign"]["steps"])
 
 
 def test_signs_every_asset_the_agents_install():
