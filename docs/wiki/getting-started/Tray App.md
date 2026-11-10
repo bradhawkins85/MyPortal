@@ -160,7 +160,8 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/config` | GET | Bearer auth_token | Resolved menu + branding + env-var allowlist + chat toggle |
 | `/api/tray/heartbeat` | POST | Bearer auth_token | Liveness ping; updates console user, IP, agent version |
 | `/api/tray/overseer/report` | POST | Bearer auth_token | Overseer report: local service state and recoveries (audited); returns seconds since MyPortal last heard from the tray WebSocket and the RMM agent |
-| `/ws/tray/{device_uid}` | WS | Bearer/`X-Tray-Token` header | Bidirectional command channel |
+| `/api/tray/device-key` | POST | Bearer auth_token | Register the device's Ed25519 public key once (409 when a different key is registered) |
+| `/ws/tray/{device_uid}` | WS | Bearer/`X-Tray-Token` header, then a signed challenge when the device has a key | Bidirectional command channel |
 | `/api/tray/{device_uid}/chat/start` | POST | Authenticated technician | Create a Matrix room and push `chat_open` |
 | `/api/tray/admin/install-tokens` | GET / POST | Super admin | List / create install tokens |
 | `/api/tray/admin/install-tokens/{id}/revoke` | POST | Super admin | Revoke an install token |
@@ -189,6 +190,14 @@ Migrations are applied automatically at startup and are idempotent.
 All endpoints appear in the Swagger UI at `/docs` per project convention.
 
 ### WebSocket protocol (JSON, line-delimited)
+
+When the device has registered a key, the first message after the socket
+opens is a challenge. The device must answer within 15 seconds or the
+socket closes with code 4401, and nothing else is sent until it does:
+
+* Server: `{"type": "challenge", "nonce": "<random>"}`
+* Device: `{"type": "auth", "signature": "<base64 Ed25519 signature>"}` over
+  `myportal-tray-ws-v1\ndevice_uid=<device_uid>\nnonce=<nonce>\n`
 
 **Server → device:**
 * `{"type": "ping"}`
@@ -413,6 +422,21 @@ re-enable the configuration.
   after a lost response); it returns 409 otherwise. To enrol a machine again,
   revoke and delete its device in MyPortal first. Once enrolled, the Windows
   tray removes the install token from `HKLM\Software\MyPortal\Tray`.
+* **Device keys.** The tray service makes its own Ed25519 key pair on first
+  start and keeps the private key in `device-key` in its state folder,
+  readable only by SYSTEM/root and Administrators. It sends the public key
+  when it enrols; devices enrolled by older releases register it once with
+  their device token (`POST /api/tray/device-key`). From then on the
+  WebSocket, which carries every command MyPortal sends the device, opens
+  only after the device signs a fresh challenge, so a device token copied
+  from a log, a backup or the network is not enough to receive the device's
+  commands. The first key a device registers is kept; the portal refuses a
+  different one. If a reinstall replaced the key but kept the device's
+  token, the tray logs that the portal holds a different key and stays
+  offline: a super administrator chooses **Reset key** for the device under
+  Tray → Devices, and the device registers its new key on its next
+  connection. The device list shows *Device key registered* for devices that
+  have one. The HTTP endpoints still accept the device token alone.
 * **Scoped auth.** Tray tokens authenticate **only** the `/api/tray/*`
   device endpoints and the `/ws/tray/*` socket. They cannot call any
   other API. Admin endpoints require an authenticated user with the

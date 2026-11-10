@@ -58,6 +58,8 @@ from app.schemas.tray import (
     TrayChatStartRequest,
     TrayChatStartResponse,
     TrayChatTokenResponse,
+    TrayDeviceKeyRequest,
+    TrayDeviceKeyResponse,
     TrayUITokenResponse,
     TrayConfigResponse,
     TrayEnrolRequest,
@@ -99,6 +101,7 @@ from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import matrix as matrix_service
 from app.services import matrix_ai_waiting_assistant
 from app.services import rmm_agent_deploy
+from app.services import tray_device_key
 from app.services import rmm_scripts
 from app.services import tacticalrmm as tacticalrmm_service
 from app.services import tray_installer
@@ -285,6 +288,13 @@ async def enrol_device(
         ):
             raise HTTPException(status_code=401, detail="Install token has expired")
 
+    public_key = None
+    if payload.public_key:
+        try:
+            public_key = tray_device_key.normalise_public_key(payload.public_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     company_id = token_record.get("company_id")
     device_uid = tray_service.normalise_device_uid(payload.device_uid)
     auth_token = tray_service.generate_auth_token()
@@ -354,6 +364,11 @@ async def enrol_device(
             console_user=payload.console_user,
             status="active",
         )
+    # A new device, or one that never used its first token, takes the key it
+    # enrols with (or none, from an older release).
+    if public_key or device.get("public_key"):
+        await tray_repo.set_device_public_key(int(device["id"]), public_key)
+        device["public_key"] = public_key
 
     # Do this only after ownership/revocation checks and device persistence.
     # Facts supplied on re-enrolment can fill gaps in older device records.
@@ -3094,6 +3109,62 @@ def _parse_popup_session(request: Request) -> dict[str, Any] | None:
     except Exception:
         return None
     return payload
+
+
+@router.post(
+    "/device-key",
+    response_model=TrayDeviceKeyResponse,
+    summary="Register the device's public key (device authenticated)",
+    tags=["Tray App"],
+    responses={409: {"description": "A different key is already registered for this device"}},
+)
+async def register_device_key(
+    payload: TrayDeviceKeyRequest,
+    request: Request,
+    device: dict = Depends(get_current_tray_device),
+) -> TrayDeviceKeyResponse:
+    """Register the Ed25519 public key of a device enrolled by an older
+    release. A device can register a key only once: after that its WebSocket
+    must sign a challenge with the matching private key, and only a super
+    administrator can reset the key (Tray → Devices → Reset key)."""
+
+    try:
+        public_key = tray_device_key.normalise_public_key(payload.public_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    device_id = int(device["id"])
+    if device.get("public_key") == public_key:
+        return TrayDeviceKeyResponse(status="unchanged")
+    if device.get("public_key") or not await tray_repo.register_device_public_key(device_id, public_key):
+        current = await tray_repo.get_device_by_id(device_id)
+        if current and current.get("public_key") == public_key:
+            return TrayDeviceKeyResponse(status="unchanged")
+        log_warning(
+            "Tray device tried to replace its registered key",
+            device_id=device_id,
+            device_uid=device.get("device_uid"),
+        )
+        await audit_service.log_action(
+            action="tray_device_key_conflict",
+            entity_type="tray_device",
+            entity_id=device_id,
+            user_id=None,
+            request=request,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="A different key is already registered for this device. "
+            "A super administrator can reset it in MyPortal.",
+        )
+    await audit_service.log_action(
+        action="tray_device_key_registered",
+        entity_type="tray_device",
+        entity_id=device_id,
+        user_id=None,
+        request=request,
+    )
+    log_info("Tray device key registered", device_id=device_id)
+    return TrayDeviceKeyResponse(status="registered")
 
 
 @router.post(

@@ -30,6 +30,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -54,6 +55,7 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/config"
 	"github.com/bradhawkins85/myportal-tray/internal/defender"
+	"github.com/bradhawkins85/myportal-tray/internal/devicekey"
 	"github.com/bradhawkins85/myportal-tray/internal/healthcheck"
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
@@ -321,6 +323,12 @@ type daemon struct {
 	cachedConfig       *api.ConfigResponse
 	defenderCommands   chan struct{}
 	defenderDetections chan struct{}
+
+	// deviceKey proves to the portal that a WebSocket comes from this device.
+	// It is nil when the key file could not be read or written.
+	deviceKey ed25519.PrivateKey
+	// wsWriteMu serialises writes to the WebSocket connection.
+	wsWriteMu sync.Mutex
 }
 
 func newDaemon(cfg *config.Config) *daemon {
@@ -701,7 +709,77 @@ func (d *daemon) startIPCServer() (*ipc.Server, error) {
 	}
 }
 
+// loadDeviceKey reads (or on first start makes) the device's key pair.
+// Without it the device still works with a portal that has no key for it.
+func (d *daemon) loadDeviceKey() {
+	if d.deviceKey != nil {
+		return
+	}
+	key, err := devicekey.LoadOrCreate(stateDir())
+	if err != nil {
+		logger.Warn("Could not load the device key: %v", err)
+		return
+	}
+	d.deviceKey = key
+}
+
+func (d *daemon) devicePublicKey() string {
+	if d.deviceKey == nil {
+		return ""
+	}
+	return devicekey.PublicKey(d.deviceKey)
+}
+
+// registerDeviceKey gives the portal this device's public key before each
+// WebSocket connection. The portal keeps the first key it receives, so this
+// only matters once (or after a super administrator resets the key); later
+// calls confirm the same key.
+func (d *daemon) registerDeviceKey() {
+	public := d.devicePublicKey()
+	if public == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err := d.client.RegisterDeviceKey(ctx, public)
+	switch {
+	case err == nil:
+	case errors.Is(err, api.ErrDeviceKeyUnsupported):
+		logger.Debug("Portal does not take tray device keys yet")
+	case errors.Is(err, api.ErrDeviceKeyConflict):
+		logger.Error("The portal holds a different key for this device, so it will refuse the connection. " +
+			"A super administrator can reset the device key under Tray → Devices.")
+	default:
+		logger.Warn("Could not register the device key: %v", err)
+	}
+}
+
+// writeWS sends one JSON message; gorilla/websocket allows one writer at a time.
+func (d *daemon) writeWS(conn *websocket.Conn, v any) error {
+	d.wsWriteMu.Lock()
+	defer d.wsWriteMu.Unlock()
+	return conn.WriteJSON(v)
+}
+
+// answerChallenge signs the portal's WebSocket challenge with the device key.
+func (d *daemon) answerChallenge(conn *websocket.Conn, msg map[string]json.RawMessage) {
+	var nonce string
+	_ = json.Unmarshal(msg["nonce"], &nonce)
+	if d.deviceKey == nil || nonce == "" {
+		logger.Warn("WS challenge received but this device has no key to answer it")
+		return
+	}
+	reply := map[string]string{
+		"type":      "auth",
+		"signature": devicekey.SignChallenge(d.deviceKey, d.client.DeviceUID(), nonce),
+	}
+	if err := d.writeWS(conn, reply); err != nil {
+		logger.Warn("WS challenge reply failed: %v", err)
+	}
+}
+
 func (d *daemon) ensureEnrolled() error {
+	d.loadDeviceKey()
 	s := loadState()
 	if s != nil && s.AuthToken != "" {
 		d.client.SetAuth(s.DeviceUID, s.AuthToken)
@@ -749,6 +827,7 @@ func (d *daemon) ensureEnrolled() error {
 		Hostname:     facts.Hostname,
 		SerialNumber: facts.SerialNumber,
 		AgentVersion: updater.AgentVersion,
+		PublicKey:    d.devicePublicKey(),
 	})
 	if err != nil {
 		return err
@@ -778,6 +857,7 @@ func (d *daemon) wsLoop() {
 		default:
 		}
 
+		d.registerDeviceKey()
 		ctx, cancel := context.WithCancel(context.Background())
 		conn, err := d.client.ConnectWS(ctx)
 		if err != nil {
@@ -812,7 +892,7 @@ func (d *daemon) handleWS(ctx context.Context, conn *websocket.Conn) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := conn.WriteJSON(map[string]string{"type": "pong"}); err != nil {
+				if err := d.writeWS(conn, map[string]string{"type": "pong"}); err != nil {
 					return
 				}
 			}
@@ -830,6 +910,10 @@ func (d *daemon) handleWS(ctx context.Context, conn *websocket.Conn) {
 		msgType := ""
 		if t, ok := msg["type"]; ok {
 			_ = json.Unmarshal(t, &msgType)
+		}
+		if msgType == "challenge" {
+			d.answerChallenge(conn, msg)
+			continue
 		}
 		d.dispatchWSMessage(msgType, msg)
 	}

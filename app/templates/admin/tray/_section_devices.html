@@ -106,6 +106,7 @@
                   {% else %}
                     <span class="status status--danger">Revoked</span>
                   {% endif %}
+                  {% if device.public_key %}<div class="data-table__sub">Device key registered</div>{% endif %}
                 </td>
                 <td data-value="{{ ((device.os or '') ~ ' ' ~ (device.os_version or ''))|trim|lower }}">{{ device.os or '—' }} {{ device.os_version or '' }}</td>
                 <td data-value="{{ (device.console_user or '')|lower }}">{{ device.console_user or '—' }}</td>
@@ -133,6 +134,12 @@
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <button type="submit" class="button button--small button--danger">Revoke</button>
                     </form>
+                    {% if device.public_key %}
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/reset-key" class="inline-form" data-confirm="Reset this device's key? Only do this after reinstalling the tray on this device. The next device to connect with its token registers a new key.">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small">Reset key</button>
+                    </form>
+                    {% endif %}
                     <form method="post" action="/api/wol/devices/{{ device.id }}/wake" class="inline-form" data-confirm="Wake this device? A WoL magic packet will be broadcast by other online agents on its network. The result is tracked for about 2 minutes.">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <button type="submit" class="button button--small">Wake</button>

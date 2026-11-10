@@ -198,6 +198,9 @@ func TestEnrolmentRetryRetainsIdentityAcrossServiceRestart(t *testing.T) {
 	if len(requests) != 2 || requests[0].DeviceUID != requests[1].DeviceUID {
 		t.Fatalf("enrolment identities changed: %#v", requests)
 	}
+	if requests[0].PublicKey == "" || requests[0].PublicKey != requests[1].PublicKey {
+		t.Fatalf("enrolment must send the same device key on retry: %#v", requests)
+	}
 	if d.client.DeviceUID() != pending.DeviceUID || loadState().AuthToken != "device-auth" {
 		t.Fatal("credentials were not installed and persisted")
 	}
