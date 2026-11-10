@@ -8,16 +8,34 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// consoleUserName returns the account signed in to the active console
-// session. The service runs as SYSTEM, whose USERNAME is the machine account
-// (COMPUTERNAME$), so it asks the session's token instead.
+// consoleUserName returns the account in use on the device now. The service
+// runs as SYSTEM, whose USERNAME is the machine account (COMPUTERNAME$), so
+// it reads each session's token instead. Users left signed in but switched
+// away from or disconnected are skipped, so the person actually at the
+// machine (or the active remote session) is reported.
 func consoleUserName() string {
-	sessionID, _, _ := procWTSGetActiveConsole.Call()
-	if uint32(sessionID) == 0xFFFFFFFF {
+	consoleID, _, _ := procWTSGetActiveConsole.Call()
+	var info *windows.WTS_SESSION_INFO
+	var count uint32
+	if err := windows.WTSEnumerateSessions(0, 0, 1, &info, &count); err != nil {
 		return ""
 	}
+	defer windows.WTSFreeMemory(uintptr(unsafe.Pointer(info)))
+	sessions := make([]consoleSession, 0, count)
+	for _, s := range unsafe.Slice(info, count) {
+		if s.State != windows.WTSActive {
+			continue
+		}
+		sessions = append(sessions, consoleSession{
+			ID: s.SessionID, Active: true, User: sessionUserName(s.SessionID),
+		})
+	}
+	return pickConsoleUser(sessions, uint32(consoleID))
+}
+
+func sessionUserName(sessionID uint32) string {
 	var token windows.Token
-	if ret, _, _ := procWTSQueryUserToken.Call(sessionID, uintptr(unsafe.Pointer(&token))); ret == 0 {
+	if err := windows.WTSQueryUserToken(sessionID, &token); err != nil {
 		return ""
 	}
 	defer token.Close()

@@ -273,6 +273,15 @@ type HeartbeatRequest struct {
 	ConsoleUser  string `json:"console_user,omitempty"`
 	AgentVersion string `json:"agent_version,omitempty"`
 	LastIP       string `json:"last_ip,omitempty"`
+	// ConsoleUserActive is false when nobody is signed in, so the portal
+	// keeps showing the last user marked as no longer signed in.
+	ConsoleUserActive *bool `json:"console_user_active,omitempty"`
+}
+
+// NewHeartbeatRequest reports user as the signed-in user ("" for nobody).
+func NewHeartbeatRequest(user, agentVersion string) HeartbeatRequest {
+	active := user != ""
+	return HeartbeatRequest{ConsoleUser: user, AgentVersion: agentVersion, ConsoleUserActive: &active}
 }
 
 // DefenderPolicy is the effective Defender configuration for this device.
@@ -663,7 +672,7 @@ func (c *Client) RequestChatToken(ctx context.Context, roomID int) (*ChatTokenRe
 }
 
 // PostWolSent tells MyPortal that this agent broadcast a Wake-on-LAN magic
-// packet for the attempt. ``errMsg`` is non-empty when the broadcast failed.
+// packet for the attempt. “errMsg“ is non-empty when the broadcast failed.
 func (c *Client) PostWolSent(ctx context.Context, attemptID int, errMsg string) error {
 	if attemptID <= 0 {
 		return fmt.Errorf("wol: attempt id is required")

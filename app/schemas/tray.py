@@ -65,6 +65,8 @@ class TrayTRMMSyncResponse(BaseModel):
 
 class TrayHeartbeatRequest(BaseModel):
     console_user: Optional[str] = Field(default=None, max_length=255)
+    # False when nobody is signed in; console_user then keeps the last user.
+    console_user_active: Optional[bool] = None
     agent_version: Optional[str] = Field(default=None, max_length=32)
     last_ip: Optional[str] = Field(default=None, max_length=64)
 

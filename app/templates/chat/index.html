@@ -146,7 +146,7 @@
           </td>
           <td data-column="device" data-label="Device">{{ room.device_name or '—' }}</td>
           <td data-column="company" data-label="Company">{{ room.company_name or '—' }}</td>
-          <td data-column="console-user" data-label="Console user">{{ room.console_user or '—' }}</td>
+          <td data-column="console-user" data-label="Console user">{% if room.console_user and room.console_user_active in (0, false) %}<em title="Nobody is signed in now; this is the last logged in user">{{ room.console_user }}</em>{% else %}{{ room.console_user or '—' }}{% endif %}</td>
           <td data-column="status" data-label="Status">
             <span class="badge badge--{% if room.status == 'open' %}operational{% else %}neutral{% endif %}">
               {{ room.status | capitalize }}

@@ -464,6 +464,22 @@ def test_device_create_update_revoke(tray_db, run):
     assert updated["console_user"] == "bob"
     assert updated["last_ip"] == "10.0.0.5"
 
+    # Nobody signed in: keep the last user, mark it as no longer signed in.
+    run(repo.update_device_heartbeat(
+        int(device["id"]), console_user=None, last_ip=None, agent_version=None,
+        console_user_active=False,
+    ))
+    updated = run(repo.get_device_by_uid("dev-1"))
+    assert updated["console_user"] == "bob"
+    assert not updated["console_user_active"]
+    run(repo.update_device_heartbeat(
+        int(device["id"]), console_user="carol", last_ip=None, agent_version=None,
+        console_user_active=True,
+    ))
+    updated = run(repo.get_device_by_uid("dev-1"))
+    assert updated["console_user"] == "carol"
+    assert updated["console_user_active"]
+
     run(repo.revoke_device(int(device["id"])))
     assert run(repo.get_device_by_auth_hash(svc.hash_token(new_raw))) is None
     run(repo.reactivate_device(int(device["id"])))
