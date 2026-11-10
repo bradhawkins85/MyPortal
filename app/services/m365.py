@@ -4535,6 +4535,61 @@ async def clear_company_pkce_client_id(company_id: int) -> None:
     log_info("Cleared per-company M365 PKCE client ID", company_id=company_id)
 
 
+async def _adopt_or_create_license_staff(
+    *,
+    company_id: int,
+    user: dict[str, Any],
+    email: str,
+    account_enabled: bool,
+    last_sign_in: datetime | None,
+) -> dict[str, Any]:
+    """Return the staff record for a licensed M365 user with no email match.
+
+    A new staff request has no email until its account is created, so adopt
+    that request (by name) and fill in the email instead of creating a
+    duplicate that would lose the request's onboarding details.
+    """
+    first = (user.get("givenName") or "").strip() or "Unknown"
+    last = (user.get("surname") or "").strip() or user.get("displayName") or ""
+    pending = await staff_repo.get_pending_staff_request_by_name(
+        company_id, first, last
+    )
+    if pending:
+        await staff_repo.set_staff_email(int(pending["id"]), email)
+        if last_sign_in is not None:
+            await staff_repo.update_m365_last_sign_in(int(pending["id"]), last_sign_in)
+        log_info(
+            "M365 licence sync matched staff request by name",
+            company_id=company_id,
+            staff_id=pending["id"],
+        )
+        return {**pending, "email": email}
+    return await staff_repo.create_staff(
+        company_id=company_id,
+        first_name=first,
+        last_name=last,
+        email=email,
+        mobile_phone=None,
+        date_onboarded=None,
+        date_offboarded=None,
+        enabled=account_enabled,
+        is_ex_staff=not account_enabled,
+        street=None,
+        city=None,
+        state=None,
+        postcode=None,
+        country=None,
+        department=None,
+        job_title=None,
+        org_company=None,
+        manager_name=None,
+        account_action="Onboarded" if account_enabled else "Offboarded",
+        syncro_contact_id=None,
+        source="m365",
+        m365_last_sign_in=last_sign_in,
+    )
+
+
 async def _sync_staff_assignments(
     *,
     company_id: int,
@@ -4582,35 +4637,13 @@ async def _sync_staff_assignments(
                 account_enabled = bool(user.get("accountEnabled", True))
                 staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
                 if not staff:
-                    first = (user.get("givenName") or "").strip() or "Unknown"
-                    last = (
-                        (user.get("surname") or "").strip() or user.get("displayName") or ""
-                    )
-                    created = await staff_repo.create_staff(
+                    staff = await _adopt_or_create_license_staff(
                         company_id=company_id,
-                        first_name=first or "Unknown",
-                        last_name=last or "",
+                        user=user,
                         email=email,
-                        mobile_phone=None,
-                        date_onboarded=None,
-                        date_offboarded=None,
-                        enabled=account_enabled,
-                        is_ex_staff=not account_enabled,
-                        street=None,
-                        city=None,
-                        state=None,
-                        postcode=None,
-                        country=None,
-                        department=None,
-                        job_title=None,
-                        org_company=None,
-                        manager_name=None,
-                        account_action="Onboarded" if account_enabled else "Offboarded",
-                        syncro_contact_id=None,
-                        source="m365",
-                        m365_last_sign_in=last_sign_in,
+                        account_enabled=account_enabled,
+                        last_sign_in=last_sign_in,
                     )
-                    staff = created
                 elif last_sign_in is not None:
                     await staff_repo.update_m365_last_sign_in(
                         int(staff["id"]), last_sign_in
@@ -4653,35 +4686,13 @@ async def _sync_staff_assignments(
                     account_enabled = bool(user.get("accountEnabled", True))
                     staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
                     if not staff:
-                        first = (user.get("givenName") or "").strip() or "Unknown"
-                        last = (
-                            (user.get("surname") or "").strip() or user.get("displayName") or ""
-                        )
-                        created = await staff_repo.create_staff(
+                        staff = await _adopt_or_create_license_staff(
                             company_id=company_id,
-                            first_name=first or "Unknown",
-                            last_name=last or "",
+                            user=user,
                             email=email,
-                            mobile_phone=None,
-                            date_onboarded=None,
-                            date_offboarded=None,
-                            enabled=account_enabled,
-                            is_ex_staff=not account_enabled,
-                            street=None,
-                            city=None,
-                            state=None,
-                            postcode=None,
-                            country=None,
-                            department=None,
-                            job_title=None,
-                            org_company=None,
-                            manager_name=None,
-                            account_action="Onboarded" if account_enabled else "Offboarded",
-                            syncro_contact_id=None,
-                            source="m365",
-                            m365_last_sign_in=None,
+                            account_enabled=account_enabled,
+                            last_sign_in=None,
                         )
-                        staff = created
                     assigned_emails.add(email)
                     await license_repo.link_staff_to_license(int(staff["id"]), license_id)
                 url = payload.get("@odata.nextLink")
