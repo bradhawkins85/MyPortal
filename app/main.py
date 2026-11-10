@@ -1350,6 +1350,12 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
     if not device.get("asset_id"):
         await tray_service.provision_device_for_checkin(device)
     await websocket.accept()
+    from app.services import tray_device_key
+
+    if not await tray_device_key.prove_possession(websocket, device):
+        log_warning("Tray WebSocket refused: device key challenge failed", device_uid=device_uid)
+        await websocket.close(code=4401)
+        return
     tray_service.register_connection(device_uid, websocket)
     await tray_service.mark_websocket_alive(device)
     # The device may hold a menu cached before a config change or a server
@@ -9218,6 +9224,36 @@ async def admin_tray_revoke_device(device_id: int, request: Request):
 
     await tray_service.revoke_device(device_id)
     return RedirectResponse(url="/admin/tray#devices", status_code=303)
+
+
+@app.post("/admin/tray/devices/{device_id}/reset-key", response_class=HTMLResponse)
+async def admin_tray_reset_device_key(device_id: int, request: Request):
+    """Forget a device's registered key, so it can register a new one. Use it
+    when a reinstall replaced the key but kept the device's token."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+    from app.services import tray as tray_service
+
+    device = await tray_repo.get_device_by_id(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Tray device not found")
+    await tray_repo.set_device_public_key(device_id, None)
+    # Close the live connection so it reconnects and registers its key.
+    await tray_service.close_device_connection(str(device.get("device_uid") or ""))
+    await audit_service.log_action(
+        action="tray_device_key_reset",
+        entity_type="tray_device",
+        entity_id=device_id,
+        user_id=int(current_user["id"]),
+        request=request,
+    )
+    return flash_redirect(
+        "/admin/tray#devices",
+        "Device key reset. The device registers its current key the next time it connects.",
+        "success",
+    )
 
 
 @app.post("/admin/tray/devices/{device_id}/reactivate", response_class=HTMLResponse)

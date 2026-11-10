@@ -88,6 +88,9 @@ type EnrolRequest struct {
 	SerialNumber string `json:"serial_number,omitempty"`
 	AgentVersion string `json:"agent_version,omitempty"`
 	ConsoleUser  string `json:"console_user,omitempty"`
+	// PublicKey is the device's Ed25519 public key (base64). Once the portal
+	// has it, the WebSocket must answer a signed challenge.
+	PublicKey string `json:"public_key,omitempty"`
 }
 
 // EnrolResponse mirrors the server's TrayEnrolResponse schema.
@@ -511,6 +514,36 @@ func (c *Client) IssueUIToken(ctx context.Context) (string, error) {
 		return "", errors.New("ui-token: empty token")
 	}
 	return out.UIToken, nil
+}
+
+// ErrDeviceKeyUnsupported means the portal predates device keys.
+var ErrDeviceKeyUnsupported = errors.New("portal does not take tray device keys")
+
+// ErrDeviceKeyConflict means the portal holds a different key for this
+// device; a super administrator must reset it.
+var ErrDeviceKeyConflict = errors.New("portal holds a different key for this device")
+
+// RegisterDeviceKey gives the portal this device's public key. Registering
+// the key the portal already holds succeeds. It needs the device token.
+func (c *Client) RegisterDeviceKey(ctx context.Context, publicKey string) error {
+	body, err := json.Marshal(map[string]string{"public_key": publicKey})
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, "/api/tray/device-key", body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return ErrDeviceKeyUnsupported
+	case http.StatusConflict:
+		return ErrDeviceKeyConflict
+	}
+	return fmt.Errorf("device-key: HTTP %d", resp.StatusCode)
 }
 
 // VersionResponse mirrors the server's TrayVersionResponse schema.

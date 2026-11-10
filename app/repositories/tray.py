@@ -462,6 +462,31 @@ async def set_device_ui_token(
     )
 
 
+async def register_device_public_key(device_id: int, public_key: str) -> bool:
+    """Store a device's public key unless it already has one. Returns whether
+    this call stored it."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # A static statement: the MySQL adapter turns the ``?`` placeholders into ``%s``.
+    changed = await db.execute_rowcount(
+        "UPDATE tray_devices SET public_key = ?, public_key_registered_at = ?, updated_at = ? "
+        "WHERE id = ? AND public_key IS NULL",
+        (public_key, now, now, device_id),
+    )
+    return changed > 0
+
+
+async def set_device_public_key(device_id: int, public_key: str | None) -> None:
+    """Replace (or with ``None`` clear) a device's public key."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    registered = now if public_key else None
+    # A static statement: the MySQL adapter turns the ``?`` placeholders into ``%s``.
+    await db.execute(
+        "UPDATE tray_devices SET public_key = ?, public_key_registered_at = ?, updated_at = ? "
+        "WHERE id = ?",
+        (public_key, registered, now, device_id),
+    )
+
+
 async def get_device_by_ui_token_hash(ui_token_hash: str) -> dict[str, Any] | None:
     placeholder = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(

@@ -1097,6 +1097,16 @@ def register_connection(device_uid: str, websocket: Any) -> None:
     _active_connections[device_uid] = websocket
 
 
+async def close_device_connection(device_uid: str) -> None:
+    """Close the device's WebSocket if this worker holds it."""
+    websocket = _active_connections.pop(device_uid, None) if device_uid else None
+    if websocket is not None:
+        try:
+            await websocket.close(code=4401)
+        except Exception:  # noqa: BLE001 - already closing
+            pass
+
+
 def unregister_connection(device_uid: str, websocket: Any) -> None:
     current = _active_connections.get(device_uid)
     if current is websocket:
@@ -1133,13 +1143,7 @@ async def revoke_device(device_id: int) -> None:
     except Exception as exc:  # noqa: BLE001 - the RMM feature may not be installed
         log_warning("Could not revoke RMM agents for tray device", device_id=device_id, error=str(exc))
         revoked_agents = 0
-    device_uid = str((device or {}).get("device_uid") or "")
-    websocket = _active_connections.pop(device_uid, None) if device_uid else None
-    if websocket is not None:
-        try:
-            await websocket.close(code=4401)
-        except Exception:  # noqa: BLE001 - already closing
-            pass
+    await close_device_connection(str((device or {}).get("device_uid") or ""))
     log_info("Tray device revoked", device_id=device_id, rmm_agents_revoked=revoked_agents)
 
 
