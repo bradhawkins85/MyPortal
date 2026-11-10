@@ -42,17 +42,20 @@ func showWindowsNotification(title, body string) {
 	}()
 }
 
-func showChatSessionNotification(title, body, chatURL string) {
+// showChatSessionNotification shows a BurntToast notification with an
+// "Open chat" button and reports true. When that is not possible it starts a
+// MessageBoxW (which blocks until dismissed) in the background and reports
+// false, so the caller opens the chat window itself.
+func showChatSessionNotification(title, body, chatURL string) bool {
 	if strings.TrimSpace(chatURL) == "" {
 		showWindowsNotification(title, body)
-		return
+		return false
 	}
-	go func() {
-		if showBurntToastNotification(title, body, "Open chat", chatURL) {
-			return
-		}
-		showWindowsMessageBox(title, windowsChatNotificationMessage(body, chatURL))
-	}()
+	if showBurntToastNotification(title, body, "Open chat", chatURL) {
+		return true
+	}
+	go showWindowsMessageBox(title, windowsChatNotificationMessage(body, chatURL))
+	return false
 }
 
 func windowsChatNotificationMessage(body, chatURL string) string {

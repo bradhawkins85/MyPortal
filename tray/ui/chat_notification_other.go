@@ -2,6 +2,9 @@
 
 package main
 
-func showChatSessionNotification(title, body, chatURL string) {
+// showChatSessionNotification reports false: these notifications have no
+// "Open chat" button, so the chat window opens as well.
+func showChatSessionNotification(title, body, chatURL string) bool {
 	showOSNotification(title, body)
+	return false
 }
