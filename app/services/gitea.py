@@ -401,3 +401,76 @@ def public_settings(settings: GiteaSettings) -> GiteaSettings:
 def private_files_settings(settings: GiteaSettings) -> GiteaSettings:
     """The private repository of files scripts deploy, owned by the scripts owner."""
     return _files_repository(settings, PRIVATE_FILES_REPOSITORY)
+
+
+async def token_login(settings: GiteaSettings) -> str:
+    """The Gitea account MyPortal's API token belongs to."""
+
+    try:
+        async with _client(settings) as client:
+            response = await client.get(settings.base_url + "/api/v1/user")
+    except httpx.HTTPError as exc:
+        raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
+    _raise_for(response, "reading the API token's account")
+    login = str((response.json() or {}).get("login") or "")
+    if not login:
+        raise GiteaError("Gitea did not say which account the API token belongs to.")
+    return login
+
+
+_GLOB_SPECIAL = re.compile(r"([\\*?\[\]{}!])")
+
+
+def glob_literal(text: str) -> str:
+    """``text`` escaped for a Gitea branch protection file pattern."""
+
+    return _GLOB_SPECIAL.sub(r"\\\1", text)
+
+
+def _same_names(current: Any, wanted: list[str]) -> bool:
+    return sorted(str(name).casefold() for name in current or []) == sorted(name.casefold() for name in wanted)
+
+
+async def protect_branch(settings: GiteaSettings, writers: Iterable[str], open_patterns: Iterable[str]) -> bool:
+    """Let only ``writers`` change the branch, except for files matching
+    ``open_patterns``, which anyone with write access may still change.
+
+    Gitea checks every pushed, web-edited or API commit against the rule, so
+    a technician's write grant covers only the open files. Returns whether
+    the rule was created or changed."""
+
+    names = sorted({name for name in writers if name}, key=str.casefold)
+    patterns = ";".join(pattern for pattern in open_patterns if pattern)
+    wanted: dict[str, Any] = {
+        "enable_push": True,
+        "enable_push_whitelist": True,
+        "push_whitelist_usernames": names,
+        "push_whitelist_deploy_keys": False,
+        "enable_merge_whitelist": True,
+        "merge_whitelist_usernames": names,
+        "unprotected_file_patterns": patterns,
+    }
+    collection = _repo_url(settings) + "/branch_protections"
+    rule_url = collection + "/" + quote(settings.branch, safe="")
+    action = "protecting the " + settings.repo + " branch " + settings.branch
+    try:
+        async with _client(settings) as client:
+            current = await client.get(rule_url)
+            if current.status_code == 404:
+                response = await client.post(
+                    collection, json={"rule_name": settings.branch, "branch_name": settings.branch, **wanted}
+                )
+            else:
+                _raise_for(current, action)
+                rule = current.json() or {}
+                if (
+                    all(rule.get(key) == value for key, value in wanted.items() if not key.endswith("_usernames"))
+                    and _same_names(rule.get("push_whitelist_usernames"), names)
+                    and _same_names(rule.get("merge_whitelist_usernames"), names)
+                ):
+                    return False
+                response = await client.patch(rule_url, json=wanted)
+    except httpx.HTTPError as exc:
+        raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
+    _raise_for(response, action)
+    return True

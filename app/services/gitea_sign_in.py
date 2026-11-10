@@ -40,6 +40,7 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import users as user_repo
 from app.security.menu_permissions import normalize_menu_permissions
 from app.services import gitea
+from app.services import rmm_script_layout as layout
 
 PERMISSION = "menu.rmm_script_editing"
 _RANK = {"none": 0, "read": 1, "write": 2}
@@ -236,4 +237,43 @@ async def reconcile_accounts() -> int:
         _granted.pop(user_id, None)
         changed += 1
         log_info("Script repository access updated", login=login, permission=level)
+    return changed
+
+
+def open_file_patterns(path: str) -> list[str]:
+    """Files every technician with write access may change: everything in
+    ``Common/`` and the scripts inside company folders. The hidden
+    ``.myportal-company`` files that link each folder to its company, and the
+    top-level files, stay with super administrators and MyPortal, so a
+    technician cannot point a folder at another company's devices."""
+
+    prefix = gitea.glob_literal(path.strip("/").lower() + "/") if path.strip("/") else ""
+    common = layout.COMMON_FOLDER.lower()
+    companies = layout.COMPANIES_FOLDER.lower()
+    # Gitea matches lower-cased paths and treats "." and "/" as separators, so
+    # "?" never matches the leading dot of the company link file.
+    return [prefix + common + "/**", prefix + companies + "/**/?**"]
+
+
+async def protect_company_links() -> int:
+    """Limit changes to the company link files in the script and Private-Files
+    repositories to super administrators and MyPortal's own account.
+    Returns the number of branch rules created or changed."""
+
+    settings = await gitea.load_settings()
+    writers = [await gitea.token_login(settings)]
+    for account in await rmm_repo.list_gitea_accounts():
+        if account.get("permission") != "write":
+            continue
+        user = await user_repo.get_user_by_id(int(account["user_id"]))
+        if user and user.get("is_super_admin") and is_user_active(user):
+            writers.append(str(account["gitea_login"]))
+    changed = 0
+    for repository in (settings, gitea.private_files_settings(settings)):
+        try:
+            if await gitea.protect_branch(repository, writers, open_file_patterns(repository.path)):
+                changed += 1
+                log_info("Protected company link files", repository=repository.repo, writers=len(writers))
+        except gitea.GiteaError as exc:
+            log_warning("Could not protect company link files", repository=repository.repo, error=str(exc))
     return changed

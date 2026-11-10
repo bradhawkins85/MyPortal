@@ -92,10 +92,21 @@ in Administration → Roles:
 | --- | --- |
 | No access | The Gitea sign-in page; **Open Gitea** is hidden on the Scripts page |
 | Read | Can view and download the script repository |
-| Write | Can change scripts, create branches and merge pull requests |
+| Write | Can change scripts and create branches; only super administrators merge pull requests into the main branch |
 
 Super administrators always have write access. The permission covers the whole repository,
 including every company folder, and any one of a technician's company roles is enough.
+
+Technicians with write access can change every script in `Common/` and in the company folders,
+but not the `.myportal-company` files that link each folder to its company, or the files at the
+top of the repository. Without that, a technician could link a folder to another company and
+run its scripts on that company's devices. Every ten minutes MyPortal sets a branch protection
+rule on the scripts branch and on `Private-Files` so that only super administrators who have
+opened Gitea, and MyPortal's own account, can change those files or merge pull requests.
+Renaming or deleting a company folder therefore needs a super administrator. The rule replaces
+the push and merge settings of any rule you made yourself for that branch; other settings, such
+as required approvals, are kept. A super administrator who opens Gitea for the first time can
+change the link files once the next ten-minute check has run.
 
 - The first visit creates the technician's Gitea account, named after the start of their email
   address and their MyPortal user id (for example `jsmith-12`), and adds it to the script
@@ -156,7 +167,7 @@ MyPortal creates these folders itself, along with a folder for every company, on
 every ten minutes, so a new company gets its folder without anyone touching Gitea. Archived
 companies do not get a new folder. Git cannot store an empty folder, so each company folder
 holds a small `.myportal-company` file that records which company it belongs to; leave it in
-place. Because of that file you can rename a company folder in Gitea and it stays linked. A
+place. Because of that file a super administrator can rename a company folder in Gitea and it stays linked. A
 folder you make yourself under `Companies/` is linked to the company with the same name.
 The same folder maintenance applies to `Private-Files`.
 
