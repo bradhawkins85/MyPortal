@@ -64,3 +64,13 @@ def test_build_agent_checks_the_release_before_building():
     assert "go build -o $verifier ./build-agent/verify-release" in installer
     assert "release-public-key.pem" in installer
     assert "VerifierPath" in installer and "ReleaseKeyPath" in installer
+
+
+def test_build_agent_installer_fetches_source_when_run_on_its_own():
+    installer = Path("tray/build-agent/Install-MyPortalBuildAgent.ps1").read_text()
+    fetch = installer.index("git clone --quiet --depth 1 --branch $SourceRef")
+    build = installer.index("go build -o $verifier ./build-agent/verify-release")
+    assert fetch < build
+    assert "Push-Location $trayRoot" in installer
+    assert "Join-Path $PSScriptRoot '..'" not in installer
+    assert "Remove-Item -LiteralPath $sourceClone" in installer
