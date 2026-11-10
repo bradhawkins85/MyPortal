@@ -64,23 +64,51 @@ func handleChatOpen(payload chatOpenPayload) {
 		return
 	}
 	title, body := chatNotificationText(payload)
+	rememberAnnounced(payload.RoomID, payload.Message)
 	announceChatRoom(payload.RoomID, title, body)
 }
 
 func handleChatMessage(payload chatMessagePayload) {
-	// The first technician message in a room opens the chat window and shows
-	// a notification.  Later replies only open or focus the chat window: it is
-	// the active conversation surface and keeps polling the room while open.
-	// Closed rooms are rejected by the popup/token endpoints so stale messages
-	// do not create a fresh "Chat from <device>" room.
-	if markChatRoomAnnounced(payload.RoomID) {
-		title, body := chatMessageNotificationText(payload)
-		announceChatRoom(payload.RoomID, title, body)
+	// Every technician message opens or focuses the chat window and shows a
+	// notification, so a reply is noticed even when the user closed the
+	// chat. The one exception is the message chat_open already announced.
+	markChatRoomAnnounced(payload.RoomID)
+	if recentlyAnnounced(payload.RoomID, payload.Message) {
 		return
 	}
-	if chatURL := chatOpenURL(payload.RoomID); chatURL != "" {
-		go openChatWindowFunc(chatURL, gConfig)
+	title, body := chatMessageNotificationText(payload)
+	announceChatRoom(payload.RoomID, title, body)
+}
+
+const announceDedupWindow = 30 * time.Second
+
+type announcedMessage struct {
+	text string
+	at   time.Time
+}
+
+var (
+	lastAnnouncedMu sync.Mutex
+	lastAnnounced   = map[int]announcedMessage{}
+)
+
+func rememberAnnounced(roomID int, text string) {
+	lastAnnouncedMu.Lock()
+	defer lastAnnouncedMu.Unlock()
+	lastAnnounced[roomID] = announcedMessage{text: strings.TrimSpace(text), at: time.Now()}
+}
+
+// recentlyAnnounced reports whether chat_open just announced this same text,
+// so the matching chat_message does not notify twice.
+func recentlyAnnounced(roomID int, text string) bool {
+	lastAnnouncedMu.Lock()
+	defer lastAnnouncedMu.Unlock()
+	prev, ok := lastAnnounced[roomID]
+	if !ok {
+		return false
 	}
+	delete(lastAnnounced, roomID)
+	return prev.text == strings.TrimSpace(text) && time.Since(prev.at) < announceDedupWindow
 }
 
 func announceChatRoom(roomID int, title, body string) {

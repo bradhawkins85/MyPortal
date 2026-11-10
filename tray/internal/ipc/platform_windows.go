@@ -34,35 +34,27 @@ func dialPlatform(path string) (net.Conn, error) {
 	return conn, nil
 }
 
-// verifyPipeServer checks the process serving the pipe runs as LocalSystem,
-// so the UI never takes chats or notifications from a user's impostor.
+// verifyPipeServer checks the pipe is owned by LocalSystem or the
+// Administrators group, so the UI never takes chats or notifications from a
+// standard user's impostor pipe. It reads the pipe's owner rather than the
+// server process token, which standard users are not allowed to open.
 func verifyPipeServer(conn net.Conn) error {
 	f, ok := conn.(interface{ Fd() uintptr })
 	if !ok {
 		return fmt.Errorf("ipc: pipe handle unavailable")
 	}
-	var pid uint32
-	if err := windows.GetNamedPipeServerProcessId(windows.Handle(f.Fd()), &pid); err != nil {
-		return fmt.Errorf("ipc: pipe server process: %w", err)
-	}
-	proc, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	sd, err := windows.GetSecurityInfo(windows.Handle(f.Fd()), windows.SE_KERNEL_OBJECT, windows.OWNER_SECURITY_INFORMATION)
 	if err != nil {
-		return fmt.Errorf("ipc: open pipe server process: %w", err)
+		return fmt.Errorf("ipc: pipe owner: %w", err)
 	}
-	defer windows.CloseHandle(proc) //nolint:errcheck
-	var token windows.Token
-	if err := windows.OpenProcessToken(proc, windows.TOKEN_QUERY, &token); err != nil {
-		return fmt.Errorf("ipc: pipe server token: %w", err)
+	owner, _, err := sd.Owner()
+	if err != nil || owner == nil {
+		return fmt.Errorf("ipc: pipe owner: %v", err)
 	}
-	defer token.Close() //nolint:errcheck
-	user, err := token.GetTokenUser()
-	if err != nil {
-		return fmt.Errorf("ipc: pipe server user: %w", err)
+	if owner.IsWellKnown(windows.WinLocalSystemSid) || owner.IsWellKnown(windows.WinBuiltinAdministratorsSid) {
+		return nil
 	}
-	if !user.User.Sid.IsWellKnown(windows.WinLocalSystemSid) {
-		return fmt.Errorf("ipc: pipe server is not running as LocalSystem")
-	}
-	return nil
+	return fmt.Errorf("ipc: pipe is owned by %s, not LocalSystem or Administrators", owner.String())
 }
 
 func removeSocket(_ string) {}
