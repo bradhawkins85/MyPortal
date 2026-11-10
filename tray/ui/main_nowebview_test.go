@@ -18,6 +18,9 @@ func resetAnnouncedChatRooms(t *testing.T) {
 	announcedChatRoomsMu.Lock()
 	announcedChatRooms = map[int]bool{}
 	announcedChatRoomsMu.Unlock()
+	lastAnnouncedMu.Lock()
+	lastAnnounced = map[int]announcedMessage{}
+	lastAnnouncedMu.Unlock()
 	t.Cleanup(func() {
 		announcedChatRoomsMu.Lock()
 		announcedChatRooms = map[int]bool{}
@@ -25,7 +28,7 @@ func resetAnnouncedChatRooms(t *testing.T) {
 	})
 }
 
-func TestHandleIPCMessageAnnouncesFirstChatMessageOnly(t *testing.T) {
+func TestHandleIPCMessageNotifiesEveryChatMessage(t *testing.T) {
 	resetAnnouncedChatRooms(t)
 	previousNotify := showChatSessionNotificationFunc
 	previousOpen := openChatWindowFunc
@@ -78,8 +81,8 @@ func TestHandleIPCMessageAnnouncesFirstChatMessageOnly(t *testing.T) {
 
 	notifyMu.Lock()
 	defer notifyMu.Unlock()
-	if len(titles) != 1 {
-		t.Fatalf("notifications = %d, want only the first message to notify", len(titles))
+	if len(titles) != 2 {
+		t.Fatalf("notifications = %d, want one for each message", len(titles))
 	}
 	for _, want := range []string{"Alex Tech", "Printer offline", "Please try printing again."} {
 		if !strings.Contains(bodies[0], want) {
