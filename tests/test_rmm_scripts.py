@@ -1,6 +1,7 @@
 """RMM scripting: parameter/env detection, Gitea sync, runs, results and pages."""
 from __future__ import annotations
 
+import base64
 import json
 import re
 from pathlib import Path
@@ -373,7 +374,7 @@ async def sqlite_db(monkeypatch):
                  "517_rmm_onboarding_inventory_gate.sql", "518_rmm_script_result_rules.sql",
                  "522_rmm_event_log_min_level.sql", "530_rmm_script_default_run_as.sql",
                  "531_rmm_meshcentral_nodes.sql", "544_rmm_live_sessions.sql", "547_rmm_ordered_actions.sql",
-                 "548_rmm_script_run_scheduled_for.sql"):
+                 "548_rmm_script_run_scheduled_for.sql", "551_rmm_agent_key.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -2034,3 +2035,122 @@ async def test_one_rmm_agent_per_tray_device(sqlite_db):
     assert await rmm_scripts.authenticate_agent(first["auth_token"]) is None
     assert (await rmm_repo.get_agent(int(agent["id"])))["status"] == "replaced"
     assert [a["id"] for a in await rmm_repo.list_tray_device_agents(5)] == [replacement["id"]]
+
+
+def _agent_key():
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    private = Ed25519PrivateKey.generate()
+    public = private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    return private, base64.b64encode(public).decode()
+
+
+async def _enrol_with_key(uid, *, public_key=None, current_token=None, proof=None):
+    result = await rmm_scripts.enrol_agent(
+        tray_device={"id": 5, "company_id": 1, "asset_id": 10},
+        payload={"agent_uid": uid, "hostname": "PC", "os": "windows", "current_auth_token": current_token,
+                 "public_key": public_key, "key_proof": proof},
+        client_ip=None,
+    )
+    return result, await rmm_repo.get_agent(result["agent_id"])
+
+
+@pytest.mark.anyio
+async def test_agent_with_a_key_needs_it_to_re_key(sqlite_db):
+    from app.services import rmm_agent_key
+
+    uid = "agent-uid-key1"
+    private, public = _agent_key()
+    first, agent = await _enrol_with_key(uid, public_key=public)
+    assert agent["public_key"] == public and agent["public_key_registered_at"]
+
+    # The current token alone no longer re-keys an agent that is in use.
+    with pytest.raises(PermissionError):
+        await _enrol_with_key(uid, public_key=public, current_token=first["auth_token"])
+    wrong, _ = _agent_key()
+    forged = base64.b64encode(
+        wrong.sign(rmm_agent_key.enrol_proof_message(uid, first["auth_token"], public))
+    ).decode()
+    with pytest.raises(PermissionError):
+        await _enrol_with_key(uid, public_key=public, current_token=first["auth_token"], proof=forged)
+    assert await rmm_scripts.authenticate_agent(first["auth_token"]) is not None
+
+    # The agent's own installation signs with its key and may rotate it.
+    _, rotated = _agent_key()
+    proof = base64.b64encode(
+        private.sign(rmm_agent_key.enrol_proof_message(uid, first["auth_token"], rotated))
+    ).decode()
+    second, agent = await _enrol_with_key(uid, public_key=rotated, current_token=first["auth_token"], proof=proof)
+    assert agent["public_key"] == rotated
+    assert await rmm_scripts.authenticate_agent(first["auth_token"]) is None
+
+    # A replayed request fails: the token it proves has been replaced.
+    with pytest.raises(PermissionError):
+        await _enrol_with_key(uid, public_key=rotated, current_token=first["auth_token"], proof=proof)
+
+    # An agent that has gone quiet can still be replaced by a reinstall.
+    await sqlite_db.execute(
+        "UPDATE rmm_agents SET last_seen_utc = %s WHERE id = %s", ("2020-01-01 00:00:00", agent["id"])
+    )
+    _, reinstall_key = _agent_key()
+    _, agent = await _enrol_with_key(uid, public_key=reinstall_key)
+    assert agent["public_key"] == reinstall_key
+
+
+@pytest.mark.anyio
+async def test_enrol_proof_message_is_fixed():
+    from app.services import rmm_agent_key
+
+    assert rmm_agent_key.enrol_proof_message("a", "foo", "pk") == (
+        b"myportal-rmm-enrol-v1\nagent_uid=a\ncurrent_token_sha256="
+        b"2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae\npublic_key=pk\n"
+    )
+    assert rmm_agent_key.live_message("a", 7, "n") == b"myportal-rmm-live-v1\nagent_uid=a\nsession_id=7\nnonce=n\n"
+
+
+@pytest.mark.anyio
+async def test_older_agent_registers_its_key_once(sqlite_db):
+    from app.services import rmm_agent_key
+
+    first, agent = await _enrol_with_key("agent-uid-key2")
+    assert agent["public_key"] is None
+    _, public = _agent_key()
+    _, other = _agent_key()
+    assert await rmm_agent_key.register(agent, public) == "registered"
+    assert await rmm_agent_key.register(agent, public) == "unchanged"
+    stored = await rmm_repo.get_agent(agent["id"])
+    assert await rmm_agent_key.register(stored, public) == "unchanged"
+    with pytest.raises(PermissionError):
+        await rmm_agent_key.register(stored, other)
+    with pytest.raises(ValueError):
+        await rmm_agent_key.register(stored, "not a key")
+    assert (await rmm_repo.get_agent(agent["id"]))["public_key"] == public
+
+
+@pytest.mark.anyio
+async def test_live_session_challenge_uses_the_agent_key():
+    from app.services import rmm_agent_key
+
+    private, public = _agent_key()
+    agent = {"agent_uid": "agent-uid-key3", "public_key": public}
+
+    class Socket:
+        def __init__(self, sign_with):
+            self.sent = []
+            self.sign_with = sign_with
+
+        async def send_json(self, message):
+            self.sent.append(message)
+
+        async def receive_json(self):
+            nonce = self.sent[-1]["nonce"]
+            message = rmm_agent_key.live_message(agent["agent_uid"], 4, nonce)
+            return {"type": "auth", "signature": base64.b64encode(self.sign_with.sign(message)).decode()}
+
+    assert await rmm_agent_key.prove_live_session(Socket(private), agent, 4)
+    other, _ = _agent_key()
+    assert not await rmm_agent_key.prove_live_session(Socket(other), agent, 4)
+    unchallenged = Socket(private)
+    assert await rmm_agent_key.prove_live_session(unchallenged, {"agent_uid": "x", "public_key": None}, 4)
+    assert unchallenged.sent == []

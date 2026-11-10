@@ -13,7 +13,7 @@ import asyncio
 import base64
 import binascii
 import secrets
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -46,16 +46,22 @@ def challenge_message(device_uid: str, nonce: str) -> bytes:
     return ("myportal-tray-ws-v1\ndevice_uid=" + device_uid + "\nnonce=" + nonce + "\n").encode("utf-8")
 
 
-def verify(public_key: str, device_uid: str, nonce: str, signature: Any) -> bool:
+def verify_signature(public_key: str, message: bytes, signature: Any) -> bool:
+    """Whether ``signature`` (base64) is ``public_key``'s signature of ``message``."""
+
     try:
         raw_signature = base64.b64decode(str(signature or ""), validate=True)
         if len(raw_signature) != SIGNATURE_BYTES:
             return False
         key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key, validate=True))
-        key.verify(raw_signature, challenge_message(device_uid, nonce))
+        key.verify(raw_signature, message)
     except (InvalidSignature, binascii.Error, ValueError):
         return False
     return True
+
+
+def verify(public_key: str, device_uid: str, nonce: str, signature: Any) -> bool:
+    return verify_signature(public_key, challenge_message(device_uid, nonce), signature)
 
 
 async def _await_auth(websocket: Any) -> Any:
@@ -66,20 +72,36 @@ async def _await_auth(websocket: Any) -> Any:
     return None
 
 
-async def prove_possession(websocket: Any, device: Mapping[str, Any]) -> bool:
-    """Challenge an accepted WebSocket to sign with the device's registered
-    key. A device without a key (an older release) passes unchallenged."""
+async def challenge_socket(
+    websocket: Any, public_key: str, message_for: Callable[[str], bytes], *, announce: bool = False
+) -> bool:
+    """Send a fresh nonce and check the signed reply. ``announce`` sends the
+    challenge, marked ``"required": false``, even without a key, for a
+    protocol where the client reads it first; only a key is then waited for."""
 
-    public_key = device.get("public_key")
+    if not public_key and not announce:
+        return True
+    nonce = new_nonce()
+    challenge: dict[str, Any] = {"type": "challenge", "nonce": nonce}
+    if announce:
+        challenge["required"] = bool(public_key)
+    await websocket.send_json(challenge)
     if not public_key:
         return True
-    device_uid = str(device.get("device_uid") or "")
-    nonce = new_nonce()
-    await websocket.send_json({"type": "challenge", "nonce": nonce})
     try:
         signature = await asyncio.wait_for(_await_auth(websocket), CHALLENGE_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         return False
     except Exception:  # noqa: BLE001 - a disconnect or malformed frame fails the challenge
         return False
-    return verify(str(public_key), device_uid, nonce, signature)
+    return verify_signature(public_key, message_for(nonce), signature)
+
+
+async def prove_possession(websocket: Any, device: Mapping[str, Any]) -> bool:
+    """Challenge an accepted WebSocket to sign with the device's registered
+    key. A device without a key (an older release) passes unchallenged."""
+
+    device_uid = str(device.get("device_uid") or "")
+    return await challenge_socket(
+        websocket, str(device.get("public_key") or ""), lambda nonce: challenge_message(device_uid, nonce)
+    )

@@ -50,6 +50,7 @@ from app.services import audit as audit_service
 from app.services import gitea
 from app.services import gitea_sign_in
 from app.services import rmm_agent_deploy
+from app.services import rmm_agent_key
 from app.services import rmm_agent_uninstall
 from app.services import rmm_automation
 from app.services import rmm_checks
@@ -1058,6 +1059,21 @@ class AgentEnrolRequest(AgentDetails):
         max_length=200,
         description="The agent's existing auth token, proving it is the agent being re-enrolled.",
     )
+    public_key: str | None = Field(
+        default=None,
+        max_length=64,
+        description="The agent's Ed25519 public key (32 bytes, base64).",
+    )
+    key_proof: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Signature by the agent's registered key over myportal-rmm-enrol-v1, the agent UID, "
+        "the SHA-256 of current_auth_token and public_key. Needed to re-key an agent that is in use.",
+    )
+
+
+class AgentKeyRequest(BaseModel):
+    public_key: str = Field(min_length=40, max_length=64, description="Ed25519 public key, base64")
 
 
 @router.post("/api/rmm/agent/enrol", summary="Enrol the RMM agent installed with a tray device")
@@ -1083,6 +1099,32 @@ async def agent_enrol(payload: AgentEnrolRequest, request: Request, tray_device:
     if result.pop("created", False):
         await rmm_automation.on_agent_enrolled(int(result["agent_id"]))
     return result
+
+
+@router.post(
+    "/api/rmm/agent/key",
+    summary="Register the RMM agent's public key",
+    responses={409: {"description": "A different key is already registered for this agent"}},
+)
+async def agent_register_key(payload: AgentKeyRequest, request: Request, agent: dict = Depends(get_current_rmm_agent)):
+    """Register the Ed25519 public key of an agent enrolled by an older release.
+    The first key is kept; re-enrolling the agent replaces it."""
+    try:
+        result = await rmm_agent_key.register(agent, payload.public_key)
+    except PermissionError as exc:
+        await audit_service.record(
+            action="rmm.agent.key_conflict", request=request, entity_type="rmm_agent",
+            entity_id=agent.get("id"), actor="rmm-agent",
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if result == "registered":
+        await audit_service.record(
+            action="rmm.agent.key_registered", request=request, entity_type="rmm_agent",
+            entity_id=agent.get("id"), actor="rmm-agent",
+        )
+    return {"status": result}
 
 
 @router.post("/api/rmm/agent/checkin", summary="Report RMM agent details")
