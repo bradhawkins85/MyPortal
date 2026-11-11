@@ -8,6 +8,11 @@ from app.services.workflow_variable_functions import (
     parse_pipeline,
 )
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 VARS = {"staff": {"first_name": "John", "last_name": " Smith ", "full_name": "John Smith"}}
 
 
@@ -66,3 +71,38 @@ def test_schema_rejects_unknown_function():
     with pytest.raises(ValueError, match="unknown function"):
         WorkflowStepDefinition(key="s", name="S", config={"email": "${vars.staff.first_name | bogus}"})
     WorkflowStepDefinition(key="s", name="S", config={"email": "${vars.staff.first_name | left(1)}"})
+
+
+@pytest.mark.anyio
+async def test_create_user_sends_function_shaped_upn_to_graph(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.services import staff_onboarding_workflows as workflows
+
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
+    graph_post = AsyncMock(return_value={"id": "user-1"})
+    monkeypatch.setattr(workflows.m365_service, "_graph_post", graph_post)
+    vars_map = {"staff": {"first_name": " Jane ", "last_name": "O'Citizen"}}
+    raw_step = {
+        "type": "create_user",
+        "user_principal_name": "${vars.staff.first_name | trim | alnum | lower}"
+        "${vars.staff.last_name | trim | alnum | left(1) | lower}@alchemycs.com.au",
+        "display_name": "${vars.staff.first_name | trim} ${vars.staff.last_name}",
+    }
+    step = workflows._resolve_template_value(raw_step, vars_map=vars_map)
+
+    result = await workflows._execute_policy_step(
+        step=step,
+        company_id=9,
+        staff={"id": 1, "email": ""},
+        policy_config={},
+        vars_map=vars_map,
+    )
+
+    payload = graph_post.await_args_list[0].args[2]
+    assert payload["userPrincipalName"] == "janeo@alchemycs.com.au"
+    assert payload["mailNickname"] == "janeo"
+    assert payload["displayName"] == "Jane O'Citizen"
+    assert result["user_principal_name"] == "janeo@alchemycs.com.au"
