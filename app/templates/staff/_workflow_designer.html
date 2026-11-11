@@ -291,7 +291,7 @@
     <header class="modal__header scf-editor__header">
       <div>
         <h2 class="modal__title" id="swf-variables-title">Variables in this workflow</h2>
-        <p class="scf-editor__subtitle">Type <code>${vars.name}</code> in any text field, or use the variable helper while editing a step. Values from a step are only available to the steps after it.</p>
+        <p class="scf-editor__subtitle">Type <code>${vars.name}</code> in any text field, or use the variable helper while editing a step. Values from a step are only available to the steps after it. Shape a value with text functions, e.g. <code>${vars.staff.first_name}${vars.staff.last_name | left(1)}</code> gives <code>JohnS</code> for John Smith.</p>
       </div>
       <button type="button" class="modal__close" data-modal-close aria-label="Close variables reference"></button>
     </header>
