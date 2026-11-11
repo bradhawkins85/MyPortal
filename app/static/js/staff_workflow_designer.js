@@ -32,7 +32,7 @@
   const DEFAULT_STEP_TYPE = String(pageConfig.default_step_type || '');
   const API_BASE = `/staff/workflows/${DIRECTION}/policies`;
   const STORAGE_KEY = `myportal.staffWorkflows.${DIRECTION}.selected`;
-  const VAR_PATTERN = /\$\{vars\.([A-Za-z0-9_.-]+)\}/g;
+  const VAR_PATTERN = /\$\{vars\.([A-Za-z0-9_.-]+)(?:\s*\|[^{}]*)?\}/g;
   const KEY_PATTERN = /[^a-z0-9_.-]+/g;
   // Engine aliases and namespaces that are always resolvable at run time.
   const ALWAYS_KNOWN = new Set([

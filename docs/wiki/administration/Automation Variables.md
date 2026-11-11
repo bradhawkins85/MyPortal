@@ -267,6 +267,31 @@ Staff workflow steps (onboarding and offboarding) support `${vars.*}` interpolat
 
 Backward-compatible aliases remain available: `${vars.staff_first_name}`, `${vars.staff_last_name}`, `${vars.staff_full_name}`, and `${vars.staff_email}`.
 
+### Text functions
+
+Pipe a workflow variable through one or more functions with `|` to trim or reshape it. Functions run left to right and can be chained, e.g. `${vars.staff.last_name | trim | left(1) | upper}`.
+
+Example: for John Smith, `${vars.staff.first_name}${vars.staff.last_name | left(1)}@mycompany.com.au` renders `JohnS@mycompany.com.au`.
+
+| Function | What it does | Example (`John Smith`) |
+| --- | --- | --- |
+| `left(n)` | First `n` characters. | `left(1)` → `J` |
+| `right(n)` | Last `n` characters. | `right(3)` → `ith` |
+| `mid(start, length)` | Characters from `start` (1 = first); length optional. | `mid(6, 2)` → `Sm` |
+| `trim` / `ltrim` / `rtrim` | Remove spaces at both ends / the start / the end. | |
+| `len` | Number of characters. | `10` |
+| `upper` / `lower` / `proper` | Change case. | `lower` → `john smith` |
+| `replace(find, with)` | Replace text; omit `with` to remove it. Quote values with spaces or commas. | `replace(" ", ".")` → `John.Smith` |
+| `word(n)` | The `n`th word; negative counts from the end. | `word(2)` → `Smith` |
+| `first_word` / `last_word` | First or last word. | `last_word` → `Smith` |
+| `initials` | First letter of each word. | `JS` |
+| `nospace` | Remove all whitespace. | `JohnSmith` |
+| `alnum` | Keep only letters and digits (handy for O'Brien → OBrien). | |
+| `pad_left(width, char)` | Pad on the left to `width` (default `0`). | |
+| `default(text)` | Use `text` when the value is blank. | |
+
+Unknown functions or bad arguments are rejected when the workflow is saved.
+
 ### Date/time tokens (`now.*`)
 
 Workflow execution context always includes UTC date/time tokens:

@@ -1,0 +1,7 @@
+{
+  "guid": "82469b35-dd54-4491-b8fa-52743fced485",
+  "occurred_at": "2026-11-11T02:06Z",
+  "change_type": "Feature",
+  "summary": "Staff onboarding and offboarding workflows can now shape variables with text functions such as left, right, mid, trim, len, upper, lower and replace, so formats like JohnS@company.com can be built with ${vars.staff.first_name}${vars.staff.last_name | left(1)}.",
+  "content_hash": "5cfb8b7c49398597c66322dcb06c912c8a37884204094e07b17fe6df7a1c0682"
+}

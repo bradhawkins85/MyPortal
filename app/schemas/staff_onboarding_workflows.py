@@ -5,8 +5,28 @@ from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.services import workflow_variable_functions
+
 
 _WORKFLOW_KEY_PATTERN = re.compile(r"[^a-z0-9_.-]+")
+
+
+_PIPED_VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)(\s*\|[^{}]*)\}")
+
+
+def _validate_variable_functions(value: Any) -> None:
+    if isinstance(value, str):
+        for match in _PIPED_VAR_PATTERN.finditer(value):
+            try:
+                workflow_variable_functions.parse_pipeline(match.group(1) + match.group(2))
+            except workflow_variable_functions.VariableFunctionError as exc:
+                raise ValueError(f"{match.group(0)}: {exc}.") from exc
+    elif isinstance(value, dict):
+        for item in value.values():
+            _validate_variable_functions(item)
+    elif isinstance(value, list):
+        for item in value:
+            _validate_variable_functions(item)
 
 
 class WorkflowStepDefinition(BaseModel):
@@ -34,6 +54,7 @@ class WorkflowStepDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_vault_secret_source(self) -> "WorkflowStepDefinition":
+        _validate_variable_functions(self.config)
         step_type = str(self.config.get("type") or self.key).strip().lower()
         if step_type == "create_myportal_credential":
             source = str(self.config.get("secret_source") or "").strip()
