@@ -413,6 +413,7 @@ func (d *daemon) run() {
 	d.updater = updater.New(d.client, d.cfg.AutoUpdate)
 	go d.updater.Run(updateCtx)
 	go d.rmmVersionLoop(updateCtx)
+	go d.minidumpLoop(updateCtx)
 
 	// Main WS + heartbeat loop.
 	go cleanupHealthCheckPawnIO()

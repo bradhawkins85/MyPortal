@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/bradhawkins85/myportal-tray/internal/minidump"
 )
 
 // Client wraps the MyPortal REST + WebSocket API for tray devices.
@@ -934,6 +936,24 @@ func (c *Client) PostHealthCheckResult(ctx context.Context, healthCheckID, comma
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		return fmt.Errorf("health-check result: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// PostMinidumps reports decoded blue screen dumps. Only these summaries are
+// sent; the dump files stay on the computer.
+func (c *Client) PostMinidumps(ctx context.Context, dumps []minidump.Summary) error {
+	body, err := json.Marshal(map[string]any{"dumps": dumps})
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, "/api/tray/minidumps", body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("minidump report: HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
