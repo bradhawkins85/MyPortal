@@ -292,7 +292,7 @@ given by an environment variable and is skipped without it).
 
 ## Out of scope
 
-Full `MEMORY.DMP` and kernel dumps, application crash dumps, uploading or
+Full and kernel memory dumps (`MEMORY.DMP`), application crash dumps, uploading or
 downloading the dump file, Microsoft symbols and function names, running a
 debugger on the computer, automatic analysis of new dumps, automations or
 notifications when a blue screen is reported, and macOS or Linux panics.
