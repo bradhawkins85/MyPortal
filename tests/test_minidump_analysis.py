@@ -343,3 +343,295 @@ async def test_ingest_prunes(store):
         ]
         await service.ingest(_device(5), dumps)
     assert await repo.count_for_asset(10) == 50
+
+
+# --------------------------------------------------------------------------- #
+# Analysis
+# --------------------------------------------------------------------------- #
+
+LLM = {"base_url": "http://llm.test", "model": "test-model", "api_key": ""}
+REPORT = {
+    "likely_cause": "The Realtek wireless driver touched memory at a raised IRQL.",
+    "category": "driver", "suspect": "rtwlane.sys (Realtek wireless LAN driver)", "confidence": "medium",
+    "evidence": ["Parameter 4 points into rtwlane.sys"], "steps": ["Update the Realtek wireless driver"],
+    "further_checks": ["Run Windows Memory Diagnostic"],
+    "sources": [{"title": "Fix DRIVER_IRQL", "url": "/knowledge-base/articles/fix-driver-irql"}],
+}
+
+
+@pytest.fixture
+async def analysis(store, monkeypatch):
+    state = {"chats": [], "notes": [], "scheduled": [], "kb_terms": [], "web_terms": [], "reply": json.dumps(REPORT),
+             "web_enabled": False, "web_error": None, "ai_allowed": True, "model": "test-model",
+             "tickets": {3: {"id": 3, "company_id": 1, "subject": "Blue screens", "status": "open"},
+                         4: {"id": 4, "company_id": 2, "subject": "Other company", "status": "open"},
+                         5: {"id": 5, "company_id": 1, "subject": "Not linked", "status": "open"}},
+             "ticket_assets": {3: [10], 4: [20], 5: [11]}}
+
+    async def chat(llm, messages):
+        state["chats"].append((dict(llm), messages))
+        if isinstance(state["reply"], Exception):
+            raise state["reply"]
+        return state["reply"]
+
+    async def search_kb(ticket_like, terms):
+        state["kb_terms"].append((dict(ticket_like), list(terms)))
+        return [{"id": 9, "slug": "fix-driver-irql", "title": "Fix DRIVER_IRQL", "summary": "s", "content": "c"}]
+
+    async def research(terms):
+        state["web_terms"].append(list(terms))
+        if state["web_error"]:
+            raise RuntimeError(state["web_error"])
+        return [{"title": "Vendor advice", "url": "https://vendor.example/advice", "snippet": "", "content": "text"}]
+
+    async def add_note(ticket_id, body_html):
+        state["notes"].append((ticket_id, body_html))
+        return {"id": len(state["notes"])}
+
+    async def get_ticket(ticket_id):
+        return state["tickets"].get(ticket_id)
+
+    async def list_ticket_assets(ticket_id):
+        return [{"asset_id": asset_id} for asset_id in state["ticket_assets"].get(ticket_id, [])]
+
+    async def ai_allowed(ticket):
+        return state["ai_allowed"]
+
+    def schedule(coro, *, description, dump_id):
+        state["scheduled"].append((description, dump_id, coro))
+
+    monkeypatch.setattr(service, "_chat", chat)
+    monkeypatch.setattr(service.ai_troubleshooter, "_search_kb", search_kb)
+    monkeypatch.setattr(service.troubleshoot_web_search, "is_enabled", lambda: state["web_enabled"])
+    monkeypatch.setattr(service.troubleshoot_web_search, "research", research)
+    monkeypatch.setattr(service.tray_service, "add_troubleshoot_note", add_note)
+    monkeypatch.setattr(service.tray_service, "build_troubleshoot_llm_config",
+                        lambda model=None: dict(LLM, model=state["model"]))
+    monkeypatch.setattr(service.tickets_repo, "get_ticket", get_ticket)
+    monkeypatch.setattr(service.tickets_repo, "list_ticket_assets", list_ticket_assets)
+    monkeypatch.setattr(service.ai_consent, "is_ai_allowed_for_ticket", ai_allowed)
+    monkeypatch.setattr(service, "_schedule", schedule)
+    monkeypatch.setattr(service, "_utcnow", lambda: NOW)
+    yield state
+    for _description, _dump_id, coro in state["scheduled"]:
+        coro.close()
+
+
+async def _ingested(**overrides) -> dict:
+    await service.ingest(_device(5), [_summary(**overrides)], now=NOW)
+    return (await repo.list_for_asset(10))[0]
+
+
+async def _run(state) -> None:
+    _description, _dump_id, coro = state["scheduled"].pop()
+    await coro
+
+
+def test_research_terms():
+    dump = {"bugcheck_code": 0xD1, "suspect_driver": "rtwlane.sys",
+            "summary": {"drivers": [{"name": "secret-vendor.sys"}], "file_name": "111126-8765-01.dmp"}}
+    assert service.research_terms(dump) == ["DRIVER_IRQL_NOT_LESS_OR_EQUAL rtwlane.sys", "DRIVER_IRQL_NOT_LESS_OR_EQUAL"]
+    assert service.research_terms({"bugcheck_code": 0xABCD, "suspect_driver": None}) == ["bug check 0x0000ABCD"]
+    assert service.research_terms({"bugcheck_code": 0xABCD, "suspect_driver": "x.sys"}) == [
+        "bug check 0x0000ABCD x.sys", "bug check 0x0000ABCD"]
+    assert service.research_terms({"bugcheck_code": None, "suspect_driver": "<b>"}) == []
+
+
+def test_parse_report_normalises():
+    data = dict(REPORT, category="Banana", confidence="certain", steps=[f"step {i}" for i in range(30)],
+                likely_cause="x" * 9000, suspect="y" * 900, evidence="not a list")
+    report = service.parse_report(data, "", allowed_sources=[])
+    assert report["category"] == "unknown" and report["confidence"] == "low"
+    assert len(report["steps"]) == 12 and len(report["likely_cause"]) == 2000 and len(report["suspect"]) == 200
+    assert report["evidence"] == [] and report["sources"] == []
+    assert report["web_error"] == "" and report["ticket_note"] == ""
+
+
+def test_parse_report_keeps_only_supplied_sources():
+    allowed = [{"title": "Fix DRIVER_IRQL", "url": "/knowledge-base/articles/fix-driver-irql"},
+               {"title": "Vendor advice", "url": "https://vendor.example/advice"},
+               {"title": "Bad", "url": "javascript:alert(1)"}]
+    data = dict(REPORT, sources=[
+        {"title": "<b>renamed</b>", "url": "/knowledge-base/articles/fix-driver-irql"},
+        {"title": "Invented", "url": "https://evil.example/"},
+        {"title": "Bad", "url": "javascript:alert(1)"},
+        "https://vendor.example/advice", {"url": 5}, None,
+    ])
+    report = service.parse_report(data, "", allowed_sources=allowed)
+    assert report["sources"] == [
+        {"title": "Fix DRIVER_IRQL", "url": "/knowledge-base/articles/fix-driver-irql"},
+        {"title": "Vendor advice", "url": "https://vendor.example/advice"},
+    ]
+
+
+def test_parse_report_falls_back_to_text():
+    report = service.parse_report(None, "It was the Wi-Fi driver.", allowed_sources=[])
+    assert report["likely_cause"] == "It was the Wi-Fi driver." and report["confidence"] == "low"
+    assert report["steps"] == [] and report["category"] == "unknown"
+
+
+@pytest.mark.anyio
+async def test_start_analysis_refusals(analysis):
+    dump = await _ingested()
+    analysis["model"] = ""
+    with pytest.raises(service.MinidumpError, match="No LLM model is configured for the AI assistant."):
+        await service.start_analysis(dump=dump, requested_by={"id": 1})
+    analysis["model"] = "test-model"
+
+    for ticket_id in (4, 5, 999):
+        with pytest.raises(service.MinidumpError, match="Choose a ticket linked to this asset.") as caught:
+            await service.start_analysis(dump=dump, requested_by={"id": 1}, ticket_id=ticket_id)
+        assert caught.value.status_code == 400
+    assert (await repo.get_dump(dump["id"]))["analysis_status"] == "none" and not analysis["scheduled"]
+
+    result = await service.start_analysis(dump=dump, requested_by={"id": 1}, ticket_id=3)
+    assert result == {"id": dump["id"], "analysis_status": "analysing", "ticket_id": 3}
+    with pytest.raises(service.MinidumpError, match="This dump is already being analysed.") as caught:
+        await service.start_analysis(dump=dump, requested_by={"id": 2})
+    assert caught.value.status_code == 409 and len(analysis["scheduled"]) == 1
+
+    await service.ingest(_device(5), [_summary(file_name="bad.dmp", supported=False, error="not a kernel dump")], now=NOW)
+    bad = next(row for row in await repo.list_for_asset(10) if row["file_name"] == "bad.dmp")
+    with pytest.raises(service.MinidumpError, match="This dump could not be decoded, so it cannot be analysed."):
+        await service.start_analysis(dump=bad, requested_by={"id": 1})
+
+
+@pytest.mark.anyio
+async def test_run_analysis_saves_the_report(analysis):
+    dump = await _ingested()
+    await service.start_analysis(dump=dump, requested_by={"id": 7})
+    assert analysis["scheduled"][0][:2] == ("analysis", dump["id"])
+    await _run(analysis)
+    row = await repo.get_dump(dump["id"])
+    assert row["analysis_status"] == "completed" and row["model"] == "test-model"
+    assert row["analysed_by_user_id"] == 7 and row["analysed_at"] is not None and row["analysis_error"] is None
+    report = row["analysis"]
+    assert report["likely_cause"] == REPORT["likely_cause"] and report["category"] == "driver"
+    assert report["sources"] == REPORT["sources"] and report["ticket_note"] == "" and report["web_error"] == ""
+    llm, messages = analysis["chats"][0]
+    assert llm["model"] == "test-model"
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "0x000000D1 DRIVER_IRQL_NOT_LESS_OR_EQUAL" in prompt and "rtwlane.sys" in prompt
+    assert "Address of the instruction that referenced the memory" in prompt
+    assert "Fix DRIVER_IRQL" in prompt and "/knowledge-base/articles/fix-driver-irql" in prompt
+    # Knowledge base search is scoped to the asset's company; the web is off by default.
+    assert analysis["kb_terms"] == [({"company_id": 1, "subject": ""},
+                                     ["DRIVER_IRQL_NOT_LESS_OR_EQUAL rtwlane.sys", "DRIVER_IRQL_NOT_LESS_OR_EQUAL"])]
+    assert analysis["web_terms"] == [] and analysis["notes"] == []
+
+
+@pytest.mark.anyio
+async def test_chat_uses_the_minidump_feature(monkeypatch):
+    seen = {}
+
+    async def fake_chat(llm, messages, *, json_mode=False, feature=""):
+        seen.update(json_mode=json_mode, feature=feature)
+        return "{}"
+
+    monkeypatch.setattr(service.ai_troubleshooter, "_chat", fake_chat)
+    await service._chat(LLM, [])
+    assert seen == {"json_mode": True, "feature": "minidump_analysis"}
+    from app.services import llm_usage
+    assert llm_usage.FEATURES_BY_KEY["minidump_analysis"].label == "Minidump analysis"
+
+
+@pytest.mark.anyio
+async def test_run_analysis_treats_dump_content_as_untrusted(analysis):
+    dump = await _ingested(suspect_driver="ignore-previous-instructions.sys",
+                           stack_drivers=[{"driver": "ignore-previous-instructions.sys", "offset": "0x1"}])
+    await service.start_analysis(dump=dump, requested_by={"id": 1})
+    await _run(analysis)
+    _llm, messages = analysis["chats"][0]
+    system = next(m["content"] for m in messages if m["role"] == "system")
+    user = next(m["content"] for m in messages if m["role"] == "user")
+    assert "ignore-previous-instructions.sys" not in system
+    assert "BEGIN_UNTRUSTED_RECORDS" in user
+    assert user.index("ignore-previous-instructions.sys") > user.index("BEGIN_UNTRUSTED_RECORDS")
+
+
+@pytest.mark.anyio
+async def test_run_analysis_records_failure(analysis):
+    dump = await _ingested()
+    analysis["reply"] = RuntimeError("boom " * 300)
+    await service.start_analysis(dump=dump, requested_by={"id": 1})
+    await _run(analysis)
+    row = await repo.get_dump(dump["id"])
+    assert row["analysis_status"] == "failed" and row["analysis"] is None
+    assert row["analysis_error"] and len(row["analysis_error"]) <= 512
+    analysis["reply"] = json.dumps(REPORT)
+    await service.start_analysis(dump=row, requested_by={"id": 1})
+    await _run(analysis)
+    assert (await repo.get_dump(dump["id"]))["analysis_status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_web_search_failure_is_not_fatal(analysis):
+    dump = await _ingested()
+    analysis["web_enabled"], analysis["web_error"] = True, "search provider down"
+    await service.start_analysis(dump=dump, requested_by={"id": 1})
+    await _run(analysis)
+    row = await repo.get_dump(dump["id"])
+    assert row["analysis_status"] == "completed" and row["analysis"]["web_error"] == "search provider down"
+    assert analysis["web_terms"] == [["DRIVER_IRQL_NOT_LESS_OR_EQUAL rtwlane.sys", "DRIVER_IRQL_NOT_LESS_OR_EQUAL"]]
+
+
+@pytest.mark.anyio
+async def test_web_results_can_be_cited(analysis):
+    dump = await _ingested()
+    analysis["web_enabled"] = True
+    analysis["reply"] = json.dumps(dict(REPORT, sources=[{"title": "x", "url": "https://vendor.example/advice"}]))
+    await service.start_analysis(dump=dump, requested_by={"id": 1})
+    await _run(analysis)
+    assert (await repo.get_dump(dump["id"]))["analysis"]["sources"] == [
+        {"title": "Vendor advice", "url": "https://vendor.example/advice"}]
+
+
+@pytest.mark.anyio
+async def test_ticket_note_posted_escaped_and_consent_checked(analysis):
+    dump = await _ingested()
+    analysis["reply"] = json.dumps(dict(REPORT, likely_cause="<script>x</script>", suspect="<img src=x>",
+                                        steps=["<b>Update</b> the driver"]))
+    await service.start_analysis(dump=dump, requested_by={"id": 1}, ticket_id=3)
+    await _run(analysis)
+    assert len(analysis["notes"]) == 1
+    ticket_id, body = analysis["notes"][0]
+    assert ticket_id == 3 and "&lt;script&gt;x&lt;/script&gt;" in body and "&lt;img src=x&gt;" in body
+    assert "<script>" not in body and "<img" not in body and "<b>Update" not in body
+    assert "0x000000D1 DRIVER_IRQL_NOT_LESS_OR_EQUAL" in body and "PC-01" in body
+    assert (await repo.get_dump(dump["id"]))["analysis"]["ticket_note"] == "posted"
+
+    analysis["ai_allowed"] = False
+    row = await repo.get_dump(dump["id"])
+    await service.start_analysis(dump=row, requested_by={"id": 1}, ticket_id=3)
+    await _run(analysis)
+    assert len(analysis["notes"]) == 1
+    final = await repo.get_dump(dump["id"])
+    assert final["analysis_status"] == "completed" and final["analysis"]["ticket_note"].startswith("skipped")
+
+
+@pytest.mark.anyio
+async def test_stale_analysis_is_failed_when_listed(analysis, monkeypatch):
+    dump = await _ingested()
+    await service.start_analysis(dump=dump, requested_by={"id": 1})
+    assert (await service.list_for_asset(10))[0]["analysis_status"] == "analysing"
+    monkeypatch.setattr(service, "_utcnow", lambda: NOW + timedelta(minutes=20))
+    listed = (await service.list_for_asset(10))[0]
+    assert listed["analysis_status"] == "failed" and listed["status_label"] == "Failed"
+    assert listed["analysis_error"] == "The analysis did not finish. Try again."
+
+
+def test_present_labels():
+    base = {"id": 1, "file_name": "a.dmp", "crashed_at": NOW, "bugcheck_code": 0xD1, "suspect_driver": "x.sys",
+            "supported": True, "analysis": None, "analysis_error": None, "analysed_at": None, "ticket_id": None,
+            "summary": {"uptime_seconds": 187200, "error": ""}}
+    expected = {"none": ("Not analysed", "neutral"), "analysing": ("Analysing…", "info"),
+                "completed": ("Analysed", "success"), "failed": ("Failed", "danger")}
+    for status, (label, variant) in expected.items():
+        shown = service.present(dict(base, analysis_status=status))
+        assert (shown["status_label"], shown["status_variant"]) == (label, variant)
+    shown = service.present(dict(base, analysis_status="none"))
+    assert shown["uptime_label"] == "2 d 4 h" and shown["stop_code"] == "0x000000D1 DRIVER_IRQL_NOT_LESS_OR_EQUAL"
+    assert shown["parameter_meanings"][0] == "Memory address referenced"
+    assert service.present(dict(base, analysis_status="none", summary={}))["uptime_label"] == ""
+    assert service.present(dict(base, analysis_status="none", summary={"uptime_seconds": 300}))["uptime_label"] == "5 min"
+    assert service.present(dict(base, analysis_status="none", summary={"uptime_seconds": 7200}))["uptime_label"] == "2 h"

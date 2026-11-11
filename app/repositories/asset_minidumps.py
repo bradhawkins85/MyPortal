@@ -182,3 +182,8 @@ async def fail_stale(asset_id: int, stale_before: datetime, *, error: str) -> in
         "AND (analysis_started_at IS NULL OR analysis_started_at < %s)",
         (STATUS_FAILED, error[:512], _utcnow(), asset_id, STATUS_ANALYSING, stale_before),
     ) or 0)
+
+
+async def asset_name(asset_id: int) -> str:
+    row = await db.fetch_one("SELECT name FROM assets WHERE id = %s", (asset_id,))
+    return str((row or {}).get("name") or "")

@@ -64,6 +64,11 @@ FEATURES: tuple[LLMFeature, ...] = (
         callers=(("app.services.ai_health_check", "_chat"),),
     ),
     LLMFeature(
+        "minidump_analysis", "Minidump analysis",
+        "Explains the likely cause of a Windows blue screen from a decoded minidump.",
+        callers=(("app.services.minidump_analysis", "_chat"),),
+    ),
+    LLMFeature(
         "rmm_findings", "RMM findings",
         "Looks across every company's RMM data for abnormalities technicians should review.",
         callers=(("app.services.rmm_findings", "_chat"),),
