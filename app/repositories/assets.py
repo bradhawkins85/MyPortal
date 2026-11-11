@@ -812,7 +812,7 @@ async def upsert_asset(
                 motherboard_manufacturer = %s,
                 form_factor = %s,
                 last_user = %s,
-                approx_age = %s,
+                approx_age = CASE WHEN cpu_release_date IS NULL THEN %s ELSE approx_age END,
                 performance_score = %s,
                 warranty_status = CASE WHEN warranty_source IS NULL THEN %s ELSE warranty_status END,
                 warranty_end_date = CASE WHEN warranty_source IS NULL THEN %s ELSE warranty_end_date END,
