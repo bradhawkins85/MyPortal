@@ -152,6 +152,19 @@ async def latest_completed_for_company(company_id: int | None) -> list[dict[str,
     return [_row(row) for row in rows or []]
 
 
+async def latest_scores_for_company(company_id: int) -> dict[int, dict[str, Any]]:
+    """Each of the company's assets' latest completed health check score, keyed by asset ID."""
+
+    rows = await db.fetch_all(
+        "SELECT h.id, h.asset_id, h.overall_status, h.health_score, h.completed_at "
+        "FROM ai_health_checks h JOIN assets a ON a.id = h.asset_id "
+        "WHERE a.company_id = %s AND h.company_id = a.company_id AND h.id = ("
+        "SELECT MAX(l.id) FROM ai_health_checks l WHERE l.asset_id = h.asset_id AND l.status = 'completed')",
+        (int(company_id),),
+    )
+    return {int(row["asset_id"]): dict(row) for row in rows or []}
+
+
 async def update(health_check_id: int, **fields: Any) -> None:
     """Update the given columns. JSON fields are passed as Python values."""
 

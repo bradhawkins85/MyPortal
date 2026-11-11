@@ -434,6 +434,13 @@ async def assets_page(request: Request):
         rmm_install_attempts = await rmm_agent_deploy.company_latest_attempts(company_id)
     # The health check is an RMM option: it needs its pack and a deployed RMM agent.
     can_health_check = can_push_rmm_agent and main_module._feature_pack_available("health_check")
+    # Technicians who see RMM scripts get each asset's latest health check score.
+    show_health_score = show_rmm_agent and main_module._feature_pack_available("health_check")
+    health_scores: dict[int, dict[str, Any]] = {}
+    if show_health_score:
+        from app.repositories import ai_health_checks as health_checks_repo
+
+        health_scores = await health_checks_repo.latest_scores_for_company(company_id)
     if can_push_rmm_agent:
         from app.services import rmm_remote_control
         from app.services import rmm_commands
@@ -479,6 +486,13 @@ async def assets_page(request: Request):
             record["rmm_uninstall"] = bool(rmm_agent.get("uninstall"))
             record["can_health_check"] = can_health_check
             record["health_check_ready"] = bool(tray_device)
+        if show_health_score and record.get("id"):
+            check = health_scores.get(int(record["id"]))
+            score = check.get("health_score") if check else None
+            record["health_score"] = int(score) if score is not None else None
+            record["health_score_sort"] = record["health_score"] if score is not None else ""
+            record["health_check_status"] = (check or {}).get("overall_status")
+            record["health_check_url"] = f"/health-checks/{int(check['id'])}" if check else None
         if show_rmm_agent and record.get("id"):
             rmm_agent = rmm_agents.get(int(record["id"])) or {}
             record["rmm_agent"] = rmm_agent.get("state", "missing")
@@ -512,6 +526,11 @@ async def assets_page(request: Request):
         status_index = next((i for i, column in enumerate(all_columns) if column["key"] == "status"), 0)
         all_columns.insert(status_index + 1, {"key": "rmm_agent", "label": "RMM agent", "sort": "number"})
         all_columns.insert(status_index + 2, {"key": "rmm_agent_version", "label": "RMM agent version", "sort": "string"})
+    if show_health_score:
+        performance_index = next(
+            (i for i, column in enumerate(all_columns) if column["key"] == "performance_score"), len(all_columns) - 1
+        )
+        all_columns.insert(performance_index + 1, {"key": "health_score", "label": "Health check score", "sort": "number"})
     # Tags belong to the tags pack and are internal, so customers never see them.
     show_tags = False
     if can_write_assets and main_module._feature_pack_available("tags"):
