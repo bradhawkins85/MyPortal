@@ -1,0 +1,7 @@
+{
+  "guid": "b2211e32-6dd0-4315-ab66-060c08771449",
+  "occurred_at": "2026-11-11T23:51Z",
+  "change_type": "Feature",
+  "summary": "Super admins can choose which Assets list columns end users see from Asset settings, such as hiding the Health check score or individual custom fields; hidden custom fields are also left off end users' asset pages, while technicians still see every column.",
+  "content_hash": "8ce5de9dcafe088911955d0731134277c7549d72024165b4d395bf55f69cd47a"
+}
