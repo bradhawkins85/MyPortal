@@ -109,7 +109,7 @@
                   {% if device.public_key %}<div class="data-table__sub">Device key registered</div>{% endif %}
                 </td>
                 <td data-value="{{ ((device.os or '') ~ ' ' ~ (device.os_version or ''))|trim|lower }}">{{ device.os or '—' }} {{ device.os_version or '' }}</td>
-                <td data-value="{{ (device.console_user or '')|lower }}">{{ device.console_user or '—' }}</td>
+                <td data-value="{{ (device.console_user or '')|lower }}">{% if device.console_user and device.console_user_active in (0, false) %}<em title="Nobody is signed in now; this is the last logged in user">{{ device.console_user }}</em>{% else %}{{ device.console_user or '—' }}{% endif %}</td>
                 <td data-value="{{ device.last_seen_utc or '' }}">
                   {% if device.last_seen_utc %}<span data-utc="{{ device.last_seen_utc }}">{{ device.last_seen_utc }}</span>{% else %}—{% endif %}
                 </td>

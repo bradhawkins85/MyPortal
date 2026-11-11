@@ -578,17 +578,23 @@ async def update_device_heartbeat(
     console_user: str | None,
     last_ip: str | None,
     agent_version: str | None,
+    console_user_active: bool | None = None,
 ) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    active = None if console_user_active is None else int(bool(console_user_active))
+    if active == 0:
+        # Nobody is signed in: keep the last user but mark it as no longer current.
+        console_user = None
     # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
         f"UPDATE tray_devices SET last_seen_utc = {placeholder}, "  # nosec B608
         f"console_user = COALESCE({placeholder}, console_user), "
+        f"console_user_active = COALESCE({placeholder}, console_user_active), "
         f"last_ip = COALESCE({placeholder}, last_ip), "
         f"agent_version = COALESCE({placeholder}, agent_version), "
         f"updated_at = {placeholder} WHERE id = {placeholder}",
-        (now, console_user, last_ip, agent_version, now, device_id),
+        (now, console_user, active, last_ip, agent_version, now, device_id),
     )
 
 

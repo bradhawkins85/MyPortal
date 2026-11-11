@@ -874,6 +874,7 @@ async def heartbeat(
         console_user=payload.console_user,
         last_ip=client_ip,
         agent_version=payload.agent_version,
+        console_user_active=payload.console_user_active,
     )
     if not device.get("asset_id") or not device.get("setup_ticket_processed", 1):
         await tray_service.provision_device_for_checkin(device)

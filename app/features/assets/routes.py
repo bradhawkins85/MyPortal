@@ -2081,6 +2081,7 @@ async def asset_detail_page(
     # The tray app reports who is signed in now; synced inventory only knows
     # the last user, so it stands in when the device has no tray app.
     logged_on_user = None
+    logged_on_user_is_last = False
     if not customer_safe:
         tray_device = (await tray_repo.list_active_devices_by_asset_ids([asset_id])).get(asset_id) or {}
         console_user = str(tray_device.get("console_user") or "").strip()
@@ -2092,6 +2093,11 @@ async def asset_detail_page(
             console_user
             or str(record.get("last_user") or "").strip()
             or None
+        )
+        # Nobody signed in now (or only inventory's last user is known):
+        # the name shown is the last user to sign in.
+        logged_on_user_is_last = bool(logged_on_user) and (
+            not console_user or tray_device.get("console_user_active") in (0, False)
         )
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
@@ -2130,6 +2136,7 @@ async def asset_detail_page(
             "health_check": health_check_context,
             "asset_tags": tags_context,
             "logged_on_user": logged_on_user,
+            "logged_on_user_is_last": logged_on_user_is_last,
             "can_edit_network_map": can_view_network_map and (is_super_admin or main_module._membership_menu_can(
                 user, membership, "menu.network_map", write=True)),
             "asset_photos": (await asset_photo_repo.list_for_asset(
