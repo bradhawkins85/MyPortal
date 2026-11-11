@@ -114,3 +114,20 @@ def test_wake_available_without_an_agent_only_to_authorised_staff(page, can_wake
     assert ('id="wol-status-11"' in menu) is visible
     if visible:
         assert "Wake on LAN" in menu and "data-confirm=" in menu
+
+
+def test_health_check_score_links_to_the_latest_report(page):
+    columns = [{"key": "name", "label": "Name", "sort": "string"},
+               {"key": "health_score", "label": "Health check score", "sort": "number"}]
+    html = _render(page,
+                   {"id": 10, "name": "PC", "health_score": 72, "health_score_sort": 72,
+                    "health_check_status": "attention", "health_check_url": "/health-checks/5"},
+                   {"id": 11, "name": "New PC", "health_score": None, "health_score_sort": ""},
+                   columns=columns)
+    assert "Health check score" in html.split("</thead>", 1)[0]
+    scored = html.split('id="asset-10"', 1)[1].split("</tr>", 1)[0]
+    cell = scored.split('data-column="health_score"', 1)[1].split("</td>", 1)[0]
+    assert 'data-value="72"' in cell
+    assert 'class="status status--warning" href="/health-checks/5"' in cell and "72/100" in cell
+    unscored = html.split('id="asset-11"', 1)[1].split("</tr>", 1)[0]
+    assert "/100" not in unscored and "—" in unscored.split('data-column="health_score"', 1)[1].split("</td>", 1)[0]
