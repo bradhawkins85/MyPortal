@@ -3057,6 +3057,40 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
   height: 1.1rem;
 }
 
+/* Asset settings: columns end users can see */
+.asset-column-visibility {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-4, 1rem);
+}
+
+.asset-column-visibility__group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.asset-column-visibility__legend {
+  margin-bottom: var(--space-2, 0.5rem);
+  font-weight: 600;
+}
+
+.asset-column-visibility__list {
+  display: grid;
+  gap: var(--space-2, 0.5rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.asset-column-visibility__option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+}
+
 .asset-columns--open .asset-columns__toggle {
   background: rgba(148, 163, 184, 0.2);
 }
