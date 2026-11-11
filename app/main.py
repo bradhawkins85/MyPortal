@@ -101,6 +101,7 @@ from app.api.routes import (
     subscriptions as subscriptions_api,
     tag_exclusions,
     tag_synonyms,
+    cpu_release_dates as cpu_release_dates_api,
     tickets as tickets_api,
     tray as tray_api,
     tray_deployment as tray_deployment_api,
@@ -605,6 +606,7 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "process_transcription": "Process transcription",
     "sync_huntress": "Sync Huntress data",
     "lookup_asset_warranties": "Look up asset warranties",
+    "lookup_cpu_release_dates": "Estimate asset ages from CPU launch dates",
     "update_tray_icon_installer": "Update Tray Icon Installer",
     "rag_index_start": "RAG start indexing",
     "rag_index_stop": "RAG stop indexing",
@@ -634,7 +636,7 @@ _TASK_COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Microsoft 365", ("sync_m365_", "refresh_m365_", "m365_mail_sync:")),
     ("Staff and assets", (
         "sync_staff", "sync_assets", "sync_tactical_assets", "update_mac_vendors",
-        "lookup_asset_warranties", "update_chocolatey_catalog",
+        "lookup_asset_warranties", "lookup_cpu_release_dates", "update_chocolatey_catalog",
     )),
     ("Billing and Xero", (
         "sync_to_xero", "generate_invoice", "unbill_time_entries",
@@ -1650,6 +1652,7 @@ app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
+app.include_router(cpu_release_dates_api.router)
 app.include_router(tag_synonyms.router)
 app.include_router(chat_api.router)
 app.include_router(tray_api.router)
@@ -8530,7 +8533,7 @@ async def admin_scheduled_tasks(
     available_commands = (
         "update_mac_vendors", "update_chocolatey_catalog", "sync_staff", "sync_m365_data", "sync_m365_licenses",
         "sync_m365_contacts", "sync_m365_mailboxes", "refresh_m365_consent_status",
-        "sync_huntress", "lookup_asset_warranties", "sync_to_xero", "sync_to_xero_auto_send",
+        "sync_huntress", "lookup_asset_warranties", "lookup_cpu_release_dates", "sync_to_xero", "sync_to_xero_auto_send",
         "generate_invoice", "process_subscription_renewals",
         "unbill_time_entries", "send_price_change_notifications", "create_scheduled_ticket",
         "sync_recordings", "sync_unifi_talk_recordings", "queue_transcriptions",

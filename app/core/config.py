@@ -1278,6 +1278,19 @@ class Settings(BaseSettings):
         ge=1,
         validation_alias="WARRANTY_LOOKUP_BATCH_SIZE",
     )
+    # CPU release date lookup, used to estimate each device's age. Intel
+    # processors are looked up on Intel ARK; the module is enabled from
+    # Admin -> Modules.
+    cpu_release_lookup_retry_days: int = Field(
+        default=30,
+        ge=1,
+        validation_alias="CPU_RELEASE_LOOKUP_RETRY_DAYS",
+    )
+    cpu_release_lookup_batch_size: int = Field(
+        default=25,
+        ge=1,
+        validation_alias="CPU_RELEASE_LOOKUP_BATCH_SIZE",
+    )
     # GitHub integration (used for fetching the latest tray MSI on startup)
     github_token: str | None = Field(
         default=None,

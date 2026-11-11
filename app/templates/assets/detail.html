@@ -555,6 +555,7 @@
     <div class="ce-section__body"><dl class="definition-list">
       <dt>Asset ID</dt><dd>{{ asset.id }}</dd><dt>Company</dt><dd>{{ company.name if company else asset.company_id }}</dd>
       <dt>Type</dt><dd><span class="asset-type-badge"><img src="{{ asset_type.icon }}" alt="" width="20" height="20"> {{ asset_type_label }}</span>{% if asset.provenance != 'manual' and asset.type and asset.type != asset_type_label %} <span class="text-muted">(reported as {{ asset.type }})</span>{% endif %}</dd><dt>Status</dt><dd>{{ asset.status or '—' }}</dd>
+      {% if cpu_age %}<dt>CPU launched</dt><dd>{{ cpu_age.release_label }} <span class="text-muted">({{ cpu_age.model }}, {% if cpu_age.source_url %}<a href="{{ cpu_age.source_url }}" target="_blank" rel="noopener noreferrer">{{ cpu_age.source_label }}</a>{% else %}{{ cpu_age.source_label }}{% endif %})</span></dd><dt>Approx age</dt><dd>About {{ cpu_age.age_years }} year{{ "s" if cpu_age.age_years != 1 }} <span class="text-muted">— estimated from the CPU launch date; the device cannot be older than its processor.</span></dd>{% endif %}
       <dt>Serial number</dt><dd>{{ asset.serial_number or '—' }}</dd><dt>Warranty</dt><dd>{{ asset.warranty_status or '—' }}{% if asset.warranty_end_date %} (ends {{ asset.warranty_end_date }}){% endif %}</dd>
       {% if not customer_safe %}<dt>Syncro ID</dt><dd>{{ asset.syncro_asset_id or '—' }}</dd><dt>Tactical ID</dt><dd>{{ asset.tactical_asset_id or '—' }}</dd>{% endif %}
       <dt>Provenance</dt><dd>{{ 'Manual' if asset.provenance == 'manual' else 'Integration' }}</dd>

@@ -2146,6 +2146,7 @@ async def asset_detail_page(
             "asset_sources": [] if customer_safe else await asset_repo.list_asset_sources(company_id, asset_id),
             "customer_safe": customer_safe,
             "warranty": None if customer_safe else await _warranty_context(record),
+            "cpu_age": await _cpu_age_context(record, rmm_context),
             "customer_roles": await role_repo.list_roles() if can_write else [],
             "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if can_write else [],
             "bcp_context": bcp_context,
@@ -2735,6 +2736,23 @@ async def _warranty_context(record: Mapping[str, Any]) -> dict[str, Any]:
         "is_manual": source == "manual",
         "checked_at_utc": _utc_iso(record.get("warranty_checked_at")),
     }
+
+
+async def _cpu_age_context(record: Mapping[str, Any], rmm_context: Any) -> dict[str, Any] | None:
+    """Describe the CPU launch date behind the asset's approximate age, if one is known."""
+    if not record.get("cpu_release_date"):
+        return None
+    from app.repositories import cpu_release_dates as cpu_repo
+    from app.services import cpu_release_dates as cpu_service
+
+    cpu_name = record.get("cpu_name")
+    if not cpu_name and isinstance(rmm_context, Mapping):
+        hardware = rmm_context.get("inventory")
+        snapshot = hardware.get("inventory") if isinstance(hardware, Mapping) else None
+        cpu_name = snapshot.get("cpu_model") if isinstance(snapshot, Mapping) else None
+    identity = cpu_service.identify(cpu_name)
+    entry = await cpu_repo.get_by_key(identity.key) if identity else None
+    return cpu_service.describe(entry)
 
 
 def _utc_iso(value: Any) -> str | None:
