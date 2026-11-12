@@ -84,27 +84,22 @@
     'tbody', 'td', 'th', 'thead', 'tr', 'u', 'ul',
   ]);
   const HTML_BLOCKED_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form']);
-  // These are administrator-authored email templates. Keep inline presentation
-  // attributes in both the editor and preview; email clients need them for layout.
-  const HTML_GLOBAL_ATTRS = new Set(['class', 'style', 'title', 'role', 'colspan', 'rowspan']);
+  const HTML_GLOBAL_ATTRS = new Set(['class', 'title', 'colspan', 'rowspan']);
   const HTML_ATTRS_BY_TAG = {
     a: new Set(['href', 'target', 'rel']),
     img: new Set(['src', 'alt', 'width', 'height']),
-    table: new Set(['width', 'height', 'align', 'bgcolor', 'border', 'cellpadding', 'cellspacing']),
-    td: new Set(['width', 'height', 'align', 'valign', 'bgcolor']),
-    th: new Set(['width', 'height', 'align', 'valign', 'bgcolor']),
   };
-  const HTML_ALLOWED_ATTRS = Array.from(new Set([
-    ...Array.from(HTML_GLOBAL_ATTRS),
-    ...Object.values(HTML_ATTRS_BY_TAG).flatMap((attrs) => Array.from(attrs)),
-  ]));
 
   function sanitizeHtml(html) {
     const source = String(html || '');
     if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+      const allowedAttrs = [
+        ...Array.from(HTML_GLOBAL_ATTRS),
+        ...Object.values(HTML_ATTRS_BY_TAG).flatMap((attrs) => Array.from(attrs)),
+      ];
       return window.DOMPurify.sanitize(source, {
         ALLOWED_TAGS: Array.from(HTML_ALLOWED_TAGS),
-        ALLOWED_ATTR: HTML_ALLOWED_ATTRS,
+        ALLOWED_ATTR: Array.from(new Set(allowedAttrs)),
         FORBID_TAGS: Array.from(HTML_BLOCKED_TAGS),
         ALLOW_DATA_ATTR: false,
       });
@@ -462,12 +457,7 @@
 
     function getContent() {
       if (sunEditor) {
-        const code = sunEditor.getContext().element.code;
-        // getContents() only reads the visual editor. HTML view may contain
-        // newer edits, including when Save or Ctrl+S is used before leaving it.
-        const html = code.style.display === 'block'
-          ? sunEditor.core.cleanHTML(code.value)
-          : sunEditor.getContents(true);
+        const html = sunEditor.getContents(true);
         // An emptied editor leaves a lone empty paragraph behind.
         return /^<p>(<br>)?<\/p>$/.test(html.trim()) ? '' : html;
       }
@@ -494,10 +484,6 @@
         height: '320',
         minHeight: '220',
         resizingBar: true,
-        // SunEditor's defaults otherwise discard the inline styles and table
-        // attributes before getContents() supplies the saved email HTML.
-        attributesWhitelist: { all: HTML_ALLOWED_ATTRS.join('|') },
-        tagsBlacklist: Array.from(HTML_BLOCKED_TAGS).join('|'),
         buttonList: [
           ['undo', 'redo'],
           ['formatBlock', 'bold', 'underline', 'italic', 'strike'],
