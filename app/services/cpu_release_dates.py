@@ -146,7 +146,9 @@ def identify(name: Any) -> CpuIdentity | None:
 # Launch dates as typed by a technician
 # ---------------------------------------------------------------------------
 
-_QUARTER_RE = re.compile(r"^Q([1-4])\s*['’`]?\s*(\d{4}|\d{2})$", re.I)
+# Single optional spaces keep matching linear (input is whitespace-collapsed first).
+_QUARTER_RE = re.compile(r"^Q([1-4])\s?['’`]?\s?(\d{4}|\d{2})$", re.I)
+_MAX_INPUT_LENGTH = 32
 _ISO_MONTH_RE = re.compile(r"^(\d{4})-(\d{1,2})(?:-\d{1,2})?$")
 _MONTH_YEAR_RE = re.compile(r"^(\d{1,2})\s*/\s*(\d{4})$")
 _NAMED_MONTH_RE = re.compile(r"^([a-z]{3,9})\.?\s+(\d{4})$", re.I)
@@ -176,8 +178,8 @@ def parse_release_text(text: Any) -> tuple[date, str] | None:
     ``07/2019``, ``Jul 2019`` or ``2019``. Quarters map to their first month,
     the earliest the processor could ship. Returns ``(date, label)``.
     """
-    value = " ".join(html.unescape(str(text or "")).split())
-    if not value:
+    value = " ".join(html.unescape(str(text or ""))[:256].split())
+    if not value or len(value) > _MAX_INPUT_LENGTH:
         return None
     match = _QUARTER_RE.match(value)
     if match:

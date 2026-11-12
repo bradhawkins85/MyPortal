@@ -76,6 +76,16 @@ def test_parse_release_text_rejects_other_input(text):
     assert service.parse_release_text(text) is None
 
 
+def test_parse_release_text_stays_fast_on_long_input():
+    """Regression for CodeQL's polynomial-regex finding on the quarter pattern."""
+    import time
+
+    started = time.perf_counter()
+    assert service.parse_release_text("q1" + " " * 20000 + "x") is None
+    assert service._QUARTER_RE.match("q1" + " " * 20000 + "x") is None
+    assert time.perf_counter() - started < 0.5
+
+
 def test_age_in_years_rounds_to_nearest_year():
     assert service.age_in_years(date(2019, 7, 1), date(2026, 11, 11)) == 7
     assert service.age_in_years(date(2017, 7, 1), date(2026, 11, 11)) == 9

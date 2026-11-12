@@ -44,11 +44,11 @@
 
   // Mirrors app/services/cpu_release_dates.py::parse_release_text.
   function parseLaunch(value) {
-    const text = String(value || '').trim().replace(/\s+/g, ' ');
-    if (!text) {
+    const text = String(value || '').slice(0, 256).trim().replace(/\s+/g, ' ');
+    if (!text || text.length > 32) {
       return null;
     }
-    let m = /^Q([1-4])\s*['’`]?\s*(\d{4}|\d{2})$/i.exec(text);
+    let m = /^Q([1-4])\s?['’`]?\s?(\d{4}|\d{2})$/i.exec(text);
     if (m) {
       const year = fullYear(m[2]);
       const when = monthDate(year, (Number(m[1]) - 1) * 3 + 1);
