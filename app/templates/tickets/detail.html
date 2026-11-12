@@ -577,23 +577,6 @@
                           <span class="timeline__action">
                             <strong>📞 Call Recording:</strong> {{ reply.caller_name }} → {{ reply.callee_name }}
                           </span>
-                          {% if reply.time_summary %}
-                            <span class="timeline__meta timeline__meta-group" aria-label="Time spent details">
-                              {% if reply.minutes_spent is not none %}
-                                <span class="timeline__chip timeline__chip--time">
-                                  ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
-                                </span>
-                              {% endif %}
-                              {% if not reply.external_reference %}
-                                <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
-                                  {{ 'Billable' if reply.is_billable else 'Non-billable' }}
-                                </span>
-                              {% endif %}
-                              {% if reply.labour_type_name %}
-                                <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
-                              {% endif %}
-                            </span>
-                          {% endif %}
                         </div>
                         {% with history_entry_type="call_recording", history_entry_id=reply.id, history_view='portal' %}
                           {% include "tickets/_history_delete.html" %}
@@ -648,47 +631,7 @@
                             {% elif reply.is_not_resolution_step %}
                               <span class="status status--neutral">Not a resolution step</span>
                             {% endif %}
-                            {% if reply.has_email_tracking %}
-                              {% set _reply_recipient_count = reply.recipient_count|default(0) %}
-                              {% set _is_multi_recipient = _reply_recipient_count and _reply_recipient_count > 1 %}
-                              {% if reply.is_email_opened %}
-                                {% set _badge_html %}<span class="badge badge--success" title="Email opened {{ reply.email_open_count }} time{{ 's' if reply.email_open_count > 1 else '' }}">✓ Read</span>{% endset %}
-                              {% else %}
-                                {% set _badge_html %}<span class="badge badge--muted" title="Email sent, not yet opened">📧 Sent</span>{% endset %}
-                              {% endif %}
-                              {% if _is_multi_recipient %}
-                                <button
-                                  type="button"
-                                  class="badge-trigger"
-                                  data-email-recipients-trigger
-                                  data-reply-id="{{ reply.id }}"
-                                  data-recipient-count="{{ _reply_recipient_count }}"
-                                  aria-haspopup="dialog"
-                                  aria-controls="email-recipients-modal"
-                                  title="Show per-recipient delivery status ({{ _reply_recipient_count }} recipients)"
-                                >{{ _badge_html|safe }}</button>
-                              {% else %}
-                                {{ _badge_html|safe }}
-                              {% endif %}
-                            {% endif %}
                           </span>
-                          {% if reply.time_summary %}
-                            <span class="timeline__meta timeline__meta-group" aria-label="Time spent details">
-                              {% if reply.minutes_spent is not none %}
-                                <span class="timeline__chip timeline__chip--time">
-                                  ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
-                                </span>
-                              {% endif %}
-                              {% if not reply.external_reference %}
-                                <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
-                                  {{ 'Billable' if reply.is_billable else 'Non-billable' }}
-                                </span>
-                              {% endif %}
-                              {% if reply.labour_type_name %}
-                                <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
-                              {% endif %}
-                            </span>
-                          {% endif %}
                         </div>
                         {% with history_entry_type="reply", history_entry_id=reply.id, history_view='portal' %}
                           {% include "tickets/_history_delete.html" %}

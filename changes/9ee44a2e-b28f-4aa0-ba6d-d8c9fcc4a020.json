@@ -1,0 +1,7 @@
+{
+  "guid": "9ee44a2e-b28f-4aa0-ba6d-d8c9fcc4a020",
+  "occurred_at": "2026-11-12T07:05Z",
+  "change_type": "Improvement",
+  "summary": "Simplified portal ticket conversations by removing email delivery, time, billing and labour type badges.",
+  "content_hash": "0f6b1263ebc688a3d41b1934312703722e7e434b5ea92420e21c6a6865c1ac68"
+}
