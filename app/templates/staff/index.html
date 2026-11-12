@@ -864,6 +864,7 @@
                 <button type="button" class="button button--ghost button--small" id="edit-action-offboarding-request" data-edit-action="offboarding-request">Request offboarding</button>
               </div>
             </section>
+            {% if is_admin or has_admin_technician_access %}
             <section class="stf-action-group" data-stf-action-group aria-labelledby="staff-edit-actions-approval">
               <h4 class="stf-action-group__title" id="staff-edit-actions-approval">Approval</h4>
               <div class="stf-action-group__buttons">
@@ -871,6 +872,7 @@
                 <button type="button" class="button button--ghost button--small" id="edit-action-deny" data-edit-action="deny" hidden>Deny</button>
               </div>
             </section>
+            {% endif %}
             <section class="stf-action-group" data-stf-action-group aria-labelledby="staff-edit-actions-workflow">
               <h4 class="stf-action-group__title" id="staff-edit-actions-workflow">Workflow</h4>
               <div class="stf-action-group__buttons">
