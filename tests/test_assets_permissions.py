@@ -29,6 +29,7 @@ async def test_assets_page_allows_read_only_menu_permission(monkeypatch):
     user = {"id": 7, "company_id": 42, "is_super_admin": False}
     membership = {
         "company_id": 42,
+        "role_id": 3,
         "can_manage_assets": False,
         "menu_permissions": {"menu.assets": "read"},
     }
@@ -43,7 +44,7 @@ async def test_assets_page_allows_read_only_menu_permission(monkeypatch):
         return {"id": company_id, "name": "Acme"}
 
     async def fake_list_company_assets(company_id):
-        return []
+        return [{"id": 100, "company_id": company_id, "name": "Workstation", "customer_visible": False}]
 
     async def fake_list_field_definitions():
         return []
@@ -54,6 +55,10 @@ async def test_assets_page_allows_read_only_menu_permission(monkeypatch):
     async def fake_render_template(template, request, current_user, *, extra=None):
         assert template == "assets/index.html"
         assert extra["company"] == {"id": 42, "name": "Acme"}
+        assert [asset["id"] for asset in extra["assets"]] == [100]
+        assert extra["can_write_assets"] is False
+        assert extra["can_wake"] is False
+        assert extra["can_push_rmm_agent"] is False
         return HTMLResponse("assets page")
 
     monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_authenticated_user)
@@ -62,6 +67,7 @@ async def test_assets_page_allows_read_only_menu_permission(monkeypatch):
     monkeypatch.setattr(assets_routes.asset_repo, "list_company_assets", fake_list_company_assets)
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", fake_list_field_definitions)
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", fake_get_all_asset_field_values)
+    monkeypatch.setattr(assets_routes.tray_repo, "list_active_devices_by_asset_ids", AsyncMock(return_value={}))
     monkeypatch.setattr(main_module, "_render_template", fake_render_template)
 
     response = await assets_routes.assets_page(_request())
@@ -167,9 +173,24 @@ async def test_assets_page_adds_tray_agent_sync_column(monkeypatch):
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", fake_list_field_definitions)
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", fake_get_all_asset_field_values)
     monkeypatch.setattr(assets_routes.tray_repo, "list_active_devices_by_asset_ids", fake_list_active_devices_by_asset_ids)
-    monkeypatch.setattr(assets_routes, "_customer_visible_assets", AsyncMock(side_effect=lambda _membership, _company_id, rows: [row for row in rows if row.get("customer_visible")]))
     monkeypatch.setattr(main_module, "_render_template", fake_render_template)
 
     response = await assets_routes.assets_page(_request())
 
     assert response.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_read_only_assets_cannot_update_documentation(monkeypatch):
+    membership = {"menu_permissions": {"menu.assets": "read"}}
+    monkeypatch.setattr(assets_routes, "_load_asset_context", AsyncMock(
+        return_value=({"id": 7}, membership, {"id": 42}, 42, None)
+    ))
+    update = AsyncMock()
+    monkeypatch.setattr(assets_routes.asset_repo, "update_manual_inventory", update)
+
+    with pytest.raises(assets_routes.HTTPException) as excinfo:
+        await assets_routes.update_asset_documentation(_request(), 100)
+
+    assert excinfo.value.status_code == 403
+    update.assert_not_awaited()
