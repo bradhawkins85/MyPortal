@@ -83,9 +83,8 @@ async def test_end_users_do_not_get_hidden_columns_or_their_values(monkeypatch):
 
     keys = _keys(captured)
     assert "serial_number" not in keys and "cf_2" not in keys
-    assert "name" in keys and "cf_1" in keys
+    assert "name" in keys
     record = captured["assets"][0]
-    assert record["cf_1"] == "CC-42"
     assert "cf_2" not in record and "serial_number" not in record
     assert "secret-recovery-key" not in repr(captured["assets"])
 
@@ -107,8 +106,34 @@ async def test_technicians_still_see_every_column(monkeypatch):
     await assets_routes.assets_page(_request())
 
     keys = _keys(captured)
-    assert {"serial_number", "cf_1", "cf_2"} <= set(keys)
+    assert "serial_number" in keys
     restricted.assert_not_awaited()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("technician", [False, True])
+async def test_custom_field_columns_are_for_super_admins_only(monkeypatch, technician):
+    """Read Only and Read Write asset access never show custom fields."""
+    captured, _ = _wire_assets_page(monkeypatch, technician=technician, hidden=set())
+
+    await assets_routes.assets_page(_request())
+
+    keys = _keys(captured)
+    assert not {"cf_1", "cf_2"} & set(keys)
+    assert "CC-42" not in repr(captured["assets"])
+    assert "secret-recovery-key" not in repr(captured["assets"])
+
+
+@pytest.mark.anyio
+async def test_super_admins_see_custom_field_columns(monkeypatch):
+    captured, _ = _wire_assets_page(monkeypatch, technician=True, hidden=set())
+    monkeypatch.setattr(main_module, "_require_authenticated_user", AsyncMock(
+        return_value=({"id": 1, "company_id": 11, "is_super_admin": True}, None)))
+
+    await assets_routes.assets_page(_request())
+
+    assert {"cf_1", "cf_2"} <= set(_keys(captured))
+    assert captured["assets"][0]["cf_1"] == "CC-42"
 
 
 @pytest.mark.anyio
