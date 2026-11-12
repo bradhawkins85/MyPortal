@@ -1,0 +1,7 @@
+{
+  "guid": "251ed7c2-7336-43de-8a5d-744c3113d88f",
+  "occurred_at": "2026-11-12T02:37Z",
+  "change_type": "Fix",
+  "summary": "Eligible Microsoft 365 users can sign in without pre-linking; MyPortal creates or links their account automatically.",
+  "content_hash": "fbbab597a849dc6dd636f1000d70527d0ec65a17658354e55b6e397f302338e5"
+}

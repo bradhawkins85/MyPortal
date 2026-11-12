@@ -841,14 +841,14 @@
     ] %}
     {% set sso_mode_labels = {"off": "Off", "optional": "Optional", "required": "Required"} %}
     {% set sso_unlinked = sso_members | rejectattr("identity") | list %}
-    {% set sso_required_available = sso_tenant_connected and sso_linked_count > 0 %}
+    {% set sso_required_available = sso_tenant_connected %}
     {% set sso_via_labels = {"auto": "Linked · auto", "admin": "Linked · admin"} %}
 
     <section class="card card--panel ce-section" id="ce-microsoft-sign-in" data-company-edit-section="microsoft-sign-in" data-sso-panel data-sso-mode="{{ sso_mode }}" aria-labelledby="ce-microsoft-sign-in-title">
       <header class="ce-section__header">
         <div class="ce-section__heading">
           <h2 class="card__title" id="ce-microsoft-sign-in-title">Microsoft sign-in</h2>
-          <p class="card__subtitle">Let this company's people sign in to {{ app_name | default('MyPortal') }} with their Microsoft 365 account.</p>
+          <p class="card__subtitle">Let this company's people sign in to {{ app_name | default('MyPortal') }} with their Microsoft 365 account. Eligible users on approved email domains are created or linked automatically.</p>
         </div>
         <div class="ce-section__meta"><span class="badge badge--muted">{{ sso_linked_count }} linked</span></div>
       </header>
@@ -889,7 +889,7 @@
               {% endfor %}
             </dl>
             {% if not sso_required_available %}
-              <p class="form-help" id="sso-required-help">Required becomes available once this company's Microsoft 365 tenant is connected and at least one person is linked.</p>
+              <p class="form-help" id="sso-required-help">Required becomes available once this company's Microsoft 365 tenant is connected.</p>
             {% endif %}
           </fieldset>
 

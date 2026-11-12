@@ -252,11 +252,10 @@ def test_company_admin_sets_optional(world, as_company_admin):
     assert audits[0]["after"] == {"sso_mode": "optional"}
 
 
-def test_required_without_links_is_400(world, as_company_admin):
+def test_required_without_links_is_allowed(world, as_company_admin):
     response = as_company_admin.put("/api/companies/7/sso", json={"mode": "required"})
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Link at least one user before requiring Microsoft sign-in."
-    assert world.companies[7]["sso_mode"] == "off"
+    assert response.status_code == 200
+    assert world.companies[7]["sso_mode"] == "required"
 
 
 def test_unexpected_mode_error_text_is_not_exposed(world, as_company_admin, monkeypatch):

@@ -6221,10 +6221,21 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     sso_envelope = _sso_state_envelope(request, state)
     if sso_envelope is not None:
         return await auth.complete_sso_callback(request, sso_envelope, code, error)
+    # Unusable sign-in state must reach the logged SSO rejection. Valid
+    # session-bound state still belongs to the administration flow.
+    if request.cookies.get(auth.SSO_BINDING_COOKIE):
+        envelope = _decode_m365_oauth_state(request, state) if state else None
+        if not isinstance(envelope, dict) or "transaction_id" not in envelope:
+            return await auth.complete_sso_callback(request, {}, code, error)
     # Consume first, including denied-consent responses: a callback transaction
     # is single-use regardless of whether Microsoft returned a code.
     state_data = await _consume_m365_oauth_state(request, state)
     if not state_data:
+        log_warning(
+            "Microsoft OAuth callback state rejected",
+            state_present=bool(state),
+            sign_in_binding_present=bool(request.cookies.get(auth.SSO_BINDING_COOKIE)),
+        )
         return flash_redirect("/m365", "The Microsoft sign-in session expired or was already used.", "error")
     flow = str(state_data.get("flow") or "connect")
     company_id = int(state_data.get("company_id") or 0)
