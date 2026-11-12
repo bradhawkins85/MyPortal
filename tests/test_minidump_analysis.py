@@ -843,3 +843,103 @@ def test_pack_registers_the_minidump_routes():
                      "/api/assets/{asset_id}/minidumps/{dump_id}/analyse",
                      "/rmm/assets/{asset_id}/minidumps/{dump_id}/analyse"}
     assert all(route.summary for route in routes.router.routes)
+
+
+# --------------------------------------------------------------------------- #
+# Asset page section
+# --------------------------------------------------------------------------- #
+
+from tests.test_rmm_scripts import _environment  # noqa: E402
+
+
+def _shown(**overrides) -> dict:
+    dump = {"id": 3, "asset_id": 10, "file_name": "111126-8765-01.dmp", "crashed_at": datetime(2026, 11, 11, 2, 1),
+            "bugcheck_code": 0xD1, "suspect_driver": "rtwlane.sys", "supported": True, "analysis_status": "none",
+            "analysis": None, "analysis_error": None, "analysed_at": None, "ticket_id": None,
+            "summary": json.loads(json.dumps(CONTRACT))}
+    dump.update(overrides)
+    return service.present(dump)
+
+
+def _section(dumps, **overrides) -> str:
+    context = {"dumps": dumps, "count": len(dumps), "can_run": True, "llm_ready": True,
+               "tickets": [{"id": 3, "subject": "Blue screens"}],
+               "analysing": any(d["analysis_status"] == "analysing" for d in dumps)}
+    context.update(overrides)
+    return _environment().get_template("assets/_minidumps.html").render(
+        asset={"id": 10, "name": "PC-01"}, minidumps=context, csrf_token="tok")
+
+
+def test_section_empty_state():
+    html_text = _section([])
+    assert "No blue screens reported yet" in html_text and "<form" not in html_text
+    assert 'id="minidumps"' in html_text and 'data-asset-edit-section="minidumps"' in html_text
+
+
+def test_section_lists_dump_with_chips_and_form():
+    html_text = _section([_shown()])
+    assert "0x000000D1 DRIVER_IRQL_NOT_LESS_OR_EQUAL" in html_text and "Suspected driver: rtwlane.sys" in html_text
+    assert 'data-utc="2026-11-11' in html_text and "Not analysed" in html_text and "Up 1 d before the crash" in html_text
+    assert 'action="/rmm/assets/10/minidumps/3/analyse"' in html_text and 'method="post"' in html_text
+    assert 'name="_csrf" value="tok"' in html_text
+    assert 'name="ticket_id"' in html_text and "#3 — Blue screens" in html_text and "Don't post to a ticket" in html_text
+    assert ">Analyse</button>" in html_text
+    assert "No third-party driver identified" in _section([_shown(suspect_driver=None)])
+
+
+def test_section_shows_a_finished_analysis():
+    report = service.parse_report(REPORT, "", allowed_sources=REPORT["sources"])
+    report["ticket_note"] = "posted"
+    html_text = _section([_shown(analysis_status="completed", analysis=report, ticket_id=3,
+                                 analysed_at=datetime(2026, 11, 11, 3, 0))])
+    for expected in ("Analysed", "Likely cause", REPORT["likely_cause"], "Medium confidence", "Driver",
+                     "Parameter 4 points into rtwlane.sys", "Update the Realtek wireless driver",
+                     "Run Windows Memory Diagnostic", 'href="/knowledge-base/articles/fix-driver-irql"',
+                     "Analyse again", 'href="/admin/tickets/3"', "Decoded dump", "ntoskrnl.exe+0x3f5a10",
+                     "Memory address referenced"):
+        assert expected in html_text, expected
+
+
+def test_section_escapes_model_and_device_text():
+    report = service.parse_report(
+        dict(REPORT, likely_cause="<script>alert(1)</script>", suspect="<img src=x>", steps=["<b>bold</b>"],
+             sources=[]), "", allowed_sources=[])
+    report["sources"] = [{"title": "<i>t</i>", "url": "javascript:alert(1)"}]
+    html_text = _section([_shown(analysis_status="completed", analysis=report, suspect_driver="<svg>",
+                                 file_name="<x>.dmp")])
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html_text and "&lt;img src=x&gt;" in html_text
+    for raw in ("<script>alert", "<img", "<b>bold", "<svg>", "<x>", "javascript:"):
+        assert raw not in html_text, raw
+
+
+def test_section_hides_analyse_when_not_allowed():
+    assert "<form" not in _section([_shown()], can_run=False, tickets=[])
+    no_model = _section([_shown()], llm_ready=False)
+    assert "No AI model is configured" in no_model and "disabled" in no_model
+    unsupported = _section([_shown(supported=False, summary=dict(CONTRACT, error="32-bit dumps are not supported"))])
+    assert "32-bit dumps are not supported" in unsupported and "<form" not in unsupported
+
+
+def test_section_shows_running_and_failed_states():
+    running = _section([_shown(analysis_status="analysing")])
+    assert "Analysing…" in running and 'data-md-status="analysing"' in running and "disabled" in running
+    failed = _section([_shown(analysis_status="failed", analysis_error="The analysis did not finish. Try again.")])
+    assert "The analysis did not finish. Try again." in failed and "status--error" in failed
+    assert "Analyse again" in failed
+
+
+def test_asset_page_wires_the_section():
+    detail = (ROOT / "app" / "templates" / "assets" / "detail.html").read_text(encoding="utf-8")
+    assert '("minidumps", "minidumps", "Minidumps", minidumps.count or "" if minidumps else "", minidumps)' in detail
+    assert '{% include "assets/_minidumps.html" %}' in detail and "asset_minidumps.js" in detail
+    asset_routes = (ROOT / "app" / "features" / "assets" / "routes.py").read_text(encoding="utf-8")
+    assert '"minidumps": minidumps_context' in asset_routes and "minidump_routes.asset_context" in asset_routes
+    script = (ROOT / "app" / "static" / "js" / "asset_minidumps.js").read_text(encoding="utf-8")
+    assert "data-md-root" in script and "innerHTML" not in script
+    css = (ROOT / "app" / "static" / "css" / "app.css").read_text(encoding="utf-8")
+    block = css[css.index("/* Asset page: Minidumps"):]
+    block = block[:block.index("/* End asset page: Minidumps */")]
+    import re
+
+    # Shared tokens only: no literal colours.
+    assert ".md-dump" in block and not re.search(r"#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(", block)
