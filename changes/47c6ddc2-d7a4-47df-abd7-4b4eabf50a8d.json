@@ -1,0 +1,7 @@
+{
+  "guid": "47c6ddc2-d7a4-47df-abd7-4b4eabf50a8d",
+  "occurred_at": "2026-11-12T03:06Z",
+  "change_type": "Fix",
+  "summary": "The Downloads menu is hidden from end users while direct download links remain available.",
+  "content_hash": "021d754e5ab9817d65645ef4c6b1a585736a0d4b53f72134cfff5718f36f46d0"
+}
