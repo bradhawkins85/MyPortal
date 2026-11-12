@@ -36,10 +36,11 @@ class InvoiceBase(BaseModel):
 
 
 class InvoiceCreate(InvoiceBase):
-    pass
+    assigned_user_id: int | None = Field(default=None, alias="assignedUserId", gt=0)
 
 
 class InvoiceUpdate(BaseModel):
+    assigned_user_id: int | None = Field(default=None, alias="assignedUserId", gt=0)
     company_id: int | None = Field(default=None, alias="companyId")
     invoice_number: str | None = Field(default=None, alias="invoiceNumber", min_length=1, max_length=255)
     amount: Decimal | None = Field(default=None, gt=-1_000_000_000, max_digits=12, decimal_places=2)
@@ -71,6 +72,8 @@ class InvoiceUpdate(BaseModel):
 
 
 class InvoiceResponse(BaseModel):
+    created_by: int | None = Field(default=None, alias="createdBy")
+    assigned_user_id: int | None = Field(default=None, alias="assignedUserId")
     id: int
     company_id: int = Field(alias="companyId")
     invoice_number: str = Field(alias="invoiceNumber")

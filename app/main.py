@@ -163,6 +163,7 @@ from app.services import system_update_history
 from app.services import system_updates as system_updates_service
 from app.services import worker_readiness
 from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
+from app.security.commerce_permissions import COMMERCE_PERMISSION_FIELDS, commerce_scope
 from app.security.menu_permissions import (
     build_menu_access_map,
     catalogue_for_api,
@@ -2764,7 +2765,7 @@ async def _build_base_context(
         "can_access_forms": _menu_can(menu_access, "menu.forms") or is_super_admin or _has_permission("can_access_forms"),
         "can_manage_assets": _menu_can(menu_access, "menu.assets", write=True) or is_super_admin or _has_permission("can_manage_assets"),
         "can_manage_licenses": _menu_can(menu_access, "menu.m365.licenses", write=True) or is_super_admin or _has_permission("can_manage_licenses"),
-        "can_manage_invoices": _menu_can(menu_access, "menu.invoices", write=True) or is_super_admin or _has_permission("can_manage_invoices"),
+        "can_manage_invoices": _menu_can(menu_access, "menu.invoices") or is_super_admin or _has_permission("can_manage_invoices"),
         "can_manage_staff": (
             is_super_admin
             or (
@@ -3175,7 +3176,10 @@ async def _load_company_section_context(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
 
     membership = await _get_effective_company_membership(request, user["id"], company_id)
-    has_permission = bool(membership and membership.get(permission_field))
+    if permission_field in COMMERCE_PERMISSION_FIELDS:
+        has_permission = commerce_scope(user, membership, COMMERCE_PERMISSION_FIELDS[permission_field]) != "none"
+    else:
+        has_permission = bool(membership and membership.get(permission_field))
     if not (is_super_admin or has_permission):
         return (
             user,

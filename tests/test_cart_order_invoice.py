@@ -10,6 +10,7 @@ async def test_generate_order_invoice_persists_locally_before_xero_sync(monkeypa
     calls: list[tuple[str, object]] = []
 
     async def fake_generate_invoice(company_id, **kwargs):
+        assert kwargs["created_by"] == 5
         calls.append(("generate", kwargs["recurring_line_items"]))
         return {"status": "succeeded", "invoice_id": 42, "invoice_number": "INV-42"}
 
@@ -27,6 +28,7 @@ async def test_generate_order_invoice_persists_locally_before_xero_sync(monkeypa
     result = await invoice_generator.generate_order_invoice(
         order_number="ORD123",
         company_id=7,
+        created_by=5,
         user_name="Ada Admin",
         order_items=[
             {

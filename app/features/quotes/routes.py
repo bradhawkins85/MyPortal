@@ -23,6 +23,7 @@ from app.features.orders import routes as orders_routes
 from app.repositories import cart as cart_repo
 from app.repositories import companies as company_repo
 from app.repositories import freight_rules as freight_rules_repo
+from app.security.commerce_permissions import commerce_scope, commerce_record_visible, require_commerce_record
 from app.repositories import shop as shop_repo
 from app.repositories import users as user_repo
 from app.security.session import session_manager
@@ -374,7 +375,9 @@ async def quotes_page(
     if redirect:
         return redirect
 
-    quotes_raw = await shop_repo.list_quote_summaries(company_id)
+    scope = commerce_scope(user, membership, "menu.quotes")
+    quotes_raw = [record for record in await shop_repo.list_quote_summaries(company_id)
+                  if commerce_record_visible(user, scope, record, "menu.quotes")]
 
     def _label(value: str | None) -> str:
         text = (value or "").strip()
@@ -483,6 +486,8 @@ async def export_quote_pdf(
         return redirect
 
     quote_summary = await shop_repo.get_quote_summary(quote_number, company_id)
+    if quote_summary:
+        require_commerce_record(user, commerce_scope(user, membership, "menu.quotes"), quote_summary, "menu.quotes")
     quote_items = await shop_repo.list_quote_items(quote_number, company_id)
     if not quote_summary or not quote_items:
         raise HTTPException(
@@ -577,6 +582,8 @@ async def load_quote_to_cart(request: Request, quote_number: str) -> RedirectRes
     if not session:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
+    quote_summary = await shop_repo.get_quote_summary(quote_number, company_id)
+    require_commerce_record(user, commerce_scope(user, membership, "menu.quotes"), quote_summary or {}, "menu.quotes")
     quote_items = await shop_repo.list_quote_items(quote_number, company_id)
     if not quote_items:
         message = quote("Quote not found or has no items.")
