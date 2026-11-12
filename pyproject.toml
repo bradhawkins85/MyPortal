@@ -66,3 +66,6 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["app*"]
 exclude = ["tests*", "migrations*", "deploy*", "changes*"]
+
+[tool.setuptools.package-data]
+app = ["data/*.csv", "data/*.md"]

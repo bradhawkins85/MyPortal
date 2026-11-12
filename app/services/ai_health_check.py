@@ -67,6 +67,7 @@ from app.services import health_check_remediation
 from app.services import rmm_agent_deploy
 from app.services import tray as tray_service
 from app.services import troubleshoot_web_search
+from app.services import cpu_catalog
 
 LLM_FEATURE = "ai_health_check"
 COMMAND = "health_check"
@@ -1130,6 +1131,9 @@ def _snapshot_for_prompt(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     compact = dict(snapshot)
     sections = dict(_sections(snapshot))
     compact["sections"] = sections
+    reference = cpu_catalog.lookup(_dict(sections.get("cpu")).get("name"))
+    if reference:
+        compact["cpu_reference"] = reference
     if isinstance(sections.get("disks"), list):
         sections["disks"] = [_disk_for_prompt(disk) for disk in sections["disks"]]
     if isinstance(compact.get("disk_smart"), dict):
