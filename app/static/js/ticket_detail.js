@@ -1,4 +1,18 @@
 (function () {
+  document.querySelectorAll('[data-history-delete]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      if (!window.confirm(form.dataset.historyDeleteConfirm)) {
+        event.preventDefault();
+        return;
+      }
+      const button = form.querySelector('button[type="submit"]');
+      if (button) {
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+      }
+    });
+  });
+
   const aiAgentName = document.querySelector("[data-ai-agent-name]")?.dataset.aiAgentName || "Sophia";
 
   document.querySelectorAll('[data-resolution-classification]').forEach((checkbox) => {
