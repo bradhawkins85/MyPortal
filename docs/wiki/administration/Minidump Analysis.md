@@ -63,7 +63,7 @@ The AI troubleshooter then:
 
 The page updates when the analysis finishes, usually within a minute. Use
 **Analyse again** to repeat it, for example after adding a knowledge base
-article. Nothing is analysed automatically, so no AI usage is spent until a
+article. If a repeat fails, the previous result stays on the card. Nothing is analysed automatically, so no AI usage is spent until a
 technician asks. Each run is listed as **Minidump analysis** on the LLM Usage
 page.
 
@@ -104,7 +104,7 @@ processing; the analysis itself is still saved on the asset.
 
 | Problem | What to check |
 | --- | --- |
-| No crashes listed | Windows is not writing small memory dumps, the tray app is out of date, or the tray device is not linked to this asset. Crashes appear up to an hour after the tray app starts. |
+| No crashes listed | Windows is not writing small memory dumps, the tray app is out of date, or the tray device is not linked to this asset (it is matched by its link, then by serial number or computer name). Once it is linked, its crashes arrive on the next hourly scan. |
 | *Not decoded* | The file is a 32-bit dump, is not a kernel minidump, or was damaged when Windows wrote it. |
 | *Failed* | The AI model did not answer or returned nothing usable; the reason is shown on the card. Click **Analyse again**. An analysis that has not finished after 15 minutes is marked failed. |
 | A wrong crash time | The time comes from the dump. When it is missing or implausible, the dump file's own time is used. |
@@ -115,7 +115,7 @@ All routes appear in the Swagger UI at `/docs`.
 
 | Route | Method | Caller | Purpose |
 | --- | --- | --- | --- |
-| `/api/tray/minidumps` | POST | Device bearer | Report decoded dumps: `{"dumps": [...]}`, at most 20 per request and 2 MB; six reports per device in ten minutes |
+| `/api/tray/minidumps` | POST | Device bearer | Report decoded dumps: `{"dumps": [...]}`, at most 20 per request and 2 MB; six reports per device in ten minutes. `409` while the device is not linked to an asset: the tray app keeps the dumps and reports them again on its next hourly scan |
 | `/api/assets/{asset_id}/minidumps` | GET | RMM scripts access | The asset's crashes and their analyses |
 | `/api/assets/{asset_id}/minidumps/{dump_id}/analyse` | POST | RMM scripts write access | Start an analysis; body `{"ticket_id": int|null}`. `202` when started, `409` when one is already running, `400` when the ticket is not linked to the asset |
 | `/rmm/assets/{asset_id}/minidumps/{dump_id}/analyse` | POST | RMM scripts write access | The same from the asset page's form |

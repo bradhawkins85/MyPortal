@@ -56,9 +56,13 @@ def _int(value: Any) -> int | None:
 async def resolve_asset_for_device(device: Mapping[str, Any]) -> dict[str, Any] | None:
     """The asset a tray device reports for, in the device's own company.
 
-    The linked asset wins, then the asset that names the device
-    (``assets.tray_device_uid``), then the only live asset with the device's
-    serial number. ``None`` when nothing, or more than one asset, matches.
+    The same rules the asset page uses to find an asset's tray device
+    (:func:`app.repositories.ai_health_checks.find_tray_device_for_asset`),
+    so a device the page shows also has its dumps stored: the linked asset,
+    then the asset that names the device (``assets.tray_device_uid``), then
+    the only live asset no other device has claimed with the device's serial
+    number or host name. ``None`` when nothing, or more than one asset,
+    matches.
     """
 
     company_id = _int(device.get("company_id"))
@@ -68,20 +72,27 @@ async def resolve_asset_for_device(device: Mapping[str, Any]) -> dict[str, Any] 
     asset_id = _int(device.get("asset_id"))
     if asset_id:
         row = await db.fetch_one(columns + "id = %s", (company_id, asset_id))
-        return dict(row) if row else None
+        if row:
+            return dict(row)
     device_uid = str(device.get("device_uid") or "").strip()
     if device_uid:
         row = await db.fetch_one(columns + "tray_device_uid = %s", (company_id, device_uid))
         if row:
             return dict(row)
-    serial = str(device.get("serial_number") or "").strip()
-    if not serial:
-        return None
-    rows = await db.fetch_all(
-        columns + "archived_at IS NULL AND serial_number IS NOT NULL AND LOWER(serial_number) = LOWER(%s) LIMIT 2",
-        (company_id, serial),
-    )
-    return dict(rows[0]) if len(rows) == 1 else None
+    unclaimed = "archived_at IS NULL AND (tray_device_uid IS NULL OR tray_device_uid = '') AND "
+    for column, value in (("serial_number", device.get("serial_number")), ("name", device.get("hostname"))):
+        text = str(value or "").strip()
+        if not text:
+            continue
+        rows = await db.fetch_all(
+            columns + unclaimed + column + " IS NOT NULL AND LOWER(" + column + ") = LOWER(%s) LIMIT 2",
+            (company_id, text),
+        )
+        if len(rows) == 1:
+            return dict(rows[0])
+        if rows:
+            return None
+    return None
 
 
 async def upsert_dump(
@@ -146,7 +157,8 @@ async def claim_analysis(
 
     A single conditional update, so two technicians clicking at once cannot
     both start a run. A run that started before ``stale_before`` never
-    finished and can be taken over.
+    finished and can be taken over. ``now`` identifies the run: pass it to
+    :func:`finish_analysis` as ``started_at``.
     """
 
     changed = await db.execute_rowcount(
@@ -160,16 +172,37 @@ async def claim_analysis(
 
 async def finish_analysis(
     dump_id: int, *, status: str, analysis: Mapping[str, Any] | None, error: str | None,
-    now: datetime | None = None,
-) -> None:
+    started_at: datetime, now: datetime | None = None,
+) -> bool:
+    """Record how the run that started at ``started_at`` ended.
+
+    ``False``, changing nothing, when that run no longer holds the dump
+    (another run took it over). A failure keeps the previous report.
+    """
+
     now = now or _utcnow()
+    owned = " WHERE id = %s AND analysis_status = %s AND analysis_started_at = %s"
+    if analysis is None:
+        changed = await db.execute_rowcount(
+            "UPDATE asset_minidumps SET analysis_status = %s, analysis_error = %s, updated_at = %s" + owned,
+            (status, (str(error)[:512] if error else None), now, dump_id, STATUS_ANALYSING, started_at),
+        )
+    else:
+        changed = await db.execute_rowcount(
+            "UPDATE asset_minidumps SET analysis_status = %s, analysis_json = %s, analysis_error = %s, "
+            "analysed_at = %s, updated_at = %s" + owned,
+            (status, json.dumps(analysis), (str(error)[:512] if error else None), now, now, dump_id,
+             STATUS_ANALYSING, started_at),
+        )
+    return bool(changed)
+
+
+async def update_analysis(dump_id: int, analysis: Mapping[str, Any]) -> None:
+    """Replace a completed dump's stored report (to record how its ticket note went)."""
+
     await db.execute(
-        "UPDATE asset_minidumps SET analysis_status = %s, analysis_json = %s, analysis_error = %s, "
-        "analysed_at = %s, updated_at = %s WHERE id = %s",
-        (
-            status, json.dumps(analysis) if analysis is not None else None,
-            (str(error)[:512] if error else None), now, now, dump_id,
-        ),
+        "UPDATE asset_minidumps SET analysis_json = %s WHERE id = %s AND analysis_status = %s",
+        (json.dumps(analysis), dump_id, STATUS_COMPLETED),
     )
 
 

@@ -36,7 +36,7 @@
         {% endif %}
         {% if report %}
         <details class="md-result" open>
-          <summary>Likely cause</summary>
+          <summary>{% if dump.analysis_status == 'completed' %}Likely cause{% else %}Likely cause (previous analysis){% endif %}</summary>
           <div class="md-result__body">
             <ul class="md-chips" aria-label="Analysis summary">
               {% if dump.confidence_label %}<li class="md-chip md-chip--{{ report.confidence if report.confidence in ('high', 'medium', 'low') else 'low' }}">{{ dump.confidence_label }}</li>{% endif %}

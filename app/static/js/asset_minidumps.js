@@ -26,10 +26,23 @@
       return ids;
     }
 
+    function unsavedChanges() {
+      var savebar = document.querySelector('[data-ae-savebar]');
+      return !!savebar && !savebar.hidden;
+    }
+
     function finish(failed) {
       stop();
+      var message = failed ? 'Analysis failed.' : 'Analysis finished.';
+      if (unsavedChanges()) {
+        // Reloading would discard edits made elsewhere on the page while waiting.
+        if (live) {
+          live.textContent = message + ' Reload the page to see the result.';
+        }
+        return;
+      }
       if (live) {
-        live.textContent = failed ? 'Analysis failed.' : 'Analysis finished.';
+        live.textContent = message;
       }
       if (window.location.hash !== '#minidumps') {
         window.location.hash = '#minidumps';

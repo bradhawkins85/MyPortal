@@ -128,19 +128,24 @@ async def upload_minidumps(request: Request, device: dict = Depends(get_current_
     """Store the dumps a tray device decoded, on the device's own asset.
 
     The body is ``{"dumps": [...]}`` with at most 20 summaries and 2 MB in
-    total. A device may report six times in ten minutes.
+    total. A device may report six times in ten minutes. 409 when the device
+    has no asset yet; it reports the same dumps again later.
     """
 
     body = await _read_body(request)
     try:
         payload = json.loads(body)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The report is not valid JSON") from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("dumps"), list):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The report needs a list of dumps")
     if not allow_upload(int(device.get("id") or 0), time.monotonic()):
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many reports; try again later")
     counts = await service.ingest(device, payload["dumps"])
+    linked = counts.pop("linked")
+    if not linked and counts["received"]:
+        # Not a success: the tray app keeps these dumps and reports them again once it has an asset.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This device is not linked to an asset yet")
     return JSONResponse({"status": "ok", **counts})
 
 

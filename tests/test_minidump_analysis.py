@@ -163,10 +163,15 @@ async def test_finish_and_fail_stale(store):
     done = await _add(name="done.dmp")
     stuck = await _add(name="stuck.dmp")
     stale = NOW - timedelta(minutes=15)
+    started = NOW - timedelta(minutes=20)
     for dump_id in (done, stuck):
-        assert await repo.claim_analysis(dump_id, user_id=1, ticket_id=None, model="m", now=NOW - timedelta(minutes=20),
+        assert await repo.claim_analysis(dump_id, user_id=1, ticket_id=None, model="m", now=started,
                                          stale_before=stale - timedelta(minutes=20))
-    await repo.finish_analysis(done, status="completed", analysis={"likely_cause": "x"}, error=None, now=NOW)
+    # Only the run that holds the dump may finish it.
+    assert await repo.finish_analysis(done, status="completed", analysis={"likely_cause": "wrong run"}, error=None,
+                                      started_at=started - timedelta(minutes=1), now=NOW) is False
+    assert await repo.finish_analysis(done, status="completed", analysis={"likely_cause": "x"}, error=None,
+                                      started_at=started, now=NOW) is True
     assert await repo.fail_stale(10, stale, error="The analysis did not finish. Try again.") == 1
     rows = {row["file_name"]: row for row in await repo.list_for_asset(10)}
     assert rows["done.dmp"]["analysis_status"] == "completed" and rows["done.dmp"]["analysis"] == {"likely_cause": "x"}
@@ -289,7 +294,8 @@ def test_clean_summary_fixes_implausible_times():
 @pytest.mark.anyio
 async def test_ingest_stores_names_and_dedupes(store):
     dumps = [_summary(), _summary(file_name="111026-1111-01.dmp", bugcheck_code=0x124, suspect_driver="")]
-    assert await service.ingest(_device(5), dumps) == {"received": 2, "stored": 2, "duplicates": 0, "rejected": 0}
+    assert await service.ingest(_device(5), dumps) == {
+        "received": 2, "stored": 2, "duplicates": 0, "rejected": 0, "linked": True}
     rows = {row["file_name"]: row for row in await repo.list_for_asset(10)}
     first = rows["111126-8765-01.dmp"]
     assert first["company_id"] == 1 and first["asset_id"] == 10 and first["tray_device_id"] == 5
@@ -298,7 +304,7 @@ async def test_ingest_stores_names_and_dedupes(store):
     assert rows["111026-1111-01.dmp"]["bugcheck_name"] == "WHEA_UNCORRECTABLE_ERROR"
     assert rows["111026-1111-01.dmp"]["suspect_driver"] is None
     again = await service.ingest(_device(5), dumps)
-    assert again == {"received": 2, "stored": 0, "duplicates": 2, "rejected": 0}
+    assert again == {"received": 2, "stored": 0, "duplicates": 2, "rejected": 0, "linked": True}
     assert await repo.count_for_asset(10) == 2
 
 
@@ -312,7 +318,7 @@ async def test_ingest_uses_file_time_when_crash_time_missing(store):
 @pytest.mark.anyio
 async def test_ingest_ignores_device_without_asset(store):
     counts = await service.ingest(_device(8), [_summary()])
-    assert counts == {"received": 1, "stored": 0, "duplicates": 0, "rejected": 0}
+    assert counts == {"received": 1, "stored": 0, "duplicates": 0, "rejected": 0, "linked": False}
     cursor = await store["conn"].execute("SELECT COUNT(*) FROM asset_minidumps")
     assert (await cursor.fetchone())[0] == 0
 
@@ -330,7 +336,7 @@ async def test_ingest_rejects_non_list_and_caps_count(store):
     dumps = [_summary(file_name=f"d{i:02d}.dmp") for i in range(30)]
     dumps[3] = "junk"
     counts = await service.ingest(_device(5), dumps)
-    assert counts == {"received": 20, "stored": 19, "duplicates": 0, "rejected": 1}
+    assert counts == {"received": 20, "stored": 19, "duplicates": 0, "rejected": 1, "linked": True}
 
 
 @pytest.mark.anyio
@@ -946,3 +952,125 @@ def test_asset_page_wires_the_section():
 
     # Shared tokens only: no literal colours.
     assert ".md-dump" in block and not re.search(r"#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(", block)
+
+
+# --------------------------------------------------------------------------- #
+# Whole-branch review fixes
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_upload_from_a_device_without_an_asset_is_refused_so_the_tray_retries(client):
+    """A 2xx would make the tray remember the dumps as sent; they would never arrive once the asset is linked."""
+    test_client, state = client
+    state["device"] = _device(8)
+    response = test_client.post("/api/tray/minidumps", json={"dumps": [_summary()]})
+    assert response.status_code == 409
+    assert (await service.ingest(_device(8), [_summary()]))["linked"] is False
+    assert (await service.ingest(_device(5), [_summary()]))["linked"] is True
+    # Nothing to store is not an error: an empty report from an unlinked device is accepted.
+    assert test_client.post("/api/tray/minidumps", json={"dumps": []}).status_code == 200
+
+
+HOSTILE_VALUES = [
+    {"architecture": []}, {"architecture": {"a": 1}},
+    {"crashed_at": "0001-01-01T00:00:00+14:00"}, {"crashed_at": "9999-12-31T23:59:59-10:00"},
+    {"file_modified_at": "0001-01-01T00:00:00+14:00"}, {"file_modified_at": "9999-12-31T23:59:59-10:00"},
+    {"file_modified_at": "0005-01-01T00:00:00"},
+    {"drivers": [{"name": "a.sys", "timestamp": "9999-12-31T23:59:59-10:00"}]},
+    {"suspect_driver": ["x"]}, {"error": {"a": 1}}, {"bugcheck_parameters": [[], {}, None, 1.5]},
+    {"parameter_drivers": [{"parameter": "1"}, {"parameter": [], "address": {}}]},
+    {"stack_drivers": [None, 5, {"driver": []}]}, {"unloaded_drivers": [{"name": 5}]},
+    {"faulting_address": []}, {"supported": "yes"}, {"file_size": 1e400}, {"uptime_seconds": "many"},
+]
+
+
+@pytest.mark.parametrize("override", HOSTILE_VALUES, ids=lambda value: next(iter(value)))
+def test_clean_summary_never_raises_on_hostile_values(override):
+    cleaned = service.clean_summary(_summary(**override), now=NOW)
+    assert cleaned is None or json.dumps(cleaned)
+
+
+@pytest.mark.anyio
+async def test_ingest_counts_a_bad_dump_as_rejected_and_keeps_the_rest(store, monkeypatch):
+    dumps = [_summary(file_name="good-1.dmp")] + [_summary(file_name=f"bad-{i}.dmp", **value)
+                                                   for i, value in enumerate(HOSTILE_VALUES[:8])]
+    dumps.append(_summary(file_name="good-2.dmp"))
+    counts = await service.ingest(_device(5), dumps, now=NOW)
+    assert counts["received"] == 10 and counts["stored"] + counts["rejected"] == 10
+    names = {row["file_name"] for row in await repo.list_for_asset(10)}
+    assert {"good-1.dmp", "good-2.dmp"} <= names
+    # A year-5 file time is implausible, so that dump is rejected rather than stored or crashing.
+    assert "bad-6.dmp" not in names
+
+    def explode(raw, *, now):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(service, "clean_summary", explode)
+    assert (await service.ingest(_device(5), [_summary(file_name="x.dmp")], now=NOW))["rejected"] == 1
+
+
+@pytest.mark.anyio
+async def test_deeply_nested_upload_is_a_400(client):
+    test_client, _state = client
+    nested = b'{"dumps": ' + b"[" * 50000 + b"]" * 50000 + b"}"
+    assert test_client.post("/api/tray/minidumps", content=nested).status_code == 400
+
+
+@pytest.mark.anyio
+async def test_resolve_asset_matches_the_asset_page(store):
+    """The asset page finds a tray device by host name too; its dumps must land on the same asset."""
+    await store["conn"].execute("INSERT INTO assets (id, company_id, name, serial_number) VALUES (14, 1, 'LAPTOP-7', '')")
+    by_name = _device(8, device_uid="dev-80", serial_number="", hostname="laptop-7")
+    assert (await repo.resolve_asset_for_device(by_name))["id"] == 14
+    # A link to an asset that is gone, or in another company, falls back to the other rules.
+    assert (await repo.resolve_asset_for_device(_device(6, asset_id=9999)))["id"] == 11
+    assert (await repo.resolve_asset_for_device(_device(6, asset_id=20)))["id"] == 11
+    assert await repo.resolve_asset_for_device(_device(30)) is None
+    # An asset already claimed by another device's uid is not taken by host name.
+    await store["conn"].execute("UPDATE assets SET tray_device_uid = 'someone-else' WHERE id = 14")
+    assert await repo.resolve_asset_for_device(by_name) is None
+
+
+@pytest.mark.anyio
+async def test_failed_rerun_keeps_the_previous_report(analysis):
+    dump = await _ingested()
+    await service.start_analysis(dump=dump, requested_by={"id": 1})
+    await _run(analysis)
+    analysis["reply"] = RuntimeError("model timed out")
+    await service.start_analysis(dump=await repo.get_dump(dump["id"]), requested_by={"id": 1})
+    during = (await service.list_for_asset(10))[0]
+    assert during["analysis_status"] == "analysing" and during["analysis"]["likely_cause"] == REPORT["likely_cause"]
+    await _run(analysis)
+    row = await repo.get_dump(dump["id"])
+    assert row["analysis_status"] == "failed" and row["analysis"]["likely_cause"] == REPORT["likely_cause"]
+    shown = (await service.list_for_asset(10))[0]
+    assert shown["status_label"] == "Failed" and shown["analysis"]["likely_cause"] == REPORT["likely_cause"]
+    html_text = _section([shown])
+    assert REPORT["likely_cause"] in html_text and "The last analysis failed" in html_text
+    assert "Analyse again" in html_text
+
+
+@pytest.mark.anyio
+async def test_a_run_that_was_taken_over_cannot_overwrite_or_post(analysis, monkeypatch):
+    dump = await _ingested()
+    await service.start_analysis(dump=dump, requested_by={"id": 1}, ticket_id=3)   # run A
+    late = NOW + timedelta(minutes=20)
+    monkeypatch.setattr(service, "_utcnow", lambda: late)
+    await service.start_analysis(dump=await repo.get_dump(dump["id"]), requested_by={"id": 2})  # run B takes over
+    run_a, run_b = analysis["scheduled"][0][2], analysis["scheduled"][1][2]
+    analysis["scheduled"].clear()
+    analysis["reply"] = json.dumps(dict(REPORT, likely_cause="From the stale run A"))
+    await run_a
+    row = await repo.get_dump(dump["id"])
+    assert row["analysis_status"] == "analysing" and row["analysis"] is None and analysis["notes"] == []
+    analysis["reply"] = json.dumps(dict(REPORT, likely_cause="From run B"))
+    await run_b
+    row = await repo.get_dump(dump["id"])
+    assert row["analysis_status"] == "completed" and row["analysis"]["likely_cause"] == "From run B"
+    assert analysis["notes"] == []  # run B asked for no ticket
+
+
+def test_poller_does_not_reload_over_unsaved_changes():
+    script = (ROOT / "app" / "static" / "js" / "asset_minidumps.js").read_text(encoding="utf-8")
+    assert "data-ae-savebar" in script and "Reload the page to see the result" in script

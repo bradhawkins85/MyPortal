@@ -94,10 +94,10 @@ def _parse_time(value: Any) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    except ValueError:
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    except (ValueError, OverflowError):
         return None
-    if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
     return parsed.replace(microsecond=0)
 
 
@@ -140,12 +140,14 @@ def clean_summary(raw: Any, *, now: datetime) -> dict[str, Any] | None:
         return None
     file_name = _name(raw.get("file_name"))
     modified = _parse_time(raw.get("file_modified_at"))
-    if not file_name or modified is None:
+    if not file_name or modified is None or modified < _EARLIEST:
         return None
     code = raw.get("bugcheck_code")
     if isinstance(code, bool) or not isinstance(code, int) or code < 0 or code > 0xFFFFFFFF:
         code = None
-    architecture = raw.get("architecture") if raw.get("architecture") in _ARCHITECTURES else "unknown"
+    architecture = raw.get("architecture")
+    if not isinstance(architecture, str) or architecture not in _ARCHITECTURES:
+        architecture = "unknown"
     parameter_drivers = []
     for item in _list(raw.get("parameter_drivers"))[:4]:
         ref = _address_ref(item)
@@ -193,24 +195,29 @@ def _stored_time(value: str) -> datetime | None:
     return datetime.strptime(value, _TIME_FORMAT) if value else None
 
 
-async def ingest(device: Mapping[str, Any], dumps: Any, *, now: datetime | None = None) -> dict[str, int]:
+async def ingest(device: Mapping[str, Any], dumps: Any, *, now: datetime | None = None) -> dict[str, Any]:
     """Store the dump summaries a tray device reported, on the device's own asset.
 
-    A device with no asset in its company is accepted and ignored. Returns
-    how many were received, stored, already known and rejected.
+    Returns how many were received, stored, already known and rejected.
+    ``linked`` is ``False``, and nothing is stored, when the device has no
+    asset in its company yet; the caller must not report that as success, or
+    the tray app would never send those dumps again.
     """
 
     now = now or _utcnow()
     items = _list(dumps)[:MAX_DUMPS_PER_UPLOAD]
-    counts = {"received": len(items), "stored": 0, "duplicates": 0, "rejected": 0}
-    if not items:
-        return counts
+    counts: dict[str, Any] = {"received": len(items), "stored": 0, "duplicates": 0, "rejected": 0, "linked": True}
     asset = await repo.resolve_asset_for_device(device)
     device_id = device.get("id")
     if not asset or not isinstance(device_id, int):
+        counts["linked"] = False
         return counts
     for raw in items:
-        summary = clean_summary(raw, now=now)
+        try:
+            summary = clean_summary(raw, now=now)
+        except Exception as exc:  # noqa: BLE001 - one bad dump must not lose the others
+            log_warning("Minidump summary rejected", device_id=device_id, error=str(exc)[:200])
+            summary = None
         if summary is None:
             counts["rejected"] += 1
             continue
@@ -508,7 +515,7 @@ async def start_analysis(
     if not claimed:
         raise MinidumpError("This dump is already being analysed.")
     _schedule(
-        run_analysis(dump_id, llm=dict(llm), ticket_id=int(ticket_id) if ticket_id else None),
+        run_analysis(dump_id, llm=dict(llm), ticket_id=int(ticket_id) if ticket_id else None, started_at=now),
         description="analysis", dump_id=dump_id,
     )
     return {"id": dump_id, "analysis_status": repo.STATUS_ANALYSING, "ticket_id": int(ticket_id) if ticket_id else None}
@@ -529,8 +536,15 @@ async def _post_ticket_note(dump: Mapping[str, Any], report: Mapping[str, Any], 
     return "posted"
 
 
-async def run_analysis(dump_id: int, *, llm: Mapping[str, str], ticket_id: int | None) -> None:
-    """Research the crash, ask the model for the likely cause and save the report."""
+async def run_analysis(
+    dump_id: int, *, llm: Mapping[str, str], ticket_id: int | None, started_at: datetime
+) -> None:
+    """Research the crash, ask the model for the likely cause and save the report.
+
+    ``started_at`` is the claim time from :func:`start_analysis`. A run that
+    was taken over while it worked (it ran past :data:`STALE_AFTER`) saves
+    nothing and posts nothing; a failure keeps the previous report.
+    """
 
     try:
         dump = await repo.get_dump(dump_id)
@@ -545,13 +559,19 @@ async def run_analysis(dump_id: int, *, llm: Mapping[str, str], ticket_id: int |
         report["web_error"] = web_error
         if not report["likely_cause"]:
             raise ValueError("The AI model returned no explanation")
-        if ticket_id:
-            report["ticket_note"] = await _post_ticket_note(dump, report, ticket_id)
-        await repo.finish_analysis(dump_id, status=repo.STATUS_COMPLETED, analysis=report, error=None, now=_utcnow())
     except Exception as exc:  # noqa: BLE001 - recorded on the dump so the technician can retry
         message = str(exc)[:500] or exc.__class__.__name__
         log_warning("Minidump analysis failed", dump_id=dump_id, error=message)
-        await repo.finish_analysis(dump_id, status=repo.STATUS_FAILED, analysis=None, error=message, now=_utcnow())
+        await repo.finish_analysis(
+            dump_id, status=repo.STATUS_FAILED, analysis=None, error=message, started_at=started_at, now=_utcnow(),
+        )
+        return
+    saved = await repo.finish_analysis(
+        dump_id, status=repo.STATUS_COMPLETED, analysis=report, error=None, started_at=started_at, now=_utcnow(),
+    )
+    if saved and ticket_id:
+        report["ticket_note"] = await _post_ticket_note(dump, report, ticket_id)
+        await repo.update_analysis(dump_id, report)
 
 
 def _html_list(items: Sequence[str], *, ordered: bool = False) -> str:
@@ -618,7 +638,8 @@ def present(dump: Mapping[str, Any]) -> dict[str, Any]:
         "analysis_status": status,
         "status_label": label,
         "status_variant": variant,
-        "analysis": dict(analysis) if analysis and status == repo.STATUS_COMPLETED else None,
+        # A failed or running re-analysis still shows the last good report.
+        "analysis": dict(analysis) if analysis else None,
         "confidence_label": CONFIDENCE_LABELS.get((analysis or {}).get("confidence"), ""),
         "category_label": CATEGORY_LABELS.get((analysis or {}).get("category"), ""),
         "analysis_error": dump.get("analysis_error") or "",
