@@ -266,7 +266,7 @@
           {% set current_path = request.url.path if request is defined else '' %}
           {% set membership = active_membership or {} %}
           {% set has_company_membership = active_membership is defined and active_membership is not none %}
-          {% set menu_access = menu_access | default({}) %}
+          {% set menu_access = menu_access | default(membership.get('menu_permissions') or {}) %}
           {% set is_super_admin = is_super_admin | default(current_user.get('is_super_admin') if current_user else False) %}
           {% set staff_permission = staff_permission | default(membership.get('staff_permission', 0) or 0) %}
           {# The dashboard is the authenticated portal landing page, so every signed-in user needs its navigation link. #}

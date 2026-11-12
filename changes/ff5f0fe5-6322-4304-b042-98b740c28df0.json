@@ -1,0 +1,7 @@
+{
+  "guid": "ff5f0fe5-6322-4304-b042-98b740c28df0",
+  "occurred_at": "2026-11-12T04:28Z",
+  "change_type": "Fix",
+  "summary": "Assets Read Only now displays company assets, and Applications, Websites and Expirations menus respect their own role permissions independently of Assets.",
+  "content_hash": "0e682699ad4a62cd39507f9496bcd437769bdf471d657714e32d0af6b75ec409"
+}

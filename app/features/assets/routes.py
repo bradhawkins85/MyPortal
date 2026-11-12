@@ -294,7 +294,9 @@ async def assets_page(request: Request):
 
     rows = await asset_repo.list_company_assets(company_id)
     if not can_write_assets:
-        rows = [_customer_asset(dict(row)) for row in await _customer_visible_assets(membership, company_id, rows)]
+        # The page context already requires Assets read access. Publication
+        # audiences govern customer content, not the company asset register.
+        rows = [_customer_asset(dict(row)) for row in rows]
     hidden_columns = await _end_user_hidden_columns(user, request)
     field_definitions = [
         definition
@@ -2128,6 +2130,7 @@ async def asset_detail_page(
     can_write = is_super_admin or main_module._membership_menu_can(
         user, membership, "menu.assets", write=True
     )
+    can_read = main_module._membership_menu_can(user, membership, "menu.assets")
     can_view_relationships = is_super_admin or main_module._membership_menu_can(
         user, membership, "menu.asset_relationships"
     )
@@ -2142,7 +2145,7 @@ async def asset_detail_page(
     )
     customer_safe = (not can_write) or customer_preview
     if (record_company_id is None or int(record_company_id) != company_id
-            or (not is_super_admin and not can_write and (not bool(record.get("customer_visible")) or not await _customer_role_can_view_asset(membership, company_id, asset_id)))):
+            or (not is_super_admin and not can_read and (not bool(record.get("customer_visible")) or not await _customer_role_can_view_asset(membership, company_id, asset_id)))):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
         )
