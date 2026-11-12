@@ -1,0 +1,7 @@
+{
+  "guid": "a9758fe6-02b5-4491-9562-0c9ae5eebcf7",
+  "occurred_at": "2026-11-10T01:49Z",
+  "change_type": "Feature",
+  "summary": "Tray and RMM agent builds are now signed by an approved GitHub release workflow, and devices only install updates and agent builds that carry a valid release signature",
+  "content_hash": "3b41f9e11288144d0186cf054ee945adb83f008b79bc974464c87b419a71c39e"
+}

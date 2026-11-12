@@ -1,0 +1,7 @@
+{
+  "guid": "fb9f183b-b350-4f8a-8ca6-fd5f8d2e9d14",
+  "occurred_at": "2026-11-10T02:29Z",
+  "change_type": "Security",
+  "summary": "Each RMM agent now has its own key: re-enrolling an agent that is in use and opening a live tools session need a signature from it, so a copied agent token alone is no longer enough",
+  "content_hash": "e7798d98abecfa4867ac9abdeb383c9c53b0d3ae9448b5981c2fed1956b44e6b"
+}

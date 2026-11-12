@@ -13,7 +13,7 @@ from .routes import router as orders_router
 
 PACK = FeaturePack(
     slug="orders",
-    version="1.0.0",
+    version="1.1.0",
     routers=(orders_router,),
 )
 

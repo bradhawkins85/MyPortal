@@ -309,9 +309,9 @@ def test_required_option_disabled_without_tenant(world, client):
     assert "Not connected" in section
 
 
-def test_required_option_disabled_without_linked_users(world, client):
+def test_required_option_available_without_linked_users(world, client):
     section = _section(client.get(EDIT_URL).text)
-    assert "disabled" in _tag(section, 'value="required"')
+    assert "disabled" not in _tag(section, 'value="required"')
 
 
 def test_required_option_enabled_with_tenant_and_link(world, client):
@@ -439,13 +439,13 @@ def test_mode_form_post_redirects_with_flash(world, client):
 
 
 def test_mode_form_error_is_flashed(world, client):
-    world.mode_error = sso_policy.SsoModeError("link_required")
+    world.mode_error = sso_policy.SsoModeError("tenant_required")
     response = client.post("/admin/companies/7/sso/mode", data={"sso_mode": "required"})
     assert response.status_code == 303
     assert response.headers["location"] == SECTION_URL
     flash = _flash(response)
     assert flash == {
-        "message": "Link at least one user before requiring Microsoft sign-in.",
+        "message": "Connect this company's Microsoft 365 tenant before requiring Microsoft sign-in.",
         "variant": "error",
     }
 

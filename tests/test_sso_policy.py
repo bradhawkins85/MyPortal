@@ -266,7 +266,7 @@ async def test_can_manage_link_rules(fakes):
     assert await sso_policy.can_manage_link(admin, target, 9, {7}) is False
 
 
-async def test_set_required_needs_tenant_and_a_linked_user(fakes):
+async def test_set_required_needs_a_tenant_but_no_prelinked_user(fakes):
     actor = {"id": 2}
     request = SimpleNamespace()
     fakes.modes[7] = "optional"
@@ -275,11 +275,6 @@ async def test_set_required_needs_tenant_and_a_linked_user(fakes):
         await sso_policy.set_company_sso_mode(7, "required", actor=actor, request=request)
 
     fakes.tenant[7] = True
-    with pytest.raises(ValueError, match="Link at least one user"):
-        await sso_policy.set_company_sso_mode(7, "required", actor=actor, request=request)
-    assert fakes.updates == [] and fakes.audits == []
-
-    fakes.identity_counts[7] = 1
     await sso_policy.set_company_sso_mode(7, "required", actor=actor, request=request)
     assert fakes.updates == [(7, {"sso_mode": "required"})]
     assert fakes.audits == [{
@@ -311,9 +306,8 @@ async def test_set_mode_errors_are_typed_with_constant_copy(fakes):
     assert no_tenant.value.code == "tenant_required"
 
     fakes.tenant[7] = True
-    with pytest.raises(sso_policy.SsoModeError) as no_links:
-        await sso_policy.set_company_sso_mode(7, "required", actor={"id": 2}, request=None)
-    assert no_links.value.code == "link_required"
+    await sso_policy.set_company_sso_mode(7, "required", actor={"id": 2}, request=None)
+    assert fakes.updates == [(7, {"sso_mode": "required"})]
     assert sso_policy.mode_error_message("not-a-code") == "Microsoft sign-in mode could not be changed."
 
 

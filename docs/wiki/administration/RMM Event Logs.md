@@ -5,7 +5,7 @@ Every device sends the logs in `EVENT_LOG_DEFAULT_LOGS` (**Application** and **S
 change it); technicians can add more logs for a whole company or for one device. Browse them from **Event logs** in the main menu
 (`/rmm/event-logs`), filtered by device, log, level, event ID, source, message text and
 date range (UTC days), or on an asset's page under **Event logs**. [Event log rules](#event-log-rules)
-drop events you do not want to keep, or run a script when an event arrives.
+drop events you do not want to keep, or take actions in order when an event arrives: create a ticket, run scripts or schedule them.
 
 Event logs are high volume, so they are stored in a **separate database**, not MyPortal's main
 one, and are left out of backups unless you ask for them.
@@ -110,31 +110,40 @@ Open **Event log rules** from the Event logs page (`/rmm/event-logs/rules`). A r
   *is one of* / *is not one of* (comma separated), *contains*, *does not contain* or *starts
   with*. Event ID takes *is*, *is not*, *is one of* and *is not one of*; Level takes *is*, *is
   not* and *is at least* (that level or more severe). A rule needs at least one condition.
-- **Then**:
-  - **Drop the event**: matching events are not stored. Drop rules are checked first, so a
-    dropped event never runs a script.
-  - **Run a script**: runs an [RMM script](RMM%20Scripts.md) on the device that sent the event.
-    It runs at most once per batch the agent sends, using the first matching event, and then not
-    again on that device until the **cooldown** (60 minutes by default) has passed. After you
-    choose the script and save, its parameters appear; besides the usual variables they can use
-    the event's own, such as `{{event.message}}`, `{{event.event_id}}`, `{{event.level}}`,
-    `{{event.provider}}`, `{{event.log_name}}`, `{{event.computer}}`, `{{event.record_id}}` and
-    `{{event.time_created}}`. Rules for every company can only use scripts in the `Common` folder.
-  - **Schedule a script**: runs a script on the device that sent the event later instead of
-    straight away, for actions such as a reboot out of hours. Choose **After a delay** (in
-    minutes) or **At the next time of day** (HH:MM in the rule's time zone, which defaults to
-    `DEFAULT_TIMEZONE`). Its script values work as for **Run a script**, using the event that
-    scheduled it. One run waits per rule and device: more matching events while it waits do not
-    schedule another. The RMM automation job queues it when it is due; if the rule is turned off,
-    changed to another action or deleted first, the waiting run is dropped. The rules list shows
-    how many devices have a run waiting.
-  - **Create a ticket**: raises a ticket for the company the device belongs to, with the
-    device's asset linked and the matching events in its description. While that ticket is not
-    closed, later matches from the same rule on the same device are added to it as internal
-    updates instead of raising another ticket; once it is closed, the next match raises a new one.
-    Add the **Run Troubleshooting Bot** action to a *Ticket created* automation to have the AI
-    troubleshooter investigate these tickets automatically (see
-    [Tray App](../getting-started/Tray%20App.md#multi-stage-troubleshooter-ticket-assets)).
+- **Then**: either drop the event, or store it and take actions.
+  - **Drop the event**: matching events are not stored and no actions run. Drop rules are
+    checked first, so a dropped event never starts another rule's actions.
+  - **Store it and take actions**: add the actions to take, in any combination. They run one
+    after another in the order listed, for the device that sent the event, so a rule can, for
+    example, create a ticket, run a script, then schedule another script for out of hours. Use
+    **+ Add an action** to add one, the arrows to reorder and **Remove** to take one out. Add as
+    many scripts as you need (up to 10 actions); a rule creates at most one ticket per device. If
+    one action fails, the actions after it still run.
+    - **Create a ticket**: raises a ticket for the company the device belongs to, with the
+      device's asset linked and the matching events in its description. While that ticket is not
+      closed, later matches from the same rule on the same device are added to it as internal
+      updates instead of raising another ticket; once it is closed, the next match raises a new
+      one. Add the **Run Troubleshooting Bot** action to a *Ticket created* automation to have the
+      AI troubleshooter investigate these tickets automatically (see
+      [Tray App](../getting-started/Tray%20App.md#multi-stage-troubleshooter-ticket-assets)).
+    - **Run a script**: runs an [RMM script](RMM%20Scripts.md) on the device that sent the event.
+      It runs at most once per batch the agent sends, using the first matching event. The rule's
+      scripts then do not run again on that device until the **cooldown** (60 minutes by default,
+      **Run scripts again on a device at most every**) has passed. After you choose the script and
+      save, its parameters appear in that action; besides the usual variables they can use the
+      event's own, such as `{{event.message}}`, `{{event.event_id}}`, `{{event.level}}`,
+      `{{event.provider}}`, `{{event.log_name}}`, `{{event.computer}}`, `{{event.record_id}}` and
+      `{{event.time_created}}`. Rules for every company can only use scripts in the `Common` folder.
+    - **Schedule a script**: runs a script on the device that sent the event later instead of
+      straight away, for actions such as a reboot out of hours. Choose **After a delay** (in
+      minutes) or **At the next time of day** (HH:MM in the action's time zone, which defaults to
+      `DEFAULT_TIMEZONE`). Its script values work as for **Run a script**, using the event that
+      scheduled it. One run waits per action and device: more matching events while it waits do
+      not schedule another. The RMM automation job queues it when it is due; if the rule is turned
+      off, the action is removed or the rule is deleted first, the waiting run is dropped. The
+      rules list shows how many runs are waiting.
+
+  Rules saved before actions could be combined keep their one action and work as before.
 
 A [health check](Health%20Check.md#watching-for-problems-in-the-event-logs) suggests rules for
 the problems it finds; **Create this rule** opens this form filled in to raise a ticket.

@@ -9,6 +9,12 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
+from app.security.commerce_permissions import (
+    CommerceScope,
+    commerce_scope,
+    commerce_record_visible,
+    require_commerce_record,
+)
 from app.repositories import companies as company_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import invoices as invoice_repo
@@ -16,6 +22,7 @@ from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import user_companies as user_company_repo
 from app.schemas.invoices import InvoiceCreate, InvoiceResponse, InvoiceUpdate
+from app.services.invoice_assignment import validate_invoice_assignee
 from app.services import audit as audit_service
 from app.services import invoice_generator as invoice_generator_service
 from app.services import xero as xero_service
@@ -108,12 +115,21 @@ def _build_batch_dashboard(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-async def _ensure_company_access(user: dict, company_id: int) -> None:
+async def _ensure_company_access(user: dict, company_id: int) -> CommerceScope:
     if user.get("is_super_admin"):
-        return
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
-    if not membership or not bool(membership.get("can_manage_invoices")):
+        return "all"
+    if user.get("id") is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    membership = user.get("simulated_membership")
+    if membership is not None:
+        if membership.get("company_id") != company_id:
+            membership = None
+    else:
+        membership = await user_company_repo.get_user_company(int(user["id"]), company_id)
+    scope = commerce_scope(user, membership, "menu.invoices")
+    if scope == "none":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invoices access denied")
+    return scope
 
 
 @router.get("", response_model=list[InvoiceResponse])
@@ -131,8 +147,9 @@ async def list_invoices(
     company = await company_repo.get_company_by_id(company_id)
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    await _ensure_company_access(current_user, company_id)
-    records = await invoice_repo.list_company_invoices(company_id)
+    scope = await _ensure_company_access(current_user, company_id)
+    records = [record for record in await invoice_repo.list_company_invoices(company_id)
+               if commerce_record_visible(current_user, scope, record, "menu.invoices")]
     return [InvoiceResponse.model_validate(record) for record in records]
 
 
@@ -146,7 +163,10 @@ async def create_invoice(
     company = await company_repo.get_company_by_id(payload.company_id)
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    await validate_invoice_assignee(payload.company_id, payload.assigned_user_id)
     created = await invoice_repo.create_invoice(
+        created_by=int(current_user["id"]),
+        assigned_user_id=payload.assigned_user_id,
         company_id=payload.company_id,
         invoice_number=payload.invoice_number,
         amount=payload.amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
@@ -181,7 +201,8 @@ async def get_invoice(
     invoice = await invoice_repo.get_invoice_by_id(invoice_id)
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
-    await _ensure_company_access(current_user, int(invoice["company_id"]))
+    scope = await _ensure_company_access(current_user, int(invoice["company_id"]))
+    require_commerce_record(current_user, scope, invoice, "menu.invoices")
     return InvoiceResponse.model_validate(invoice)
 
 
@@ -201,6 +222,7 @@ async def update_invoice(
     company = await company_repo.get_company_by_id(int(merged["company_id"]))
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    await validate_invoice_assignee(int(merged["company_id"]), merged.get("assigned_user_id"))
     amount_value = merged.get("amount")
     if amount_value is None:
         amount_value = Decimal("0.00")
@@ -219,6 +241,7 @@ async def update_invoice(
     adjustment_updates = {
         key: data[key]
         for key in (
+            "assigned_user_id",
             "approval_required",
             "approved_by",
             "approved_at",
@@ -379,6 +402,7 @@ async def bill_ticket_now(
         ) from exc
     result = await invoice_generator_service.generate_invoice(
         company_id_int,
+        created_by=int(current_user["id"]),
         ticket_ids=[payload.ticket_id],
         include_recurring_items=False,
         approval_required=payload.approval_required,

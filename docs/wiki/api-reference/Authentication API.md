@@ -32,6 +32,20 @@ For subsequent users:
 
 All authentication routes are documented in the interactive Swagger UI at `/docs`.
 
+### Profile work details and integrations
+
+The `/admin/profile#details` and `/admin/profile#integrations` sections require
+super administrator access, company admin access, or the Technician permission
+on the active company membership. Ticket write access alone does not grant access.
+The same rule applies while simulating a role.
+
+Unauthorized users receive `403` from the Microsoft 365 contacts connect,
+callback, disconnect and phone lookup actions, and from `GET`/`PUT`
+`/api/click-to-call/settings`. Updates to `mobile_phone`, `booking_link_url`,
+`email_signature` or `matrix_user_id` through `PATCH /api/users/{user_id}` also
+require this access. Security, privacy and navigation preferences remain
+available through the profile.
+
 ### Registration
 
 **POST /auth/register**

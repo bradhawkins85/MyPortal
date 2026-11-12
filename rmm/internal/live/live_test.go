@@ -123,6 +123,11 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessAnswering(t, nil)
+}
+
+func newHarnessAnswering(t *testing.T, answer func(string) string) *harness {
+	t.Helper()
 	t.Setenv("MYPORTAL_RMM_ALLOW_HTTP", "1")
 	accepted := make(chan *websocket.Conn, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +150,7 @@ func newHarness(t *testing.T) *harness {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		Serve(ctx, agentConn, 7, "test")
+		Serve(ctx, agentConn, 7, "test", answer)
 	}()
 	conn := <-accepted
 	t.Cleanup(func() {
@@ -382,5 +387,20 @@ func TestSessionTerminal(t *testing.T) {
 	}
 	if msg := h.fail("terminal.open", map[string]interface{}{"term": "t2", "shell": "definitely-not-a-shell"}); !strings.Contains(msg, "not available") {
 		t.Fatalf("unknown shell: %q", msg)
+	}
+}
+
+func TestServeAnswersTheChallenge(t *testing.T) {
+	h := newHarnessAnswering(t, func(nonce string) string { return "signed:" + nonce })
+	if err := h.conn.WriteJSON(map[string]string{"type": "challenge", "nonce": "n1"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = h.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var got map[string]string
+	if err := h.conn.ReadJSON(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["type"] != "auth" || got["signature"] != "signed:n1" {
+		t.Fatalf("challenge answer = %v", got)
 	}
 }

@@ -289,7 +289,7 @@ async def test_integration_sync_keeps_vendor_warranty_dates(monkeypatch):
         "machine_type, status, os_name, cpu_name, ram_gb, hdd_size, last_sync, boot_time, "
         "motherboard_manufacturer, form_factor, last_user, approx_age, performance_score, "
         "warranty_status, warranty_end_date, warranty_source, syncro_asset_id, tactical_asset_id, "
-        "serial_number, mac_address)"
+        "serial_number, mac_address, cpu_release_date)"
     )
     conn.execute("INSERT INTO assets (id, warranty_status, warranty_end_date, warranty_source) "
                  "VALUES (5, 'Active', '2027-01-01', 'dell'), (6, 'Old', '2020-01-01', NULL)")

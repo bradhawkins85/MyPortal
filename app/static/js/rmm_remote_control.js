@@ -148,6 +148,7 @@
   }
   const message = box.querySelector('[data-rmm-remote-message]');
   const link = box.querySelector('[data-rmm-remote-link]');
+  const dismiss = box.querySelector('[data-rmm-remote-dismiss]');
   const POLL_MS = 2000;
   const GIVE_UP_MS = 10 * 60 * 1000;
   const RUN_STATUS = {
@@ -160,6 +161,9 @@
   let target = '';
   let meshTab = null;
   let note = '';
+  // Set when the viewer closes the status box; progress for that session stays
+  // hidden (errors still show) until another remote session is started.
+  let dismissed = false;
 
   function csrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -186,6 +190,10 @@
   }
 
   function show(text, isError) {
+    if (dismissed && !isError) {
+      return;
+    }
+    dismissed = false;
     box.hidden = false;
     box.classList.toggle('is-error', Boolean(isError));
     message.textContent = text;
@@ -314,6 +322,13 @@
     }
   }
 
+  if (dismiss) {
+    dismiss.addEventListener('click', function () {
+      dismissed = true;
+      box.hidden = true;
+    });
+  }
+
   document.addEventListener('click', async function (event) {
     const button = event.target instanceof Element ? event.target.closest('[data-rmm-remote]') : null;
     if (!button || busy) {
@@ -327,6 +342,7 @@
       meshTab = reserveTab();
     }
     setBusy(true);
+    dismissed = false;
     note = '';
     target = button.dataset.rmmRemoteName ? ' on ' + button.dataset.rmmRemoteName : '';
     link.hidden = true;

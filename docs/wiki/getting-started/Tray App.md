@@ -34,6 +34,13 @@ Every endpoint runs **two** cooperating components:
                                   └────────────────────┘
 ```
 
+On Windows the service and UI talk over the `\\.\pipe\myportal-tray` named
+pipe. Only SYSTEM and Administrators can create or own it, signed-in users can
+only connect, and the UI checks that the process serving the pipe runs as
+LocalSystem before it trusts any chat or notification from it. If another
+process already holds the pipe name, the service retries for two minutes and
+then logs `IPC server: … chat delivery disabled`.
+
 ### Why split service from UI?
 
 * On Windows, services run in **session 0** which cannot draw UI in the
@@ -153,7 +160,8 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/config` | GET | Bearer auth_token | Resolved menu + branding + env-var allowlist + chat toggle |
 | `/api/tray/heartbeat` | POST | Bearer auth_token | Liveness ping; updates console user, IP, agent version |
 | `/api/tray/overseer/report` | POST | Bearer auth_token | Overseer report: local service state and recoveries (audited); returns seconds since MyPortal last heard from the tray WebSocket and the RMM agent |
-| `/ws/tray/{device_uid}` | WS | Bearer/`X-Tray-Token` header | Bidirectional command channel |
+| `/api/tray/device-key` | POST | Bearer auth_token | Register the device's Ed25519 public key once (409 when a different key is registered) |
+| `/ws/tray/{device_uid}` | WS | Bearer/`X-Tray-Token` header, then a signed challenge when the device has a key | Bidirectional command channel |
 | `/api/tray/{device_uid}/chat/start` | POST | Authenticated technician | Create a Matrix room and push `chat_open` |
 | `/api/tray/admin/install-tokens` | GET / POST | Super admin | List / create install tokens |
 | `/api/tray/admin/install-tokens/{id}/revoke` | POST | Super admin | Revoke an install token |
@@ -173,7 +181,7 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/admin/configs/targeting/fields` | GET | Super admin | Advanced rule fields and operators (same catalogue as RMM checks) |
 | `/api/tray/admin/configs/targeting/preview` | POST | Super admin | Preview active tray devices matching a scope + an item's rule tree |
 | `/api/tray/admin/devices` | GET | Helpdesk technician | List enrolled devices |
-| `/api/tray/admin/devices/{id}/revoke` | POST | Super admin | Revoke a device |
+| `/api/tray/admin/devices/{id}/revoke` | POST | Super admin | Revoke a device, its RMM agents, its open connection and popup chat sessions |
 | `/api/tray/{device_uid}/troubleshoot` | POST | Helpdesk / super admin | Ask an active device to run the AI troubleshooting agent for a ticket (queues + pushes a `troubleshoot` WS command) |
 | `/api/tickets/{ticket_id}/troubleshoot-complete` | POST | Device bearer | AI agent reports generated guidance + sanitized log bundle for a ticket (multipart) |
 | `/api/health-checks/{id}/device-status` | POST | Device bearer | Health check progress (see [Health Check](../administration/Health%20Check.md)) |
@@ -183,13 +191,21 @@ All endpoints appear in the Swagger UI at `/docs` per project convention.
 
 ### WebSocket protocol (JSON, line-delimited)
 
+When the device has registered a key, the first message after the socket
+opens is a challenge. The device must answer within 15 seconds or the
+socket closes with code 4401, and nothing else is sent until it does:
+
+* Server: `{"type": "challenge", "nonce": "<random>"}`
+* Device: `{"type": "auth", "signature": "<base64 Ed25519 signature>"}` over
+  `myportal-tray-ws-v1\ndevice_uid=<device_uid>\nnonce=<nonce>\n`
+
 **Server → device:**
 * `{"type": "ping"}`
 * `{"type": "config_changed", "version": <n>}`
 * `{"type": "chat_open", "room_id": <int>, "matrix_room_id": "...", "subject": "..."}`
 * `{"type": "show_notification", "title": "...", "body": "..."}`
 * `{"type": "run_menu_action", "node_id": "..."}` *(only for whitelisted server-defined actions)*
-* `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "prompt": "...", "llm_base_url": "...", "llm_model": "...", "llm_api_key": "..."}` *(AI troubleshooting: the device collects sanitized local logs, asks a local LLM for guidance, then POSTs the result back to `troubleshoot-complete`. Fields are flat top-level JSON.)*
+* `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "prompt": "...", "llm_base_url": "...", "llm_model": "..."}` *(AI troubleshooting: the device collects sanitized local logs, asks a local LLM for guidance, then POSTs the result back to `troubleshoot-complete`. Fields are flat top-level JSON. MyPortal never sends its LLM API key to devices, so this direct mode only works with an LLM the device can reach without one; the ticket AI troubleshooter calls the LLM from the server instead.)*
 * `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "mode": "collect_logs", "log_requests": [{"source": "System", "reason": "...", "hours": 24}]}` *(Multi-stage troubleshooter: the device collects only the allowlisted log sources named, scrubs them and uploads them to `troubleshoot-complete`; the server analyses them. No LLM credentials are sent.)*
 * `{"type": "health_check", "command_id": <int>, "health_check_id": <int>, "phase": "snapshot"|"logs", "log_requests": [...], "extra_log_folders": [...], "extra_event_logs": [...], "allow_pawnio": <bool>, "event_days": <int>}` *(AI health check: the device reads a read-only health snapshot (and, on physical Windows hardware when allowed, hardware sensors through a temporarily installed PawnIO driver), collects the named allowlisted logs and uploads them to `/api/health-checks/{id}/device-result`. See [Health Check](../administration/Health%20Check.md).)*
 
@@ -399,8 +415,28 @@ re-enable the configuration.
   URL-safe random values. Only their SHA-256 hashes are stored (column
   `*_hash`); a 12-character `*_prefix` is kept for display so admins can
   identify which token is which without exposing the secret.
-* **Token rotation.** Calling `/api/tray/enrol` again with the same
-  `device_uid` rotates the auth token; the previous token is invalidated.
+* **Re-enrolment.** An install token is shared by every device in the
+  company, so it cannot re-key a device that is already in use. Calling
+  `/api/tray/enrol` again with the same `device_uid` only works for a device
+  that enrolled in the last 7 days and has never checked in (a tray retrying
+  after a lost response); it returns 409 otherwise. To enrol a machine again,
+  revoke and delete its device in MyPortal first. Once enrolled, the Windows
+  tray removes the install token from `HKLM\Software\MyPortal\Tray`.
+* **Device keys.** The tray service makes its own Ed25519 key pair on first
+  start and keeps the private key in `device-key` in its state folder,
+  readable only by SYSTEM/root and Administrators. It sends the public key
+  when it enrols; devices enrolled by older releases register it once with
+  their device token (`POST /api/tray/device-key`). From then on the
+  WebSocket, which carries every command MyPortal sends the device, opens
+  only after the device signs a fresh challenge, so a device token copied
+  from a log, a backup or the network is not enough to receive the device's
+  commands. The first key a device registers is kept; the portal refuses a
+  different one. If a reinstall replaced the key but kept the device's
+  token, the tray logs that the portal holds a different key and stays
+  offline: a super administrator chooses **Reset key** for the device under
+  Tray → Devices, and the device registers its new key on its next
+  connection. The device list shows *Device key registered* for devices that
+  have one. The HTTP endpoints still accept the device token alone.
 * **Scoped auth.** Tray tokens authenticate **only** the `/api/tray/*`
   device endpoints and the `/ws/tray/*` socket. They cannot call any
   other API. Admin endpoints require an authenticated user with the
@@ -495,8 +531,11 @@ https://portal.example.com/api/tray/ticket-form/url-action?TrayAgentID={{agent.T
 ```
 
 The variable name is case-sensitive. Tactical RMM URL-encodes the custom-field
-value. MyPortal accepts only an active tray device that is linked to an asset,
-then redirects the browser to a short-lived encrypted MyPortal ticket form.
+value. The URL Action needs a signed-in MyPortal helpdesk technician (or super
+admin): anyone else is sent to the login page first and returns to the form
+afterwards, because a device UID alone is not a secret. MyPortal accepts only
+an active tray device that is linked to an asset, then redirects the browser
+to a short-lived encrypted MyPortal ticket form.
 The URL Action never exposes the internal asset or device database ID.
 
 ### Windows (PowerShell)
@@ -504,8 +543,11 @@ The URL Action never exposes the internal asset or device database ID.
 ```powershell
 $url   = 'https://portal.example.com'
 $token = 'PASTE-INSTALL-TOKEN-HERE'
-Invoke-WebRequest -Uri "$url/static/tray/myportal-tray.msi" -OutFile $env:TEMP\myportal-tray.msi
-msiexec.exe /i $env:TEMP\myportal-tray.msi `
+$dir   = Join-Path $env:TEMP ('myportal-tray-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $dir | Out-Null
+icacls.exe $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+Invoke-WebRequest -Uri "$url/static/tray/myportal-tray.msi" -OutFile "$dir\myportal-tray.msi"
+msiexec.exe /i "$dir\myportal-tray.msi" `
     MYPORTAL_URL="$url" ENROL_TOKEN="$token" /qn
 ```
 
@@ -514,16 +556,22 @@ msiexec.exe /i $env:TEMP\myportal-tray.msi `
 ```bash
 URL='https://portal.example.com'
 TOKEN='PASTE-INSTALL-TOKEN-HERE'
-curl -fsSL "$URL/static/tray/myportal-tray.pkg" -o /tmp/myportal-tray.pkg
+DIR="$(mktemp -d)"
+curl -fsSL --proto =https "$URL/static/tray/myportal-tray.pkg" -o "$DIR/myportal-tray.pkg"
 sudo /bin/sh -c "
+    umask 077
     echo MYPORTAL_URL=$URL  >  /Library/Preferences/io.myportal.tray.env
     echo ENROL_TOKEN=$TOKEN >> /Library/Preferences/io.myportal.tray.env
 "
-sudo installer -pkg /tmp/myportal-tray.pkg -target /
+sudo installer -pkg "$DIR/myportal-tray.pkg" -target /
 ```
 
 The admin **Install tokens** page generates these snippets pre-filled
-with the portal URL and a freshly-minted token (shown once).
+with the portal URL and a freshly-minted token (shown once). They download
+into a new folder with a random name that other local users cannot change:
+a fixed path such as `C:\Windows\Temp\myportal-tray.msi` or
+`/tmp/myportal-tray.pkg` could be swapped for another installer before it runs
+with administrator rights.
 
 ### Uninstall
 
@@ -562,6 +610,7 @@ See `tray/README.md` for build instructions.
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | `/api/tray/enrol` returns 401 | Install token expired / revoked / typo | Generate a new token in admin UI |
+| `/api/tray/enrol` returns 409 "Device is already enrolled" | The device ID belongs to a device that has already checked in | Revoke and delete the device on the Devices admin page, then reinstall |
 | Tray icon never appears after install | UI agent could not be launched in the active console session | Check service logs; ensure the user has logged in interactively at least once |
 | Tray shows the default icon instead of the branded one | The UI could not download or decode the icon | The tray uses the configuration's **Branding icon URL** (.ico or PNG), then the icon uploaded under **Admin > Tray**. Check the UI log for `Tray icon` lines naming each URL tried and why it failed |
 | "Chat with this device" button missing | Company has `tray_chat_enabled = 0`, or Matrix is disabled | Toggle on the company edit page; verify `MATRIX_ENABLED=true` |
@@ -596,7 +645,7 @@ chat-start and websocket plumbing. Subsequent PRs cover:
 The service polls this endpoint every 6 hours. Response:
 
 ```json
-{"version": "0.2.0", "download_url": "https://…/myportal-tray.msi", "required": false, "sha256": "…"}
+{"version": "0.2.0", "download_url": "https://…/myportal-tray.msi", "required": false, "sha256": "…", "signature": "…"}
 ```
 
 Publish a new version from the **Tray > Versions** admin page or via:
@@ -608,8 +657,8 @@ POST /api/tray/admin/versions
 
 The tray app updates itself, so no RMM script is needed to keep it current.
 When the published version is newer than the one it runs, the service
-downloads the installer, checks it against the published SHA-256, and runs
-it silently (`msiexec /qn` on Windows, `installer -pkg` on macOS). The
+downloads the installer, checks it against the published SHA-256 and the
+release signature (see *Release signing* below), and runs it silently (`msiexec /qn` on Windows, `installer -pkg` on macOS). The
 installer replaces and restarts the service. It never reinstalls the version
 it runs or moves to an older one. A technician can also send the `update`
 command to check straight away.
@@ -634,6 +683,48 @@ On both platforms the installer log is written to `update-installer.log` next
 to the service log (`/Library/Logs/MyPortal/tray` on macOS) and replaced by
 each update. On macOS it holds the `installer` output, including the package
 scripts' output.
+
+### Release signing
+
+Every release asset the tray app installs (the tray MSI, pkg and Linux
+tarball, and the six RMM agent builds) is signed by the **Sign release**
+workflow (`.github/workflows/sign-release.yml`). The workflow waits until the
+release's builds are uploaded, then asks a maintainer to approve the
+`release-signing` environment, which holds the Ed25519 private key as the
+`RELEASE_SIGNING_KEY` secret. It uploads an `<asset>.sig` file next to each
+asset.
+
+The public key is built into the tray app
+(`tray/internal/release/release-public-key.pem`). The tray updater and the
+RMM agent installer accept a build only when its signature covers that
+asset's name, the offered version and the SHA-256 of the downloaded bytes.
+MyPortal caches each `.sig` with the installer it belongs to and relays it in
+`/api/tray/version` and `/api/rmm/agent/package`, but it cannot make one. A
+compromised portal, or anyone between a device and GitHub, therefore cannot
+get a device to install a build the project did not release. Devices also
+refuse a version string they cannot compare, so they cannot be moved to an
+older release.
+
+What this means in practice:
+
+- Approve the **Sign release** run for each release. Devices do not update
+  to a release until its signatures are uploaded, and the **Update tray icon
+  installer** scheduled task picks them up on its next run (run it from
+  **Scheduled tasks** to do it straight away). The **Installers on this
+  server** list marks each installer *Signed* or *Not signed yet*.
+- A version you publish must point at a signed release installer, such as one
+  from the **Installers on this server** list. Devices refuse any other
+  installer.
+- If a run is missing a build, run **Sign release** again for that tag from
+  the Actions tab once the build is uploaded.
+- To replace the key, generate a new one, update
+  `release-public-key.pem` and the secret together, and release a tray
+  version signed with the *old* key first, so devices move to a build that
+  trusts the new key.
+
+Company installers from the local build server are not affected: they are
+only used for first installs from deployment links and keep the code-signing
+certificate described in *Tray Build Server*.
 
 Publish each platform's installer under its own platform. A version published
 for **All** is offered to Windows and macOS devices alike, and neither can
@@ -802,7 +893,7 @@ raw log data is never uploaded unsanitised.
    the configured LLM, queues the job in `tray_command_log`, and pushes a
    `troubleshoot` command over the device WebSocket (see §3). The command
    carries the `ticket_id` / `command_id` identifiers, the `prompt`, and the
-   local LLM endpoint (`llm_base_url` / `llm_model` / `llm_api_key`).
+   local LLM endpoint (`llm_base_url` / `llm_model`; no API key is sent).
 2. The service runs the Go agent (`tray/internal/agent/`) in a background
    goroutine: it collects up to 24 h of platform logs (Windows Event Log
    + common app logs on Windows; `log` / `Console` subsystem logs and

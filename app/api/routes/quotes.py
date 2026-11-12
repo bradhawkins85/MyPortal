@@ -7,6 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
 from app.core.config import get_settings
+from app.security.commerce_permissions import (
+    CommerceScope,
+    commerce_scope,
+    commerce_record_visible,
+    require_commerce_record,
+)
 from app.repositories import companies as company_repo
 from app.repositories import shop as shop_repo
 from app.repositories import user_companies as user_company_repo
@@ -64,30 +70,23 @@ async def _ensure_company(company_id: int) -> None:
         )
 
 
-async def _ensure_quote_access(
-    user: dict, company_id: int, quote_summary: dict | None = None
-) -> None:
-    """Ensure user has access to quotes for this company.
-
-    Access is granted if:
-    1. User is a super admin, OR
-    2. User has can_access_quotes permission for the company.
-    """
+async def _ensure_quote_access(user: dict, company_id: int, quote_summary: dict | None = None) -> CommerceScope:
     if user.get("is_super_admin"):
-        return
-
-    user_id = user.get("id")
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
-        )
-
-    # Check company membership and permissions
-    membership = await user_company_repo.get_user_company(int(user_id), company_id)
-    if not membership or not bool(membership.get("can_access_quotes")):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Quotes access denied"
-        )
+        return "all"
+    if user.get("id") is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    membership = user.get("simulated_membership")
+    if membership is not None:
+        if membership.get("company_id") != company_id:
+            membership = None
+    else:
+        membership = await user_company_repo.get_user_company(int(user["id"]), company_id)
+    scope = commerce_scope(user, membership, "menu.quotes")
+    if scope == "none":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Quotes access denied")
+    if quote_summary is not None:
+        require_commerce_record(user, scope, quote_summary, "menu.quotes")
+    return scope
 
 
 async def _can_assign_quotes(user: dict, company_id: int) -> bool:
@@ -102,7 +101,12 @@ async def _can_assign_quotes(user: dict, company_id: int) -> bool:
     if user_id is None:
         return False
 
-    membership = await user_company_repo.get_user_company(int(user_id), company_id)
+    membership = user.get("simulated_membership")
+    if membership is not None:
+        if membership.get("company_id") != company_id:
+            return False
+    else:
+        membership = await user_company_repo.get_user_company(int(user_id), company_id)
     if not membership:
         return False
 
@@ -118,8 +122,9 @@ async def list_quotes(
 ) -> list[QuoteSummaryResponse]:
     resolved_company_id = await _resolve_company_id(company_id, company_id_alt)
     await _ensure_company(resolved_company_id)
-    await _ensure_quote_access(current_user, resolved_company_id)
-    records = await shop_repo.list_quote_summaries(resolved_company_id)
+    scope = await _ensure_quote_access(current_user, resolved_company_id)
+    records = [record for record in await shop_repo.list_quote_summaries(resolved_company_id)
+               if commerce_record_visible(current_user, scope, record, "menu.quotes")]
     return [QuoteSummaryResponse.model_validate(record) for record in records]
 
 

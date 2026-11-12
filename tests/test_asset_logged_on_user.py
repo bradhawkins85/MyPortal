@@ -9,6 +9,14 @@ from starlette.requests import Request
 from app import main as main_module
 from app.features.assets import routes
 
+
+@pytest.fixture(autouse=True)
+def no_hidden_asset_columns(monkeypatch):
+    """No asset columns are hidden from end users unless a test says so."""
+    monkeypatch.setattr(
+        routes.asset_column_restrictions_repo, "list_restricted_keys", AsyncMock(return_value=set())
+    )
+
 DETAIL_TEMPLATE = Path(__file__).resolve().parent.parent / "app" / "templates" / "assets" / "detail.html"
 
 
@@ -133,3 +141,36 @@ async def test_machine_account_from_the_tray_falls_back_to_the_last_user(monkeyp
     await routes.asset_detail_page(_request(), 10, customer_preview=False)
 
     assert renderer.await_args.kwargs["extra"]["logged_on_user"] == "bob"
+
+
+@pytest.mark.anyio
+async def test_last_user_is_flagged_when_nobody_is_signed_in(monkeypatch):
+    renderer, _tray_lookup = _patch_detail(
+        monkeypatch,
+        record={"id": 10, "company_id": 3, "last_user": "old.user"},
+        tray_devices={10: {"id": 5, "console_user": "alice", "console_user_active": 0}},
+    )
+
+    await routes.asset_detail_page(_request(), 10, customer_preview=False)
+
+    extra = renderer.await_args.kwargs["extra"]
+    assert extra["logged_on_user"] == "alice"
+    assert extra["logged_on_user_is_last"] is True
+
+
+@pytest.mark.anyio
+async def test_signed_in_user_is_not_flagged_as_last(monkeypatch):
+    renderer, _tray_lookup = _patch_detail(
+        monkeypatch,
+        record={"id": 10, "company_id": 3},
+        tray_devices={10: {"id": 5, "console_user": "alice", "console_user_active": 1}},
+    )
+
+    await routes.asset_detail_page(_request(), 10, customer_preview=False)
+
+    assert renderer.await_args.kwargs["extra"]["logged_on_user_is_last"] is False
+
+
+def test_detail_template_shows_last_user_in_italics():
+    template = DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    assert "Last logged on: <em>{{ logged_on_user }}</em>" in template

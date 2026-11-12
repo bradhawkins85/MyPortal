@@ -93,7 +93,7 @@ def test_designer_schema_has_no_unresolvable_default_variables():
         for step_type, schema in handlers._WORKFLOW_STEP_FORM_SCHEMA.items()
         for field in schema.get("fields", [])
         if isinstance(field.get("default"), str)
-        for name in pattern.findall(field["default"])
+        for name in (m.group(1) for m in pattern.finditer(field["default"]))
         if name not in base_names
     ]
     assert not unresolved, unresolved

@@ -10,6 +10,10 @@
     registers a scheduled task that runs the agent as SYSTEM every two
     minutes. See docs/wiki/getting-started/Tray Build Server.md.
 
+    Run it from the repository's tray\build-agent folder, or on its own: when
+    the rest of the tray folder is not next to it, it clones -GitHubRepo at
+    -SourceRef (default main) into a temporary folder and uses that.
+
 .EXAMPLE
     .\Install-MyPortalBuildAgent.ps1 -PortalUrl https://portal.example.com `
         -ApiKey (Read-Host 'API key') -CertificateThumbprint 0123ABCD... `
@@ -26,6 +30,7 @@ param(
     [string]$WorkDir = 'C:\MyPortalBuild',
     [string]$WixVersion = '7.*',
     [string]$IcdPath,
+    [string]$SourceRef = 'main',
     [switch]$RunNow
 )
 
@@ -34,11 +39,6 @@ Set-StrictMode -Version 3
 
 if ($PortalUrl -notmatch '^https://') { throw 'PortalUrl must start with https://' }
 $CertificateThumbprint = ($CertificateThumbprint -replace '\s', '').ToUpperInvariant()
-. (Join-Path $PSScriptRoot 'New-MyPortalProvisioningPackage.ps1')
-$resolvedIcd = Resolve-MyPortalIcd $IcdPath
-if ($IcdPath -and -not $resolvedIcd) {
-    throw 'IcdPath must point to ICD.exe with Microsoft-Desktop-Provisioning.dat in the same directory. Install the Windows ADK Configuration Designer component.'
-}
 
 $missing = @(
     @{ Command = 'dotnet'; Name = '.NET SDK 8+ (winget install Microsoft.DotNet.SDK.8)' },
@@ -48,6 +48,30 @@ $missing = @(
 ) | Where-Object { -not (Get-Command $_.Command -ErrorAction SilentlyContinue) } | ForEach-Object { $_.Name }
 if ($missing) {
     throw ("Install these machine-wide, open a new PowerShell window and run this script again: " + ($missing -join ', '))
+}
+
+# The agent scripts, the release signature checker's source and the release
+# public key all come from the tray folder. Use the one this script sits in;
+# when the script was copied on its own, fetch the tray folder from GitHub.
+$trayRoot = Split-Path -Parent $PSScriptRoot
+$sourceClone = $null
+if (-not (Test-Path -LiteralPath (Join-Path $trayRoot 'go.mod')) -or
+    -not (Test-Path -LiteralPath (Join-Path $trayRoot 'build-agent\verify-release'))) {
+    $sourceClone = Join-Path ([System.IO.Path]::GetTempPath()) ('myportal-build-agent-' + [guid]::NewGuid().ToString('N'))
+    Write-Host "The tray folder is not next to this script; fetching $GitHubRepo ($SourceRef) from GitHub..."
+    git clone --quiet --depth 1 --branch $SourceRef "https://github.com/$GitHubRepo.git" $sourceClone
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not download $GitHubRepo ($SourceRef). Copy the repository's whole tray folder to this server and run the script from tray\build-agent instead."
+    }
+    $trayRoot = Join-Path $sourceClone 'tray'
+}
+$agentSource = Join-Path $trayRoot 'build-agent'
+
+try {
+. (Join-Path $agentSource 'New-MyPortalProvisioningPackage.ps1')
+$resolvedIcd = Resolve-MyPortalIcd $IcdPath
+if ($IcdPath -and -not $resolvedIcd) {
+    throw 'IcdPath must point to ICD.exe with Microsoft-Desktop-Provisioning.dat in the same directory. Install the Windows ADK Configuration Designer component.'
 }
 
 $cert = Get-Item -LiteralPath "Cert:\LocalMachine\My\$CertificateThumbprint" -ErrorAction SilentlyContinue
@@ -68,8 +92,26 @@ if (Test-Path -LiteralPath $wix) {
 }
 if ($LASTEXITCODE -ne 0) { throw 'Installing WiX failed.' }
 
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'MyPortalBuildAgent.ps1') -Destination $InstallDir -Force
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'New-MyPortalProvisioningPackage.ps1') -Destination $InstallDir -Force
+# Build the release signature checker and keep the release public key from
+# this checkout, so the agent only builds releases signed by that key.
+$verifier = Join-Path $toolsDir 'myportal-verify-release.exe'
+$releaseKey = Join-Path $InstallDir 'release-public-key.pem'
+Push-Location $trayRoot
+try {
+    $env:CGO_ENABLED = '0'
+    go build -o $verifier ./build-agent/verify-release
+    if ($LASTEXITCODE -ne 0) { throw 'Building the release signature checker failed. Is Go installed?' }
+} finally {
+    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+    Pop-Location
+}
+Copy-Item -LiteralPath (Join-Path $trayRoot 'internal\release\release-public-key.pem') -Destination $releaseKey -Force
+
+Copy-Item -LiteralPath (Join-Path $agentSource 'MyPortalBuildAgent.ps1') -Destination $InstallDir -Force
+Copy-Item -LiteralPath (Join-Path $agentSource 'New-MyPortalProvisioningPackage.ps1') -Destination $InstallDir -Force
+} finally {
+    if ($sourceClone) { Remove-Item -LiteralPath $sourceClone -Recurse -Force -ErrorAction SilentlyContinue }
+}
 
 $configDir = Join-Path $env:ProgramData 'MyPortalBuildAgent'
 New-Item -ItemType Directory -Force -Path $configDir | Out-Null
@@ -83,6 +125,8 @@ $configPath = Join-Path $configDir 'config.json'
     WorkDir               = $WorkDir
     WixPath               = $wix
     IcdPath               = $resolvedIcd
+    VerifierPath          = $verifier
+    ReleaseKeyPath        = $releaseKey
 } | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding utf8
 
 # The config holds the API key and the work folder briefly holds install

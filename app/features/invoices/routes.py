@@ -7,12 +7,22 @@ from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Form, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.repositories import companies as company_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import invoice_lines as invoice_lines_repo
+from app.repositories import users as users_repo
+from app.security.commerce_permissions import (
+    commerce_scope,
+    commerce_record_visible,
+    require_commerce_record,
+)
+from app.services import audit as audit_service
+from app.services.invoice_assignment import can_assign_invoice, validate_invoice_assignee
+
+
 router = APIRouter(tags=["Invoices"])
 
 
@@ -58,7 +68,7 @@ async def _load_invoice_context(request: Request):
     membership = await main_module._get_effective_company_membership(
         request, user["id"], company_id
     )
-    can_manage = bool(membership and membership.get("can_manage_invoices"))
+    can_manage = commerce_scope(user, membership, "menu.invoices") != "none"
     if not (is_super_admin or can_manage):
         return (
             user,
@@ -155,7 +165,9 @@ async def invoices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_invoice_context(request)
     if redirect:
         return redirect
-    records = await invoice_repo.list_company_invoices(company_id)
+    scope = commerce_scope(user, membership, "menu.invoices")
+    records = [record for record in await invoice_repo.list_company_invoices(company_id)
+               if commerce_record_visible(user, scope, record, "menu.invoices")]
     formatted, total_amount, paid_count = _format_invoice_records(
         records, is_super_admin=bool(user.get("is_super_admin"))
     )
@@ -227,6 +239,9 @@ async def invoice_detail_page(request: Request, invoice_id: int):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
     if bool(user.get("is_super_admin")) and int(invoice.get("company_id", 0)) != company_id:
         company = await company_repo.get_company_by_id(int(invoice.get("company_id", 0)))
+    require_commerce_record(user, commerce_scope(user, membership, "menu.invoices"), invoice, "menu.invoices")
+    can_assign = can_assign_invoice(user, membership)
+    assignees = await users_repo.list_company_members(int(invoice["company_id"])) if can_assign else []
     lines = await invoice_lines_repo.list_invoice_lines(invoice_id)
     amount_value = invoice.get("amount")
     amount_decimal = (
@@ -282,6 +297,8 @@ async def invoice_detail_page(request: Request, invoice_id: int):
             }
         )
     extra = {
+        "can_assign_invoice": can_assign,
+        "invoice_assignees": assignees,
         "title": f"Invoice {invoice['invoice_number']}",
         "invoice": dict(invoice)
         | {
@@ -304,6 +321,30 @@ async def invoice_detail_page(request: Request, invoice_id: int):
         "adjustment_amount_display": invoice.get("billing_adjustment_amount"),
     }
     return await main_module._render_template("invoices/detail.html", request, user, extra=extra)
+
+
+@router.post("/invoices/{invoice_id}/assign", include_in_schema=False)
+async def assign_invoice(request: Request, invoice_id: int, assigned_user_id: str = Form("")):
+    user, membership, company, company_id, redirect = await _load_invoice_context(request)
+    if redirect:
+        return redirect
+    if not can_assign_invoice(user, membership):
+        raise HTTPException(status_code=403, detail="Invoice assignment requires company admin access")
+    invoice = await invoice_repo.get_invoice_by_id(invoice_id)
+    if not invoice or (not user.get("is_super_admin") and int(invoice["company_id"]) != company_id):
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    try:
+        assignee = int(assigned_user_id) if assigned_user_id.strip() else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid invoice assignee") from None
+    await validate_invoice_assignee(int(invoice["company_id"]), assignee)
+    updated = await invoice_repo.patch_invoice(invoice_id, assigned_user_id=assignee)
+    await audit_service.record(
+        action="invoice.assign", request=request, user_id=int(user["id"]),
+        entity_type="invoice", entity_id=invoice_id, before=invoice, after=updated,
+        metadata={"company_id": int(invoice["company_id"])},
+    )
+    return RedirectResponse(url=f"/invoices/{invoice_id}", status_code=303)
 
 
 __all__ = ["router"]

@@ -1,7 +1,9 @@
 // Package state stores the RMM agent's enrolment between restarts.
 //
-// The file lives in a directory only the service account can read, because
-// it holds the agent's bearer token:
+// The file lives in a directory only the service account (and, on Windows,
+// Administrators) can read or write, because it holds the agent's bearer
+// token and the address of the portal the agent takes jobs from. On Windows
+// that is enforced with an explicit access list (see internal/secdir):
 //
 //   - Windows: %ProgramData%\MyPortal RMM\rmm-state.json
 //   - macOS:   /Library/Application Support/MyPortal RMM/rmm-state.json
@@ -14,6 +16,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/bradhawkins85/myportal-rmm/internal/secdir"
 )
 
 const fileName = "rmm-state.json"
@@ -23,6 +27,8 @@ type State struct {
 	PortalURL string `json:"portal_url"`
 	AgentUID  string `json:"agent_uid"`
 	AuthToken string `json:"auth_token"`
+	// PrivateKey is the agent's own Ed25519 key (see internal/agentkey).
+	PrivateKey string `json:"private_key,omitempty"`
 }
 
 // Dir returns the agent's data directory for this platform.
@@ -71,9 +77,19 @@ func Load() (State, error) {
 	return s, nil
 }
 
+// Prepare locks the state folder down and removes anything in it that the
+// service did not create (links, or files owned by another user). Call it
+// once at start-up before Load. It returns the paths it removed.
+func Prepare() ([]string, error) {
+	if err := secdir.Secure(Dir(), secdir.Private); err != nil {
+		return nil, err
+	}
+	return secdir.Sweep(Dir()), nil
+}
+
 // Save writes the state with owner-only permissions.
 func Save(s State) error {
-	if err := os.MkdirAll(Dir(), 0o700); err != nil {
+	if err := secdir.Secure(Dir(), secdir.Private); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(s, "", "  ")
@@ -81,6 +97,10 @@ func Save(s State) error {
 		return err
 	}
 	tmp := Path() + ".tmp"
+	// Never write into a temporary file someone else left behind.
+	if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}

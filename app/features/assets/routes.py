@@ -11,10 +11,11 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Mapping
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app.core.logging import log_info
+from app.repositories import asset_column_restrictions as asset_column_restrictions_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as asset_repo
 from app.repositories import asset_photos as asset_photo_repo
@@ -182,6 +183,37 @@ def _customer_asset(record: dict[str, Any]) -> dict[str, Any]:
     return {key: record.get(key) for key in _CUSTOMER_ASSET_FIELDS}
 
 
+# Built-in asset table columns admins may hide from end users. Name always
+# stays so every row can be opened.
+_RESTRICTABLE_ASSET_COLUMNS: list[dict[str, str]] = [
+    {"key": column["key"], "label": column["label"]}
+    for column in _ASSET_TABLE_COLUMNS
+    if column["key"] != "name"
+] + [{"key": "health_score", "label": "Health check score"}]
+
+
+async def _end_user_hidden_columns(user: Mapping[str, Any], request: Request) -> set[str]:
+    """Only explicit admins and technicians may bypass hidden asset columns."""
+    if user.get("is_super_admin"):
+        return set()
+    main_module = _main()
+    membership = getattr(request.state, "active_membership", None)
+    if membership is None and user.get("company_id") is not None:
+        membership = await main_module._get_effective_company_membership(
+            request, user["id"], int(user["company_id"])
+        )
+    if any(
+        main_module._membership_menu_can(dict(user), membership, key, write=True)
+        for key in ("menu.admin.company", "menu.admin.technician")
+    ):
+        return set()
+    return await asset_column_restrictions_repo.list_restricted_keys()
+
+
+def _custom_field_column_key(definition: Mapping[str, Any]) -> str:
+    return f"cf_{definition['id']}"
+
+
 def _main():
     from app import main as main_module
 
@@ -263,10 +295,15 @@ async def assets_page(request: Request):
     rows = await asset_repo.list_company_assets(company_id)
     if not can_write_assets:
         rows = [_customer_asset(dict(row)) for row in await _customer_visible_assets(membership, company_id, rows)]
-    field_definitions = (
-        await asset_custom_fields_repo.list_field_definitions()
-        if user.get("is_super_admin") else []
-    )
+    hidden_columns = await _end_user_hidden_columns(user, request)
+    field_definitions = [
+        definition
+        for definition in (
+            await asset_custom_fields_repo.list_field_definitions()
+            if can_write_assets else []
+        )
+        if _custom_field_column_key(definition) not in hidden_columns
+    ]
 
     def _clean_text(value: Any) -> str | None:
         if value is None:
@@ -434,6 +471,17 @@ async def assets_page(request: Request):
         rmm_install_attempts = await rmm_agent_deploy.company_latest_attempts(company_id)
     # The health check is an RMM option: it needs its pack and a deployed RMM agent.
     can_health_check = can_push_rmm_agent and main_module._feature_pack_available("health_check")
+    # Technicians who see RMM scripts get each asset's latest health check score.
+    show_health_score = (
+        show_rmm_agent
+        and main_module._feature_pack_available("health_check")
+        and "health_score" not in hidden_columns
+    )
+    health_scores: dict[int, dict[str, Any]] = {}
+    if show_health_score:
+        from app.repositories import ai_health_checks as health_checks_repo
+
+        health_scores = await health_checks_repo.latest_scores_for_company(company_id)
     if can_push_rmm_agent:
         from app.services import rmm_remote_control
         from app.services import rmm_commands
@@ -479,6 +527,13 @@ async def assets_page(request: Request):
             record["rmm_uninstall"] = bool(rmm_agent.get("uninstall"))
             record["can_health_check"] = can_health_check
             record["health_check_ready"] = bool(tray_device)
+        if show_health_score and record.get("id"):
+            check = health_scores.get(int(record["id"]))
+            score = check.get("health_score") if check else None
+            record["health_score"] = int(score) if score is not None else None
+            record["health_score_sort"] = record["health_score"] if score is not None else ""
+            record["health_check_status"] = (check or {}).get("overall_status")
+            record["health_check_url"] = f"/health-checks/{int(check['id'])}" if check else None
         if show_rmm_agent and record.get("id"):
             rmm_agent = rmm_agents.get(int(record["id"])) or {}
             record["rmm_agent"] = rmm_agent.get("state", "missing")
@@ -512,6 +567,11 @@ async def assets_page(request: Request):
         status_index = next((i for i, column in enumerate(all_columns) if column["key"] == "status"), 0)
         all_columns.insert(status_index + 1, {"key": "rmm_agent", "label": "RMM agent", "sort": "number"})
         all_columns.insert(status_index + 2, {"key": "rmm_agent_version", "label": "RMM agent version", "sort": "string"})
+    if show_health_score:
+        performance_index = next(
+            (i for i, column in enumerate(all_columns) if column["key"] == "performance_score"), len(all_columns) - 1
+        )
+        all_columns.insert(performance_index + 1, {"key": "health_score", "label": "Health check score", "sort": "number"})
     # Tags belong to the tags pack and are internal, so customers never see them.
     show_tags = False
     if can_write_assets and main_module._feature_pack_available("tags"):
@@ -526,6 +586,16 @@ async def assets_page(request: Request):
             record["tags"] = tags_by_asset.get(int(record["id"]), []) if record.get("id") else []
         type_index = next((i for i, column in enumerate(all_columns) if column["key"] == "type"), 0)
         all_columns.insert(type_index + 1, {"key": "tags", "label": "Tags", "sort": "string"})
+
+    if hidden_columns:
+        all_columns = [
+            column for column in all_columns
+            if column["key"] == "name" or column["key"] not in hidden_columns
+        ]
+        for record in prepared:
+            for key in list(record):
+                if key != "name" and any(key == hidden or key.startswith(hidden + "_") for hidden in hidden_columns):
+                    record.pop(key, None)
 
     stats = {
         "total": len(prepared),
@@ -631,7 +701,7 @@ async def new_asset_page(request: Request):
         "assets/form.html", request, user,
         extra={"title": "Create asset", "company": company, "asset": None,
                **await _asset_type_picker(_company_id),
-               "custom_fields": await asset_custom_fields_repo.list_field_definitions()},
+               "custom_fields": await _visible_custom_fields(user, request)},
     )
 
 
@@ -697,8 +767,22 @@ async def _manual_asset_values(
     return values
 
 
-async def _save_submitted_custom_fields(asset_id: int, form: Any) -> None:
+async def _visible_custom_fields(user: Mapping[str, Any], request: Request) -> list[dict[str, Any]]:
+    hidden_columns = await _end_user_hidden_columns(user, request)
+    return [
+        definition
+        for definition in await asset_custom_fields_repo.list_field_definitions()
+        if _custom_field_column_key(definition) not in hidden_columns
+    ]
+
+
+async def _save_submitted_custom_fields(
+    asset_id: int, form: Any, hidden_columns: set[str] | frozenset[str] = frozenset()
+) -> None:
+    # Fields hidden from this user are not on their form, so leave them as stored.
     for definition in await asset_custom_fields_repo.list_field_definitions():
+        if _custom_field_column_key(definition) in hidden_columns:
+            continue
         key = f"custom_{definition['id']}"
         raw = form.get(key)
         field_type = definition.get("field_type")
@@ -733,7 +817,7 @@ async def create_manual_asset(request: Request):
     asset_id = await asset_repo.create_manual_asset(
         company_id=company_id, created_by=int(user["id"]), **values
     )
-    await _save_submitted_custom_fields(asset_id, form)
+    await _save_submitted_custom_fields(asset_id, form, await _end_user_hidden_columns(user, request))
     await audit_service.record(
         action="asset.manual.create", request=request, user_id=int(user["id"]),
         entity_type="asset", entity_id=asset_id,
@@ -902,6 +986,112 @@ async def send_expiration_reminder(request: Request):
     return main_module.flash_redirect("/expirations", message, "success" if result else "warning")
 
 
+CPU_LAUNCH_DATES_PATH = "/assets/cpu-launch-dates"
+
+
+def _parse_launch_month(value: Any) -> date | None:
+    """Read a launch date from a month picker (YYYY-MM) or a date (YYYY-MM-DD)."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        if len(text) == 7:
+            return date.fromisoformat(text + "-01")
+        return date.fromisoformat(text).replace(day=1)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Enter the launch month as YYYY-MM") from exc
+
+
+@router.get(CPU_LAUNCH_DATES_PATH, response_class=HTMLResponse,
+            summary="Review processor launch dates used to estimate asset age")
+async def cpu_launch_dates_page(request: Request):
+    from app.services import cpu_release_dates as cpu_service
+
+    main_module = _main()
+    user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    processors = await cpu_service.overview()
+    needs_date = [p for p in processors if not p.get("release_date")]
+    dated = [p for p in processors if p.get("release_date")]
+    extra = {
+        "title": "CPU launch dates",
+        "processors": processors,
+        "needs_date": sorted(needs_date, key=lambda p: (-p["device_count"], (p.get("model") or p["cpu_name"]).casefold())),
+        "dated": sorted(dated, key=lambda p: (p["vendor_label"].casefold(), (p.get("model") or p["cpu_name"]).casefold())),
+        "cpu_lookup_enabled": await cpu_service.is_module_enabled(),
+        "device_total": sum(p["device_count"] for p in processors),
+        "today_iso": date.today().isoformat(),
+    }
+    return await main_module._render_template("assets/cpu_launch_dates.html", request, user, extra=extra)
+
+
+@router.post(CPU_LAUNCH_DATES_PATH + "/refresh", summary="Look up missing processor launch dates now")
+async def refresh_cpu_launch_dates(request: Request, background_tasks: BackgroundTasks):
+    from app.services import cpu_release_dates as cpu_service
+
+    main_module = _main()
+    _user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not await cpu_service.is_module_enabled():
+        return main_module.flash_redirect(
+            CPU_LAUNCH_DATES_PATH, "Turn on the CPU age lookup module to look up launch dates on Intel ARK.", "error",
+        )
+    background_tasks.add_task(_refresh_cpu_launch_dates)
+    return main_module.flash_redirect(
+        CPU_LAUNCH_DATES_PATH,
+        "Looking up Intel processors on Intel ARK. Refresh this page in a minute or two to see the dates.",
+        "success",
+    )
+
+
+async def _refresh_cpu_launch_dates() -> None:
+    from app.core.logging import log_error
+    from app.services import cpu_release_dates as cpu_service
+
+    try:
+        await cpu_service.refresh()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("CPU release date lookup failed", error=str(exc))
+
+
+@router.post(CPU_LAUNCH_DATES_PATH + "/{entry_id}", summary="Record or clear a processor's launch date")
+async def save_cpu_launch_date(request: Request, entry_id: int):
+    from app.repositories import cpu_release_dates as cpu_repo
+    from app.services import cpu_release_dates as cpu_service
+
+    main_module = _main()
+    user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing = await cpu_repo.get(entry_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Processor not found")
+    form = await request.form()
+    clearing = str(form.get("action") or "") == "clear"
+    released = None if clearing else _parse_launch_month(form.get("release_month"))
+    if not clearing and released is None:
+        return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, "Choose the month the processor was launched.", "error")
+    if released and released > date.today():
+        return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, "The launch date cannot be in the future.", "error")
+    await cpu_service.set_manual_release_date(entry_id, released)
+    await audit_service.record(
+        action="cpu_release_date.update", request=request, user_id=int(user["id"]),
+        entity_type="cpu_release_date", entity_id=entry_id,
+        before={"release_date": existing["release_date"].isoformat() if existing.get("release_date") else None,
+                "source": existing.get("source")},
+        after={"release_date": released.isoformat() if released else None,
+               "source": "manual" if released else None},
+    )
+    name = existing.get("model") or existing.get("cpu_name")
+    if released:
+        message = f"Saved: {name} launched {released:%B %Y}. Devices with it have been updated."
+    else:
+        message = f"Cleared the date for {name}. The next lookup will try to find it again."
+    return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, message, "success")
+
+
 @router.get("/assets/settings", response_class=HTMLResponse)
 async def assets_settings_page(request: Request):
     main_module = _main()
@@ -920,9 +1110,40 @@ async def assets_settings_page(request: Request):
         "is_super_admin": True,
         "required_field_rules": await asset_repo.list_required_field_rules(),
         "field_definitions": await asset_custom_fields_repo.list_field_definitions(),
+        "restrictable_columns": _RESTRICTABLE_ASSET_COLUMNS,
+        "hidden_columns": await asset_column_restrictions_repo.list_restricted_keys(),
     }
     return await main_module._render_template(
         "assets/settings.html", request, user, extra=extra
+    )
+
+
+@router.post("/assets/settings/column-visibility", summary="Choose asset columns hidden from end users")
+async def save_asset_column_visibility(request: Request):
+    main_module = _main()
+    user, _membership, _, _, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    form = await request.form()
+    allowed = {column["key"] for column in _RESTRICTABLE_ASSET_COLUMNS}
+    allowed.update(
+        _custom_field_column_key(definition)
+        for definition in await asset_custom_fields_repo.list_field_definitions()
+    )
+    before = sorted(await asset_column_restrictions_repo.list_restricted_keys())
+    # Ticked boxes are visible; any column listed on the form but left unticked is hidden.
+    listed = {str(value) for value in form.getlist("known_columns")} & allowed
+    visible = {str(value) for value in form.getlist("visible_columns")}
+    keys = sorted(listed - visible)
+    await asset_column_restrictions_repo.replace_restricted_keys(keys)
+    await audit_service.record(
+        action="asset.columns.visibility.update", request=request, user_id=int(user["id"]),
+        entity_type="asset_columns", before={"hidden_columns": before}, after={"hidden_columns": keys},
+    )
+    return main_module.flash_redirect(
+        "/assets/settings#column-visibility", "Column visibility saved.", "success"
     )
 
 
@@ -1940,7 +2161,7 @@ async def asset_detail_page(
         references = []
     if not isinstance(references, list):
         references = []
-    definitions = [] if customer_safe else await asset_custom_fields_repo.list_field_definitions()
+    definitions = [] if customer_safe else await _visible_custom_fields(user, request)
     values = {} if customer_safe else await asset_custom_fields_repo.get_all_asset_field_values([asset_id])
     custom_fields = [
         {**definition, "value": values.get(asset_id, {}).get(definition["id"])}
@@ -2081,6 +2302,7 @@ async def asset_detail_page(
     # The tray app reports who is signed in now; synced inventory only knows
     # the last user, so it stands in when the device has no tray app.
     logged_on_user = None
+    logged_on_user_is_last = False
     if not customer_safe:
         tray_device = (await tray_repo.list_active_devices_by_asset_ids([asset_id])).get(asset_id) or {}
         console_user = str(tray_device.get("console_user") or "").strip()
@@ -2092,6 +2314,11 @@ async def asset_detail_page(
             console_user
             or str(record.get("last_user") or "").strip()
             or None
+        )
+        # Nobody signed in now (or only inventory's last user is known):
+        # the name shown is the last user to sign in.
+        logged_on_user_is_last = bool(logged_on_user) and (
+            not console_user or tray_device.get("console_user_active") in (0, False)
         )
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
@@ -2121,6 +2348,7 @@ async def asset_detail_page(
             "asset_sources": [] if customer_safe else await asset_repo.list_asset_sources(company_id, asset_id),
             "customer_safe": customer_safe,
             "warranty": None if customer_safe else await _warranty_context(record),
+            "cpu_age": await _cpu_age_context(record, rmm_context),
             "customer_roles": await role_repo.list_roles() if can_write else [],
             "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if can_write else [],
             "bcp_context": bcp_context,
@@ -2130,6 +2358,7 @@ async def asset_detail_page(
             "health_check": health_check_context,
             "asset_tags": tags_context,
             "logged_on_user": logged_on_user,
+            "logged_on_user_is_last": logged_on_user_is_last,
             "can_edit_network_map": can_view_network_map and (is_super_admin or main_module._membership_menu_can(
                 user, membership, "menu.network_map", write=True)),
             "asset_photos": (await asset_photo_repo.list_for_asset(
@@ -2637,7 +2866,7 @@ async def update_asset_documentation(request: Request, asset_id: int):
         values = await _manual_asset_values(form, company_id, record)
         await asset_repo.update_manual_inventory(asset_id, **values)
     # Custom fields are editable for every asset, not just manually created ones.
-    await _save_submitted_custom_fields(asset_id, form)
+    await _save_submitted_custom_fields(asset_id, form, await _end_user_hidden_columns(user, request))
     criticality = _clean_optional(form, "criticality")
     review_status = str(form.get("review_status") or "not_reviewed")
     if criticality not in {None, "low", "medium", "high", "critical"}:
@@ -2709,6 +2938,23 @@ async def _warranty_context(record: Mapping[str, Any]) -> dict[str, Any]:
         "is_manual": source == "manual",
         "checked_at_utc": _utc_iso(record.get("warranty_checked_at")),
     }
+
+
+async def _cpu_age_context(record: Mapping[str, Any], rmm_context: Any) -> dict[str, Any] | None:
+    """Describe the CPU launch date behind the asset's approximate age, if one is known."""
+    if not record.get("cpu_release_date"):
+        return None
+    from app.repositories import cpu_release_dates as cpu_repo
+    from app.services import cpu_release_dates as cpu_service
+
+    cpu_name = record.get("cpu_name")
+    if not cpu_name and isinstance(rmm_context, Mapping):
+        hardware = rmm_context.get("inventory")
+        snapshot = hardware.get("inventory") if isinstance(hardware, Mapping) else None
+        cpu_name = snapshot.get("cpu_model") if isinstance(snapshot, Mapping) else None
+    identity = cpu_service.identify(cpu_name)
+    entry = await cpu_repo.get_by_key(identity.key) if identity else None
+    return cpu_service.describe(entry)
 
 
 def _utc_iso(value: Any) -> str | None:

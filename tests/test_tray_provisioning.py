@@ -14,7 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
 from app.api.dependencies.auth import get_current_user
-from app.api.dependencies.api_keys import require_api_key
+from app.api.dependencies.api_keys import require_api_key, require_scoped_api_key
 from app.api.routes import tray_deployment as deploy_routes
 from app.core.database import db
 from app.repositories import tray as tray_repo
@@ -756,6 +756,7 @@ async def test_api_validation_errors_never_reflect_bootstrap_secrets(path, paylo
     app.add_exception_handler(RequestValidationError, main.handle_request_validation_error)
     app.dependency_overrides[get_current_user] = lambda: {"id": 1, "is_super_admin": True}
     app.dependency_overrides[require_api_key] = lambda: {}
+    app.dependency_overrides[require_scoped_api_key] = lambda: {"permissions": [{"path": "*", "methods": ["POST"]}]}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url=PORTAL
     ) as client:

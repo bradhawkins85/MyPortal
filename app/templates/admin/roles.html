@@ -31,6 +31,9 @@
 {# Access level wording. Tickets read as Own / All and Technician is a Yes / No switch. #}
 {% set role_level_labels = {
   'default': {'none': 'No access', 'read': 'Read only', 'write': 'Read & write'},
+  'menu.quotes': {'none': 'None', 'read': 'Mine', 'write': 'All'},
+  'menu.orders': {'none': 'None', 'read': 'Mine', 'write': 'All'},
+  'menu.invoices': {'none': 'None', 'read': 'Mine', 'write': 'All'},
   'menu.tickets': {'none': 'No access', 'read': 'Own', 'write': 'All'},
   'menu.admin.technician': {'none': 'No', 'write': 'Yes'},
 } %}
@@ -200,6 +203,11 @@
         Tickets use <strong>No access</strong>, <strong>Own</strong> and <strong>All</strong>: Own opens <code>/tickets</code> for the user's tickets,
         while All opens <code>/tickets</code> for company tickets; technicians continue to use <code>/admin/tickets</code> for all customers.
         The Technician permission is a <strong>No</strong> / <strong>Yes</strong> switch.
+      </p>
+      <p>
+        Quotes, orders and invoices use <strong>None</strong>, <strong>Mine</strong> and <strong>All</strong>.
+        Mine shows records the user created or is assigned to; All shows records in the company.
+        Company admins and technicians retain company-wide visibility.
       </p>
       <p>
         System roles keep their names and can't be deleted, so baseline access policies stay intact; their permissions can still be tuned.

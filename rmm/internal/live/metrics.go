@@ -7,18 +7,19 @@ import (
 
 // Metrics is one real-time CPU and memory sample.
 type Metrics struct {
-	Time          time.Time `json:"time"`
-	CPUPercent    float64   `json:"cpu_percent"`
-	Cores         []float64 `json:"cores"`
-	MemoryTotal   uint64    `json:"memory_total"`
-	MemoryUsed    uint64    `json:"memory_used"`
-	SwapTotal     uint64    `json:"swap_total"`
-	SwapUsed      uint64    `json:"swap_used"`
-	Processes     int       `json:"processes"`
-	UptimeSeconds uint64    `json:"uptime_seconds"`
-	NetRxBps      float64   `json:"net_rx_bps"`
-	NetTxBps      float64   `json:"net_tx_bps"`
-	Errors        []string  `json:"errors,omitempty"`
+	Time          time.Time   `json:"time"`
+	CPUPercent    float64     `json:"cpu_percent"`
+	Cores         []float64   `json:"cores"`
+	MemoryTotal   uint64      `json:"memory_total"`
+	MemoryUsed    uint64      `json:"memory_used"`
+	SwapTotal     uint64      `json:"swap_total"`
+	SwapUsed      uint64      `json:"swap_used"`
+	Processes     int         `json:"processes"`
+	UptimeSeconds uint64      `json:"uptime_seconds"`
+	NetRxBps      float64     `json:"net_rx_bps"`
+	NetTxBps      float64     `json:"net_tx_bps"`
+	Disks         []DiskSpace `json:"disks"`
+	Errors        []string    `json:"errors,omitempty"`
 }
 
 type memoryInfo struct {
@@ -40,11 +41,17 @@ func cpuPercent(before, after cpuTimes) float64 {
 	return percent
 }
 
+// diskInterval spaces out disk reads; free space changes slowly and a
+// stalled volume should not hold up every CPU sample.
+const diskInterval = 5 * time.Second
+
 type metricsSampler struct {
 	cpu     []cpuTimes
 	rx, tx  uint64
 	netAt   time.Time
 	haveNet bool
+	disks   []DiskSpace
+	diskAt  time.Time
 }
 
 func (m *metricsSampler) sample() Metrics {
@@ -78,6 +85,18 @@ func (m *metricsSampler) sample() Metrics {
 			}
 		}
 		m.rx, m.tx, m.netAt, m.haveNet = rx, tx, now, true
+	}
+	if m.diskAt.IsZero() || now.Sub(m.diskAt) >= diskInterval {
+		if disks, err := readDisks(); err != nil {
+			out.Errors = append(out.Errors, "disks: "+err.Error())
+		} else {
+			m.disks = disks
+		}
+		m.diskAt = now
+	}
+	out.Disks = m.disks
+	if out.Disks == nil {
+		out.Disks = []DiskSpace{}
 	}
 	out.Processes = processCount()
 	out.UptimeSeconds = uptimeSeconds()

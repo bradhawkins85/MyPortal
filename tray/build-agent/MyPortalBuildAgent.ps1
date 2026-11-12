@@ -36,6 +36,8 @@ $GitHubRepo = if ($config.PSObject.Properties['GitHubRepo'] -and $config.GitHubR
 $WorkDir = if ($config.PSObject.Properties['WorkDir'] -and $config.WorkDir) { $config.WorkDir } else { 'C:\MyPortalBuild' }
 $Wix = if ($config.PSObject.Properties['WixPath'] -and $config.WixPath) { $config.WixPath } else { 'wix' }
 $TimestampServer = if ($config.PSObject.Properties['TimestampServer']) { $config.TimestampServer } else { $null }
+$Verifier = if ($config.PSObject.Properties['VerifierPath']) { [string]$config.VerifierPath } else { '' }
+$ReleaseKey = if ($config.PSObject.Properties['ReleaseKeyPath']) { [string]$config.ReleaseKeyPath } else { '' }
 . (Join-Path $PSScriptRoot 'New-MyPortalProvisioningPackage.ps1')
 $requestedIcd = if ($config.PSObject.Properties['IcdPath']) { [string]$config.IcdPath } else { '' }
 $Icd = Resolve-MyPortalIcd $requestedIcd
@@ -127,6 +129,28 @@ function Invoke-Native([string]$What) {
     if ($LASTEXITCODE -ne 0) { throw "$What failed with exit code $LASTEXITCODE" }
 }
 
+# Checks the release's myportal-source.sig covers the commit just cloned, so
+# only source the release key signed is built into company installers.
+function Assert-SignedRelease([string]$Tag, [string]$Src, [string]$Dir) {
+    if (-not $Verifier -or -not (Test-Path -LiteralPath $Verifier) -or -not $ReleaseKey -or -not (Test-Path -LiteralPath $ReleaseKey)) {
+        throw 'This build agent predates release signing. Run Install-MyPortalBuildAgent.ps1 again from the latest tray/build-agent folder, then press Rebuild.'
+    }
+    $commit = (git -C $Src rev-parse HEAD).Trim()
+    Invoke-Native "git rev-parse of $Tag"
+    $sig = Join-Path $Dir 'myportal-source.sig'
+    $url = "https://github.com/$GitHubRepo/releases/download/$([uri]::EscapeDataString($Tag))/myportal-source.sig"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $sig -MaximumRedirection 5 | Out-Null
+    } catch {
+        throw "Release $Tag is not signed yet (no myportal-source.sig). Approve its Sign release run on GitHub, then press Rebuild."
+    }
+    $output = & $Verifier -key $ReleaseKey -tag $Tag -commit $commit -sig $sig 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Release $Tag failed the release signature check: $($output -join ' ')"
+    }
+    Write-Log "Release $Tag source signature verified ($commit)"
+}
+
 # Builds the signed tray binaries for a release tag from source, the same way
 # the Build MSI workflow does, without touching the GitHub release itself.
 function Get-Payload([string]$Tag) {
@@ -143,6 +167,7 @@ function Get-Payload([string]$Tag) {
     Write-Log "Building tray binaries for $Tag"
     git clone --quiet --depth 1 --branch $Tag "https://github.com/$GitHubRepo.git" $src 2>&1 | Out-Null
     Invoke-Native "git clone of $Tag"
+    Assert-SignedRelease $Tag $src $dir
 
     $wxs = Join-Path $src 'tray\installer\windows\myportal-tray.wxs'
     $bundle = Join-Path $src 'tray\installer\windows\myportal-tray-bundle.wxs'

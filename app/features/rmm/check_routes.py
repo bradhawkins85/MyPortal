@@ -38,8 +38,7 @@ from app.repositories import rmm_automation as automation_repo
 from app.repositories import rmm_targeting as targeting_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
-from app.services import rmm_automation, rmm_checks, rmm_proxmox
-from app.services import rmm_event_log_rules as event_log_rules
+from app.services import rmm_action_steps, rmm_checks, rmm_proxmox
 from app.services import rmm_scripts
 from app.services import rmm_stats
 from app.services import rmm_targeting
@@ -62,7 +61,6 @@ FORM_DEFAULTS: dict[str, Any] = {
     "process_name": "", "process_expected": "running",
     "program_name": "", "program_expected": "installed", "program_version_operator": "none", "program_version": "",
     "proxmox_condition": "guest", "proxmox_target": "", "proxmox_threshold": "85",
-    "package_id": "",
     "script_expect": "exit_code", "script_value": "0", "script_interval": str(rmm_checks.DEFAULT_SCRIPT_INTERVAL),
 }
 DEFAULT_DURATIONS = {"cpu": 30, "memory": 15, "network": 15, "offline": 30}
@@ -77,14 +75,8 @@ def check_summary(check: dict[str, Any], *, counts: dict[str, int] | None = None
         scope = f"Company: {check.get('company_name') or check['company_id']}"
     else:
         scope = "Every company"
-    action = rmm_checks.ACTIONS.get(check.get("action"), check.get("action"))
-    if check.get("action") == "run_script":
-        action = f"Run {check.get('script_name') or 'a removed script'}"
-    elif check.get("action") == "install_choco":
-        action = f"Install Chocolatey package {(check.get('settings') or {}).get('package_id', '')}"
-    elif check.get("action") == "schedule_script":
-        action = (f"Run {check.get('script_name') or 'a removed script'} "
-                  f"{event_log_rules.describe_schedule(check)}")
+    actions = rmm_action_steps.steps(check)
+    action = rmm_action_steps.describe_all(actions) or rmm_checks.ACTIONS["none"]
     limit = rmm_checks.describe_action_results(check)
     if limit:
         action = f"{action}, {limit}"
@@ -93,6 +85,10 @@ def check_summary(check: dict[str, Any], *, counts: dict[str, int] | None = None
         "type_label": rmm_checks.CHECK_TYPES.get(check.get("check_type"), check.get("check_type")),
         "scope_label": scope,
         "action_label": action,
+        "action_steps": [rmm_action_steps.describe(step) for step in actions],
+        "action_types": [step["type"] for step in actions],
+        "action_limit": limit,
+        "repeats": any(step["type"] in rmm_action_steps.REPEATABLE_TYPES for step in actions),
         "description": rmm_checks.describe(check),
         "counts": counts or {},
     }
@@ -135,7 +131,6 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
     elif kind == "script":
         values.update(script_expect=settings.get("expect"), script_value=settings.get("value"),
                       script_interval=settings.get("interval_minutes") or rmm_checks.DEFAULT_SCRIPT_INTERVAL)
-    values["package_id"] = settings.get("package_id", "")
     if check.get("asset_id") is not None:
         scope = "asset"
     elif check.get("company_id") is None and check.get("id") is not None:
@@ -147,15 +142,11 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
         "target_mode": "rules" if check.get("target_rules") is not None else "all",
         "target_rules": check.get("target_rules"),
         "check_type": kind, "duration_minutes": check.get("duration_minutes") or 0,
-        "check_script_id": check.get("check_script_id"), "action": check.get("action") or "none",
-        "auto_close_when_resolved": bool(check.get("auto_close_when_resolved")),
-        "script_id": check.get("script_id"), "timeout_seconds": check.get("timeout_seconds") or 600,
+        "check_script_id": check.get("check_script_id"),
+        "actions": rmm_action_steps.form_steps(rmm_action_steps.steps(check)),
+        "timeout_seconds": check.get("timeout_seconds") or 600,
         "cooldown_minutes": check.get("cooldown_minutes") if check.get("cooldown_minutes") is not None
         else rmm_checks.DEFAULT_COOLDOWN_MINUTES,
-        "schedule_mode": check.get("schedule_mode") or "delay",
-        "delay_minutes": check.get("delay_minutes") or event_log_rules.DEFAULT_DELAY_MINUTES,
-        "run_time": check.get("run_time") or "02:00",
-        "schedule_timezone": check.get("schedule_timezone") or rmm_automation.default_timezone(),
         "is_enabled": bool(check.get("is_enabled")),
         "action_results": "\n".join(rmm_checks.action_results(check)), **values,
     }
@@ -211,15 +202,11 @@ def _posted(form: Any, check_id: int | None) -> dict[str, Any]:
         "asset_id": number("asset_id"), "check_type": str(form.get("check_type") or ""),
         "target_mode": str(form.get("target_mode") or "all"), "target_rules": rules,
         "duration_minutes": form.get("duration_minutes") or 0, "check_script_id": number("check_script_id"),
-        "action": str(form.get("action") or "none"), "script_id": number("script_id"),
+        "actions": rmm_action_steps.posted_steps(form, rmm_checks.ACTION_TYPES,
+                                                 legacy_action=str(form.get("action") or "none")),
         "timeout_seconds": form.get("timeout_seconds") or 600,
         "cooldown_minutes": form.get("cooldown_minutes") or rmm_checks.DEFAULT_COOLDOWN_MINUTES,
-        "schedule_mode": str(form.get("schedule_mode") or "delay"),
-        "delay_minutes": form.get("delay_minutes") or event_log_rules.DEFAULT_DELAY_MINUTES,
-        "run_time": str(form.get("run_time") or ""),
-        "schedule_timezone": str(form.get("schedule_timezone") or ""),
         "is_enabled": bool(form.get("is_enabled")),
-        "auto_close_when_resolved": str(form.get("auto_close_when_resolved") or "").lower() in {"1", "on", "true", "yes"},
         "action_results": str(form.get("action_results") or "")[:8192],
     }
 
@@ -236,7 +223,7 @@ async def _render(
     status_code: int = 200,
 ):
     is_super_admin = bool(user.get("is_super_admin"))
-    checks = await checks_repo.list_checks_for_company(company_id)
+    checks = await rmm_action_steps.with_script_names(await checks_repo.list_checks_for_company(company_id))
     counts = await checks_repo.count_states((int(check["id"]) for check in checks), company_id=company_id)
     rows = []
     for check in checks:
@@ -245,17 +232,13 @@ async def _render(
         summary["replaced"] = bool(rmm_checks.replaced_by(check, checks)) and check.get("asset_id") is None
         rows.append(summary)
     stored = await checks_repo.get_check(int(editing["id"]), with_secrets=True) if editing and editing.get("id") else None
-    script = check_script = None
-    fields: list[dict[str, Any]] = []
+    check_script = None
     check_fields: list[dict[str, Any]] = []
-    if editing and editing.get("script_id"):
-        script = await rmm_repo.get_script(int(editing["script_id"]))
-        if stored and stored.get("script_id") == editing.get("script_id"):
-            fields = rmm_checks.script_values(stored, script)
     if editing and editing.get("check_script_id"):
         check_script = await rmm_repo.get_script(int(editing["check_script_id"]))
         if stored and stored.get("check_script_id") == editing.get("check_script_id"):
             check_fields = rmm_checks.script_values(stored, check_script, own=True)
+    step_scripts = await rmm_action_steps.script_details((editing or {}).get("actions") or [], stored)
     variables = [{"group": "Check", "label": label, "token": token} for label, token in rmm_checks.CHECK_VARIABLES]
     variables += await rmm_scripts.available_variables()
     response = await _assets_routes()._main()._render_template(
@@ -269,9 +252,12 @@ async def _render(
             "editing": editing,
             "errors": errors or {},
             "check_types": rmm_checks.CHECK_TYPES,
-            "actions": rmm_checks.ACTIONS,
-            "script_actions": rmm_checks.SCRIPT_ACTIONS,
-            "schedule_modes": event_log_rules.SCHEDULE_MODES,
+            "actions": {kind: rmm_action_steps.TYPES[kind] for kind in rmm_checks.ACTION_TYPES},
+            "schedule_modes": rmm_action_steps.SCHEDULE_MODES,
+            "step_scripts": step_scripts,
+            "blank_actions": rmm_action_steps.blank_steps(rmm_checks.ACTION_TYPES),
+            "add_action_key": rmm_action_steps.new_key(step["key"] for step in (editing or {}).get("actions") or []),
+            "max_actions": rmm_action_steps.MAX_STEPS,
             "disk_metrics": rmm_checks.DISK_METRICS,
             "memory_metrics": rmm_checks.MEMORY_METRICS,
             "comparisons": rmm_checks.COMPARISONS,
@@ -288,8 +274,6 @@ async def _render(
             "statuses": rmm_checks.STATUSES,
             "devices": [agent for agent in await rmm_repo.list_company_agents(company_id) if agent.get("asset_id")],
             "scripts": await rmm_repo.list_scripts(company_id=company_id),
-            "script": script,
-            "script_fields": fields,
             "check_script": check_script,
             "check_script_fields": check_fields,
             "variables": variables,
@@ -332,6 +316,7 @@ async def check_devices(request: Request, check_id: int, status_filter: str | No
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Check not found")
     if status_filter is not None and status_filter not in DEVICE_STATUSES:
         raise HTTPException(status_code=422, detail="Choose failing or warning devices")
+    check = (await rmm_action_steps.with_script_names([check]))[0]
     states = await checks_repo.list_check_devices(
         check_id, company_id, [status_filter] if status_filter else DEVICE_STATUSES
     )
@@ -469,7 +454,10 @@ async def _save(request: Request, check_id: int | None):
         entity_id=saved_id,
         metadata={
             "name": saved["name"], "check_type": saved["check_type"], "target": saved["target"],
-            "settings": saved["settings"], "action": saved["action"], "company_id": saved.get("company_id"),
+            "settings": saved["settings"], "action": saved["action"],
+            "actions": [{key: value for key, value in step.items() if key in ("key", "type", "script_id", "package_id")}
+                        for step in rmm_action_steps.steps(saved)],
+            "company_id": saved.get("company_id"),
             "asset_id": saved.get("asset_id"), "script_id": saved.get("script_id"),
             "check_script_id": saved.get("check_script_id"), "enabled": saved["is_enabled"],
             "auto_close_when_resolved": saved["auto_close_when_resolved"],
@@ -485,16 +473,13 @@ async def _save(request: Request, check_id: int | None):
 async def _needs_script_values(saved: dict[str, Any], previous: dict[str, Any] | None) -> bool:
     """Whether the save chose a script with parameters, which are only shown to fill in once saved."""
 
-    for key in ("script_id", "check_script_id"):
-        script_id = saved.get(key)
-        if key == "script_id" and saved["action"] not in rmm_checks.SCRIPT_ACTIONS:
-            continue
-        if not script_id or (previous and previous.get(key) == script_id):
-            continue
-        script = await rmm_repo.get_script(int(script_id))
-        if script and rmm_scripts.script_fields(script):
-            return True
-    return False
+    if await rmm_action_steps.script_changed(rmm_action_steps.steps(saved), rmm_action_steps.steps(previous)):
+        return True
+    script_id = saved.get("check_script_id")
+    if not script_id or (previous and previous.get("check_script_id") == script_id):
+        return False
+    script = await rmm_repo.get_script(int(script_id))
+    return bool(script and rmm_scripts.script_fields(script))
 
 
 @router.post(PAGE_PATH, response_class=HTMLResponse, summary="Add an RMM check")
@@ -545,7 +530,7 @@ async def asset_checks_context(company_id: int, asset_id: int, *, can_edit: bool
                                stats_hardware: str | None = None) -> dict[str, Any]:
     """The asset page's Checks and Machine stats sections."""
 
-    checks = await checks_repo.list_checks_for_device(company_id, asset_id)
+    checks = await rmm_action_steps.with_script_names(await checks_repo.list_checks_for_device(company_id, asset_id))
     agent = await rmm_repo.get_asset_agent(asset_id)
     if agent and agent.get("company_id") is not None and int(agent["company_id"]) != int(company_id):
         agent = None
@@ -559,7 +544,7 @@ async def asset_checks_context(company_id: int, asset_id: int, *, can_edit: bool
         relevant = [check for check in checks
                     if check.get("target_rules") is None and rmm_checks._in_scope(check, company_id, asset_id)]
     applied = {int(check["id"]) for check in rmm_checks.effective_checks(relevant, company_id, asset_id)}
-    states = await checks_repo.list_states_for_agent(int(agent["id"])) if agent else {}
+    states = await checks_repo.list_states_for_agent(int(agent["id"]), with_schedules=True) if agent else {}
     rows = []
     for check in relevant:
         state = states.get(int(check["id"])) if int(check["id"]) in applied else None

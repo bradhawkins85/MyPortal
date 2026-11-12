@@ -7,6 +7,14 @@ from app.features.assets import routes as assets_routes
 import app.main as main_module
 
 
+@pytest.fixture(autouse=True)
+def no_hidden_asset_columns(monkeypatch):
+    """No asset columns are hidden from end users unless a test says so."""
+    monkeypatch.setattr(
+        assets_routes.asset_column_restrictions_repo, "list_restricted_keys", AsyncMock(return_value=set())
+    )
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"

@@ -83,17 +83,19 @@ disable holds or retention, or automatically repeat destructive actions.
 
 Spam search and purge run under the **delegated permissions of the Microsoft
 administrator who last reconnected the company** — not under the MyPortal
-application. The connect flow (including the **Configure Compliance
-Administrator** action) consents the Microsoft Graph scopes first and then
-chains a second consent screen for the Security & Compliance scope
+application. The single connect flow (**Grant Microsoft consent** in guided
+setup, also used to reconnect and by diagnostics **Repair**) consents the
+Microsoft Graph scopes first and then chains a second consent screen for the
+Security & Compliance scope
 (`https://ps.compliance.protection.outlook.com/.default`) — AAD does not
 allow that `/.default` scope in the same request as other resources' scopes
 (AADSTS70011). The resulting refresh token is cumulative: it covers both
 scope sets, and MyPortal exchanges it for a delegated Security & Compliance
 token on every compliance search and purge, so Microsoft Purview authorizes
 the call as that user. If a reconnect ends before the second consent screen
-(or the consent is denied), the **Capture Security & Compliance access**
-action on the Microsoft 365 settings page runs that step on its own.
+(or the consent is denied), reconnect again: the second screen is shown
+whenever the stored sign-in cannot yet issue a Security & Compliance token,
+and skipped once it can.
 
 Consequences for tenant setup:
 
@@ -253,10 +255,10 @@ misreported as failures of every Purview prerequisite.
 
 The preflight also verifies that the enterprise application itself has either
 the **Exchange Administrator** or **Compliance Administrator** Entra directory
-role, because those diagnostics probes still run app-only. The diagnostics
-repair action assigns Compliance Administrator to the enterprise application
-using the delegated administrator session, then verifies the assignment before
-probing Purview. (This is separate from the **user-side** Compliance
+role, because those diagnostics probes still run app-only. Every connect and
+the diagnostics repair action assign Compliance Administrator to the
+enterprise application using the delegated administrator session, then verify
+the assignment before probing Purview. (This is separate from the **user-side** Compliance
 Administrator / eDiscoveryManager / Search And Purge roles that the signed-in
 administrator's own account must hold for the delegated search and purge
 calls described above.)
@@ -288,8 +290,10 @@ permission repair, and M365 permission diagnostics.
 
 ## Compliance Administrator remediation
 
-The spam search page can start an interactive Microsoft administrator sign-in
-that does two things at once:
+There is no separate Compliance Administrator step. The one interactive
+Microsoft administrator sign-in (**Grant Microsoft consent**, a reconnect, or
+diagnostics **Repair** when no stored sign-in is usable) does all of this
+alongside granting the application permissions:
 
 1. Assigns the built-in **Compliance Administrator** directory role to the
    configured enterprise application (for the app-only probes surfaced in
@@ -310,10 +314,11 @@ that does two things at once:
 The delegated administrator session must have the Microsoft Graph
 `RoleManagement.ReadWrite.Directory` scope consented and the signed-in account
 must have an active supported role, such as Privileged Role Administrator.
-After Graph verifies a new assignment, MyPortal reconnects and can queue the
-selected failed search again. Role assignment success and the later Purview
-search result are reported separately because the assignment does not
-establish Purview provisioning.
+If the role cannot be assigned, the connection still completes and MyPortal
+shows a warning; reconnect as a suitable administrator or use diagnostics
+**Repair** to retry. Role assignment success and the later Purview search
+result are reported separately because the assignment does not establish
+Purview provisioning.
 
 The Exchange Online `Exchange.ManageAsApp` application permission grants
 (used by the Managed Folder Assistant follow-up and the diagnostics probes)

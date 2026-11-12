@@ -92,10 +92,21 @@ in Administration → Roles:
 | --- | --- |
 | No access | The Gitea sign-in page; **Open Gitea** is hidden on the Scripts page |
 | Read | Can view and download the script repository |
-| Write | Can change scripts, create branches and merge pull requests |
+| Write | Can change scripts and create branches; only super administrators merge pull requests into the main branch |
 
 Super administrators always have write access. The permission covers the whole repository,
 including every company folder, and any one of a technician's company roles is enough.
+
+Technicians with write access can change every script in `Common/` and in the company folders,
+but not the `.myportal-company` files that link each folder to its company, or the files at the
+top of the repository. Without that, a technician could link a folder to another company and
+run its scripts on that company's devices. Every ten minutes MyPortal sets a branch protection
+rule on the scripts branch and on `Private-Files` so that only super administrators who have
+opened Gitea, and MyPortal's own account, can change those files or merge pull requests.
+Renaming or deleting a company folder therefore needs a super administrator. The rule replaces
+the push and merge settings of any rule you made yourself for that branch; other settings, such
+as required approvals, are kept. A super administrator who opens Gitea for the first time can
+change the link files once the next ten-minute check has run.
 
 - The first visit creates the technician's Gitea account, named after the start of their email
   address and their MyPortal user id (for example `jsmith-12`), and adds it to the script
@@ -156,7 +167,7 @@ MyPortal creates these folders itself, along with a folder for every company, on
 every ten minutes, so a new company gets its folder without anyone touching Gitea. Archived
 companies do not get a new folder. Git cannot store an empty folder, so each company folder
 holds a small `.myportal-company` file that records which company it belongs to; leave it in
-place. Because of that file you can rename a company folder in Gitea and it stays linked. A
+place. Because of that file a super administrator can rename a company folder in Gitea and it stays linked. A
 folder you make yourself under `Companies/` is linked to the company with the same name.
 The same folder maintenance applies to `Private-Files`.
 
@@ -312,6 +323,18 @@ or grouped by scope:
 {"asset": {"BitLocker Status": "On"}, "company": {"Tenant ID": "contoso"}}
 ```
 
+A script can only set values it declares: its own source must contain the
+`##myportal[scope.Name]` marker for each value, as in the `Write-Output` lines above. A script
+that writes the result file instead declares its values in a comment:
+
+```powershell
+# ##myportal[asset.BitLocker Status] ##myportal[company.Tenant ID]
+```
+
+Undeclared values are skipped and listed on the run, so a compromised device cannot change
+other fields or variables. MyPortal fills field and variable values into a script's inputs as
+plain text, so a value that looks like `{{…}}` is never expanded.
+
 Names match the field or variable name, ignoring case. Checkbox fields take `true`/`false`,
 and date fields take a `YYYY-MM-DD` date. Values for names that don't exist, and image fields,
 are skipped and listed on the run, so create the field or variable first.
@@ -410,7 +433,22 @@ an asset's page. Then:
    `{{company.name}}`. Variables are filled in separately for each device, so one run can give
    every device its own value. Leaving an optional field empty uses the script's default.
 3. Set how long the script may run before the device stops it.
-4. Choose who it runs as under **Run as**, then run it.
+4. Choose who it runs as under **Run as**.
+5. Under **When**, keep **Now** to send it straight away, or choose **Later** and pick a
+   date and time (in your own time zone) — for example to reboot a server at 4am — then
+   select **Schedule script**.
+
+### Run a script later
+
+A script run with **When** set to **Later** is queued straight away, with the values
+and variables captured as usual, but no device collects it before the chosen time.
+Until then the run history shows it as **Scheduled for** that time, and it can be
+cancelled there like any queued run. At the chosen time it joins the device's queue
+like a script run then, following the script's execution mode; an offline device
+collects it when it next connects. The **Offline wait timeout** starts at the
+scheduled time, not when you scheduled it. A time can be chosen up to a year ahead.
+
+For a script that should run again and again, use a [schedule](#schedules) instead.
 
 ### Queue before the agent is installed
 
@@ -425,8 +463,8 @@ entered values and resolved variables are captured when queued. Platform, shell,
 associated file paths and agent capabilities are checked before execution; an
 incompatible script is not sent to the device.
 
-The **Offline wait timeout** starts when the script is queued, including time
-waiting for installation. Choose **Forever** (0) to wait indefinitely, or set a
+The **Offline wait timeout** starts when the script is queued (or at its
+scheduled time when run later), including time waiting for installation. Choose **Forever** (0) to wait indefinitely, or set a
 limit so the run expires if the agent does not collect it in time. The execution
 timeout starts separately when the agent collects the script.
 
@@ -705,6 +743,12 @@ cancel, abort, AI summary and change to a schedule or onboarding step is recorde
 The RMM agent (`myportal-rmm`) is a separate program from the tray app, built for Windows,
 macOS and Linux by the **Build RMM agent** workflow. It enrols with the tray device's token so
 it joins the same company and asset, then waits for runs.
+
+Each tray device has one RMM agent. While that agent is connected, MyPortal refuses to enrol a
+second agent for the device, and re-enrolling the agent needs its own saved token (which a
+redeploy from the tray app sends automatically). If the agent was reinstalled without its saved
+state, the new agent takes over once the old one has been offline for 30 minutes; the old
+agent is marked *replaced* and its token stops working.
 
 ### Removing PawnIO
 

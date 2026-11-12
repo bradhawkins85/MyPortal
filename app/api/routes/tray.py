@@ -36,6 +36,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from app.api.dependencies.auth import (
     get_current_tray_device,
     get_current_user,
+    get_tray_ui_device,
+    get_optional_user,
     require_helpdesk_technician,
     require_super_admin,
 )
@@ -56,6 +58,9 @@ from app.schemas.tray import (
     TrayChatStartRequest,
     TrayChatStartResponse,
     TrayChatTokenResponse,
+    TrayDeviceKeyRequest,
+    TrayDeviceKeyResponse,
+    TrayUITokenResponse,
     TrayConfigResponse,
     TrayEnrolRequest,
     TrayEnrolResponse,
@@ -96,6 +101,7 @@ from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import matrix as matrix_service
 from app.services import matrix_ai_waiting_assistant
 from app.services import rmm_agent_deploy
+from app.services import tray_device_key
 from app.services import rmm_scripts
 from app.services import tacticalrmm as tacticalrmm_service
 from app.services import tray_installer
@@ -226,6 +232,33 @@ async def _validate_tray_answers(
 # ---------------------------------------------------------------------------
 
 
+_UNCLAIMED_ENROLMENT_WINDOW = timedelta(days=7)
+
+
+def _is_unclaimed_enrolment(device: dict[str, Any]) -> bool:
+    """Return whether ``device`` was enrolled recently and never checked in.
+
+    Such a row belongs to a tray whose enrolment response was lost, so the
+    install token may re-issue its auth token. Any device that has ever
+    reported in has proven possession of its token and is not re-keyable.
+    """
+
+    for key in ("last_seen_utc", "ws_last_seen_utc", "overseer_last_seen_utc"):
+        if device.get(key):
+            return False
+    created_at = device.get("created_at")
+    if isinstance(created_at, str):
+        try:
+            created_at = datetime.fromisoformat(created_at)
+        except ValueError:
+            return False
+    if not isinstance(created_at, datetime):
+        return False
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - created_at <= _UNCLAIMED_ENROLMENT_WINDOW
+
+
 @router.post(
     "/enrol",
     response_model=TrayEnrolResponse,
@@ -254,6 +287,13 @@ async def enrol_device(
             timezone.utc
         ):
             raise HTTPException(status_code=401, detail="Install token has expired")
+
+    public_key = None
+    if payload.public_key:
+        try:
+            public_key = tray_device_key.normalise_public_key(payload.public_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     company_id = token_record.get("company_id")
     device_uid = tray_service.normalise_device_uid(payload.device_uid)
@@ -284,6 +324,24 @@ async def enrol_device(
             raise HTTPException(
                 status_code=409, detail="Device is already enrolled to another company"
             )
+        # An install token is shared by every machine in the company, so it
+        # must not re-key a device that is already in use. The only
+        # legitimate re-enrolment is a tray retrying after a timed-out
+        # request, before it has ever used the token it was issued.
+        if not _is_unclaimed_enrolment(existing):
+            log_warning(
+                "Tray re-enrolment refused for device already in use",
+                device_uid=device_uid,
+                device_id=existing.get("id"),
+                install_token_id=token_record.get("id"),
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Device is already enrolled. Revoke and delete it in "
+                    "MyPortal before enrolling it again."
+                ),
+            )
         await tray_repo.update_device_auth(
             int(existing["id"]),
             auth_token_hash=auth_hash,
@@ -306,6 +364,11 @@ async def enrol_device(
             console_user=payload.console_user,
             status="active",
         )
+    # A new device, or one that never used its first token, takes the key it
+    # enrols with (or none, from an older release).
+    if public_key or device.get("public_key"):
+        await tray_repo.set_device_public_key(int(device["id"]), public_key)
+        device["public_key"] = public_key
 
     # Do this only after ownership/revocation checks and device persistence.
     # Facts supplied on re-enrolment can fill gaps in older device records.
@@ -441,7 +504,7 @@ async def get_device_config(
 )
 async def get_outlook_signatures(
     payload: TrayOutlookSignaturesRequest,
-    device: dict = Depends(get_current_tray_device),
+    device: dict = Depends(get_tray_ui_device),
 ) -> TrayOutlookSignaturesResponse:
     """Return rendered signatures for Outlook accounts found on the device.
 
@@ -649,7 +712,7 @@ def _find_rmm_script_node(
 )
 async def run_rmm_script(
     payload: TrayRMMScriptRunRequest,
-    device: dict = Depends(get_current_tray_device),
+    device: dict = Depends(get_tray_ui_device),
 ) -> TrayRMMScriptRunResponse:
     """Queue a menu-approved MyPortal RMM script on this computer's RMM agent.
 
@@ -705,7 +768,7 @@ async def run_rmm_script(
 )
 async def run_trmm_script(
     payload: TrayTRMMScriptRunRequest,
-    device: dict = Depends(get_current_tray_device),
+    device: dict = Depends(get_tray_ui_device),
 ) -> TrayTRMMScriptRunResponse:
     """Run a menu-approved Tactical RMM script against the linked asset.
 
@@ -811,6 +874,7 @@ async def heartbeat(
         console_user=payload.console_user,
         last_ip=client_ip,
         agent_version=payload.agent_version,
+        console_user_active=payload.console_user_active,
     )
     if not device.get("asset_id") or not device.get("setup_ticket_processed", 1):
         await tray_service.provision_device_for_checkin(device)
@@ -1344,7 +1408,7 @@ const form=document.querySelector('form');['name','email','phone'].forEach(k=>{{
 )
 async def issue_ticket_token(
     request: Request,
-    device: dict = Depends(get_current_tray_device),
+    device: dict = Depends(get_tray_ui_device),
 ) -> TrayTicketTokenResponse:
     body: dict[str, Any] = {}
     try:
@@ -1373,6 +1437,7 @@ async def tacticalrmm_ticket_url_action(
     tray_agent_id: str | None = Query(
         default=None, alias="TrayAgentID", min_length=1, max_length=255
     ),
+    current_user: dict | None = Depends(get_optional_user),
 ) -> RedirectResponse:
     """Launch an asset-linked ticket form from a Tactical RMM URL Action.
 
@@ -1380,9 +1445,24 @@ async def tacticalrmm_ticket_url_action(
     RMM asset sync.  Exchange it for the same short-lived encrypted form token
     used by the tray application rather than exposing an internal device ID in
     the form URL.
+
+    A device UID is not a secret (it appears in the TRMM custom field, the
+    device's registry and WebSocket URLs), so the device-bound form is only
+    issued to a signed-in helpdesk technician. URL Actions open in the
+    technician's browser, where they are normally signed in already; anyone
+    else is sent to the login page and back.
     """
 
     device_uid = (tray_agent_id or "").strip()
+    if current_user is None:
+        target = "/api/tray/ticket-form/url-action"
+        if device_uid:
+            target += "?TrayAgentID=" + quote(device_uid, safe="")
+        return RedirectResponse(
+            url="/login?next=" + quote(target, safe=""),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    await require_helpdesk_technician(current_user)
     device = await tray_repo.get_device_by_uid(device_uid)
     if not device or device.get("status") == "revoked":
         log_info("Tactical RMM URL Action using unauthenticated ticket fallback")
@@ -1958,7 +2038,7 @@ async def admin_revoke_device(
     device_id: int,
     current_user: dict = Depends(require_super_admin),
 ) -> JSONResponse:
-    await tray_repo.revoke_device(device_id)
+    await tray_service.revoke_device(device_id)
     return JSONResponse({"status": "revoked"})
 
 
@@ -2408,8 +2488,8 @@ def _serialise_device(row: dict[str, Any]) -> dict[str, Any]:
 def room_accessible_to_device(room: dict[str, Any] | None, device: dict[str, Any]) -> bool:
     """Return whether a tray ``device`` may open popup chat for ``room``.
 
-    The room must belong to the device's company and, when the room is
-    linked to a specific tray device, to this device.
+    The room must belong to the device's company and be linked to this
+    device.
     """
 
     if not room:
@@ -2421,13 +2501,15 @@ def room_accessible_to_device(room: dict[str, Any] | None, device: dict[str, Any
         return False
     if not device_company or room_company != device_company:
         return False
+    # Only rooms bound to this device: portal chats with no device are other
+    # people's conversations, and room IDs are easy to guess.
     room_device = room.get("tray_device_id")
-    if room_device is not None:
-        try:
-            return int(room_device) == int(device.get("id") or 0)
-        except (TypeError, ValueError):
-            return False
-    return True
+    if room_device is None:
+        return False
+    try:
+        return int(room_device) == int(device.get("id") or 0)
+    except (TypeError, ValueError):
+        return False
 
 
 async def _attach_room_to_device(room_id: int, device_id: int) -> None:
@@ -2591,6 +2673,8 @@ async def get_tray_version(request: Request) -> JSONResponse:
             "download_url": row.get("download_url"),
             "required": bool(row.get("required")),
             "sha256": row.get("sha256"),
+            "signature": row.get("signature")
+            or tray_installer.cached_installer_signature(row.get("sha256")),
         }
     )
 
@@ -2943,7 +3027,8 @@ async def run_troubleshoot(
         "prompt": payload.prompt,
         "llm_base_url": llm["base_url"],
         "llm_model": llm["model"],
-        "llm_api_key": llm["api_key"],
+        # The provider API key never leaves the server: devices would keep
+        # it, and the command log stores this payload.
     }
     command_id, delivered = await tray_service.dispatch_troubleshoot_command(
         device_id=int(device["id"]),
@@ -3028,13 +3113,97 @@ def _parse_popup_session(request: Request) -> dict[str, Any] | None:
 
 
 @router.post(
+    "/device-key",
+    response_model=TrayDeviceKeyResponse,
+    summary="Register the device's public key (device authenticated)",
+    tags=["Tray App"],
+    responses={409: {"description": "A different key is already registered for this device"}},
+)
+async def register_device_key(
+    payload: TrayDeviceKeyRequest,
+    request: Request,
+    device: dict = Depends(get_current_tray_device),
+) -> TrayDeviceKeyResponse:
+    """Register the Ed25519 public key of a device enrolled by an older
+    release. A device can register a key only once: after that its WebSocket
+    must sign a challenge with the matching private key, and only a super
+    administrator can reset the key (Tray → Devices → Reset key)."""
+
+    try:
+        public_key = tray_device_key.normalise_public_key(payload.public_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    device_id = int(device["id"])
+    if device.get("public_key") == public_key:
+        return TrayDeviceKeyResponse(status="unchanged")
+    if device.get("public_key") or not await tray_repo.register_device_public_key(device_id, public_key):
+        current = await tray_repo.get_device_by_id(device_id)
+        if current and current.get("public_key") == public_key:
+            return TrayDeviceKeyResponse(status="unchanged")
+        log_warning(
+            "Tray device tried to replace its registered key",
+            device_id=device_id,
+            device_uid=device.get("device_uid"),
+        )
+        await audit_service.log_action(
+            action="tray_device_key_conflict",
+            entity_type="tray_device",
+            entity_id=device_id,
+            user_id=None,
+            request=request,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="A different key is already registered for this device. "
+            "A super administrator can reset it in MyPortal.",
+        )
+    await audit_service.log_action(
+        action="tray_device_key_registered",
+        entity_type="tray_device",
+        entity_id=device_id,
+        user_id=None,
+        request=request,
+    )
+    log_info("Tray device key registered", device_id=device_id)
+    return TrayDeviceKeyResponse(status="registered")
+
+
+@router.post(
+    "/ui-token",
+    response_model=TrayUITokenResponse,
+    summary="Issue the low-privilege token the tray UI uses (device authenticated)",
+    tags=["Tray App"],
+)
+async def issue_ui_token(
+    device: dict = Depends(get_current_tray_device),
+) -> TrayUITokenResponse:
+    """Issue a new UI token for this device, replacing any earlier one.
+
+    The tray service calls this with the device token and hands the result to
+    the tray UI, which runs as the signed-in user. The UI token only opens
+    chat, the ticket form, Outlook signatures and menu scripts, so the device
+    token can stay readable by SYSTEM/root alone. Re-enrolling the device
+    clears the UI token.
+    """
+
+    ui_token = tray_service.generate_auth_token()
+    await tray_repo.set_device_ui_token(
+        int(device["id"]),
+        ui_token_hash=tray_service.hash_token(ui_token),
+        ui_token_prefix=tray_service.token_prefix(ui_token),
+    )
+    log_info("Tray UI token issued", device_id=device.get("id"))
+    return TrayUITokenResponse(ui_token=ui_token)
+
+
+@router.post(
     "/chat-token",
     response_model=TrayChatTokenResponse,
     summary="Issue a one-time popup chat token (device authenticated)",
 )
 async def issue_chat_token(
     request: Request,
-    device: dict = Depends(get_current_tray_device),
+    device: dict = Depends(get_tray_ui_device),
 ) -> TrayChatTokenResponse:
     """Issue a short-lived one-time URL token so the tray client can open
     ``/tray/chat?token=<token>`` in a popup webview without requiring the end
@@ -3138,16 +3307,7 @@ async def popup_chat_get_room(
     Authenticated by the ``tray_popup`` encrypted session cookie set when
     ``GET /tray/chat?token=...`` is visited.
     """
-    session = _parse_popup_session(request)
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session"
-        )
-
-    if session.get("room_id") != room_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Room mismatch"
-        )
+    session = await _require_popup_room_session(request, room_id)
 
     room = await chat_repo.get_room(room_id)
     if not room:
@@ -3241,16 +3401,7 @@ async def popup_chat_send_message(
     Authenticated by the ``tray_popup`` session cookie and the CSRF token
     that was embedded in the popup page.
     """
-    session = _parse_popup_session(request)
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session"
-        )
-
-    if session.get("room_id") != room_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Room mismatch"
-        )
+    session = await _require_popup_room_session(request, room_id)
 
     # Validate CSRF token from the X-Tray-CSRF header.
     csrf_header = request.headers.get("X-Tray-CSRF", "")
@@ -3325,7 +3476,11 @@ async def popup_chat_send_message(
     )
 
 
-def _require_popup_room_session(request: Request, room_id: int) -> dict[str, Any]:
+async def _require_popup_room_session(request: Request, room_id: int) -> dict[str, Any]:
+    """Return the popup session for ``room_id`` while its device is still active.
+
+    The cookie lasts two hours, so revoking the device must end it too.
+    """
     session = _parse_popup_session(request)
     if not session:
         raise HTTPException(
@@ -3334,6 +3489,15 @@ def _require_popup_room_session(request: Request, room_id: int) -> dict[str, Any
     if session.get("room_id") != room_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Room mismatch"
+        )
+    try:
+        device_id = int(session.get("device_id") or 0)
+    except (TypeError, ValueError):
+        device_id = 0
+    device = await tray_repo.get_device_by_id(device_id) if device_id else None
+    if not device or device.get("status") != "active":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session"
         )
     return session
 
@@ -3374,7 +3538,7 @@ async def popup_chat_send_attachment(
     technicians receive them in their Matrix client like any other photo or
     file.
     """
-    session = _require_popup_room_session(request, room_id)
+    session = await _require_popup_room_session(request, room_id)
     csrf_header = request.headers.get("X-Tray-CSRF", "")
     if not secrets.compare_digest(csrf_header, session.get("csrf", "")):
         raise HTTPException(
@@ -3465,7 +3629,7 @@ async def popup_chat_get_media(
     Only attachments of messages in the popup session's own room are served.
     Types that are not safe to show inline are always sent as downloads.
     """
-    _require_popup_room_session(request, room_id)
+    await _require_popup_room_session(request, room_id)
     message = await chat_repo.get_room_message(room_id, message_id)
     public = chat_media.public_media(message or {}, media_url="")
     media = chat_media.load_media(message or {})

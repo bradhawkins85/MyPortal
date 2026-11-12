@@ -64,7 +64,7 @@ async def test_shop_section_authorization(monkeypatch, level, permission_field):
 ])
 async def test_read_only_cannot_change_cart_or_checkout(monkeypatch, handler):
     user = {'id': 9, 'company_id': 5}
-    membership = {'menu_permissions': {'menu.shop': 'read'},
+    membership = {'menu_permissions': {'menu.shop': 'read', 'menu.quotes': 'write'},
                   'can_access_shop': True, 'can_access_cart': True, 'can_access_quotes': True}
     monkeypatch.setattr(main, '_require_authenticated_user', AsyncMock(return_value=(user, None)))
     monkeypatch.setattr(main, '_get_effective_company_membership', AsyncMock(return_value=membership))

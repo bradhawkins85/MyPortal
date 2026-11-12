@@ -11,6 +11,11 @@ the tray app, with its own version, build workflow
 | macOS | LaunchDaemon (root) | `/Library/Application Support/MyPortal RMM` |
 | Linux | systemd unit (root), binary in `/opt/myportal-rmm` | `/var/lib/myportal-rmm` |
 
+The state folder holds the agent's token, so only the service account and
+Administrators can use it. On Windows the agent gives it a protected access list
+at start-up, and removes anything in it that the service did not create (a link,
+or a file owned by another user) before reading its state.
+
 ## Install
 
 The tray app installs the agent when MyPortal pushes it: from the Assets page
@@ -27,6 +32,28 @@ Enrolment uses the tray device's token, so the agent joins the tray device's
 company and asset. The token is read from the environment (or
 `--tray-token-file`), never the command line. `myportal-rmm uninstall` removes
 the service.
+
+### Agent key
+
+Each agent has its own Ed25519 key pair (`internal/agentkey`), kept in
+`rmm-state.json` with the token. The public key is sent with every enrolment;
+an agent enrolled by an older release makes a key on its next start and
+registers it once with `POST /api/rmm/agent/key` (MyPortal keeps the first key).
+Once MyPortal has the key:
+
+- Re-enrolling an agent that is still in use needs its current token **and**
+  a signature from its key over
+  `myportal-rmm-enrol-v1\nagent_uid=<uid>\ncurrent_token_sha256=<hex>\npublic_key=<new key>\n`,
+  which `myportal-rmm enrol` adds itself. A token copied off the device is not
+  enough, and because the token changes on every enrolment a captured request
+  cannot be replayed. An agent offline for 30 minutes can still be replaced by
+  a reinstall, as before.
+- A live tools socket opens only after the agent answers
+  `{"type": "challenge", "nonce": …}` with
+  `{"type": "auth", "signature": …}` over
+  `myportal-rmm-live-v1\nagent_uid=<uid>\nsession_id=<id>\nnonce=<nonce>\n`.
+
+Job polling and results still use the bearer token alone.
 
 ## How it works
 
@@ -148,7 +175,8 @@ A technician can open **Live tools** on a device's asset page for an
 interactive session without RustDesk or MeshCentral (remote desktop is not
 part of this). MyPortal lists requested sessions in the job poll (`live`); the
 agent connects back over a WebSocket to `/ws/rmm/agent/live/{id}` with its
-bearer token and MyPortal relays JSON between it and the technician's browser.
+bearer token, signs MyPortal's challenge when it has a registered key (see
+*Agent key*), and MyPortal relays JSON between it and the technician's browser.
 The agent advertises `live_tools_supported: true` on enrolment and check-in;
 MyPortal only offers sessions to agents that do. See `internal/live`.
 

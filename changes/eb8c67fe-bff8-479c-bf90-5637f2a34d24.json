@@ -1,0 +1,7 @@
+{
+  "guid": "eb8c67fe-bff8-479c-bf90-5637f2a34d24",
+  "occurred_at": "2026-11-09T01:49Z",
+  "change_type": "Improvement",
+  "summary": "Microsoft 365 guided setup now shows the tenant's name, domain and the account you signed in with after Sign in with Microsoft, so you can confirm the right customer tenant without checking its tenant ID.",
+  "content_hash": "67f87fba752b71919889e0200467cdb3fbd115914ee84be99b9772db80cb9714"
+}

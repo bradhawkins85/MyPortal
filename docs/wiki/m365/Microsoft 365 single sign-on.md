@@ -14,7 +14,8 @@ This page is for MSP and company admins. It explains how to turn the feature on,
 
 - The company is connected to Microsoft 365 (a tenant is set on **Edit company → Microsoft 365**, or the company is mapped to a CSP tenant). Microsoft sign-in uses that tenant to decide which Microsoft accounts belong to the company.
 - The shared MyPortal sign-in app (the same multi-tenant app described in [PKCE App Setup](PKCE%20App%20Setup.md)) is used. It only asks users for the basic `openid`, `profile` and `email` permissions, so **no extra admin consent is needed** in the customer tenant.
-- The people who will sign in already have MyPortal accounts. MyPortal does not create accounts from Microsoft sign-in.
+- The company's Microsoft 365 connection can read user account status through Microsoft Graph (`User.Read.All` or equivalent access). MyPortal checks `accountEnabled` against the signing-in user's permanent Microsoft object ID before admitting them. If this check is unavailable, sign-in fails without creating an account.
+- People do not need an existing MyPortal account or a pre-created Microsoft link. Eligible users are created or linked on their first Microsoft sign-in.
 
 ---
 
@@ -33,7 +34,7 @@ Things to know about **Required**:
 - **Unlinked users keep password sign-in.** Only users who already have a linked Microsoft account are forced to use it, so turning on Required never locks out someone who has not been linked yet.
 - **Stale links do not lock anyone out.** If a user's linked Microsoft tenant no longer reaches any of their companies with Microsoft sign-in turned on (for example the tenant was disconnected), they keep password sign-in.
 - **Super admins are never forced.** They can always sign in with a password or passkey.
-- Required can only be chosen once the company has a connected Microsoft 365 tenant and at least one linked user.
+- Required can be chosen once the company has a connected Microsoft 365 tenant; no pre-linked user is needed.
 - A user whose company requires Microsoft sign-in cannot unlink their own Microsoft account from their profile.
 - If a person belongs to several companies, Required on any one of them applies to them.
 
@@ -55,15 +56,15 @@ The same setting is available through the [Company SSO API](#company-sso-api).
 
 A MyPortal account is linked to a Microsoft account by Microsoft's permanent tenant and user identifiers, not by email address, so a later change of email or UPN does not break the link.
 
-**Automatic link on first sign-in.** When someone signs in with Microsoft for the first time, MyPortal links them to an existing MyPortal user only when **all** of these are true:
+**Automatic creation or linking on first sign-in.** When someone signs in with Microsoft for the first time, MyPortal checks all of these:
 
 1. **The address is trustworthy.** MyPortal uses the Microsoft email only when Microsoft marks it as verified by the tenant (the `xms_edov` claim). Otherwise it uses the Microsoft sign-in name (UPN). The address must be a single, complete email address.
 2. **The domain belongs to the company.** The address's domain is one of the **Email domains** of a company that is connected to that Microsoft tenant and has Microsoft sign-in turned on.
-3. **Exactly one person matches.** Exactly one active MyPortal user in those companies has that email, and that user is not already linked to a Microsoft account.
-4. **The user is not a super admin.** Super admins are never linked automatically.
-5. **The user belongs only to those companies.** Someone who is also a member of any company outside the tenant's Microsoft-sign-in companies is never linked automatically.
+3. **Microsoft sign-in is enabled for the user.** Microsoft Graph must return the same permanent user ID with `accountEnabled=true`. This is checked on subsequent sign-ins too, including accounts linked manually.
+4. **An existing account is eligible.** If an account exists, exactly one active MyPortal user in those companies must match, with no existing link to a different Microsoft identity. The user must belong only to companies in that tenant with Microsoft sign-in enabled. Disabled accounts and accounts in unrelated companies are never replaced or moved. Existing roles, including super-admin status, stay unchanged.
+5. **A new account joins the approved domain's company.** If no MyPortal account has the address, MyPortal creates an active account, assigns the ordinary **Member** role in that company, and links the Microsoft identity. The account, company access and identity are saved together; a failure saves none of them. New accounts never receive administrator access. No MyPortal password is supplied to the user; Microsoft sign-in continues through the existing MFA flow.
 
-If any rule fails, nothing is linked and the person sees *"No MyPortal account is linked to this Microsoft account. Contact your administrator."* An admin can still link these users by hand (below).
+If an eligibility rule fails, nothing is created or linked and the person sees *"This Microsoft account is not eligible to sign in to MyPortal. Contact your administrator."* An admin can still manage links by hand (below). A missing **Member** role or unavailable directory check must be corrected before provisioning can succeed.
 
 **Linked by an admin.** Admins can link, re-link and unlink users:
 
@@ -103,13 +104,15 @@ Admin rules:
 
 | What the user sees | What it means and what to do |
 |---|---|
-| *No MyPortal account is linked to this Microsoft account. Contact your administrator.* | No MyPortal user matched, more than one matched, the account belongs to a different company, or the account is disabled. Link the user manually on **Edit company → Microsoft sign-in**, or correct the email on their MyPortal account so it matches their Microsoft email, then ask them to try again. The audit log shows the exact reason (below). |
+| *This Microsoft account is not eligible to sign in to MyPortal. Contact your administrator.* | Check the approved company email domain, tenant, existing account's company access, conflicting links and Microsoft `accountEnabled` status. Eligible users are created or linked automatically; pre-linking is unnecessary. |
 | *Microsoft sign-in is not enabled for your organisation.* | None of the companies connected to the user's Microsoft tenant has Microsoft sign-in turned on. Set the company's mode to **Optional** or **Required** and check that the correct tenant is connected. |
 | *Your organisation requires Microsoft sign-in.* | The company is in Required mode and the user is linked. They must use **Sign in with Microsoft**. If they cannot, unlink them (they then use their password again) or move the company back to **Optional**. |
 | *Your Microsoft sign-in session expired. Please try again.* | The sign-in took longer than ten minutes, or the link was reused. Start again from the sign-in page. |
 | *Microsoft sign-in was cancelled or failed.* | The user cancelled at Microsoft, or Microsoft returned an error. Details are in the application log. Starting Microsoft sign-in in two tabs at once cancels the first — use one tab. |
 | *Invalid authenticator code. Start Microsoft sign-in again.* | Microsoft did not report MFA and the six-digit MyPortal code was wrong. Each attempt needs a fresh Microsoft sign-in; wrong codes count toward the account lockout. |
 | *Microsoft sign-in isn't available right now. Use your password or contact your administrator.* | MyPortal has no sign-in app registered with Microsoft yet. A super admin connects Microsoft 365 (which registers the app) or sets `M365_PKCE_CLIENT_ID`; until then people use their password. |
+
+**Returning to sign-in without an explanation.** A callback with missing or invalid state and a sign-in binding cookie returns directly to sign-in with the expiry message and logs `sso_state_rejected`. Check that all web workers use the same `SESSION_SECRET` and that the browser starts sign-in on the hostname used by `PORTAL_URL`, so the binding cookie reaches `/m365/callback`. Token redemption failures log the HTTP status and Microsoft's numeric `AADSTS` codes when provided; use those codes to identify the Microsoft configuration or policy failure. Admin consent alone does not enable a company's Microsoft sign-in mode. Once the company is enabled, eligible users are created or linked automatically.
 
 **Checking a staged deployment.** Before relying on Microsoft sign-in, sign in once with a test account from each tenant and check that Microsoft's ID token carries the `amr` claim (MyPortal skips its own code only when `amr` includes `mfa`) and, where the tenant verifies email, the `xms_edov` claim (without it, automatic linking uses the UPN instead of the email). Also check the `client_id` in the address of the Microsoft sign-in page: it must be MyPortal's own registered app, not the Azure CLI client `04b07795-8542-4ab8-9e00-81f6b0a2c83a`. MyPortal never starts Microsoft sign-in with that fallback client; it shows the "isn't available" message above instead.
 
@@ -121,7 +124,7 @@ Microsoft sign-in writes to the audit log:
 
 | Event | When | Details |
 |---|---|---|
-| `auth.sso.link` | An account is linked, automatically or by an admin | How it was linked, who linked it, the tenant and a hashed Microsoft user id |
+| `auth.sso.link` | An account is linked, automatically or by an admin | How it was linked, who linked it, the tenant and a hashed Microsoft user id; automatic links include `account_provisioned` to indicate a newly created account |
 | `auth.sso.unlink` | A link is removed | Who removed it |
 | `auth.sso.fail` | A sign-in is refused for a user MyPortal could identify | A reason: `no_link`, `company_mismatch`, `account_disabled`, `tenant_not_enabled` or `password_login_refused` |
 | `auth.login.succeed` | A successful sign-in | `authentication_method` of `m365_sso`, plus `mfa_satisfied_by` of `microsoft`, `myportal_totp` or `none` |
@@ -146,5 +149,5 @@ These endpoints are documented in Swagger UI and need an authenticated user who 
 ## Known limitations
 
 - The Edit company page is currently super-admin only, so company admins who are not super admins manage Microsoft sign-in through the API.
-- Accounts are never created by Microsoft sign-in; each person needs an existing MyPortal user.
+- Automatic creation requires an approved company email domain, a connected tenant with Microsoft sign-in enabled, an enabled Microsoft user and the **Member** role.
 - Only Microsoft 365 is supported (no Google, generic OIDC or SAML), and sign-in cannot be started from Microsoft My Apps.

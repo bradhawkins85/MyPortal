@@ -751,6 +751,7 @@ def _scheduled_tasks_context(**overrides):
         "company_options": [{"value": "", "label": "All companies"}, {"value": "42", "label": "Acme"}],
         "bulk_company_options": [{"value": "42", "label": "Acme"}],
         "schedule_timezone": "Australia/Brisbane",
+        "command_default_crons": {"generate_invoice": "1 0 L * *", "sync_to_xero": "2 15 L * *"},
         "csrf_token": "t",
     }
     context.update(overrides)
@@ -795,6 +796,8 @@ def test_scheduled_tasks_render_grouped_list_with_editor_modals():
     assert data["timezone"] == "Australia/Brisbane"
     assert data["tasks"][0]["cron"] == "1 15 L * *"
     assert data["commandDefaults"]["generate_invoice"] == "1 0 L * *"
+    assert data["commandDefaults"]["sync_to_xero"] == "2 15 L * *"
+    assert "generate_invoice" in data["sequentialCommands"]
     assert "scheduled_tasks.js" in html and "automation.js" not in html
     # The stat strip filters the list: each tile is a toggle button keyed to a row attribute.
     assert 'data-sch-filter-strip' in html
@@ -889,6 +892,23 @@ def test_profile_standard_user_sees_security_and_menu_only():
     assert "rich_text_editor.js" not in html
     assert re.search(r'data-totp-password-field\s+hidden', html)
     assert "data-profile-no-second-factor hidden" not in html
+
+
+def test_profile_ticket_writer_cannot_render_work_details_or_integrations():
+    from app import main as main_module
+
+    allowed = main_module._can_edit_profile_technician_tools(
+        {"id": 7}, {"menu_permissions": {"menu.tickets": "write"}}
+    )
+    html = _render_profile(profile_show_technician_tools=allowed)
+    for section in ("details", "integrations"):
+        assert f'data-profile-tab="{section}"' not in html
+        assert f'data-profile-panel="{section}"' not in html
+    assert 'id="profile-contact-form"' not in html
+    assert 'id="click-to-call-form"' not in html
+    assert 'href="/admin/profile/m365-contacts/connect"' not in html
+    for section in ("security", "privacy", "menu"):
+        assert f'data-profile-panel="{section}"' in html
 
 
 def _render_webhooks(**context) -> str:

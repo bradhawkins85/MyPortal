@@ -1,0 +1,7 @@
+{
+  "guid": "e1134e64-2124-424d-9fb4-c9f92b27ed18",
+  "occurred_at": "2026-11-09T04:01Z",
+  "change_type": "Fix",
+  "summary": "Reported emails now defaults to the last 1 day instead of 30 days to reduce page load time.",
+  "content_hash": "40658dffc8a774dfc69a95471bb706fc1770bd11f44e768fc8f50da70d832331"
+}

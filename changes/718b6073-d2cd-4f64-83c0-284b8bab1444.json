@@ -1,0 +1,7 @@
+{
+  "guid": "718b6073-d2cd-4f64-83c0-284b8bab1444",
+  "occurred_at": "2026-11-12T03:50Z",
+  "change_type": "Feature",
+  "summary": "Admins can set quotes, orders and invoices to None, Mine or All visibility and assign invoices to individual users.",
+  "content_hash": "c60b1937c5c8364851059f18a41a51d4a92f17690cd7290921c93fd9c9ef5784"
+}

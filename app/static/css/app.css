@@ -852,9 +852,9 @@ body.navigation--top .layout__header {
   }
 }
 
-/* Compact top menu: on standard resolution displays (1080p or lower) the
- * labelled menu overflows the screen, so it collapses to icons only. Each
- * top-level item carries a hover tooltip (set from base.html) naming it.
+/* Compact top menu: when the labelled items exceed the available row width,
+ * collapse to icons only. Each top-level item carries a hover tooltip
+ * (set by layout.js) naming it.
  * The rules stay scoped to direct children of the top menu so expanded
  * drop-downs keep their item labels and stay readable. */
 body.navigation--top.navigation--top-compact .menu > .menu__item > a .menu__label,
@@ -3057,6 +3057,40 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
   height: 1.1rem;
 }
 
+/* Asset settings: columns end users can see */
+.asset-column-visibility {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-4, 1rem);
+}
+
+.asset-column-visibility__group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.asset-column-visibility__legend {
+  margin-bottom: var(--space-2, 0.5rem);
+  font-weight: 600;
+}
+
+.asset-column-visibility__list {
+  display: grid;
+  gap: var(--space-2, 0.5rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.asset-column-visibility__option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+}
+
 .asset-columns--open .asset-columns__toggle {
   background: rgba(148, 163, 184, 0.2);
 }
@@ -4259,6 +4293,31 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
 
 .ticket-assets-linked__remote[hidden] { display: none; }
 .ticket-assets-linked__remote.is-error { color: var(--hf-danger); }
+
+/* Close control on the remote control status box (asset and ticket pages). */
+.rmm-remote__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  margin-inline-start: auto;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.rmm-remote__dismiss:hover,
+.rmm-remote__dismiss:focus-visible {
+  border-color: var(--hf-line);
+  opacity: 1;
+}
 
 .ticket-assets-linked__action[disabled],
 .ticket-assets-linked__action[aria-disabled="true"] {
@@ -14076,6 +14135,25 @@ a.service-card__ai-icon:hover {
   align-self: flex-start;
 }
 
+.ticket-details-contact__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+}
+
+.ticket-phone-modal {
+  width: min(92vw, 32rem);
+}
+
+.ticket-phone-modal__eyebrow {
+  margin: 0 0 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--hf-muted);
+}
+
 /* AI summary header: keep the actions on one line beside the title. */
 .ticket-ai-summary__heading {
   display: flex;
@@ -23397,5 +23475,125 @@ a.sch-item__company:focus-visible {
   .sso-segmented__option {
     flex: 1 1 auto;
     text-align: center;
+  }
+}
+
+/* CPU launch dates (Assets → CPU launch dates) */
+.cpu-launch__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--space-gap-roomy);
+  margin: 0;
+}
+
+.cpu-launch__stats dt {
+  font-size: 0.8rem;
+  color: var(--hf-muted);
+}
+
+.cpu-launch__stats dd {
+  margin: 0.15rem 0 0;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.cpu-launch__notice {
+  margin: var(--space-gap-roomy) 0 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.5rem;
+  color: var(--hf-copy);
+  background: color-mix(in srgb, var(--hf-warning) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hf-warning) 30%, transparent);
+}
+
+.cpu-launch [hidden] {
+  display: none !important;
+}
+
+.cpu-item.scf-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.cpu-launch .scf-chip a,
+.cpu-launch__notice a {
+  color: var(--hf-accent-strong);
+  text-decoration: underline;
+}
+
+.cpu-item__name {
+  margin: 0.15rem 0 0;
+  word-break: break-word;
+}
+
+.cpu-item__fallback {
+  margin-top: 0.5rem;
+}
+
+.cpu-editor__eyebrow {
+  margin: 0 0 0.15rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--hf-muted);
+}
+
+.cpu-editor__subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--hf-muted);
+  word-break: break-word;
+}
+
+.cpu-editor__body.modal__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16rem;
+  align-items: start;
+  gap: calc(var(--space-gap-roomy) * 2);
+}
+
+.cpu-editor__main {
+  min-width: 0;
+}
+
+.cpu-editor__aside {
+  padding: var(--space-gap-roomy);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--hf-muted) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--hf-line);
+}
+
+.cpu-editor__preview-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--hf-muted);
+}
+
+.cpu-editor__age {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.cpu-editor.modal__panel > .cpu-editor__footer {
+  margin: 0;
+}
+
+.cpu-editor__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
+.cpu-editor__spacer {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 720px) {
+  .cpu-editor__body.modal__body {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -1,0 +1,7 @@
+{
+  "guid": "310f379a-9a19-439e-90a1-bd6958ee9b0e",
+  "occurred_at": "2026-11-09T00:09Z",
+  "change_type": "Feature",
+  "summary": "Ticket details now have an Add Phone button to record the requester's mobile, landline or company number, and a Send To Outlook button that adds or updates the requester in your own Outlook contacts (reconnect Outlook contacts on your profile to allow saving).",
+  "content_hash": "56296f58839d9731ec26dd3243cf9e19fd2679d4eb0b22ddc390e800c6ad9cd3"
+}

@@ -174,6 +174,7 @@ async def agent_package(
         "sha256": package["sha256"],
         "size": package["size"],
         "download_path": "/api/rmm/agent/package/download?" + urlencode(query),
+        "signature": package.get("signature"),
     }
 
 

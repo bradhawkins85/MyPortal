@@ -28,7 +28,7 @@
         <td data-label="Check" data-column-key="name"><strong>{{ check.name }}</strong><br><span class="text-muted">{{ check.type_label }}</span></td>
         <td data-label="Applies to" data-column-key="scope">{{ check.scope_label }}{% if check.target_rules %}<br><span class="rmm-chip">Advanced rules</span>{% endif %}{% if check.replaced %}<br><span class="text-muted">Some devices have their own</span>{% endif %}</td>
         <td data-label="Fails when" data-column-key="when">{{ check.description }}</td>
-        <td data-label="Then" data-column-key="action">{{ check.action_label }}{% if check.action in ("run_script", "install_choco") %} <span class="text-muted">({{ "again every " ~ check.cooldown_minutes ~ " min while failing" if check.cooldown_minutes else "once per failure" }})</span>{% endif %}{% if check.action == "create_ticket" %} <span class="text-muted">(one open ticket per device)</span>{% endif %}</td>
+        <td data-label="Then" data-column-key="action">{{ rmm_ui.action_summary(check) }}{% if check.repeats %} <span class="text-muted">({{ ("scripts and installs " if check.action_steps | length > 1 else "") ~ ("again every " ~ check.cooldown_minutes ~ " min while failing" if check.cooldown_minutes else "once per failure") }})</span>{% endif %}{% if "create_ticket" in (check.action_types or []) %} <span class="text-muted">(one open ticket per device)</span>{% endif %}</td>
         <td data-label="Devices" data-column-key="results" data-mobile-hidden="true">
           {% set failing = check.counts.get("failing", 0) %}{% set passing = check.counts.get("passing", 0) %}{% set warning = check.counts.get("warning", 0) %}
           {% if failing %}<button type="button" class="status status--error rmm-check-devices__open" data-rmm-check-devices-open="{{ check.id }}" data-rmm-check-devices-status="failing" data-rmm-check-devices-name="{{ check.name }}" aria-haspopup="dialog" aria-controls="rmm-check-devices-modal" title="Show the failing devices">{{ failing }} failing</button> {% endif %}{% if warning %}<button type="button" class="status status--warning rmm-check-devices__open" data-rmm-check-devices-open="{{ check.id }}" data-rmm-check-devices-status="warning" data-rmm-check-devices-name="{{ check.name }}" aria-haspopup="dialog" aria-controls="rmm-check-devices-modal" title="Show the devices with a problem">{{ warning }} with a problem</button> {% endif %}{% if passing %}<span class="status status--success">{{ passing }} passing</span>{% endif %}{% if not failing and not passing and not warning %}<span class="text-muted">No results yet</span>{% endif %}
@@ -127,7 +127,7 @@
         <header class="ce-section__header">
           <div class="ce-section__heading">
             <h2 class="card__title" id="rmm-checks-heading">All checks</h2>
-            <p class="card__subtitle">Checks watch each device's disk space, ping targets, CPU, memory, services, network throughput, files, processes, script results and check-ins. A problem must last the check's duration before the check fails. When it fails the check can run a script on the device or raise a ticket for it; the ticket gets an update when the check passes again. For the same drive, ping target, service, interface, path, process or script, a device's own check replaces its company's, which replaces a check for every company. Open a device to see its results and stats.</p>
+            <p class="card__subtitle">Checks watch each device's disk space, ping targets, CPU, memory, services, network throughput, files, processes, script results and check-ins. A problem must last the check's duration before the check fails. When it fails the check takes its actions in the order you list them: raise a ticket, run scripts, schedule scripts for later or install packages, in any combination. The ticket gets an update when the check passes again. For the same drive, ping target, service, interface, path, process or script, a device's own check replaces its company's, which replaces a check for every company. Open a device to see its results and stats.</p>
           </div>
           {% if can_edit %}<a class="button button--primary button--small" href="/rmm/checks?new=1#rmm-check-form">Add check</a>{% endif %}
         </header>
@@ -170,6 +170,7 @@
 {% block scripts %}
 <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
+<script src="{{ static_url('/static/js/rmm_action_steps.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_checks.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_check_devices.js') }}" defer></script>
 {% endblock %}

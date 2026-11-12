@@ -195,3 +195,35 @@ async def get_current_tray_device(request: Request) -> dict:
     if not device.get("asset_id"):
         await tray_service.provision_device_for_checkin(device)
     return device
+
+
+async def get_tray_ui_device(request: Request) -> dict:
+    """Authenticate a request from the tray UI that runs as the signed-in user.
+
+    Accepts the device's low-privilege UI token, which only the endpoints that
+    use this dependency honour (chat, ticket form, Outlook signatures and
+    menu scripts). The device token is still accepted so a UI from an older
+    release keeps working until its service is upgraded.
+    """
+
+    token = ""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Tray device authentication required",
+        )
+    token_hash = tray_service.hash_token(token)
+    device = await tray_repo.get_device_by_ui_token_hash(token_hash)
+    if not device:
+        device = await tray_repo.get_device_by_auth_hash(token_hash)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Tray device authentication failed",
+        )
+    if not device.get("asset_id"):
+        await tray_service.provision_device_for_checkin(device)
+    return device

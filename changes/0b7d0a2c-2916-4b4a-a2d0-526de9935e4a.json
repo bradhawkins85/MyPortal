@@ -1,0 +1,7 @@
+{
+  "guid": "0b7d0a2c-2916-4b4a-a2d0-526de9935e4a",
+  "occurred_at": "2026-11-11T02:22Z",
+  "change_type": "Fix",
+  "summary": "The workflow variable preview now shows the value after text functions such as left, trim and lower are applied, so techs see the exact email address or name that will be sent to Microsoft 365.",
+  "content_hash": "0e41dccb0c63f9d05b63c3db95fc5f9c7904e8a98426ba8aba3ef8c5ee48b04c"
+}

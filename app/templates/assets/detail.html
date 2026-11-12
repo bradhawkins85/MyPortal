@@ -60,6 +60,7 @@
 <div class="rmm-remote__status rmm-remote__status--floating" data-rmm-remote-status role="status" aria-live="polite" hidden>
   <span data-rmm-remote-message></span>
   <a class="button button--primary button--small" data-rmm-remote-link href="#" target="_blank" rel="noopener noreferrer" hidden>Open</a>
+  <button type="button" class="rmm-remote__dismiss" data-rmm-remote-dismiss aria-label="Dismiss remote control status"><span aria-hidden="true">&times;</span></button>
 </div>
 {% endif %}
 
@@ -100,7 +101,7 @@
           {% if not customer_safe %}
             <li class="scf-chip">{{ 'Manual inventory' if asset.provenance == 'manual' else 'Synced inventory' }}</li>
             {% if asset.serial_number %}<li class="scf-chip">SN {{ asset.serial_number }}</li>{% endif %}
-            {% if logged_on_user %}<li class="scf-chip" title="Currently logged on user">Logged on: {{ logged_on_user }}</li>{% endif %}
+            {% if logged_on_user %}{% if logged_on_user_is_last %}<li class="scf-chip" title="Nobody is signed in now; this is the last logged in user">Last logged on: <em>{{ logged_on_user }}</em></li>{% else %}<li class="scf-chip" title="Currently logged on user">Logged on: {{ logged_on_user }}</li>{% endif %}{% endif %}
             {% if asset.criticality %}<li class="scf-chip scf-chip--logic">{{ asset.criticality | title }} criticality</li>{% endif %}
             <li class="scf-chip{% if asset.review_status != 'reviewed' %} scf-chip--muted{% endif %}">{{ (asset.review_status or 'not_reviewed') | replace('_', ' ') | title }}</li>
             <li class="scf-chip{% if asset.customer_visible %} scf-chip--visibility{% else %} scf-chip--muted{% endif %}">{{ 'Customer portal' if asset.customer_visible else 'Internal asset' }}</li>
@@ -243,7 +244,7 @@
           {% for check in chk.checks %}
           <tr>
             <td data-label="Check"><strong>{{ check.name }}</strong><br><span class="text-muted">{{ check.type_label }}</span></td>
-            <td data-label="Fails when">{{ check.description }}{% if check.action != "none" %}<br><span class="text-muted">Then: {{ check.action_label }}</span>{% endif %}</td>
+            <td data-label="Fails when">{{ check.description }}{% if check.action_steps %}<br><span class="text-muted">Then: {{ check.action_label }}</span>{% endif %}</td>
             <td data-label="Result">
               {% if not check.is_enabled %}<span class="status status--neutral">Off</span>
               {% elif not check.applies %}<span class="status status--neutral">Replaced</span> <span class="text-muted">by a more specific check for the same thing</span>
@@ -445,7 +446,7 @@
             <td data-label="Rule"><strong>{{ rule.name }}</strong>{% if rule.last_run_summary %}<br><span class="text-muted">{{ rule.last_run_summary }}</span>{% endif %}</td>
             <td data-label="Applies to">{{ "This device" if rule.asset_id else rule.scope_label }}</td>
             <td data-label="When">{% for text in rule.conditions_text %}{{ text }}{% if not loop.last %}<br>and {% endif %}{% endfor %}</td>
-            <td data-label="Then">{{ rule.action_label }}</td>
+            <td data-label="Then">{{ rmm_ui.action_summary(rule) }}</td>
             <td data-label="Status"><span class="status status--{{ 'success' if rule.is_enabled else 'neutral' }}">{{ "On" if rule.is_enabled else "Off" }}</span></td>
             <td class="table__actions">{% if rule.can_edit %}{{ rmm_ui.event_log_rule_menu(rule, csrf_token, asset.id) }}{% endif %}</td>
           </tr>
@@ -554,6 +555,7 @@
     <div class="ce-section__body"><dl class="definition-list">
       <dt>Asset ID</dt><dd>{{ asset.id }}</dd><dt>Company</dt><dd>{{ company.name if company else asset.company_id }}</dd>
       <dt>Type</dt><dd><span class="asset-type-badge"><img src="{{ asset_type.icon }}" alt="" width="20" height="20"> {{ asset_type_label }}</span>{% if asset.provenance != 'manual' and asset.type and asset.type != asset_type_label %} <span class="text-muted">(reported as {{ asset.type }})</span>{% endif %}</dd><dt>Status</dt><dd>{{ asset.status or '—' }}</dd>
+      {% if cpu_age %}<dt>CPU launched</dt><dd>{{ cpu_age.release_label }} <span class="text-muted">({{ cpu_age.model }}, {% if cpu_age.source_url %}<a href="{{ cpu_age.source_url }}" target="_blank" rel="noopener noreferrer">{{ cpu_age.source_label }}</a>{% else %}{{ cpu_age.source_label }}{% endif %})</span></dd><dt>Approx age</dt><dd>About {{ cpu_age.age_years }} year{{ "s" if cpu_age.age_years != 1 }} <span class="text-muted">— estimated from the CPU launch date; the device cannot be older than its processor.{% if is_super_admin %} <a href="/assets/cpu-launch-dates">CPU launch dates</a>{% endif %}</span></dd>{% endif %}
       <dt>Serial number</dt><dd>{{ asset.serial_number or '—' }}</dd><dt>Warranty</dt><dd>{{ asset.warranty_status or '—' }}{% if asset.warranty_end_date %} (ends {{ asset.warranty_end_date }}){% endif %}</dd>
       {% if not customer_safe %}<dt>Syncro ID</dt><dd>{{ asset.syncro_asset_id or '—' }}</dd><dt>Tactical ID</dt><dd>{{ asset.tactical_asset_id or '—' }}</dd>{% endif %}
       <dt>Provenance</dt><dd>{{ 'Manual' if asset.provenance == 'manual' else 'Integration' }}</dd>

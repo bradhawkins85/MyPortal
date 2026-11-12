@@ -25,17 +25,29 @@
     {% if is_super_admin %}
     <div class="ce-subsection" aria-labelledby="tray-agent-updates-title">
       <h3 id="tray-agent-updates-title">Agent updates</h3>
-      <p class="form-help">Update asks a tray device to install the latest release now, through the MyPortal Tray Agent's built-in updater. Offline devices receive the update when they reconnect.</p>
-      <form method="post" action="/admin/tray/devices/bulk-update-outdated" class="form" data-confirm="Update every non-revoked tray device whose agent is older than the server tray app release?">
+      <p class="form-help">Update asks a tray device to install the latest release now, through the MyPortal Tray Agent's built-in updater. Updating all outdated agents works through them one at a time so downloads do not overload the server. Offline devices receive the update when they reconnect.</p>
+      <form method="post" action="/admin/tray/devices/bulk-update-outdated" class="form" data-confirm="Update every non-revoked tray device whose agent is older than the server tray app release? Devices are updated one at a time.">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <div class="form-actions">
           <button
             type="submit"
             class="button button--secondary"
-            {% if not d.outdated_device_count %}disabled{% endif %}
+            {% if not d.outdated_device_count or (d.update_rollout and d.update_rollout.running) %}disabled{% endif %}
           >Update all outdated agents</button>
           <span class="form-help">{{ d.outdated_device_count }} tray {{ 'device is' if d.outdated_device_count == 1 else 'devices are' }} older than {{ release.version or 'the loaded release' }}.</span>
         </div>
+        {% set rollout = d.update_rollout %}
+        {% if rollout %}
+        <p class="form-help" role="status" aria-live="polite">
+          {% if rollout.running %}
+            <span class="status status--info">Updating</span>
+            {{ rollout.processed }} of {{ rollout.total }} devices done, one at a time{% if rollout.current_hostname %}; now updating {{ rollout.current_hostname }}{% endif %}.
+          {% else %}
+            <span class="status status--neutral">Last rollout</span>
+            {{ rollout.updated }} updated to {{ rollout.target_version }}{% if rollout.queued_offline %}, {{ rollout.queued_offline }} offline (update when they reconnect){% endif %}{% if rollout.timed_out %}, {{ rollout.timed_out }} did not report the new version in time{% endif %}. Finished <span data-utc="{{ rollout.finished_at.isoformat() }}">{{ rollout.finished_at.isoformat() }}</span>.
+          {% endif %}
+        </p>
+        {% endif %}
       </form>
     </div>
     {% endif %}
@@ -94,9 +106,10 @@
                   {% else %}
                     <span class="status status--danger">Revoked</span>
                   {% endif %}
+                  {% if device.public_key %}<div class="data-table__sub">Device key registered</div>{% endif %}
                 </td>
                 <td data-value="{{ ((device.os or '') ~ ' ' ~ (device.os_version or ''))|trim|lower }}">{{ device.os or '—' }} {{ device.os_version or '' }}</td>
-                <td data-value="{{ (device.console_user or '')|lower }}">{{ device.console_user or '—' }}</td>
+                <td data-value="{{ (device.console_user or '')|lower }}">{% if device.console_user and device.console_user_active in (0, false) %}<em title="Nobody is signed in now; this is the last logged in user">{{ device.console_user }}</em>{% else %}{{ device.console_user or '—' }}{% endif %}</td>
                 <td data-value="{{ device.last_seen_utc or '' }}">
                   {% if device.last_seen_utc %}<span data-utc="{{ device.last_seen_utc }}">{{ device.last_seen_utc }}</span>{% else %}—{% endif %}
                 </td>
@@ -121,6 +134,12 @@
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <button type="submit" class="button button--small button--danger">Revoke</button>
                     </form>
+                    {% if device.public_key %}
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/reset-key" class="inline-form" data-confirm="Reset this device's key? Only do this after reinstalling the tray on this device. The next device to connect with its token registers a new key.">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small">Reset key</button>
+                    </form>
+                    {% endif %}
                     <form method="post" action="/api/wol/devices/{{ device.id }}/wake" class="inline-form" data-confirm="Wake this device? A WoL magic packet will be broadcast by other online agents on its network. The result is tracked for about 2 minutes.">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <button type="submit" class="button button--small">Wake</button>

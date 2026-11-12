@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 AccessLevel = Literal["none", "read", "write"]
 ACCESS_LEVELS: tuple[AccessLevel, ...] = ("none", "read", "write")
+COMMERCE_MENU_PERMISSIONS = frozenset({"menu.quotes", "menu.orders", "menu.invoices"})
 BOOLEAN_MENU_PERMISSIONS: frozenset[str] = frozenset({"menu.admin.technician"})
 
 # Sparse role payloads written before the feature-specific catalogue existed
@@ -54,8 +55,8 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.issues", "Issue tracker", "Company", "View or manage issue tracker items.", ("issues.manage",), "can_manage_issues"),
     MenuPermission("menu.marketing", "Marketing", "Company", "View or manage marketing pages and contacts.", ("marketing.access",), None),
     MenuPermission("menu.shop", "Shop", "Commerce", "Browse shop products; write access allows cart actions.", ("shop.access",), "can_access_shop"),
-    MenuPermission("menu.quotes", "Quotes", "Commerce", "View quotes; write access allows quote actions.", (), "can_access_quotes"),
-    MenuPermission("menu.orders", "Orders", "Commerce", "View orders; write access allows order actions.", ("orders.access",), "can_access_orders"),
+    MenuPermission("menu.quotes", "Quotes", "Commerce", "None hides quotes, Mine shows quotes created by or assigned to the user, and All shows company quotes. Company admins and technicians retain company-wide access.", (), "can_access_quotes"),
+    MenuPermission("menu.orders", "Orders", "Commerce", "None hides orders, Mine shows orders created by or assigned to the user, and All shows company orders. Company admins and technicians retain company-wide access.", ("orders.access",), "can_access_orders"),
     MenuPermission("menu.forms", "Forms", "Company", "View forms; write access allows submissions.", ("forms.access",), "can_access_forms"),
     MenuPermission("menu.documentation_search", "Documentation search", "Documentation", "Search only documentation sources the role can already open. This permission never grants access to a search result by itself."),
     MenuPermission("menu.assets", "Assets", "Company", "View assets; write access allows asset changes.", ("assets.manage",), "can_manage_assets"),
@@ -85,7 +86,7 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.m365.diagnostics", "Office 365 Diagnostics", "Office 365", "View or repair Microsoft 365 diagnostics.", admin_only=True),
     MenuPermission("menu.subscriptions", "Subscriptions", "Commerce", "View subscriptions; write access allows subscription change/order actions.", ("billing.manage", "licenses.manage", "cart.access"), None),
     MenuPermission("menu.voice_monitor", "Voice monitor", "Company", "View subscribed monitoring numbers; write access allows monitoring preferences and test calls."),
-    MenuPermission("menu.invoices", "Invoices", "Commerce", "View invoices; write access allows invoice management.", ("billing.manage", "invoices.manage"), "can_manage_invoices"),
+    MenuPermission("menu.invoices", "Invoices", "Commerce", "None hides invoices, Mine shows invoices created by or assigned to the user, and All shows company invoices. Company admins and technicians retain company-wide access.", ("billing.manage", "invoices.manage"), "can_manage_invoices"),
     MenuPermission("menu.staff", "Staff", "Company", "View staff; write access allows staff management.", ("staff.manage",), "can_manage_staff"),
     MenuPermission("menu.compliance", "SMB1001", "Compliance", "View or manage SMB1001 compliance (and legacy Essential 8 records).", ("compliance.access",), "can_view_compliance"),
     MenuPermission("menu.reports", "Reports", "Reporting", "View generated company reports."),
@@ -184,6 +185,8 @@ def normalize_access_level(value: Any) -> AccessLevel:
 
 
 def normalize_menu_permission_level(key: str, value: Any) -> AccessLevel:
+    if key in COMMERCE_MENU_PERMISSIONS:
+        value = {"mine": "read", "all": "write"}.get(str(value).strip().lower(), value)
     level = normalize_access_level(value)
     if key in BOOLEAN_MENU_PERMISSIONS and level == "read":
         return "write"
@@ -265,7 +268,7 @@ def menu_permission_is_explicit_no_access(raw: Any, key: str) -> bool:
     if isinstance(raw, dict):
         source = raw.get("menu") if isinstance(raw.get("menu"), dict) else raw
         if key in source:
-            return normalize_access_level(source.get(key)) == "none"
+            return normalize_menu_permission_level(key, source.get(key)) == "none"
     return False
 
 
@@ -323,6 +326,8 @@ def build_menu_access_map(
         "is_admin": "menu.admin.company",
     }
     for boolean_key, menu_key in legacy_boolean_to_menu.items():
+        if menu_key in COMMERCE_MENU_PERMISSIONS and isinstance(raw_menu_permissions, dict):
+            continue
         if membership_data.get(boolean_key):
             if menu_key == "menu.shop":
                 # A role's Shop level is authoritative over stale membership flags.

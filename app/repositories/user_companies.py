@@ -128,7 +128,12 @@ def _enrich_with_role_permissions(data: dict[str, Any], role_permissions_raw: An
 
     data["can_access_shop"] = menu_has_access(menu_permissions, "menu.shop")
     data["can_access_cart"] = menu_has_access(menu_permissions, "menu.shop", write=True)
-    data["can_access_quotes"] = menu_has_access(menu_permissions, "menu.quotes")
+    for field, key in (
+        ("can_access_quotes", "menu.quotes"),
+        ("can_access_orders", "menu.orders"),
+        ("can_manage_invoices", "menu.invoices"),
+    ):
+        data[field] = menu_has_access(menu_permissions, key)
 
 
 def _normalise(row: dict[str, Any]) -> dict[str, Any]:

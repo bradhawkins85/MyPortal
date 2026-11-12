@@ -3,6 +3,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"sync/atomic"
@@ -41,17 +42,20 @@ func showWindowsNotification(title, body string) {
 	}()
 }
 
-func showChatSessionNotification(title, body, chatURL string) {
+// showChatSessionNotification shows a BurntToast notification with an
+// "Open chat" button and reports true. When that is not possible it starts a
+// MessageBoxW (which blocks until dismissed) in the background and reports
+// false, so the caller opens the chat window itself.
+func showChatSessionNotification(title, body, chatURL string) bool {
 	if strings.TrimSpace(chatURL) == "" {
 		showWindowsNotification(title, body)
-		return
+		return false
 	}
-	go func() {
-		if showBurntToastNotification(title, body, "Open chat", chatURL) {
-			return
-		}
-		showWindowsMessageBox(title, windowsChatNotificationMessage(body, chatURL))
-	}()
+	if showBurntToastNotification(title, body, "Open chat", chatURL) {
+		return true
+	}
+	go showWindowsMessageBox(title, windowsChatNotificationMessage(body, chatURL))
+	return false
 }
 
 func windowsChatNotificationMessage(body, chatURL string) string {
@@ -75,8 +79,8 @@ func showBurntToastNotification(title, body, buttonText, buttonURL string) bool 
 	if buttonText == "" || buttonURL == "" {
 		buttonText, buttonURL = "", ""
 	}
-	args := burntToastArgs(title, body, buttonText, buttonURL, gPortalURL, !burntToastInstallFailed.Load())
-	cmd := exec.Command("powershell.exe", args...)
+	cmd := exec.Command("powershell.exe", burntToastArgs()...)
+	cmd.Env = append(os.Environ(), burntToastEnv(title, body, buttonText, buttonURL, gPortalURL, !burntToastInstallFailed.Load())...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -91,29 +95,48 @@ func showBurntToastNotification(title, body, buttonText, buttonURL string) bool 
 
 const burntToastInstallFailedMarker = "BurntToast install failed"
 
-func burntToastArgs(title, body, buttonText, buttonURL, portalURL string, allowInstall bool) []string {
-	args := []string{
+// burntToastArgs runs the fixed notification script. PowerShell joins every
+// argument after -Command into the script text, so the title, message and
+// URLs (which come from technicians and chat users) are never passed as
+// arguments: they travel in environment variables and stay plain strings.
+func burntToastArgs() []string {
+	return []string{
 		"-NoProfile",
 		"-NonInteractive",
 		"-WindowStyle", "Hidden",
 		"-Command",
 		burntToastPowerShellCommand(),
-		"-Title", title,
-		"-Message", body,
-		"-PortalUrl", strings.TrimSpace(portalURL),
 	}
-	if buttonText != "" && buttonURL != "" {
-		args = append(args, "-ButtonText", buttonText, "-ButtonUrl", buttonURL)
+}
+
+func burntToastEnv(title, body, buttonText, buttonURL, portalURL string, allowInstall bool) []string {
+	if buttonText == "" || buttonURL == "" {
+		buttonText, buttonURL = "", ""
 	}
+	install := ""
 	if allowInstall {
-		args = append(args, "-AllowInstall")
+		install = "1"
 	}
-	return args
+	return []string{
+		"MYPORTAL_TOAST_TITLE=" + title,
+		"MYPORTAL_TOAST_MESSAGE=" + body,
+		"MYPORTAL_TOAST_PORTAL_URL=" + strings.TrimSpace(portalURL),
+		"MYPORTAL_TOAST_BUTTON_TEXT=" + buttonText,
+		"MYPORTAL_TOAST_BUTTON_URL=" + buttonURL,
+		"MYPORTAL_TOAST_ALLOW_INSTALL=" + install,
+	}
 }
 
 func burntToastPowerShellCommand() string {
-	return `param([Parameter(Mandatory=$true)][string]$Title,[Parameter(Mandatory=$true)][string]$Message,[string]$PortalUrl,[string]$ButtonText,[string]$ButtonUrl,[switch]$AllowInstall)
-$ErrorActionPreference = 'Stop'
+	return `$ErrorActionPreference = 'Stop'
+$Title = [string]$env:MYPORTAL_TOAST_TITLE
+$Message = [string]$env:MYPORTAL_TOAST_MESSAGE
+$PortalUrl = [string]$env:MYPORTAL_TOAST_PORTAL_URL
+$ButtonText = [string]$env:MYPORTAL_TOAST_BUTTON_TEXT
+$ButtonUrl = [string]$env:MYPORTAL_TOAST_BUTTON_URL
+$AllowInstall = $env:MYPORTAL_TOAST_ALLOW_INSTALL -eq '1'
+if (-not $Title) { throw 'No notification title' }
+if (-not $Message) { $Message = $Title }
 if ([Security.Principal.WindowsIdentity]::GetCurrent().IsSystem) { throw 'Running as SYSTEM, so the notification would not be seen' }
 $cacheDir = Join-Path $env:LOCALAPPDATA 'MyPortal\Notifications'
 New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null

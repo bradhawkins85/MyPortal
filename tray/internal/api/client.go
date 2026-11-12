@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -37,8 +38,29 @@ type Client struct {
 func New(portalURL string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(portalURL, "/"),
-		http:    &http.Client{Timeout: 30 * time.Second},
+		http:    &http.Client{Timeout: 30 * time.Second, CheckRedirect: sameOriginHTTPSRedirect},
 	}
+}
+
+// sameOriginHTTPSRedirect follows a redirect only to https on the same host
+// (and, once on https, the same port) as the original request. Go's own policy keeps
+// the Authorization header on a redirect to the same host over plain http or
+// another port, which would hand the device token to anyone who can answer
+// there.
+func sameOriginHTTPSRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return http.ErrUseLastResponse
+	}
+	first := via[0].URL
+	if !strings.EqualFold(req.URL.Scheme, "https") || !strings.EqualFold(req.URL.Hostname(), first.Hostname()) {
+		return http.ErrUseLastResponse
+	}
+	// An http -> https upgrade on the same host may change the port; once on
+	// https, stay on the same port.
+	if strings.EqualFold(first.Scheme, "https") && req.URL.Port() != first.Port() {
+		return http.ErrUseLastResponse
+	}
+	return nil
 }
 
 // SetAuth configures the per-device auth token after enrolment.
@@ -66,6 +88,9 @@ type EnrolRequest struct {
 	SerialNumber string `json:"serial_number,omitempty"`
 	AgentVersion string `json:"agent_version,omitempty"`
 	ConsoleUser  string `json:"console_user,omitempty"`
+	// PublicKey is the device's Ed25519 public key (base64). Once the portal
+	// has it, the WebSocket must answer a signed challenge.
+	PublicKey string `json:"public_key,omitempty"`
 }
 
 // EnrolResponse mirrors the server's TrayEnrolResponse schema.
@@ -248,6 +273,15 @@ type HeartbeatRequest struct {
 	ConsoleUser  string `json:"console_user,omitempty"`
 	AgentVersion string `json:"agent_version,omitempty"`
 	LastIP       string `json:"last_ip,omitempty"`
+	// ConsoleUserActive is false when nobody is signed in, so the portal
+	// keeps showing the last user marked as no longer signed in.
+	ConsoleUserActive *bool `json:"console_user_active,omitempty"`
+}
+
+// NewHeartbeatRequest reports user as the signed-in user ("" for nobody).
+func NewHeartbeatRequest(user, agentVersion string) HeartbeatRequest {
+	active := user != ""
+	return HeartbeatRequest{ConsoleUser: user, AgentVersion: agentVersion, ConsoleUserActive: &active}
 }
 
 // DefenderPolicy is the effective Defender configuration for this device.
@@ -462,12 +496,74 @@ func (c *Client) Heartbeat(ctx context.Context, req HeartbeatRequest) error {
 	return nil
 }
 
+// ErrUITokenUnsupported means the portal predates UI tokens.
+var ErrUITokenUnsupported = errors.New("portal does not issue tray UI tokens")
+
+// IssueUIToken asks the portal for a new low-privilege token for the tray UI,
+// replacing any earlier one. It needs the device token.
+func (c *Client) IssueUIToken(ctx context.Context) (string, error) {
+	resp, err := c.post(ctx, "/api/tray/ui-token", []byte("{}"), true)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		return "", ErrUITokenUnsupported
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ui-token: HTTP %d", resp.StatusCode)
+	}
+	var out struct {
+		UIToken string `json:"ui_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("ui-token: %w", err)
+	}
+	if out.UIToken == "" {
+		return "", errors.New("ui-token: empty token")
+	}
+	return out.UIToken, nil
+}
+
+// ErrDeviceKeyUnsupported means the portal predates device keys.
+var ErrDeviceKeyUnsupported = errors.New("portal does not take tray device keys")
+
+// ErrDeviceKeyConflict means the portal holds a different key for this
+// device; a super administrator must reset it.
+var ErrDeviceKeyConflict = errors.New("portal holds a different key for this device")
+
+// RegisterDeviceKey gives the portal this device's public key. Registering
+// the key the portal already holds succeeds. It needs the device token.
+func (c *Client) RegisterDeviceKey(ctx context.Context, publicKey string) error {
+	body, err := json.Marshal(map[string]string{"public_key": publicKey})
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, "/api/tray/device-key", body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return ErrDeviceKeyUnsupported
+	case http.StatusConflict:
+		return ErrDeviceKeyConflict
+	}
+	return fmt.Errorf("device-key: HTTP %d", resp.StatusCode)
+}
+
 // VersionResponse mirrors the server's TrayVersionResponse schema.
 type VersionResponse struct {
 	Version     string `json:"version"`
 	DownloadURL string `json:"download_url,omitempty"`
 	Required    bool   `json:"required"`
 	Sha256      string `json:"sha256,omitempty"`
+	// Signature is the release key's signature over the installer, relayed
+	// by the portal from the GitHub release.
+	Signature string `json:"signature,omitempty"`
 }
 
 // GetVersion checks if a newer installer version is available.
@@ -576,7 +672,7 @@ func (c *Client) RequestChatToken(ctx context.Context, roomID int) (*ChatTokenRe
 }
 
 // PostWolSent tells MyPortal that this agent broadcast a Wake-on-LAN magic
-// packet for the attempt. ``errMsg`` is non-empty when the broadcast failed.
+// packet for the attempt. “errMsg“ is non-empty when the broadcast failed.
 func (c *Client) PostWolSent(ctx context.Context, attemptID int, errMsg string) error {
 	if attemptID <= 0 {
 		return fmt.Errorf("wol: attempt id is required")

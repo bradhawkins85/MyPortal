@@ -32,7 +32,7 @@
   const DEFAULT_STEP_TYPE = String(pageConfig.default_step_type || '');
   const API_BASE = `/staff/workflows/${DIRECTION}/policies`;
   const STORAGE_KEY = `myportal.staffWorkflows.${DIRECTION}.selected`;
-  const VAR_PATTERN = /\$\{vars\.([A-Za-z0-9_.-]+)\}/g;
+  const VAR_PATTERN = /\$\{vars\.([A-Za-z0-9_.-]+)(\s*\|[^{}]*)?\}/g;
   const KEY_PATTERN = /[^a-z0-9_.-]+/g;
   // Engine aliases and namespaces that are always resolvable at run time.
   const ALWAYS_KNOWN = new Set([
@@ -188,6 +188,95 @@
       // fall through
     }
     return { ok: false, rows: [] };
+  }
+
+  // Mirrors app/services/workflow_variable_functions.py so the preview shows
+  // the value the workflow will actually send.
+  function splitOutsideQuotes(text, separator) {
+    const parts = [];
+    let current = '';
+    let quote = null;
+    for (const ch of text) {
+      if (quote) {
+        if (ch === quote) quote = null;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === separator) {
+        parts.push(current);
+        current = '';
+        continue;
+      }
+      current += ch;
+    }
+    if (quote) throw new Error('unterminated quote');
+    parts.push(current);
+    return parts;
+  }
+
+  function parseFunctionArgs(raw) {
+    if (!raw.trim()) return [];
+    return splitOutsideQuotes(raw, ',').map((piece) => {
+      const text = piece.trim();
+      if (text.length >= 2 && text[0] === text[text.length - 1] && (text[0] === '"' || text[0] === "'")) {
+        return text.slice(1, -1);
+      }
+      return text;
+    });
+  }
+
+  function intArg(args, index, fallback) {
+    if (index >= args.length) {
+      if (fallback === undefined) throw new Error('needs a number');
+      return fallback;
+    }
+    if (!/^\s*-?\d+\s*$/.test(args[index])) throw new Error('expects a whole number');
+    return parseInt(args[index], 10);
+  }
+
+  function pickWord(value, index) {
+    const words = value.split(/\s+/).filter(Boolean);
+    if (index === 0 || Math.abs(index) > words.length) return '';
+    return index > 0 ? words[index - 1] : words[words.length + index];
+  }
+
+  const VAR_FUNCTIONS = {
+    left: (v, a) => v.slice(0, Math.max(intArg(a, 0), 0)),
+    right: (v, a) => { const n = Math.max(intArg(a, 0), 0); return n ? v.slice(-n) : ''; },
+    mid: (v, a) => {
+      const start = Math.max(intArg(a, 0), 1) - 1;
+      return a.length > 1 ? v.slice(start, start + Math.max(intArg(a, 1), 0)) : v.slice(start);
+    },
+    trim: (v) => v.trim(),
+    ltrim: (v) => v.replace(/^\s+/, ''),
+    rtrim: (v) => v.replace(/\s+$/, ''),
+    len: (v) => String(v.length),
+    upper: (v) => v.toUpperCase(),
+    lower: (v) => v.toLowerCase(),
+    proper: (v) => v.toLowerCase().replace(/(^|[^A-Za-z])([a-z])/g, (m, pre, ch) => pre + ch.toUpperCase()),
+    replace: (v, a) => { if (!a.length) throw new Error('needs the text to find'); return v.split(a[0]).join(a[1] || ''); },
+    word: (v, a) => pickWord(v, intArg(a, 0, 1)),
+    first_word: (v) => pickWord(v, 1),
+    last_word: (v) => pickWord(v, -1),
+    initials: (v) => v.split(/\s+/).filter(Boolean).map((w) => w[0]).join(''),
+    nospace: (v) => v.replace(/\s+/g, ''),
+    alnum: (v) => v.replace(/[^\p{L}\p{N}]/gu, ''),
+    pad_left: (v, a) => v.padStart(Math.min(Math.max(intArg(a, 0), 0), 200), (a[1] || '0')[0]),
+    default: (v, a) => (v.trim() ? v : (a[0] || '')),
+  };
+
+  // Returns the shaped value, or throws with a plain-English reason.
+  function applyVarFunctions(value, pipes) {
+    let result = value === undefined || value === null ? '' : String(value);
+    if (!pipes) return result;
+    splitOutsideQuotes(pipes, '|').slice(1).forEach((segment) => {
+      const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([\s\S]*)\))?\s*$/.exec(segment);
+      if (!match) throw new Error(`cannot read "${segment.trim()}"`);
+      const name = match[1].toLowerCase();
+      const fn = VAR_FUNCTIONS[name];
+      if (!fn) throw new Error(`unknown function "${name}"`);
+      result = String(fn(result, parseFunctionArgs(match[2] || '')));
+    });
+    return result;
   }
 
   function collectRefs(value, into = new Set()) {
@@ -1155,18 +1244,27 @@
     const lookup = variableLookup(editorGroups());
     editor.previewText.textContent = '';
     let cursor = 0;
-    text.replace(VAR_PATTERN, (match, name, offset) => {
+    text.replace(VAR_PATTERN, (match, name, pipes, offset) => {
       if (offset > cursor) {
         editor.previewText.append(document.createTextNode(text.slice(cursor, offset)));
       }
       const variable = lookup.get(name);
-      if (variable) {
-        const sample = variable.secret ? '••••••••' : (variable.sample !== undefined ? String(variable.sample) : `‹${variable.label}›`);
-        editor.previewText.append(el('mark', { className: 'swf-preview__value', title: match, text: sample }));
-      } else if (isAlwaysKnown(name) || refStatus(name, lookup) === 'ok') {
-        editor.previewText.append(el('mark', { className: 'swf-preview__value', title: match, text: `‹${name}›` }));
-      } else {
+      const known = Boolean(variable) || isAlwaysKnown(name) || refStatus(name, lookup) === 'ok';
+      if (!known) {
         editor.previewText.append(el('mark', { className: 'swf-preview__value swf-preview__value--missing', title: 'Not available at this step', text: match }));
+      } else if (variable && variable.secret) {
+        editor.previewText.append(el('mark', { className: 'swf-preview__value', title: match, text: '••••••••' }));
+      } else if (variable && variable.sample !== undefined) {
+        try {
+          const shaped = applyVarFunctions(variable.sample, pipes);
+          editor.previewText.append(el('mark', { className: 'swf-preview__value', title: match, text: shaped }));
+        } catch (error) {
+          editor.previewText.append(el('mark', { className: 'swf-preview__value swf-preview__value--missing', title: `Can't apply: ${error.message}`, text: match }));
+        }
+      } else {
+        const label = variable ? variable.label : name;
+        const suffix = pipes ? ` ${pipes.trim()}` : '';
+        editor.previewText.append(el('mark', { className: 'swf-preview__value', title: match, text: `‹${label}${suffix}›` }));
       }
       cursor = offset + match.length;
       return match;

@@ -16,8 +16,10 @@ MyPortal ──(queued build: release tag, portal URL, token)──▶ build age
 The agent:
 
 1. asks MyPortal for the next build every two minutes;
-2. checks out that tray release tag from GitHub and builds the tray binaries
-   from source the same way the *Build MSI* workflow does (cached per release);
+2. checks out that tray release tag from GitHub, checks the release's
+   signature covers the commit it checked out (see *Release signing* below),
+   and builds the tray binaries from source the same way the *Build MSI*
+   workflow does (cached per release);
 3. builds `myportal-tray.msi` with the company's settings as property
    defaults, then wraps it in a Burn setup bundle;
 4. signs the binaries, the MSI, the bundle engine and the bundle with your
@@ -99,7 +101,9 @@ certificate appears in **Local Machine → Personal** with a private key.
 
 The claim response contains company install tokens and, for provisioning
 jobs, the administrator and Wi-Fi credentials. Keep the key restricted to
-these paths and the server's IP. The API uses HTTPS; the build work folder
+these paths and the server's IP. MyPortal refuses a key with no path
+permissions on these endpoints (HTTP 403), so a key made for another job
+cannot claim builds. The API uses HTTPS; the build work folder
 is restricted to SYSTEM and Administrators and transient files are deleted
 after each job.
 
@@ -126,8 +130,9 @@ location ^~ /api/tray/build-agent/ {
 
 ## 5. Install the agent
 
-Copy the `tray/build-agent` folder from the repository to the server, open
-PowerShell 7 **as Administrator** in it and run:
+Open PowerShell 7 **as Administrator** in `tray\build-agent` of a clone of
+the repository, or in any folder holding just `Install-MyPortalBuildAgent.ps1`,
+and run:
 
 ```powershell
 .\Install-MyPortalBuildAgent.ps1 `
@@ -138,16 +143,39 @@ PowerShell 7 **as Administrator** in it and run:
   -RunNow
 ```
 
-This installs WiX into `C:\Program Files\MyPortalBuildAgent\tools`, writes
+This installs WiX and builds the release signature checker into
+`C:\Program Files\MyPortalBuildAgent\tools`, copies the release public key
+from `tray\internal\release\release-public-key.pem`, writes
 `C:\ProgramData\MyPortalBuildAgent\config.json` (readable only by SYSTEM and
 Administrators) and registers the **MyPortal Build Agent** scheduled task,
 which runs as SYSTEM every two minutes.
 
+When the script is not inside a `tray\build-agent` folder (for example a
+copy in `C:\temp`), it downloads the repository from GitHub into a temporary
+folder, installs from that copy and deletes it afterwards. Use `-SourceRef`
+to choose the branch or tag it downloads (default `main`).
+
 Optional parameters: `-WorkDir` (default `C:\MyPortalBuild`), `-GitHubRepo`
 (for a fork), `-WixVersion` (default `7.*`) and `-IcdPath` (full path to the
-ADK's `ICD.exe`). Run the script again from the latest complete
-`tray/build-agent` folder to update the agent and its provisioning helper,
-change settings or update WiX. Keep all helper scripts together.
+ADK's `ICD.exe`). Run the script again to update the agent and its
+provisioning helper, change settings or update WiX; a copy on its own fetches
+the latest `main`, and a script inside a `tray` folder uses that folder, so
+keep that folder up to date.
+
+### Release signing
+
+Each tray release is signed by the **Sign release** GitHub workflow once you
+approve it. Besides the installers it signs the commit the release tag points
+at (`myportal-source.sig`). Before building a release the agent downloads that
+file and checks it with the public key it installed, against the commit it
+just checked out. A release that is not signed yet, or whose tag was moved to
+other code, fails with a message on the Deployment URLs page instead of being
+built into your company installers.
+
+To set this up on an existing build server, run `Install-MyPortalBuildAgent.ps1`
+again (Go must be installed, as for builds).
+Nothing else changes: the installers it builds are still signed with your
+code-signing certificate.
 
 ## 6. Check it works
 
@@ -329,9 +357,13 @@ a wrong package password and a revoked MyPortal enrolment token.
 | Only provisioning builds stay *Queued* | The agent log's *No builds to run:* line says which applies. *Too old*: rerun `Install-MyPortalBuildAgent.ps1` from current source. *Did not find Windows Configuration Designer*: the rest of the line says whether `ICD.exe` is missing or lacks `Microsoft-Desktop-Provisioning.dat`; install or repair the ADK Configuration Designer component, or set `IcdPath` in `config.json`. An agent without WCD can still build ordinary installers. |
 | A provisioning build fails | The error on *Admin > Tray > Deployment URLs* and in `agent.log` names the step: a WiX, signing or Git error, WCD's exit code, or a missing package password. For a WCD failure, open `provisioning-diagnostics.log` in the agent's work folder (default `C:\MyPortalBuild`, readable only by SYSTEM and Administrators). It holds WCD's output from the last provisioning build with passwords and tokens removed. Fix the cause, then press *Rebuild*. |
 | Provisioning build cannot retrieve the generated encryption password | The build fails instead of publishing a package without a usable password. Check the installed WCD version and update the agent; do not send ICD output or project XML to users, as they contain credentials. |
+| *This build agent predates release signing* | Run `Install-MyPortalBuildAgent.ps1` again (on its own it fetches the latest source), then press **Rebuild**. |
+| *Release … is not signed yet* | Approve the release's **Sign release** run in GitHub Actions (or run that workflow for the tag), then press **Rebuild**. |
+| *Release … failed the release signature check* | The tag points at a commit the release key did not sign, or the agent's `release-public-key.pem` is out of date. Do not build it: check the tag on GitHub, and if the key was rotated rerun the installer. |
 | *Failed: Release … predates deployment URL support* | The cached tray release was tagged before this feature. Publish a new tray release, then press **Rebuild**. |
 | *Failed: go build / npm ci failed* | Check Go and Node.js are installed machine-wide and the server can reach `proxy.golang.org` and `registry.npmjs.org`. Delete the release's folder under `C:\MyPortalBuild\payloads` to force a clean build. |
 | *Failed: Code-signing certificate … was not found* | Import the certificate into **Local Machine → Personal** with its private key and check the thumbprint in `config.json`. |
+| *Installer: go.mod file not found* | An installer older than this fix was run outside a `tray\build-agent` folder. Download the current `Install-MyPortalBuildAgent.ps1` and run it again, or run it from a full clone of the repository. |
 | Upload fails with 413 | Raise the proxy upload limit as in step 4. |
 | A build stopped half way | Builds that do not report back within two hours are handed out again automatically. |
 

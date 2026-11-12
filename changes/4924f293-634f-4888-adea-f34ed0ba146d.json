@@ -1,0 +1,7 @@
+{
+  "guid": "4924f293-634f-4888-adea-f34ed0ba146d",
+  "occurred_at": "2026-11-09T04:50Z",
+  "change_type": "Feature",
+  "summary": "RMM checks and event log rules can now take several actions when they fail or match, in the order you list them, such as creating a ticket, running a script and then scheduling another, with as many scripts as you need.",
+  "content_hash": "8c2dd514dcf182ca32df3a3b41379ec56f2b0a2f3633173d8a7f9fa9aff1d5ed"
+}

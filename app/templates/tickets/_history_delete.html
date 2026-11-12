@@ -1,0 +1,7 @@
+{% if is_super_admin %}
+<form action="/admin/tickets/{{ ticket.id }}/history/{{ history_entry_type }}/{{ history_entry_id }}/delete" method="post" data-history-delete data-history-delete-confirm="{{ 'Remove this call recording from the conversation history? The recording file will be kept.' if history_entry_type == 'call_recording' else 'Permanently delete this conversation entry and its recorded time? This cannot be undone.' }}">
+  {% include "partials/csrf.html" %}
+  <input type="hidden" name="view" value="{{ history_view | default('admin') }}">
+  <button type="submit" class="button button--danger button--small">{{ 'Remove from history' if history_entry_type == 'call_recording' else 'Delete entry' }}</button>
+</form>
+{% endif %}

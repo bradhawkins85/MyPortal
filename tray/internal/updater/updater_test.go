@@ -2,6 +2,11 @@ package updater
 
 import (
 	"context"
+	"crypto/ed25519"
+	crand "crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +16,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/bradhawkins85/myportal-tray/internal/api"
+	"github.com/bradhawkins85/myportal-tray/internal/release"
 )
 
 func TestJitteredInterval(t *testing.T) {
@@ -57,7 +65,8 @@ func TestIsNewer(t *testing.T) {
 		{"0.8", "0.8.0", false},
 		{"0.0.0", "0.8.4", false},
 		{"", "0.8.4", false},
-		{"nightly", "0.8.4", true},
+		{"nightly", "0.8.4", false},
+		{"0.9.0", "dev", false},
 	}
 	for _, tc := range cases {
 		if got := isNewer(tc.available, tc.current); got != tc.want {
@@ -188,5 +197,59 @@ func TestLinuxUpdateCommandLeavesTheServiceCgroup(t *testing.T) {
 	})
 	if without.Args[0] != "/bin/sh" || without.Args[len(without.Args)-2] != "/tmp/u.tar.gz" {
 		t.Fatalf("unexpected fallback command: %q", without.Args)
+	}
+}
+
+func signedInstaller(t *testing.T, version string) (path, digest, signature string, restore func()) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(crand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore = release.UseKeyForTesting(pub)
+	path = filepath.Join(t.TempDir(), "installer")
+	body := []byte("installer bytes")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	digest = hex.EncodeToString(sum[:])
+	signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, release.Manifest(installerAssetName(runtime.GOOS), version, digest)))
+	return path, digest, signature, restore
+}
+
+func TestVerifyInstallerNeedsTheReleaseSignature(t *testing.T) {
+	path, digest, sig, restore := signedInstaller(t, "v1.4.0")
+	defer restore()
+
+	if err := verifyInstaller(path, &api.VersionResponse{Version: "1.4.0", Sha256: digest, Signature: sig}); err != nil {
+		t.Fatalf("signed installer refused: %v", err)
+	}
+	if err := verifyInstaller(path, &api.VersionResponse{Version: "1.4.0", Signature: sig}); err != nil {
+		t.Fatalf("a signed installer needs no server digest: %v", err)
+	}
+	refused := map[string]*api.VersionResponse{
+		"unsigned":        {Version: "1.4.0", Sha256: digest},
+		"other version":   {Version: "1.5.0", Sha256: digest, Signature: sig},
+		"digest mismatch": {Version: "1.4.0", Sha256: strings.Repeat("0", 64), Signature: sig},
+		"other signature": {Version: "1.4.0", Signature: base64.StdEncoding.EncodeToString(make([]byte, 64))},
+	}
+	for name, resp := range refused {
+		if err := verifyInstaller(path, resp); err == nil {
+			t.Errorf("%s: installer accepted", name)
+		}
+	}
+}
+
+func TestCheckDownloadURLAllowsOnlyWebAddresses(t *testing.T) {
+	for _, ok := range []string{"https://portal.example/static/tray/myportal-tray.msi", "http://portal.lan/x.msi"} {
+		if err := checkDownloadURL(ok); err != nil {
+			t.Errorf("%s refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"file:///C:/evil.msi", `\\server\share\evil.msi`, "ftp://x/y", "https://"} {
+		if err := checkDownloadURL(bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
 	}
 }

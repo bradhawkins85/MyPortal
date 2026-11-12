@@ -620,7 +620,7 @@
     const list = initList(root, items);
     const selection = initSelection(root, items, redistributeModal, timeZone);
     const editor = initEditor(editorModal, data, timeZone);
-    initBulkCreate(bulkModal, timeZone);
+    initBulkCreate(bulkModal, timeZone, data);
     const history = initHistory(logsModal);
     const preview = initPreview(previewModal);
 
@@ -1212,6 +1212,14 @@
     return fallback;
   }
 
+  // New tasks start at a random time of day so they do not all run at once;
+  // the technician can change it before saving.
+  function randomDailyCron() {
+    const minute = Math.floor(Math.random() * 60);
+    const hour = Math.floor(Math.random() * 24);
+    return `${minute} ${hour} * * *`;
+  }
+
   function builderToCron(state) {
     const [hour, minute] = (state.time || '00:00').split(':').map((value) => Number(value) || 0);
     switch (state.mode) {
@@ -1367,6 +1375,7 @@
       rules: form.querySelector('[data-sch-preview-rules]'),
     };
     const defaults = data.commandDefaults || {};
+    const sequential = Array.isArray(data.sequentialCommands) ? data.sequentialCommands : [];
     let snapshot = '';
     let editing = null;
     let nameLocked = '';
@@ -1544,7 +1553,10 @@
         payloadField.dispatchEvent(new Event('input', { bubbles: true }));
       }
 
-      builder.load(record.cron || defaults[commandField.value] || '0 2 * * *');
+      const followsSlotPattern = duplicate && sequential.includes(commandField.value) && defaults[commandField.value];
+      builder.load(
+        (followsSlotPattern ? defaults[commandField.value] : record.cron) || defaults[commandField.value] || randomDailyCron(),
+      );
       activeField.checked = record.active !== false;
       hideField.checked = Boolean(record.exclude_from_calendar);
       const retries = Number(record.max_retries);
@@ -1694,7 +1706,7 @@
   // Bulk create
   // ---------------------------------------------------------------------------
 
-  function initBulkCreate(modal, timeZone) {
+  function initBulkCreate(modal, timeZone, data) {
     const form = modal && modal.querySelector('[data-sch-bulk-form]');
     if (!form) {
       return;
@@ -1717,6 +1729,24 @@
     const submit = form.querySelector('[data-sch-bulk-submit]');
     let snapshot = '';
     let cronEdited = false;
+    const bulkDefaults = data.commandDefaults || {};
+    const bulkSequential = Array.isArray(data.sequentialCommands) ? data.sequentialCommands : [];
+
+    // Month-end billing tasks queue one minute apart after the latest
+    // existing task, so pre-fill the stagger from that next free slot.
+    function applySequentialDefault() {
+      const fields = String(bulkDefaults[commandField.value] || '').split(/\s+/);
+      if (!bulkSequential.includes(commandField.value) || fields.length !== 5 || fields[2] !== 'L') {
+        return;
+      }
+      cronEdited = false;
+      timings.forEach((input) => {
+        input.checked = input.value === 'stagger';
+      });
+      part('repeat').value = 'monthly';
+      part('monthDay').value = 'L';
+      part('time').value = `${pad(Number(fields[1]) || 0)}:${pad(Number(fields[0]) || 0)}`;
+    }
 
     const timing = () => (timings.find((input) => input.checked) || {}).value || 'random';
     const commandLabel = () => {
@@ -1813,6 +1843,9 @@
       if (event.target && event.target.hasAttribute && event.target.hasAttribute('data-sch-bulk-timing')) {
         cronEdited = false;
       }
+      if (event.target === commandField) {
+        applySequentialDefault();
+      }
       update();
     });
     form.querySelectorAll('[data-sch-bulk-companies]').forEach((button) => {
@@ -1874,6 +1907,7 @@
     });
 
     modal.__confirmClose = () => serialize() === snapshot || window.confirm('Discard this bulk task?');
+    applySequentialDefault();
     update();
     snapshot = serialize();
   }

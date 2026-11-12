@@ -40,10 +40,23 @@ def test_m365_sensitive_actions_retain_csrf_and_safe_secret_fields() -> None:
 
 def test_confirm_tenant_uses_navigation_for_oauth_redirect() -> None:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    partial = (TEMPLATE_PATH.parent / "_discovered_tenant.html").read_text(encoding="utf-8")
 
-    expected_link = (
-        'href="/m365/provision?tenant_id={{ '
-        "request.query_params.get('m365_discovered_tenant') | urlencode }}\""
-    )
-    assert expected_link in source
-    assert 'action="/m365/provision"' not in source
+    assert '{% include "m365/_discovered_tenant.html" %}' in source
+    expected_link = 'href="/m365/provision?tenant_id={{ discovered_tenant.tenant_id | urlencode }}"'
+    assert expected_link in partial
+    assert 'action="/m365/provision"' not in source + partial
+    # The tenant is shown from the signed hand-off, never from the raw URL.
+    assert "request.query_params.get('m365_discovered_tenant')" not in source
+
+
+def test_guided_setup_has_three_steps_with_completion_ticks() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    # Reviewing diagnostics before consent always failed, so it is not a step.
+    assert "Review access" not in source
+    assert 'step_top(1, "Confirm tenant", tenant_done)' in source
+    assert 'step_top(2, "Grant consent", consent_done)' in source
+    assert 'step_top(3, "Verify and activate", activate_done)' in source
+    assert "m365-step--done" in source and "Completed" in source
+    assert "{% set consent_done = has_credentials and consent_granted %}" in source

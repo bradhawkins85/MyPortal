@@ -24,6 +24,20 @@ class TrayDeviceFacts(BaseModel):
 class TrayEnrolRequest(TrayDeviceFacts):
     install_token: str = Field(min_length=16, max_length=200)
     device_uid: Optional[str] = Field(default=None, max_length=64)
+    public_key: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="The device's Ed25519 public key (32 bytes, base64). Once registered, "
+        "the device must sign a challenge each time its WebSocket connects.",
+    )
+
+
+class TrayDeviceKeyRequest(BaseModel):
+    public_key: str = Field(min_length=40, max_length=64, description="Ed25519 public key, base64")
+
+
+class TrayDeviceKeyResponse(BaseModel):
+    status: str = Field(description="registered, or unchanged when this key was already registered")
 
 
 class TrayEnrolResponse(BaseModel):
@@ -51,6 +65,8 @@ class TrayTRMMSyncResponse(BaseModel):
 
 class TrayHeartbeatRequest(BaseModel):
     console_user: Optional[str] = Field(default=None, max_length=255)
+    # False when nobody is signed in; console_user then keeps the last user.
+    console_user_active: Optional[bool] = None
     agent_version: Optional[str] = Field(default=None, max_length=32)
     last_ip: Optional[str] = Field(default=None, max_length=64)
 
@@ -559,6 +575,10 @@ class TrayNotificationRequest(BaseModel):
 
 class TrayNotificationResponse(BaseModel):
     delivered: bool
+
+
+class TrayUITokenResponse(BaseModel):
+    ui_token: str
 
 
 class TrayChatTokenResponse(BaseModel):

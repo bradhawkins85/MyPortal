@@ -716,9 +716,10 @@ def test_reported_emails_template_notes_hidden_ignored_reports():
 def test_reported_filters_default_to_hiding_ignored_reports():
     from app.features.m365_admin import routes
 
-    assert routes._reported_filters({}) == ("all", service.DEFAULT_LOOKBACK_DAYS, "hide")
+    assert routes._reported_filters({}) == ("all", 1, "hide")
+    assert routes._reported_filters({"days": "30"}) == ("all", 30, "hide")
     assert routes._reported_filters({"kind": "JUNK", "days": "7", "ignored": "only"}) == ("junk", 7, "only")
-    assert routes._reported_filters({"kind": "x", "days": "abc", "ignored": "x"})[::2] == ("all", "hide")
+    assert routes._reported_filters({"kind": "x", "days": "abc", "ignored": "x"}) == ("all", 1, "hide")
     assert routes._reported_emails_url("phish", 14, "show") == "/m365/reported-emails?kind=phish&days=14&ignored=show"
 
 

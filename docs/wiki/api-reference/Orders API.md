@@ -10,7 +10,10 @@ query parameter for every request to scope results to a specific customer.
 
 Returns the recent order summaries for the specified company. The authenticated
 user must either be a super admin or a company member with the `can_access_orders`
-permission.
+permission. Roles use None, Mine or All: None denies access (403), Mine
+returns orders purchased by the signed-in user, and All returns company orders.
+Company administrators and technicians retain company-wide access. A request for
+another user's order under Mine returns 404.
 
 **Response example**
 

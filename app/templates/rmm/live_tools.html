@@ -23,15 +23,15 @@
          data-live-supported="{{ 'true' if live_supported else 'false' }}">
   {% include "partials/csrf.html" %}
 
-  <div class="rmm-live__bar">
-    <div class="rmm-live__status">
-      <span class="status status--neutral" data-live-connection>Not connected</span>
+  <div class="rmm-live__header">
+    <div class="rmm-live__device">
       <span class="rmm-live__host" data-live-host>{{ asset_name }}</span>
-      <span class="rmm-live__meta" data-live-os></span>
+      <span class="rmm-live__meta" data-live-os>{{ {'windows': 'Windows', 'linux': 'Linux', 'darwin': 'macOS'}.get(agent_os, agent_os) if agent_os else 'RMM agent' }}{% if agent_version %} · agent {{ agent_version }}{% endif %}</span>
     </div>
-    <div class="rmm-live__bar-actions">
-      <button type="button" class="button button--primary" data-live-connect hidden>Connect</button>
-      <button type="button" class="button button--secondary" data-live-disconnect hidden>Disconnect</button>
+    <div class="rmm-live__header-actions">
+      <span class="status status--neutral" role="status" aria-live="polite" data-live-connection>Not connected</span>
+      <button type="button" class="button button--primary button--small" data-live-connect hidden>Connect</button>
+      <button type="button" class="button button--secondary button--small" data-live-disconnect hidden>Disconnect</button>
     </div>
   </div>
 
@@ -61,7 +61,7 @@
     </nav>
 
     <div class="rmm-live__panels">
-      {# Overview: real-time CPU, memory and network #}
+      {# Overview: real-time CPU, memory, disks and network #}
       <section class="rmm-live__panel" data-live-panel="overview" aria-label="Overview">
         <div class="rmm-live__meters">
           <div class="rmm-live__meter">
@@ -79,6 +79,14 @@
             <div class="rmm-live__gauge" data-live-swap-gauge><span data-live-swap-value>—</span></div>
             <p class="rmm-live__meter-note" data-live-swap-note></p>
           </div>
+          {# One meter per fixed disk is added here from each metrics sample. #}
+          <template data-live-disk-template>
+            <div class="rmm-live__meter" data-live-disk>
+              <h3 data-live-disk-title></h3>
+              <div class="rmm-live__gauge" data-live-disk-gauge><span data-live-disk-value>—</span></div>
+              <p class="rmm-live__meter-note" data-live-disk-note></p>
+            </div>
+          </template>
         </div>
         <dl class="rmm-live__stats">
           <div><dt>Network in</dt><dd data-live-net-rx>—</dd></div>
@@ -86,7 +94,31 @@
           <div><dt>Processes</dt><dd data-live-proc-count>—</dd></div>
           <div><dt>Uptime</dt><dd data-live-uptime>—</dd></div>
         </dl>
-        <canvas class="rmm-live__chart" data-live-chart height="120" aria-hidden="true"></canvas>
+        <figure class="rmm-live__trend" aria-labelledby="live-trend-title live-net-trend-title">
+          <figcaption class="rmm-live__trend-head">
+            <h3 id="live-trend-title">CPU and memory use, last 2 minutes</h3>
+            <ul class="rmm-live__legend">
+              <li><span class="rmm-live__swatch rmm-live__swatch--cpu" aria-hidden="true"></span>CPU</li>
+              <li><span class="rmm-live__swatch rmm-live__swatch--mem" aria-hidden="true"></span>Memory</li>
+            </ul>
+          </figcaption>
+          <div class="rmm-live__trend-plot">
+            <div class="rmm-live__trend-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>
+            <canvas class="rmm-live__chart" data-live-chart height="120" aria-hidden="true"></canvas>
+          </div>
+          <div class="rmm-live__trend-head rmm-live__trend-head--sub">
+            <h3 id="live-net-trend-title">Network throughput, last 2 minutes</h3>
+            <ul class="rmm-live__legend">
+              <li><span class="rmm-live__swatch rmm-live__swatch--net-in" aria-hidden="true"></span>In (received)</li>
+              <li><span class="rmm-live__swatch rmm-live__swatch--net-out" aria-hidden="true"></span>Out (sent)</li>
+            </ul>
+          </div>
+          <div class="rmm-live__trend-plot">
+            <div class="rmm-live__trend-axis" aria-hidden="true"><span data-live-net-axis-max>—</span><span data-live-net-axis-mid></span><span>0 B/s</span></div>
+            <canvas class="rmm-live__chart" data-live-net-chart height="120" aria-hidden="true"></canvas>
+          </div>
+          <p class="rmm-live__meter-note">Sampled every second; the newest reading is on the right. The network scale adjusts to the busiest second shown.</p>
+        </figure>
       </section>
 
       {# Terminal #}
@@ -172,7 +204,7 @@
         <nav class="rmm-live__crumbs" data-live-du-crumbs aria-label="Scanned folder"></nav>
         <div class="rmm-live__table-wrap">
           <table class="table rmm-live__table" data-live-du-table>
-            <thead><tr><th>Name</th><th class="rmm-live__num">Size</th><th class="rmm-live__bar-col">Share</th><th class="rmm-live__num">Items</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th class="rmm-live__num">Size</th><th class="rmm-live__share-col">Share</th><th class="rmm-live__num">Items</th><th></th></tr></thead>
             <tbody data-live-du-body><tr><td colspan="5" class="text-muted">Scan a drive or folder to find what is using space.</td></tr></tbody>
           </table>
         </div>

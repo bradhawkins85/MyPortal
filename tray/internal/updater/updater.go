@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,7 @@ import (
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
+	"github.com/bradhawkins85/myportal-tray/internal/release"
 )
 
 // AgentVersion is embedded at build time via ldflags.
@@ -146,6 +148,14 @@ func (c *Checker) CheckNow(ctx context.Context, force bool) {
 		logger.Warn("Auto-update: version %s has no download URL", resp.Version)
 		return
 	}
+	if err := checkDownloadURL(resp.DownloadURL); err != nil {
+		logger.Warn("Auto-update: %v", err)
+		return
+	}
+	if strings.TrimSpace(resp.Signature) == "" {
+		logger.Warn("Auto-update: version %s is not signed by the release key; not installing it", resp.Version)
+		return
+	}
 	if err := c.downloadAndInstall(ctx, resp); err != nil {
 		logger.Error("Auto-update failed: %v", err)
 	}
@@ -180,7 +190,7 @@ func (c *Checker) downloadAndInstall(ctx context.Context, resp *api.VersionRespo
 		os.Remove(tmpPath)
 		return err
 	}
-	if err := verifyInstallerSha256(tmpPath, resp.Sha256); err != nil {
+	if err := verifyInstaller(tmpPath, resp); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}
@@ -311,13 +321,14 @@ func removeStaleInstallers(dir string, olderThan time.Duration) {
 // isNewer reports whether available is a newer version than current.
 // Versions compare by their dotted numeric parts ("v" prefix, pre-release
 // and build suffixes ignored), so a device never reinstalls the version it
-// runs or moves to an older one. When either version is not numeric, any
-// difference counts as newer, as before.
+// runs or moves to an older one. A version that is not numeric is never
+// newer, so a device cannot be steered onto an older signed release by a
+// version string it cannot compare.
 func isNewer(available, current string) bool {
 	a, okA := parseVersion(available)
 	b, okB := parseVersion(current)
 	if !okA || !okB {
-		return strings.TrimSpace(available) != "" && available != current
+		return false
 	}
 	for i := 0; i < len(a) || i < len(b); i++ {
 		var x, y int
@@ -355,30 +366,56 @@ func parseVersion(v string) ([]int, bool) {
 	return out, true
 }
 
-// verifyInstallerSha256 checks the downloaded installer against the digest
-// published by the server. A provided digest must match exactly; the
-// comparison is constant-time. When the server publishes no digest (legacy
-// publishes predating digest support) the check is skipped with a warning so
-// older servers keep working; operators should re-publish versions so every
-// rollout carries a digest.
-func verifyInstallerSha256(path, expected string) error {
-	expected = strings.ToLower(strings.TrimSpace(expected))
-	if expected == "" {
-		logger.Warn("Auto-update: server did not provide an installer SHA-256 digest; skipping integrity check")
-		return nil
+// installerAssetName is the release asset the tray updates from on goos.
+func installerAssetName(goos string) string {
+	switch goos {
+	case "windows":
+		return "myportal-tray.msi"
+	case "linux":
+		return "myportal-tray-linux.tar.gz"
+	default:
+		return "myportal-tray.pkg"
 	}
-	f, err := os.Open(path)
+}
+
+// checkDownloadURL allows only web downloads.
+func checkDownloadURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return fmt.Errorf("refusing installer URL %q: not an http(s) address", raw)
+	}
+	return nil
+}
+
+// verifyInstaller checks the downloaded installer against the digest the
+// server published (when it published one) and, always, against the release
+// key's signature for this platform's asset and the offered version. The
+// portal relays the signature but cannot make one, so it cannot install a
+// build the project did not release.
+func verifyInstaller(path string, resp *api.VersionResponse) error {
+	actual, err := fileSha256(path)
 	if err != nil {
 		return err
+	}
+	if expected := strings.ToLower(strings.TrimSpace(resp.Sha256)); expected != "" &&
+		subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
+		return fmt.Errorf("installer sha256 mismatch: got %s want %s", actual, expected)
+	}
+	if err := release.Verify(installerAssetName(runtime.GOOS), resp.Version, actual, resp.Signature); err != nil {
+		return fmt.Errorf("installer for %s: %w", resp.Version, err)
+	}
+	return nil
+}
+
+func fileSha256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
 	}
 	defer f.Close()
 	digest := sha256.New()
 	if _, err := io.Copy(digest, f); err != nil {
-		return err
+		return "", err
 	}
-	actual := hex.EncodeToString(digest.Sum(nil))
-	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
-		return fmt.Errorf("installer sha256 mismatch: got %s want %s", actual, expected)
-	}
-	return nil
+	return hex.EncodeToString(digest.Sum(nil)), nil
 }

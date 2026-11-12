@@ -13,7 +13,7 @@ def test_room_accessible_to_device_requires_same_company_and_device():
 
     device = {"id": 5, "company_id": 10}
     assert room_accessible_to_device({"company_id": 10, "tray_device_id": 5}, device)
-    assert room_accessible_to_device({"company_id": 10, "tray_device_id": None}, device)
+    assert not room_accessible_to_device({"company_id": 10, "tray_device_id": None}, device)
     assert not room_accessible_to_device({"company_id": 11, "tray_device_id": None}, device)
     assert not room_accessible_to_device({"company_id": 10, "tray_device_id": 6}, device)
     assert not room_accessible_to_device(None, device)
@@ -85,3 +85,93 @@ async def test_enrol_refuses_foreign_or_revoked_device(monkeypatch, existing, ex
     with pytest.raises(HTTPException) as exc_info:
         await tray_routes.enrol_device(payload, SimpleNamespace(headers={}))  # type: ignore[arg-type]
     assert exc_info.value.status_code == expected_status
+
+
+def test_connection_still_valid_requires_active_device_with_same_token():
+    from app.services.tray import connection_still_valid
+
+    device = {"status": "active", "auth_token_hash": "abc"}
+    assert connection_still_valid(device, "abc")
+    assert not connection_still_valid({**device, "status": "revoked"}, "abc")
+    assert not connection_still_valid({**device, "auth_token_hash": "rotated"}, "abc")
+    assert not connection_still_valid(None, "abc")
+
+
+@pytest.mark.anyio
+async def test_revoke_device_revokes_rmm_agents_and_closes_socket(monkeypatch):
+    from app.services import tray as tray_service
+
+    calls: list[str] = []
+
+    async def fake_get_device_by_id(device_id):
+        return {"id": device_id, "device_uid": "uid-1"}
+
+    async def fake_revoke(device_id):
+        calls.append("revoke")
+
+    async def fake_revoke_agents(device_id):
+        calls.append("agents")
+        return 1
+
+    class _Socket:
+        async def close(self, code=1000):
+            calls.append(f"close:{code}")
+
+    monkeypatch.setattr(tray_service.tray_repo, "get_device_by_id", fake_get_device_by_id)
+    monkeypatch.setattr(tray_service.tray_repo, "revoke_device", fake_revoke)
+    monkeypatch.setattr(tray_service.tray_repo, "revoke_device_rmm_agents", fake_revoke_agents)
+    tray_service.register_connection("uid-1", _Socket())
+    await tray_service.revoke_device(9)
+    assert calls == ["revoke", "agents", "close:4401"]
+    assert not tray_service.is_device_connected("uid-1")
+
+
+@pytest.mark.anyio
+async def test_popup_session_ends_when_device_revoked(monkeypatch):
+    from app.api.routes import tray as tray_routes
+
+    async def fake_get_device_by_id(device_id):
+        return {"id": device_id, "status": "revoked"}
+
+    monkeypatch.setattr(tray_routes, "_parse_popup_session", lambda request: {"device_id": 5, "room_id": 3})
+    monkeypatch.setattr(tray_routes.tray_repo, "get_device_by_id", fake_get_device_by_id)
+    with pytest.raises(HTTPException) as exc_info:
+        await tray_routes._require_popup_room_session(SimpleNamespace(), 3)
+    assert exc_info.value.status_code == 401
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "existing",
+    [
+        # Checked in over HTTPS, the WebSocket, or from the overseer.
+        {"id": 7, "company_id": 10, "status": "active", "last_seen_utc": "2026-11-01 00:00:00",
+         "created_at": "2026-11-01 00:00:00"},
+        {"id": 7, "company_id": 10, "status": "active", "ws_last_seen_utc": "2026-11-01 00:00:00",
+         "created_at": "2026-11-01 00:00:00"},
+        {"id": 7, "company_id": 10, "status": "active", "overseer_last_seen_utc": "2026-11-01 00:00:00",
+         "created_at": "2026-11-01 00:00:00"},
+        # Never checked in, but too old to be a lost enrolment response.
+        {"id": 7, "company_id": 10, "status": "active", "created_at": "2020-01-01 00:00:00"},
+        {"id": 7, "company_id": 10, "status": "active"},
+    ],
+)
+async def test_enrol_refuses_to_rekey_device_in_use(monkeypatch, existing):
+    from app.schemas.tray import TrayEnrolRequest
+
+    tray_routes = _enrol_stubs(monkeypatch, existing)
+    payload = TrayEnrolRequest(install_token="install-token-value", device_uid="device-abc", os="windows")
+    with pytest.raises(HTTPException) as exc_info:
+        await tray_routes.enrol_device(payload, SimpleNamespace(headers={}))  # type: ignore[arg-type]
+    assert exc_info.value.status_code == 409
+
+
+def test_unclaimed_enrolment_allows_recent_never_seen_device():
+    from datetime import datetime, timedelta, timezone
+
+    from app.api.routes.tray import _is_unclaimed_enrolment
+
+    recent = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)
+    assert _is_unclaimed_enrolment({"created_at": recent})
+    assert _is_unclaimed_enrolment({"created_at": recent.isoformat(sep=" ")})
+    assert not _is_unclaimed_enrolment({"created_at": recent, "last_seen_utc": recent})
+    assert not _is_unclaimed_enrolment({"created_at": "not a date"})

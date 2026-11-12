@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
+from app.security.commerce_permissions import commerce_scope, commerce_record_visible, require_commerce_record
 from app.repositories import shop as shop_repo
 
 
@@ -65,7 +66,9 @@ async def orders_page(
     if redirect:
         return redirect
 
-    orders_raw = await shop_repo.list_order_summaries(company_id)
+    scope = commerce_scope(user, membership, "menu.orders")
+    orders_raw = [record for record in await shop_repo.list_order_summaries(company_id)
+                  if commerce_record_visible(user, scope, record, "menu.orders")]
 
     def _label(value: str | None) -> str:
         text = (value or "").strip()

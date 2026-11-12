@@ -39,6 +39,12 @@
   }
 
   /* ----- WebSocket RPC client ----- */
+  const HELLO_RETRY_MS = 3000;
+  const HANDSHAKE_TIMEOUT_MS = 60000;
+  class RequestTimeout extends Error {
+    constructor() { super('The device did not respond in time.'); }
+  }
+
   function createClient() {
     let socket = null;
     let seq = 0;
@@ -56,17 +62,38 @@
         try { handler(data); } catch (err) { /* keep other listeners alive */ }
       });
     }
-    function request(op, args) {
+    function request(op, args, timeoutMs) {
       return new Promise((resolve, reject) => {
         if (!socket || socket.readyState !== WebSocket.OPEN) {
-          reject(new Error('Not connected to the device.'));
+          reject(new Error('Not connected to the device. Select Connect to start a live session.'));
           return;
         }
         seq += 1;
         const id = 'c' + seq;
-        pending.set(id, { resolve, reject });
+        let timer = null;
+        const settle = (fn) => (value) => { if (timer) clearTimeout(timer); fn(value); };
+        pending.set(id, { resolve: settle(resolve), reject: settle(reject) });
+        if (timeoutMs) {
+          timer = setTimeout(() => {
+            if (pending.delete(id)) reject(new RequestTimeout());
+          }, timeoutMs);
+        }
         socket.send(JSON.stringify({ id: id, op: op, args: args || {} }));
       });
+    }
+    /* The agent dials in only after its job poll hears about the session, and
+       a Redis relay drops frames sent before the agent is listening. Repeat
+       the (idempotent) hello until the agent answers or we give up. */
+    async function handshake() {
+      const deadline = Date.now() + HANDSHAKE_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        try {
+          return await request('hello', {}, HELLO_RETRY_MS);
+        } catch (err) {
+          if (!(err instanceof RequestTimeout)) throw err;
+        }
+      }
+      throw new Error('The device did not answer. Check the RMM agent is running and connected, then try again.');
     }
     function send(op, args) {
       if (socket && socket.readyState === WebSocket.OPEN) {
@@ -120,11 +147,12 @@
       }
       if (socket) { try { socket.close(); } catch (e) { /* ignore */ } }
     }
-    return { on, request, send, connect, close, state };
+    return { on, request, send, connect, handshake, close, state };
   }
 
   const client = createClient();
   let hello = null;
+  let ready = false;
   const views = [];
 
   /* ----- Connect / disconnect ----- */
@@ -145,24 +173,33 @@
     if (connectBtn) connectBtn.disabled = true;
     try {
       await client.connect();
-      hello = await client.request('hello');
+      setConnection('Waiting for the device…', 'warning');
+      hello = await client.handshake();
+      ready = true;
       setConnection('Connected', 'success');
       if (connectBtn) connectBtn.hidden = true;
       if (disconnectBtn) disconnectBtn.hidden = false;
-      el('[data-live-os]').textContent = hello.os + ' · ' + hello.arch + ' · agent ' + hello.version;
+      const osNames = { windows: 'Windows', linux: 'Linux', darwin: 'macOS' };
+      el('[data-live-os]').textContent = (osNames[hello.os] || hello.os) + ' · ' + hello.arch + ' · agent ' + hello.version;
       els('[data-live-windows-only]').forEach((node) => { node.hidden = (hello.os !== 'windows'); });
       views.forEach((view) => view.onConnect && view.onConnect(hello));
       activateTab(currentTab);
     } catch (err) {
+      ready = false;
+      client.close();
       setConnection('Not connected', 'neutral');
       showError(err.message);
       if (connectBtn) { connectBtn.hidden = false; connectBtn.disabled = false; }
     }
   }
   function disconnect() {
+    ready = false;
     client.close();
   }
   client.on('close', () => {
+    const wasReady = ready;
+    ready = false;
+    if (wasReady) showError('The live session ended. Select Connect to start a new one.');
     setConnection('Not connected', 'neutral');
     if (connectBtn) { connectBtn.hidden = false; connectBtn.disabled = false; }
     if (disconnectBtn) disconnectBtn.hidden = true;
@@ -185,6 +222,7 @@
       tab.setAttribute('aria-current', active ? 'true' : 'false');
     });
     els('[data-live-panel]').forEach((panel) => { panel.hidden = panel.dataset.livePanel !== name; });
+    if (!ready) return;
     views.forEach((view) => { if (view.tab === name && view.onShow) view.onShow(); });
   }
   els('[data-live-tab]').forEach((tab) => tab.addEventListener('click', () => activateTab(tab.dataset.liveTab)));
@@ -258,6 +296,8 @@
   initRegistry(client, views, { el, els, openPrompt, confirmAction });
 
   if (!canStart && workspace) workspace.hidden = true;
+  // Opening the page is the request to connect; start straight away.
+  if (canStart) connect();
 
   /* =====================================================================
      Overview — real-time CPU, memory and network
@@ -272,6 +312,8 @@
     const swapValue = h.el('[data-live-swap-value]');
     const swapGauge = h.el('[data-live-swap-gauge]');
     const swapNote = h.el('[data-live-swap-note]');
+    const diskTemplate = h.el('[data-live-disk-template]');
+    const diskMeters = new Map();
     const chart = h.el('[data-live-chart]');
     const history = [];
     let running = false;
@@ -282,25 +324,79 @@
       node.classList.toggle('rmm-live__gauge--high', pct >= 90);
       node.classList.toggle('rmm-live__gauge--warn', pct >= 70 && pct < 90);
     }
-    function drawChart() {
-      if (!chart || !chart.getContext) return;
-      const ctx = chart.getContext('2d');
-      const width = chart.width = chart.clientWidth || 600;
-      const height = chart.height;
+    // Fixed disks: one gauge each, kept in the agent's order beside swap.
+    // Agents that predate disk reporting send no list and show none.
+    function renderDisks(disks) {
+      if (!diskTemplate || !Array.isArray(disks)) return;
+      const keep = new Set();
+      let after = diskTemplate;
+      disks.forEach((disk) => {
+        if (!disk || !disk.mount || !disk.total) return;
+        keep.add(disk.mount);
+        let meter = diskMeters.get(disk.mount);
+        if (!meter) {
+          meter = diskTemplate.content.firstElementChild.cloneNode(true);
+          diskMeters.set(disk.mount, meter);
+        }
+        if (after.nextElementSibling !== meter) after.after(meter);
+        after = meter;
+        const title = 'Disk ' + disk.mount + (disk.label ? ' (' + disk.label + ')' : '');
+        meter.querySelector('[data-live-disk-title]').textContent = title;
+        meter.title = disk.fs_type ? title + ' · ' + disk.fs_type : title;
+        const pct = (disk.used / disk.total) * 100;
+        meter.querySelector('[data-live-disk-value]').textContent = Math.round(pct) + '%';
+        gauge(meter.querySelector('[data-live-disk-gauge]'), pct);
+        meter.querySelector('[data-live-disk-note]').textContent =
+          h.fmtBytes(disk.used) + ' / ' + h.fmtBytes(disk.total) + ' · ' + h.fmtBytes(disk.total - disk.used) + ' free';
+      });
+      diskMeters.forEach((meter, mount) => {
+        if (!keep.has(mount)) { meter.remove(); diskMeters.delete(mount); }
+      });
+    }
+    const netChart = h.el('[data-live-net-chart]');
+    const netAxisMax = h.el('[data-live-net-axis-max]');
+    const netAxisMid = h.el('[data-live-net-axis-mid]');
+
+    // Round a byte rate up to 1, 2 or 5 x 10^n of the unit fmtBytes will
+    // show (B, KB, MB…), so the axis reads e.g. "5 MB/s" rather than "4.77 MB/s".
+    function niceCeiling(value) {
+      if (!(value > 0)) return 1024;
+      const unit = Math.pow(1024, Math.min(5, Math.floor(Math.log(value) / Math.log(1024))));
+      const scaled = value / unit;
+      const power = Math.pow(10, Math.floor(Math.log10(scaled)));
+      const step = [1, 2, 5, 10].find((f) => scaled <= f * power);
+      const top = step * power;
+      return (top > 512 ? 1024 : top) * unit;
+    }
+    function plot(canvas, series, maxValue) {
+      if (!canvas || !canvas.getContext) return;
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width = canvas.clientWidth || 600;
+      const height = canvas.height;
       ctx.clearRect(0, 0, width, height);
       if (history.length < 2) return;
-      const styles = getComputedStyle(document.documentElement);
-      const draw = (key, color) => {
-        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+      const styles = getComputedStyle(canvas);
+      const colour = (name, fallback) => (styles.getPropertyValue(name) || fallback).trim();
+      ctx.strokeStyle = colour('--color-border', '#d8dce3');
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, height / 2); ctx.lineTo(width, height / 2); ctx.stroke();
+      series.forEach(([key, token, fallback]) => {
+        ctx.strokeStyle = colour(token, fallback); ctx.lineWidth = 2; ctx.beginPath();
         history.forEach((point, i) => {
           const x = (i / (history.length - 1)) * width;
-          const y = height - (Math.max(0, Math.min(100, point[key])) / 100) * height;
+          const y = height - (Math.max(0, Math.min(maxValue, point[key] || 0)) / maxValue) * height;
           if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
         ctx.stroke();
-      };
-      draw('cpu', (styles.getPropertyValue('--color-primary') || '#4f46e5').trim());
-      draw('mem', (styles.getPropertyValue('--color-success') || '#16a34a').trim());
+      });
+    }
+    function drawChart() {
+      plot(chart, [['cpu', '--color-primary', '#4f46e5'], ['mem', '--color-success', '#16a34a']], 100);
+      const peak = history.reduce((max, p) => Math.max(max, p.rx || 0, p.tx || 0), 0);
+      const top = niceCeiling(peak);
+      if (netAxisMax) netAxisMax.textContent = h.fmtBytes(top) + '/s';
+      if (netAxisMid) netAxisMid.textContent = h.fmtBytes(top / 2) + '/s';
+      plot(netChart, [['rx', '--rmm-live-net-in', '#c084fc'], ['tx', '--rmm-live-net-out', '#fb923c']], top);
     }
     client.on('metrics', (m) => {
       cpuValue.textContent = Math.round(m.cpu_percent) + '%';
@@ -321,11 +417,12 @@
       swapValue.textContent = m.swap_total ? Math.round(swapPct) + '%' : 'n/a';
       gauge(swapGauge, swapPct);
       swapNote.textContent = m.swap_total ? h.fmtBytes(m.swap_used) + ' / ' + h.fmtBytes(m.swap_total) : 'No swap in use';
+      renderDisks(m.disks);
       h.el('[data-live-net-rx]').textContent = h.fmtBytes(m.net_rx_bps) + '/s';
       h.el('[data-live-net-tx]').textContent = h.fmtBytes(m.net_tx_bps) + '/s';
       h.el('[data-live-proc-count]').textContent = m.processes || '—';
       h.el('[data-live-uptime]').textContent = h.fmtDuration(m.uptime_seconds);
-      history.push({ cpu: m.cpu_percent, mem: memPct });
+      history.push({ cpu: m.cpu_percent, mem: memPct, rx: m.net_rx_bps || 0, tx: m.net_tx_bps || 0 });
       if (history.length > 120) history.shift();
       drawChart();
     });
@@ -465,11 +562,13 @@
         const tr = document.createElement('tr');
         tr.innerHTML =
           '<td title="' + escapeHtml(p.path || p.command || '') + '">' + escapeHtml(p.name || '') + '</td>' +
-          '<td class="rmm-live__num">' + p.pid + '</td>' +
+          // Every value comes from the device, so even "numeric" fields are
+          // coerced or escaped before they reach innerHTML.
+          '<td class="rmm-live__num">' + escapeHtml(String(p.pid ?? '')) + '</td>' +
           '<td>' + escapeHtml(p.user || '') + '</td>' +
-          '<td class="rmm-live__num">' + (p.cpu_percent || 0).toFixed(1) + '</td>' +
-          '<td class="rmm-live__num">' + h.fmtBytes(p.memory_bytes) + '</td>' +
-          '<td class="rmm-live__num">' + (p.threads || '') + '</td>' +
+          '<td class="rmm-live__num">' + (Number(p.cpu_percent) || 0).toFixed(1) + '</td>' +
+          '<td class="rmm-live__num">' + escapeHtml(h.fmtBytes(p.memory_bytes)) + '</td>' +
+          '<td class="rmm-live__num">' + escapeHtml(String(p.threads || '')) + '</td>' +
           '<td class="rmm-live__num"></td>';
         const actions = tr.lastChild;
         const end = document.createElement('button');
@@ -844,8 +943,9 @@
         if (item.skipped) { const note = document.createElement('span'); note.className = 'text-muted'; note.textContent = ' — ' + item.skipped; name.appendChild(note); }
         tr.appendChild(name);
         const size = document.createElement('td'); size.className = 'rmm-live__num'; size.textContent = h.fmtBytes(item.size); tr.appendChild(size);
-        const bar = document.createElement('td'); bar.className = 'rmm-live__bar-col';
-        bar.innerHTML = '<span class="rmm-live__bar" style="--pct:' + (item.percent || 0).toFixed(1) + '"></span><span class="rmm-live__bar-label">' + (item.percent || 0).toFixed(1) + '%</span>';
+        const bar = document.createElement('td'); bar.className = 'rmm-live__share-col';
+        const pct = (Number(item.percent) || 0).toFixed(1);
+        bar.innerHTML = '<span class="rmm-live__share" style="--pct:' + pct + '"></span><span class="rmm-live__share-label">' + pct + '%</span>';
         tr.appendChild(bar);
         const items = document.createElement('td'); items.className = 'rmm-live__num';
         items.textContent = item.type === 'dir' ? (item.files + ' files') : ''; tr.appendChild(items);

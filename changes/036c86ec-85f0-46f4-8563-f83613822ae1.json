@@ -1,0 +1,7 @@
+{
+  "guid": "036c86ec-85f0-46f4-8563-f83613822ae1",
+  "occurred_at": "2026-11-09T11:56Z",
+  "change_type": "Security",
+  "summary": "RMM scripts can only set the asset fields and company variables they declare with a ##myportal marker in their source, and values written by devices are no longer expanded as templates.",
+  "content_hash": "37ee3843eb3c8bcfba430498ab6c529adcc86d567382387332db74e032af14c7"
+}

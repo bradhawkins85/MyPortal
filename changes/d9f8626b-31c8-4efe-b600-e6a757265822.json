@@ -1,0 +1,7 @@
+{
+  "guid": "d9f8626b-31c8-4efe-b600-e6a757265822",
+  "occurred_at": "2026-11-10T01:56Z",
+  "change_type": "Feature",
+  "summary": "Tray build server: the build agent only builds company installers from a release whose source commit is signed by the release key",
+  "content_hash": "8a3de0d473bcb8ddf86bc34169b2e6c757d5499338ed03dcad0b868be447394a"
+}

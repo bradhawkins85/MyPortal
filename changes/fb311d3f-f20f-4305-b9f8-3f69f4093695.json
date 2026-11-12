@@ -1,0 +1,7 @@
+{
+  "guid": "fb311d3f-f20f-4305-b9f8-3f69f4093695",
+  "occurred_at": "2026-11-10T00:52Z",
+  "change_type": "Improvement",
+  "summary": "On Windows, a tray chat notification with an Open chat button no longer opens the chat window as well; the window still opens by itself when the notification falls back to a popup.",
+  "content_hash": "31287cc939a9c5f93842d8695025bcf4398c60f0ed969d6d464b1f6c14e7ec1d"
+}

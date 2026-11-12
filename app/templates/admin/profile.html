@@ -292,7 +292,7 @@
         <header class="card__header profile-card__header">
           <div class="profile-card__heading">
             <h2 class="card__title" id="profile-outlook-title">Outlook contacts</h2>
-            <p class="card__subtitle">Show phone numbers from your own Outlook contacts when you view a requester.</p>
+            <p class="card__subtitle">Show phone numbers from your own Outlook contacts when you view a requester, and save requesters to Outlook with <em>Send To Outlook</em>. If you connected before <em>Send To Outlook</em> was added, reconnect to allow saving.</p>
           </div>
           {% if m365_contacts.connected %}
             <span class="scf-chip sif-chip--optional">Connected</span>
@@ -433,7 +433,7 @@
           <legend class="form-label">Top menu labels</legend>
           <label class="navigation-style__option">
             <input type="checkbox" name="top-menu-labels" />
-            <span><strong>Always show menu labels</strong><small>On standard resolution displays (1080p or lower) the top menu shows icons only, with a hover tooltip for each item. Turn this on to keep the labels visible at every resolution.</small></span>
+            <span><strong>Always show menu labels</strong><small>The top menu automatically hides labels when space is limited, with a hover tooltip for each item. Turn this on to keep labels visible regardless of available space.</small></span>
           </label>
         </fieldset>
         {% if role_switcher_allowed | default(false) %}
