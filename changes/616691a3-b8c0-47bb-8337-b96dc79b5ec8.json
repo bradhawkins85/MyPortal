@@ -1,0 +1,7 @@
+{
+  "guid": "616691a3-b8c0-47bb-8337-b96dc79b5ec8",
+  "occurred_at": "2026-11-12T03:46Z",
+  "change_type": "Improvement",
+  "summary": "The staff table now defaults to First Name, Last Name, Email, O365 Last Sign In, Enabled, and Actions while preserving saved column selections.",
+  "content_hash": "96be3ad6c2927c666f4875b8f511b4ac40eaa43e3d80ec9af45d08727c72213b"
+}
