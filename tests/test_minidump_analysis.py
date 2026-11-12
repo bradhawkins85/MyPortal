@@ -635,3 +635,211 @@ def test_present_labels():
     assert service.present(dict(base, analysis_status="none", summary={}))["uptime_label"] == ""
     assert service.present(dict(base, analysis_status="none", summary={"uptime_seconds": 300}))["uptime_label"] == "5 min"
     assert service.present(dict(base, analysis_status="none", summary={"uptime_seconds": 7200}))["uptime_label"] == "2 h"
+
+
+# --------------------------------------------------------------------------- #
+# Routes
+# --------------------------------------------------------------------------- #
+
+from fastapi import FastAPI, HTTPException  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.api.dependencies import auth  # noqa: E402
+from app.features.health_check import minidump_routes as routes  # noqa: E402
+
+ASSETS = {
+    10: {"id": 10, "company_id": 1, "name": "PC-01", "os_name": "Windows 11 Pro"},
+    11: {"id": 11, "company_id": 1, "name": "PC-02", "os_name": "Windows 11 Pro"},
+    20: {"id": 20, "company_id": 2, "name": "OTHER", "os_name": "Windows 11 Pro"},
+    40: {"id": 40, "company_id": 1, "name": "MAC-01", "os_name": "macOS 15"},
+}
+
+
+@pytest.fixture
+def client(analysis, monkeypatch):
+    state = analysis
+    state.update(access={"user": {"id": 7, "email": "tech@example.com"}, "company_id": 1, "can_run": True,
+                         "deny": None}, access_calls=[], audits=[], device=_device(5), authenticated=True)
+
+    async def rmm_access(request, *, asset_id=None, write=False):
+        state["access_calls"].append({"asset_id": asset_id, "write": write})
+        access = state["access"]
+        if access["deny"]:
+            raise HTTPException(status_code=access["deny"], detail="denied")
+        if write and not access["can_run"]:
+            raise HTTPException(status_code=403, detail="Permission to run RMM actions is required")
+        return access["user"], access["company_id"], access["can_run"], None
+
+    async def get_asset(asset_id):
+        return ASSETS.get(asset_id)
+
+    async def log_action(**kwargs):
+        state["audits"].append(kwargs)
+
+    async def current_device():
+        if not state["authenticated"]:
+            raise HTTPException(status_code=401, detail="Tray device authentication required")
+        return state["device"]
+
+    monkeypatch.setattr(routes, "_rmm_access", rmm_access)
+    monkeypatch.setattr(routes.asset_repo, "get_asset_by_id", get_asset)
+    monkeypatch.setattr(routes.audit_service, "log_action", log_action)
+    monkeypatch.setattr(routes, "_UPLOADS", {})
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[auth.get_current_tray_device] = current_device
+    with TestClient(app, follow_redirects=False) as test_client:
+        yield test_client, state
+
+
+@pytest.mark.anyio
+async def test_device_upload_stores_dumps(client):
+    test_client, _state = client
+    response = test_client.post("/api/tray/minidumps", json={"dumps": [_summary()]})
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "received": 1, "stored": 1, "duplicates": 0, "rejected": 0}
+    assert await repo.count_for_asset(10) == 1
+
+
+@pytest.mark.anyio
+async def test_device_upload_rejects_oversize_and_malformed(client):
+    test_client, _state = client
+    big = b'{"dumps": [], "pad": "' + b"x" * (2 * 1024 * 1024) + b'"}'
+    assert test_client.post("/api/tray/minidumps", content=big).status_code == 413
+    for body in (b"[]", b'{"dumps": "x"}', b"not json", b"", b'{"nope": []}'):
+        assert test_client.post("/api/tray/minidumps", content=body).status_code == 400, body
+    assert await repo.count_for_asset(10) == 0
+
+
+@pytest.mark.anyio
+async def test_device_upload_requires_device_token(client):
+    test_client, state = client
+    state["authenticated"] = False
+    assert test_client.post("/api/tray/minidumps", json={"dumps": [_summary()]}).status_code == 401
+    assert await repo.count_for_asset(10) == 0
+
+
+@pytest.mark.anyio
+async def test_device_upload_is_throttled(client):
+    test_client, _state = client
+    codes = [test_client.post("/api/tray/minidumps", json={"dumps": []}).status_code for _ in range(7)]
+    assert codes == [200] * 6 + [429]
+    uploads: dict = {}
+    assert all(routes.allow_upload(5, 1000.0, uploads) for _ in range(6))
+    assert routes.allow_upload(5, 1001.0, uploads) is False
+    assert routes.allow_upload(6, 1001.0, uploads) is True  # per device
+    assert routes.allow_upload(5, 1601.0, uploads) is True
+    assert len(uploads[5]) == 1  # old entries are dropped
+
+
+@pytest.mark.anyio
+async def test_list_requires_access_and_scopes(client):
+    test_client, state = client
+    await _add(name="mine.dmp")
+    await _add(asset_id=20, company_id=2, device_id=30, name="other.dmp")
+    listed = test_client.get("/api/assets/10/minidumps")
+    assert listed.status_code == 200
+    dumps = listed.json()["dumps"]
+    assert [dump["file_name"] for dump in dumps] == ["mine.dmp"]
+    assert dumps[0]["stop_code"] == "0x000000D1 DRIVER_IRQL_NOT_LESS_OR_EQUAL" and dumps[0]["status_label"] == "Not analysed"
+    assert state["access_calls"][-1] == {"asset_id": 10, "write": False}
+    # An asset in another company is not found, whatever the id.
+    assert test_client.get("/api/assets/20/minidumps").status_code == 404
+    assert test_client.get("/api/assets/999/minidumps").status_code == 404
+    state["access"]["deny"] = 403
+    assert test_client.get("/api/assets/10/minidumps").status_code == 403
+
+
+@pytest.mark.anyio
+async def test_analyse_checks_dump_belongs_to_asset(client):
+    test_client, state = client
+    foreign = await _add(asset_id=11, name="pc02.dmp", device_id=6)
+    assert test_client.post(f"/api/assets/10/minidumps/{foreign}/analyse", json={}).status_code == 404
+    assert test_client.post("/api/assets/10/minidumps/9999/analyse", json={}).status_code == 404
+    assert test_client.post(f"/rmm/assets/10/minidumps/{foreign}/analyse", data={}).status_code == 404
+    assert (await repo.get_dump(foreign))["analysis_status"] == "none"
+    assert not state["scheduled"] and not state["audits"]
+
+
+@pytest.mark.anyio
+async def test_analyse_needs_write_access(client):
+    test_client, state = client
+    dump_id = await _add()
+    state["access"]["can_run"] = False
+    assert test_client.post(f"/api/assets/10/minidumps/{dump_id}/analyse", json={}).status_code == 403
+    assert test_client.post(f"/rmm/assets/10/minidumps/{dump_id}/analyse", data={}).status_code == 403
+    assert [call["write"] for call in state["access_calls"]] == [True, True]
+    assert (await repo.get_dump(dump_id))["analysis_status"] == "none" and not state["scheduled"]
+
+
+@pytest.mark.anyio
+async def test_analyse_starts_and_audits(client):
+    test_client, state = client
+    dump_id = await _add()
+    response = test_client.post(f"/api/assets/10/minidumps/{dump_id}/analyse", json={"ticket_id": 3})
+    assert response.status_code == 202
+    assert response.json() == {"id": dump_id, "analysis_status": "analysing", "ticket_id": 3}
+    assert len(state["scheduled"]) == 1
+    audit = state["audits"][0]
+    assert audit["action"] == "minidump.analyse" and audit["entity_type"] == "asset_minidump"
+    assert audit["entity_id"] == dump_id and audit["user_id"] == 7
+    assert audit["new_value"] == {"asset_id": 10, "ticket_id": 3}
+    # A second click while it runs is refused, and a bad ticket is a 400.
+    assert test_client.post(f"/api/assets/10/minidumps/{dump_id}/analyse", json={}).status_code == 409
+    other = await _add(name="second.dmp")
+    assert test_client.post(f"/api/assets/10/minidumps/{other}/analyse", json={"ticket_id": 4}).status_code == 400
+    assert len(state["audits"]) == 1
+
+
+@pytest.mark.anyio
+async def test_analyse_form_redirects_with_flash(client):
+    test_client, state = client
+    dump_id = await _add()
+    started = test_client.post(f"/rmm/assets/10/minidumps/{dump_id}/analyse", data={"ticket_id": ""})
+    assert started.status_code == 303 and started.headers["location"] == "/assets/10#minidumps"
+    assert len(state["scheduled"]) == 1 and len(state["audits"]) == 1
+    again = test_client.post(f"/rmm/assets/10/minidumps/{dump_id}/analyse", data={"ticket_id": "3"})
+    assert again.status_code == 303 and again.headers["location"] == "/assets/10#minidumps"
+    assert len(state["scheduled"]) == 1
+    junk = await _add(name="third.dmp")
+    assert test_client.post(f"/rmm/assets/10/minidumps/{junk}/analyse", data={"ticket_id": "abc"}).status_code == 303
+    assert (await repo.get_dump(junk))["analysis_status"] == "none"
+
+
+@pytest.mark.anyio
+async def test_asset_context_visibility(client, monkeypatch):
+    _test_client, state = client
+    devices = {10: {"id": 5, "os": "windows", "hostname": "pc-01"}, 40: {"id": 41, "os": "darwin", "hostname": "mac"}}
+
+    async def find_device(asset_id):
+        return devices.get(asset_id)
+
+    async def tickets(asset_id):
+        return [{"id": 3, "subject": "Blue screens", "status": "Open"}, {"id": 6, "subject": "Old", "status": "Closed"},
+                {"id": 8, "subject": "Done", "status": "resolved"}]
+
+    monkeypatch.setattr(routes.health_repo, "find_tray_device_for_asset", find_device)
+    monkeypatch.setattr(routes.asset_repo, "list_tickets_for_asset", tickets)
+    assert await routes.asset_context(dict(ASSETS[40]), can_run=True) is None
+    assert await routes.asset_context(dict(ASSETS[11]), can_run=True) is None  # no tray app, no dumps
+    await _add()
+    context = await routes.asset_context(dict(ASSETS[10]), can_run=True)
+    assert context["count"] == 1 and context["can_run"] is True and context["llm_ready"] is True
+    assert context["dumps"][0]["file_name"] == "111126-8765-01.dmp"
+    assert context["tickets"] == [{"id": 3, "subject": "Blue screens"}]
+    # Dumps reported earlier stay visible after the tray app is removed.
+    devices.pop(10)
+    assert (await routes.asset_context(dict(ASSETS[10]), can_run=False))["can_run"] is False
+    state["model"] = ""
+    assert (await routes.asset_context(dict(ASSETS[10]), can_run=True))["llm_ready"] is False
+
+
+def test_pack_registers_the_minidump_routes():
+    from app.features.health_check import PACK
+
+    assert routes.router in PACK.routers and PACK.version == "1.2.0"
+    paths = {route.path for route in routes.router.routes}
+    assert paths == {"/api/tray/minidumps", "/api/assets/{asset_id}/minidumps",
+                     "/api/assets/{asset_id}/minidumps/{dump_id}/analyse",
+                     "/rmm/assets/{asset_id}/minidumps/{dump_id}/analyse"}
+    assert all(route.summary for route in routes.router.routes)
