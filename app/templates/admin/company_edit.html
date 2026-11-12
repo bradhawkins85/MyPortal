@@ -2116,29 +2116,21 @@
             data-initial-user-id="{{ assign_form.user_value or '' }}"
           >
             {% include "partials/csrf.html" %}
-            <input type="hidden" name="sourceCompanyId" value="{{ company.id }}" />
+            <input type="hidden" name="sourceCompanyId" value="{{ company.id }}" data-company-select />
             <div class="form-field">
-              <label class="form-label" for="assign-company">Company</label>
-              <select
-                id="assign-company"
-                name="companyId"
-                class="form-input"
-                required
-                data-company-select
-              >
-                {% for managed in managed_companies %}
-                  <option value="{{ managed.id }}" {% if managed.id == assign_form.company_id %}selected{% endif %}>
-                    {{ managed.name }}
-                  </option>
+              <label class="form-label" for="assign-job-title">Job title</label>
+              <select id="assign-job-title" name="jobTitle" class="form-input" data-job-title-select aria-describedby="assign-access-help">
+                <option value="">Select a job title instead of a user</option>
+                {% for title in job_titles %}
+                  <option value="{{ title }}" {% if title|lower == assign_form.job_title|lower %}selected{% endif %}>{{ title }}</option>
                 {% endfor %}
               </select>
             </div>
             <div class="form-field">
               <label class="form-label" for="assign-user">User</label>
-              <select id="assign-user" name="userId" class="form-input" required data-user-select>
+              <select id="assign-user" name="userId" class="form-input" data-user-select>
                 <option
                   value=""
-                  disabled
                   {% if not assign_form.user_value %}selected{% endif %}
                   data-placeholder
                 >
@@ -2180,10 +2172,37 @@
                 {% endfor %}
               </select>
             </div>
+            <p id="assign-access-help" class="text-muted form-field--wide">Choose a user or a job title. Job title rules apply to current and future active staff at {{ company.name }} and follow job title changes. Job title rules take precedence over individual roles while the title matches. Select an existing rule below to update it.</p>
             <div class="form-actions form-field--wide">
               <button type="submit" class="button">Save access</button>
             </div>
           </form>
+          {% if job_title_rules %}
+          <h3>Job title access rules</h3>
+          <div class="table-wrapper">
+            <table class="table">
+              <thead><tr><th scope="col">Job title</th><th scope="col">Membership role</th><th scope="col">Staff access level</th><th scope="col">Actions</th></tr></thead>
+              <tbody>
+              {% for rule in job_title_rules %}
+                <tr>
+                  <td data-label="Job title">{{ rule.job_title }}</td>
+                  <td data-label="Membership role">{{ rule.role_name }}</td>
+                  <td data-label="Staff access level">{% for option in staff_permission_options %}{% if option.value == rule.staff_permission %}{{ option.label }}{% endif %}{% endfor %}</td>
+                  <td data-label="Actions">
+                    <button type="button" class="button button--small button--secondary" data-edit-job-title="{{ rule.job_title }}" data-role-id="{{ rule.role_id }}" data-staff-scope="{{ rule.staff_permission }}">Edit</button>
+                    <form action="/admin/companies/assign" method="post" class="inline-form">
+                      {% include "partials/csrf.html" %}
+                      <input type="hidden" name="sourceCompanyId" value="{{ company.id }}" />
+                      <input type="hidden" name="jobTitle" value="{{ rule.job_title }}" />
+                      <button type="submit" name="removeJobTitle" value="1" class="button button--small button--danger" aria-label="Remove access rule for {{ rule.job_title }}">Remove</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
         </div>
       </section>
 
@@ -2239,6 +2258,10 @@
                         {% else %}
                           <span class="text-muted">Pending role assignment</span>
                         {% endif %}
+                      {% elif assignment.membership_job_title %}
+                        <span>{{ assignment.membership_role_name }}</span>
+                        <span class="text-muted">From job title: {{ assignment.membership_job_title }}</span>
+                        <a href="#ce-assign-access">Manage job title rule</a>
                       {% elif assignment.membership_id and role_options %}
                         <select
                           class="form-input"
@@ -2267,6 +2290,7 @@
                         <select
                           class="form-input"
                           data-staff-permission
+                          {% if assignment.membership_job_title %}disabled title="Managed by the job title access rule"{% endif %}
                           data-company-id="{{ assignment.company_id }}"
                           data-user-id="{{ assignment.user_id }}"
                         >
