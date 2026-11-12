@@ -6,7 +6,8 @@ Schedules for every company are shown to everyone and changed only by super
 admins.
 
 * ``GET /rmm/automation`` schedules, onboarding steps and onboarding history
-* ``/api/rmm/schedules`` create, edit, enable, run now and delete schedules
+* ``/api/rmm/schedules`` create, edit, enable, run now and delete schedules;
+  a schedule repeats on a cron expression or runs one time at a chosen date
 * ``/api/rmm/onboarding/steps`` add, edit, reorder and remove onboarding steps
 * ``/api/rmm/onboarding/runs`` start, view and cancel onboarding on a device
 * the Chocolatey apps panel pushes installs and updates through
@@ -63,6 +64,8 @@ def _invalid(exc: RunRequestError) -> JSONResponse:
 def _schedule_public(schedule: dict[str, Any]) -> dict[str, Any]:
     public = {key: value for key, value in schedule.items() if key != "entries_encrypted"}
     public["scope"] = "all" if schedule.get("company_id") is None else "company"
+    public["frequency"] = "once" if schedule.get("run_once_at") else "recurring"
+    public["run_once_local"] = automation.run_once_local(schedule.get("run_once_at"), str(schedule.get("timezone") or "UTC"))
     return _serialise(public) or {}
 
 
@@ -121,7 +124,9 @@ class ScheduleRequest(BaseModel):
     name: str = Field(default="", max_length=255)
     scope: Scope = "company"
     script_id: int
-    cron: str = Field(max_length=128)
+    frequency: Literal["recurring", "once"] = "recurring"
+    cron: str = Field(default="", max_length=128)
+    run_once_at: str | None = Field(default=None, max_length=64)
     timezone: str = Field(default="", max_length=64)
     target_mode: str = Field(default="all", max_length=16)
     target_rules: dict[str, Any] | None = None
@@ -134,19 +139,25 @@ class ScheduleRequest(BaseModel):
     enabled: bool = True
 
 
-@router.get("/api/rmm/schedules/preview", summary="Next times a cron schedule runs")
+@router.get("/api/rmm/schedules/preview", summary="Next times a schedule runs")
 async def schedule_preview(
     request: Request,
-    cron: str = Query(max_length=128),
+    cron: str = Query(default="", max_length=128),
     timezone: str = Query(default="", max_length=64),
+    run_once_at: str = Query(default="", max_length=64),
 ):
+    """Next three cron times, or for a one-time schedule (``run_once_at``) that time if it is still ahead."""
+
     await _context(request, api=True)
     try:
-        expression = automation.validate_cron(cron)
         tz_name = automation.validate_timezone(timezone)
+        if run_once_at:
+            once = automation.parse_run_once(run_once_at, tz_name)
+            times = [once] if automation.schedule_next_run({"run_once_at": once}) else []
+        else:
+            times = automation.next_runs(automation.validate_cron(cron), tz_name, count=3)
     except RunRequestError as exc:
         return _invalid(exc)
-    times = automation.next_runs(expression, tz_name, count=3)
     return {"timezone": tz_name, "next_runs": [value.isoformat() for value in times]}
 
 
@@ -172,7 +183,8 @@ async def _save_schedule(request: Request, payload: ScheduleRequest, schedule_id
     await audit_service.record(
         action="rmm.schedule.create" if schedule_id is None else "rmm.schedule.update",
         request=request, user_id=user.get("id"), entity_type="rmm_schedule", entity_id=saved_id,
-        metadata={"name": payload.name, "script_id": payload.script_id, "cron": payload.cron, "company_id": scope_company,
+        metadata={"name": payload.name, "script_id": payload.script_id, "frequency": payload.frequency,
+                  "cron": payload.cron, "run_once_at": payload.run_once_at, "company_id": scope_company,
                   "run_as": payload.run_as},
     )
     return {"schedule": _schedule_public(await automation_repo.get_schedule(saved_id) or {})}
@@ -202,7 +214,10 @@ async def _writable_schedule(request: Request, schedule_id: int):
 @router.post("/api/rmm/schedules/{schedule_id:int}/enabled", summary="Turn a schedule on or off")
 async def schedule_enabled_api(schedule_id: int, payload: EnabledRequest, request: Request):
     user, schedule = await _writable_schedule(request, schedule_id)
-    await automation.set_schedule_enabled(schedule, payload.enabled)
+    try:
+        await automation.set_schedule_enabled(schedule, payload.enabled)
+    except RunRequestError as exc:
+        return JSONResponse({"detail": next(iter(exc.errors.values())), "errors": exc.errors}, status_code=400)
     await audit_service.record(
         action="rmm.schedule.enable" if payload.enabled else "rmm.schedule.disable",
         request=request, user_id=user.get("id"), entity_type="rmm_schedule", entity_id=schedule_id,

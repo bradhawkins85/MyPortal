@@ -4,8 +4,9 @@ Both build on the manual flow in :mod:`app.services.rmm_scripts`: the values a
 technician enters are saved (encrypted) with the schedule or onboarding step,
 and are resolved per device each time a run is queued.
 
-* **Schedules** run a script on a cron schedule, separate from MyPortal's own
-  scheduled tasks. :func:`automation_loop` checks for due schedules every
+* **Schedules** run a script on a cron schedule, or one time at a chosen date
+  and time, separate from MyPortal's own scheduled tasks. A one-time schedule
+  turns itself off once it has run. :func:`automation_loop` checks for due schedules every
   :data:`TICK_SECONDS` on one instance at a time. A device that still has an
   unfinished run from the same schedule is skipped rather than given a second.
 * **Onboarding** runs a company's ordered list of scripts the first time one of
@@ -167,6 +168,46 @@ def next_run_after(expression: str, tz_name: str, after: datetime | None = None)
     return times[0] if times else None
 
 
+def parse_run_once(value: Any, tz_name: str) -> datetime:
+    """A one-time schedule's date and time as naive UTC.
+
+    A value without an offset (what a ``datetime-local`` input sends) is read in
+    ``tz_name``, the schedule's time zone."""
+
+    text = str(value or "").strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00")) if text else None
+    except ValueError:
+        parsed = None
+    if parsed is None:
+        raise RunRequestError({"run_once_at": "Choose the date and time to run the script."})
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=ZoneInfo(tz_name))
+    return parsed.astimezone(timezone.utc).replace(tzinfo=None, second=0, microsecond=0)
+
+
+def run_once_local(value: Any, tz_name: str) -> str | None:
+    """A stored one-time run (naive UTC) as ``YYYY-MM-DDTHH:MM`` in ``tz_name``, for the editor."""
+
+    moment = _naive_utc(value)
+    if moment is None:
+        return None
+    try:
+        zone = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("UTC")
+    return moment.replace(tzinfo=timezone.utc).astimezone(zone).strftime("%Y-%m-%dT%H:%M")
+
+
+def schedule_next_run(schedule: Mapping[str, Any], after: datetime | None = None) -> datetime | None:
+    """When an enabled schedule next runs: its one-time run if still ahead, else the cron's next time."""
+
+    if schedule.get("run_once_at"):
+        run_once = _naive_utc(schedule["run_once_at"])
+        return run_once if run_once is not None and run_once > (after or _utcnow()) else None
+    return next_run_after(str(schedule["cron"]), str(schedule["timezone"]), after=after)
+
+
 # --------------------------------------------------------------------------- #
 # Schedules
 # --------------------------------------------------------------------------- #
@@ -196,8 +237,16 @@ async def save_schedule(
     if not name:
         errors["name"] = "Give the schedule a name."
     script = await _scoped_script(payload.get("script_id"), company_id)
-    cron = validate_cron(payload.get("cron"))
     tz_name = validate_timezone(payload.get("timezone"))
+    enabled = bool(payload.get("enabled", True))
+    run_once_at: datetime | None = None
+    if str(payload.get("frequency") or "recurring") == "once":
+        cron = ""
+        run_once_at = parse_run_once(payload.get("run_once_at"), tz_name)
+        if enabled and run_once_at <= _utcnow():
+            errors["run_once_at"] = "Choose a date and time in the future."
+    else:
+        cron = validate_cron(payload.get("cron"))
     target_mode = str(payload.get("target_mode") or "all")
     if target_mode not in TARGET_MODES or (target_mode == "assets" and company_id is None):
         errors["target_mode"] = "Choose which devices to run on."
@@ -239,7 +288,6 @@ async def save_schedule(
     if errors:
         raise RunRequestError(errors)
 
-    enabled = bool(payload.get("enabled", True))
     values = {
         "name": name,
         "company_id": company_id,
@@ -258,7 +306,8 @@ async def save_schedule(
         "queue_timeout_seconds": rmm_scripts.queue_timeout_override(payload.get("queue_timeout_seconds")),
         "run_as": run_as,
         "is_enabled": enabled,
-        "next_run_at": next_run_after(cron, tz_name) if enabled else None,
+        "run_once_at": run_once_at,
+        "next_run_at": schedule_next_run({"cron": cron, "timezone": tz_name, "run_once_at": run_once_at}) if enabled else None,
         "created_by_user_id": user_id,
     }
     if schedule_id is None:
@@ -268,7 +317,9 @@ async def save_schedule(
 
 
 async def set_schedule_enabled(schedule: Mapping[str, Any], enabled: bool) -> None:
-    next_at = next_run_after(str(schedule["cron"]), str(schedule["timezone"])) if enabled else None
+    next_at = schedule_next_run(schedule) if enabled else None
+    if enabled and next_at is None and schedule.get("run_once_at"):
+        raise RunRequestError({"run_once_at": "This one-time schedule's time has passed. Edit it to choose a new time."})
     await automation_repo.set_schedule_enabled(int(schedule["id"]), enabled, next_at)
 
 
@@ -367,8 +418,9 @@ async def run_due_schedules(now: datetime | None = None) -> int:
         schedule = await automation_repo.get_schedule(int(row["id"]))
         if not schedule:
             continue
-        new_next = next_run_after(str(schedule["cron"]), str(schedule["timezone"]), after=now)
-        if not await automation_repo.claim_schedule(int(row["id"]), row["next_run_at"], new_next):
+        once = bool(schedule.get("run_once_at"))
+        new_next = None if once else next_run_after(str(schedule["cron"]), str(schedule["timezone"]), after=now)
+        if not await automation_repo.claim_schedule(int(row["id"]), row["next_run_at"], new_next, turn_off=once):
             continue
         try:
             await run_schedule(int(row["id"]), now=now)

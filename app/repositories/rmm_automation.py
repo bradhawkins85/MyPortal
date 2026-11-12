@@ -69,7 +69,7 @@ def _onboarding_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 _SCHEDULE_COLUMNS = (
     "s.id, s.name, s.company_id, s.script_id, s.cron, s.timezone, s.target_mode, s.asset_ids_json, "
-    "s.tag_ids_json, s.target_rules_json, s.inputs_json, s.timeout_seconds, s.queue_timeout_seconds, s.run_as, s.is_enabled, s.next_run_at, s.last_run_at, "
+    "s.tag_ids_json, s.target_rules_json, s.inputs_json, s.timeout_seconds, s.queue_timeout_seconds, s.run_as, s.is_enabled, s.next_run_at, s.run_once_at, s.last_run_at, "
     "s.last_run_summary, s.created_by_user_id, s.created_at, s.updated_at, sc.name AS script_name, "
     "sc.path AS script_path, sc.language AS script_language, sc.is_active AS script_active"
 )
@@ -101,15 +101,16 @@ async def create_schedule(values: dict[str, Any]) -> int:
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_schedules (name, company_id, script_id, cron, timezone, target_mode, asset_ids_json, "
         "tag_ids_json, target_rules_json, entries_encrypted, inputs_json, timeout_seconds, queue_timeout_seconds, run_as, is_enabled, next_run_at, "
-        "created_by_user_id, created_at, updated_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "run_once_at, created_by_user_id, created_at, updated_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             values["name"], values["company_id"], values["script_id"], values["cron"], values["timezone"],
             values["target_mode"], json.dumps(values["asset_ids"]), json.dumps(values["tag_ids"]),
             json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
             values["entries_encrypted"], json.dumps(values["inputs"]), values["timeout_seconds"], values.get("queue_timeout_seconds"),
             values.get("run_as", "system"),
-            1 if values["is_enabled"] else 0, values["next_run_at"], values.get("created_by_user_id"), now, now,
+            1 if values["is_enabled"] else 0, values["next_run_at"], values.get("run_once_at"),
+            values.get("created_by_user_id"), now, now,
         ),
     )
 
@@ -118,14 +119,15 @@ async def update_schedule(schedule_id: int, values: dict[str, Any]) -> None:
     await db.execute(
         "UPDATE rmm_schedules SET name = %s, company_id = %s, script_id = %s, cron = %s, timezone = %s, "
         "target_mode = %s, asset_ids_json = %s, tag_ids_json = %s, target_rules_json = %s, entries_encrypted = %s, inputs_json = %s, "
-        "timeout_seconds = %s, queue_timeout_seconds = %s, run_as = %s, is_enabled = %s, next_run_at = %s, updated_at = %s WHERE id = %s",
+        "timeout_seconds = %s, queue_timeout_seconds = %s, run_as = %s, is_enabled = %s, next_run_at = %s, run_once_at = %s, updated_at = %s "
+        "WHERE id = %s",
         (
             values["name"], values["company_id"], values["script_id"], values["cron"], values["timezone"],
             values["target_mode"], json.dumps(values["asset_ids"]), json.dumps(values["tag_ids"]),
             json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
             values["entries_encrypted"], json.dumps(values["inputs"]), values["timeout_seconds"], values.get("queue_timeout_seconds"),
             values.get("run_as", "system"),
-            1 if values["is_enabled"] else 0, values["next_run_at"], _utcnow(), schedule_id,
+            1 if values["is_enabled"] else 0, values["next_run_at"], values.get("run_once_at"), _utcnow(), schedule_id,
         ),
     )
 
@@ -150,13 +152,19 @@ async def due_schedule_ids(now: datetime) -> list[dict[str, Any]]:
     return [dict(row) for row in rows or []]
 
 
-async def claim_schedule(schedule_id: int, previous_next: Any, new_next: datetime | None) -> bool:
-    """Move a due schedule to its next time. ``False`` when another worker already did."""
+async def claim_schedule(
+    schedule_id: int, previous_next: Any, new_next: datetime | None, *, turn_off: bool = False
+) -> bool:
+    """Move a due schedule to its next time. ``False`` when another worker already did.
 
-    claimed = await db.execute_rowcount(
-        "UPDATE rmm_schedules SET next_run_at = %s WHERE id = %s AND next_run_at = %s AND is_enabled = 1",
-        (new_next, schedule_id, previous_next),
+    ``turn_off`` also switches the schedule off, for a one-time schedule that is now running."""
+
+    sql = (
+        "UPDATE rmm_schedules SET next_run_at = %s, is_enabled = 0 WHERE id = %s AND next_run_at = %s AND is_enabled = 1"
+        if turn_off
+        else "UPDATE rmm_schedules SET next_run_at = %s WHERE id = %s AND next_run_at = %s AND is_enabled = 1"
     )
+    claimed = await db.execute_rowcount(sql, (new_next, schedule_id, previous_next))
     return claimed > 0
 
 

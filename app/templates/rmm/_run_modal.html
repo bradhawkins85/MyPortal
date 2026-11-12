@@ -58,18 +58,29 @@
             <p class="form-help form-help--error" data-rmm-error="tags" hidden></p>
           </div>
           <div class="form-field" data-rmm-mode-only="schedule">
-            <label class="form-label" for="rmm-cron-preset">When</label>
-            <select class="form-input" id="rmm-cron-preset" data-rmm-cron-preset>
-              <option value="0 * * * *">Every hour</option>
-              <option value="0 2 * * *">Every day at 2am</option>
-              <option value="0 2 * * 1">Every Monday at 2am</option>
-              <option value="0 2 1 * *">On the 1st of every month at 2am</option>
-              <option value="">Custom (cron)</option>
-            </select>
+            <span class="form-label" id="rmm-frequency-label">When</span>
+            <div class="rmm-segmented" role="radiogroup" aria-labelledby="rmm-frequency-label">
+              <label class="rmm-segmented__option"><input type="radio" name="rmm-frequency" value="recurring" checked data-rmm-frequency /><span>Repeats</span></label>
+              <label class="rmm-segmented__option"><input type="radio" name="rmm-frequency" value="once" data-rmm-frequency /><span>One time</span></label>
+            </div>
+            <div data-rmm-frequency-only="recurring">
+              <label class="visually-hidden" for="rmm-cron-preset">How often</label>
+              <select class="form-input" id="rmm-cron-preset" data-rmm-cron-preset>
+                <option value="0 * * * *">Every hour</option>
+                <option value="0 2 * * *">Every day at 2am</option>
+                <option value="0 2 * * 1">Every Monday at 2am</option>
+                <option value="0 2 1 * *">On the 1st of every month at 2am</option>
+                <option value="">Custom (cron)</option>
+              </select>
+            </div>
             <div class="rmm-cron">
-              <div>
+              <div data-rmm-frequency-only="recurring">
                 <label class="form-label rmm-cron__label" for="rmm-cron">Cron</label>
                 <input class="form-input" id="rmm-cron" maxlength="128" autocomplete="off" spellcheck="false" placeholder="minute hour day month weekday" data-rmm-cron />
+              </div>
+              <div data-rmm-frequency-only="once" hidden>
+                <label class="form-label rmm-cron__label" for="rmm-run-once">Date and time</label>
+                <input class="form-input rmm-cron__date" id="rmm-run-once" type="datetime-local" step="60" data-rmm-run-once />
               </div>
               <div>
                 <label class="form-label rmm-cron__label" for="rmm-timezone">Time zone</label>
@@ -77,7 +88,9 @@
               </div>
             </div>
             <p class="form-help" data-rmm-cron-preview role="status" aria-live="polite"></p>
+            <p class="form-help" data-rmm-frequency-only="once" hidden>Runs once at this time in the schedule's time zone, then the schedule turns itself off. Use <strong>Run now</strong> to run it again.</p>
             <p class="form-help form-help--error" data-rmm-error="cron" hidden></p>
+            <p class="form-help form-help--error" data-rmm-error="run_once_at" hidden></p>
             <p class="form-help form-help--error" data-rmm-error="timezone" hidden></p>
           </div>
           <label class="rmm-check" data-rmm-mode-only="schedule"><input type="checkbox" data-rmm-enabled checked /> Schedule is on</label>
