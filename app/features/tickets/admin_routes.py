@@ -1900,6 +1900,39 @@ async def admin_toggle_reply_resolution_step(ticket_id: int, reply_id: int, requ
     return flash_redirect(f"/admin/tickets/{ticket_id}#conversation", message, "success")
 
 
+@router.post("/admin/tickets/{ticket_id:int}/history/{entry_type}/{entry_id:int}/delete", response_class=HTMLResponse)
+async def admin_delete_history_entry(ticket_id: int, entry_type: str, entry_id: int, request: Request):
+    """Only super admins may remove entries from a ticket's conversation."""
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await parse_csrf_form(request)
+    if not await tickets_repo.get_ticket(ticket_id):
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    if entry_type == "reply":
+        removed = await tickets_repo.delete_reply(entry_id, ticket_id)
+    elif entry_type == "call_recording":
+        from app.repositories import call_recordings as call_recordings_repo
+
+        removed = await call_recordings_repo.remove_recording_from_ticket(entry_id, ticket_id)
+    else:
+        raise HTTPException(status_code=404, detail="Conversation entry not found")
+    if not removed:
+        raise HTTPException(status_code=404, detail="Conversation entry not found")
+    await audit_service.record(
+        action="ticket.history.delete",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        metadata={"entry_type": entry_type, "entry_id": entry_id},
+    )
+    await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
+    # Only allow the two known ticket pages as redirect destinations.
+    destination = f"/tickets/{ticket_id}" if form.get("view") == "portal" else f"/admin/tickets/{ticket_id}"
+    return flash_redirect(f"{destination}#conversation", "Conversation entry deleted.", "success")
+
+
 @router.post("/admin/tickets/{ticket_id:int}/delete", response_class=HTMLResponse)
 async def admin_delete_ticket(ticket_id: int, request: Request):
     main_module = _main()
