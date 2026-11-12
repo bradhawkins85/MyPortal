@@ -573,6 +573,9 @@ async def load_quote_to_cart(request: Request, quote_number: str) -> RedirectRes
     if redirect:
         return redirect
 
+    if not main_module._membership_menu_can(user, membership, "menu.shop", write=True):
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
     session = await session_manager.load_session(request)
     if not session:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -636,6 +639,9 @@ async def save_as_quote(request: Request) -> RedirectResponse:
     )
     if redirect:
         return redirect
+
+    if not main_module._membership_menu_can(user, membership, "menu.shop", write=True):
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     session = await session_manager.load_session(request)
     if not session:

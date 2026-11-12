@@ -70,6 +70,7 @@ def _virtual_membership(role: Mapping[str, Any], company_id: int | None) -> dict
         "status": "active",
     }
     membership.update({field: permission in legacy for field, permission in permission_fields.items()})
+    membership["can_access_cart"] = menu_permissions.get("menu.shop") == "write"
     membership["can_access_quotes"] = menu_permissions.get("menu.quotes", "none") != "none"
     return membership
 

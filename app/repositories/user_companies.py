@@ -126,6 +126,8 @@ def _enrich_with_role_permissions(data: dict[str, Any], role_permissions_raw: An
         elif field_name in _PERMISSION_FIELDS:
             data[field_name] = False
 
+    data["can_access_shop"] = menu_has_access(menu_permissions, "menu.shop")
+    data["can_access_cart"] = menu_has_access(menu_permissions, "menu.shop", write=True)
     data["can_access_quotes"] = menu_has_access(menu_permissions, "menu.quotes")
 
 
