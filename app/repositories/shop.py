@@ -1651,6 +1651,7 @@ async def list_order_summaries(company_id: int) -> list[dict[str, Any]]:
         SELECT
             order_number,
             company_id,
+            MAX(user_id) AS user_id,
             MAX(order_date) AS order_date,
             MAX(status) AS status,
             MAX(shipping_status) AS shipping_status,
@@ -1679,6 +1680,7 @@ async def get_order_summary(
         SELECT
             order_number,
             company_id,
+            MAX(user_id) AS user_id,
             MAX(order_date) AS order_date,
             MAX(status) AS status,
             MAX(shipping_status) AS shipping_status,
@@ -2909,6 +2911,7 @@ def _ensure_naive_utc(value: Any) -> datetime | None:
 
 def _normalise_order_summary(row: dict[str, Any]) -> dict[str, Any]:
     summary = dict(row)
+    summary["user_id"] = _coerce_optional_int(row.get("user_id"))
     summary["order_number"] = str(row.get("order_number") or "").strip()
     summary["company_id"] = _coerce_optional_int(row.get("company_id"))
     summary["status"] = str(row.get("status") or "").strip()

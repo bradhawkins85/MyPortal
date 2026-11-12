@@ -10,8 +10,11 @@ from app.features.invoices import PACK
 
 
 EXPECTED = {
+    ("POST", "/invoices/{invoice_id}/assign"),
     ("GET", "/invoices"),
+    ("HEAD", "/invoices"),
     ("GET", "/invoices/global"),
+    ("HEAD", "/invoices/global"),
     ("GET", "/invoices/{invoice_id}"),
     ("HEAD", "/invoices/{invoice_id}"),
 }

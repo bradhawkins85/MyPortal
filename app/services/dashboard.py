@@ -34,6 +34,7 @@ from app.repositories import notifications as notifications_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import webhook_events as webhook_events_repo
+from app.security.commerce_permissions import commerce_scope, commerce_record_visible
 from app.security.session import session_manager
 from app.services import company_access
 
@@ -235,7 +236,9 @@ async def _attention_section(ctx: _DashboardContext) -> dict[str, Any]:
     # 3. Overdue / outstanding invoices for the active company
     if ctx.active_company_id is not None and ctx.has_permission("can_manage_invoices"):
         try:
-            invoices = await invoice_repo.list_company_invoices(int(ctx.active_company_id))
+            scope = commerce_scope(dict(ctx.user), dict(ctx.membership or {}), "menu.invoices")
+            invoices = [record for record in await invoice_repo.list_company_invoices(int(ctx.active_company_id))
+                        if commerce_record_visible(dict(ctx.user), scope, record, "menu.invoices")]
         except Exception as exc:
             log_error("Dashboard: invoice lookup failed", error=str(exc))
             invoices = []

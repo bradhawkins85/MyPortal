@@ -7,6 +7,7 @@ from typing import Any, Optional
 from app.core.database import db
 
 _ALLOWED_PATCH_COLUMNS = frozenset({
+    "assigned_user_id",
     "company_id", "invoice_number", "amount", "due_date", "status",
     "xero_invoice_id", "xero_invoice_number", "synced_to_xero_at",
     "approval_required", "approved_by", "approved_at",
@@ -42,6 +43,9 @@ def _normalise_invoice(row: dict[str, Any]) -> dict[str, Any]:
             invoice[key] = parsed
         if isinstance(invoice.get(key), datetime) and invoice[key].tzinfo is None:
             invoice[key] = invoice[key].replace(tzinfo=timezone.utc)
+    for field in ("created_by", "assigned_user_id"):
+        if invoice.get(field) is not None:
+            invoice[field] = int(invoice[field])
     approved_by = invoice.get("approved_by")
     if approved_by is not None:
         invoice["approved_by"] = int(approved_by)
@@ -66,12 +70,8 @@ async def list_xero_sync_exceptions(company_id: int | None = None) -> list[dict[
         where_clauses.append("company_id = %s")
         params.append(company_id)
     rows = await db.fetch_all(
-        f"""
-        SELECT *
-        FROM invoices
-        WHERE {' AND '.join(where_clauses)}
-        ORDER BY xero_sync_attempted_at DESC, id DESC
-        """,  # nosec B608
+        "SELECT * FROM invoices WHERE " + " AND ".join(where_clauses)
+        + " ORDER BY xero_sync_attempted_at DESC, id DESC",
         tuple(params),
     )
     return [_normalise_invoice(row) for row in rows]
@@ -131,6 +131,8 @@ async def create_invoice(
     amount: Decimal,
     due_date: date | None,
     status: str | None,
+    created_by: int | None = None,
+    assigned_user_id: int | None = None,
     approval_required: bool = False,
     approved_by: int | None = None,
     approved_at: datetime | None = None,
@@ -156,9 +158,11 @@ async def create_invoice(
             billing_adjustment_reason,
             xero_sync_error,
             xero_sync_attempted_at,
+            created_by,
+            assigned_user_id,
             created_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -174,6 +178,8 @@ async def create_invoice(
             billing_adjustment_reason,
             xero_sync_error,
             xero_sync_attempted_at,
+            created_by,
+            assigned_user_id,
             datetime.now(timezone.utc),
         ),
     )
@@ -217,11 +223,11 @@ async def patch_invoice(invoice_id: int, **updates: Any) -> dict[str, Any]:
         if not existing:
             raise ValueError("Invoice not found")
         return existing
-    columns = ", ".join(f"{column} = %s" for column in updates.keys())
+    columns = ", ".join(column + " = %s" for column in updates)
     params = list(updates.values()) + [invoice_id]
     # Columns are produced by the explicit invoice patch allowlist above; values remain bound.
     await db.execute(  # nosec B608
-        f"UPDATE invoices SET {columns} WHERE id = %s",  # nosec B608
+        "UPDATE invoices SET " + columns + " WHERE id = %s",
         tuple(params),
     )
     updated = await get_invoice_by_id(invoice_id)
