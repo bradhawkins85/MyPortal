@@ -571,6 +571,23 @@ def test_existing_m365_callback_flows_unchanged(client, stubs, monkeypatch):
     assert sign_in_id in stubs.transactions
 
 
+def test_contacts_callback_rechecks_profile_access(client, stubs, monkeypatch):
+    stubs.sessions_by_token["token-2"] = _session(9, 2)
+    client.cookies.set(SESSION_COOKIE, "token-2")
+
+    async def ticket_writer(request):
+        request.state.active_membership = {"menu_permissions": {"menu.tickets": "write"}}
+        return {"id": 2}, None
+
+    monkeypatch.setattr(main_module, "_require_authenticated_user", ticket_writer)
+    transaction_id = stubs.put_transaction(
+        flow="user_m365_contacts", user_id=2, session_id=9, code_verifier="v"
+    )
+    state = oauth_state_serializer.dumps({"transaction_id": transaction_id})
+    response = client.get(f"/m365/callback?code=c&state={state}", follow_redirects=False)
+    assert response.status_code == 403
+
+
 def test_oauth_state_serializer_is_shared_with_main():
     assert main_module.oauth_state_serializer is oauth_state_serializer
 

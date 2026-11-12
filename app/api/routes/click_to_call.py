@@ -6,7 +6,7 @@ import re
 import httpx
 
 from app.services.monitored_http import monitored_client
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.dependencies.auth import get_current_user
@@ -14,6 +14,7 @@ from app.api.dependencies.database import require_database
 from app.core.config import get_settings as get_app_settings
 from app.repositories import click_to_call as click_to_call_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
+from app.security.profile_access import require_profile_technician_tools
 
 router = APIRouter(prefix="/api/click-to-call", tags=["Users"])
 
@@ -90,9 +91,11 @@ def _public_settings(record: dict | None) -> dict[str, object]:
 
 @router.get("/settings")
 async def get_settings(
+    request: Request,
     _: None = Depends(require_database),
     current_user: dict = Depends(get_current_user),
 ):
+    await require_profile_technician_tools(request, current_user)
     record = await click_to_call_repo.get_settings(int(current_user["id"]))
     return _public_settings(record)
 
@@ -100,9 +103,11 @@ async def get_settings(
 @router.put("/settings")
 async def update_settings(
     payload: ClickToCallSettingsUpdate,
+    request: Request,
     _: None = Depends(require_database),
     current_user: dict = Depends(get_current_user),
 ):
+    await require_profile_technician_tools(request, current_user)
     existing = await click_to_call_repo.get_settings(int(current_user["id"]))
     has_password = bool(payload.password or (existing or {}).get("password_encrypted"))
     if payload.enabled and not (payload.phone_ip and payload.login_username and has_password):

@@ -183,6 +183,10 @@ from app.security.oauth_state import (
     discovered_tenant_serializer,
     oauth_state_serializer,
 )
+from app.security.profile_access import (
+    can_edit_profile_technician_tools as _can_edit_profile_technician_tools,
+    require_profile_technician_tools,
+)
 from app.security.rate_limiter import (
     EndpointRateLimiter,
     EndpointRateLimiterMiddleware,
@@ -2578,24 +2582,6 @@ _build_menu_access_map = build_menu_access_map
 
 def _menu_can(menu_access: dict[str, Any] | None, key: str, *, write: bool = False) -> bool:
     return menu_has_access(menu_access, key, write=write)
-
-
-def _can_edit_profile_technician_tools(user: Mapping[str, Any], membership: Mapping[str, Any] | None) -> bool:
-    """Return whether technician-only self-profile fields should be visible.
-
-    ``_is_helpdesk_technician`` intentionally treats some ticket access as
-    technician-like for broad ticket routing.  The profile-only contact tools
-    are narrower: they should be visible only to super admins and users whose
-    active membership has full technician ticket access.
-    """
-    if user.get("is_super_admin"):
-        return True
-    if not membership:
-        return False
-    profile_permissions = normalize_menu_permissions(
-        membership.get("menu_permissions") or membership.get("permissions")
-    )
-    return _menu_can(profile_permissions, "menu.tickets", write=True)
 
 
 async def _has_menu_page_access(request: Request, user: Mapping[str, Any], key: str, *, write: bool = False) -> bool:
@@ -6343,6 +6329,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         current_user, auth_redirect = await _require_authenticated_user(request)
         if auth_redirect or not current_user or int(current_user["id"]) != int(state_data.get("user_id") or 0):
             return flash_redirect("/admin/profile#integrations", "The Microsoft sign-in session is not valid.", "error")
+        await require_profile_technician_tools(request, current_user)
         verifier = str(state_data.get("code_verifier") or "")
         if not verifier:
             return flash_redirect("/admin/profile#integrations", "The Microsoft sign-in verifier is missing.", "error")
@@ -7380,7 +7367,11 @@ async def admin_profile_page(request: Request):
             }
         )
     profile_passkeys.sort(key=lambda entry: entry["name"].lower())
-    m365_contacts_status = await user_m365_contacts_service.status_for_user(int(user["id"]))
+    show_technician_tools = _can_edit_profile_technician_tools(user, membership)
+    m365_contacts_status = (
+        await user_m365_contacts_service.status_for_user(int(user["id"]))
+        if show_technician_tools else {}
+    )
     from app.repositories import user_sso_identities as sso_identity_repo
     from app.services import sso_admin
 
@@ -7392,7 +7383,7 @@ async def admin_profile_page(request: Request):
         extra={
             "title": "My profile",
             "profile_membership": membership,
-            "profile_show_technician_tools": _can_edit_profile_technician_tools(user, membership),
+            "profile_show_technician_tools": show_technician_tools,
             "profile_totp_devices": totp_devices,
             "profile_passkeys": profile_passkeys,
             "profile_m365_contacts": m365_contacts_status,
@@ -7662,6 +7653,7 @@ async def profile_m365_contacts_connect(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
+    await require_profile_technician_tools(request, user)
     redirect_uri = _build_m365_redirect_uri(request)
     verifier, challenge = m365_service.generate_pkce_pair()
     client_id = await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri)
@@ -7729,6 +7721,7 @@ async def profile_m365_contacts_disconnect(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
+    await require_profile_technician_tools(request, user)
     from app.repositories import user_m365_contacts as user_contacts_repo
     await user_contacts_repo.delete_integration(int(user["id"]))
     return flash_redirect("/admin/profile#integrations", "Outlook contacts disconnected.", "success")
@@ -7743,6 +7736,7 @@ async def profile_m365_contact_phones(request: Request, name: str = Query(..., m
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    await require_profile_technician_tools(request, user)
     try:
         phones = await user_m365_contacts_service.lookup_phones(int(user["id"]), name.strip())
     except ValueError as exc:
