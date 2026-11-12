@@ -330,3 +330,176 @@ async def test_api_manual_date_rejects_future_and_updates_assets(monkeypatch):
     assert calls == [(3, date(2021, 1, 5))]
     assert saved.source == "manual"
     assert audits[0]["action"] == "cpu_release_date.update"
+
+
+# ---------------------------------------------------------------------------
+# Admin page: Assets -> CPU launch dates
+# ---------------------------------------------------------------------------
+
+
+def _form_request(path: str, body: bytes = b""):
+    from starlette.requests import Request
+
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        if sent:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request({"type": "http", "method": "POST", "path": path,
+                    "headers": [(b"content-type", b"application/x-www-form-urlencoded")]}, receive)
+
+
+def _patch_cpu_routes(monkeypatch, entry):
+    from unittest.mock import AsyncMock
+
+    from starlette.responses import Response
+
+    from app.features.assets import routes
+
+    flashes: list[tuple[str, str, str]] = []
+    main = routes._main()
+    monkeypatch.setattr(main, "_require_super_admin_page", AsyncMock(return_value=({"id": 8}, None)))
+    monkeypatch.setattr(service.repo, "get", AsyncMock(return_value=entry))
+    saved = AsyncMock(return_value=entry)
+    monkeypatch.setattr(service, "set_manual_release_date", saved)
+    monkeypatch.setattr(routes.audit_service, "record", AsyncMock())
+
+    def flash(url, message, level):
+        flashes.append((url, message, level))
+        return Response(status_code=303)
+
+    monkeypatch.setattr(main, "flash_redirect", flash)
+    return routes, flashes, saved
+
+
+_ENTRY = {"id": 3, "cpu_key": "amd:ryzen 7 5800x", "cpu_name": "AMD Ryzen 7 5800X 8-Core Processor",
+          "model": "Ryzen 7 5800X", "release_date": None, "source": None}
+
+
+@pytest.mark.asyncio
+async def test_admin_page_saves_month_as_first_of_month(monkeypatch):
+    routes, flashes, saved = _patch_cpu_routes(monkeypatch, dict(_ENTRY))
+
+    await routes.save_cpu_launch_date(_form_request("/assets/cpu-launch-dates/3", b"release_month=2020-11"), 3)
+
+    saved.assert_awaited_once_with(3, date(2020, 11, 1))
+    assert flashes[0][2] == "success"
+    assert "Ryzen 7 5800X launched November 2020" in flashes[0][1]
+    audit = routes.audit_service.record.await_args.kwargs
+    assert audit["action"] == "cpu_release_date.update"
+    assert audit["after"] == {"release_date": "2020-11-01", "source": "manual"}
+
+
+@pytest.mark.asyncio
+async def test_admin_page_clears_manual_date(monkeypatch):
+    entry = {**_ENTRY, "release_date": date(2020, 11, 1), "source": "manual"}
+    routes, flashes, saved = _patch_cpu_routes(monkeypatch, entry)
+
+    await routes.save_cpu_launch_date(
+        _form_request("/assets/cpu-launch-dates/3", b"release_month=2020-11&action=clear"), 3,
+    )
+
+    saved.assert_awaited_once_with(3, None)
+    assert "Cleared" in flashes[0][1]
+
+
+@pytest.mark.asyncio
+async def test_admin_page_rejects_missing_future_and_bad_dates(monkeypatch):
+    routes, flashes, saved = _patch_cpu_routes(monkeypatch, dict(_ENTRY))
+
+    await routes.save_cpu_launch_date(_form_request("/x", b"release_month="), 3)
+    await routes.save_cpu_launch_date(_form_request("/x", b"release_month=2999-01"), 3)
+    with pytest.raises(routes.HTTPException) as bad:
+        await routes.save_cpu_launch_date(_form_request("/x", b"release_month=last+year"), 3)
+
+    saved.assert_not_awaited()
+    assert [level for _url, _msg, level in flashes] == ["error", "error"]
+    assert bad.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_admin_page_unknown_processor_is_404(monkeypatch):
+    routes, _flashes, _saved = _patch_cpu_routes(monkeypatch, None)
+
+    with pytest.raises(routes.HTTPException) as missing:
+        await routes.save_cpu_launch_date(_form_request("/x", b"release_month=2020-01"), 99)
+
+    assert missing.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_admin_refresh_needs_module(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    routes, flashes, _saved = _patch_cpu_routes(monkeypatch, dict(_ENTRY))
+    monkeypatch.setattr(service, "is_module_enabled", AsyncMock(return_value=False))
+    background = MagicMock()
+
+    await routes.refresh_cpu_launch_dates(_form_request("/x"), background)
+
+    background.add_task.assert_not_called()
+    assert flashes[0][2] == "error"
+
+    monkeypatch.setattr(service, "is_module_enabled", AsyncMock(return_value=True))
+    await routes.refresh_cpu_launch_dates(_form_request("/x"), background)
+
+    background.add_task.assert_called_once()
+    assert flashes[1][2] == "success"
+
+
+@pytest.mark.asyncio
+async def test_overview_counts_devices_per_processor(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(service.repo, "list_asset_cpus", AsyncMock(return_value=[
+        {"id": 1, "cpu_name": "Intel(R) Core(TM) i7-8650U CPU @ 1.90GHz"},
+        {"id": 2, "cpu_name": None, "cpu_model": "Intel Core i7-8650U"},
+        {"id": 3, "cpu_name": "AMD Ryzen 7 5800X 8-Core Processor"},
+    ]))
+    monkeypatch.setattr(service.repo, "ensure", AsyncMock())
+    monkeypatch.setattr(service.repo, "list_all", AsyncMock(return_value=[
+        {"id": 1, "cpu_key": "intel:i7-8650u", "cpu_name": "Intel Core i7-8650U", "vendor": "intel",
+         "release_date": date(2017, 7, 1), "source": "intel_ark"},
+        {"id": 2, "cpu_key": "amd:ryzen 7 5800x", "cpu_name": "AMD Ryzen 7 5800X", "vendor": "amd",
+         "release_date": None, "source": None},
+    ]))
+
+    rows = {row["cpu_key"]: row for row in await service.overview(today=date(2026, 11, 11))}
+
+    assert service.repo.ensure.await_count == 2
+    assert rows["intel:i7-8650u"]["device_count"] == 2
+    assert rows["intel:i7-8650u"]["age_years"] == 9
+    assert rows["intel:i7-8650u"]["source_label"] == "Intel ARK"
+    assert rows["amd:ryzen 7 5800x"]["device_count"] == 1
+    assert rows["amd:ryzen 7 5800x"]["age_years"] is None
+    assert rows["amd:ryzen 7 5800x"]["vendor_label"] == "AMD"
+
+
+def test_admin_page_template_renders():
+    from app.main import templates
+
+    processors = [
+        {"id": 1, "cpu_key": "intel:i7-8650u", "cpu_name": "Intel(R) Core(TM) i7-8650U CPU @ 1.90GHz",
+         "model": "i7-8650U", "vendor_label": "Intel", "release_date": date(2017, 7, 1),
+         "release_label": "Q3 2017", "source": "intel_ark", "source_label": "Intel ARK",
+         "source_url": "https://ark.intel.com/x.html", "device_count": 2, "age_years": 9,
+         "lookup_status": "found", "lookup_message": None},
+        {"id": 2, "cpu_key": "amd:ryzen 7 5800x", "cpu_name": "AMD Ryzen 7 5800X", "model": "Ryzen 7 5800X",
+         "vendor_label": "AMD", "release_date": None, "release_label": None, "source": None,
+         "source_label": None, "source_url": None, "device_count": 1, "age_years": None,
+         "lookup_status": "unsupported", "lookup_message": "AMD has no free automated launch-date lookup."},
+    ]
+    template = templates.env.get_template("assets/cpu_launch_dates.html").make_module(
+        {"today_iso": "2026-11-11", "processors": [], "needs_date": [], "dated": [],
+         "cpu_lookup_enabled": False, "device_total": 0}
+    )
+    html = template.processor_item(processors[1], "2026-11")
+    assert 'action="/assets/cpu-launch-dates/2"' in html
+    assert "Needs a manual date" in html
+    html = template.processor_item(processors[0], "2026-11")
+    assert "Launched Q3 2017" in html
+    assert 'data-cpu-month="2017-07"' in html

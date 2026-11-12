@@ -14,7 +14,7 @@ shows the CPU launch date and where it came from.
 | Processor | Source |
 | --- | --- |
 | Intel | Always [Intel ARK](https://ark.intel.com), Intel's own processor specification database. Only the model number (for example `i7-8650U`) is sent. |
-| AMD, Apple, Qualcomm and others | No free automated source. Record the launch date by hand once per model; it then applies to every device with that processor. |
+| AMD, Apple, Qualcomm and others | No free automated source. Record the launch date by hand once per model on the **CPU launch dates** page; it then applies to every device with that processor. |
 | Virtual CPUs (for example "Intel Core Processor (Broadwell)") | No model number, so no lookup. Record the date by hand if it matters. |
 
 Each distinct processor model is looked up once and remembered, so a fleet of
@@ -23,6 +23,25 @@ identical laptops costs one request. Quarters reported by ARK (for example
 
 The processor name comes from the asset's synced CPU (Syncro or Tactical RMM),
 or from the native RMM agent's hardware inventory when no synced CPU exists.
+
+## CPU launch dates page
+
+Super admins open **Assets → Actions → CPU launch dates** (`/assets/cpu-launch-dates`).
+It lists every processor model your assets report, in two groups:
+
+- **Needs a date** — models without a launch date yet, most-used first, with
+  the reason (not found on Intel ARK, lookup failed, or a maker with no
+  automatic lookup).
+- **Launch date known** — models with a date, its source (a link to the Intel
+  ARK page, or *Entered manually*) and the resulting age.
+
+Choose **Add date** or **Edit date** to pick the launch month. The editor
+previews the age the devices will get before you save, and saving updates
+every device with that processor straight away. A manually entered date is
+never replaced by a lookup; **Clear date** removes it so the next lookup tries
+again. **Look up now** (shown once the module is on) runs an Intel ARK lookup
+straight away. The page works without the module turned on, so you can add
+dates by hand at any time.
 
 ## Setup
 
