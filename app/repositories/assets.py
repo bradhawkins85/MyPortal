@@ -11,7 +11,7 @@ import aiosqlite
 
 from app.core.database import db
 from app.core.logging import log_warning
-from app.services import asset_types
+from app.services import asset_types, cpu_catalog
 
 
 def _normalise_username(value: Any) -> str:
@@ -140,7 +140,7 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
         """,
         (company_id,),
     )
-    return list(rows or [])
+    return [cpu_catalog.enrich_asset(row) for row in rows or []]
 
 
 async def list_assets_for_knowledge_base_editor() -> list[dict[str, Any]]:
@@ -156,10 +156,11 @@ async def list_assets_for_knowledge_base_editor() -> list[dict[str, Any]]:
 
 
 async def get_asset_by_id(asset_id: int) -> dict[str, Any] | None:
-    return await db.fetch_one(
+    row = await db.fetch_one(
         "SELECT * FROM assets WHERE id = %s",
         (asset_id,),
     )
+    return cpu_catalog.enrich_asset(row) if row else None
 
 
 async def create_tray_asset(device: dict[str, Any]) -> int:

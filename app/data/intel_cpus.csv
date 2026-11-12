@@ -1,0 +1,3015 @@
+product,release_date,max_operating_temp_c,source_file
+"64-bit Xeon 3.20 GHz, 1M Cache, 800 MHz FSB",Q2'04,,intel_xeon_processors_v1_8.csv
+"64-bit Xeon LV 2.80 GHz, 1M Cache, 800 MHz FSB",Q2'04,,intel_xeon_processors_v1_8.csv
+Atom 230,Q2'08,,intel_atom_processors_v1_8.csv
+Atom 330,Q3'08,,intel_atom_processors_v1_8.csv
+Atom C2308,Q2'14,85,Intel_Atom_Processors_v1_9.csv
+Atom C2316,Q3'17,100,Intel_Atom_Processors_v1_9.csv
+Atom C2338,Q3'13,,Intel_Atom_Processors_v1_9.csv
+Atom C2350,Q3'13,98,Intel_Atom_Processors_v1_9.csv
+Atom C2358,Q3'13,,Intel_Atom_Processors_v1_9.csv
+Atom C2508,Q2'14,85,Intel_Atom_Processors_v1_9.csv
+Atom C2516,Q3'17,100,Intel_Atom_Processors_v1_9.csv
+Atom C2518,Q3'13,,Intel_Atom_Processors_v1_9.csv
+Atom C2530,Q3'13,97,Intel_Atom_Processors_v1_9.csv
+Atom C2538,Q3'13,,Intel_Atom_Processors_v1_9.csv
+Atom C2550,Q3'13,96,Intel_Atom_Processors_v1_9.csv
+Atom C2558,Q3'13,,Intel_Atom_Processors_v1_9.csv
+Atom C2718,Q3'13,,Intel_Atom_Processors_v1_9.csv
+Atom C2730,Q3'13,97,Intel_Atom_Processors_v1_9.csv
+Atom C2738,Q3'13,,Intel_Atom_Processors_v1_9.csv
+Atom C2750,Q3'13,97,Intel_Atom_Processors_v1_9.csv
+Atom C2758,Q3'13,,Intel_Atom_Processors_v1_9.csv
+Atom C3308,Q3'17,89,Intel_Atom_Processors_v1_9.csv
+Atom C3336,Q3'18,89,Intel_Atom_Processors_v1_9.csv
+Atom C3338,Q1'17,89,Intel_Atom_Processors_v1_9.csv
+Atom C3338R,Q2'20,88,Intel_Atom_Processors_v1_9.csv
+Atom C3436L,Q2'20,86,Intel_Atom_Processors_v1_9.csv
+Atom C3508,Q3'17,90,Intel_Atom_Processors_v1_9.csv
+Atom C3538,Q3'17,87,Intel_Atom_Processors_v1_9.csv
+Atom C3558,Q3'17,83,Intel_Atom_Processors_v1_9.csv
+Atom C3558R,Q2'20,82,Intel_Atom_Processors_v1_9.csv
+Atom C3708,Q3'17,85,Intel_Atom_Processors_v1_9.csv
+Atom C3750,Q3'17,84,Intel_Atom_Processors_v1_9.csv
+Atom C3758,Q3'17,82,Intel_Atom_Processors_v1_9.csv
+Atom C3758R,Q2'20,82,Intel_Atom_Processors_v1_9.csv
+Atom C3808,Q3'17,86,Intel_Atom_Processors_v1_9.csv
+Atom C3830,Q3'17,85,Intel_Atom_Processors_v1_9.csv
+Atom C3850,Q3'17,78,Intel_Atom_Processors_v1_9.csv
+Atom C3858,Q3'17,83,Intel_Atom_Processors_v1_9.csv
+Atom C3950,Q3'17,78,Intel_Atom_Processors_v1_9.csv
+Atom C3955,Q3'17,78,Intel_Atom_Processors_v1_9.csv
+Atom C3958,Q3'17,83,Intel_Atom_Processors_v1_9.csv
+Atom C5115,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom C5125,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom C5310,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom C5315,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom C5320,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom C5325,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom C5335C1,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom D2500,Q3'11,100,Intel_Atom_Processors_v1_9.csv
+Atom D2550,Q1'12,100,Intel_Atom_Processors_v1_9.csv
+Atom D2700,Q3'11,100,Intel_Atom_Processors_v1_9.csv
+Atom D410,Q1'10,,intel_atom_processors_v1_8.csv
+Atom D425,Q2'10,,intel_atom_processors_v1_8.csv
+Atom D510,Q1'10,,intel_atom_processors_v1_8.csv
+Atom D525,Q2'10,,intel_atom_processors_v1_8.csv
+Atom E3805,Q4'14,110,Intel_Atom_Processors_v1_9.csv
+Atom E3815,Q4'13,110,Intel_Atom_Processors_v1_9.csv
+Atom E3825,Q4'13,110,Intel_Atom_Processors_v1_9.csv
+Atom E3826,Q4'13,110,Intel_Atom_Processors_v1_9.csv
+Atom E3827,Q4'13,110,Intel_Atom_Processors_v1_9.csv
+Atom E3845,Q4'13,110,Intel_Atom_Processors_v1_9.csv
+Atom E620,Q3'10,,intel_atom_processors_v1_8.csv
+Atom E620T,Q3'10,,intel_atom_processors_v1_8.csv
+Atom E640,Q3'10,,intel_atom_processors_v1_8.csv
+Atom E640T,Q3'10,,intel_atom_processors_v1_8.csv
+Atom E645C,Q4'10,,intel_atom_processors_v1_8.csv
+Atom E645CT,Q4'10,,intel_atom_processors_v1_8.csv
+Atom E660,Q3'10,,intel_atom_processors_v1_8.csv
+Atom E660T,Q3'10,,intel_atom_processors_v1_8.csv
+Atom E665C,Q4'10,,intel_atom_processors_v1_8.csv
+Atom E665CT,Q4'10,,intel_atom_processors_v1_8.csv
+Atom E680,Q3'10,,intel_atom_processors_v1_8.csv
+Atom E680T,Q3'10,,intel_atom_processors_v1_8.csv
+Atom N2600,Q4'11,,Intel_Atom_Processors_v1_9.csv
+Atom N270,Q2'08,,intel_atom_processors_v1_8.csv
+Atom N280,Q1'09,,intel_atom_processors_v1_8.csv
+Atom N2800,Q4'11,,Intel_Atom_Processors_v1_9.csv
+Atom N450,Q1'10,,intel_atom_processors_v1_8.csv
+Atom N455,Q2'10,,intel_atom_processors_v1_8.csv
+Atom N470,Q1'10,,intel_atom_processors_v1_8.csv
+Atom N475,Q2'10,,intel_atom_processors_v1_8.csv
+Atom N550,Q3'10,,intel_atom_processors_v1_8.csv
+Atom N570,Q1'11,,intel_atom_processors_v1_8.csv
+Atom P5322,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom P5332,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom P5342,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom P5352,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom P5362,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom P5721,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom P5731,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom P5742,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom P5752,Q2'22,,Intel_Atom_Processors_v1_9.csv
+Atom P5921B,Q1'20,85,Intel_Atom_Processors_v1_9.csv
+Atom P5931B,Q1'20,85,Intel_Atom_Processors_v1_9.csv
+Atom P5942B,Q1'20,85,Intel_Atom_Processors_v1_9.csv
+Atom P5962B,Q1'20,85,Intel_Atom_Processors_v1_9.csv
+Atom S1220,Q4'12,,Intel_Atom_Processors_v1_9.csv
+Atom S1240,Q4'12,,Intel_Atom_Processors_v1_9.csv
+Atom S1260,Q4'12,,Intel_Atom_Processors_v1_9.csv
+Atom x3-C3200RK,Q1'15,85,Intel_Atom_Processors_v1_9.csv
+Atom x3-C3205RK,Q4'16,,Intel_Atom_Processors_v1_9.csv
+Atom x3-C3230RK,Q1'15,85,Intel_Atom_Processors_v1_9.csv
+Atom x3-C3235RK,Q4'15,,Intel_Atom_Processors_v1_9.csv
+Atom x3-C3265RK,Q4'16,,Intel_Atom_Processors_v1_9.csv
+Atom x3-C3295RK,Q4'16,,Intel_Atom_Processors_v1_9.csv
+Atom x3-C3405,Q1'15,85,Intel_Atom_Processors_v1_9.csv
+Atom x3-C3445,Q1'15,85,Intel_Atom_Processors_v1_9.csv
+Atom x5-E3930,Q4'16,85,Intel_Atom_Processors_v1_9.csv
+Atom x5-E3940,Q4'16,85,Intel_Atom_Processors_v1_9.csv
+Atom x5-E8000,Q1'16,90,Intel_Atom_Processors_v1_9.csv
+Atom x5-Z8300,Q2'15,90,Intel_Atom_Processors_v1_9.csv
+Atom x5-Z8330,Q1'16,90,Intel_Atom_Processors_v1_9.csv
+Atom x5-Z8350,Q1'16,90,Intel_Atom_Processors_v1_9.csv
+Atom x5-Z8500,Q1'15,90,Intel_Atom_Processors_v1_9.csv
+Atom x5-Z8550,Q1'16,90,Intel_Atom_Processors_v1_9.csv
+Atom x6200FE,Q1'21,85,Intel_Atom_Processors_v1_9.csv
+Atom x6211E,Q1'21,85,Intel_Atom_Processors_v1_9.csv
+Atom x6212RE,Q1'21,85,Intel_Atom_Processors_v1_9.csv
+Atom x6214RE,Q1'23,85,Intel_Atom_Processors_v1_9.csv
+Atom x6413E,Q1'21,85,Intel_Atom_Processors_v1_9.csv
+Atom x6414RE,Q1'21,85,Intel_Atom_Processors_v1_9.csv
+Atom x6416RE,Q1'23,85,Intel_Atom_Processors_v1_9.csv
+Atom x6425E,Q1'21,85,Intel_Atom_Processors_v1_9.csv
+Atom x6425RE,Q1'21,85,Intel_Atom_Processors_v1_9.csv
+Atom x6427FE,Q1'21,85,Intel_Atom_Processors_v1_9.csv
+Atom x7-E3950,Q4'16,85,Intel_Atom_Processors_v1_9.csv
+Atom x7-Z8700,Q1'15,90,Intel_Atom_Processors_v1_9.csv
+Atom x7-Z8750,Q1'16,90,Intel_Atom_Processors_v1_9.csv
+Atom x7203C,Q2'24,105,Intel_Atom_Processors_v1_9.csv
+Atom x7211E,Q1'23,105,Intel_Atom_Processors_v1_9.csv
+Atom x7211RE,Q2'24,105,Intel_Atom_Processors_v1_9.csv
+Atom x7213E,Q1'23,105,Intel_Atom_Processors_v1_9.csv
+Atom x7213RE,Q2'24,105,Intel_Atom_Processors_v1_9.csv
+Atom x7405C,Q2'24,105,Intel_Atom_Processors_v1_9.csv
+Atom x7425E,Q1'23,105,Intel_Atom_Processors_v1_9.csv
+Atom x7433RE,Q2'24,105,Intel_Atom_Processors_v1_9.csv
+Atom x7809C,Q2'24,105,Intel_Atom_Processors_v1_9.csv
+Atom x7835RE,Q2'24,105,Intel_Atom_Processors_v1_9.csv
+Atom Z2420,Q1'13,90,Intel_Atom_Processors_v1_9.csv
+Atom Z2460,Q2'12,90,Intel_Atom_Processors_v1_9.csv
+Atom Z2480,Q3'12,90,Intel_Atom_Processors_v1_9.csv
+Atom Z2520,Q2'13,90,Intel_Atom_Processors_v1_9.csv
+Atom Z2560,Q2'13,90,Intel_Atom_Processors_v1_9.csv
+Atom Z2580,Q2'13,90,Intel_Atom_Processors_v1_9.csv
+Atom Z2760,Q3'12,,Intel_Atom_Processors_v1_9.csv
+Atom Z3460,Q1'14,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3480,Q1'14,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3530,Q2'14,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3560,Q2'14,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3570,Q3'14,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3580,Q2'14,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3590,Q3'15,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3735D,Q1'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z3735E,Q1'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z3735F,Q1'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z3735G,Q1'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z3736F,Q2'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z3736G,Q2'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z3740,Q3'13,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3740D,Q3'13,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3745,Q1'14,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3745D,Q1'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z3770,Q3'13,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3770D,Q3'13,90,Intel_Atom_Processors_v1_9.csv
+Atom Z3775,Q1'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z3775D,Q1'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z3785,Q2'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z3795,Q1'14,,Intel_Atom_Processors_v1_9.csv
+Atom Z500,Q2'08,,intel_atom_processors_v1_8.csv
+Atom Z510,Q2'08,,intel_atom_processors_v1_8.csv
+Atom Z510P,Q2'08,,intel_atom_processors_v1_8.csv
+Atom Z510PT,Q2'08,,intel_atom_processors_v1_8.csv
+Atom Z515,Q2'09,,intel_atom_processors_v1_8.csv
+Atom Z520,Q2'08,,intel_atom_processors_v1_8.csv
+Atom Z520PT,Q2'08,,intel_atom_processors_v1_8.csv
+Atom Z530,Q2'08,,intel_atom_processors_v1_8.csv
+Atom Z530P,Q2'08,,intel_atom_processors_v1_8.csv
+Atom Z540,Q2'08,,intel_atom_processors_v1_8.csv
+Atom Z550,Q2'09,,intel_atom_processors_v1_8.csv
+Atom Z560,Q2'10,,intel_atom_processors_v1_8.csv
+Atom Z600,Q2'10,,intel_atom_processors_v1_8.csv
+Atom Z615,Q2'10,,intel_atom_processors_v1_8.csv
+Atom Z625,Q2'10,,intel_atom_processors_v1_8.csv
+Atom Z650,Q2'11,,intel_atom_processors_v1_8.csv
+Atom Z670,Q2'11,,intel_atom_processors_v1_8.csv
+"Celeron 1.66 GHz, 1M Cache, 667 MHz FSB",Q1'06,,intel_celeron_processors_v1_8.csv
+"Celeron 1.70 GHz, 128K Cache, 400 MHz FSB",Q1'02,,intel_celeron_processors_v1_8.csv
+"Celeron 1.83 GHz, 1M Cache, 667 MHz FSB",Q1'07,,intel_celeron_processors_v1_8.csv
+Celeron 1000M,Q1'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 1005M,Q3'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 1007U,Q1'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 1017U,Q3'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 1019Y,Q2'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 1020E,Q1'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 1020M,Q1'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 1037U,Q1'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 1047UE,Q1'13,105,Intel_Celeron_Processors_v1_9.csv
+"Celeron 2.00 GHz, 128K Cache, 400 MHz FSB",Q1'02,,intel_celeron_processors_v1_8.csv
+"Celeron 2.50 GHz, 128K Cache, 400 MHz FSB",Q1'02,,intel_celeron_processors_v1_8.csv
+Celeron 2000E,Q1'14,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 2002E,Q1'14,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 220,Q4'07,,intel_celeron_processors_v1_8.csv
+Celeron 2950M,Q4'13,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 2955M,Q3'13,,intel_celeron_processors_v1_6.csv
+Celeron 2955U,Q3'13,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 2957U,Q4'13,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 2961Y,Q4'13,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 2970M,Q2'14,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 2980U,Q3'13,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 2981U,Q4'13,100,Intel_Celeron_Processors_v1_9.csv
+"Celeron 300 MHz, 128K Cache, 66 MHz FSB",Q1'99,,intel_celeron_processors_v1_8.csv
+Celeron 3205U,Q1'15,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 3215U,Q2'15,105,Intel_Celeron_Processors_v1_9.csv
+"Celeron 366 MHz, 128K Cache, 66 MHz FSB",Q1'99,,intel_celeron_processors_v1_8.csv
+Celeron 3765U,Q2'15,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 3775U,Q1'15,105,Intel_Celeron_Processors_v1_9.csv
+Celeron 3855U,Q4'15,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 3865U,Q1'17,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 3867U,Q1'19,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 3955U,Q4'15,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 3965U,Q1'17,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 3965Y,Q2'17,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 420,Q2'07,,intel_celeron_processors_v1_8.csv
+Celeron 4205U,Q1'19,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 430,Q2'07,,intel_celeron_processors_v1_8.csv
+Celeron 4305U,Q2'19,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 4305UE,Q3'18,100,Intel_Celeron_Processors_v1_9.csv
+"Celeron 433 MHz, 128K Cache, 66 MHz FSB",Q2'99,,intel_celeron_processors_v1_8.csv
+Celeron 440,Q3'06,,intel_celeron_processors_v1_8.csv
+Celeron 450,Q3'08,,intel_celeron_processors_v1_8.csv
+Celeron 5205U,Q4'19,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 530,Q1'07,,intel_celeron_processors_v1_8.csv
+Celeron 5305U,Q2'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 540,Q3'07,,intel_celeron_processors_v1_8.csv
+Celeron 550,Q3'06,,intel_celeron_processors_v1_8.csv
+Celeron 560,Q1'08,,intel_celeron_processors_v1_8.csv
+"Celeron 566 MHz, 128K Cache, 66 MHz FSB",Q1'00,,intel_celeron_processors_v1_8.csv
+Celeron 570,Q2'08,,intel_celeron_processors_v1_8.csv
+Celeron 575,Q3'06,,intel_celeron_processors_v1_8.csv
+Celeron 585,Q3'08,,intel_celeron_processors_v1_8.csv
+Celeron 6305,Q4'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 6305E,Q4'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 6600HE,Q3'21,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 725C,Q2'12,,intel_celeron_processors_v1_8.csv
+Celeron 7300,Q1'22,,intel_celeron_processors_v1_8.csv
+Celeron 7305,Q1'22,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 7305E,Q1'22,100,Intel_Celeron_Processors_v1_9.csv
+Celeron 7305L,Q3'22,100,Intel_Celeron_Processors_v1_9.csv
+"Celeron 733 MHz, 128K Cache, 66 MHz FSB",Q1'00,,intel_celeron_processors_v1_8.csv
+Celeron 787,Q3'11,,intel_celeron_processors_v1_8.csv
+Celeron 797,Q1'12,,intel_celeron_processors_v1_8.csv
+Celeron 807,Q2'12,,intel_celeron_processors_v1_8.csv
+Celeron 807UE,Q4'11,,intel_celeron_processors_v1_8.csv
+Celeron 827E,Q3'11,,intel_celeron_processors_v1_8.csv
+Celeron 847,Q2'11,,intel_celeron_processors_v1_8.csv
+Celeron 847E,Q2'11,,intel_celeron_processors_v1_8.csv
+"Celeron 850 MHz, 128K Cache, 100 MHz FSB",Q1'00,,intel_celeron_processors_v1_8.csv
+Celeron 857,Q3'11,,intel_celeron_processors_v1_8.csv
+Celeron 867,Q1'12,,intel_celeron_processors_v1_8.csv
+Celeron 877,Q2'12,,intel_celeron_processors_v1_8.csv
+Celeron 887,Q3'12,,intel_celeron_processors_v1_8.csv
+Celeron 900,Q1'09,,intel_celeron_processors_v1_8.csv
+Celeron 925,Q1'11,,intel_celeron_processors_v1_8.csv
+Celeron 927UE,Q1'13,,intel_celeron_processors_v1_8.csv
+Celeron B710,Q3'11,,intel_celeron_processors_v1_8.csv
+Celeron B720,Q1'12,,intel_celeron_processors_v1_8.csv
+Celeron B800,Q2'11,,intel_celeron_processors_v1_8.csv
+Celeron B810,Q1'11,,intel_celeron_processors_v1_8.csv
+Celeron B810E,Q2'11,,intel_celeron_processors_v1_8.csv
+Celeron B815,Q1'12,,intel_celeron_processors_v1_8.csv
+Celeron B820,Q3'12,,intel_celeron_processors_v1_8.csv
+Celeron B830,Q3'12,,intel_celeron_processors_v1_8.csv
+Celeron B840,Q3'11,,intel_celeron_processors_v1_8.csv
+Celeron D 310,Q4'05,,intel_celeron_processors_v1_8.csv
+Celeron D 315,Q3'04,,intel_celeron_processors_v1_8.csv
+Celeron D 315/315J,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron D 320,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron D 325,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron D 325/325J,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron D 325J,Q4'04,,intel_celeron_processors_v1_8.csv
+Celeron D 326,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron D 330,Q4'04,,intel_celeron_processors_v1_8.csv
+Celeron D 330/330J,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron D 330J,Q4'04,,intel_celeron_processors_v1_8.csv
+Celeron D 335,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron D 335/335J,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron D 335J,Q4'04,,intel_celeron_processors_v1_8.csv
+Celeron D 340,Q4'04,,intel_celeron_processors_v1_8.csv
+Celeron D 340J,Q4'04,,intel_celeron_processors_v1_8.csv
+Celeron D 341,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron D 345,Q4'04,,intel_celeron_processors_v1_8.csv
+Celeron D 345J,Q4'04,,intel_celeron_processors_v1_8.csv
+Celeron D 347,Q4'06,,intel_celeron_processors_v1_8.csv
+Celeron D 350,Q3'05,,intel_celeron_processors_v1_8.csv
+Celeron D 350/350J,Q3'05,,intel_celeron_processors_v1_8.csv
+Celeron D 351,Q3'05,,intel_celeron_processors_v1_8.csv
+Celeron D 352,Q2'06,,intel_celeron_processors_v1_8.csv
+Celeron D 355,Q4'05,,intel_celeron_processors_v1_8.csv
+Celeron D 356,Q2'06,,intel_celeron_processors_v1_8.csv
+Celeron D 360,Q4'06,,intel_celeron_processors_v1_8.csv
+Celeron D 365,Q1'07,,intel_celeron_processors_v1_8.csv
+Celeron E1200,Q1'08,,intel_celeron_processors_v1_8.csv
+Celeron E1400,Q2'08,,intel_celeron_processors_v1_8.csv
+Celeron E1500,Q3'06,,intel_celeron_processors_v1_8.csv
+Celeron E1600,Q2'09,,intel_celeron_processors_v1_8.csv
+Celeron E3200,Q3'09,,intel_celeron_processors_v1_8.csv
+Celeron E3300,Q3'09,,intel_celeron_processors_v1_8.csv
+Celeron E3400,Q1'10,,intel_celeron_processors_v1_8.csv
+Celeron E3500,Q3'10,,intel_celeron_processors_v1_8.csv
+Celeron G1610,Q1'13,,Intel_Celeron_Processors_v1_9.csv
+Celeron G1610T,Q1'13,,Intel_Celeron_Processors_v1_9.csv
+Celeron G1620,Q1'13,,Intel_Celeron_Processors_v1_9.csv
+Celeron G1620T,Q3'13,,Intel_Celeron_Processors_v1_9.csv
+Celeron G1630,Q3'13,,Intel_Celeron_Processors_v1_9.csv
+Celeron G1820,Q1'14,72,Intel_Celeron_Processors_v1_9.csv
+Celeron G1820T,Q1'14,66.4,Intel_Celeron_Processors_v1_9.csv
+Celeron G1820TE,Q1'14,,Intel_Celeron_Processors_v1_9.csv
+Celeron G1830,Q1'14,72,Intel_Celeron_Processors_v1_9.csv
+Celeron G1840,Q2'14,72,Intel_Celeron_Processors_v1_9.csv
+Celeron G1840T,Q2'14,66.4,Intel_Celeron_Processors_v1_9.csv
+Celeron G1850,Q2'14,72,Intel_Celeron_Processors_v1_9.csv
+Celeron G3900,Q4'15,,Intel_Celeron_Processors_v1_9.csv
+Celeron G3900E,Q1'16,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G3900T,Q4'15,,Intel_Celeron_Processors_v1_9.csv
+Celeron G3900TE,Q4'15,,Intel_Celeron_Processors_v1_9.csv
+Celeron G3902E,Q1'16,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G3920,Q4'15,,Intel_Celeron_Processors_v1_9.csv
+Celeron G3930,Q1'17,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G3930E,Q2'17,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G3930T,Q1'17,92,Intel_Celeron_Processors_v1_9.csv
+Celeron G3930TE,Q2'17,88,Intel_Celeron_Processors_v1_9.csv
+Celeron G3950,Q1'17,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G440,Q3'11,,intel_celeron_processors_v1_8.csv
+Celeron G460,Q4'11,,intel_celeron_processors_v1_8.csv
+Celeron G465,Q3'12,,intel_celeron_processors_v1_8.csv
+Celeron G470,Q2'13,,intel_celeron_processors_v1_8.csv
+Celeron G4900,Q2'18,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G4900T,Q2'18,88,Intel_Celeron_Processors_v1_9.csv
+Celeron G4920,Q2'18,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G4930,Q2'19,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G4930E,Q2'19,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G4930T,Q2'19,88,Intel_Celeron_Processors_v1_9.csv
+Celeron G4932E,Q2'19,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G4950,Q2'19,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G530,Q3'11,,intel_celeron_processors_v1_8.csv
+Celeron G530T,Q3'11,,intel_celeron_processors_v1_8.csv
+Celeron G540,Q3'11,,intel_celeron_processors_v1_8.csv
+Celeron G540T,Q2'12,,intel_celeron_processors_v1_8.csv
+Celeron G550,Q2'12,,intel_celeron_processors_v1_8.csv
+Celeron G550T,Q3'12,,intel_celeron_processors_v1_8.csv
+Celeron G555,Q3'12,,intel_celeron_processors_v1_8.csv
+Celeron G5900,Q2'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G5900E,Q2'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G5900T,Q2'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G5900TE,Q2'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G5905,Q3'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G5905T,Q3'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G5920,Q2'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G5925,Q3'20,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G6900,Q1'22,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G6900E,Q1'22,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G6900T,Q1'22,100,Intel_Celeron_Processors_v1_9.csv
+Celeron G6900TE,Q1'22,100,Intel_Celeron_Processors_v1_9.csv
+Celeron J1750,Q3'13,100,Intel_Celeron_Processors_v1_9.csv
+Celeron J1800,Q4'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron J1850,Q3'13,100,Intel_Celeron_Processors_v1_9.csv
+Celeron J1900,Q4'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron J3060,Q1'16,90,Intel_Celeron_Processors_v1_9.csv
+Celeron J3160,Q1'16,90,Intel_Celeron_Processors_v1_9.csv
+Celeron J3355,Q3'16,105,Intel_Celeron_Processors_v1_9.csv
+Celeron J3355E,Q3'19,105,Intel_Celeron_Processors_v1_9.csv
+Celeron J3455,Q3'16,105,Intel_Celeron_Processors_v1_9.csv
+Celeron J3455E,Q3'19,105,Intel_Celeron_Processors_v1_9.csv
+Celeron J4005,Q4'17,105,Intel_Celeron_Processors_v1_9.csv
+Celeron J4025,Q4'19,105,Intel_Celeron_Processors_v1_9.csv
+Celeron J4105,Q4'17,105,Intel_Celeron_Processors_v1_9.csv
+Celeron J4125,Q4'19,105,Intel_Celeron_Processors_v1_9.csv
+Celeron J6412,Q1'21,70,Intel_Celeron_Processors_v1_9.csv
+Celeron J6413,Q1'21,70,Intel_Celeron_Processors_v1_9.csv
+Celeron M 320,Q2'03,,intel_celeron_processors_v1_8.csv
+Celeron M 370,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron M 440,Q1'06,,intel_celeron_processors_v1_8.csv
+Celeron M 520,Q1'07,,intel_celeron_processors_v1_8.csv
+Celeron M 530,Q3'06,,intel_celeron_processors_v1_8.csv
+"Celeron M 600 MHz, 512K Cache, 400 MHz FSB",Q2'03,,intel_celeron_processors_v1_8.csv
+Celeron M ULV 373,Q2'04,,intel_celeron_processors_v1_8.csv
+Celeron M ULV 423,Q1'06,,intel_celeron_processors_v1_8.csv
+Celeron M ULV 523,Q3'07,,intel_celeron_processors_v1_8.csv
+Celeron M ULV 722,Q3'08,,intel_celeron_processors_v1_8.csv
+Celeron M ULV 723,Q3'08,,intel_celeron_processors_v1_8.csv
+Celeron M ULV 743,Q3'09,,intel_celeron_processors_v1_8.csv
+Celeron N2805,Q3'13,80,Intel_Celeron_Processors_v1_9.csv
+Celeron N2806,Q4'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N2807,Q1'14,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N2808,Q3'14,100,Intel_Celeron_Processors_v1_9.csv
+Celeron N2810,Q3'13,100,Intel_Celeron_Processors_v1_9.csv
+Celeron N2815,Q4'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N2820,Q4'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N2830,Q1'14,100,Intel_Celeron_Processors_v1_9.csv
+Celeron N2840,Q3'14,100,Intel_Celeron_Processors_v1_9.csv
+Celeron N2910,Q3'13,100,Intel_Celeron_Processors_v1_9.csv
+Celeron N2920,Q4'13,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N2930,Q1'14,100,Intel_Celeron_Processors_v1_9.csv
+Celeron N2940,Q3'14,100,Intel_Celeron_Processors_v1_9.csv
+Celeron N3000,Q1'15,90,Intel_Celeron_Processors_v1_9.csv
+Celeron N3010,Q1'16,90,Intel_Celeron_Processors_v1_9.csv
+Celeron N3050,Q1'15,90,Intel_Celeron_Processors_v1_9.csv
+Celeron N3060,Q1'16,90,Intel_Celeron_Processors_v1_9.csv
+Celeron N3150,Q1'15,90,Intel_Celeron_Processors_v1_9.csv
+Celeron N3160,Q1'16,90,Intel_Celeron_Processors_v1_9.csv
+Celeron N3350,Q3'16,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N3350E,Q3'19,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N3450,Q3'16,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N4000,Q4'17,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N4020,Q4'19,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N4100,Q4'17,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N4120,Q4'19,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N4500,Q1'21,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N4505,Q1'21,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N5100,Q1'21,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N5105,Q1'21,105,Intel_Celeron_Processors_v1_9.csv
+Celeron N6210,Q1'21,70,Intel_Celeron_Processors_v1_9.csv
+Celeron N6211,Q1'21,70,Intel_Celeron_Processors_v1_9.csv
+Celeron P1053,Q1'10,,intel_celeron_processors_v1_8.csv
+Celeron P4500,Q1'10,,intel_celeron_processors_v1_8.csv
+Celeron P4505,Q1'10,,intel_celeron_processors_v1_8.csv
+Celeron P4600,Q3'10,,intel_celeron_processors_v1_8.csv
+Celeron SU2300,Q3'09,,intel_celeron_processors_v1_8.csv
+Celeron T1600,Q4'08,,intel_celeron_processors_v1_8.csv
+Celeron T1700,Q4'08,,intel_celeron_processors_v1_8.csv
+Celeron T3100,Q3'08,,intel_celeron_processors_v1_8.csv
+Celeron T3300,Q1'10,,intel_celeron_processors_v1_8.csv
+Celeron T3500,Q3'10,,intel_celeron_processors_v1_8.csv
+Celeron U3400,Q2'10,,intel_celeron_processors_v1_8.csv
+Celeron U3405,Q1'10,,intel_celeron_processors_v1_8.csv
+Celeron U3600,Q1'11,,intel_celeron_processors_v1_8.csv
+Celeron ULV 573,Q3'06,,intel_celeron_processors_v1_8.csv
+Celeron ULV 763,Q1'11,,intel_celeron_processors_v1_8.csv
+Core 17-11375H (with IPU),Q1'21,,intel_core_processors_v1_8.csv
+Core 2 Duo E4300,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Duo E4400,Q2'07,,intel_core_processors_v1_8.csv
+Core 2 Duo E4500,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Duo E4600,Q4'07,,intel_core_processors_v1_8.csv
+Core 2 Duo E4700,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo E6300,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Duo E6320,Q2'07,,intel_core_processors_v1_8.csv
+Core 2 Duo E6400,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Duo E6420,Q2'07,,intel_core_processors_v1_8.csv
+Core 2 Duo E6540,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Duo E6550,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Duo E6600,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Duo E6700,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Duo E6750,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Duo E6850,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Duo E7200,Q2'08,,intel_core_processors_v1_8.csv
+Core 2 Duo E7300,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo E7400,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo E7500,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Duo E7600,Q2'09,,intel_core_processors_v1_8.csv
+Core 2 Duo E8190,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo E8200,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo E8300,Q2'08,,intel_core_processors_v1_8.csv
+Core 2 Duo E8400,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo E8500,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo E8600,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo L7200,Q1'07,,intel_core_processors_v1_8.csv
+Core 2 Duo L7300,Q2'07,,intel_core_processors_v1_8.csv
+Core 2 Duo L7400,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Duo L7500,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Duo L7700,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Duo P7350,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo P7370,Q4'08,,intel_core_processors_v1_8.csv
+Core 2 Duo P7450,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Duo P7550,Q3'09,,intel_core_processors_v1_8.csv
+Core 2 Duo P7570,Q3'09,,intel_core_processors_v1_8.csv
+Core 2 Duo P8400,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo P8600,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo P8700,Q4'08,,intel_core_processors_v1_8.csv
+Core 2 Duo P8800,Q2'09,,intel_core_processors_v1_8.csv
+Core 2 Duo P9500,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo P9600,Q4'08,,intel_core_processors_v1_8.csv
+Core 2 Duo P9700,Q2'09,,intel_core_processors_v1_8.csv
+Core 2 Duo SL9300,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo SL9380,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo SL9400,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo SL9600,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Duo SP9300,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo SP9400,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo SP9600,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Duo SU9300,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo SU9400,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo SU9600,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Duo T5670,Q2'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T5750,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T5800,Q4'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T6400,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Duo T6500,Q2'09,,intel_core_processors_v1_8.csv
+Core 2 Duo T6600,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Duo T6670,Q3'09,,intel_core_processors_v1_8.csv
+Core 2 Duo T7100,Q2'07,,intel_core_processors_v1_8.csv
+Core 2 Duo T7250,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Duo T7300,Q2'07,,intel_core_processors_v1_8.csv
+Core 2 Duo T7400,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Duo T7500,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Duo T7600,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Duo T7700,Q2'07,,intel_core_processors_v1_8.csv
+Core 2 Duo T7800,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Duo T8100,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T8300,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T9300,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T9400,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T9500,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T9550,Q4'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T9600,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T9800,Q4'08,,intel_core_processors_v1_8.csv
+Core 2 Duo T9900,Q2'09,,intel_core_processors_v1_8.csv
+Core 2 Duo U7500,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Duo U7600,Q2'07,,intel_core_processors_v1_8.csv
+Core 2 Duo U7700,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Extreme QX6700,Q4'06,,intel_core_processors_v1_8.csv
+Core 2 Extreme QX6800,Q2'07,,intel_core_processors_v1_8.csv
+Core 2 Extreme QX6850,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Extreme QX9300,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Extreme QX9650,Q4'07,,intel_core_processors_v1_8.csv
+Core 2 Extreme QX9770,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Extreme QX9775,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Extreme X6800,Q3'06,,intel_core_processors_v1_8.csv
+Core 2 Extreme X7800,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Extreme X7900,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Extreme X9000,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Extreme X9100,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Quad Q6600,Q1'07,,intel_core_processors_v1_8.csv
+Core 2 Quad Q6700,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Quad Q8200,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Quad Q8200S,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Quad Q8300,Q4'08,,intel_core_processors_v1_8.csv
+Core 2 Quad Q8400,Q2'09,,intel_core_processors_v1_8.csv
+Core 2 Quad Q8400S,Q2'09,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9000,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9100,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9300,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9400,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9400S,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9450,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9505,Q3'09,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9505S,Q3'09,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9550,Q1'08,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9550S,Q1'09,,intel_core_processors_v1_8.csv
+Core 2 Quad Q9650,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 QX6700 Extreme,Q4'06,,intel_core_processors_v1_6.csv
+Core 2 QX6800 Extreme,Q2'07,,intel_core_processors_v1_6.csv
+Core 2 QX6850 Extreme,Q3'07,,intel_core_processors_v1_6.csv
+Core 2 QX9300 Extreme,Q3'08,,intel_core_processors_v1_6.csv
+Core 2 QX9650 Extreme,Q4'07,,intel_core_processors_v1_6.csv
+Core 2 QX9770 Extreme,Q1'08,,intel_core_processors_v1_6.csv
+Core 2 QX9775 Extreme,Q1'08,,intel_core_processors_v1_6.csv
+Core 2 Solo SU3500,Q2'09,,intel_core_processors_v1_8.csv
+Core 2 Solo U2100,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Solo U2200,Q3'07,,intel_core_processors_v1_8.csv
+Core 2 Solo ULV SU3300,Q3'08,,intel_core_processors_v1_8.csv
+Core 2 Solo ULV SU3500,Q2'09,,intel_core_processors_v1_8.csv
+Core 2 X6800 Extreme,Q3'06,,intel_core_processors_v1_6.csv
+Core 2 X7800 Extreme,Q3'07,,intel_core_processors_v1_6.csv
+Core 2 X7900 Extreme,Q3'07,,intel_core_processors_v1_6.csv
+Core 2 X9000 Extreme,Q1'08,,intel_core_processors_v1_6.csv
+Core 2 X9100 Extreme,Q3'08,,intel_core_processors_v1_6.csv
+Core 3 100U,Q1'24,,intel_core_processors_v1_8.csv
+Core 3 100U (with IPU),Q1'24,,intel_core_processors_v1_8.csv
+Core 5 120U,Q1'24,,intel_core_processors_v1_8.csv
+Core 7 150U,Q1'24,,intel_core_processors_v1_8.csv
+Core Duo L2400,Q1'06,,intel_core_processors_v1_8.csv
+Core Duo T2500,Q1'06,,intel_core_processors_v1_8.csv
+Core Duo U2500,Q1'06,,intel_core_processors_v1_8.csv
+Core i3-1000G1,Q3'19,,intel_core_processors_v1_6.csv
+Core i3-1000G4,Q3'19,,intel_core_processors_v1_6.csv
+Core i3-1005G1,Q3'19,,intel_core_processors_v1_8.csv
+Core i3-10100,Q2'20,,intel_core_processors_v1_8.csv
+Core i3-10100E,Q2'20,,intel_core_processors_v1_8.csv
+Core i3-10100F,Q4'20,,intel_core_processors_v1_8.csv
+Core i3-10100T,Q2'20,,intel_core_processors_v1_8.csv
+Core i3-10100TE,Q2'20,,intel_core_processors_v1_8.csv
+Core i3-10100Y,Q1'21,,intel_core_processors_v1_8.csv
+Core i3-10105,Q1'21,,intel_core_processors_v1_8.csv
+Core i3-10105F,Q1'21,,intel_core_processors_v1_8.csv
+Core i3-10105T,Q1'21,,intel_core_processors_v1_8.csv
+Core i3-10110U,Q3'19,,intel_core_processors_v1_8.csv
+Core i3-10110Y,Q3'19,,intel_core_processors_v1_8.csv
+Core i3-10300,Q2'20,,intel_core_processors_v1_8.csv
+Core i3-10300T,Q2'20,,intel_core_processors_v1_8.csv
+Core i3-10305,Q1'21,,intel_core_processors_v1_8.csv
+Core i3-10305T,Q1'21,,intel_core_processors_v1_8.csv
+Core i3-10320,Q2'20,,intel_core_processors_v1_8.csv
+Core i3-10325,Q1'21,,intel_core_processors_v1_8.csv
+Core i3-11100HE,Q3'21,,intel_core_processors_v1_8.csv
+Core i3-1110G4,Q3'20,,intel_core_processors_v1_6.csv
+Core i3-1110G4 (with IPU),Q3'20,,intel_core_processors_v1_8.csv
+Core i3-1115G4,Q3'20,,intel_core_processors_v1_8.csv
+Core i3-1115G4 (with IPU),Q3'20,,intel_core_processors_v1_8.csv
+Core i3-1115G4E,Q3'20,,intel_core_processors_v1_8.csv
+Core i3-1115GRE,Q3'20,,intel_core_processors_v1_8.csv
+Core i3-1120G4,Q1'21,,intel_core_processors_v1_8.csv
+Core i3-1125G4,Q1'21,,intel_core_processors_v1_8.csv
+Core i3-1125G4 (with IPU),Q1'21,,intel_core_processors_v1_8.csv
+Core i3-12100,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-12100E,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-12100F,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-12100T,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-12100TE,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-1210U,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-1215U,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-1215U (with IPU),Q1'22,,intel_core_processors_v1_8.csv
+Core i3-1215UE,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-1215UL,Q3'22,,intel_core_processors_v1_8.csv
+Core i3-1220P,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-1220PE,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-12300,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-12300HE,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-12300HL,Q3'22,,intel_core_processors_v1_8.csv
+Core i3-12300T,Q1'22,,intel_core_processors_v1_8.csv
+Core i3-1305U,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-13100,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-13100E,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-13100F,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-13100T,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-13100TE,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-1315U,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-1315U (with IPU),Q1'23,,intel_core_processors_v1_8.csv
+Core i3-1315UE,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-1315URE,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-1320PE,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-1320PRE,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-13300HE,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-13300HRE,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-14100,Q1'24,,intel_core_processors_v1_8.csv
+Core i3-14100F,Q1'24,,intel_core_processors_v1_8.csv
+Core i3-14100T,Q1'24,,intel_core_processors_v1_8.csv
+Core i3-2100,Q1'11,,intel_core_processors_v1_8.csv
+Core i3-2100T,Q1'11,,intel_core_processors_v1_8.csv
+Core i3-2102,Q2'11,,intel_core_processors_v1_8.csv
+Core i3-2105,Q2'11,,intel_core_processors_v1_8.csv
+Core i3-2115C,Q2'12,,intel_core_processors_v1_8.csv
+Core i3-2120,Q1'11,,intel_core_processors_v1_8.csv
+Core i3-2120T,Q3'11,,intel_core_processors_v1_8.csv
+Core i3-2125,Q3'11,,intel_core_processors_v1_8.csv
+Core i3-2130,Q3'11,,intel_core_processors_v1_8.csv
+Core i3-2310E,Q1'11,,intel_core_processors_v1_8.csv
+Core i3-2310M,Q1'11,,intel_core_processors_v1_8.csv
+Core i3-2312M,Q2'11,,intel_core_processors_v1_8.csv
+Core i3-2328M,Q3'12,,intel_core_processors_v1_8.csv
+Core i3-2330E,Q2'11,,intel_core_processors_v1_8.csv
+Core i3-2330M,Q2'11,,intel_core_processors_v1_8.csv
+Core i3-2340UE,Q2'11,,intel_core_processors_v1_8.csv
+Core i3-2348M,Q1'13,,intel_core_processors_v1_8.csv
+Core i3-2350M,Q4'11,,intel_core_processors_v1_8.csv
+Core i3-2357M,Q2'11,,intel_core_processors_v1_8.csv
+Core i3-2365M,Q3'12,,intel_core_processors_v1_8.csv
+Core i3-2367M,Q4'11,,intel_core_processors_v1_8.csv
+Core i3-2370M,Q1'12,,intel_core_processors_v1_8.csv
+Core i3-2375M,Q1'13,,intel_core_processors_v1_8.csv
+Core i3-2377M,Q2'12,,intel_core_processors_v1_8.csv
+Core i3-3110M,Q2'12,,intel_core_processors_v1_8.csv
+Core i3-3115C,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-3120M,Q3'12,,intel_core_processors_v1_8.csv
+Core i3-3120ME,Q3'12,,intel_core_processors_v1_8.csv
+Core i3-3130M,Q1'13,,intel_core_processors_v1_8.csv
+Core i3-3210,Q1'13,,intel_core_processors_v1_8.csv
+Core i3-3217U,Q2'12,,intel_core_processors_v1_8.csv
+Core i3-3217UE,Q3'12,,intel_core_processors_v1_8.csv
+Core i3-3220,Q3'12,,intel_core_processors_v1_8.csv
+Core i3-3220T,Q3'12,,intel_core_processors_v1_8.csv
+Core i3-3225,Q3'12,,intel_core_processors_v1_8.csv
+Core i3-3227U,Q1'13,,intel_core_processors_v1_8.csv
+Core i3-3229U,Q1'13,,intel_core_processors_v1_8.csv
+Core i3-3240,Q3'12,,intel_core_processors_v1_8.csv
+Core i3-3240T,Q3'12,,intel_core_processors_v1_8.csv
+Core i3-3245,Q2'13,,intel_core_processors_v1_8.csv
+Core i3-3250,Q2'13,,intel_core_processors_v1_8.csv
+Core i3-3250T,Q2'13,,intel_core_processors_v1_8.csv
+Core i3-330E,Q1'10,,intel_core_processors_v1_8.csv
+Core i3-330M,Q1'10,,intel_core_processors_v1_8.csv
+Core i3-330UM,Q2'10,,intel_core_processors_v1_8.csv
+Core i3-350M,Q1'10,,intel_core_processors_v1_8.csv
+Core i3-370M,Q3'10,,intel_core_processors_v1_8.csv
+Core i3-380M,Q3'10,,intel_core_processors_v1_8.csv
+Core i3-380UM,Q4'10,,intel_core_processors_v1_8.csv
+Core i3-390M,Q1'11,,intel_core_processors_v1_8.csv
+Core i3-4000M,Q4'13,,intel_core_processors_v1_8.csv
+Core i3-4005M,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4010U,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4010Y,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4012Y,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4020Y,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4025U,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4030U,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4030Y,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4100E,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4100M,Q4'13,,intel_core_processors_v1_8.csv
+Core i3-4100U,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4102E,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4110E,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4110M,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4112E,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4120U,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4130,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4130T,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4150,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4150T,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4158U,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4160,Q3'14,,intel_core_processors_v1_8.csv
+Core i3-4160T,Q3'14,,intel_core_processors_v1_8.csv
+Core i3-4170,Q1'15,,intel_core_processors_v1_8.csv
+Core i3-4170T,Q1'15,,intel_core_processors_v1_8.csv
+Core i3-4330,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4330T,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4330TE,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4340,Q3'13,,intel_core_processors_v1_8.csv
+Core i3-4340TE,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4350,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4350T,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4360,Q2'14,,intel_core_processors_v1_8.csv
+Core i3-4360T,Q3'14,,intel_core_processors_v1_8.csv
+Core i3-4370,Q3'14,,intel_core_processors_v1_8.csv
+Core i3-4370T,Q1'15,,intel_core_processors_v1_8.csv
+Core i3-5005U,Q1'15,,intel_core_processors_v1_8.csv
+Core i3-5010U,Q1'15,,intel_core_processors_v1_8.csv
+Core i3-5015U,Q1'15,,intel_core_processors_v1_8.csv
+Core i3-5020U,Q1'15,,intel_core_processors_v1_8.csv
+Core i3-5157U,Q1'15,,intel_core_processors_v1_8.csv
+Core i3-530,Q1'10,,intel_core_processors_v1_8.csv
+Core i3-540,Q1'10,,intel_core_processors_v1_8.csv
+Core i3-550,Q2'10,,intel_core_processors_v1_8.csv
+Core i3-560,Q3'10,,intel_core_processors_v1_8.csv
+Core i3-6006U,Q4'16,,intel_core_processors_v1_8.csv
+Core i3-6098P,Q4'15,,intel_core_processors_v1_8.csv
+Core i3-6100,Q3'15,,intel_core_processors_v1_8.csv
+Core i3-6100E,Q4'15,,intel_core_processors_v1_8.csv
+Core i3-6100H,Q3'15,,intel_core_processors_v1_8.csv
+Core i3-6100T,Q3'15,,intel_core_processors_v1_8.csv
+Core i3-6100TE,Q4'15,,intel_core_processors_v1_8.csv
+Core i3-6100U,Q3'15,,intel_core_processors_v1_8.csv
+Core i3-6102E,Q4'15,,intel_core_processors_v1_8.csv
+Core i3-6157U,Q3'16,,intel_core_processors_v1_8.csv
+Core i3-6167U,Q3'15,,intel_core_processors_v1_8.csv
+Core i3-6300,Q3'15,,intel_core_processors_v1_8.csv
+Core i3-6300T,Q3'15,,intel_core_processors_v1_8.csv
+Core i3-6320,Q3'15,,intel_core_processors_v1_8.csv
+Core i3-7020U,Q2'18,,intel_core_processors_v1_8.csv
+Core i3-7100,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7100E,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7100H,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7100T,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7100U,Q3'16,,intel_core_processors_v1_8.csv
+Core i3-7101E,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7101TE,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7102E,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7130U,Q2'17,,intel_core_processors_v1_8.csv
+Core i3-7167U,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7300,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7300T,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7320,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-7350K,Q1'17,,intel_core_processors_v1_8.csv
+Core i3-8100,Q4'17,,intel_core_processors_v1_8.csv
+Core i3-8100B,Q3'18,,intel_core_processors_v1_8.csv
+Core i3-8100H,Q4'17,,intel_core_processors_v1_8.csv
+Core i3-8100T,Q2'18,,intel_core_processors_v1_8.csv
+Core i3-8109U,Q2'18,,intel_core_processors_v1_8.csv
+Core i3-8130U,Q1'18,,intel_core_processors_v1_8.csv
+Core i3-8140U,Q4'19,,intel_core_processors_v1_8.csv
+Core i3-8145U,Q3'18,,intel_core_processors_v1_8.csv
+Core i3-8145UE,Q3'18,,intel_core_processors_v1_8.csv
+Core i3-8300,Q2'18,,intel_core_processors_v1_8.csv
+Core i3-8300T,Q2'18,,intel_core_processors_v1_8.csv
+Core i3-8350,Q4'17,,intel_core_processors_v1_6.csv
+Core i3-8350K,Q4'17,,intel_core_processors_v1_8.csv
+Core i3-9100,Q2'19,,intel_core_processors_v1_8.csv
+Core i3-9100E,Q2'19,,intel_core_processors_v1_8.csv
+Core i3-9100F,Q2'19,,intel_core_processors_v1_8.csv
+Core i3-9100HL,Q2'19,,intel_core_processors_v1_8.csv
+Core i3-9100T,Q2'19,,intel_core_processors_v1_8.csv
+Core i3-9100TE,Q2'19,,intel_core_processors_v1_8.csv
+Core i3-9300,Q2'19,,intel_core_processors_v1_8.csv
+Core i3-9300T,Q2'19,,intel_core_processors_v1_8.csv
+Core i3-9320,Q2'19,,intel_core_processors_v1_8.csv
+Core i3-9350K,Q2'19,,intel_core_processors_v1_8.csv
+Core i3-9350KF,Q1'19,,intel_core_processors_v1_8.csv
+Core i3-L13G4,Q2'20,,intel_core_processors_v1_8.csv
+Core i3-N300,Q1'23,,intel_core_processors_v1_8.csv
+Core i3-N305,Q1'23,,intel_core_processors_v1_8.csv
+Core i5+8400 Includes Intel Optane Memory,Q2'18,,intel_core_processors_v1_8.csv
+Core i5+8500 Includes Intel Optane Memory,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-10200H,Q3'20,,intel_core_processors_v1_8.csv
+Core i5-10210U,Q3'19,,intel_core_processors_v1_8.csv
+Core i5-10210Y,Q3'19,,intel_core_processors_v1_8.csv
+Core i5-10300H,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-1030G4,Q3'19,,intel_core_processors_v1_6.csv
+Core i5-1030G7,Q3'19,,intel_core_processors_v1_6.csv
+Core i5-10310U,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10310Y,Q3'19,,intel_core_processors_v1_8.csv
+Core i5-1035G1,Q3'19,,intel_core_processors_v1_8.csv
+Core i5-1035G4,Q3'19,,intel_core_processors_v1_8.csv
+Core i5-1035G7,Q3'19,,intel_core_processors_v1_8.csv
+Core i5-1038NG7,Q2'20,,intel_core_processors_v1_6.csv
+Core i5-10400,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10400F,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10400H,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10400T,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10500,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10500E,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10500H,Q4'20,,intel_core_processors_v1_8.csv
+Core i5-10500T,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10500TE,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10505,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-10600,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10600K,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10600KF,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-10600T,Q2'20,,intel_core_processors_v1_8.csv
+Core i5-11260H,Q2'21,,intel_core_processors_v1_8.csv
+Core i5-11300H,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-1130G7,Q3'20,,intel_core_processors_v1_6.csv
+Core i5-1130G7 (with IPU),Q3'20,,intel_core_processors_v1_8.csv
+Core i5-11320H,Q2'21,,intel_core_processors_v1_8.csv
+Core i5-1135G7,Q3'20,,intel_core_processors_v1_8.csv
+Core i5-1135G7 (with IPU),Q3'20,,intel_core_processors_v1_8.csv
+Core i5-11400,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-11400F,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-11400H,Q2'21,,intel_core_processors_v1_8.csv
+Core i5-11400T,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-1140G7,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-1145G7,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-1145G7E,Q3'20,,intel_core_processors_v1_8.csv
+Core i5-1145GRE,Q3'20,,intel_core_processors_v1_8.csv
+Core i5-11500,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-11500H,Q2'21,,intel_core_processors_v1_8.csv
+Core i5-11500HE,Q3'21,,intel_core_processors_v1_8.csv
+Core i5-11500T,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-1155G7,Q2'21,,intel_core_processors_v1_8.csv
+Core i5-1155G7 (with IPU),Q2'21,,intel_core_processors_v1_8.csv
+Core i5-11600,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-11600K,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-11600KF,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-11600T,Q1'21,,intel_core_processors_v1_8.csv
+Core i5-1230U,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-1235U,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-1235U (with IPU),Q1'22,,intel_core_processors_v1_8.csv
+Core i5-1235UL,Q3'22,,intel_core_processors_v1_8.csv
+Core i5-12400,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12400F,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12400T,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-1240P,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-1240U,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12450H,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12450HX,Q2'22,,intel_core_processors_v1_8.csv
+Core i5-12450T,Q1'22,,intel_core_processors_v1_6.csv
+Core i5-1245U,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-1245UE,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-1245UL,Q3'22,,intel_core_processors_v1_8.csv
+Core i5-12500,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12500E,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12500H,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12500HL,Q3'22,,intel_core_processors_v1_8.csv
+Core i5-12500T,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12500TE,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-1250P,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-1250PE,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12600,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12600H,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12600HE,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-12600HL,Q3'22,,intel_core_processors_v1_8.csv
+Core i5-12600HX,Q2'22,,intel_core_processors_v1_8.csv
+Core i5-12600K,Q4'21,,intel_core_processors_v1_8.csv
+Core i5-12600KF,Q4'21,,intel_core_processors_v1_8.csv
+Core i5-12600T,Q1'22,,intel_core_processors_v1_8.csv
+Core i5-1334U,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-1335U,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-1335UE,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13400,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13400E,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13400F,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13400T,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-1340P,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-1340PE,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13420H,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13450HX,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-1345U,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-1345UE,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-1345URE,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13500,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13500E,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13500H,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13500H (with IPU),Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13500HX,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13500T,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13500TE,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13505H,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-1350P,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-1350PE,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-1350PRE,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13600,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13600H,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13600HE,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13600HRE,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13600HX,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-13600K,Q4'22,,intel_core_processors_v1_8.csv
+Core i5-13600KF,Q4'22,,intel_core_processors_v1_8.csv
+Core i5-13600T,Q1'23,,intel_core_processors_v1_8.csv
+Core i5-14400,Q1'24,,intel_core_processors_v1_8.csv
+Core i5-14400F,Q1'24,,intel_core_processors_v1_8.csv
+Core i5-14400T,Q1'24,,intel_core_processors_v1_8.csv
+Core i5-14450HX,Q1'24,,intel_core_processors_v1_8.csv
+Core i5-14500,Q1'24,,intel_core_processors_v1_8.csv
+Core i5-14500HX,Q1'24,,intel_core_processors_v1_8.csv
+Core i5-14500T,Q1'24,,intel_core_processors_v1_8.csv
+Core i5-14600,Q1'24,,intel_core_processors_v1_8.csv
+Core i5-14600K,Q4'23,,intel_core_processors_v1_8.csv
+Core i5-14600KF,Q4'23,,intel_core_processors_v1_8.csv
+Core i5-14600T,Q1'24,,intel_core_processors_v1_8.csv
+Core i5-2300,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2310,Q2'11,,intel_core_processors_v1_8.csv
+Core i5-2320,Q3'11,,intel_core_processors_v1_8.csv
+Core i5-2380P,Q1'12,,intel_core_processors_v1_8.csv
+Core i5-2390T,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2400,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2400S,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2405S,Q2'11,,intel_core_processors_v1_8.csv
+Core i5-2410M,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2430M,Q4'11,,intel_core_processors_v1_8.csv
+Core i5-2435M,Q4'11,,intel_core_processors_v1_8.csv
+Core i5-2450M,Q1'12,,intel_core_processors_v1_8.csv
+Core i5-2450P,Q1'12,,intel_core_processors_v1_8.csv
+Core i5-2467M,Q2'11,,intel_core_processors_v1_8.csv
+Core i5-2500,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2500K,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2500S,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2500T,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2510E,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2515E,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2520M,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2537M,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2540M,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-2550K,Q1'12,,intel_core_processors_v1_8.csv
+Core i5-2557M,Q2'11,,intel_core_processors_v1_8.csv
+Core i5-3210M (BGA),Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3210M (rPGA),Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3230M (BGA),Q1'13,,intel_core_processors_v1_8.csv
+Core i5-3230M (rPGA),Q1'13,,intel_core_processors_v1_8.csv
+Core i5-3317U,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3320M,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3330,Q3'12,,intel_core_processors_v1_8.csv
+Core i5-3330S,Q3'12,,intel_core_processors_v1_8.csv
+Core i5-3337U,Q1'13,,intel_core_processors_v1_8.csv
+Core i5-3339Y,Q1'13,,intel_core_processors_v1_8.csv
+Core i5-3340,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-3340M,Q1'13,,intel_core_processors_v1_8.csv
+Core i5-3340S,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-3350P,Q3'12,,intel_core_processors_v1_8.csv
+Core i5-3360M,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3380M,Q1'13,,intel_core_processors_v1_8.csv
+Core i5-3427U,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3437U,Q1'13,,intel_core_processors_v1_8.csv
+Core i5-3439Y,Q1'13,,intel_core_processors_v1_8.csv
+Core i5-3450,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3450S,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3470,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3470S,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3470T,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3475S,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3550,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3550S,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3570,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3570K,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3570S,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3570T,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-3610ME,Q2'12,,intel_core_processors_v1_8.csv
+Core i5-4200H,Q4'13,,intel_core_processors_v1_8.csv
+Core i5-4200M,Q4'13,,intel_core_processors_v1_8.csv
+Core i5-4200U,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4200Y,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4202Y,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4210H,Q3'14,,intel_core_processors_v1_8.csv
+Core i5-4210M,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4210U,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4210Y,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4220Y,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4250U,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4258U,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4260U,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4278U,Q3'14,,intel_core_processors_v1_8.csv
+Core i5-4288U,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4300M,Q4'13,,intel_core_processors_v1_8.csv
+Core i5-4300U,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4300Y,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4302Y,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4308U,Q3'14,,intel_core_processors_v1_8.csv
+Core i5-430M,Q1'10,,intel_core_processors_v1_8.csv
+Core i5-430UM,Q2'10,,intel_core_processors_v1_8.csv
+Core i5-4310M,Q1'14,,intel_core_processors_v1_8.csv
+Core i5-4310U,Q1'14,,intel_core_processors_v1_8.csv
+Core i5-4330M,Q4'13,,intel_core_processors_v1_8.csv
+Core i5-4340M,Q1'14,,intel_core_processors_v1_8.csv
+Core i5-4350U,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4360U,Q1'14,,intel_core_processors_v1_8.csv
+Core i5-4400E,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4402E,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4402EC,Q1'14,,intel_core_processors_v1_8.csv
+Core i5-4410E,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4422E,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4430,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4430S,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4440,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4440S,Q3'13,,intel_core_processors_v1_8.csv
+Core i5-4460,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4460S,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4460T,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-450M,Q2'10,,intel_core_processors_v1_8.csv
+Core i5-4570,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4570R,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4570S,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4570T,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4570TE,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4590,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4590S,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4590T,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-460M,Q3'10,,intel_core_processors_v1_8.csv
+Core i5-4670,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4670K,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4670R,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4670S,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4670T,Q2'13,,intel_core_processors_v1_8.csv
+Core i5-4690,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4690K,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4690S,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-4690T,Q2'14,,intel_core_processors_v1_8.csv
+Core i5-470UM,Q4'10,,intel_core_processors_v1_8.csv
+Core i5-480M,Q1'11,,intel_core_processors_v1_8.csv
+Core i5-5200U,Q1'15,,intel_core_processors_v1_8.csv
+Core i5-520E,Q1'10,,intel_core_processors_v1_8.csv
+Core i5-520M,Q1'10,,intel_core_processors_v1_8.csv
+Core i5-520UM,Q1'10,,intel_core_processors_v1_8.csv
+Core i5-5250U,Q1'15,,intel_core_processors_v1_8.csv
+Core i5-5257U,Q1'15,,intel_core_processors_v1_8.csv
+Core i5-5287U,Q1'15,,intel_core_processors_v1_8.csv
+Core i5-5300U,Q1'15,,intel_core_processors_v1_8.csv
+Core i5-5350H,Q2'15,,intel_core_processors_v1_8.csv
+Core i5-5350U,Q1'15,,intel_core_processors_v1_8.csv
+Core i5-540M,Q1'10,,intel_core_processors_v1_8.csv
+Core i5-540UM,Q2'10,,intel_core_processors_v1_8.csv
+Core i5-5575R,Q2'15,,intel_core_processors_v1_8.csv
+Core i5-560M,Q3'10,,intel_core_processors_v1_8.csv
+Core i5-560UM,Q3'10,,intel_core_processors_v1_8.csv
+Core i5-5675C,Q2'15,,intel_core_processors_v1_8.csv
+Core i5-5675R,Q2'15,,intel_core_processors_v1_8.csv
+Core i5-580M,Q3'10,,intel_core_processors_v1_8.csv
+Core i5-6200U,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6260U,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6267U,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6287U,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6300HQ,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6300U,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6350HQ,Q1'16,,intel_core_processors_v1_8.csv
+Core i5-6360U,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6400,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6400T,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6402P,Q4'15,,intel_core_processors_v1_8.csv
+Core i5-6440EQ,Q4'15,,intel_core_processors_v1_8.csv
+Core i5-6440HQ,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6442EQ,Q4'15,,intel_core_processors_v1_8.csv
+Core i5-650,Q1'10,,intel_core_processors_v1_8.csv
+Core i5-6500,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6500T,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6500TE,Q4'15,,intel_core_processors_v1_8.csv
+Core i5-655K,Q2'10,,intel_core_processors_v1_8.csv
+Core i5-6585R,Q2'16,,intel_core_processors_v1_8.csv
+Core i5-660,Q1'10,,intel_core_processors_v1_8.csv
+Core i5-6600,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6600K,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-6600T,Q3'15,,intel_core_processors_v1_8.csv
+Core i5-661,Q1'10,,intel_core_processors_v1_8.csv
+Core i5-6685R,Q2'16,,intel_core_processors_v1_8.csv
+Core i5-670,Q1'10,,intel_core_processors_v1_8.csv
+Core i5-680,Q2'10,,intel_core_processors_v1_8.csv
+Core i5-7200U,Q3'16,,intel_core_processors_v1_8.csv
+Core i5-7260U,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7267U,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7287U,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7300HQ,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7300U,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7360U,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7400,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7400T,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7440EQ,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7440HQ,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7442EQ,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-750,Q3'09,,intel_core_processors_v1_8.csv
+Core i5-7500,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7500T,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-750S,Q1'10,,intel_core_processors_v1_8.csv
+Core i5-760,Q3'10,,intel_core_processors_v1_8.csv
+Core i5-7600,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7600K,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7600T,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-7640X X Series,Q2'17,,intel_core_processors_v1_8.csv
+Core i5-7Y54,Q3'16,,intel_core_processors_v1_8.csv
+Core i5-7Y57,Q1'17,,intel_core_processors_v1_8.csv
+Core i5-8200Y,Q3'18,,intel_core_processors_v1_8.csv
+Core i5-8210Y,Q1'19,,intel_core_processors_v1_8.csv
+Core i5-8250U,Q3'17,,intel_core_processors_v1_8.csv
+Core i5-8257U,Q3'19,,intel_core_processors_v1_8.csv
+Core i5-8259U,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-8260U,Q4'19,,intel_core_processors_v1_8.csv
+Core i5-8265U,Q3'18,,intel_core_processors_v1_8.csv
+Core i5-8269U,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-8279U,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-8300H,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-8305G with Radeon Pro WX Vega M GL Graphics,Q3'18,,intel_core_processors_v1_8.csv
+Core i5-8305G with Radeon RX Vega M GL Graphics,Q1'18,,intel_core_processors_v1_8.csv
+Core i5-8310Y,Q1'19,,intel_core_processors_v1_8.csv
+Core i5-8350U,Q3'17,,intel_core_processors_v1_8.csv
+Core i5-8365U,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-8365UE,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-8400,Q4'17,,intel_core_processors_v1_8.csv
+Core i5-8400 Includes Intel Optane Memory,Q2'18,,intel_core_processors_v1_6.csv
+Core i5-8400B,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-8400H,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-8400T,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-8500,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-8500 Includes Intel Optane Memory,Q2'18,,intel_core_processors_v1_6.csv
+Core i5-8500B,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-8500T,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-8600,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-8600K,Q4'17,,intel_core_processors_v1_8.csv
+Core i5-8600T,Q2'18,,intel_core_processors_v1_8.csv
+Core i5-9300H,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-9300HF,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-9400,Q1'19,,intel_core_processors_v1_8.csv
+Core i5-9400F,Q1'19,,intel_core_processors_v1_8.csv
+Core i5-9400H,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-9400T,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-9500,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-9500E,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-9500F,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-9500T,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-9500TE,Q4'17,,intel_core_processors_v1_8.csv
+Core i5-9600,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-9600K,Q4'18,,intel_core_processors_v1_8.csv
+Core i5-9600KF,Q1'19,,intel_core_processors_v1_8.csv
+Core i5-9600T,Q2'19,,intel_core_processors_v1_8.csv
+Core i5-L16G7,Q2'20,,intel_core_processors_v1_8.csv
+Core i7+8700 Includes Intel Optane Memory,Q2'18,,intel_core_processors_v1_8.csv
+Core i7-10510U,Q3'19,,intel_core_processors_v1_8.csv
+Core i7-10510Y,Q3'19,,intel_core_processors_v1_8.csv
+Core i7-1060G7,Q3'19,,intel_core_processors_v1_6.csv
+Core i7-10610U,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-1065G7,Q3'19,,intel_core_processors_v1_8.csv
+Core i7-1068NG7,Q2'20,,intel_core_processors_v1_6.csv
+Core i7-10700,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-10700E,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-10700F,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-10700K,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-10700KF,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-10700T,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-10700TE,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-10710U,Q3'19,,intel_core_processors_v1_8.csv
+Core i7-10750H,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-10810U,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-10850H,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-10870H,Q3'20,,intel_core_processors_v1_8.csv
+Core i7-10875H,Q2'20,,intel_core_processors_v1_8.csv
+Core i7-11370H,Q1'21,,intel_core_processors_v1_6.csv
+Core i7-11370H (with IPU),Q1'21,,intel_core_processors_v1_8.csv
+Core i7-11375H,Q1'21,,intel_core_processors_v1_6.csv
+Core i7-11390H,Q2'21,,intel_core_processors_v1_6.csv
+Core i7-11390H (with IPU),Q2'21,,intel_core_processors_v1_8.csv
+Core i7-11600H,Q3'21,,intel_core_processors_v1_8.csv
+Core i7-1160G7,Q3'20,,intel_core_processors_v1_8.csv
+Core i7-1165G7,Q3'20,,intel_core_processors_v1_8.csv
+Core i7-1165G7 (with IPU),Q3'20,,intel_core_processors_v1_8.csv
+Core i7-11700,Q1'21,,intel_core_processors_v1_8.csv
+Core i7-11700F,Q1'21,,intel_core_processors_v1_8.csv
+Core i7-11700K,Q1'21,,intel_core_processors_v1_8.csv
+Core i7-11700KF,Q1'21,,intel_core_processors_v1_8.csv
+Core i7-11700T,Q1'21,,intel_core_processors_v1_8.csv
+Core i7-11800H,Q2'21,,intel_core_processors_v1_8.csv
+Core i7-1180G7,Q1'21,,intel_core_processors_v1_6.csv
+Core i7-1180G7 (with IPU),Q1'21,,intel_core_processors_v1_8.csv
+Core i7-11850H,Q2'21,,intel_core_processors_v1_8.csv
+Core i7-11850HE,Q3'21,,intel_core_processors_v1_8.csv
+Core i7-1185G7,Q3'20,,intel_core_processors_v1_8.csv
+Core i7-1185G7E,Q3'20,,intel_core_processors_v1_8.csv
+Core i7-1185GRE,Q3'20,,intel_core_processors_v1_8.csv
+Core i7-1195G7,Q2'21,,intel_core_processors_v1_8.csv
+Core i7-1195G7 (with IPU),Q2'21,,intel_core_processors_v1_8.csv
+Core i7-1250U,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-1255U,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-1255UL,Q3'22,,intel_core_processors_v1_8.csv
+Core i7-1260P,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-1260U,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12650H,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12650HX,Q2'22,,intel_core_processors_v1_8.csv
+Core i7-1265U,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-1265UE,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-1265UL,Q3'22,,intel_core_processors_v1_8.csv
+Core i7-12700,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12700E,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12700F,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12700H,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12700HL,Q3'22,,intel_core_processors_v1_8.csv
+Core i7-12700K,Q4'21,,intel_core_processors_v1_8.csv
+Core i7-12700KF,Q4'21,,intel_core_processors_v1_8.csv
+Core i7-12700T,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12700TE,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-1270P,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-1270PE,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12800H,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12800HE,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12800HL,Q3'22,,intel_core_processors_v1_8.csv
+Core i7-12800HX,Q2'22,,intel_core_processors_v1_8.csv
+Core i7-1280P,Q1'22,,intel_core_processors_v1_8.csv
+Core i7-12850HX,Q2'22,,intel_core_processors_v1_8.csv
+Core i7-1355U,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-1360P,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13620H,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13650HX,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-1365U,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-1365UE,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-1365URE,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-1366URE,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13700,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13700E,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13700F,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13700H,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13700HX,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13700K,Q4'22,,intel_core_processors_v1_8.csv
+Core i7-13700KF,Q4'22,,intel_core_processors_v1_8.csv
+Core i7-13700T,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13700TE,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13705H,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-1370P,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-1370PE,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-1370PRE,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-1375PRE,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13800H,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13800HE,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13800HRE,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-13850HX,Q1'23,,intel_core_processors_v1_8.csv
+Core i7-14650HX,Q1'24,,intel_core_processors_v1_8.csv
+Core i7-14700,Q1'24,,intel_core_processors_v1_8.csv
+Core i7-14700F,Q1'24,,intel_core_processors_v1_8.csv
+Core i7-14700HX,Q1'24,,intel_core_processors_v1_8.csv
+Core i7-14700K,Q4'23,,intel_core_processors_v1_8.csv
+Core i7-14700KF,Q4'23,,intel_core_processors_v1_8.csv
+Core i7-14700T,Q1'24,,intel_core_processors_v1_8.csv
+Core i7-2600,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2600K,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2600S,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2610UE,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2617M,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2620M,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2629M,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2630QM,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2635QM,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2637M,Q2'11,,intel_core_processors_v1_8.csv
+Core i7-2640M,Q4'11,,intel_core_processors_v1_8.csv
+Core i7-2649M,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2655LE,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2657M,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2670QM,Q4'11,,intel_core_processors_v1_8.csv
+Core i7-2675QM,Q4'11,,intel_core_processors_v1_8.csv
+Core i7-2677M,Q2'11,,intel_core_processors_v1_8.csv
+Core i7-2700K,Q4'11,,intel_core_processors_v1_8.csv
+Core i7-2710QE,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2715QE,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2720QM,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2760QM,Q4'11,,intel_core_processors_v1_8.csv
+Core i7-2820QM,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2860QM,Q4'11,,intel_core_processors_v1_8.csv
+Core i7-2920XM Extreme Edition,Q1'11,,intel_core_processors_v1_8.csv
+Core i7-2960XM Extreme Edition,Q4'11,,intel_core_processors_v1_8.csv
+Core i7-3517U,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3517UE,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3520M,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3537U,Q1'13,,intel_core_processors_v1_8.csv
+Core i7-3540M,Q1'13,,intel_core_processors_v1_8.csv
+Core i7-3555LE,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3610QE,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3610QM,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3612QE,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3612QM (BGA),Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3612QM (rPGA),Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3615QE,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3615QM,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3630QM,Q3'12,,intel_core_processors_v1_8.csv
+Core i7-3632QM (BGA),Q3'12,,intel_core_processors_v1_8.csv
+Core i7-3632QM (rPGA),Q3'12,,intel_core_processors_v1_8.csv
+Core i7-3635QM,Q3'12,,intel_core_processors_v1_8.csv
+Core i7-3667U,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3687U,Q1'13,,intel_core_processors_v1_8.csv
+Core i7-3689Y,Q1'13,,intel_core_processors_v1_8.csv
+Core i7-3720QM,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3740QM,Q3'12,,intel_core_processors_v1_8.csv
+Core i7-3770,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3770K,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3770S,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3770T,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3820,Q1'12,,intel_core_processors_v1_8.csv
+Core i7-3820QM,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3840QM,Q3'12,,intel_core_processors_v1_8.csv
+Core i7-3920XM Extreme Edition,Q2'12,,intel_core_processors_v1_8.csv
+Core i7-3930K,Q4'11,,intel_core_processors_v1_8.csv
+Core i7-3940XM Extreme Edition,Q3'12,,intel_core_processors_v1_8.csv
+Core i7-3960X Extreme Edition,Q4'11,,intel_core_processors_v1_8.csv
+Core i7-3970X Extreme Edition,Q4'12,,intel_core_processors_v1_8.csv
+Core i7-4500U,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4510U,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4550U,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4558U,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4578U,Q3'14,,intel_core_processors_v1_8.csv
+Core i7-4600M,Q4'13,,intel_core_processors_v1_8.csv
+Core i7-4600U,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4610M,Q1'14,,intel_core_processors_v1_8.csv
+Core i7-4610Y,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4650U,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4700EC,Q1'14,,intel_core_processors_v1_8.csv
+Core i7-4700EQ,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4700HQ,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4700MQ,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4702EC,Q1'14,,intel_core_processors_v1_8.csv
+Core i7-4702HQ,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4702MQ,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4710HQ,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4710MQ,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4712HQ,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4712MQ,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4720HQ,Q1'15,,intel_core_processors_v1_8.csv
+Core i7-4722HQ,Q1'15,,intel_core_processors_v1_8.csv
+Core i7-4750HQ,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4760HQ,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4765T,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4770,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4770HQ,Q3'14,,intel_core_processors_v1_8.csv
+Core i7-4770K,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4770R,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4770S,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4770T,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4770TE,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4771,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4785T,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4790,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4790K,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4790S,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4790T,Q2'14,,intel_core_processors_v1_8.csv
+Core i7-4800MQ,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4810MQ,Q1'14,,intel_core_processors_v1_8.csv
+Core i7-4820K,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4850HQ,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4860HQ,Q1'14,,intel_core_processors_v1_8.csv
+Core i7-4870HQ,Q3'14,,intel_core_processors_v1_8.csv
+Core i7-4900MQ,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4910MQ,Q1'14,,intel_core_processors_v1_8.csv
+Core i7-4930K,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4930MX Extreme Edition,Q2'13,,intel_core_processors_v1_8.csv
+Core i7-4940MX Extreme Edition,Q1'14,,intel_core_processors_v1_8.csv
+Core i7-4950HQ,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4960HQ,Q4'13,,intel_core_processors_v1_8.csv
+Core i7-4960X Extreme Edition,Q3'13,,intel_core_processors_v1_8.csv
+Core i7-4980HQ,Q3'14,,intel_core_processors_v1_8.csv
+Core i7-5500U,Q1'15,,intel_core_processors_v1_8.csv
+Core i7-5550U,Q1'15,,intel_core_processors_v1_8.csv
+Core i7-5557U,Q1'15,,intel_core_processors_v1_8.csv
+Core i7-5600U,Q1'15,,intel_core_processors_v1_8.csv
+Core i7-5650U,Q1'15,,intel_core_processors_v1_8.csv
+Core i7-5700EQ,Q2'15,,intel_core_processors_v1_8.csv
+Core i7-5700HQ,Q2'15,,intel_core_processors_v1_8.csv
+Core i7-5750HQ,Q2'15,,intel_core_processors_v1_8.csv
+Core i7-5775C,Q2'15,,intel_core_processors_v1_8.csv
+Core i7-5775R,Q2'15,,intel_core_processors_v1_8.csv
+Core i7-5820K,Q3'14,,intel_core_processors_v1_8.csv
+Core i7-5850EQ,Q2'15,,intel_core_processors_v1_8.csv
+Core i7-5850HQ,Q2'15,,intel_core_processors_v1_8.csv
+Core i7-5930K,Q3'14,,intel_core_processors_v1_8.csv
+Core i7-5950HQ,Q2'15,,intel_core_processors_v1_8.csv
+Core i7-5960X Extreme Edition,Q3'14,,intel_core_processors_v1_8.csv
+Core i7-610E,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-620LE,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-620LM,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-620M,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-620UE,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-620UM,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-640LM,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-640M,Q3'10,,intel_core_processors_v1_8.csv
+Core i7-640UM,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-6500U,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6560U,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6567U,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6600U,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-660LM,Q3'10,,intel_core_processors_v1_8.csv
+Core i7-660UE,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-660UM,Q2'10,,intel_core_processors_v1_8.csv
+Core i7-6650U,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6660U,Q1'16,,intel_core_processors_v1_8.csv
+Core i7-6700,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6700HQ,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6700K,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6700T,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6700TE,Q4'15,,intel_core_processors_v1_8.csv
+Core i7-6770HQ,Q1'16,,intel_core_processors_v1_8.csv
+Core i7-6785R,Q2'16,,intel_core_processors_v1_8.csv
+Core i7-6800K,Q2'16,,intel_core_processors_v1_8.csv
+Core i7-680UM,Q3'10,,intel_core_processors_v1_8.csv
+Core i7-6820EQ,Q4'15,,intel_core_processors_v1_8.csv
+Core i7-6820HK,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6820HQ,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6822EQ,Q4'15,,intel_core_processors_v1_8.csv
+Core i7-6850K,Q2'16,,intel_core_processors_v1_8.csv
+Core i7-6870HQ,Q1'16,,intel_core_processors_v1_8.csv
+Core i7-6900K,Q2'16,,intel_core_processors_v1_8.csv
+Core i7-6920HQ,Q3'15,,intel_core_processors_v1_8.csv
+Core i7-6950X Extreme Edition,Q2'16,,intel_core_processors_v1_8.csv
+Core i7-6970HQ,Q1'16,,intel_core_processors_v1_8.csv
+Core i7-720QM,Q3'09,,intel_core_processors_v1_8.csv
+Core i7-740QM,Q3'10,,intel_core_processors_v1_8.csv
+Core i7-7500U,Q3'16,,intel_core_processors_v1_8.csv
+Core i7-7560U,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7567U,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7600U,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7660U,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7700,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7700HQ,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7700K,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7700T,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7740X X Series,Q2'17,,intel_core_processors_v1_8.csv
+Core i7-7800X X Series,Q2'17,,intel_core_processors_v1_8.csv
+Core i7-7820EQ,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7820HK,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7820HQ,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7820X X Series,Q2'17,,intel_core_processors_v1_8.csv
+Core i7-7920HQ,Q1'17,,intel_core_processors_v1_8.csv
+Core i7-7Y75,Q3'16,,intel_core_processors_v1_8.csv
+Core i7-8086K,Q2'18,,intel_core_processors_v1_8.csv
+Core i7-820QM,Q3'09,,intel_core_processors_v1_8.csv
+Core i7-840QM,Q3'10,,intel_core_processors_v1_8.csv
+Core i7-8500Y,Q1'19,,intel_core_processors_v1_8.csv
+Core i7-8550U,Q3'17,,intel_core_processors_v1_8.csv
+Core i7-8557U,Q3'19,,intel_core_processors_v1_8.csv
+Core i7-8559U,Q2'18,,intel_core_processors_v1_8.csv
+Core i7-8565U,Q3'18,,intel_core_processors_v1_8.csv
+Core i7-8569U,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-860,Q3'09,,intel_core_processors_v1_8.csv
+Core i7-860S,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-8650U,Q3'17,,intel_core_processors_v1_8.csv
+Core i7-8665U,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-8665UE,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-870,Q3'09,,intel_core_processors_v1_8.csv
+Core i7-8700,Q4'17,,intel_core_processors_v1_8.csv
+Core i7-8700 Includes Intel Optane Memory,Q2'18,,intel_core_processors_v1_6.csv
+Core i7-8700B,Q2'18,,intel_core_processors_v1_8.csv
+Core i7-8700K,Q4'17,,intel_core_processors_v1_8.csv
+Core i7-8700T,Q2'18,,intel_core_processors_v1_8.csv
+Core i7-8705G with Radeon RX Vega M GL Graphics,Q1'18,,intel_core_processors_v1_8.csv
+Core i7-8706G with Radeon Pro WX Vega M GL Graphics,Q3'18,,intel_core_processors_v1_8.csv
+Core i7-8706G with Radeon RX Vega M GL Graphics,Q1'18,,intel_core_processors_v1_8.csv
+Core i7-8709G with Radeon RX Vega M GH Graphics,Q1'18,,intel_core_processors_v1_8.csv
+Core i7-870S,Q2'10,,intel_core_processors_v1_8.csv
+Core i7-8750H,Q2'18,,intel_core_processors_v1_8.csv
+Core i7-875K,Q2'10,,intel_core_processors_v1_8.csv
+Core i7-880,Q2'10,,intel_core_processors_v1_8.csv
+Core i7-8809G with Radeon RX Vega M GH Graphics,Q1'18,,intel_core_processors_v1_8.csv
+Core i7-8850H,Q2'18,,intel_core_processors_v1_8.csv
+Core i7-920,Q4'08,,intel_core_processors_v1_8.csv
+Core i7-920XM Extreme Edition,Q3'09,,intel_core_processors_v1_8.csv
+Core i7-930,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-940,Q4'08,,intel_core_processors_v1_8.csv
+Core i7-940XM Extreme Edition,Q3'10,,intel_core_processors_v1_8.csv
+Core i7-950,Q2'09,,intel_core_processors_v1_8.csv
+Core i7-960,Q4'09,,intel_core_processors_v1_8.csv
+Core i7-965 Extreme Edition,Q4'08,,intel_core_processors_v1_8.csv
+Core i7-970,Q3'10,,intel_core_processors_v1_8.csv
+Core i7-9700,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-9700E,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-9700F,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-9700K,Q4'18,,intel_core_processors_v1_8.csv
+Core i7-9700KF,Q1'19,,intel_core_processors_v1_8.csv
+Core i7-9700T,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-9700TE,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-975 Extreme Edition,Q2'09,,intel_core_processors_v1_8.csv
+Core i7-9750H,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-9750HF,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-980,Q2'11,,intel_core_processors_v1_8.csv
+Core i7-9800X X Series,Q4'18,,intel_core_processors_v1_8.csv
+Core i7-980X Extreme Edition,Q1'10,,intel_core_processors_v1_8.csv
+Core i7-9850H,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-9850HE,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-9850HL,Q2'19,,intel_core_processors_v1_8.csv
+Core i7-990X Extreme Edition,Q1'11,,intel_core_processors_v1_8.csv
+Core i9-10850K,Q2'20,,intel_core_processors_v1_8.csv
+Core i9-10885H,Q2'20,,intel_core_processors_v1_8.csv
+Core i9-10900,Q2'20,,intel_core_processors_v1_8.csv
+Core i9-10900E,Q2'20,,intel_core_processors_v1_8.csv
+Core i9-10900F,Q2'20,,intel_core_processors_v1_8.csv
+Core i9-10900K,Q2'20,,intel_core_processors_v1_8.csv
+Core i9-10900KF,Q2'20,,intel_core_processors_v1_8.csv
+Core i9-10900T,Q2'20,,intel_core_processors_v1_8.csv
+Core i9-10900TE,Q2'20,,intel_core_processors_v1_8.csv
+Core i9-10900X X Series,Q4'19,,intel_core_processors_v1_8.csv
+Core i9-10920X X Series,Q4'19,,intel_core_processors_v1_8.csv
+Core i9-10940X X Series,Q4'19,,intel_core_processors_v1_8.csv
+Core i9-10980HK,Q2'20,,intel_core_processors_v1_8.csv
+Core i9-10980XE Extreme Edition,Q4'19,,intel_core_processors_v1_8.csv
+Core i9-11900,Q1'21,,intel_core_processors_v1_8.csv
+Core i9-11900F,Q1'21,,intel_core_processors_v1_8.csv
+Core i9-11900H,Q2'21,,intel_core_processors_v1_8.csv
+Core i9-11900K,Q1'21,,intel_core_processors_v1_8.csv
+Core i9-11900KF,Q1'21,,intel_core_processors_v1_8.csv
+Core i9-11900T,Q1'21,,intel_core_processors_v1_8.csv
+Core i9-11950H,Q2'21,,intel_core_processors_v1_8.csv
+Core i9-11980HK,Q2'21,,intel_core_processors_v1_8.csv
+Core i9-12900,Q1'22,,intel_core_processors_v1_8.csv
+Core i9-12900E,Q1'22,,intel_core_processors_v1_8.csv
+Core i9-12900F,Q1'22,,intel_core_processors_v1_8.csv
+Core i9-12900H,Q1'22,,intel_core_processors_v1_8.csv
+Core i9-12900HK,Q1'22,,intel_core_processors_v1_8.csv
+Core i9-12900HX,Q2'22,,intel_core_processors_v1_8.csv
+Core i9-12900K,Q4'21,,intel_core_processors_v1_8.csv
+Core i9-12900KF,Q4'21,,intel_core_processors_v1_8.csv
+Core i9-12900KS,Q1'22,,intel_core_processors_v1_8.csv
+Core i9-12900T,Q1'22,,intel_core_processors_v1_8.csv
+Core i9-12900TE,Q1'22,,intel_core_processors_v1_8.csv
+Core i9-12950HX,Q2'22,,intel_core_processors_v1_8.csv
+Core i9-13900,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13900E,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13900F,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13900H,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13900HK,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13900HX,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13900K,Q4'22,,intel_core_processors_v1_8.csv
+Core i9-13900KF,Q4'22,,intel_core_processors_v1_8.csv
+Core i9-13900KS,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13900T,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13900TE,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13905H,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13950HX,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-13980HX,Q1'23,,intel_core_processors_v1_8.csv
+Core i9-14900,Q1'24,,intel_core_processors_v1_8.csv
+Core i9-14900F,Q1'24,,intel_core_processors_v1_8.csv
+Core i9-14900HX,Q1'24,,intel_core_processors_v1_8.csv
+Core i9-14900K,Q4'23,,intel_core_processors_v1_8.csv
+Core i9-14900KF,Q4'23,,intel_core_processors_v1_8.csv
+Core i9-14900KS,Q1'24,,intel_core_processors_v1_8.csv
+Core i9-14900T,Q1'24,,intel_core_processors_v1_8.csv
+Core i9-7900X X Series,Q2'17,,intel_core_processors_v1_8.csv
+Core i9-7920X X Series,Q3'17,,intel_core_processors_v1_8.csv
+Core i9-7940X X Series,Q3'17,,intel_core_processors_v1_8.csv
+Core i9-7960X X Series,Q3'17,,intel_core_processors_v1_8.csv
+Core i9-7980XE Extreme Edition,Q3'17,,intel_core_processors_v1_8.csv
+Core i9-8950HK,Q2'18,,intel_core_processors_v1_8.csv
+Core i9-9820X X Series,Q4'18,,intel_core_processors_v1_8.csv
+Core i9-9880H,Q2'19,,intel_core_processors_v1_8.csv
+Core i9-9900,Q2'19,,intel_core_processors_v1_8.csv
+Core i9-9900K,Q4'18,,intel_core_processors_v1_8.csv
+Core i9-9900KF,Q1'19,,intel_core_processors_v1_8.csv
+Core i9-9900KS,Q4'19,,intel_core_processors_v1_8.csv
+Core i9-9900T,Q2'19,,intel_core_processors_v1_8.csv
+Core i9-9900X X Series,Q4'18,,intel_core_processors_v1_8.csv
+Core i9-9920X X Series,Q4'18,,intel_core_processors_v1_8.csv
+Core i9-9940X X Series,Q4'18,,intel_core_processors_v1_8.csv
+Core i9-9960X X Series,Q4'18,,intel_core_processors_v1_8.csv
+Core i9-9980HK,Q2'19,,intel_core_processors_v1_8.csv
+Core i9-9980XE Extreme Edition,Q4'18,,intel_core_processors_v1_8.csv
+Core M-5Y10,Q3'14,,intel_core_processors_v1_8.csv
+Core M-5Y10a,Q3'14,,intel_core_processors_v1_8.csv
+Core M-5Y10c,Q4'14,,intel_core_processors_v1_8.csv
+Core M-5Y31,Q4'14,,intel_core_processors_v1_8.csv
+Core M-5Y51,Q4'14,,intel_core_processors_v1_8.csv
+Core M-5Y70,Q3'14,,intel_core_processors_v1_8.csv
+Core M-5Y71,Q4'14,,intel_core_processors_v1_8.csv
+Core m3-6Y30,Q3'15,,intel_core_processors_v1_8.csv
+Core m3-6Y54,Q3'15,,intel_core_processors_v1_8.csv
+Core m3-6Y57,Q3'15,,intel_core_processors_v1_8.csv
+Core m3-6Y75,Q3'15,,intel_core_processors_v1_8.csv
+Core m3-7Y30,Q3'16,,intel_core_processors_v1_8.csv
+Core m3-7Y32,Q2'17,,intel_core_processors_v1_8.csv
+Core m3-8100Y,Q3'18,,intel_core_processors_v1_8.csv
+Core Ultra 3 105UL,Q2'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 125H,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 125HL,Q2'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 125U,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 125UL,Q2'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 134U,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 135H,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 135HL,Q2'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 135U,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 135UL,Q2'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 225,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 225F,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 225H,Q1'25,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 225T,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 225U,Q1'25,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 226V,Q3'24,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 228V,Q3'24,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 235,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 235A,Q3'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 235H,Q1'25,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 235HX,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 235T,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 235TA,Q3'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 235U,Q1'25,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 235UA,Q3'25,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 236V,Q3'24,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 238V,Q3'24,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 245,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 245HX,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 245K,Q4'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 245KF,Q4'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 245T,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 250K Plus,Q1'26,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 250KF Plus,Q1'26,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 322,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 325,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 332,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 335,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 336H,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 5 338H,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 155H,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 155HL,Q2'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 155U,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 155UL,Q2'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 164U,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 165H,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 165HL,Q2'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 165U,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 165UL,Q2'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 251HX,Q1'26,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 255H,Q1'25,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 255HX,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 255U,Q1'25,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 256V,Q3'24,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 258V,Q3'24,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 265,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 265F,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 265H,Q1'25,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 265HX,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 265K,Q4'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 265KF,Q4'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 265T,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 265U,Q1'25,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 266V,Q3'24,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 268V,Q3'24,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 270HX Plus,Q1'26,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 270K Plus,Q1'26,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 355,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 356H,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 365,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 7 366H,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 9 185H,Q4'23,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 9 275HX,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 9 285,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 9 285H,Q1'25,110,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 9 285HX,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 9 285K,Q4'24,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 9 285T,Q1'25,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 9 288V,Q3'24,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 9 290HX Plus,Q1'26,105,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra 9 386H,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra X7 358H,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra X7 368H,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra X9 378H,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Core Ultra X9 388H,Q1'26,100,Intel_Core_Ultra_Processors_v1_10.csv
+Intel Processor 300,Q1'24,100,Intel_Processors_v1_9.csv
+Intel Processor 300T,Q1'24,100,Intel_Processors_v1_9.csv
+Intel Processor N100,Q1'23,105,Intel_Processors_v1_9.csv
+Intel Processor N150,Q1'25,105,Intel_Processors_v1_9.csv
+Intel Processor N200,Q1'23,105,Intel_Processors_v1_9.csv
+Intel Processor N250,Q1'25,105,Intel_Processors_v1_9.csv
+Intel Processor N50,Q1'23,105,Intel_Processors_v1_9.csv
+Intel Processor N97,Q1'23,105,Intel_Processors_v1_9.csv
+Intel Processor U300,Q1'23,100,Intel_Processors_v1_9.csv
+Intel Processor U300E,Q1'23,100,Intel_Processors_v1_9.csv
+Intel Processor U300L,Q2'24,100,Intel_Processors_v1_9.csv
+Intel Processor U301L,Q2'24,100,Intel_Processors_v1_9.csv
+Intel Processor U302L,Q2'24,100,Intel_Processors_v1_9.csv
+Intel Processor U303L,Q2'24,100,Intel_Processors_v1_9.csv
+Itanium 9015,Q1'07,,intel_itanium_processors_v1_6.csv
+Itanium 9110N,Q4'07,,intel_itanium_processors_v1_6.csv
+Itanium 9120N,Q4'07,,intel_itanium_processors_v1_6.csv
+Itanium 9130M,Q4'07,,intel_itanium_processors_v1_6.csv
+Itanium 9140M,Q4'07,,intel_itanium_processors_v1_6.csv
+Itanium 9140N,Q4'07,,intel_itanium_processors_v1_6.csv
+Itanium 9150M,Q4'07,,intel_itanium_processors_v1_6.csv
+Itanium 9150N,Q4'07,,intel_itanium_processors_v1_6.csv
+Itanium 9152M,Q4'07,,intel_itanium_processors_v1_6.csv
+Itanium 9310,Q1'10,,intel_itanium_processors_v1_6.csv
+Itanium 9320,Q1'10,,intel_itanium_processors_v1_6.csv
+Itanium 9330,Q1'10,,intel_itanium_processors_v1_6.csv
+Itanium 9340,Q1'10,,intel_itanium_processors_v1_6.csv
+Itanium 9350,Q1'10,,intel_itanium_processors_v1_6.csv
+Itanium 9520,Q4'12,,intel_itanium_processors_v1_6.csv
+Itanium 9540,Q4'12,,intel_itanium_processors_v1_6.csv
+Itanium 9550,Q4'12,,intel_itanium_processors_v1_6.csv
+Itanium 9560,Q4'12,,intel_itanium_processors_v1_6.csv
+Itanium 9720,Q2'17,,intel_itanium_processors_v1_6.csv
+Itanium 9740,Q2'17,,intel_itanium_processors_v1_6.csv
+Itanium 9750,Q2'17,,intel_itanium_processors_v1_6.csv
+Itanium 9760,Q2'17,,intel_itanium_processors_v1_6.csv
+"Mobile Celeron 1.20 GHz, 256K Cache, 400 MHz FSB",Q1'02,,intel_celeron_processors_v1_8.csv
+"Mobile Celeron 1.40 GHz, 256K Cache, 400 MHz FSB",Q2'04,,intel_celeron_processors_v1_8.csv
+"Mobile Celeron 1.50 GHz, 256K Cache, 400 MHz FSB",Q2'04,,intel_celeron_processors_v1_8.csv
+"Mobile Celeron 1.60 GHz, 256K Cache, 400 MHz FSB",Q2'04,,intel_celeron_processors_v1_8.csv
+"Mobile Celeron 2.20 GHz, 256K Cache, 400 MHz FSB",Q1'02,,intel_celeron_processors_v1_8.csv
+"Mobile Celeron 2.40 GHz, 256K Cache, 400 MHz FSB",Q1'02,,intel_celeron_processors_v1_8.csv
+"Mobile Celeron LV 650 MHz, 256K Cache, 100 MHz FSB",Q4'01,,intel_celeron_processors_v1_8.csv
+Pentium 1405,Q2'12,,Intel_Pentium_Processors_v1_9.csv
+Pentium 1405 v2,Q1'14,80,Intel_Pentium_Processors_v1_9.csv
+Pentium 2020M,Q3'12,90,Intel_Pentium_Processors_v1_9.csv
+Pentium 2030M,Q1'13,90,Intel_Pentium_Processors_v1_9.csv
+Pentium 2117U,Q3'12,105,Intel_Pentium_Processors_v1_9.csv
+Pentium 2127U,Q3'13,105,Intel_Pentium_Processors_v1_9.csv
+Pentium 2129Y,Q1'13,105,Intel_Pentium_Processors_v1_9.csv
+Pentium 3550M,Q4'13,100,Intel_Pentium_Processors_v1_9.csv
+Pentium 3556U,Q3'13,100,Intel_Pentium_Processors_v1_9.csv
+Pentium 3558U,Q4'13,100,Intel_Pentium_Processors_v1_9.csv
+Pentium 3560M,Q2'14,100,Intel_Pentium_Processors_v1_9.csv
+Pentium 3560Y,Q3'13,100,Intel_Pentium_Processors_v1_9.csv
+Pentium 3561Y,Q4'13,100,Intel_Pentium_Processors_v1_9.csv
+Pentium 3805U,Q1'15,105,Intel_Pentium_Processors_v1_9.csv
+Pentium 3825U,Q1'15,105,Intel_Pentium_Processors_v1_9.csv
+"Pentium 4 2.00 GHz, 512K Cache, 400 MHz FSB",Q1'02,,intel_pentium_processors_v1_8.csv
+"Pentium 4 2.20 GHz, 512K Cache, 400 MHz FSB",Q1'02,,intel_pentium_processors_v1_8.csv
+"Pentium 4 2.40 GHz, 512K Cache, 400 MHz FSB",Q1'02,,intel_pentium_processors_v1_8.csv
+"Pentium 4 2.40 GHz, 512K Cache, 533 MHz FSB",Q1'02,,intel_pentium_processors_v1_8.csv
+"Pentium 4 2.50 GHz, 512K Cache, 400 MHz FSB",Q1'02,,intel_pentium_processors_v1_8.csv
+"Pentium 4 2.60 GHz, 512K Cache, 400 MHz FSB",Q1'02,,intel_pentium_processors_v1_8.csv
+Pentium 4 505/505J,Q1'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 506,Q2'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 511,Q4'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 515/515J,Q3'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 516,Q4'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 517 Supporting HT Technology,Q3'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 519K,Q4'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 520 Supporting HT Technology,Q2'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 520J Supporting HT Technology,Q4'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 521 Supporting HT Technology,Q3'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 524 Supporting HT Technology,Q2'06,,intel_pentium_processors_v1_8.csv
+Pentium 4 530/530J Supporting HT Technology,Q2'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 530J Supporting HT Technology,Q4'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 531 Supporting HT Technology,Q2'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 540/540J Supporting HT Technology,Q2'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 540J Supporting HT Technology,Q4'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 541 Supporting HT Technology,Q3'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 550 Supporting HT Technology,Q2'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 550J Supporting HT Technology,Q4'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 551 Supporting HT Technology,Q2'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 561 Supporting HT Technology,Q3'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 570J Supporting HT Technology,Q4'04,,intel_pentium_processors_v1_8.csv
+Pentium 4 571 Supporting HT Technology,Q3'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 630 Supporting HT Technology,Q4'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 631 Supporting HT Technology,Q1'06,,intel_pentium_processors_v1_8.csv
+Pentium 4 640 Supporting HT Technology,Q1'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 641 Supporting HT Technology,Q1'06,,intel_pentium_processors_v1_8.csv
+Pentium 4 650 Supporting HT Technology,Q1'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 651 Supporting HT Technology,Q2'06,,intel_pentium_processors_v1_8.csv
+Pentium 4 660 Supporting HT Technology,Q1'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 661 Supporting HT Technology,Q1'06,,intel_pentium_processors_v1_8.csv
+Pentium 4 662 Supporting HT Technology,Q4'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 670 Supporting HT Technology,Q2'05,,intel_pentium_processors_v1_8.csv
+Pentium 4 672 Supporting HT Technology,Q4'05,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Extreme Edition Supporting HT Technology, 3.46 GHz, 2M Cache, 1066 MHz FSB",Q4'04,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Extreme Edition Supporting HT Technology, 3.73 GHz, 2M Cache, 1066 MHz FSB",Q4'04,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Mobile - M 1.70 GHz, 512K Cache, 400 MHz FSB",Q1'02,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Mobile - M 2.20 GHz, 512K Cache, 400 MHz FSB",Q1'02,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Mobile Supporting HT Technology, 2.80E GHz, 1M Cache, 800 MHz FSB",Q1'04,,intel_pentium_processors_v1_6.csv
+"Pentium 4 Supporting HT Technology, 2.80E GHz, 1M Cache, 800 MHz FSB",Q1'04,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Supporting HT Technology, 3.00 GHz, 1M Cache, 800 MHz FSB",Q1'04,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Supporting HT Technology, 3.00E GHz, 1M Cache, 800 MHz FSB",Q2'04,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Supporting HT Technology, 3.20 GHz, 1M Cache, 800 MHz FSB",Q1'04,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Supporting HT Technology, 3.20E GHz, 1M Cache, 800 MHz FSB",Q1'04,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Supporting HT Technology, 3.40 GHz, 1M Cache, 800 MHz FSB",Q1'04,,intel_pentium_processors_v1_8.csv
+"Pentium 4 Supporting HT Technology, 3.40E GHz, 1M Cache, 800 MHz FSB",Q1'04,,intel_pentium_processors_v1_8.csv
+"Pentium 4, 2.80 GHz, 512K Cache, 533 MHz FSB",Q1'02,,intel_pentium_processors_v1_8.csv
+Pentium 4405U,Q3'15,100,Intel_Pentium_Processors_v1_9.csv
+Pentium 4405Y,Q3'15,100,Intel_Pentium_Processors_v1_9.csv
+Pentium 6805,Q4'20,100,Intel_Pentium_Processors_v1_9.csv
+Pentium 840 Extreme Edition,Q2'05,,intel_pentium_processors_v1_8.csv
+Pentium 955 Extreme Edition,Q1'06,,intel_pentium_processors_v1_8.csv
+Pentium 957,Q2'11,,intel_pentium_processors_v1_8.csv
+Pentium 965 Extreme Edition,Q1'06,,intel_pentium_processors_v1_8.csv
+Pentium 967,Q4'11,,intel_pentium_processors_v1_8.csv
+Pentium 977,Q1'12,,intel_pentium_processors_v1_8.csv
+Pentium 987,Q3'12,,intel_pentium_processors_v1_8.csv
+Pentium 997,Q3'12,,intel_pentium_processors_v1_8.csv
+Pentium A1018,Q3'13,105,Intel_Pentium_Processors_v1_9.csv
+Pentium A1020,Q1'16,105,Intel_Pentium_Processors_v1_9.csv
+Pentium B915C,Q2'12,,intel_pentium_processors_v1_8.csv
+Pentium B925C,Q4'13,,intel_pentium_processors_v1_8.csv
+Pentium B940,Q2'11,,intel_pentium_processors_v1_8.csv
+Pentium B950,Q2'11,,intel_pentium_processors_v1_8.csv
+Pentium B960,Q4'11,,intel_pentium_processors_v1_8.csv
+Pentium B970,Q1'12,,intel_pentium_processors_v1_8.csv
+Pentium B980,Q2'12,,intel_pentium_processors_v1_8.csv
+Pentium D 805,Q1'05,,intel_pentium_processors_v1_8.csv
+Pentium D 820,Q2'05,,intel_pentium_processors_v1_8.csv
+Pentium D 830,Q2'05,,intel_pentium_processors_v1_8.csv
+Pentium D 840,Q2'05,,intel_pentium_processors_v1_8.csv
+Pentium D 915,Q3'06,,intel_pentium_processors_v1_8.csv
+Pentium D 920 (1),Q1'06,,intel_pentium_processors_v1_8.csv
+Pentium D 920 (2),Q1'06,,intel_pentium_processors_v1_8.csv
+Pentium D 925,Q3'06,,intel_pentium_processors_v1_8.csv
+Pentium D 930,Q1'06,,intel_pentium_processors_v1_8.csv
+Pentium D 935,Q1'07,,intel_pentium_processors_v1_8.csv
+Pentium D 940,Q1'06,,intel_pentium_processors_v1_8.csv
+Pentium D 945,Q3'06,,intel_pentium_processors_v1_8.csv
+Pentium D 950,Q1'06,,intel_pentium_processors_v1_8.csv
+Pentium D 960,Q2'06,,intel_pentium_processors_v1_8.csv
+Pentium D1507,Q4'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium D1508,Q4'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium D1509,Q4'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium D1517,Q4'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium D1519,Q2'16,85,Intel_Pentium_Processors_v1_9.csv
+Pentium E2140,Q2'07,,intel_pentium_processors_v1_8.csv
+Pentium E2160,Q3'06,,intel_pentium_processors_v1_8.csv
+Pentium E2180,Q3'07,,intel_pentium_processors_v1_8.csv
+Pentium E2200,Q4'07,,intel_pentium_processors_v1_8.csv
+Pentium E2220,Q1'08,,intel_pentium_processors_v1_8.csv
+Pentium E5200,Q3'08,,intel_pentium_processors_v1_8.csv
+Pentium E5300,Q1'08,,intel_pentium_processors_v1_8.csv
+Pentium E5400,Q1'09,,intel_pentium_processors_v1_8.csv
+Pentium E5500,Q2'10,,intel_pentium_processors_v1_8.csv
+Pentium E5700,Q3'10,,intel_pentium_processors_v1_8.csv
+Pentium E5800,Q4'10,,intel_pentium_processors_v1_8.csv
+Pentium E6300,Q2'09,,intel_pentium_processors_v1_8.csv
+Pentium E6500,Q1'08,,intel_pentium_processors_v1_8.csv
+Pentium E6500K,Q3'09,,intel_pentium_processors_v1_8.csv
+Pentium E6600,Q1'10,,intel_pentium_processors_v1_8.csv
+Pentium E6700,Q2'10,,intel_pentium_processors_v1_8.csv
+Pentium E6800,Q3'10,,intel_pentium_processors_v1_8.csv
+Pentium G2010,Q1'13,,Intel_Pentium_Processors_v1_9.csv
+Pentium G2020,Q1'13,,Intel_Pentium_Processors_v1_9.csv
+Pentium G2020T,Q1'13,,Intel_Pentium_Processors_v1_9.csv
+Pentium G2030,Q2'13,,Intel_Pentium_Processors_v1_9.csv
+Pentium G2030T,Q2'13,,Intel_Pentium_Processors_v1_9.csv
+Pentium G2100T,Q3'12,,Intel_Pentium_Processors_v1_9.csv
+Pentium G2120,Q3'12,,Intel_Pentium_Processors_v1_9.csv
+Pentium G2120T,Q2'13,,Intel_Pentium_Processors_v1_9.csv
+Pentium G2130,Q1'13,,Intel_Pentium_Processors_v1_9.csv
+Pentium G2140,Q2'13,,Intel_Pentium_Processors_v1_9.csv
+Pentium G3220,Q3'13,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G3220T,Q3'13,66.4,Intel_Pentium_Processors_v1_9.csv
+Pentium G3240,Q2'14,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G3240T,Q2'14,66.4,Intel_Pentium_Processors_v1_9.csv
+Pentium G3250,Q3'14,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G3250T,Q3'14,66.4,Intel_Pentium_Processors_v1_9.csv
+Pentium G3258,Q2'14,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G3260,Q1'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium G3260T,Q1'15,66.4,Intel_Pentium_Processors_v1_9.csv
+Pentium G3320TE,Q3'13,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G3420,Q3'13,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G3420T,Q3'13,66.4,Intel_Pentium_Processors_v1_9.csv
+Pentium G3430,Q3'13,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G3440,Q2'14,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G3440T,Q2'14,66.4,Intel_Pentium_Processors_v1_9.csv
+Pentium G3450,Q2'14,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G3450T,Q3'14,66.4,Intel_Pentium_Processors_v1_9.csv
+Pentium G3460,Q3'14,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G3460T,Q1'15,66.4,Intel_Pentium_Processors_v1_9.csv
+Pentium G3470,Q1'15,72,Intel_Pentium_Processors_v1_9.csv
+Pentium G4400,Q3'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium G4400T,Q3'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium G4400TE,Q4'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium G4500,Q3'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium G4500T,Q3'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium G4520,Q3'15,,Intel_Pentium_Processors_v1_9.csv
+Pentium G4560,Q1'17,100,Intel_Pentium_Processors_v1_9.csv
+Pentium G4560T,Q1'17,92,Intel_Pentium_Processors_v1_9.csv
+Pentium G4600,Q1'17,100,Intel_Pentium_Processors_v1_9.csv
+Pentium G4600T,Q1'17,92,Intel_Pentium_Processors_v1_9.csv
+Pentium G4620,Q1'17,100,Intel_Pentium_Processors_v1_9.csv
+Pentium G620,Q2'11,,intel_pentium_processors_v1_8.csv
+Pentium G620T,Q2'11,,intel_pentium_processors_v1_8.csv
+Pentium G622,Q2'11,,intel_pentium_processors_v1_8.csv
+Pentium G630,Q3'11,,intel_pentium_processors_v1_8.csv
+Pentium G630T,Q3'11,,intel_pentium_processors_v1_8.csv
+Pentium G632,Q3'11,,intel_pentium_processors_v1_8.csv
+Pentium G640,Q2'12,,intel_pentium_processors_v1_8.csv
+Pentium G640T,Q2'12,,intel_pentium_processors_v1_8.csv
+Pentium G645,Q3'12,,intel_pentium_processors_v1_8.csv
+Pentium G645T,Q3'12,,intel_pentium_processors_v1_8.csv
+Pentium G6950,Q1'10,,intel_pentium_processors_v1_8.csv
+Pentium G6951,Q3'11,,intel_pentium_processors_v1_8.csv
+Pentium G6960,Q1'11,,intel_pentium_processors_v1_8.csv
+Pentium G840,Q2'11,,intel_pentium_processors_v1_8.csv
+Pentium G850,Q2'11,,intel_pentium_processors_v1_8.csv
+Pentium G860,Q3'11,,intel_pentium_processors_v1_8.csv
+Pentium G860T,Q2'12,,intel_pentium_processors_v1_8.csv
+Pentium G870,Q2'12,,intel_pentium_processors_v1_8.csv
+Pentium Gold 4410Y,Q1'17,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 4415U,Q1'17,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 4415Y,Q2'17,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 4417U,Q1'19,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 4425Y,Q1'19,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 5405U,Q1'19,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 6405U,Q4'19,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 6500Y,Q1'21,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 7505,Q4'20,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 8500,Q1'22,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 8505,Q1'22,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold 8505 (with IPU),Q1'22,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G5400,Q2'18,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G5400T,Q2'18,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G5420,Q2'19,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G5420T,Q2'19,88,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G5500,Q2'18,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G5500T,Q2'18,88,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G5600,Q2'18,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G5600T,Q2'19,88,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G5620,Q2'19,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6400,Q2'20,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6400E,Q2'20,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6400T,Q2'20,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6400TE,Q2'20,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6405,Q1'21,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6405T,Q1'21,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6500,Q2'20,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6500T,Q2'20,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6505,Q1'21,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6505T,Q1'21,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6600,Q2'20,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G6605,Q1'21,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G7400,Q1'22,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G7400E,Q1'22,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G7400T,Q1'22,100,Intel_Pentium_Processors_v1_9.csv
+Pentium Gold G7400TE,Q1'22,100,Intel_Pentium_Processors_v1_9.csv
+"Pentium III - S 1.26 GHz, 512K Cache, 133 MHz FSB",Q4'01,,intel_pentium_processors_v1_8.csv
+"Pentium III - S 800 MHz, 512K Cache, 133 MHz FSB",Q4'01,,intel_pentium_processors_v1_8.csv
+"Pentium III - S 933 MHz, 512K Cache, 133 MHz FSB",Q4'01,,intel_pentium_processors_v1_8.csv
+"Pentium III 1.00 GHz, 256K Cache, 100 MHz FSB",Q1'00,,intel_pentium_processors_v1_8.csv
+"Pentium III 1.00 GHz, 256K Cache, 133 MHz FSB",Q1'00,,intel_pentium_processors_v1_8.csv
+"Pentium III 600 MHz, 256K Cache, 100 MHz FSB",Q1'00,,intel_pentium_processors_v1_8.csv
+"Pentium III 700 MHz, 256K Cache, 100 MHz FSB",Q1'00,,intel_pentium_processors_v1_8.csv
+"Pentium III 733 MHz, 256K Cache, 133 MHz FSB",Q1'00,,intel_pentium_processors_v1_8.csv
+"Pentium III 850 MHz, 256K Cache, 100 MHz FSB",Q1'00,,intel_pentium_processors_v1_8.csv
+"Pentium III 866 MHx, 256K Cache, 133 MHz FSB",Q1'00,,intel_pentium_processors_v1_8.csv
+Pentium J2850,Q3'13,100,Intel_Pentium_Processors_v1_9.csv
+Pentium J2900,Q4'13,105,Intel_Pentium_Processors_v1_9.csv
+Pentium J3710,Q1'16,90,Intel_Pentium_Processors_v1_9.csv
+Pentium J4205,Q3'16,105,Intel_Pentium_Processors_v1_9.csv
+Pentium J6426,Q1'21,70,Intel_Pentium_Processors_v1_9.csv
+"Pentium M 1.60 GHz, 1M Cache, 400 MHz FSB",Q2'03,,intel_pentium_processors_v1_8.csv
+Pentium M 725,Q2'04,,intel_pentium_processors_v1_8.csv
+Pentium M 745,Q2'04,,intel_pentium_processors_v1_8.csv
+Pentium M 745A,Q2'04,,intel_pentium_processors_v1_8.csv
+Pentium M 760,Q2'04,,intel_pentium_processors_v1_8.csv
+"Pentium M LV 1.10 GHz, 1M Cache, 400 MHz FSB",Q2'03,,intel_pentium_processors_v1_8.csv
+Pentium M LV 738,Q2'04,,intel_pentium_processors_v1_8.csv
+Pentium N3510,Q3'13,100,Intel_Pentium_Processors_v1_9.csv
+Pentium N3520,Q4'13,105,Intel_Pentium_Processors_v1_9.csv
+Pentium N3530,Q1'14,100,Intel_Pentium_Processors_v1_9.csv
+Pentium N3540,Q3'14,100,Intel_Pentium_Processors_v1_9.csv
+Pentium N3700,Q1'15,90,Intel_Pentium_Processors_v1_9.csv
+Pentium N3710,Q1'16,90,Intel_Pentium_Processors_v1_9.csv
+Pentium N4200,Q3'16,105,Intel_Pentium_Processors_v1_9.csv
+Pentium N4200E,Q3'19,105,Intel_Pentium_Processors_v1_9.csv
+Pentium N6415,Q1'21,70,Intel_Pentium_Processors_v1_9.csv
+Pentium P6000,Q2'10,,intel_pentium_processors_v1_8.csv
+Pentium P6100,Q3'10,,intel_pentium_processors_v1_8.csv
+Pentium P6200,Q3'10,,intel_pentium_processors_v1_8.csv
+Pentium P6300,Q1'11,,intel_pentium_processors_v1_8.csv
+Pentium Silver J5005,Q4'17,105,Intel_Pentium_Processors_v1_9.csv
+Pentium Silver J5040,Q4'19,105,Intel_Pentium_Processors_v1_9.csv
+Pentium Silver N5000,Q4'17,105,Intel_Pentium_Processors_v1_9.csv
+Pentium Silver N5030,Q4'19,105,Intel_Pentium_Processors_v1_9.csv
+Pentium Silver N6000,Q1'21,105,Intel_Pentium_Processors_v1_9.csv
+Pentium Silver N6005,Q1'21,105,Intel_Pentium_Processors_v1_9.csv
+Pentium T2060,Q1'07,,intel_pentium_processors_v1_8.csv
+Pentium T2080,Q2'07,,intel_pentium_processors_v1_8.csv
+Pentium T2130,Q2'07,,intel_pentium_processors_v1_8.csv
+Pentium T2310,Q4'07,,intel_pentium_processors_v1_8.csv
+Pentium T2330,Q4'07,,intel_pentium_processors_v1_8.csv
+Pentium T2370,Q1'08,,intel_pentium_processors_v1_8.csv
+Pentium T3400,Q4'08,,intel_pentium_processors_v1_8.csv
+Pentium T4200,Q1'09,,intel_pentium_processors_v1_8.csv
+Pentium T4400,Q4'09,,intel_pentium_processors_v1_8.csv
+Pentium T4500,Q1'10,,intel_pentium_processors_v1_8.csv
+Pentium U5400,Q2'10,,intel_pentium_processors_v1_8.csv
+Pentium U5600,Q1'11,,intel_pentium_processors_v1_8.csv
+Quark Microcontroller D1000,Q3'15,,intel_quark_SoC_v1_6.csv
+Quark Microcontroller D2000,Q3'15,,intel_quark_SoC_v1_6.csv
+Quark Microcontroller SE C1000,Q4'15,,intel_quark_SoC_v1_6.csv
+Quark SoC X1000,Q4'13,,intel_quark_SoC_v1_6.csv
+Quark SoC X1001,Q2'14,,intel_quark_SoC_v1_6.csv
+Quark SoC X1010,Q1'14,,intel_quark_SoC_v1_6.csv
+Quark SoC X1011,Q2'14,,intel_quark_SoC_v1_6.csv
+Quark SoC X1020,Q2'14,,intel_quark_SoC_v1_6.csv
+Quark SoC X1020D,Q1'14,,intel_quark_SoC_v1_6.csv
+Quark SoC X1021,Q2'14,,intel_quark_SoC_v1_6.csv
+Quark SoC X1021D,Q2'14,,intel_quark_SoC_v1_6.csv
+"Xeon 2.00 GHz, 512K Cache, 533 MHz FSB",Q1'02,,intel_xeon_processors_v1_8.csv
+"Xeon 2.40 GHz, 512K Cache, 533 MHz FSB",Q4'02,,intel_xeon_processors_v1_8.csv
+"Xeon 2.80 GHz, 512K Cache, 533 MHz FSB",Q4'03,,intel_xeon_processors_v1_8.csv
+Xeon 3065,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon 5130,Q2'06,,intel_xeon_processors_v1_8.csv
+Xeon 5140,Q2'06,,intel_xeon_processors_v1_8.csv
+Xeon Bronze 3104,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Bronze 3106,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Bronze 3204,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Bronze 3206R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Bronze 3408U,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Bronze 3508U,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon CPU Max 9460,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon CPU Max 9462,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon CPU Max 9468,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon CPU Max 9470,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon CPU Max 9480,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon D-1513N,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon D-1518,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon D-1520,Q1'15,,intel_xeon_processors_v1_8.csv
+Xeon D-1521,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon D-1523N,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon D-1524N,Q4'18,,intel_xeon_processors_v1_8.csv
+Xeon D-1527,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon D-1528,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon D-1529,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon D-1531,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon D-1533N,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon D-1537,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon D-1539,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon D-1540,Q1'15,,intel_xeon_processors_v1_8.csv
+Xeon D-1541,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon D-1543N,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon D-1548,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon D-1553N,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon D-1557,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon D-1559,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon D-1567,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon D-1571,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon D-1577,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon D-1602,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon D-1622,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon D-1623N,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon D-1627,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon D-1633N,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon D-1637,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon D-1649N,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon D-1653N,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon D-1702,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1712TR,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1713NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1713NTE,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1714,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1715TER,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1718T,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1722NE,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1726,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1731NTE,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1732TE,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1733NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1734NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1735TR,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1736,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1736NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1739,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1746TER,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1747NTE,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1748TE,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1749NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-1813NT,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-1823NT,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-1834,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-1844NT,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-1846,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-1848TER,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-2123IT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2141I,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2142IT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2143IT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2145NT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2146NT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2161I,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2163IT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2166NT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2173IT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2177NT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2183IT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2187NT,Q1'18,,intel_xeon_processors_v1_8.csv
+Xeon D-2712T,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2733NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2738,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2739NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2745NX,Q3'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2752NTE,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2752TER,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2753NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2757NX,Q3'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2766NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2775TE,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2776NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2777NX,Q3'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2779,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2786NTE,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2795NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2796NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2796TE,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2798NT,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2798NX,Q3'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2799,Q1'22,,intel_xeon_processors_v1_8.csv
+Xeon D-2832NT,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-2843NT,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-2876NT,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-2896NT,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-2896TER,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon D-2899NT,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon E-2124,Q3'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2124G,Q3'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2126G,Q3'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2134,Q3'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2136,Q3'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2144G,Q3'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2146G,Q3'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2174G,Q3'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2176G,Q4'17,,intel_xeon_processors_v1_8.csv
+Xeon E-2176M,Q2'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2186G,Q3'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2186M,Q2'18,,intel_xeon_processors_v1_8.csv
+Xeon E-2224,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2224G,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2226G,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2226GE,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2234,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2236,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2244G,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2246G,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2254ME,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2254ML,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2274G,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2276G,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2276M,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2276ME,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2276ML,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2278G,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2278GE,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2278GEL,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2286G,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2286M,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2288G,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon E-2314,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon E-2324G,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon E-2334,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon E-2336,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon E-2356G,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon E-2374G,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon E-2378,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon E-2378G,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon E-2386G,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon E-2388G,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon E-2414,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon E-2434,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon E-2436,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon E-2456,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon E-2468,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon E-2478,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon E-2486,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon E-2488,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon E3-1105C,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1105C v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1125C,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1125C v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1220,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1220 v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1220 v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1220 v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1220 v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1220L,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1220L v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1220L v3,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1225,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1225 v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1225 v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1225 v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1225 v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1226 v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1230,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1230 v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1230 v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1230 v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1230 v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1230L v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1231 v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1235,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1235L v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1240,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1240 v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1240 v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1240 v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1240 v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1240L v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1240L v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1241 v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1245,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1245 v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1245 v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1245 v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1245 v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1246 v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1258L v4,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1260L,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1260L v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1265L v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1265L v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1265L v4,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1268L v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1268L v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1270,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1270 v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1270 v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1270 v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1270 v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1271 v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1275,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1275 v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1275 v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1275 v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1275 v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1275L v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1276 v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1278L v4,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1280,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1280 v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1280 v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1280 v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1280 v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1281 v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1285 v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1285 v4,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1285 v6,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1285L v3,Q2'13,,intel_xeon_processors_v1_8.csv
+Xeon E3-1285L v4,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1286 v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1286L v3,Q2'14,,intel_xeon_processors_v1_8.csv
+Xeon E3-1290,Q3'11,,intel_xeon_processors_v1_8.csv
+Xeon E3-1290 v2,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E3-1501L v6,Q3'16,,intel_xeon_processors_v1_8.csv
+Xeon E3-1501M v6,Q3'16,,intel_xeon_processors_v1_8.csv
+Xeon E3-1505L v5,Q4'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1505L v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1505M v5,Q3'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1505M v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1515M v5,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E3-1535M v5,Q3'15,,intel_xeon_processors_v1_8.csv
+Xeon E3-1535M v6,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E3-1545M v5,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E3-1558L v5,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E3-1565L v5,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E3-1575M v5,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E3-1578L v5,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E3-1585 v5,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E3-1585L v5,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E3110,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon E3120,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon E5-1428L,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-1428L v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-1428L v3,Q1'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-1620,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-1620 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-1620 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-1620 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-1630 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-1630 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-1650,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-1650 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-1650 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-1650 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-1660,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-1660 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-1660 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-1660 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-1680 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-1680 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2403,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2403 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2407,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2407 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2408L v3,Q1'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-2418L,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2418L v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2418L v3,Q1'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-2420,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2420 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2428L,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2428L v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2428L v3,Q1'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-2430,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2430 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2430L,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2430L v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2438L v3,Q1'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-2440,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2440 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2448L,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2448L v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2450,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2450 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2450L,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2450L v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2470,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2470 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2603,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2603 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2603 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2603 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2608L v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2608L v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2609,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2609 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2609 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2609 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2618L v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2618L v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2618L v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2620,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2620 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2620 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2620 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2623 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2623 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2628L v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2628L v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2628L v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2630,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2630 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2630 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2630 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2630L,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2630L v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2630L v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2630L v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2637,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2637 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2637 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2637 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2640,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2640 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2640 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2640 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2643,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2643 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2643 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2643 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2648L,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2648L v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2648L v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2648L v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2650,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2650 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2650 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2650 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2650L,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2650L v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2650L v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2650L v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2658,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2658 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2658 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2658 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2658A v3,Q1'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-2660,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2660 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2660 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2660 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2665,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2667,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2667 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2667 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2667 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2670,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2670 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2670 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2680,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2680 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2680 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2680 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2683 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2683 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2687W,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2687W v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2687W v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2687W v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2690,Q1'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-2690 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2690 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2690 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2695 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2695 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2695 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2697 v2,Q3'13,,intel_xeon_processors_v1_8.csv
+Xeon E5-2697 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2697 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2697A v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2698 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2698 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2699 v3,Q3'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-2699 v4,Q1'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2699A v4,Q4'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-2699R v4,Q4'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-4603,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-4603 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-4607,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-4607 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-4610,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-4610 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-4610 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-4610 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-4617,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-4620,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-4620 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-4620 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-4620 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-4624 v2,Q1'14,,intel_xeon_processors_v1_6.csv
+Xeon E5-4624L v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-4627 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-4627 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-4627 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-4628L v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-4640,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-4640 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-4640 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-4640 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-4648 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-4650,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-4650 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-4650 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-4650 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-4650L,Q2'12,,intel_xeon_processors_v1_8.csv
+Xeon E5-4655 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-4655 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-4657L v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E5-4660 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-4660 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-4667 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-4667 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5-4669 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E5-4669 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E5205,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon E5220,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon E5240,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon E5310,Q4'06,,intel_xeon_processors_v1_8.csv
+Xeon E5320,Q4'06,,intel_xeon_processors_v1_8.csv
+Xeon E5335,Q1'07,,intel_xeon_processors_v1_8.csv
+Xeon E5345,Q1'07,,intel_xeon_processors_v1_8.csv
+Xeon E5405,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon E5410,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon E5420,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon E5430,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon E5440,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon E5450,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon E5462,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon E5472,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon E5502,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon E5503,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon E5504,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon E5506,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon E5507,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon E5520,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon E5530,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon E5540,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon E5603,Q1'11,,intel_xeon_processors_v1_8.csv
+Xeon E5606,Q1'11,,intel_xeon_processors_v1_8.csv
+Xeon E5607,Q1'11,,intel_xeon_processors_v1_8.csv
+Xeon E5620,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon E5630,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon E5640,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon E5645,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon E5649,Q1'11,,intel_xeon_processors_v1_8.csv
+Xeon E5690,Q1'11,,intel_xeon_processors_v1_6.csv
+Xeon E6510,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon E6540,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon E7-2803,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-2820,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-2830,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-2850,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-2850 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-2860,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-2870,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-2870 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-2880 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-2890 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-4807,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-4809 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-4809 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-4809 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-4820,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-4820 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-4820 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-4820 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-4830,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-4830 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-4830 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-4830 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-4850,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-4850 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-4850 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-4850 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-4860,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-4860 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-4870,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-4870 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-4880 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-4890 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-8830,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-8837,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-8850,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-8850 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-8857 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-8860,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-8860 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-8860 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-8867 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-8867 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-8867L,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-8870,Q2'11,,intel_xeon_processors_v1_8.csv
+Xeon E7-8870 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-8870 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-8870 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-8880 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-8880 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-8880 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-8880L v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-8880L v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-8890 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-8890 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-8890 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-8891 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-8891 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-8891 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-8893 v2,Q1'14,,intel_xeon_processors_v1_8.csv
+Xeon E7-8893 v3,Q2'15,,intel_xeon_processors_v1_8.csv
+Xeon E7-8893 v4,Q2'16,,intel_xeon_processors_v1_8.csv
+Xeon E7-8894 v4,Q1'17,,intel_xeon_processors_v1_8.csv
+Xeon E7210,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon E7220,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon E7310,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon E7320,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon E7330,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon E7340,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon E7420,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon E7430,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon E7440,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon E7450,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon E7520,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon E7530,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon E7540,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon EC3539,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon EC5509,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon EC5539,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon EC5549,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5115,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5118,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5119T,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5120,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5120T,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5122,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5215,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5215L,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5217,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5218,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5218B,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5218N,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5218R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5218T,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5220,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5220R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5220S,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5220T,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5222,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5315Y,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5317,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5318H,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5318N,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5318S,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5318Y,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5320,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5320H,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5320T,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5403N,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5411N,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5412U,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5415+,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5416S,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5418N,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5418Y,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5420+,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5423N,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5433N,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5512U,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5515+,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 5520+,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6126,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6126F,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6126T,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6128,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6130,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6130F,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6130T,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6132,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6134,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6136,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6138,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6138F,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6138P,Q2'18,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6138T,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6140,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6142,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6142F,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6144,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6146,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6148,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6148F,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6150,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6152,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6154,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6208U,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6209U,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6210U,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6212U,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6222V,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6226,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6226R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6230,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6230N,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6230R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6230T,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6234,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6238,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6238L,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6238R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6238T,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6240,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6240L,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6240R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6240Y,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6242,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6242R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6244,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6246,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6246R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6248,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6248R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6250,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6250L,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6252,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6252N,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6254,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6256,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6258R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6262V,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6312U,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6314U,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6326,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6328H,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6328HL,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6330,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6330H,Q3'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6330N,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6334,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6336Y,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6338,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6338N,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6338T,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6342,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6346,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6348,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6348H,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6354,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6403N,Q3'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6414U,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6416H,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6418H,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6421N,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6423N,Q3'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6426Y,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6428N,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6430,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6433N,Q3'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6433NE,Q3'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6434,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6434H,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6438M,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6438N,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6438Y+,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6442Y,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6443N,Q3'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6444Y,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6448H,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6448Y,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6454S,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6458Q,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6526Y,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6530,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6534,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6538N,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6538Y+,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6542Y,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6544Y,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6548N,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6548Y+,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6554S,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Gold 6558Q,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon L3014,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon L3110,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon L3360,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon L3406,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon L3426,Q3'09,,intel_xeon_processors_v1_8.csv
+Xeon L5215,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon L5238,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon L5240,Q2'08,,intel_xeon_processors_v1_8.csv
+Xeon L5310,Q1'07,,intel_xeon_processors_v1_8.csv
+Xeon L5318,Q1'07,,intel_xeon_processors_v1_8.csv
+Xeon L5320,Q1'07,,intel_xeon_processors_v1_8.csv
+Xeon L5335,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon L5408,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon L5410,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon L5420,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon L5430,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon L5506,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon L5508,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon L5518,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon L5520,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon L5530,Q3'09,,intel_xeon_processors_v1_8.csv
+Xeon L5609,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon L5618,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon L5630,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon L5638,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon L5640,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon L7345,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon L7445,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon L7455,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon L7545,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon L7555,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon LC3518,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon LC3528,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon LC5518,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon LC5528,Q1'10,,intel_xeon_processors_v1_8.csv
+"Xeon LV 1.60 GHz, 512K Cache, 400 MHz FSB",Q3'02,,intel_xeon_processors_v1_8.csv
+"Xeon LV 1.66 GHz, 2M Cache, 667 MHz FSB",Q1'06,,intel_xeon_processors_v1_8.csv
+"Xeon LV 2.00 GHz, 2M Cache, 667 MHz FSB",Q1'06,,intel_xeon_processors_v1_8.csv
+"Xeon LV 2.16 GHz, 2M Cache, 667 MHz FSB",Q3'06,,intel_xeon_processors_v1_8.csv
+"Xeon LV 2.40 GHz, 512K Cache, 400 MHz FSB",Q3'03,,intel_xeon_processors_v1_8.csv
+Xeon LV 5128,Q2'06,,intel_xeon_processors_v1_8.csv
+Xeon LV 5138,Q2'06,,intel_xeon_processors_v1_8.csv
+Xeon LV 5148,Q2'06,,intel_xeon_processors_v1_8.csv
+Xeon Phi 3120A Coprocessor,Q2'13,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 3120P Coprocessor,Q2'13,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 5110P Coprocessor,Q4'12,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 5120D Coprocessor,Q2'13,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7120A Coprocessor,Q2'14,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7120D Coprocessor,Q1'14,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7120P Coprocessor,Q2'13,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7120X Coprocessor,Q2'13,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7210,Q2'16,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7210F,Q4'16,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7230,Q2'16,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7230F,Q4'16,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7235,Q4'17,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7250,Q2'16,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7250F,Q4'16,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7285,Q4'17,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7290,Q4'16,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7290F,Q4'16,,intel_xeon_phi_processors_v1_6.csv
+Xeon Phi 7295,Q4'17,,intel_xeon_phi_processors_v1_6.csv
+Xeon Platinum 8153,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8156,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8158,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8160,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8160F,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8160T,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8164,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8168,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8170,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8171M,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8176,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8176F,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8180,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8253,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8256,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8260,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8260L,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8260Y,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8268,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8270,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8272CL,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8276,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8276L,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8280,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8280L,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8351N,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8352M,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8352S,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8352V,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8352Y,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8353H,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8354H,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8356H,Q3'20,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8358,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8358P,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8360H,Q3'20,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8360HL,Q3'20,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8360Y,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8362,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8368,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8368Q,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8370C,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8376H,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8376HL,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8380,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8380H,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8380HL,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8444H,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8450H,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8452Y,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8454H,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8458P,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8460H,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8460Y+,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8461V,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8462Y+,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8468,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8468H,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8468V,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8470,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8470N,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8470Q,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8471N,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8480+,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8490H,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8558,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8558P,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8558U,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8562Y+,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8568Y+,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8570,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8571N,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8580,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8581V,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8592+,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8592V,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 8593Q,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 9221,Q3'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 9222,Q3'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 9242,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Platinum 9282,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4018,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4108,Q3'17,,intel_xeon_processors_v1_6.csv
+Xeon Silver 4109T,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4110,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4112,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4114,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4114T,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4116,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4116T,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4208,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4209T,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4210,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4210R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4210T,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4214,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4214R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4214Y,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4215,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4215R,Q1'20,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4216,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4309Y,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4310,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4310T,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4314,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4316,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4410T,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4410Y,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4416+,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4509Y,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4510,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4510T,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4514Y,Q4'23,,intel_xeon_processors_v1_8.csv
+Xeon Silver 4516Y+,Q4'23,,intel_xeon_processors_v1_8.csv
+"Xeon ULV 1.66 GHz, 2M Cache, 667 MHz FSB",Q1'06,,intel_xeon_processors_v1_8.csv
+Xeon W-10855M,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-10885M,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-11155MLE,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W-11155MRE,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W-11555MLE,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W-11555MRE,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W-11855M,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon W-11865MLE,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W-11865MRE,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W-11955M,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon W-1250,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1250E,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1250P,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1250TE,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1270,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1270E,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1270P,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1270TE,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1290,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1290E,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1290P,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1290T,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1290TE,Q2'20,,intel_xeon_processors_v1_8.csv
+Xeon W-1350,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon W-1350P,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon W-1370,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon W-1370P,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon W-1390,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon W-1390P,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon W-1390T,Q2'21,,intel_xeon_processors_v1_8.csv
+Xeon W-2123,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon W-2125,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon W-2133,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon W-2135,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon W-2145,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon W-2155,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon W-2175,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon W-2195,Q3'17,,intel_xeon_processors_v1_8.csv
+Xeon W-2223,Q4'19,,intel_xeon_processors_v1_8.csv
+Xeon W-2225,Q4'19,,intel_xeon_processors_v1_8.csv
+Xeon W-2235,Q4'19,,intel_xeon_processors_v1_8.csv
+Xeon W-2245,Q4'19,,intel_xeon_processors_v1_8.csv
+Xeon W-2255,Q4'19,,intel_xeon_processors_v1_8.csv
+Xeon W-2265,Q4'19,,intel_xeon_processors_v1_8.csv
+Xeon W-2275,Q4'19,,intel_xeon_processors_v1_8.csv
+Xeon W-2295,Q4'19,,intel_xeon_processors_v1_8.csv
+Xeon W-3175X,Q4'18,,intel_xeon_processors_v1_8.csv
+Xeon W-3223,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon W-3225,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon W-3235,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon W-3245,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon W-3245M,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon W-3265,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon W-3265M,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon W-3275,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon W-3275M,Q2'19,,intel_xeon_processors_v1_8.csv
+Xeon W-3323,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W-3335,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W-3345,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W-3365,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W-3375,Q3'21,,intel_xeon_processors_v1_8.csv
+Xeon W3-2423,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W3-2425,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W3-2435,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W3520,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon W3530,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon W3540,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon W3550,Q3'09,,intel_xeon_processors_v1_8.csv
+Xeon W3565,Q4'09,,intel_xeon_processors_v1_8.csv
+Xeon W3570,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon W3580,Q3'09,,intel_xeon_processors_v1_8.csv
+Xeon W3670,Q3'10,,intel_xeon_processors_v1_8.csv
+Xeon W3680,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon W3690,Q1'11,,intel_xeon_processors_v1_8.csv
+Xeon W5-2445,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W5-2455X,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W5-2465X,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W5-3425,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W5-3435X,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W5580,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon W5590,Q3'09,,intel_xeon_processors_v1_8.csv
+Xeon W7-2475X,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W7-2495X,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W7-3445,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W7-3455,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W7-3465X,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W9-3475X,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon W9-3495X,Q1'23,,intel_xeon_processors_v1_8.csv
+Xeon X3210,Q1'07,,intel_xeon_processors_v1_8.csv
+Xeon X3220,Q1'07,,intel_xeon_processors_v1_8.csv
+Xeon X3230,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon X3320,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon X3330,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon X3350,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon X3360,Q1'08,,intel_xeon_processors_v1_8.csv
+Xeon X3370,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon X3380,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon X3430,Q3'09,,intel_xeon_processors_v1_8.csv
+Xeon X3440,Q3'09,,intel_xeon_processors_v1_8.csv
+Xeon X3450,Q3'09,,intel_xeon_processors_v1_8.csv
+Xeon X3460,Q3'09,,intel_xeon_processors_v1_8.csv
+Xeon X3470,Q3'09,,intel_xeon_processors_v1_8.csv
+Xeon X3480,Q2'10,,intel_xeon_processors_v1_8.csv
+Xeon X5260,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon X5270,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon X5272,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon X5355,Q4'06,,intel_xeon_processors_v1_8.csv
+Xeon X5365,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon X5450,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon X5460,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon X5470,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon X5472,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon X5482,Q4'07,,intel_xeon_processors_v1_8.csv
+Xeon X5492,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon X5550,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon X5560,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon X5570,Q1'09,,intel_xeon_processors_v1_8.csv
+Xeon X5647,Q1'11,,intel_xeon_processors_v1_8.csv
+Xeon X5650,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon X5660,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon X5667,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon X5670,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon X5672,Q1'11,,intel_xeon_processors_v1_8.csv
+Xeon X5675,Q1'11,,intel_xeon_processors_v1_8.csv
+Xeon X5677,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon X5680,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon X5687,Q1'11,,intel_xeon_processors_v1_8.csv
+Xeon X5690,Q1'11,,intel_xeon_processors_v1_8.csv
+Xeon X6550,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon X7350,Q3'07,,intel_xeon_processors_v1_8.csv
+Xeon X7460,Q3'08,,intel_xeon_processors_v1_8.csv
+Xeon X7542,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon X7550,Q1'10,,intel_xeon_processors_v1_8.csv
+Xeon X7560,Q1'10,,intel_xeon_processors_v1_8.csv

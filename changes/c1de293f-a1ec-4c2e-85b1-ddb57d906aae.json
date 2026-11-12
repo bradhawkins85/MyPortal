@@ -1,0 +1,7 @@
+{
+  "guid": "c1de293f-a1ec-4c2e-85b1-ddb57d906aae",
+  "occurred_at": "2026-11-12T07:12Z",
+  "change_type": "Feature",
+  "summary": "CPU release dates now pre-fill missing asset ages, with available temperature references shown in Hardware and supplied to health checks.",
+  "content_hash": "614c36ca26a6797315b385f972b09c2aa0e6253339bdd4d9506db12c880868d9"
+}

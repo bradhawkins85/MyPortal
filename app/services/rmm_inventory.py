@@ -26,7 +26,7 @@ from typing import Any, Iterable, Mapping
 from app.core.logging import log_info, log_warning
 from app.repositories import rmm_inventory as repo
 from app.repositories import network_map as network_map_repo
-from app.services import rmm_proxmox
+from app.services import rmm_proxmox, cpu_catalog
 
 REFRESH_INTERVAL = timedelta(hours=24)
 POLL_SECONDS = 120
@@ -283,6 +283,7 @@ async def asset_inventory_context(agent: Mapping[str, Any] | None, *, can_refres
     received = _as_datetime(inventory.get("received_at")) if inventory else None
     requested = _as_datetime(inventory.get("refresh_requested_at")) if inventory else None
     if inventory:
+        inventory = cpu_catalog.enrich_asset(inventory)
         inventory = {key: value.isoformat() if isinstance(value, (datetime, date)) else value
                      for key, value in inventory.items()}
     software = [{key: value.isoformat() if isinstance(value, date) else value for key, value in item.items()}
