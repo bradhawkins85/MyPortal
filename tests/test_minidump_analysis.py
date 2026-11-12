@@ -837,8 +837,11 @@ async def test_asset_context_visibility(client, monkeypatch):
 def test_pack_registers_the_minidump_routes():
     from app.features.health_check import PACK
 
-    assert routes.router in PACK.routers and PACK.version == "1.2.0"
+    # Compare by path: other tests reload feature packs, which makes new router objects.
+    assert PACK.version == "1.2.0"
+    registered = {route.path for router in PACK.routers for route in router.routes}
     paths = {route.path for route in routes.router.routes}
+    assert paths <= registered
     assert paths == {"/api/tray/minidumps", "/api/assets/{asset_id}/minidumps",
                      "/api/assets/{asset_id}/minidumps/{dump_id}/analyse",
                      "/rmm/assets/{asset_id}/minidumps/{dump_id}/analyse"}
