@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Mapping
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app.core.logging import log_info
@@ -978,19 +978,6 @@ async def send_expiration_reminder(request: Request):
 CPU_LAUNCH_DATES_PATH = "/assets/cpu-launch-dates"
 
 
-def _parse_launch_month(value: Any) -> date | None:
-    """Read a launch date from a month picker (YYYY-MM) or a date (YYYY-MM-DD)."""
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        if len(text) == 7:
-            return date.fromisoformat(text + "-01")
-        return date.fromisoformat(text).replace(day=1)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="Enter the launch month as YYYY-MM") from exc
-
-
 @router.get(CPU_LAUNCH_DATES_PATH, response_class=HTMLResponse,
             summary="Review processor launch dates used to estimate asset age")
 async def cpu_launch_dates_page(request: Request):
@@ -1015,36 +1002,6 @@ async def cpu_launch_dates_page(request: Request):
     return await main_module._render_template("assets/cpu_launch_dates.html", request, user, extra=extra)
 
 
-@router.post(CPU_LAUNCH_DATES_PATH + "/refresh", summary="Look up missing processor launch dates now")
-async def refresh_cpu_launch_dates(request: Request, background_tasks: BackgroundTasks):
-    from app.services import cpu_release_dates as cpu_service
-
-    main_module = _main()
-    _user, redirect = await main_module._require_super_admin_page(request)
-    if redirect:
-        return redirect
-    if not await cpu_service.is_module_enabled():
-        return main_module.flash_redirect(
-            CPU_LAUNCH_DATES_PATH, "Turn on the CPU age lookup module to look up launch dates on Intel ARK.", "error",
-        )
-    background_tasks.add_task(_refresh_cpu_launch_dates)
-    return main_module.flash_redirect(
-        CPU_LAUNCH_DATES_PATH,
-        "Looking up Intel processors on Intel ARK. Refresh this page in a minute or two to see the dates.",
-        "success",
-    )
-
-
-async def _refresh_cpu_launch_dates() -> None:
-    from app.core.logging import log_error
-    from app.services import cpu_release_dates as cpu_service
-
-    try:
-        await cpu_service.refresh()
-    except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("CPU release date lookup failed", error=str(exc))
-
-
 @router.post(CPU_LAUNCH_DATES_PATH + "/{entry_id}", summary="Record or clear a processor's launch date")
 async def save_cpu_launch_date(request: Request, entry_id: int):
     from app.repositories import cpu_release_dates as cpu_repo
@@ -1059,25 +1016,42 @@ async def save_cpu_launch_date(request: Request, entry_id: int):
         raise HTTPException(status_code=404, detail="Processor not found")
     form = await request.form()
     clearing = str(form.get("action") or "") == "clear"
-    released = None if clearing else _parse_launch_month(form.get("release_month"))
-    if not clearing and released is None:
-        return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, "Choose the month the processor was launched.", "error")
-    if released and released > date.today():
-        return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, "The launch date cannot be in the future.", "error")
-    await cpu_service.set_manual_release_date(entry_id, released)
+    release = None
+    source = str(form.get("source") or "manual")
+    if not clearing:
+        text = str(form.get("launch_date") or "").strip()
+        if not text:
+            return main_module.flash_redirect(
+                CPU_LAUNCH_DATES_PATH, "Enter the launch date, for example Q3'19 as Intel ARK shows it.", "error",
+            )
+        release = cpu_service.parse_release_text(text)
+        if release is None:
+            return main_module.flash_redirect(
+                CPU_LAUNCH_DATES_PATH,
+                f"'{text[:40]}' is not a launch date MyPortal understands. Use Q3'19, 2019-07 or Jul 2019.",
+                "error",
+            )
+        if release[0] > date.today():
+            return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, "The launch date cannot be in the future.", "error")
+    try:
+        updated = await cpu_service.set_release_date(
+            entry_id, release, source=source, source_url=form.get("source_url"),
+        )
+    except cpu_service.LaunchDateError as exc:
+        return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, str(exc), "error")
     await audit_service.record(
         action="cpu_release_date.update", request=request, user_id=int(user["id"]),
         entity_type="cpu_release_date", entity_id=entry_id,
         before={"release_date": existing["release_date"].isoformat() if existing.get("release_date") else None,
-                "source": existing.get("source")},
-        after={"release_date": released.isoformat() if released else None,
-               "source": "manual" if released else None},
+                "source": existing.get("source"), "source_url": existing.get("source_url")},
+        after={"release_date": release[0].isoformat() if release else None,
+               "source": updated.get("source"), "source_url": updated.get("source_url")},
     )
     name = existing.get("model") or existing.get("cpu_name")
-    if released:
-        message = f"Saved: {name} launched {released:%B %Y}. Devices with it have been updated."
+    if release:
+        message = f"Saved: {name} launched {release[1]}. Devices with it have been updated."
     else:
-        message = f"Cleared the date for {name}. The next lookup will try to find it again."
+        message = f"Cleared the launch date for {name}."
     return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, message, "success")
 
 

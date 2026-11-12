@@ -6,23 +6,25 @@
 
 {% block header_actions %}
   {% set cpu_actions = [] %}
-  {% if cpu_lookup_enabled %}
-    {% set _ = cpu_actions.append({"label": "Look up now", "type": "form", "action": "/assets/cpu-launch-dates/refresh", "variant": "primary", "attrs": {"title": "Look up Intel processors that have no launch date yet on Intel ARK"}}) %}
-  {% endif %}
   {% set _ = cpu_actions.append({"label": "Module settings", "type": "link", "href": "/admin/modules"}) %}
   {% set _ = cpu_actions.append({"label": "Back to assets", "type": "link", "href": "/assets"}) %}
   {{ page_header_actions(cpu_actions, menu_id="cpu-launch-actions") }}
 {% endblock %}
 
-{% macro processor_item(cpu, max_month) %}
+{% macro edit_attrs(cpu, label) -%}
+data-cpu-edit aria-haspopup="dialog" aria-controls="cpu-launch-modal"
+  data-cpu-id="{{ cpu.id }}" data-cpu-label="{{ label }}" data-cpu-name="{{ cpu.cpu_name }}"
+  data-cpu-value="{{ cpu.release_label or '' }}" data-cpu-source="{{ cpu.source or '' }}"
+  data-cpu-source-url="{{ cpu.source_url or '' }}" data-cpu-intel="{{ '1' if cpu.vendor == 'intel' else '' }}"
+  data-cpu-ark-url="{{ cpu.ark_url or '' }}" data-cpu-devices="{{ cpu.device_count }}"
+{%- endmacro %}
+
+{% macro processor_item(cpu) %}
   {%- set label = cpu.model or cpu.cpu_name -%}
   <li class="scf-item cpu-item" data-cpu-item data-cpu-search="{{ label }} {{ cpu.cpu_name }} {{ cpu.vendor_label }}">
     <div class="scf-item__main">
       <div class="scf-item__heading">
-        <button type="button" class="scf-item__label cpu-item__label" data-cpu-edit aria-haspopup="dialog" aria-controls="cpu-launch-modal"
-          data-cpu-id="{{ cpu.id }}" data-cpu-label="{{ label }}" data-cpu-name="{{ cpu.cpu_name }}"
-          data-cpu-month="{{ cpu.release_date.strftime('%Y-%m') if cpu.release_date else '' }}"
-          data-cpu-source="{{ cpu.source or '' }}" data-cpu-devices="{{ cpu.device_count }}">{{ label }}</button>
+        <button type="button" class="scf-item__label cpu-item__label" {{ edit_attrs(cpu, label) }}>{{ label }}</button>
       </div>
       {% if cpu.model and cpu.model != cpu.cpu_name %}<p class="scf-item__key cpu-item__name">{{ cpu.cpu_name }}</p>{% endif %}
       <ul class="scf-item__chips" aria-label="Summary for {{ label }}">
@@ -31,31 +33,26 @@
         {% if cpu.release_date %}
           <li class="scf-chip scf-chip--visibility">Launched {{ cpu.release_label or cpu.release_date.strftime('%b %Y') }}</li>
           <li class="scf-chip">About {{ cpu.age_years }} year{{ "s" if cpu.age_years != 1 }} old</li>
-          {% if cpu.source == 'manual' %}<li class="scf-chip scf-chip--logic">Entered manually</li>
-          {% elif cpu.source_url %}<li class="scf-chip"><a href="{{ cpu.source_url }}" target="_blank" rel="noopener noreferrer">{{ cpu.source_label or 'Source' }}</a></li>
+          {% if cpu.source_url %}<li class="scf-chip"><a href="{{ cpu.source_url }}" target="_blank" rel="noopener noreferrer">{{ cpu.source_label or 'Source' }}</a></li>
           {% elif cpu.source_label %}<li class="scf-chip">{{ cpu.source_label }}</li>{% endif %}
-        {% elif cpu.lookup_status == 'not_found' %}<li class="scf-chip scf-chip--muted">Not found on Intel ARK</li>
-        {% elif cpu.lookup_status == 'error' %}<li class="scf-chip scf-chip--muted">Lookup failed</li>
-        {% elif cpu.lookup_status == 'unsupported' %}<li class="scf-chip scf-chip--muted">Needs a manual date</li>
-        {% else %}<li class="scf-chip">Waiting for lookup</li>{% endif %}
+        {% elif cpu.vendor == 'intel' and cpu.model %}<li class="scf-chip scf-chip--muted">Needs a date from Intel ARK</li>
+        {% else %}<li class="scf-chip scf-chip--muted">Needs a date</li>{% endif %}
       </ul>
-      {% if not cpu.release_date and cpu.lookup_message %}<p class="scf-item__help">{{ cpu.lookup_message }}</p>{% endif %}
       <details class="cpu-item__fallback" data-cpu-fallback>
         <summary>{{ 'Change date' if cpu.release_date else 'Add date' }}</summary>
         <form class="form-inline" method="post" action="/assets/cpu-launch-dates/{{ cpu.id }}">
           {% include "partials/csrf.html" %}
-          <label class="form-label" for="cpu-month-{{ cpu.id }}">Launch month</label>
-          <input class="form-input" type="month" id="cpu-month-{{ cpu.id }}" name="release_month" value="{{ cpu.release_date.strftime('%Y-%m') if cpu.release_date else '' }}" max="{{ max_month }}">
+          <label class="form-label" for="cpu-date-{{ cpu.id }}">Launch date</label>
+          <input class="form-input" id="cpu-date-{{ cpu.id }}" name="launch_date" value="{{ cpu.release_label or '' }}" placeholder="Q3'19" maxlength="32">
+          <input type="hidden" name="source" value="{{ 'intel_ark' if cpu.vendor == 'intel' else 'manual' }}">
           <button class="button button--primary button--small" type="submit">Save</button>
-          {% if cpu.source == 'manual' %}<button class="button button--ghost button--small" type="submit" name="action" value="clear">Clear</button>{% endif %}
+          {% if cpu.release_date %}<button class="button button--ghost button--small" type="submit" name="action" value="clear">Clear</button>{% endif %}
         </form>
       </details>
     </div>
     <div class="scf-item__actions">
-      <button type="button" class="button button--ghost button--small" data-cpu-edit aria-haspopup="dialog" aria-controls="cpu-launch-modal"
-        data-cpu-id="{{ cpu.id }}" data-cpu-label="{{ label }}" data-cpu-name="{{ cpu.cpu_name }}"
-        data-cpu-month="{{ cpu.release_date.strftime('%Y-%m') if cpu.release_date else '' }}"
-        data-cpu-source="{{ cpu.source or '' }}" data-cpu-devices="{{ cpu.device_count }}">{{ 'Edit date' if cpu.release_date else 'Add date' }}</button>
+      {% if cpu.ark_url and not cpu.release_date %}<a class="button button--ghost button--small" href="{{ cpu.ark_url }}" target="_blank" rel="noopener noreferrer">Open on Intel ARK<span class="visually-hidden"> (opens in a new tab)</span></a>{% endif %}
+      <button type="button" class="button button--ghost button--small" {{ edit_attrs(cpu, label) }}>{{ 'Edit date' if cpu.release_date else 'Add date' }}</button>
     </div>
   </li>
 {% endmacro %}
@@ -66,7 +63,7 @@
     <header class="card__header card__header--stacked">
       <div>
         <h2 class="card__title" id="cpu-launch-summary-title">How device age is estimated</h2>
-        <p class="card__subtitle">A computer cannot be older than its processor, so each device's <strong>Approx age</strong> is the number of years since its CPU was launched. Intel processors are looked up on Intel ARK automatically; add the launch month for any other processor here and every device with it is updated.</p>
+        <p class="card__subtitle">A computer cannot be older than its processor, so each device's <strong>Approx age</strong> is the number of years since its CPU was launched. Record each processor's launch date once and every device with it is updated. For Intel processors, choose <strong>Open on Intel ARK</strong>, find the <em>Launch Date</em> under Supplemental Information (for example <code>Q3'19</code>) and type it in as shown.</p>
       </div>
     </header>
     <div class="card__body">
@@ -76,7 +73,7 @@
         <div><dt>Devices covered</dt><dd>{{ dated | sum(attribute='device_count') }} of {{ device_total }}</dd></div>
       </dl>
       {% if not cpu_lookup_enabled %}
-        <p class="cpu-launch__notice" role="status">Automatic Intel ARK lookups are off. Turn on <strong>CPU age lookup</strong> in <a href="/admin/modules">Modules</a> to fill in Intel dates and keep ages up to date each day. Dates you add here still apply straight away.</p>
+        <p class="cpu-launch__notice" role="status">The daily age refresh is off. Turn on <strong>CPU age lookup</strong> in <a href="/admin/modules">Modules</a> so new devices pick up their age and existing ages keep counting up. Dates you add here still apply straight away.</p>
       {% endif %}
     </div>
   </section>
@@ -97,13 +94,13 @@
         {% if needs_date %}
           <h3 class="scf-group__title" id="cpu-needs-date-title" data-cpu-group>Needs a date <span class="text-muted">({{ needs_date | length }})</span></h3>
           <ul class="scf-list" aria-labelledby="cpu-needs-date-title">
-            {% for cpu in needs_date %}{{ processor_item(cpu, today_iso[:7]) }}{% endfor %}
+            {% for cpu in needs_date %}{{ processor_item(cpu) }}{% endfor %}
           </ul>
         {% endif %}
         {% if dated %}
           <h3 class="scf-group__title" id="cpu-dated-title" data-cpu-group>Launch date known <span class="text-muted">({{ dated | length }})</span></h3>
           <ul class="scf-list" aria-labelledby="cpu-dated-title">
-            {% for cpu in dated %}{{ processor_item(cpu, today_iso[:7]) }}{% endfor %}
+            {% for cpu in dated %}{{ processor_item(cpu) }}{% endfor %}
           </ul>
         {% endif %}
         <p class="scf-empty scf-empty--search" data-cpu-no-results hidden>No processors match your search.</p>
@@ -131,15 +128,28 @@
     <div class="modal__body cpu-editor__body">
       <div class="cpu-editor__main">
         <div class="form-field">
-          <label class="form-label" for="cpu-modal-month">Launch month</label>
-          <input class="form-input" type="month" id="cpu-modal-month" name="release_month" max="{{ today_iso[:7] }}" data-cpu-month-input aria-describedby="cpu-modal-month-help cpu-modal-month-error">
-          <p class="form-help" id="cpu-modal-month-help">The month the maker released this processor, from its specification page. If only a quarter is listed, use its first month (Q3 2019 is July 2019).</p>
-          <p class="form-error" id="cpu-modal-month-error" data-cpu-error hidden></p>
+          <label class="form-label" for="cpu-modal-date">Launch date</label>
+          <input class="form-input" id="cpu-modal-date" name="launch_date" maxlength="32" placeholder="Q3'19" autocomplete="off" spellcheck="false" data-cpu-date-input aria-describedby="cpu-modal-date-help cpu-modal-date-error">
+          <p class="form-help" id="cpu-modal-date-help">Type it as Intel ARK shows it, for example <code>Q3'19</code>. A month such as <code>2019-07</code> or <code>Jul 2019</code> also works. Quarters count from their first month.</p>
+          <p class="form-error" id="cpu-modal-date-error" data-cpu-error hidden></p>
+        </div>
+        <p class="cpu-editor__ark" data-cpu-ark hidden><a href="#" target="_blank" rel="noopener noreferrer" data-cpu-ark-link>Open this processor on Intel ARK<span class="visually-hidden"> (opens in a new tab)</span></a></p>
+        <fieldset class="form-field cpu-editor__source">
+          <legend class="form-label">Where the date came from</legend>
+          <div class="cpu-segmented" role="radiogroup">
+            <label class="cpu-segmented__option"><input type="radio" name="source" value="intel_ark" data-cpu-source-input> Intel ARK</label>
+            <label class="cpu-segmented__option"><input type="radio" name="source" value="manual" data-cpu-source-input> Other source</label>
+          </div>
+        </fieldset>
+        <div class="form-field">
+          <label class="form-label" for="cpu-modal-url">Intel ARK page <span class="text-muted">optional</span></label>
+          <input class="form-input" id="cpu-modal-url" name="source_url" type="url" maxlength="512" placeholder="https://www.intel.com/content/www/us/en/products/sku/…" autocomplete="off" data-cpu-url-input aria-describedby="cpu-modal-url-help">
+          <p class="form-help" id="cpu-modal-url-help">Paste the processor's intel.com page so others can check the date later.</p>
         </div>
       </div>
       <aside class="cpu-editor__aside" aria-label="Preview">
         <p class="cpu-editor__preview-label">Preview</p>
-        <p class="cpu-editor__age" data-cpu-preview-age role="status" aria-live="polite">Choose a month to see the estimated age.</p>
+        <p class="cpu-editor__age" data-cpu-preview-age role="status" aria-live="polite">Enter a launch date to see the estimated age.</p>
         <p class="text-muted" data-cpu-preview-summary></p>
       </aside>
     </div>

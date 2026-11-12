@@ -10,30 +10,70 @@
   const form = modal.querySelector('[data-cpu-form]');
   const title = modal.querySelector('[data-cpu-title]');
   const subtitle = modal.querySelector('[data-cpu-subtitle]');
-  const monthInput = modal.querySelector('[data-cpu-month-input]');
+  const dateInput = modal.querySelector('[data-cpu-date-input]');
+  const urlInput = modal.querySelector('[data-cpu-url-input]');
+  const sourceInputs = Array.from(modal.querySelectorAll('[data-cpu-source-input]'));
   const errorEl = modal.querySelector('[data-cpu-error]');
   const clearButton = modal.querySelector('[data-cpu-clear]');
+  const arkRow = modal.querySelector('[data-cpu-ark]');
+  const arkLink = modal.querySelector('[data-cpu-ark-link]');
   const previewAge = modal.querySelector('[data-cpu-preview-age]');
   const previewSummary = modal.querySelector('[data-cpu-preview-summary]');
-  const maxMonth = monthInput.getAttribute('max') || '';
   const state = { trigger: null, initial: '', devices: 0, label: '' };
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
   // The JavaScript editor replaces the per-item fallback forms.
   root.querySelectorAll('[data-cpu-fallback]').forEach((el) => {
     el.hidden = true;
   });
 
-  function parseMonth(value) {
-    const match = /^(\d{4})-(\d{2})$/.exec(String(value || '').trim());
-    if (!match) {
-      return null;
+  function fullYear(text) {
+    let year = Number(text);
+    if (text.length <= 2) {
+      year += year >= 70 ? 1900 : 2000;
     }
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    if (month < 1 || month > 12) {
+    return year;
+  }
+
+  function monthDate(year, month) {
+    if (month < 1 || month > 12 || year < 1970 || year > 2100) {
       return null;
     }
     return new Date(Date.UTC(year, month - 1, 1));
+  }
+
+  // Mirrors app/services/cpu_release_dates.py::parse_release_text.
+  function parseLaunch(value) {
+    const text = String(value || '').trim().replace(/\s+/g, ' ');
+    if (!text) {
+      return null;
+    }
+    let m = /^Q([1-4])\s*['’`]?\s*(\d{4}|\d{2})$/i.exec(text);
+    if (m) {
+      const year = fullYear(m[2]);
+      const when = monthDate(year, (Number(m[1]) - 1) * 3 + 1);
+      return when ? { date: when, label: 'Q' + m[1] + ' ' + year } : null;
+    }
+    m = /^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/.exec(text);
+    if (m) {
+      const when = monthDate(Number(m[1]), Number(m[2]));
+      return when ? { date: when } : null;
+    }
+    m = /^(\d{1,2})\s*\/\s*(\d{4})$/.exec(text);
+    if (m) {
+      const when = monthDate(Number(m[2]), Number(m[1]));
+      return when ? { date: when } : null;
+    }
+    m = /^([a-z]{3,9})\.?\s+(\d{4})$/i.exec(text);
+    if (m && MONTHS.includes(m[1].slice(0, 3).toLowerCase())) {
+      const when = monthDate(Number(m[2]), MONTHS.indexOf(m[1].slice(0, 3).toLowerCase()) + 1);
+      return when ? { date: when } : null;
+    }
+    m = /^(19[89]\d|20\d{2})$/.exec(text);
+    if (m) {
+      return { date: new Date(Date.UTC(Number(m[1]), 0, 1)), label: m[1] };
+    }
+    return null;
   }
 
   function ageInYears(launched) {
@@ -45,62 +85,80 @@
     return count + ' ' + word + (count === 1 ? '' : 's');
   }
 
+  function monthName(when) {
+    return when.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  }
+
   function validate() {
-    const value = monthInput.value;
+    const parsed = parseLaunch(dateInput.value);
     let message = '';
-    if (!value) {
-      message = 'Choose the month the processor was launched.';
-    } else if (!parseMonth(value)) {
-      message = 'Enter the month as YYYY-MM, for example 2019-07.';
-    } else if (maxMonth && value > maxMonth) {
+    if (!dateInput.value.trim()) {
+      message = "Enter the launch date, for example Q3'19 as Intel ARK shows it.";
+    } else if (!parsed) {
+      message = "Use Q3'19, 2019-07 or Jul 2019.";
+    } else if (parsed.date.getTime() > Date.now()) {
       message = 'The launch date cannot be in the future.';
+    } else if (urlInput.value.trim() && !/^https:\/\/([a-z0-9-]+\.)*intel\.com(\/|$)/i.test(urlInput.value.trim())) {
+      message = "Paste the https:// link of the processor's page on intel.com, or leave it blank.";
     }
     errorEl.textContent = message;
     errorEl.hidden = !message;
-    monthInput.setAttribute('aria-invalid', message ? 'true' : 'false');
+    dateInput.setAttribute('aria-invalid', message ? 'true' : 'false');
     return !message;
   }
 
   function updatePreview() {
-    const launched = parseMonth(monthInput.value);
+    const parsed = parseLaunch(dateInput.value);
     const devices = plural(state.devices, 'device');
-    if (!launched || (maxMonth && monthInput.value > maxMonth)) {
-      previewAge.textContent = 'Choose a month to see the estimated age.';
+    if (!parsed || parsed.date.getTime() > Date.now()) {
+      previewAge.textContent = 'Enter a launch date to see the estimated age.';
       previewSummary.textContent = devices + ' with this processor will be updated when you save.';
       return;
     }
-    const age = ageInYears(launched);
-    const when = launched.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    const age = ageInYears(parsed.date);
     previewAge.textContent = 'About ' + plural(age, 'year') + ' old';
     previewSummary.textContent = devices + ' with ' + state.label + ' will show an Approx age of '
-      + plural(age, 'year') + ', counted from ' + when + '.';
+      + plural(age, 'year') + ', counted from ' + monthName(parsed.date) + '.';
+  }
+
+  function snapshot() {
+    const source = sourceInputs.find((input) => input.checked);
+    return [dateInput.value.trim(), urlInput.value.trim(), source ? source.value : ''].join('|');
   }
 
   function openEditor(trigger) {
     const data = trigger.dataset;
+    const isIntel = data.cpuIntel === '1';
     state.trigger = trigger;
-    state.initial = data.cpuMonth || '';
     state.devices = Number(data.cpuDevices || 0);
     state.label = data.cpuLabel || 'this processor';
     form.setAttribute('action', '/assets/cpu-launch-dates/' + encodeURIComponent(data.cpuId));
-    title.textContent = (state.initial ? 'Edit launch date: ' : 'Add launch date: ') + state.label;
+    title.textContent = (data.cpuValue ? 'Edit launch date: ' : 'Add launch date: ') + state.label;
     subtitle.textContent = data.cpuName && data.cpuName !== state.label
       ? 'Reported as “' + data.cpuName + '”'
       : 'Used by ' + plural(state.devices, 'device') + '.';
-    monthInput.value = state.initial;
-    clearButton.hidden = data.cpuSource !== 'manual';
+    dateInput.value = data.cpuValue || '';
+    urlInput.value = data.cpuSourceUrl || '';
+    const source = data.cpuSource || (isIntel ? 'intel_ark' : 'manual');
+    sourceInputs.forEach((input) => {
+      input.checked = input.value === source;
+    });
+    arkRow.hidden = !data.cpuArkUrl;
+    arkLink.href = data.cpuArkUrl || '#';
+    clearButton.hidden = !data.cpuValue;
     errorEl.hidden = true;
     errorEl.textContent = '';
-    monthInput.removeAttribute('aria-invalid');
+    dateInput.removeAttribute('aria-invalid');
     updatePreview();
+    state.initial = snapshot();
     modal.hidden = false;
     modal.classList.add('is-visible');
     modal.setAttribute('aria-hidden', 'false');
-    window.requestAnimationFrame(() => monthInput.focus());
+    window.requestAnimationFrame(() => dateInput.focus());
   }
 
   function closeEditor(force) {
-    if (!force && monthInput.value !== state.initial
+    if (!force && snapshot() !== state.initial
       && !window.confirm('Discard the launch date you entered?')) {
       return;
     }
@@ -137,27 +195,38 @@
     }
   });
 
-  monthInput.addEventListener('input', () => {
-    updatePreview();
-    if (!errorEl.hidden) {
-      validate();
+  [dateInput, urlInput].forEach((input) => {
+    input.addEventListener('input', () => {
+      updatePreview();
+      if (!errorEl.hidden) {
+        validate();
+      }
+    });
+  });
+
+  // Pasting an intel.com page link implies the date came from Intel ARK.
+  urlInput.addEventListener('change', () => {
+    if (urlInput.value.trim()) {
+      sourceInputs.forEach((input) => {
+        input.checked = input.value === 'intel_ark';
+      });
     }
   });
 
   form.addEventListener('submit', (event) => {
     const submitter = event.submitter;
     if (submitter && submitter.value === 'clear') {
-      if (!window.confirm('Clear the launch date for ' + state.label + '? Its devices keep their current age until a new date is found.')) {
+      if (!window.confirm('Clear the launch date for ' + state.label + '? Its devices keep their current age.')) {
         event.preventDefault();
       }
       return;
     }
     if (!validate()) {
       event.preventDefault();
-      monthInput.focus();
+      dateInput.focus();
       return;
     }
-    state.initial = monthInput.value;
+    state.initial = snapshot();
   });
 
   const search = root.querySelector('[data-cpu-search-input]');

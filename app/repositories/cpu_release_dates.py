@@ -101,60 +101,23 @@ async def ensure(cpu_key: str, cpu_name: str, vendor: str | None, model: str | N
     )
 
 
-async def list_due(*, retry_before: datetime, limit: int) -> list[dict[str, Any]]:
-    """Return processors never checked, or not found/failed before ``retry_before``.
-
-    Found and hand-entered dates are never looked up again.
-    """
-    rows = await db.fetch_all(
-        "SELECT id, cpu_key, cpu_name, vendor, model, lookup_status, checked_at "
-        "FROM cpu_release_dates "
-        "WHERE (source IS NULL OR source <> 'manual') "
-        "AND (lookup_status IS NULL OR (lookup_status <> 'found' AND (checked_at IS NULL OR checked_at < %s))) "
-        "ORDER BY checked_at IS NULL DESC, checked_at ASC, id ASC LIMIT %s",
-        (_dt(retry_before), int(limit)),
-    )
-    return [dict(row) for row in rows or []]
-
-
-async def record_lookup(
-    cpu_key: str,
+async def set_manual(
+    entry_id: int,
     *,
-    lookup_status: str,
-    message: str | None,
-    checked_at: datetime,
-    source: str | None = None,
-    release_date: date | None = None,
-    release_label: str | None = None,
+    release_date: date | None,
+    release_label: str | None,
+    source: str = "manual",
     source_url: str | None = None,
 ) -> None:
-    """Store a lookup outcome; the date is only replaced when one was found."""
-    note = (message or "")[:255] or None
-    if lookup_status == "found":
-        await db.execute(
-            "UPDATE cpu_release_dates SET release_date = %s, release_label = %s, source = %s, "
-            "source_url = %s, lookup_status = %s, lookup_message = %s, checked_at = %s, updated_at = %s "
-            "WHERE cpu_key = %s AND (source IS NULL OR source <> 'manual')",
-            (_d(release_date), (release_label or "")[:32] or None, source, (source_url or "")[:512] or None,
-             lookup_status, note, _dt(checked_at), _dt(checked_at), cpu_key),
-        )
-        return
-    await db.execute(
-        "UPDATE cpu_release_dates SET lookup_status = %s, lookup_message = %s, checked_at = %s, "
-        "updated_at = %s WHERE cpu_key = %s AND (source IS NULL OR source <> 'manual')",
-        (lookup_status, note, _dt(checked_at), _dt(checked_at), cpu_key),
-    )
-
-
-async def set_manual(entry_id: int, *, release_date: date | None, release_label: str | None) -> None:
-    """Record a launch date by hand, or clear it so the next run looks it up again."""
+    """Record a launch date a technician entered, or clear it."""
     now = _dt(_utcnow())
     if release_date:
         await db.execute(
-            "UPDATE cpu_release_dates SET release_date = %s, release_label = %s, source = 'manual', "
-            "source_url = NULL, lookup_status = 'found', lookup_message = %s, checked_at = %s, "
+            "UPDATE cpu_release_dates SET release_date = %s, release_label = %s, source = %s, "
+            "source_url = %s, lookup_status = 'found', lookup_message = NULL, checked_at = %s, "
             "updated_at = %s WHERE id = %s",
-            (_d(release_date), (release_label or "")[:32] or None, "Entered manually.", now, now, int(entry_id)),
+            (_d(release_date), (release_label or "")[:32] or None, source,
+             (source_url or "")[:512] or None, now, now, int(entry_id)),
         )
         return
     await db.execute(
