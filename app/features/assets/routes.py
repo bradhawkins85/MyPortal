@@ -289,20 +289,24 @@ async def assets_page(request: Request):
     can_export_assets = main_module._membership_menu_can(
         user, membership, "menu.assets", write=True
     )
-    can_write_assets = bool(user.get("is_super_admin")) or can_export_assets
+    is_super_admin = bool(user.get("is_super_admin"))
+    can_write_assets = is_super_admin or can_export_assets
+    # Read Only sees the same register as Read Write; only changes differ.
+    can_view_assets = is_super_admin or main_module._membership_menu_can(
+        user, membership, "menu.assets"
+    )
     can_wake = can_write_assets and await main_module._is_helpdesk_technician(user, request)
 
     rows = await asset_repo.list_company_assets(company_id)
-    if not can_write_assets:
-        # The page context already requires Assets read access. Publication
-        # audiences govern customer content, not the company asset register.
+    if not can_view_assets:
         rows = [_customer_asset(dict(row)) for row in rows]
     hidden_columns = await _end_user_hidden_columns(user, request)
+    # Custom fields are managed by super admins only.
     field_definitions = [
         definition
         for definition in (
             await asset_custom_fields_repo.list_field_definitions()
-            if can_write_assets else []
+            if is_super_admin else []
         )
         if _custom_field_column_key(definition) not in hidden_columns
     ]
@@ -452,7 +456,7 @@ async def assets_page(request: Request):
         or main_module._membership_menu_can(user, membership, "menu.rmm_scripts", write=True)
     )
     # Technicians who see RMM scripts get a column showing each device's RMM agent.
-    show_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
+    show_rmm_agent = can_view_assets and main_module._feature_pack_available("rmm") and (
         bool(user.get("is_super_admin"))
         or main_module._membership_menu_can(user, membership, "menu.rmm_scripts")
     )
@@ -503,7 +507,7 @@ async def assets_page(request: Request):
             tray_device.get("hostname") if tray_device else None
         )
         record["tray_agent_synced"] = bool(record["tray_device_uid"])
-        if can_write_assets:
+        if can_view_assets:
             record["tray_agent_version"] = _clean_text(
                 tray_device.get("agent_version") if tray_device else None
             )
@@ -562,7 +566,7 @@ async def assets_page(request: Request):
         for field_def in field_definitions
     ]
     all_columns = list(_ASSET_TABLE_COLUMNS) + custom_columns
-    if can_write_assets:
+    if can_view_assets:
         synced_index = next(i for i, column in enumerate(all_columns) if column["key"] == "tray_agent_synced")
         all_columns.insert(synced_index + 1, {"key": "tray_agent_version", "label": "Tray agent version", "sort": "string"})
     if show_rmm_agent:
@@ -576,10 +580,11 @@ async def assets_page(request: Request):
         all_columns.insert(performance_index + 1, {"key": "health_score", "label": "Health check score", "sort": "number"})
     # Tags belong to the tags pack and are internal, so customers never see them.
     show_tags = False
-    if can_write_assets and main_module._feature_pack_available("tags"):
+    if can_view_assets and main_module._feature_pack_available("tags"):
         from app.features.tags import routes as tags_routes
 
-        show_tags = await tags_routes.can_edit_tags(request, user, membership)
+        show_tags = await tags_routes.can_edit_tags(request, user, membership) or (
+            await main_module._is_helpdesk_technician(user, request))
     if show_tags:
         from app.repositories import tags as tags_repo
 
@@ -644,6 +649,20 @@ async def _asset_write_context(request: Request, asset_id: int | None = None):
         user, membership, "menu.assets", write=True
     )):
         raise HTTPException(status_code=403, detail="Asset write access required")
+    return user, company, company_id, None
+
+
+async def _asset_manage_context(request: Request, asset_id: int):
+    """Context for asset changes beyond the profile and photos.
+
+    Read Write asset access covers only the profile and photos; asset type
+    overrides, warranty and reconciliation changes and archiving stay with
+    super admins."""
+    user, company, company_id, redirect = await _asset_write_context(request, asset_id)
+    if redirect:
+        return user, company, company_id, redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
     return user, company, company_id, None
 
 
@@ -2117,13 +2136,19 @@ async def asset_detail_page(
     can_edit_photos = is_super_admin or main_module._membership_menu_can(
         user, membership, "menu.asset_photos", write=True
     )
-    customer_safe = (not can_write) or customer_preview
+    # Read Only and Read Write staff see the same internal view; Read Write
+    # only adds editing of the profile (photos follow their own permission).
+    # Asset type overrides, custom fields, data provenance, warranty and
+    # reconciliation changes, customer visibility and archiving are reserved
+    # for super admins.
+    customer_safe = (not (is_super_admin or can_read)) or customer_preview
+    can_manage = is_super_admin and not customer_safe
     if (record_company_id is None or int(record_company_id) != company_id
             or (not is_super_admin and not can_read and (not bool(record.get("customer_visible")) or not await _customer_role_can_view_asset(membership, company_id, asset_id)))):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
         )
-    can_wake = (not customer_safe) and await main_module._is_helpdesk_technician(user, request)
+    can_wake = (not customer_safe) and can_write and await main_module._is_helpdesk_technician(user, request)
     wol_stats: dict = {}
     if can_wake:
         from app.repositories import wol as wol_repo
@@ -2138,8 +2163,8 @@ async def asset_detail_page(
         references = []
     if not isinstance(references, list):
         references = []
-    definitions = [] if customer_safe else await _visible_custom_fields(user, request)
-    values = {} if customer_safe else await asset_custom_fields_repo.get_all_asset_field_values([asset_id])
+    definitions = await _visible_custom_fields(user, request) if can_manage else []
+    values = await asset_custom_fields_repo.get_all_asset_field_values([asset_id]) if can_manage else {}
     custom_fields = [
         {**definition, "value": values.get(asset_id, {}).get(definition["id"])}
         for definition in definitions
@@ -2276,6 +2301,9 @@ async def asset_detail_page(
 
         if await tags_routes.can_edit_tags(request, user, membership):
             tags_context = await tags_routes.asset_tags_context(asset_id, can_edit=True)
+        elif can_read and await main_module._is_helpdesk_technician(user, request):
+            # Read Only technicians see the same tags, without changing them.
+            tags_context = await tags_routes.asset_tags_context(asset_id, can_edit=False)
     # The tray app reports who is signed in now; synced inventory only knows
     # the last user, so it stands in when the device has no tray app.
     logged_on_user = None
@@ -2322,12 +2350,13 @@ async def asset_detail_page(
             **await _asset_type_picker(company_id),
             "synced_asset_type_groups": asset_types.grouped(),
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
-            "asset_sources": [] if customer_safe else await asset_repo.list_asset_sources(company_id, asset_id),
+            "asset_sources": await asset_repo.list_asset_sources(company_id, asset_id) if can_manage else [],
             "customer_safe": customer_safe,
+            "can_manage_asset": can_manage,
             "warranty": None if customer_safe else await _warranty_context(record),
             "cpu_age": await _cpu_age_context(record, rmm_context),
-            "customer_roles": await role_repo.list_roles() if can_write else [],
-            "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if can_write else [],
+            "customer_roles": await role_repo.list_roles() if can_manage else [],
+            "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if can_manage else [],
             "bcp_context": bcp_context,
             "infrastructure_links": infrastructure_links,
             "network_interfaces": network_interfaces,
@@ -2842,8 +2871,10 @@ async def update_asset_documentation(request: Request, asset_id: int):
     if record.get("provenance") == "manual":
         values = await _manual_asset_values(form, company_id, record)
         await asset_repo.update_manual_inventory(asset_id, **values)
-    # Custom fields are editable for every asset, not just manually created ones.
-    await _save_submitted_custom_fields(asset_id, form, await _end_user_hidden_columns(user, request))
+    # Custom fields are editable for every asset, not just manually created
+    # ones, but only by super admins: Read Write asset access covers the profile.
+    if user.get("is_super_admin"):
+        await _save_submitted_custom_fields(asset_id, form, await _end_user_hidden_columns(user, request))
     criticality = _clean_optional(form, "criticality")
     review_status = str(form.get("review_status") or "not_reviewed")
     if criticality not in {None, "low", "medium", "high", "critical"}:
@@ -2878,7 +2909,7 @@ async def update_asset_documentation(request: Request, asset_id: int):
 
 @router.post("/assets/{asset_id}/asset-type", summary="Override or reset a synced asset's type")
 async def update_asset_type(request: Request, asset_id: int):
-    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
+    user, _company, company_id, redirect = await _asset_manage_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2961,7 +2992,7 @@ def _form_date(value: Any) -> date | None:
 async def lookup_asset_warranty(request: Request, asset_id: int):
     from app.services import warranty_lookup
 
-    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
+    user, _company, company_id, redirect = await _asset_manage_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2984,7 +3015,7 @@ async def lookup_asset_warranty(request: Request, asset_id: int):
 
 @router.post("/assets/{asset_id}/warranty", summary="Record or clear an asset's warranty dates manually")
 async def save_manual_asset_warranty(request: Request, asset_id: int):
-    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
+    user, _company, company_id, redirect = await _asset_manage_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -3019,7 +3050,7 @@ async def save_manual_asset_warranty(request: Request, asset_id: int):
 
 @router.post("/assets/{asset_id}/reconciliation/{source_record_id}/approve")
 async def approve_asset_reconciliation(request: Request, asset_id: int, source_record_id: int):
-    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
+    user, _company, company_id, redirect = await _asset_manage_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -3040,13 +3071,11 @@ async def approve_asset_reconciliation(request: Request, asset_id: int, source_r
 @router.post("/assets/{asset_id}/archive")
 async def archive_asset(request: Request, asset_id: int):
     main_module = _main()
-    user, membership, _, company_id, redirect = await _load_asset_context(request, asset_id=asset_id)
+    user, _membership, _, company_id, redirect = await _load_asset_context(request, asset_id=asset_id)
     if redirect:
         return redirect
-    if not (user.get("is_super_admin") or main_module._membership_menu_can(
-        user, membership, "menu.assets", write=True
-    )):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
     record = await asset_repo.get_asset_by_id(asset_id)
     if not record or int(record.get("company_id") or 0) != company_id:
         raise HTTPException(status_code=404, detail="Asset not found")

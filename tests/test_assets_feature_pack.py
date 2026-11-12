@@ -182,6 +182,20 @@ async def test_asset_detail_read_only_access_is_company_scoped(monkeypatch, asse
         "list_articles_for_context",
         AsyncMock(return_value=[]),
     )
+    # Read Only staff get the same internal view as Read Write.
+    monkeypatch.setattr(main_module, "_feature_pack_available", lambda _slug: False)
+    monkeypatch.setattr(main_module, "_is_helpdesk_technician", AsyncMock(return_value=False))
+    monkeypatch.setattr(assets_routes.processes_repo, "list_relationship_targets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.websites_repo, "list_websites", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.websites_repo, "list_for_asset", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.infrastructure_repo, "for_asset",
+                        AsyncMock(return_value={"addresses": [], "placements": []}))
+    monkeypatch.setattr(assets_routes.tray_repo, "list_active_devices_by_asset_ids", AsyncMock(return_value={}))
+    monkeypatch.setattr(asset_repo, "list_reconciliation_candidates", AsyncMock(return_value=[]))
+    sources = AsyncMock(return_value=[])
+    monkeypatch.setattr(asset_repo, "list_asset_sources", sources)
+    monkeypatch.setattr(assets_routes, "_warranty_context", AsyncMock(return_value={}))
+    monkeypatch.setattr(assets_routes, "_asset_type_picker", AsyncMock(return_value={}))
     renderer = AsyncMock(return_value=assets_routes.HTMLResponse("detail"))
     monkeypatch.setattr(main_module, "_render_template", renderer)
 
@@ -199,8 +213,14 @@ async def test_asset_detail_read_only_access_is_company_scoped(monkeypatch, asse
     extra = renderer.await_args.kwargs["extra"]
     assert extra["can_edit"] is False
     assert extra["can_wake"] is False
-    assert extra["customer_safe"] is True
-    assert "notes" not in extra["asset"]
+    assert extra["customer_safe"] is False
+    assert extra["asset"]["notes"] == "Internal notes"
+    # Custom fields, data provenance, visibility and archive stay with super admins.
+    assert extra["can_manage_asset"] is False
+    assert extra["custom_fields"] == []
+    assert extra["asset_sources"] == []
+    assert extra["customer_roles"] == []
+    sources.assert_not_awaited()
 
 
 @pytest.mark.anyio

@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 
 from app import main as main_module
 from app.features.assets import routes
@@ -103,9 +104,28 @@ async def test_list_pages_ignore_the_asset_company(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_technician_can_save_an_asset_from_another_company(monkeypatch):
+async def test_read_write_technician_cannot_override_the_asset_type(monkeypatch):
+    """Read Write asset access covers only the profile and photos."""
     _install(monkeypatch, user={"id": 7, "company_id": ACTIVE_COMPANY},
              memberships={ACTIVE_COMPANY: TECH_MEMBERSHIP, ASSET_COMPANY: TECH_MEMBERSHIP})
+    set_type = AsyncMock()
+    monkeypatch.setattr(routes.asset_repo, "set_asset_type", set_type)
+
+    class FakeRequest:
+        async def form(self):
+            return {"asset_type": "laptop"}
+
+    with pytest.raises(HTTPException) as excinfo:
+        await routes.update_asset_type(FakeRequest(), ASSET_ID)
+
+    assert excinfo.value.status_code == 403
+    set_type.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_super_admin_can_save_an_asset_from_another_company(monkeypatch):
+    _install(monkeypatch, user={"id": 1, "company_id": ACTIVE_COMPANY, "is_super_admin": True},
+             memberships={})
     set_type = AsyncMock()
     monkeypatch.setattr(routes.asset_repo, "set_asset_type", set_type)
     monkeypatch.setattr(routes.audit_service, "record", AsyncMock())

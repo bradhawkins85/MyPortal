@@ -32,9 +32,20 @@ This feature adds support for custom fields on assets, allowing administrators t
   returned or changeable for them through the asset custom-field API; saving
   an asset as an end user leaves their stored values unchanged.
 - *Name* is always shown. Super admins and helpdesk technicians always see
-  every column.
-- End users with asset write access see the custom field columns that are not
-  hidden. Read-only customers keep the fixed customer-safe column set.
+  every built-in column.
+- Custom field columns, and the *Custom fields* section of the asset page,
+  are shown to super admins only. Read Only and Read Write asset access see
+  the same asset list and asset page as each other, without custom fields.
+
+### Asset access levels
+- **Read Only** sees the same asset list and asset page as Read Write, with
+  every input read-only.
+- **Read Write** can additionally edit the asset's *Profile*, and photos when
+  the *Asset photos* permission allows it.
+- Only super admins see or change the inventory *Asset type* override,
+  *Custom fields*, *Data provenance*, *Customer visibility* and
+  *Archive & restore*, record or look up warranty dates, and approve
+  possible integration matches.
 
 ### 3. Asset-Level Field Values
 - Each asset can have values for all defined custom fields
