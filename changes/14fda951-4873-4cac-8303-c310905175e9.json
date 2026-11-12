@@ -1,0 +1,7 @@
+{
+  "guid": "14fda951-4873-4cac-8303-c310905175e9",
+  "occurred_at": "2026-11-12T03:35Z",
+  "change_type": "Security",
+  "summary": "Restrict profile work details and integrations to administrators and technicians.",
+  "content_hash": "dbb40a091bee928c6ef7ffcb6e38ea8aae5516ebdd6db41fc4814af854544398"
+}

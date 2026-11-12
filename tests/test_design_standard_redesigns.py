@@ -894,6 +894,23 @@ def test_profile_standard_user_sees_security_and_menu_only():
     assert "data-profile-no-second-factor hidden" not in html
 
 
+def test_profile_ticket_writer_cannot_render_work_details_or_integrations():
+    from app import main as main_module
+
+    allowed = main_module._can_edit_profile_technician_tools(
+        {"id": 7}, {"menu_permissions": {"menu.tickets": "write"}}
+    )
+    html = _render_profile(profile_show_technician_tools=allowed)
+    for section in ("details", "integrations"):
+        assert f'data-profile-tab="{section}"' not in html
+        assert f'data-profile-panel="{section}"' not in html
+    assert 'id="profile-contact-form"' not in html
+    assert 'id="click-to-call-form"' not in html
+    assert 'href="/admin/profile/m365-contacts/connect"' not in html
+    for section in ("security", "privacy", "menu"):
+        assert f'data-profile-panel="{section}"' in html
+
+
 def _render_webhooks(**context) -> str:
     stub_base = (
         "{% block header_actions %}{% endblock %}{% block content %}{% endblock %}"
