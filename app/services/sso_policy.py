@@ -103,7 +103,6 @@ _MODE_ERROR_MESSAGES = {
     "tenant_required": (
         "Connect this company's Microsoft 365 tenant before requiring Microsoft sign-in."
     ),
-    "link_required": "Link at least one user before requiring Microsoft sign-in.",
 }
 _MODE_ERROR_FALLBACK = "Microsoft sign-in mode could not be changed."
 
@@ -128,8 +127,6 @@ async def set_company_sso_mode(
     if mode == "required":
         if not await company_has_tenant(company_id):
             raise SsoModeError("tenant_required")
-        if not await sso_identity_repo.count_for_company(company_id):
-            raise SsoModeError("link_required")
     previous = await get_company_sso_mode(company_id)
     await company_repo.update_company(company_id, sso_mode=mode)
     await audit_service.record(

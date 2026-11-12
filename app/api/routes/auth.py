@@ -1812,6 +1812,13 @@ async def _handle_sso_callback(
 
     try:
         outcome = await sso_login.resolve(claims, request=request)
+    except m365_service.M365Error as exc:
+        log_warning(
+            "Microsoft sign-in directory check failed",
+            **m365_service._safe_m365_error_fields(exc),
+            ip=_client_ip(request),
+        )
+        return _sso_failure(SSO_MICROSOFT_FAILED_MESSAGE)
     except _SSO_INTEGRITY_ERRORS as exc:
         log_error("Microsoft sign-in account link conflicted", error=type(exc).__name__)
         return _sso_failure(sso_login.GENERIC_FAILURE)

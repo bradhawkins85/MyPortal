@@ -87,7 +87,7 @@ def test_login_form_keeps_auto_redirect_after_unrelated_flash(client):
 @pytest.mark.parametrize(
     "message",
     [
-        "No MyPortal account is linked to this Microsoft account. Contact your administrator.",
+        "This Microsoft account is not eligible to sign in to MyPortal. Contact your administrator.",
         "Microsoft sign-in is not enabled for your organisation.",
         "Your Microsoft sign-in session expired. Please try again.",
         "Microsoft sign-in was cancelled or failed. Please try again.",

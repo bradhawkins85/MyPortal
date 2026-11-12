@@ -30,6 +30,7 @@ from tests.conftest import reset_rate_limiters
 EXPIRED = "Your Microsoft sign-in session expired. Please try again."
 MS_FAILED = "Microsoft sign-in was cancelled or failed. Please try again."
 SESSION_COOKIE = session_manager.session_cookie_name
+REAL_RESOLVE = sso_login.resolve
 
 
 @pytest.fixture(autouse=True)
@@ -328,6 +329,44 @@ def test_callback_happy_path_sets_session_and_redirects_to_next(client, stubs):
     assert stubs.identity_logins and stubs.identity_logins[0]["id"] == 77
     assert stubs.identity_logins[0]["upn"] == "a@contoso.com"
     assert isinstance(stubs.identity_logins[0]["when"], datetime)
+
+
+@pytest.mark.parametrize("mode", ["optional", "required"])
+def test_first_microsoft_sign_in_provisions_user_and_creates_session(client, stubs, monkeypatch, mode):
+    from unittest.mock import AsyncMock
+
+    stubs.mode = mode
+    monkeypatch.setattr(sso_login, "resolve", REAL_RESOLVE)
+    monkeypatch.setattr(sso_login.sso_identity_repo, "get_by_subject", AsyncMock(return_value=None))
+    monkeypatch.setattr(sso_login.company_repo, "list_email_domains_for_companies", AsyncMock(return_value={"contoso.com"}))
+    monkeypatch.setattr(sso_login.company_repo, "get_company_by_email_domain", AsyncMock(return_value={"id": 1}))
+    monkeypatch.setattr(user_repo, "list_active_users_by_email_in_companies", AsyncMock(return_value=[]))
+    monkeypatch.setattr(user_repo, "get_user_by_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(m365_service, "acquire_access_token", AsyncMock(return_value="directory-token"))
+    monkeypatch.setattr(m365_service, "_graph_get", AsyncMock(return_value={"id": "oid-1", "accountEnabled": True}))
+    provision = AsyncMock(return_value=(dict(stubs.user), dict(stubs.identity)))
+    monkeypatch.setattr(sso_login.sso_provisioning, "create_user_with_identity", provision)
+
+    state = stubs.begin(client, next_path="/tickets")
+    response = client.get("/m365/callback", params={"code": "c", "state": state}, follow_redirects=False)
+
+    assert response.status_code == 303 and response.headers["location"] == "/tickets"
+    assert stubs.sessions_created == [1]
+    assert _session_cookie_value(response) == "token-1"
+    assert provision.await_args.kwargs["company_id"] == 1
+    assert stubs.audit["auth.sso.link"]["metadata"]["account_provisioned"] is True
+
+
+def test_directory_error_during_callback_does_not_create_session(client, stubs, monkeypatch):
+    stubs.resolve_error = m365_service.M365Error("private directory response", http_status=503)
+    warnings = []
+    monkeypatch.setattr(auth_routes, "log_warning", lambda message, **fields: warnings.append((message, fields)))
+    state = stubs.begin(client)
+    response = client.get("/m365/callback", params={"code": "c", "state": state}, follow_redirects=False)
+    assert _flash(response)["message"] == MS_FAILED
+    assert not stubs.sessions_created
+    assert warnings[0][1]["http_status"] == 503
+    assert "private" not in str(warnings)
 
 
 def test_callback_unsafe_next_falls_back_to_root(client, stubs):

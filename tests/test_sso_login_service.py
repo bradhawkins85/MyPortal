@@ -31,6 +31,12 @@ class Fakes:
         self.candidate_queries: list[tuple] = []
         self.domains: set[str] = {"contoso.com"}
         self.domain_queries: list[list[int]] = []
+        self.domain_company = 7
+        self.directory_user = {"id": "oid-1", "accountEnabled": True, "givenName": "Alice", "surname": "Smith"}
+        self.directory_error = None
+        self.directory_calls = []
+        self.provisioned = []
+        self.provision_error = None
 
     @property
     def audit_actions(self) -> list[str]:
@@ -68,7 +74,7 @@ def fakes(monkeypatch):
         wanted = set(company_ids)
         return [
             u for u in f.users
-            if (u["email"] or "").lower() == email
+            if (u["email"] or "").lower() == email and int(u.get("is_active", 1)) == 1
             and (u["company_id"] in wanted or f.memberships.get(int(u["id"]), set()) & wanted)
         ]
 
@@ -78,6 +84,36 @@ def fakes(monkeypatch):
 
     async def record(**kwargs):
         f.audits.append(kwargs)
+
+    async def domain_company(domain):
+        return {"id": f.domain_company} if domain in f.domains else None
+
+    async def get_user_by_email(email):
+        return next((u for u in f.users if (u.get("email") or "").lower() == email), None)
+
+    async def token(company_id):
+        f.directory_calls.append(company_id)
+        return "directory-token"
+
+    async def graph_get(access_token, url):
+        assert access_token == "directory-token"
+        assert "/users/oid-1?" in url
+        assert "accountEnabled" in url
+        if f.directory_error:
+            raise f.directory_error
+        return f.directory_user
+
+    async def provision(**kwargs):
+        if f.provision_error:
+            raise f.provision_error
+        f.provisioned.append(kwargs)
+        user = {"id": 10, "email": kwargs["email"], "company_id": kwargs["company_id"],
+                "is_active": 1, "is_super_admin": 0}
+        identity = {"id": 55, "user_id": 10}
+        f.users.append(user)
+        f.user = user
+        f.identity = identity
+        return user, identity
 
     monkeypatch.setattr(sso_login.sso_policy, "companies_for_tenant", companies_for_tenant)
     monkeypatch.setattr(sso_login.sso_policy, "user_company_ids", user_company_ids)
@@ -90,6 +126,11 @@ def fakes(monkeypatch):
         sso_login.company_repo, "list_email_domains_for_companies", list_email_domains_for_companies
     )
     monkeypatch.setattr(sso_login.audit_service, "record", record)
+    monkeypatch.setattr(sso_login.company_repo, "get_company_by_email_domain", domain_company)
+    monkeypatch.setattr(sso_login.user_repo, "get_user_by_email", get_user_by_email)
+    monkeypatch.setattr(sso_login.m365_service, "acquire_access_token", token)
+    monkeypatch.setattr(sso_login.m365_service, "_graph_get", graph_get)
+    monkeypatch.setattr(sso_login.sso_provisioning, "create_user_with_identity", provision)
     return f
 
 
@@ -186,6 +227,95 @@ async def test_auto_link_single_match_creates_identity(fakes):
     assert link["metadata"]["tenant_id"] == "tenant-a"
     assert len(link["metadata"]["object_id_hash"]) == 16
     assert "oid-1" not in json.dumps(link)
+
+
+async def test_first_sign_in_provisions_member_account_and_next_sign_in_reuses_it(fakes):
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure is None and out.user["email"] == "alice@contoso.com"
+    assert out.user["company_id"] == 7 and out.user["is_super_admin"] == 0
+    assert out.identity["user_id"] == out.user["id"] and out.mfa_satisfied
+    provisioned = fakes.provisioned[0]
+    assert provisioned["first_name"] == "Alice" and provisioned["last_name"] == "Smith"
+    assert provisioned["password_hash"].startswith("pbkdf2_sha256$")
+    assert fakes.audits[0]["metadata"]["account_provisioned"] is True
+    again = await sso_login.resolve(CLAIMS, request=None)
+    assert again.user["id"] == out.user["id"]
+    assert len(fakes.provisioned) == 1
+
+
+async def test_provisioning_uses_the_domain_company_in_a_shared_tenant(fakes):
+    fakes.sso_companies = [7, 8]
+    fakes.domain_company = 8
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure is None and out.user["company_id"] == 8
+    assert fakes.directory_calls == [8]
+
+
+async def test_provisioning_rejects_domain_owned_by_a_different_tenant_company(fakes):
+    fakes.domain_company = 99
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure == "no_link"
+    assert not fakes.provisioned and not fakes.directory_calls
+
+
+@pytest.mark.parametrize("existing", [
+    {"id": 3, "email": "alice@contoso.com", "company_id": 7, "is_active": 0},
+    {"id": 3, "email": "alice@contoso.com", "company_id": 99, "is_active": 1},
+])
+async def test_provisioning_never_replaces_disabled_or_unrelated_existing_user(fakes, existing):
+    fakes.users = [existing]
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure == "no_link" and not fakes.provisioned
+    assert not fakes.created
+
+
+@pytest.mark.parametrize("linked", [False, True])
+@pytest.mark.parametrize("directory_user", [
+    {"id": "oid-1", "accountEnabled": False},
+    {"id": "oid-1"},
+    {"id": "oid-1", "accountEnabled": "true"},
+    {"id": "other-object", "accountEnabled": True},
+])
+async def test_microsoft_account_must_be_enabled_for_new_and_linked_users(fakes, linked, directory_user):
+    fakes.directory_user = directory_user
+    if linked:
+        fakes.identity = {"id": 9, "user_id": 1}
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure == "microsoft_account_disabled"
+    assert not fakes.provisioned and not fakes.created
+
+
+async def test_existing_user_is_not_auto_linked_when_microsoft_account_disabled(fakes):
+    fakes.users = [dict(ALICE)]
+    fakes.directory_user["accountEnabled"] = False
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure == "microsoft_account_disabled" and not fakes.created
+
+
+async def test_missing_microsoft_user_cannot_be_provisioned(fakes):
+    fakes.directory_error = M365Error("not found", http_status=404)
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure == "microsoft_account_disabled" and not fakes.provisioned
+
+
+async def test_directory_failure_does_not_create_an_account(fakes):
+    fakes.directory_error = M365Error("unavailable", http_status=503)
+    with pytest.raises(M365Error):
+        await sso_login.resolve(CLAIMS, request=None)
+    assert not fakes.provisioned and not fakes.created
+
+
+async def test_concurrent_provisioning_reuses_the_winning_identity(fakes, monkeypatch):
+    import sqlite3
+
+    async def concurrent(**kwargs):
+        fakes.identity = {"id": 9, "user_id": 1}
+        raise sqlite3.IntegrityError("already provisioned")
+
+    # The winning transaction is visible when the losing callback reloads it.
+    monkeypatch.setattr(sso_login.sso_provisioning, "create_user_with_identity", concurrent)
+    out = await sso_login.resolve(CLAIMS, request=None)
+    assert out.failure is None and out.user["id"] == 1
 
 
 @pytest.mark.parametrize(
@@ -309,12 +439,12 @@ async def test_auto_link_refused_without_any_company_domains(fakes):
 
 
 @pytest.mark.parametrize("flag", [True, 1])
-async def test_auto_link_refused_for_super_admin(fakes, flag):
+async def test_auto_link_preserves_existing_super_admin_status(fakes, flag):
     fakes.users = [{**ALICE, "is_super_admin": flag}]
     out = await sso_login.resolve(CLAIMS, request=None)
-    assert out.failure == "no_link" and out.user is None
-    assert out.message == sso_login.GENERIC_FAILURE
-    assert fakes.created == [] and fakes.audits == []
+    assert out.failure is None and out.user["is_super_admin"] == flag
+    assert fakes.created[0]["user_id"] == ALICE["id"]
+    assert fakes.provisioned == []
 
 
 async def test_auto_link_refused_when_candidate_belongs_outside_tenant_companies(fakes):
