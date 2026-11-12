@@ -477,24 +477,96 @@
     return rows;
   };
 
+  const syncTopMenuLabels = (compactTopMenu) => {
+    if (!sidebarMenuRoot) return;
+    // In the compact top menu the labels are hidden by CSS, so each
+    // top-level item needs a hover tooltip and accessible name.
+    // Any unread badge moves out of the hidden
+    // label to stay visible next to the icon.
+    sidebarMenuRoot.querySelectorAll(':scope > .menu__item, :scope > .menu__item--expandable').forEach((item) => {
+      const target = item.querySelector(':scope > a, :scope > [data-menu-toggle]');
+      const labelElement = target?.querySelector(':scope > .menu__label');
+      if (!target || !labelElement) {
+        return;
+      }
+      if (compactTopMenu) {
+        const label = (item.dataset.menuLabel || readMenuLabel(item)).trim();
+        if (label) {
+          target.setAttribute('title', label);
+          target.setAttribute('aria-label', label);
+        }
+        const badge = labelElement.querySelector('.menu__badge');
+        if (badge && badge.parentElement === labelElement) {
+          target.insertBefore(badge, labelElement);
+        }
+      } else {
+        target.removeAttribute('title');
+        target.removeAttribute('aria-label');
+        const badge = target.querySelector(':scope > .menu__badge');
+        if (badge && badge.parentElement === target) {
+          labelElement.appendChild(badge);
+        }
+      }
+    });
+  };
+
+  let navigationFrame = null;
+  let navigationMutationObserver = null;
   const syncNavigationPresentation = () => {
     // Mobile always uses the labelled drawer; retain the saved desktop preference.
     const useTopNavigation = !mobileMedia.matches && activeSidebarPreferences.navigation_style === 'top';
     document.body.classList.toggle('navigation--top', useTopNavigation);
-    // On standard resolution displays (1080p or lower) the labelled
-    // top menu runs past the edge of the screen, so collapse it to icons
-    // only with hover tooltips unless the user opted into always
-    // showing the labels.
-    const standardResolutionDisplay =
-      window.screen && Number.isFinite(window.screen.height) && window.screen.height <= 1080;
-    const compactTopMenu =
-      useTopNavigation &&
-      activeSidebarPreferences.top_menu_labels !== 'always' &&
-      standardResolutionDisplay;
+
+    // Measure the fully labelled row, even when it was previously compact.
+    // Reading only the compact width would make labels alternate on each resize.
+    // The flex container already reserves room for the brand, switchers and actions.
+    document.body.classList.remove('navigation--top-compact');
+    syncTopMenuLabels(false);
+    let compactTopMenu = false;
+    if (useTopNavigation && sidebarMenuRoot && activeSidebarPreferences.top_menu_labels !== 'always') {
+      const items = Array.from(sidebarMenuRoot.children).filter((item) => item.getClientRects().length);
+      const style = window.getComputedStyle(sidebarMenuRoot);
+      const gap = parseFloat(style.columnGap) || 0;
+      const requiredWidth = items.reduce((width, item) => {
+        const itemStyle = window.getComputedStyle(item);
+        return width + item.getBoundingClientRect().width +
+          (parseFloat(itemStyle.marginLeft) || 0) + (parseFloat(itemStyle.marginRight) || 0);
+      }, gap * Math.max(0, items.length - 1));
+      const availableWidth = sidebarMenuRoot.clientWidth -
+        (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+      compactTopMenu = requiredWidth > availableWidth;
+    }
     document.body.classList.toggle('navigation--top-compact', compactTopMenu);
-    return compactTopMenu;
+    syncTopMenuLabels(compactTopMenu);
+    // Badge relocation is our own mutation, not a menu-content change.
+    navigationMutationObserver?.takeRecords();
+    syncTopMenuHeights();
   };
-  mobileMedia.addEventListener('change', syncNavigationPresentation);
+  const queueNavigationPresentation = () => {
+    if (navigationFrame !== null) return;
+    navigationFrame = window.requestAnimationFrame(() => {
+      navigationFrame = null;
+      syncNavigationPresentation();
+    });
+  };
+  mobileMedia.addEventListener('change', queueNavigationPresentation);
+  window.addEventListener('resize', queueNavigationPresentation);
+  if (sidebarMenuRoot) {
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(queueNavigationPresentation);
+      // Include siblings so brand, role/company switchers and action changes
+      // trigger a recheck even when the viewport itself has not changed.
+      Array.from(sidebarMenuRoot.parentElement.children).forEach((element) => observer.observe(element));
+    }
+    navigationMutationObserver = new MutationObserver(queueNavigationPresentation);
+    navigationMutationObserver.observe(sidebarMenuRoot, {
+      subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden'],
+    });
+    if (document.fonts) {
+      document.fonts.ready.then(queueNavigationPresentation);
+      document.fonts.addEventListener('loadingdone', queueNavigationPresentation);
+    }
+  }
 
   const applySidebarPreferences = (preferences) => {
     if (!sidebarMenuRoot) {
@@ -512,7 +584,6 @@
       hidden: Array.isArray(preferences?.hidden) ? preferences.hidden : [],
       groups: Array.isArray(preferences?.groups) ? preferences.groups : [],
     };
-    const compactTopMenu = syncNavigationPresentation();
     const roleSwitcherContainer = document.querySelector('[data-role-switcher-container]');
     if (roleSwitcherContainer) {
       // While viewing as another role a hidden switcher falls back to the
@@ -588,33 +659,7 @@
         setMenuItemExpanded(item, false);
       });
     }
-    // In the compact top menu the labels are hidden by CSS, so each
-    // top-level item needs a hover tooltip naming it (which doubles as
-    // its accessible name) and any unread badge moves out of the hidden
-    // label to stay visible next to the icon.
-    sidebarMenuRoot.querySelectorAll(':scope > .menu__item, :scope > .menu__item--expandable').forEach((item) => {
-      const target = item.querySelector(':scope > a, :scope > [data-menu-toggle]');
-      const labelElement = target?.querySelector(':scope > .menu__label');
-      if (!target || !labelElement) {
-        return;
-      }
-      if (compactTopMenu) {
-        const label = (item.dataset.menuLabel || readMenuLabel(item)).trim();
-        if (label) {
-          target.setAttribute('title', label);
-        }
-        const badge = labelElement.querySelector('.menu__badge');
-        if (badge && badge.parentElement === labelElement) {
-          target.insertBefore(badge, labelElement);
-        }
-      } else {
-        target.removeAttribute('title');
-        const badge = target.querySelector(':scope > .menu__badge');
-        if (badge && badge.parentElement === target) {
-          labelElement.appendChild(badge);
-        }
-      }
-    });
+    syncNavigationPresentation();
     document.dispatchEvent(new CustomEvent('myportal:sidebar-updated'));
   };
 

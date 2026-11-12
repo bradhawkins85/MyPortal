@@ -852,9 +852,9 @@ body.navigation--top .layout__header {
   }
 }
 
-/* Compact top menu: on standard resolution displays (1080p or lower) the
- * labelled menu overflows the screen, so it collapses to icons only. Each
- * top-level item carries a hover tooltip (set from base.html) naming it.
+/* Compact top menu: when the labelled items exceed the available row width,
+ * collapse to icons only. Each top-level item carries a hover tooltip
+ * (set by layout.js) naming it.
  * The rules stay scoped to direct children of the top menu so expanded
  * drop-downs keep their item labels and stay readable. */
 body.navigation--top.navigation--top-compact .menu > .menu__item > a .menu__label,

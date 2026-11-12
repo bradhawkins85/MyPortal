@@ -112,3 +112,101 @@ def test_mobile_navigation_portrait_landscape_and_desktop(browser, style, labels
         assert not errors
     finally:
         context.close()
+
+
+@pytest.mark.parametrize("screen_height", [1080, 1440])
+def test_top_menu_labels_follow_available_space(browser, screen_height):
+    from playwright.sync_api import expect
+
+    preferences = {"navigation_style": "top", "top_menu_labels": "auto"}
+    env = Environment(loader=FileSystemLoader(ROOT / "app/templates"), autoescape=True)
+    env.globals.update(static_url=lambda path: path, feature_pack_available=lambda name: False,
+                       sidebar_default_preferences=lambda: preferences)
+    html = env.get_template("base.html").render(
+        request=type("Request", (), {"url": type("Url", (), {"path": "/"})()})(),
+        app_name="MyPortal", current_user={"id": 42}, active_membership={}, menu_access={},
+        available_companies=[], cart_summary={"item_count": 0, "total_quantity": 0, "subtotal": 0},
+        plausible_config={"enabled": False}, csrf_token="test-csrf",
+    )
+    context = browser.new_context(viewport={"width": 1366, "height": 768},
+                                  screen={"width": 2560, "height": screen_height})
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+
+    def intercept(route):
+        path = urlsplit(route.request.url).path
+        if path == "/fixture":
+            route.fulfill(content_type="text/html", body=html)
+        elif path in ("/static/css/app.css", "/static/js/layout.js"):
+            route.fulfill(content_type="text/css" if path.endswith(".css") else "application/javascript",
+                          body=(ROOT / "app" / path.lstrip("/")).read_text())
+        elif path.startswith("/static/"):
+            route.fulfill(body="")
+        else:
+            route.fulfill(content_type="application/json", body=json.dumps(preferences))
+
+    page.route("**/*", intercept)
+    try:
+        page.goto("http://navigation.test/fixture")
+        body = page.locator("body")
+        compact = re.compile(r".*navigation--top-compact.*")
+        expect(body).to_have_class(re.compile(r".*navigation--top.*"))
+        expect(body).not_to_have_class(compact)
+        home = page.locator('.menu > .menu__item > a[href="/"]')
+        expect(home.locator('.menu__label')).to_be_visible()
+
+        # Content changes at a fixed viewport must trigger measurement too.
+        page.evaluate('''() => {
+            const menu = document.querySelector('.layout__sidebar .menu');
+            const source = menu.querySelector('.menu__item');
+            const badge = document.createElement('span');
+            badge.className = 'menu__badge';
+            badge.textContent = '12';
+            source.querySelector('.menu__label').appendChild(badge);
+            for (let i = 0; i < 10; i++) {
+                const item = source.cloneNode(true);
+                item.dataset.testExtra = 'true';
+                item.dataset.menuLabel = 'Workspace ' + i;
+                item.querySelector('a').href = '/workspace-' + i;
+                item.querySelector('.menu__label').textContent = 'Workspace ' + i;
+                menu.appendChild(item);
+            }
+        }''')
+        expect(body).to_have_class(compact)
+        expect(home.locator('.menu__label')).to_be_hidden()
+        expect(home).to_have_attribute('title', 'Dashboard')
+        expect(home).to_have_accessible_name('Dashboard')
+        expect(home.locator(':scope > .menu__badge')).to_be_visible()
+
+        # Widen, narrow, and widen again to catch stale compact measurements.
+        for width, is_compact in [(2560, False), (1366, True), (2560, False)]:
+            page.set_viewport_size({"width": width, "height": 900})
+            if is_compact:
+                expect(body).to_have_class(compact)
+            else:
+                expect(body).not_to_have_class(compact)
+                expect(home.locator('.menu__label .menu__badge')).to_be_visible()
+                assert home.get_attribute('title') is None
+
+        # A wider sibling consumes menu space without a viewport change.
+        page.locator('.brand').evaluate("el => el.style.width = '1400px'")
+        expect(body).to_have_class(compact)
+        page.locator('.brand').evaluate("el => el.style.width = ''")
+        expect(body).not_to_have_class(compact)
+
+        page.set_viewport_size({"width": 1366, "height": 768})
+        expect(body).to_have_class(compact)
+        # Hiding entries restores names without changing window dimensions.
+        page.locator('[data-test-extra]').evaluate_all('items => items.forEach(item => item.hidden = true)')
+        expect(body).not_to_have_class(compact)
+        page.locator('[data-test-extra]').evaluate_all('items => items.forEach(item => item.hidden = false)')
+        expect(body).to_have_class(compact)
+
+        # The explicit user preference still takes precedence over auto fitting.
+        page.evaluate("MyPortalSidebarMenu.apply({navigation_style: 'top', top_menu_labels: 'always'})")
+        expect(body).not_to_have_class(compact)
+        expect(home.locator('.menu__label')).to_be_visible()
+        assert not errors
+    finally:
+        context.close()
