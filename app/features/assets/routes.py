@@ -15,6 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app.core.logging import log_info
+from app.repositories import asset_column_restrictions as asset_column_restrictions_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as asset_repo
 from app.repositories import asset_photos as asset_photo_repo
@@ -182,6 +183,26 @@ def _customer_asset(record: dict[str, Any]) -> dict[str, Any]:
     return {key: record.get(key) for key in _CUSTOMER_ASSET_FIELDS}
 
 
+# Built-in asset table columns admins may hide from end users. Name always
+# stays so every row can be opened.
+_RESTRICTABLE_ASSET_COLUMNS: list[dict[str, str]] = [
+    {"key": column["key"], "label": column["label"]}
+    for column in _ASSET_TABLE_COLUMNS
+    if column["key"] != "name"
+] + [{"key": "health_score", "label": "Health check score"}]
+
+
+async def _end_user_hidden_columns(user: Mapping[str, Any], request: Request) -> set[str]:
+    """Asset columns hidden from this user; staff (technicians) see every column."""
+    if await _main()._is_helpdesk_technician(user, request):
+        return set()
+    return await asset_column_restrictions_repo.list_restricted_keys()
+
+
+def _custom_field_column_key(definition: Mapping[str, Any]) -> str:
+    return f"cf_{definition['id']}"
+
+
 def _main():
     from app import main as main_module
 
@@ -263,10 +284,15 @@ async def assets_page(request: Request):
     rows = await asset_repo.list_company_assets(company_id)
     if not can_write_assets:
         rows = [_customer_asset(dict(row)) for row in await _customer_visible_assets(membership, company_id, rows)]
-    field_definitions = (
-        await asset_custom_fields_repo.list_field_definitions()
-        if user.get("is_super_admin") else []
-    )
+    hidden_columns = await _end_user_hidden_columns(user, request)
+    field_definitions = [
+        definition
+        for definition in (
+            await asset_custom_fields_repo.list_field_definitions()
+            if can_write_assets else []
+        )
+        if _custom_field_column_key(definition) not in hidden_columns
+    ]
 
     def _clean_text(value: Any) -> str | None:
         if value is None:
@@ -434,6 +460,17 @@ async def assets_page(request: Request):
         rmm_install_attempts = await rmm_agent_deploy.company_latest_attempts(company_id)
     # The health check is an RMM option: it needs its pack and a deployed RMM agent.
     can_health_check = can_push_rmm_agent and main_module._feature_pack_available("health_check")
+    # Technicians who see RMM scripts get each asset's latest health check score.
+    show_health_score = (
+        show_rmm_agent
+        and main_module._feature_pack_available("health_check")
+        and "health_score" not in hidden_columns
+    )
+    health_scores: dict[int, dict[str, Any]] = {}
+    if show_health_score:
+        from app.repositories import ai_health_checks as health_checks_repo
+
+        health_scores = await health_checks_repo.latest_scores_for_company(company_id)
     if can_push_rmm_agent:
         from app.services import rmm_remote_control
         from app.services import rmm_commands
@@ -479,6 +516,13 @@ async def assets_page(request: Request):
             record["rmm_uninstall"] = bool(rmm_agent.get("uninstall"))
             record["can_health_check"] = can_health_check
             record["health_check_ready"] = bool(tray_device)
+        if show_health_score and record.get("id"):
+            check = health_scores.get(int(record["id"]))
+            score = check.get("health_score") if check else None
+            record["health_score"] = int(score) if score is not None else None
+            record["health_score_sort"] = record["health_score"] if score is not None else ""
+            record["health_check_status"] = (check or {}).get("overall_status")
+            record["health_check_url"] = f"/health-checks/{int(check['id'])}" if check else None
         if show_rmm_agent and record.get("id"):
             rmm_agent = rmm_agents.get(int(record["id"])) or {}
             record["rmm_agent"] = rmm_agent.get("state", "missing")
@@ -512,6 +556,11 @@ async def assets_page(request: Request):
         status_index = next((i for i, column in enumerate(all_columns) if column["key"] == "status"), 0)
         all_columns.insert(status_index + 1, {"key": "rmm_agent", "label": "RMM agent", "sort": "number"})
         all_columns.insert(status_index + 2, {"key": "rmm_agent_version", "label": "RMM agent version", "sort": "string"})
+    if show_health_score:
+        performance_index = next(
+            (i for i, column in enumerate(all_columns) if column["key"] == "performance_score"), len(all_columns) - 1
+        )
+        all_columns.insert(performance_index + 1, {"key": "health_score", "label": "Health check score", "sort": "number"})
     # Tags belong to the tags pack and are internal, so customers never see them.
     show_tags = False
     if can_write_assets and main_module._feature_pack_available("tags"):
@@ -526,6 +575,16 @@ async def assets_page(request: Request):
             record["tags"] = tags_by_asset.get(int(record["id"]), []) if record.get("id") else []
         type_index = next((i for i, column in enumerate(all_columns) if column["key"] == "type"), 0)
         all_columns.insert(type_index + 1, {"key": "tags", "label": "Tags", "sort": "string"})
+
+    if hidden_columns:
+        all_columns = [
+            column for column in all_columns
+            if column["key"] == "name" or column["key"] not in hidden_columns
+        ]
+        for record in prepared:
+            for key in list(record):
+                if key != "name" and any(key == hidden or key.startswith(hidden + "_") for hidden in hidden_columns):
+                    record.pop(key, None)
 
     stats = {
         "total": len(prepared),
@@ -631,7 +690,7 @@ async def new_asset_page(request: Request):
         "assets/form.html", request, user,
         extra={"title": "Create asset", "company": company, "asset": None,
                **await _asset_type_picker(_company_id),
-               "custom_fields": await asset_custom_fields_repo.list_field_definitions()},
+               "custom_fields": await _visible_custom_fields(user, request)},
     )
 
 
@@ -697,8 +756,22 @@ async def _manual_asset_values(
     return values
 
 
-async def _save_submitted_custom_fields(asset_id: int, form: Any) -> None:
+async def _visible_custom_fields(user: Mapping[str, Any], request: Request) -> list[dict[str, Any]]:
+    hidden_columns = await _end_user_hidden_columns(user, request)
+    return [
+        definition
+        for definition in await asset_custom_fields_repo.list_field_definitions()
+        if _custom_field_column_key(definition) not in hidden_columns
+    ]
+
+
+async def _save_submitted_custom_fields(
+    asset_id: int, form: Any, hidden_columns: set[str] | frozenset[str] = frozenset()
+) -> None:
+    # Fields hidden from this user are not on their form, so leave them as stored.
     for definition in await asset_custom_fields_repo.list_field_definitions():
+        if _custom_field_column_key(definition) in hidden_columns:
+            continue
         key = f"custom_{definition['id']}"
         raw = form.get(key)
         field_type = definition.get("field_type")
@@ -733,7 +806,7 @@ async def create_manual_asset(request: Request):
     asset_id = await asset_repo.create_manual_asset(
         company_id=company_id, created_by=int(user["id"]), **values
     )
-    await _save_submitted_custom_fields(asset_id, form)
+    await _save_submitted_custom_fields(asset_id, form, await _end_user_hidden_columns(user, request))
     await audit_service.record(
         action="asset.manual.create", request=request, user_id=int(user["id"]),
         entity_type="asset", entity_id=asset_id,
@@ -1026,9 +1099,40 @@ async def assets_settings_page(request: Request):
         "is_super_admin": True,
         "required_field_rules": await asset_repo.list_required_field_rules(),
         "field_definitions": await asset_custom_fields_repo.list_field_definitions(),
+        "restrictable_columns": _RESTRICTABLE_ASSET_COLUMNS,
+        "hidden_columns": await asset_column_restrictions_repo.list_restricted_keys(),
     }
     return await main_module._render_template(
         "assets/settings.html", request, user, extra=extra
+    )
+
+
+@router.post("/assets/settings/column-visibility", summary="Choose asset columns hidden from end users")
+async def save_asset_column_visibility(request: Request):
+    main_module = _main()
+    user, _membership, _, _, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    form = await request.form()
+    allowed = {column["key"] for column in _RESTRICTABLE_ASSET_COLUMNS}
+    allowed.update(
+        _custom_field_column_key(definition)
+        for definition in await asset_custom_fields_repo.list_field_definitions()
+    )
+    before = sorted(await asset_column_restrictions_repo.list_restricted_keys())
+    # Ticked boxes are visible; any column listed on the form but left unticked is hidden.
+    listed = {str(value) for value in form.getlist("known_columns")} & allowed
+    visible = {str(value) for value in form.getlist("visible_columns")}
+    keys = sorted(listed - visible)
+    await asset_column_restrictions_repo.replace_restricted_keys(keys)
+    await audit_service.record(
+        action="asset.columns.visibility.update", request=request, user_id=int(user["id"]),
+        entity_type="asset_columns", before={"hidden_columns": before}, after={"hidden_columns": keys},
+    )
+    return main_module.flash_redirect(
+        "/assets/settings#column-visibility", "Column visibility saved.", "success"
     )
 
 
@@ -2046,7 +2150,7 @@ async def asset_detail_page(
         references = []
     if not isinstance(references, list):
         references = []
-    definitions = [] if customer_safe else await asset_custom_fields_repo.list_field_definitions()
+    definitions = [] if customer_safe else await _visible_custom_fields(user, request)
     values = {} if customer_safe else await asset_custom_fields_repo.get_all_asset_field_values([asset_id])
     custom_fields = [
         {**definition, "value": values.get(asset_id, {}).get(definition["id"])}
@@ -2751,7 +2855,7 @@ async def update_asset_documentation(request: Request, asset_id: int):
         values = await _manual_asset_values(form, company_id, record)
         await asset_repo.update_manual_inventory(asset_id, **values)
     # Custom fields are editable for every asset, not just manually created ones.
-    await _save_submitted_custom_fields(asset_id, form)
+    await _save_submitted_custom_fields(asset_id, form, await _end_user_hidden_columns(user, request))
     criticality = _clean_optional(form, "criticality")
     review_status = str(form.get("review_status") or "not_reviewed")
     if criticality not in {None, "low", "medium", "high", "critical"}:

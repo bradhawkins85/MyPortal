@@ -24,6 +24,57 @@
     </form>
     {% if required_field_rules %}<div class="card__body"><h3>Configured rules</h3><ul>{% for rule in required_field_rules %}<li>{{ rule.asset_type }}: {{ rule.field_key }}</li>{% endfor %}</ul></div>{% endif %}
   </section>
+  <section class="card card--panel admin-grid__full" id="column-visibility" aria-labelledby="column-visibility-heading">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title" id="column-visibility-heading">Columns end users can see</h2>
+        <p class="card__subtitle">Untick a column to hide it from end users on the Assets list. Hidden custom fields are also left off their asset pages. Super admins and helpdesk technicians always see every column.</p>
+      </div>
+    </header>
+    <form method="post" action="/assets/settings/column-visibility" data-column-visibility-form>
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+      <div class="card__body asset-column-visibility">
+        <fieldset class="asset-column-visibility__group">
+          <legend class="asset-column-visibility__legend">Asset details</legend>
+          <p class="form-help">Name is always shown so every asset can be opened.</p>
+          <ul class="asset-column-visibility__list" role="list">
+            {% for column in restrictable_columns %}
+              <li>
+                <label class="checkbox asset-column-visibility__option">
+                  <input type="checkbox" name="visible_columns" value="{{ column.key }}" data-column-key="{{ column.key }}"{% if column.key not in hidden_columns %} checked{% endif %}>
+                  <span>{{ column.label }}</span>
+                  {% if column.key in hidden_columns %}<span class="status status--neutral">Hidden from end users</span>{% endif %}
+                </label>
+              </li>
+            {% endfor %}
+          </ul>
+        </fieldset>
+        <fieldset class="asset-column-visibility__group">
+          <legend class="asset-column-visibility__legend">Custom fields</legend>
+          {% if field_definitions %}
+            <ul class="asset-column-visibility__list" role="list">
+              {% for field in field_definitions %}
+                {% set column_key = 'cf_' ~ field.id %}
+                <li>
+                  <label class="checkbox asset-column-visibility__option">
+                    <input type="checkbox" name="visible_columns" value="{{ column_key }}" data-column-key="{{ column_key }}"{% if column_key not in hidden_columns %} checked{% endif %}>
+                    <span>{{ field.display_name or field.name }}</span>
+                    {% if column_key in hidden_columns %}<span class="status status--neutral">Hidden from end users</span>{% endif %}
+                  </label>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="form-help">No custom fields yet. Fields you add below appear here so you can choose who sees them.</p>
+          {% endif %}
+        </fieldset>
+        {# Every listed column, so unticked ones are saved as hidden. #}
+        {% for column in restrictable_columns %}<input type="hidden" name="known_columns" value="{{ column.key }}">{% endfor %}
+        {% for field in field_definitions %}<input type="hidden" name="known_columns" value="cf_{{ field.id }}">{% endfor %}
+      </div>
+      <footer class="card__footer"><button class="button button--primary" type="submit">Save column visibility</button></footer>
+    </form>
+  </section>
   <section class="card card--panel admin-grid__full">
     <header class="card__header card__header--stacked">
       <div>

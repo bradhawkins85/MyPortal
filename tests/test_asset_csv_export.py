@@ -10,6 +10,14 @@ from app.features.assets import routes as assets_routes
 from app.features.tags import routes as tags_routes
 
 
+@pytest.fixture(autouse=True)
+def no_hidden_asset_columns(monkeypatch):
+    """No asset columns are hidden from end users unless a test says so."""
+    monkeypatch.setattr(
+        assets_routes.asset_column_restrictions_repo, "list_restricted_keys", AsyncMock(return_value=set())
+    )
+
+
 @pytest.mark.parametrize(
     ("menu_level", "expected"),
     [
@@ -53,10 +61,11 @@ def test_assets_page_export_option_requires_write_menu_permission(monkeypatch, m
     monkeypatch.setattr(assets_routes.asset_repo, "list_company_assets", fake_list_company_assets)
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", fake_list_field_definitions)
     monkeypatch.setattr(tags_routes, "can_edit_tags", AsyncMock(return_value=False))
+    monkeypatch.setattr(main_module, "_is_helpdesk_technician", AsyncMock(return_value=False))
 
     import asyncio
 
-    response = asyncio.run(assets_routes.assets_page(SimpleNamespace()))
+    response = asyncio.run(assets_routes.assets_page(SimpleNamespace(state=SimpleNamespace())))
 
     assert response.extra["can_export_assets"] is expected
     assert captured["template_name"] == "assets/index.html"

@@ -145,6 +145,18 @@
                   >
                     {% if value %}{{ value }}{% else %}<span class="text-muted">—</span>{% endif %}
                   </td>
+                {% elif key == 'health_score' %}
+                  <td
+                    data-label="{{ column.label }}"
+                    data-column="{{ key }}"
+                    data-value="{{ asset.get('health_score_sort', '') }}"
+                    {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+                  >
+                    {% if value is not none and asset.health_check_url %}
+                      {% set health_variant = {'healthy': 'success', 'attention': 'warning', 'critical': 'danger'}.get(asset.health_check_status, 'neutral') %}
+                      <a class="status status--{{ health_variant }}" href="{{ asset.health_check_url }}" title="Open the latest health check report">{{ value }}/100</a>
+                    {% else %}<span class="text-muted">—</span>{% endif %}
+                  </td>
                 {% elif key == 'last_sync' %}
                   <td
                     data-label="{{ column.label }}"

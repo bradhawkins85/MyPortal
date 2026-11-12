@@ -9,6 +9,14 @@ from starlette.requests import Request
 from app import main as main_module
 from app.features.assets import routes
 
+
+@pytest.fixture(autouse=True)
+def no_hidden_asset_columns(monkeypatch):
+    """No asset columns are hidden from end users unless a test says so."""
+    monkeypatch.setattr(
+        routes.asset_column_restrictions_repo, "list_restricted_keys", AsyncMock(return_value=set())
+    )
+
 DETAIL_TEMPLATE = Path(__file__).resolve().parent.parent / "app" / "templates" / "assets" / "detail.html"
 
 

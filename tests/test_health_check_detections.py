@@ -496,6 +496,26 @@ async def test_assets_reporting_a_detection_come_from_their_latest_check(store):
     assert reporting_assets([{"id": 1, "asset_id": 3, "report": {"signals": ["junk", {"title": "no key"}]}}]) == {}
 
 
+@pytest.mark.anyio
+async def test_assets_table_scores_come_from_each_assets_latest_completed_check(store):
+    async def check(asset_id, status, score, overall, company_id=1):
+        check_id = await repo.create(company_id=company_id, asset_id=asset_id, tray_device_id=None, ticket_id=None,
+                                     platform="windows", model="m", allow_pawnio=False, requested_by_user_id=None)
+        await repo.update(check_id, status=status, health_score=score, overall_status=overall,
+                          completed=status == "completed")
+        return check_id
+
+    await check(10, "completed", 40, "critical")
+    latest_10 = await check(10, "completed", 85, "healthy")
+    await check(10, "queued", None, None)  # still running: the last completed score stands
+    await check(20, "completed", 70, "attention", company_id=2)
+    scores = await repo.latest_scores_for_company(1)
+    assert set(scores) == {10}
+    assert scores[10]["id"] == latest_10 and scores[10]["health_score"] == 85
+    assert scores[10]["overall_status"] == "healthy"
+    assert set(await repo.latest_scores_for_company(2)) == {20}
+
+
 # --------------------------------------------------------------------------- #
 # Event log rules from a health check
 # --------------------------------------------------------------------------- #
