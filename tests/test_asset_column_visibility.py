@@ -111,10 +111,9 @@ async def test_technicians_still_see_every_column(monkeypatch):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("technician", [False, True])
-async def test_custom_field_columns_are_for_super_admins_only(monkeypatch, technician):
-    """Read Only and Read Write asset access never show custom fields."""
-    captured, _ = _wire_assets_page(monkeypatch, technician=technician, hidden=set())
+async def test_custom_field_columns_are_hidden_from_other_roles(monkeypatch):
+    """Roles that are neither admins nor technicians never see custom fields."""
+    captured, _ = _wire_assets_page(monkeypatch, technician=False, hidden=set())
 
     await assets_routes.assets_page(_request())
 
@@ -122,6 +121,26 @@ async def test_custom_field_columns_are_for_super_admins_only(monkeypatch, techn
     assert not {"cf_1", "cf_2"} & set(keys)
     assert "CC-42" not in repr(captured["assets"])
     assert "secret-recovery-key" not in repr(captured["assets"])
+
+
+@pytest.mark.anyio
+async def test_technicians_see_custom_field_columns(monkeypatch):
+    captured, _ = _wire_assets_page(monkeypatch, technician=True, hidden={"cf_2"})
+
+    await assets_routes.assets_page(_request())
+
+    assert {"cf_1", "cf_2"} <= set(_keys(captured))
+    assert captured["assets"][0]["cf_1"] == "CC-42"
+
+
+@pytest.mark.anyio
+async def test_helpdesk_technicians_see_custom_field_columns(monkeypatch):
+    captured, _ = _wire_assets_page(monkeypatch, technician=False, hidden=set())
+    monkeypatch.setattr(main_module, "_is_helpdesk_technician", AsyncMock(return_value=True))
+
+    await assets_routes.assets_page(_request())
+
+    assert {"cf_1", "cf_2"} <= set(_keys(captured))
 
 
 @pytest.mark.anyio
