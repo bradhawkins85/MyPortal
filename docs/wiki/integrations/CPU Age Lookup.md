@@ -11,54 +11,62 @@ shows the CPU launch date and where it came from.
 
 ## Where launch dates come from
 
+Each processor model needs its launch date recorded once, on the
+**CPU launch dates** page. Every device with that processor then gets its age.
+
 | Processor | Source |
 | --- | --- |
-| Intel | Always [Intel ARK](https://ark.intel.com), Intel's own processor specification database. Only the model number (for example `i7-8650U`) is sent. |
-| AMD, Apple, Qualcomm and others | No free automated source. Record the launch date by hand once per model on the **CPU launch dates** page; it then applies to every device with that processor. |
-| Virtual CPUs (for example "Intel Core Processor (Broadwell)") | No model number, so no lookup. Record the date by hand if it matters. |
+| Intel | [Intel ARK](https://www.intel.com/content/www/us/en/ark.html). The page links each Intel model to Intel's site; open its specification page and read **Launch Date** under *Supplemental Information* (for example `Q3'19` for the Core i7-1065G7). |
+| AMD, Apple, Qualcomm and others | The maker's own specification page, or another reliable source. |
+| Virtual CPUs (for example "Intel Core Processor (Broadwell)") | No model number. Record a date only if it matters. |
 
-Each distinct processor model is looked up once and remembered, so a fleet of
-identical laptops costs one request. Quarters reported by ARK (for example
-`Q3'17`) are stored as the first day of that quarter.
+MyPortal does not fetch Intel ARK itself. Intel's old ARK search now redirects
+to a 404 page, and intel.com refuses automated requests ("Access Denied"), so
+the date is read in your own browser and typed in.
 
 The processor name comes from the asset's synced CPU (Syncro or Tactical RMM),
 or from the native RMM agent's hardware inventory when no synced CPU exists.
+Different spellings of the same model (for example
+`Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz` and `Intel Core i7-1065G7`) are
+grouped as one processor.
 
 ## CPU launch dates page
 
 Super admins open **Assets → Actions → CPU launch dates** (`/assets/cpu-launch-dates`).
 It lists every processor model your assets report, in two groups:
 
-- **Needs a date** — models without a launch date yet, most-used first, with
-  the reason (not found on Intel ARK, lookup failed, or a maker with no
-  automatic lookup).
-- **Launch date known** — models with a date, its source (a link to the Intel
-  ARK page, or *Entered manually*) and the resulting age.
+- **Needs a date** — models without a launch date yet, most-used first. Intel
+  models have an **Open on Intel ARK** button that searches Intel's site for
+  the model in a new tab.
+- **Launch date known** — models with a date, where it came from (a link to the
+  Intel page when one was recorded) and the resulting age.
 
-Choose **Add date** or **Edit date** to pick the launch month. The editor
-previews the age the devices will get before you save, and saving updates
-every device with that processor straight away. A manually entered date is
-never replaced by a lookup; **Clear date** removes it so the next lookup tries
-again. **Look up now** (shown once the module is on) runs an Intel ARK lookup
-straight away. The page works without the module turned on, so you can add
-dates by hand at any time.
+Choose **Add date** or **Edit date** to open the editor:
+
+- **Launch date** — type it as Intel ARK shows it (`Q3'19`). `Q3 2019`,
+  `2019-07`, `07/2019`, `Jul 2019` and `2019` also work. A quarter counts from
+  its first month, the earliest the processor could ship.
+- **Where the date came from** — *Intel ARK* (the default for Intel
+  processors) or *Other source*.
+- **Intel ARK page** (optional) — paste the processor's intel.com page so
+  others can check the date later. Only `https://` links on intel.com are
+  accepted.
+
+The editor previews the age the devices will get. Saving updates every device
+with that processor straight away and is recorded in the audit log. **Clear
+date** removes the date; devices keep their last age until a new date is
+recorded.
 
 ## Setup
 
 Turn on **CPU age lookup** in **Admin → Modules**. No credentials are needed.
-
-Optional tuning in `.env`:
-
-```
-CPU_RELEASE_LOOKUP_RETRY_DAYS=30   # retry processors not found after this many days
-CPU_RELEASE_LOOKUP_BATCH_SIZE=25   # processor models looked up per run
-```
+Dates recorded on the page apply straight away even with the module off; the
+module runs the daily refresh below.
 
 ## When it runs
 
-- Daily at 05:45 (store time): finds new processor models, looks up the ones
-  without a launch date, and recalculates every asset's age so it keeps
-  counting up.
+- Daily at 05:45 (store time): registers processor models reported by new
+  devices and recalculates every asset's age so it keeps counting up.
 - On demand: add a scheduled task with the command **Estimate asset ages from
   CPU launch dates**, or call `POST /api/cpu-release-dates/refresh`.
 
@@ -69,8 +77,8 @@ overwrite its *Approx age*.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/cpu-release-dates` | List processor models, their launch dates and lookup status. |
-| `POST` | `/api/cpu-release-dates/refresh` | Run a lookup now (in the background). |
-| `PUT` | `/api/cpu-release-dates/{id}` | Record a launch date by hand (`{"release_date": "2021-01-01"}`), or send `null` to clear it so the next run looks it up again. |
+| `GET` | `/api/cpu-release-dates` | List processor models and their launch dates. |
+| `POST` | `/api/cpu-release-dates/refresh` | Register new processor models and recalculate ages now. |
+| `PUT` | `/api/cpu-release-dates/{id}` | Record a launch date (`{"launch_date": "Q3'19", "source": "intel_ark", "source_url": "https://www.intel.com/…"}`), or send `"launch_date": null` to clear it. |
 
-Manual changes are recorded in the audit log.
+Changes are recorded in the audit log.

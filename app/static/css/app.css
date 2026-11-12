@@ -23553,6 +23553,9 @@ a.sch-item__company:focus-visible {
 }
 
 .cpu-editor__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
   min-width: 0;
 }
 
