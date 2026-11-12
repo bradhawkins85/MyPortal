@@ -64,6 +64,7 @@
   {% endif %}
   {% if is_super_admin %}
     {% set _ = asset_actions.append({"label": "Settings", "type": "link", "href": "/assets/settings"}) %}
+    {% set _ = asset_actions.append({"label": "CPU launch dates", "type": "link", "href": "/assets/cpu-launch-dates", "attrs": {"title": "Review the processor launch dates used to estimate each device's age"}}) %}
     {% if show_tags %}{% set _ = asset_actions.append({"label": "Tags", "type": "link", "href": "/admin/tags"}) %}{% endif %}
   {% endif %}
   {% set _ = asset_actions.append({"label": "Network devices", "type": "link", "href": "/devices"}) %}

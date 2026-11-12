@@ -23477,3 +23477,123 @@ a.sch-item__company:focus-visible {
     text-align: center;
   }
 }
+
+/* CPU launch dates (Assets → CPU launch dates) */
+.cpu-launch__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--space-gap-roomy);
+  margin: 0;
+}
+
+.cpu-launch__stats dt {
+  font-size: 0.8rem;
+  color: var(--hf-muted);
+}
+
+.cpu-launch__stats dd {
+  margin: 0.15rem 0 0;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.cpu-launch__notice {
+  margin: var(--space-gap-roomy) 0 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.5rem;
+  color: var(--hf-copy);
+  background: color-mix(in srgb, var(--hf-warning) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hf-warning) 30%, transparent);
+}
+
+.cpu-launch [hidden] {
+  display: none !important;
+}
+
+.cpu-item.scf-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.cpu-launch .scf-chip a,
+.cpu-launch__notice a {
+  color: var(--hf-accent-strong);
+  text-decoration: underline;
+}
+
+.cpu-item__name {
+  margin: 0.15rem 0 0;
+  word-break: break-word;
+}
+
+.cpu-item__fallback {
+  margin-top: 0.5rem;
+}
+
+.cpu-editor__eyebrow {
+  margin: 0 0 0.15rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--hf-muted);
+}
+
+.cpu-editor__subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--hf-muted);
+  word-break: break-word;
+}
+
+.cpu-editor__body.modal__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16rem;
+  align-items: start;
+  gap: calc(var(--space-gap-roomy) * 2);
+}
+
+.cpu-editor__main {
+  min-width: 0;
+}
+
+.cpu-editor__aside {
+  padding: var(--space-gap-roomy);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--hf-muted) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--hf-line);
+}
+
+.cpu-editor__preview-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--hf-muted);
+}
+
+.cpu-editor__age {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.cpu-editor.modal__panel > .cpu-editor__footer {
+  margin: 0;
+}
+
+.cpu-editor__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
+.cpu-editor__spacer {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 720px) {
+  .cpu-editor__body.modal__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

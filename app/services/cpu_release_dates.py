@@ -430,6 +430,31 @@ async def refresh(*, limit: int | None = None) -> dict[str, Any]:
     return {"status": "ok", **summary}
 
 
+async def overview(today: date | None = None) -> list[dict[str, Any]]:
+    """Every processor model in use, with its launch date and how many devices have it.
+
+    New models are registered first, so a technician can record a date for a
+    processor even before the first scheduled lookup has run.
+    """
+    assets = await discover_cpus()
+    counts: dict[str, int] = {}
+    for asset in assets:
+        identity = asset.get("_cpu")
+        if identity:
+            counts[identity.key] = counts.get(identity.key, 0) + 1
+    entries = []
+    for entry in await repo.list_all():
+        released = entry.get("release_date")
+        entries.append({
+            **entry,
+            "device_count": counts.get(entry["cpu_key"], 0),
+            "age_years": age_in_years(released, today) if released else None,
+            "vendor_label": VENDOR_LABELS.get(entry.get("vendor") or "", "Unknown maker"),
+            "source_label": SOURCE_LABELS.get(entry.get("source") or ""),
+        })
+    return entries
+
+
 async def set_manual_release_date(entry_id: int, release_date: date | None) -> dict[str, Any]:
     """Record (or clear) a processor's launch date by hand and update its devices."""
     entry = await repo.get(entry_id)
