@@ -7,6 +7,9 @@
 {% set asset_tags = asset_tags | default(none) %}
 {% set health_check = health_check | default(none) %}
 {% set asset_display_name = asset.name or ('Asset ' ~ asset.id) %}
+{% set can_manage_asset = can_manage_asset | default(false) %}
+{% set is_asset_staff = is_asset_staff | default(false) %}
+{% set can_manage_visibility = is_super_admin and not customer_safe %}
 
 {% block header_title %}
   {{ 'Edit asset' if can_edit and not customer_safe else 'Asset details' }}
@@ -24,7 +27,7 @@
         repairing go through the tray app so they work without one. -#}
     {%- set rmm_agent = rmm_staff and rmm.agent -%}
     {% set detail_actions = [] %}
-    {% if can_edit and not customer_safe %}{% set _ = detail_actions.append({"label": "Save changes", "type": "submit", "variant": "primary", "form": "asset-settings-form", "attrs": {"data-asset-save": "", "title": "Save the asset profile and editable custom fields"}}) %}{% endif %}
+    {% if can_edit and not customer_safe %}{% set _ = detail_actions.append({"label": "Save changes", "type": "submit", "variant": "primary", "form": "asset-settings-form", "attrs": {"data-asset-save": "", "title": "Save the asset profile" ~ (" and editable custom fields" if can_manage_asset else "")}}) %}{% endif %}
     {% set _ = detail_actions.append({"type": "section", "label": "Asset"}) %}
     {% set _ = detail_actions.append({"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id, "icon": icons.process}) %}
     {% if is_super_admin and not customer_safe %}{% set _ = detail_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true", "icon": icons.preview}) %}{% endif %}
@@ -104,7 +107,7 @@
             {% if logged_on_user %}{% if logged_on_user_is_last %}<li class="scf-chip" title="Nobody is signed in now; this is the last logged in user">Last logged on: <em>{{ logged_on_user }}</em></li>{% else %}<li class="scf-chip" title="Currently logged on user">Logged on: {{ logged_on_user }}</li>{% endif %}{% endif %}
             {% if asset.criticality %}<li class="scf-chip scf-chip--logic">{{ asset.criticality | title }} criticality</li>{% endif %}
             <li class="scf-chip{% if asset.review_status != 'reviewed' %} scf-chip--muted{% endif %}">{{ (asset.review_status or 'not_reviewed') | replace('_', ' ') | title }}</li>
-            <li class="scf-chip{% if asset.customer_visible %} scf-chip--visibility{% else %} scf-chip--muted{% endif %}">{{ 'Customer portal' if asset.customer_visible else 'Internal asset' }}</li>
+            {% if is_asset_staff %}<li class="scf-chip{% if asset.customer_visible %} scf-chip--visibility{% else %} scf-chip--muted{% endif %}">{{ 'Customer portal' if asset.customer_visible else 'Internal asset' }}</li>{% endif %}
           {% endif %}
         </ul>
       </div>
@@ -114,7 +117,7 @@
     {% if can_view_asset_relationships %}{% set _ = asset_counters.append({"label": "Relationships", "value": relationships | length, "variant": "info", "href": "#asset-relationships"}) %}{% endif %}
     {% if not customer_safe %}
       {% set _ = asset_counters.append({"label": "Linked tickets", "value": tickets | length, "variant": "info", "href": "#asset-tickets"}) %}
-      {% set _ = asset_counters.append({"label": "Custom fields", "value": custom_fields | length, "variant": "neutral", "href": "#asset-custom-fields"}) %}
+      {% if is_asset_staff %}{% set _ = asset_counters.append({"label": "Custom fields", "value": custom_fields | length, "variant": "neutral", "href": "#asset-custom-fields"}) %}{% endif %}
       {% if network_interfaces is not none %}{% set _ = asset_counters.append({"label": "Interfaces", "value": network_interfaces.interfaces | length, "variant": "neutral", "href": "#interfaces"}) %}{% endif %}
     {% endif %}
     {% if asset_counters %}{{ counter_strip(asset_counters, class="ce-overview__stats") }}{% endif %}
@@ -130,7 +133,7 @@
         ("Asset", [
           ("profile", "asset-profile", "Profile", "", not customer_safe),
           ("inventory", "asset-inventory", "Inventory", "", true),
-          ("custom-fields", "asset-custom-fields", "Custom fields", custom_fields | selectattr("value") | list | length or "", not customer_safe),
+          ("custom-fields", "asset-custom-fields", "Custom fields", custom_fields | selectattr("value") | list | length or "", is_asset_staff),
           ("warranty", "asset-warranty", "Warranty", "", warranty is not none),
           ("tags", "tags", "Tags", "", asset_tags is not none),
           ("hardware", "hardware", "Hardware", "", rmm and rmm.inventory),
@@ -159,12 +162,12 @@
           ("tickets", "asset-tickets", "Linked tickets", tickets | length, not customer_safe),
         ]),
         ("Integrations", [
-          ("sources", "source-records", "Data provenance", asset_sources | length, not customer_safe),
+          ("sources", "source-records", "Data provenance", asset_sources | length, is_asset_staff),
           ("matches", "asset-matches", "Possible matches", reconciliation_candidates | length, not customer_safe and reconciliation_candidates),
         ]),
         ("Access & lifecycle", [
-          ("visibility", "asset-visibility", "Customer visibility", "", can_edit and not customer_safe),
-          ("archive", "asset-archive", "Archive & restore", "", can_edit and not customer_safe),
+          ("visibility", "asset-visibility", "Customer visibility", "", can_manage_visibility),
+          ("archive", "asset-archive", "Archive & restore", "", can_manage_asset),
         ]),
       ] %}
       {% for group_label, items in asset_groups %}
@@ -548,7 +551,7 @@
 {% endif %}{% endfor %}</textarea>
           <small class="form-help">One non-sensitive HTTP(S) link per line, optionally prefixed with a label and |.</small></div>
       </div>
-      {% if can_edit %}<footer class="form-actions"><label class="checkbox"><input type="checkbox" name="send_tray_notification" value="1"><span>Send a tray push notification to this asset's device</span></label><button class="button button--primary" type="submit" data-asset-save>Save changes</button><span class="form-help">Saves the profile and editable custom fields.</span></footer>{% endif %}
+      {% if can_edit %}<footer class="form-actions"><label class="checkbox"><input type="checkbox" name="send_tray_notification" value="1"><span>Send a tray push notification to this asset's device</span></label><button class="button button--primary" type="submit" data-asset-save>Save changes</button><span class="form-help">Saves the profile{{ ' and editable custom fields' if can_manage_asset }}.</span></footer>{% endif %}
     </form>
   </section>{% endif %}
 
@@ -557,12 +560,13 @@
     <div class="ce-section__body"><dl class="definition-list">
       <dt>Asset ID</dt><dd>{{ asset.id }}</dd><dt>Company</dt><dd>{{ company.name if company else asset.company_id }}</dd>
       <dt>Type</dt><dd><span class="asset-type-badge"><img src="{{ asset_type.icon }}" alt="" width="20" height="20"> {{ asset_type_label }}</span>{% if asset.provenance != 'manual' and asset.type and asset.type != asset_type_label %} <span class="text-muted">(reported as {{ asset.type }})</span>{% endif %}</dd><dt>Status</dt><dd>{{ asset.status or '—' }}</dd>
+      {% if cpu_age %}<dt>CPU launched</dt><dd>{{ cpu_age.release_label }} <span class="text-muted">({{ cpu_age.model }}, {% if cpu_age.source_url %}<a href="{{ cpu_age.source_url }}" target="_blank" rel="noopener noreferrer">{{ cpu_age.source_label }}</a>{% else %}{{ cpu_age.source_label }}{% endif %})</span></dd><dt>Approx age</dt><dd>About {{ cpu_age.age_years }} year{{ "s" if cpu_age.age_years != 1 }} <span class="text-muted">— estimated from the CPU launch date; the device cannot be older than its processor.{% if is_super_admin %} <a href="/assets/cpu-launch-dates">CPU launch dates</a>{% endif %}</span></dd>{% endif %}
       <dt>Serial number</dt><dd>{{ asset.serial_number or '—' }}</dd><dt>Warranty</dt><dd>{{ asset.warranty_status or '—' }}{% if asset.warranty_end_date %} (ends {{ asset.warranty_end_date }}){% endif %}</dd>
       {% if not customer_safe %}<dt>Syncro ID</dt><dd>{{ asset.syncro_asset_id or '—' }}</dd><dt>Tactical ID</dt><dd>{{ asset.tactical_asset_id or '—' }}</dd>{% endif %}
       <dt>Provenance</dt><dd>{{ 'Manual' if asset.provenance == 'manual' else 'Integration' }}</dd>
       <dt>Last sync</dt><dd>{{ asset.last_sync or ('Not applicable' if asset.provenance == 'manual' else 'Never') }}</dd>
     </dl><p class="text-muted">{{ 'Inventory and documentation are technician-maintained.' if asset.provenance == 'manual' else 'Inventory fields above are sync-owned; operational documentation is manual-owned.' }}</p>
-    {% if can_edit and asset.provenance != 'manual' %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/asset-type">{% include "partials/csrf.html" %}
+    {% if can_manage_asset and asset.provenance != 'manual' %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/asset-type">{% include "partials/csrf.html" %}
       <label class="form-label" for="asset-type-override">Asset type</label>
       <select class="form-input" id="asset-type-override" name="asset_type">
         <option value="" {% if asset.asset_type_source != 'manual' %}selected{% endif %}>Automatic from sync ({{ derived_asset_type.label }})</option>
@@ -585,7 +589,7 @@
         <dt>Last checked</dt><dd>{% if warranty.checked_at_utc %}<span data-utc="{{ warranty.checked_at_utc }}">{{ warranty.checked_at_utc }}</span>{% else %}Never{% endif %}{% if asset.warranty_lookup_message %} <span class="text-muted" role="status">— {{ asset.warranty_lookup_message }}</span>{% endif %}</dd>
       </dl>
       {% if not warranty.vendor_supported and warranty.vendor_check_url %}<p class="text-muted">{{ warranty.vendor_label }} has no free automated warranty lookup. <a href="{{ warranty.vendor_check_url }}" target="_blank" rel="noopener noreferrer">Check on the {{ warranty.vendor_label }} website</a> and record the dates below.</p>{% endif %}
-      {% if can_edit %}
+      {% if can_manage_asset %}
         {% if warranty.lookup_enabled %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/warranty/lookup">{% include "partials/csrf.html" %}
           <button class="button button--ghost button--small" type="submit" {% if warranty.is_manual %}title="Dates were entered manually; a lookup will replace them if the manufacturer finds this asset"{% endif %}>Check warranty now</button>
           <small class="form-help">Sends only the serial number to the manufacturer's own warranty service.</small>
@@ -602,13 +606,13 @@
     </div>
   </section>{% endif %}
 
-  {% if not customer_safe %}<section class="card card--panel ce-section" id="asset-custom-fields" data-asset-edit-section="custom-fields" aria-labelledby="asset-custom-fields-title">
-    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-custom-fields-title">Custom fields</h2><p class="card__subtitle">{{ 'Update additional inventory details alongside the asset profile.' if can_edit else 'Additional inventory details recorded for this asset.' }} Insert a field's value into a script or template with its token.</p></div></header>
+  {% if is_asset_staff %}<section class="card card--panel ce-section" id="asset-custom-fields" data-asset-edit-section="custom-fields" aria-labelledby="asset-custom-fields-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-custom-fields-title">Custom fields</h2><p class="card__subtitle">{{ 'Update additional inventory details alongside the asset profile.' if can_manage_asset else 'Additional inventory details recorded for this asset.' }} Insert a field's value into a script or template with its token.</p></div></header>
     <div class="ce-section__body"><div class="ce-form-grid">
       {% for field in custom_fields %}<div class="form-field">
-        {% if can_edit %}<label class="form-label" for="asset-custom-{{ field.id }}">{{ field.display_name or field.name }}</label>{% else %}<span class="form-label">{{ field.display_name or field.name }}</span>{% endif %}
+        {% if can_manage_asset %}<label class="form-label" for="asset-custom-{{ field.id }}">{{ field.display_name or field.name }}</label>{% else %}<span class="form-label">{{ field.display_name or field.name }}</span>{% endif %}
         {% if field.field_type != 'image' %}{% set token = '{{ asset.variables.' ~ field.name ~ ' }}' %}<button type="button" class="ce-token" data-ce-copy="{{ token }}" title="Copy the template token"><span class="ce-token__text">{{ token }}</span><span class="ce-token__hint" data-ce-copy-status aria-live="polite">Copy</span></button>{% endif %}
-        {% if can_edit %}
+        {% if can_manage_asset %}
           {% if field.field_type == 'checkbox' %}<label class="checkbox"><input id="asset-custom-{{ field.id }}" form="asset-settings-form" name="custom_{{ field.id }}" value="1" type="checkbox" {% if field.value %}checked{% endif %}><span>Yes</span></label>
           {% elif field.field_type == 'date' %}<input id="asset-custom-{{ field.id }}" form="asset-settings-form" class="form-input" name="custom_{{ field.id }}" type="date" value="{{ field.value or '' }}">
           {% elif field.field_type == 'url' %}<input id="asset-custom-{{ field.id }}" form="asset-settings-form" class="form-input" name="custom_{{ field.id }}" type="url" value="{{ field.value or '' }}">
@@ -616,7 +620,7 @@
           {% else %}<input id="asset-custom-{{ field.id }}" form="asset-settings-form" class="form-input" name="custom_{{ field.id }}" value="{{ field.value or '' }}">{% endif %}
         {% elif field.field_type == 'url' and field.value %}<a href="{{ field.value }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>{% elif field.field_type == 'checkbox' %}{{ 'Yes' if field.value else 'No' }}{% elif field.field_type == 'textarea' and field.value %}<span style="white-space: pre-wrap;">{{ field.value }}</span>{% else %}{{ field.value or '—' }}{% endif %}
       </div>{% else %}<p class="text-muted">No custom fields configured.</p>{% endfor %}
-    </div>{% if can_edit and custom_fields %}<div class="form-actions"><button class="button button--primary" type="submit" form="asset-settings-form" data-asset-save>Save changes</button><span class="form-help">Saves the profile and editable custom fields.</span></div>{% endif %}</div>
+    </div>{% if can_manage_asset and custom_fields %}<div class="form-actions"><button class="button button--primary" type="submit" form="asset-settings-form" data-asset-save>Save changes</button><span class="form-help">Saves the profile and editable custom fields.</span></div>{% endif %}</div>
   </section>{% endif %}
   {% if not customer_safe %}<section class="card card--panel ce-section" id="asset-assignments" data-asset-edit-section="assignments" aria-labelledby="asset-assignments-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-assignments-title">Network and rack assignments</h2><p class="card__subtitle">Open the dedicated workspace to manage each assignment.</p></div></header>
@@ -767,10 +771,10 @@
 
   {% if not customer_safe and reconciliation_candidates %}<section class="card card--panel ce-section" id="asset-matches" data-asset-edit-section="matches" aria-labelledby="asset-matches-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-matches-title">Possible integration matches</h2><p class="card__subtitle">Review identifiers before linking. A name alone is never merged automatically.</p></div></header>
-    <div class="ce-section__body"><ul>{% for candidate in reconciliation_candidates %}<li><strong>{{ candidate.source | title }}</strong> — {{ candidate.external_id }}{% if candidate.last_error %}<span class="text-muted">{{ candidate.last_error }}</span>{% endif %}{% if can_edit %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/reconciliation/{{ candidate.id }}/approve"><button class="button button--primary button--small" type="submit">Approve match</button></form>{% endif %}</li>{% endfor %}</ul></div>
+    <div class="ce-section__body"><ul>{% for candidate in reconciliation_candidates %}<li><strong>{{ candidate.source | title }}</strong> — {{ candidate.external_id }}{% if candidate.last_error %}<span class="text-muted">{{ candidate.last_error }}</span>{% endif %}{% if can_manage_asset %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/reconciliation/{{ candidate.id }}/approve"><button class="button button--primary button--small" type="submit">Approve match</button></form>{% endif %}</li>{% endfor %}</ul></div>
   </section>{% endif %}
 
-  {% if not customer_safe %}<section class="card card--panel ce-section" id="source-records" data-asset-edit-section="sources" aria-labelledby="source-records-title">
+  {% if is_asset_staff %}<section class="card card--panel ce-section" id="source-records" data-asset-edit-section="sources" aria-labelledby="source-records-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="source-records-title">Data provenance and ownership</h2><p class="card__subtitle">Integration-owned inventory is refreshed by its source. Notes, references, relationships, photos, and custom fields remain manually owned.</p></div></header>
     <div class="ce-section__body"><div class="table-wrapper"><table class="table"><thead><tr><th>Source</th><th>Source record</th><th>Status</th><th>Fields owned by source</th><th>Last successful update</th></tr></thead><tbody>
       {% for source in asset_sources %}<tr><td>{{ source.source | replace('_', ' ') | title }}</td><td><a href="#source-record-{{ source.id }}" id="source-record-{{ source.id }}"><code>{{ source.external_id }}</code></a></td><td><span class="status status--{{ 'success' if source.status == 'active' else 'warning' }}">{{ source.status | replace('_', ' ') | title }}</span></td><td>{{ source.owned_fields | join(', ') or 'Record linkage only' }}</td><td>{% if source.last_success_at %}<span data-utc="{{ source.last_success_at }}">{{ source.last_success_at }}</span>{% else %}Never{% endif %}</td></tr>
@@ -813,7 +817,7 @@
     {% for reference in references %}<li><a href="{{ reference.url }}" target="_blank" rel="noopener noreferrer">{{ reference.label }}</a></li>{% endfor %}
   </ul></div></section>{% endif %}
 
-  {% if can_edit and not customer_safe %}
+  {% if can_manage_visibility %}
   <section class="card card--panel ce-section" id="asset-visibility" data-asset-edit-section="visibility" aria-labelledby="asset-visibility-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-visibility-title">Customer visibility</h2><p class="card__subtitle">Choose who can view the approved inventory details in the customer portal.</p></div><span class="status status--{{ 'success' if asset.customer_visible else 'neutral' }}">{{ 'Published' if asset.customer_visible else 'Internal' }}</span></header>
     <div class="ce-section__body"><form class="form" method="post" action="/assets/{{ asset.id }}/publish">
@@ -822,7 +826,8 @@
       <div class="form-field"><label class="form-label" for="asset-customer-roles">Published to customer roles</label><select class="form-input" id="asset-customer-roles" name="allowed_role_ids" multiple size="5" {% if asset.customer_visible %}disabled{% endif %}>{% for role in customer_roles %}<option value="{{ role.id }}" {% if role.id in customer_role_ids %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select><p class="form-help">New publications deny access until at least one role is selected. Roles also require the Published assets permission.</p></div>
       <div class="form-actions"><button class="button button--primary" type="submit">{{ 'Remove from customer portal' if asset.customer_visible else 'Publish to customer portal' }}</button></div><p class="form-help">Assets are internal by default. Customer views contain only approved inventory fields.</p>
     </form></div>
-  </section>
+  </section>{% endif %}
+  {% if can_manage_asset %}
   <section class="card card--panel ce-section" id="asset-archive" data-asset-edit-section="archive" aria-labelledby="asset-archive-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-archive-title">Archive & restore</h2><p class="card__subtitle">Manage the asset's place in active inventory.</p></div></header>
     <div class="ce-section__body"><form class="form" method="post" action="/assets/{{ asset.id }}/archive">

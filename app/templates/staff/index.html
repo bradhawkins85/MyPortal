@@ -48,15 +48,15 @@
               Email
             </label>
             <label class="ticket-columns__option">
-              <input type="checkbox" class="staff-column-toggle" data-column="mobile" checked />
+              <input type="checkbox" class="staff-column-toggle" data-column="mobile" />
               Mobile
             </label>
             <label class="ticket-columns__option">
-              <input type="checkbox" class="staff-column-toggle" data-column="code" checked />
+              <input type="checkbox" class="staff-column-toggle" data-column="code" />
               Code
             </label>
             <label class="ticket-columns__option">
-              <input type="checkbox" class="staff-column-toggle" data-column="onboarded" checked />
+              <input type="checkbox" class="staff-column-toggle" data-column="onboarded" />
               Onboarded
             </label>
             <label class="ticket-columns__option">
@@ -65,12 +65,12 @@
             </label>
             {% if is_super_admin %}
               <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="portal-last-login" checked />
+                <input type="checkbox" class="staff-column-toggle" data-column="portal-last-login" />
                 MyPortal Last Login
               </label>
             {% endif %}
             <label class="ticket-columns__option">
-              <input type="checkbox" class="staff-column-toggle" data-column="onboarding-workflow" checked />
+              <input type="checkbox" class="staff-column-toggle" data-column="onboarding-workflow" />
               Onboarding Workflow
             </label>
             <label class="ticket-columns__option">
@@ -79,7 +79,7 @@
             </label>
             {% for field in staff_custom_field_definitions %}
               <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="custom-{{ field.name }}" checked />
+                <input type="checkbox" class="staff-column-toggle" data-column="custom-{{ field.name }}" />
                 {{ field.display_name or field.name }}
               </label>
             {% endfor %}
@@ -864,6 +864,7 @@
                 <button type="button" class="button button--ghost button--small" id="edit-action-offboarding-request" data-edit-action="offboarding-request">Request offboarding</button>
               </div>
             </section>
+            {% if is_admin or has_admin_technician_access %}
             <section class="stf-action-group" data-stf-action-group aria-labelledby="staff-edit-actions-approval">
               <h4 class="stf-action-group__title" id="staff-edit-actions-approval">Approval</h4>
               <div class="stf-action-group__buttons">
@@ -871,6 +872,7 @@
                 <button type="button" class="button button--ghost button--small" id="edit-action-deny" data-edit-action="deny" hidden>Deny</button>
               </div>
             </section>
+            {% endif %}
             <section class="stf-action-group" data-stf-action-group aria-labelledby="staff-edit-actions-workflow">
               <h4 class="stf-action-group__title" id="staff-edit-actions-workflow">Workflow</h4>
               <div class="stf-action-group__buttons">

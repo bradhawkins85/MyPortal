@@ -1,0 +1,7 @@
+{
+  "guid": "35cba45a-4066-4cfa-b2d2-c31a7ef12c3c",
+  "occurred_at": "2026-11-12T04:57Z",
+  "change_type": "Feature",
+  "summary": "Company access can now be assigned by job title, automatically following staff hires and title changes, with the edited company selected automatically.",
+  "content_hash": "04cba2ce4554c420f325358abe4e26215e05c326904e196735759e45390c4ac7"
+}

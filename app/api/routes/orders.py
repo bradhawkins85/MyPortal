@@ -4,6 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
+from app.security.commerce_permissions import (
+    CommerceScope,
+    commerce_scope,
+    commerce_record_visible,
+    require_commerce_record,
+)
 from app.repositories import companies as company_repo
 from app.repositories import shop as shop_repo
 from app.repositories import user_companies as user_company_repo
@@ -28,15 +34,21 @@ async def _ensure_company(company_id: int) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
 
-async def _ensure_order_access(user: dict, company_id: int) -> None:
+async def _ensure_order_access(user: dict, company_id: int) -> CommerceScope:
     if user.get("is_super_admin"):
-        return
-    user_id = user.get("id")
-    if user_id is None:
+        return "all"
+    if user.get("id") is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    membership = await user_company_repo.get_user_company(int(user_id), company_id)
-    if not membership or not bool(membership.get("can_access_orders")):
+    membership = user.get("simulated_membership")
+    if membership is not None:
+        if membership.get("company_id") != company_id:
+            membership = None
+    else:
+        membership = await user_company_repo.get_user_company(int(user["id"]), company_id)
+    scope = commerce_scope(user, membership, "menu.orders")
+    if scope == "none":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Orders access denied")
+    return scope
 
 
 @router.get("", response_model=list[OrderSummaryResponse])
@@ -48,8 +60,9 @@ async def list_orders(
 ) -> list[OrderSummaryResponse]:
     resolved_company_id = await _resolve_company_id(company_id, company_id_alt)
     await _ensure_company(resolved_company_id)
-    await _ensure_order_access(current_user, resolved_company_id)
-    records = await shop_repo.list_order_summaries(resolved_company_id)
+    scope = await _ensure_order_access(current_user, resolved_company_id)
+    records = [record for record in await shop_repo.list_order_summaries(resolved_company_id)
+               if commerce_record_visible(current_user, scope, record, "menu.orders")]
     return [OrderSummaryResponse.model_validate(record) for record in records]
 
 
@@ -63,10 +76,11 @@ async def get_order(
 ) -> OrderDetailResponse:
     resolved_company_id = await _resolve_company_id(company_id, company_id_alt)
     await _ensure_company(resolved_company_id)
-    await _ensure_order_access(current_user, resolved_company_id)
+    scope = await _ensure_order_access(current_user, resolved_company_id)
     summary = await shop_repo.get_order_summary(order_number, resolved_company_id)
     if not summary:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    require_commerce_record(current_user, scope, summary, "menu.orders")
     items = await shop_repo.list_order_items(order_number, resolved_company_id)
     summary["items"] = items
     return OrderDetailResponse.model_validate(summary)

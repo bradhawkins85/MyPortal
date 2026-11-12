@@ -15,6 +15,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app.core.logging import log_info
+from app.repositories import asset_column_restrictions as asset_column_restrictions_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as asset_repo
 from app.repositories import asset_photos as asset_photo_repo
@@ -182,6 +183,54 @@ def _customer_asset(record: dict[str, Any]) -> dict[str, Any]:
     return {key: record.get(key) for key in _CUSTOMER_ASSET_FIELDS}
 
 
+# Built-in asset table columns admins may hide from end users. Name always
+# stays so every row can be opened.
+_RESTRICTABLE_ASSET_COLUMNS: list[dict[str, str]] = [
+    {"key": column["key"], "label": column["label"]}
+    for column in _ASSET_TABLE_COLUMNS
+    if column["key"] != "name"
+] + [{"key": "health_score", "label": "Health check score"}]
+
+
+async def _end_user_hidden_columns(user: Mapping[str, Any], request: Request) -> set[str]:
+    """Only explicit admins and technicians may bypass hidden asset columns."""
+    if user.get("is_super_admin"):
+        return set()
+    main_module = _main()
+    membership = getattr(request.state, "active_membership", None)
+    if membership is None and user.get("company_id") is not None:
+        membership = await main_module._get_effective_company_membership(
+            request, user["id"], int(user["company_id"])
+        )
+    if any(
+        main_module._membership_menu_can(dict(user), membership, key, write=True)
+        for key in ("menu.admin.company", "menu.admin.technician")
+    ):
+        return set()
+    return await asset_column_restrictions_repo.list_restricted_keys()
+
+
+async def _is_asset_staff(user: Mapping[str, Any], membership: Any, request: Request) -> bool:
+    """Admins and technicians, who keep full asset management.
+
+    The Read Only / Read Write split (profile and photos only; no custom
+    fields, data provenance, asset type override or archiving) applies to
+    every other role."""
+    if user.get("is_super_admin"):
+        return True
+    main_module = _main()
+    if any(
+        main_module._membership_menu_can(dict(user), membership, key, write=True)
+        for key in ("menu.admin.company", "menu.admin.technician")
+    ):
+        return True
+    return bool(await main_module._is_helpdesk_technician(user, request))
+
+
+def _custom_field_column_key(definition: Mapping[str, Any]) -> str:
+    return f"cf_{definition['id']}"
+
+
 def _main():
     from app import main as main_module
 
@@ -257,16 +306,27 @@ async def assets_page(request: Request):
     can_export_assets = main_module._membership_menu_can(
         user, membership, "menu.assets", write=True
     )
-    can_write_assets = bool(user.get("is_super_admin")) or can_export_assets
+    is_super_admin = bool(user.get("is_super_admin"))
+    can_write_assets = is_super_admin or can_export_assets
+    # Read Only sees the same register as Read Write; only changes differ.
+    can_view_assets = is_super_admin or main_module._membership_menu_can(
+        user, membership, "menu.assets"
+    )
     can_wake = can_write_assets and await main_module._is_helpdesk_technician(user, request)
 
     rows = await asset_repo.list_company_assets(company_id)
-    if not can_write_assets:
-        rows = [_customer_asset(dict(row)) for row in await _customer_visible_assets(membership, company_id, rows)]
-    field_definitions = (
-        await asset_custom_fields_repo.list_field_definitions()
-        if user.get("is_super_admin") else []
-    )
+    if not can_view_assets:
+        rows = [_customer_asset(dict(row)) for row in rows]
+    hidden_columns = await _end_user_hidden_columns(user, request)
+    # Custom field columns are for admins and technicians only.
+    field_definitions = [
+        definition
+        for definition in (
+            await asset_custom_fields_repo.list_field_definitions()
+            if await _is_asset_staff(user, membership, request) else []
+        )
+        if _custom_field_column_key(definition) not in hidden_columns
+    ]
 
     def _clean_text(value: Any) -> str | None:
         if value is None:
@@ -413,7 +473,7 @@ async def assets_page(request: Request):
         or main_module._membership_menu_can(user, membership, "menu.rmm_scripts", write=True)
     )
     # Technicians who see RMM scripts get a column showing each device's RMM agent.
-    show_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
+    show_rmm_agent = can_view_assets and main_module._feature_pack_available("rmm") and (
         bool(user.get("is_super_admin"))
         or main_module._membership_menu_can(user, membership, "menu.rmm_scripts")
     )
@@ -434,6 +494,17 @@ async def assets_page(request: Request):
         rmm_install_attempts = await rmm_agent_deploy.company_latest_attempts(company_id)
     # The health check is an RMM option: it needs its pack and a deployed RMM agent.
     can_health_check = can_push_rmm_agent and main_module._feature_pack_available("health_check")
+    # Technicians who see RMM scripts get each asset's latest health check score.
+    show_health_score = (
+        show_rmm_agent
+        and main_module._feature_pack_available("health_check")
+        and "health_score" not in hidden_columns
+    )
+    health_scores: dict[int, dict[str, Any]] = {}
+    if show_health_score:
+        from app.repositories import ai_health_checks as health_checks_repo
+
+        health_scores = await health_checks_repo.latest_scores_for_company(company_id)
     if can_push_rmm_agent:
         from app.services import rmm_remote_control
         from app.services import rmm_commands
@@ -453,7 +524,7 @@ async def assets_page(request: Request):
             tray_device.get("hostname") if tray_device else None
         )
         record["tray_agent_synced"] = bool(record["tray_device_uid"])
-        if can_write_assets:
+        if can_view_assets:
             record["tray_agent_version"] = _clean_text(
                 tray_device.get("agent_version") if tray_device else None
             )
@@ -479,6 +550,13 @@ async def assets_page(request: Request):
             record["rmm_uninstall"] = bool(rmm_agent.get("uninstall"))
             record["can_health_check"] = can_health_check
             record["health_check_ready"] = bool(tray_device)
+        if show_health_score and record.get("id"):
+            check = health_scores.get(int(record["id"]))
+            score = check.get("health_score") if check else None
+            record["health_score"] = int(score) if score is not None else None
+            record["health_score_sort"] = record["health_score"] if score is not None else ""
+            record["health_check_status"] = (check or {}).get("overall_status")
+            record["health_check_url"] = f"/health-checks/{int(check['id'])}" if check else None
         if show_rmm_agent and record.get("id"):
             rmm_agent = rmm_agents.get(int(record["id"])) or {}
             record["rmm_agent"] = rmm_agent.get("state", "missing")
@@ -505,19 +583,25 @@ async def assets_page(request: Request):
         for field_def in field_definitions
     ]
     all_columns = list(_ASSET_TABLE_COLUMNS) + custom_columns
-    if can_write_assets:
+    if can_view_assets:
         synced_index = next(i for i, column in enumerate(all_columns) if column["key"] == "tray_agent_synced")
         all_columns.insert(synced_index + 1, {"key": "tray_agent_version", "label": "Tray agent version", "sort": "string"})
     if show_rmm_agent:
         status_index = next((i for i, column in enumerate(all_columns) if column["key"] == "status"), 0)
         all_columns.insert(status_index + 1, {"key": "rmm_agent", "label": "RMM agent", "sort": "number"})
         all_columns.insert(status_index + 2, {"key": "rmm_agent_version", "label": "RMM agent version", "sort": "string"})
+    if show_health_score:
+        performance_index = next(
+            (i for i, column in enumerate(all_columns) if column["key"] == "performance_score"), len(all_columns) - 1
+        )
+        all_columns.insert(performance_index + 1, {"key": "health_score", "label": "Health check score", "sort": "number"})
     # Tags belong to the tags pack and are internal, so customers never see them.
     show_tags = False
-    if can_write_assets and main_module._feature_pack_available("tags"):
+    if can_view_assets and main_module._feature_pack_available("tags"):
         from app.features.tags import routes as tags_routes
 
-        show_tags = await tags_routes.can_edit_tags(request, user, membership)
+        show_tags = await tags_routes.can_edit_tags(request, user, membership) or (
+            await main_module._is_helpdesk_technician(user, request))
     if show_tags:
         from app.repositories import tags as tags_repo
 
@@ -526,6 +610,16 @@ async def assets_page(request: Request):
             record["tags"] = tags_by_asset.get(int(record["id"]), []) if record.get("id") else []
         type_index = next((i for i, column in enumerate(all_columns) if column["key"] == "type"), 0)
         all_columns.insert(type_index + 1, {"key": "tags", "label": "Tags", "sort": "string"})
+
+    if hidden_columns:
+        all_columns = [
+            column for column in all_columns
+            if column["key"] == "name" or column["key"] not in hidden_columns
+        ]
+        for record in prepared:
+            for key in list(record):
+                if key != "name" and any(key == hidden or key.startswith(hidden + "_") for hidden in hidden_columns):
+                    record.pop(key, None)
 
     stats = {
         "total": len(prepared),
@@ -572,6 +666,27 @@ async def _asset_write_context(request: Request, asset_id: int | None = None):
         user, membership, "menu.assets", write=True
     )):
         raise HTTPException(status_code=403, detail="Asset write access required")
+    return user, company, company_id, None
+
+
+async def _asset_manage_context(request: Request, asset_id: int):
+    """Context for asset changes beyond the profile and photos.
+
+    Read Write asset access covers only the profile and photos; asset type
+    overrides, warranty and reconciliation changes and archiving stay with
+    admins and technicians who have asset write access."""
+    main_module = _main()
+    user, membership, company, company_id, redirect = await _load_asset_context(
+        request, asset_id=asset_id
+    )
+    if redirect:
+        return user, company, company_id, redirect
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    if not await _is_asset_staff(user, membership, request):
+        raise HTTPException(status_code=403, detail="Admin or technician access required")
     return user, company, company_id, None
 
 
@@ -631,7 +746,7 @@ async def new_asset_page(request: Request):
         "assets/form.html", request, user,
         extra={"title": "Create asset", "company": company, "asset": None,
                **await _asset_type_picker(_company_id),
-               "custom_fields": await asset_custom_fields_repo.list_field_definitions()},
+               "custom_fields": await _visible_custom_fields(user, request)},
     )
 
 
@@ -697,8 +812,22 @@ async def _manual_asset_values(
     return values
 
 
-async def _save_submitted_custom_fields(asset_id: int, form: Any) -> None:
+async def _visible_custom_fields(user: Mapping[str, Any], request: Request) -> list[dict[str, Any]]:
+    hidden_columns = await _end_user_hidden_columns(user, request)
+    return [
+        definition
+        for definition in await asset_custom_fields_repo.list_field_definitions()
+        if _custom_field_column_key(definition) not in hidden_columns
+    ]
+
+
+async def _save_submitted_custom_fields(
+    asset_id: int, form: Any, hidden_columns: set[str] | frozenset[str] = frozenset()
+) -> None:
+    # Fields hidden from this user are not on their form, so leave them as stored.
     for definition in await asset_custom_fields_repo.list_field_definitions():
+        if _custom_field_column_key(definition) in hidden_columns:
+            continue
         key = f"custom_{definition['id']}"
         raw = form.get(key)
         field_type = definition.get("field_type")
@@ -733,7 +862,7 @@ async def create_manual_asset(request: Request):
     asset_id = await asset_repo.create_manual_asset(
         company_id=company_id, created_by=int(user["id"]), **values
     )
-    await _save_submitted_custom_fields(asset_id, form)
+    await _save_submitted_custom_fields(asset_id, form, await _end_user_hidden_columns(user, request))
     await audit_service.record(
         action="asset.manual.create", request=request, user_id=int(user["id"]),
         entity_type="asset", entity_id=asset_id,
@@ -902,6 +1031,86 @@ async def send_expiration_reminder(request: Request):
     return main_module.flash_redirect("/expirations", message, "success" if result else "warning")
 
 
+CPU_LAUNCH_DATES_PATH = "/assets/cpu-launch-dates"
+
+
+@router.get(CPU_LAUNCH_DATES_PATH, response_class=HTMLResponse,
+            summary="Review processor launch dates used to estimate asset age")
+async def cpu_launch_dates_page(request: Request):
+    from app.services import cpu_release_dates as cpu_service
+
+    main_module = _main()
+    user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    processors = await cpu_service.overview()
+    needs_date = [p for p in processors if not p.get("release_date")]
+    dated = [p for p in processors if p.get("release_date")]
+    extra = {
+        "title": "CPU launch dates",
+        "processors": processors,
+        "needs_date": sorted(needs_date, key=lambda p: (-p["device_count"], (p.get("model") or p["cpu_name"]).casefold())),
+        "dated": sorted(dated, key=lambda p: (p["vendor_label"].casefold(), (p.get("model") or p["cpu_name"]).casefold())),
+        "cpu_lookup_enabled": await cpu_service.is_module_enabled(),
+        "device_total": sum(p["device_count"] for p in processors),
+        "today_iso": date.today().isoformat(),
+    }
+    return await main_module._render_template("assets/cpu_launch_dates.html", request, user, extra=extra)
+
+
+@router.post(CPU_LAUNCH_DATES_PATH + "/{entry_id}", summary="Record or clear a processor's launch date")
+async def save_cpu_launch_date(request: Request, entry_id: int):
+    from app.repositories import cpu_release_dates as cpu_repo
+    from app.services import cpu_release_dates as cpu_service
+
+    main_module = _main()
+    user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing = await cpu_repo.get(entry_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Processor not found")
+    form = await request.form()
+    clearing = str(form.get("action") or "") == "clear"
+    release = None
+    source = str(form.get("source") or "manual")
+    if not clearing:
+        text = str(form.get("launch_date") or "").strip()
+        if not text:
+            return main_module.flash_redirect(
+                CPU_LAUNCH_DATES_PATH, "Enter the launch date, for example Q3'19 as Intel ARK shows it.", "error",
+            )
+        release = cpu_service.parse_release_text(text)
+        if release is None:
+            return main_module.flash_redirect(
+                CPU_LAUNCH_DATES_PATH,
+                f"'{text[:40]}' is not a launch date MyPortal understands. Use Q3'19, 2019-07 or Jul 2019.",
+                "error",
+            )
+        if release[0] > date.today():
+            return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, "The launch date cannot be in the future.", "error")
+    try:
+        updated = await cpu_service.set_release_date(
+            entry_id, release, source=source, source_url=form.get("source_url"),
+        )
+    except cpu_service.LaunchDateError as exc:
+        return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, str(exc), "error")
+    await audit_service.record(
+        action="cpu_release_date.update", request=request, user_id=int(user["id"]),
+        entity_type="cpu_release_date", entity_id=entry_id,
+        before={"release_date": existing["release_date"].isoformat() if existing.get("release_date") else None,
+                "source": existing.get("source"), "source_url": existing.get("source_url")},
+        after={"release_date": release[0].isoformat() if release else None,
+               "source": updated.get("source"), "source_url": updated.get("source_url")},
+    )
+    name = existing.get("model") or existing.get("cpu_name")
+    if release:
+        message = f"Saved: {name} launched {release[1]}. Devices with it have been updated."
+    else:
+        message = f"Cleared the launch date for {name}."
+    return main_module.flash_redirect(CPU_LAUNCH_DATES_PATH, message, "success")
+
+
 @router.get("/assets/settings", response_class=HTMLResponse)
 async def assets_settings_page(request: Request):
     main_module = _main()
@@ -920,9 +1129,40 @@ async def assets_settings_page(request: Request):
         "is_super_admin": True,
         "required_field_rules": await asset_repo.list_required_field_rules(),
         "field_definitions": await asset_custom_fields_repo.list_field_definitions(),
+        "restrictable_columns": _RESTRICTABLE_ASSET_COLUMNS,
+        "hidden_columns": await asset_column_restrictions_repo.list_restricted_keys(),
     }
     return await main_module._render_template(
         "assets/settings.html", request, user, extra=extra
+    )
+
+
+@router.post("/assets/settings/column-visibility", summary="Choose asset columns hidden from end users")
+async def save_asset_column_visibility(request: Request):
+    main_module = _main()
+    user, _membership, _, _, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    form = await request.form()
+    allowed = {column["key"] for column in _RESTRICTABLE_ASSET_COLUMNS}
+    allowed.update(
+        _custom_field_column_key(definition)
+        for definition in await asset_custom_fields_repo.list_field_definitions()
+    )
+    before = sorted(await asset_column_restrictions_repo.list_restricted_keys())
+    # Ticked boxes are visible; any column listed on the form but left unticked is hidden.
+    listed = {str(value) for value in form.getlist("known_columns")} & allowed
+    visible = {str(value) for value in form.getlist("visible_columns")}
+    keys = sorted(listed - visible)
+    await asset_column_restrictions_repo.replace_restricted_keys(keys)
+    await audit_service.record(
+        action="asset.columns.visibility.update", request=request, user_id=int(user["id"]),
+        entity_type="asset_columns", before={"hidden_columns": before}, after={"hidden_columns": keys},
+    )
+    return main_module.flash_redirect(
+        "/assets/settings#column-visibility", "Column visibility saved.", "success"
     )
 
 
@@ -1907,6 +2147,7 @@ async def asset_detail_page(
     can_write = is_super_admin or main_module._membership_menu_can(
         user, membership, "menu.assets", write=True
     )
+    can_read = main_module._membership_menu_can(user, membership, "menu.assets")
     can_view_relationships = is_super_admin or main_module._membership_menu_can(
         user, membership, "menu.asset_relationships"
     )
@@ -1919,13 +2160,21 @@ async def asset_detail_page(
     can_edit_photos = is_super_admin or main_module._membership_menu_can(
         user, membership, "menu.asset_photos", write=True
     )
-    customer_safe = (not can_write) or customer_preview
+    # Read Only and Read Write see the same internal view; Read Write only
+    # adds editing of the profile (photos follow their own permission).
+    # Custom fields and data provenance are shown to admins and technicians,
+    # who (with write access) also manage the asset type override, custom
+    # fields, warranty, reconciliation and archiving. Customer visibility
+    # stays with super admins.
+    customer_safe = (not (is_super_admin or can_read)) or customer_preview
+    is_staff = (not customer_safe) and await _is_asset_staff(user, membership, request)
+    can_manage = is_staff and can_write
     if (record_company_id is None or int(record_company_id) != company_id
-            or (not is_super_admin and not can_write and (not bool(record.get("customer_visible")) or not await _customer_role_can_view_asset(membership, company_id, asset_id)))):
+            or (not is_super_admin and not can_read and (not bool(record.get("customer_visible")) or not await _customer_role_can_view_asset(membership, company_id, asset_id)))):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
         )
-    can_wake = (not customer_safe) and await main_module._is_helpdesk_technician(user, request)
+    can_wake = (not customer_safe) and can_write and await main_module._is_helpdesk_technician(user, request)
     wol_stats: dict = {}
     if can_wake:
         from app.repositories import wol as wol_repo
@@ -1940,8 +2189,8 @@ async def asset_detail_page(
         references = []
     if not isinstance(references, list):
         references = []
-    definitions = [] if customer_safe else await asset_custom_fields_repo.list_field_definitions()
-    values = {} if customer_safe else await asset_custom_fields_repo.get_all_asset_field_values([asset_id])
+    definitions = await _visible_custom_fields(user, request) if is_staff else []
+    values = await asset_custom_fields_repo.get_all_asset_field_values([asset_id]) if is_staff else {}
     custom_fields = [
         {**definition, "value": values.get(asset_id, {}).get(definition["id"])}
         for definition in definitions
@@ -2085,6 +2334,9 @@ async def asset_detail_page(
 
         if await tags_routes.can_edit_tags(request, user, membership):
             tags_context = await tags_routes.asset_tags_context(asset_id, can_edit=True)
+        elif can_read and await main_module._is_helpdesk_technician(user, request):
+            # Read Only technicians see the same tags, without changing them.
+            tags_context = await tags_routes.asset_tags_context(asset_id, can_edit=False)
     # The tray app reports who is signed in now; synced inventory only knows
     # the last user, so it stands in when the device has no tray app.
     logged_on_user = None
@@ -2131,11 +2383,14 @@ async def asset_detail_page(
             **await _asset_type_picker(company_id),
             "synced_asset_type_groups": asset_types.grouped(),
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
-            "asset_sources": [] if customer_safe else await asset_repo.list_asset_sources(company_id, asset_id),
+            "asset_sources": await asset_repo.list_asset_sources(company_id, asset_id) if is_staff else [],
             "customer_safe": customer_safe,
+            "is_asset_staff": is_staff,
+            "can_manage_asset": can_manage,
             "warranty": None if customer_safe else await _warranty_context(record),
-            "customer_roles": await role_repo.list_roles() if can_write else [],
-            "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if can_write else [],
+            "cpu_age": await _cpu_age_context(record, rmm_context),
+            "customer_roles": await role_repo.list_roles() if is_super_admin and not customer_safe else [],
+            "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if is_super_admin and not customer_safe else [],
             "bcp_context": bcp_context,
             "infrastructure_links": infrastructure_links,
             "network_interfaces": network_interfaces,
@@ -2651,8 +2906,10 @@ async def update_asset_documentation(request: Request, asset_id: int):
     if record.get("provenance") == "manual":
         values = await _manual_asset_values(form, company_id, record)
         await asset_repo.update_manual_inventory(asset_id, **values)
-    # Custom fields are editable for every asset, not just manually created ones.
-    await _save_submitted_custom_fields(asset_id, form)
+    # Custom fields are editable for every asset, not just manually created
+    # ones, by admins and technicians: other roles' write access covers the profile.
+    if await _is_asset_staff(user, membership, request):
+        await _save_submitted_custom_fields(asset_id, form, await _end_user_hidden_columns(user, request))
     criticality = _clean_optional(form, "criticality")
     review_status = str(form.get("review_status") or "not_reviewed")
     if criticality not in {None, "low", "medium", "high", "critical"}:
@@ -2687,7 +2944,7 @@ async def update_asset_documentation(request: Request, asset_id: int):
 
 @router.post("/assets/{asset_id}/asset-type", summary="Override or reset a synced asset's type")
 async def update_asset_type(request: Request, asset_id: int):
-    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
+    user, _company, company_id, redirect = await _asset_manage_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2726,6 +2983,23 @@ async def _warranty_context(record: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _cpu_age_context(record: Mapping[str, Any], rmm_context: Any) -> dict[str, Any] | None:
+    """Describe the CPU launch date behind the asset's approximate age, if one is known."""
+    if not record.get("cpu_release_date"):
+        return None
+    from app.repositories import cpu_release_dates as cpu_repo
+    from app.services import cpu_release_dates as cpu_service
+
+    cpu_name = record.get("cpu_name")
+    if not cpu_name and isinstance(rmm_context, Mapping):
+        hardware = rmm_context.get("inventory")
+        snapshot = hardware.get("inventory") if isinstance(hardware, Mapping) else None
+        cpu_name = snapshot.get("cpu_model") if isinstance(snapshot, Mapping) else None
+    identity = cpu_service.identify(cpu_name)
+    entry = await cpu_repo.get_by_key(identity.key) if identity else None
+    return cpu_service.describe(entry)
+
+
 def _utc_iso(value: Any) -> str | None:
     if isinstance(value, str):
         try:
@@ -2753,7 +3027,7 @@ def _form_date(value: Any) -> date | None:
 async def lookup_asset_warranty(request: Request, asset_id: int):
     from app.services import warranty_lookup
 
-    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
+    user, _company, company_id, redirect = await _asset_manage_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2776,7 +3050,7 @@ async def lookup_asset_warranty(request: Request, asset_id: int):
 
 @router.post("/assets/{asset_id}/warranty", summary="Record or clear an asset's warranty dates manually")
 async def save_manual_asset_warranty(request: Request, asset_id: int):
-    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
+    user, _company, company_id, redirect = await _asset_manage_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2811,7 +3085,7 @@ async def save_manual_asset_warranty(request: Request, asset_id: int):
 
 @router.post("/assets/{asset_id}/reconciliation/{source_record_id}/approve")
 async def approve_asset_reconciliation(request: Request, asset_id: int, source_record_id: int):
-    user, _company, company_id, redirect = await _asset_write_context(request, asset_id)
+    user, _company, company_id, redirect = await _asset_manage_context(request, asset_id)
     if redirect:
         return redirect
     record = await asset_repo.get_asset_by_id(asset_id)
@@ -2832,13 +3106,9 @@ async def approve_asset_reconciliation(request: Request, asset_id: int, source_r
 @router.post("/assets/{asset_id}/archive")
 async def archive_asset(request: Request, asset_id: int):
     main_module = _main()
-    user, membership, _, company_id, redirect = await _load_asset_context(request, asset_id=asset_id)
+    user, _company, company_id, redirect = await _asset_manage_context(request, asset_id)
     if redirect:
         return redirect
-    if not (user.get("is_super_admin") or main_module._membership_menu_can(
-        user, membership, "menu.assets", write=True
-    )):
-        raise HTTPException(status_code=403, detail="Asset write access required")
     record = await asset_repo.get_asset_by_id(asset_id)
     if not record or int(record.get("company_id") or 0) != company_id:
         raise HTTPException(status_code=404, detail="Asset not found")

@@ -230,6 +230,7 @@ async def _get_xero_rate_lookup_credentials() -> tuple[str | None, str | None]:
 async def generate_invoice(
     company_id: int,
     *,
+    created_by: int | None = None,
     ticket_ids: list[int] | None = None,
     include_recurring_items: bool = True,
     recurring_line_items: list[dict[str, Any]] | None = None,
@@ -488,6 +489,7 @@ async def generate_invoice(
             due_date=due_date,
             status="pending_approval" if approval_required else "draft",
             approval_required=approval_required,
+            created_by=created_by,
         )
     except Exception as exc:
         logger.error(
@@ -727,6 +729,7 @@ async def generate_order_invoice(
     *,
     order_number: str,
     company_id: int,
+    created_by: int | None = None,
     order_items: list[dict[str, Any]],
     user_name: str | None = None,
     freight_amount: Decimal | None = None,
@@ -786,6 +789,7 @@ async def generate_order_invoice(
 
     result = await generate_invoice(
         company_id,
+        created_by=created_by,
         include_recurring_items=False,
         recurring_line_items=line_items,
         include_ticket_items=False,

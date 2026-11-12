@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
+from app.repositories import asset_column_restrictions as column_restrictions_repo
 from app.repositories import assets as assets_repo
 from app.repositories import asset_custom_fields as custom_fields_repo
 from app.repositories import company_memberships as membership_repo
@@ -35,6 +36,17 @@ async def _has_helpdesk_permission(current_user: dict) -> bool:
         )
     except RuntimeError:
         return False
+
+
+async def _hidden_field_ids(current_user: dict) -> set[int]:
+    """Custom fields an admin hid from end users; helpdesk staff see them all."""
+    if await _has_helpdesk_permission(current_user):
+        return set()
+    return {
+        int(key.removeprefix("cf_"))
+        for key in await column_restrictions_repo.list_restricted_keys()
+        if key.startswith("cf_") and key.removeprefix("cf_").isdigit()
+    }
 
 
 async def _require_asset_custom_field_access(asset_id: int, current_user: dict) -> dict[str, Any]:
@@ -134,7 +146,12 @@ async def get_asset_custom_fields(asset_id: int, current_user: dict = Depends(ge
     """Get all custom field values for an asset."""
     await _require_asset_custom_field_access(asset_id, current_user)
     rows = await custom_fields_repo.get_asset_field_values(asset_id)
-    return [AssetFieldValue.from_db_row(row) for row in rows]
+    hidden = await _hidden_field_ids(current_user)
+    return [
+        AssetFieldValue.from_db_row(row)
+        for row in rows
+        if int(row["field_definition_id"]) not in hidden
+    ]
 
 
 @router.post("/assets/{asset_id}/custom-fields", response_model=dict[str, str], tags=["Asset Custom Fields"])
@@ -149,7 +166,13 @@ async def set_asset_custom_fields(
     from app.schemas.asset_custom_fields import FieldType
     from app.services import tray as tray_service
 
+    hidden = await _hidden_field_ids(current_user)
     for field in fields:
+        if field.field_definition_id in hidden:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Field definition {field.field_definition_id} not found"
+            )
         definition = await custom_fields_repo.get_field_definition(field.field_definition_id)
         if not definition:
             raise HTTPException(
@@ -199,5 +222,7 @@ async def delete_asset_custom_field(
 ):
     """Delete a custom field value for an asset."""
     await _require_asset_custom_field_access(asset_id, current_user)
+    if field_definition_id in await _hidden_field_ids(current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Field definition not found")
     await custom_fields_repo.delete_asset_field_value(asset_id, field_definition_id)
     return {"message": "Custom field value deleted successfully"}

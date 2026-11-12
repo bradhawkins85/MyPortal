@@ -24,6 +24,33 @@ This feature adds support for custom fields on assets, allowing administrators t
   - Delete definitions (cascades to all asset values)
   - Reorder fields by display order
 
+### Columns end users can see
+- On the same Settings page, **Columns end users can see** lists every Assets
+  list column (for example *Serial number* or *Health check score*) and every
+  custom field. Untick a column and save to hide it from end users.
+- Hidden custom fields are also left off end users' asset pages and are not
+  returned or changeable for them through the asset custom-field API; saving
+  an asset as an end user leaves their stored values unchanged.
+- *Name* is always shown. Super admins and helpdesk technicians always see
+  every built-in column.
+- Custom field columns, and the *Custom fields* section of the asset page,
+  are shown to admins and technicians: super admins, company admins, the
+  technician permission and helpdesk technicians. Other roles do not see
+  custom fields.
+
+### Asset access levels
+Admins and technicians (as above) keep full asset management with Read Write
+access. For every other role:
+- **Read Only** sees the same asset list and asset page as Read Write, with
+  every input read-only.
+- **Read Write** can additionally edit the asset's *Profile*, and photos when
+  the *Asset photos* permission allows it.
+- The inventory *Asset type* override, *Custom fields*, *Data provenance*
+  and *Archive & restore* are hidden, and warranty dates and possible
+  integration matches are read-only.
+
+*Customer visibility* is managed by super admins only.
+
 ### 3. Asset-Level Field Values
 - Each asset can have values for all defined custom fields
 - Access via the "Edit" button on each asset row

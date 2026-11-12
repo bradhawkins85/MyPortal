@@ -1033,10 +1033,19 @@ async def _render_company_edit_page(
             if "Database pool not initialised" not in str(exc):
                 raise
 
+    from app.repositories import company_job_title_access as job_title_access_repo
+    job_title_rules = await job_title_access_repo.list_rules(company_id) if is_super_admin else []
+    title_labels = {str(row.get("job_title") or "").strip().lower(): str(row.get("job_title") or "").strip()
+                    for row in company_staff if str(row.get("job_title") or "").strip()}
+    for rule in job_title_rules:
+        title_labels.setdefault(rule["job_title"], rule["job_title"])
+    job_titles = sorted(title_labels.values(), key=str.lower)
+
     assign_form = {
         "company_id": assign_company_id,
         "user_id": assign_user_id,
         "user_value": assign_user_value,
+        "job_title": str(assign_values.get("job_title") or ""),
         "role_id": assign_role_id,
         "staff_permission": assign_staff_permission,
         "can_manage_staff": assign_can_manage_staff,
@@ -1057,6 +1066,8 @@ async def _render_company_edit_page(
         "error_message": error_message,
         "email_domain_preview": preview_domains,
         "assign_form": assign_form,
+        "job_titles": job_titles,
+        "job_title_rules": job_title_rules,
         "company_user_options": company_user_options,
         "assign_user_options": assign_user_options,
         "company_automation_tasks": company_automation_tasks,
@@ -1599,12 +1610,14 @@ async def admin_assign_user_to_company(request: Request):
     user_id_raw = form.get("userId") or form.get("user_id")
     company_id_raw = form.get("companyId") or form.get("company_id")
     source_company_raw = form.get("sourceCompanyId") or form.get("source_company_id")
+    job_title = str(form.get("jobTitle") or "").strip()
     role_raw = form.get("roleId") or form.get("role_id")
     staff_permission_raw = form.get("staffPermission") or form.get("staff_permission")
 
     assign_form_state: dict[str, Any] = {
         "company_id": source_company_raw or company_id_raw,
         "user_value": user_id_raw,
+        "job_title": job_title,
         "user_id": None,
         "role_id": role_raw,
         "staff_permission": staff_permission_raw,
@@ -1639,11 +1652,46 @@ async def admin_assign_user_to_company(request: Request):
 
     if resolved_company_id is None:
         return await _assign_error(
-            "Select both a user and a company.", status.HTTP_400_BAD_REQUEST
+            "Select a user or a job title.", status.HTTP_400_BAD_REQUEST
         )
 
     company_id = resolved_company_id
     assign_form_state["company_id"] = company_id
+
+    if job_title:
+        from app.repositories import company_job_title_access as job_title_access_repo
+        from app.services import audit as audit_service
+
+        if user_id_raw:
+            return await _assign_error("Select either a user or a job title, not both.", status.HTTP_400_BAD_REQUEST)
+        if not await company_repo.get_company_by_id(company_id):
+            return await _assign_error("Company not found.", status.HTTP_404_NOT_FOUND)
+        previous_rules = await job_title_access_repo.list_rules(company_id)
+        previous = next((rule for rule in previous_rules if rule["job_title"] == job_title.lower()), None)
+        if form.get("removeJobTitle") == "1":
+            await job_title_access_repo.delete_rule(company_id, job_title)
+            new_value = None
+        else:
+            staff_rows = await staff_repo.list_staff(company_id)
+            available_titles = {str(row.get("job_title") or "").strip().lower() for row in staff_rows}
+            if len(job_title) > 255 or (job_title.lower() not in available_titles and previous is None):
+                return await _assign_error("Select a job title from this company's staff.", status.HTTP_400_BAD_REQUEST)
+            try:
+                role_id = int(role_raw) if role_raw else None
+            except (TypeError, ValueError):
+                role_id = None
+            role = await role_repo.get_role_by_id(role_id) if role_id else None
+            if not role:
+                return await _assign_error("Select a valid membership role for this job title.", status.HTTP_400_BAD_REQUEST)
+            new_value = {"company_id": company_id, "job_title": job_title.lower(), "role_id": role_id,
+                         "staff_permission": _normalize_staff_access_scope(staff_permission_raw)}
+            await job_title_access_repo.save_rule(**new_value)
+        await audit_service.log_action(
+            action="company.job_title_access_changed", user_id=current_user.get("id"),
+            entity_type="company", entity_id=company_id, previous_value=previous,
+            new_value=new_value, request=request,
+        )
+        return _main()._company_edit_redirect(company_id=company_id, success="Job title access rule removed." if new_value is None else "Job title access rule saved.")
 
     user_identifier = (user_id_raw or "").strip()
     parsed_user_id: int | None = None
@@ -1750,7 +1798,7 @@ async def admin_assign_user_to_company(request: Request):
             parsed_user_id = int(user_identifier)
         except (TypeError, ValueError):
             return await _assign_error(
-                "Select both a user and a company.", status.HTTP_400_BAD_REQUEST
+                "Select a user or a job title.", status.HTTP_400_BAD_REQUEST
             )
 
     assign_form_state["user_id"] = parsed_user_id

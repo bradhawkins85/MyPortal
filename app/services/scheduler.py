@@ -566,6 +566,18 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Daily CPU age refresh (05:45 store-local): registers new processor
+        # models and recalculates each asset's approximate age from the
+        # launch dates recorded on Assets -> CPU launch dates.
+        if not self._scheduler.get_job("asset-cpu-age-lookup"):
+            self._scheduler.add_job(
+                self._run_cpu_release_lookup,
+                CronTrigger(hour=5, minute=45, timezone=self._scheduler.timezone),
+                id="asset-cpu-age-lookup",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         # Seed an "unknown" event for every active backup job each morning so
         # missing reports remain visible. Runs at 00:05 store-local time.
         if not self._scheduler.get_job("backup-history-seed"):
@@ -963,6 +975,19 @@ class SchedulerService:
                 await warranty_lookup.refresh_due_assets()
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Asset warranty lookup failed", error=str(exc))
+
+    async def _run_cpu_release_lookup(self) -> None:
+        """Register new processor models and refresh each asset's approximate age."""
+        async with db.acquire_lock("cpu_release_lookup", timeout=5) as lock_acquired:
+            if not lock_acquired:
+                log_info("CPU age refresh already running on another worker, skipping")
+                return
+            from app.services import cpu_release_dates
+
+            try:
+                await cpu_release_dates.refresh()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("CPU age refresh failed", error=str(exc))
 
     async def _run_backup_history_seed(self) -> None:
         """Seed daily 'unknown' backup events with distributed lock."""
@@ -1429,6 +1454,13 @@ class SchedulerService:
                     result = await warranty_lookup.refresh_due_assets(
                         int(company_id) if company_id else None
                     )
+                    details = json.dumps(result, default=str)
+                    if result.get("status") == "skipped":
+                        status = "skipped"
+                elif command == "lookup_cpu_release_dates":
+                    from app.services import cpu_release_dates
+
+                    result = await cpu_release_dates.refresh()
                     details = json.dumps(result, default=str)
                     if result.get("status") == "skipped":
                         status = "skipped"

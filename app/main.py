@@ -101,6 +101,7 @@ from app.api.routes import (
     subscriptions as subscriptions_api,
     tag_exclusions,
     tag_synonyms,
+    cpu_release_dates as cpu_release_dates_api,
     tickets as tickets_api,
     tray as tray_api,
     tray_deployment as tray_deployment_api,
@@ -162,6 +163,7 @@ from app.services import system_update_history
 from app.services import system_updates as system_updates_service
 from app.services import worker_readiness
 from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
+from app.security.commerce_permissions import COMMERCE_PERMISSION_FIELDS, commerce_scope
 from app.security.menu_permissions import (
     build_menu_access_map,
     catalogue_for_api,
@@ -181,6 +183,10 @@ from app.security.oauth_state import (
     DISCOVERED_TENANT_MAX_AGE_SECONDS,
     discovered_tenant_serializer,
     oauth_state_serializer,
+)
+from app.security.profile_access import (
+    can_edit_profile_technician_tools as _can_edit_profile_technician_tools,
+    require_profile_technician_tools,
 )
 from app.security.rate_limiter import (
     EndpointRateLimiter,
@@ -605,6 +611,7 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "process_transcription": "Process transcription",
     "sync_huntress": "Sync Huntress data",
     "lookup_asset_warranties": "Look up asset warranties",
+    "lookup_cpu_release_dates": "Estimate asset ages from CPU launch dates",
     "update_tray_icon_installer": "Update Tray Icon Installer",
     "rag_index_start": "RAG start indexing",
     "rag_index_stop": "RAG stop indexing",
@@ -634,7 +641,7 @@ _TASK_COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Microsoft 365", ("sync_m365_", "refresh_m365_", "m365_mail_sync:")),
     ("Staff and assets", (
         "sync_staff", "sync_assets", "sync_tactical_assets", "update_mac_vendors",
-        "lookup_asset_warranties", "update_chocolatey_catalog",
+        "lookup_asset_warranties", "lookup_cpu_release_dates", "update_chocolatey_catalog",
     )),
     ("Billing and Xero", (
         "sync_to_xero", "generate_invoice", "unbill_time_entries",
@@ -1650,6 +1657,7 @@ app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
+app.include_router(cpu_release_dates_api.router)
 app.include_router(tag_synonyms.router)
 app.include_router(chat_api.router)
 app.include_router(tray_api.router)
@@ -2577,24 +2585,6 @@ def _menu_can(menu_access: dict[str, Any] | None, key: str, *, write: bool = Fal
     return menu_has_access(menu_access, key, write=write)
 
 
-def _can_edit_profile_technician_tools(user: Mapping[str, Any], membership: Mapping[str, Any] | None) -> bool:
-    """Return whether technician-only self-profile fields should be visible.
-
-    ``_is_helpdesk_technician`` intentionally treats some ticket access as
-    technician-like for broad ticket routing.  The profile-only contact tools
-    are narrower: they should be visible only to super admins and users whose
-    active membership has full technician ticket access.
-    """
-    if user.get("is_super_admin"):
-        return True
-    if not membership:
-        return False
-    profile_permissions = normalize_menu_permissions(
-        membership.get("menu_permissions") or membership.get("permissions")
-    )
-    return _menu_can(profile_permissions, "menu.tickets", write=True)
-
-
 async def _has_menu_page_access(request: Request, user: Mapping[str, Any], key: str, *, write: bool = False) -> bool:
     """Return whether the authenticated user has explicit access to a menu-owned page.
 
@@ -2754,14 +2744,14 @@ async def _build_base_context(
                 can_edit_bcp = False
 
     permission_flags = {
-        "can_access_shop": _menu_can(menu_access, "menu.shop") or is_super_admin or _has_permission("can_access_shop"),
-        "can_access_cart": is_super_admin or _has_permission("can_access_cart"),
+        "can_access_shop": _menu_can(menu_access, "menu.shop"),
+        "can_access_cart": _menu_can(menu_access, "menu.shop", write=True),
         "can_access_orders": _menu_can(menu_access, "menu.orders") or is_super_admin or _has_permission("can_access_orders"),
         "can_access_quotes": _menu_can(menu_access, "menu.quotes") or is_super_admin or _has_permission("can_access_quotes"),
         "can_access_forms": _menu_can(menu_access, "menu.forms") or is_super_admin or _has_permission("can_access_forms"),
         "can_manage_assets": _menu_can(menu_access, "menu.assets", write=True) or is_super_admin or _has_permission("can_manage_assets"),
         "can_manage_licenses": _menu_can(menu_access, "menu.m365.licenses", write=True) or is_super_admin or _has_permission("can_manage_licenses"),
-        "can_manage_invoices": _menu_can(menu_access, "menu.invoices", write=True) or is_super_admin or _has_permission("can_manage_invoices"),
+        "can_manage_invoices": _menu_can(menu_access, "menu.invoices") or is_super_admin or _has_permission("can_manage_invoices"),
         "can_manage_staff": (
             is_super_admin
             or (
@@ -3172,7 +3162,14 @@ async def _load_company_section_context(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
 
     membership = await _get_effective_company_membership(request, user["id"], company_id)
-    has_permission = bool(membership and membership.get(permission_field))
+    if permission_field in COMMERCE_PERMISSION_FIELDS:
+        has_permission = commerce_scope(user, membership, COMMERCE_PERMISSION_FIELDS[permission_field]) != "none"
+    else:
+        has_permission = bool(membership and membership.get(permission_field))
+    if permission_field in {"can_access_shop", "can_access_cart"}:
+        has_permission = _membership_menu_can(
+            user, membership, "menu.shop", write=permission_field == "can_access_cart"
+        )
     if not (is_super_admin or has_permission):
         return (
             user,
@@ -6218,10 +6215,21 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     sso_envelope = _sso_state_envelope(request, state)
     if sso_envelope is not None:
         return await auth.complete_sso_callback(request, sso_envelope, code, error)
+    # Unusable sign-in state must reach the logged SSO rejection. Valid
+    # session-bound state still belongs to the administration flow.
+    if request.cookies.get(auth.SSO_BINDING_COOKIE):
+        envelope = _decode_m365_oauth_state(request, state) if state else None
+        if not isinstance(envelope, dict) or "transaction_id" not in envelope:
+            return await auth.complete_sso_callback(request, {}, code, error)
     # Consume first, including denied-consent responses: a callback transaction
     # is single-use regardless of whether Microsoft returned a code.
     state_data = await _consume_m365_oauth_state(request, state)
     if not state_data:
+        log_warning(
+            "Microsoft OAuth callback state rejected",
+            state_present=bool(state),
+            sign_in_binding_present=bool(request.cookies.get(auth.SSO_BINDING_COOKIE)),
+        )
         return flash_redirect("/m365", "The Microsoft sign-in session expired or was already used.", "error")
     flow = str(state_data.get("flow") or "connect")
     company_id = int(state_data.get("company_id") or 0)
@@ -6329,6 +6337,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         current_user, auth_redirect = await _require_authenticated_user(request)
         if auth_redirect or not current_user or int(current_user["id"]) != int(state_data.get("user_id") or 0):
             return flash_redirect("/admin/profile#integrations", "The Microsoft sign-in session is not valid.", "error")
+        await require_profile_technician_tools(request, current_user)
         verifier = str(state_data.get("code_verifier") or "")
         if not verifier:
             return flash_redirect("/admin/profile#integrations", "The Microsoft sign-in verifier is missing.", "error")
@@ -7366,7 +7375,11 @@ async def admin_profile_page(request: Request):
             }
         )
     profile_passkeys.sort(key=lambda entry: entry["name"].lower())
-    m365_contacts_status = await user_m365_contacts_service.status_for_user(int(user["id"]))
+    show_technician_tools = _can_edit_profile_technician_tools(user, membership)
+    m365_contacts_status = (
+        await user_m365_contacts_service.status_for_user(int(user["id"]))
+        if show_technician_tools else {}
+    )
     from app.repositories import user_sso_identities as sso_identity_repo
     from app.services import sso_admin
 
@@ -7378,7 +7391,7 @@ async def admin_profile_page(request: Request):
         extra={
             "title": "My profile",
             "profile_membership": membership,
-            "profile_show_technician_tools": _can_edit_profile_technician_tools(user, membership),
+            "profile_show_technician_tools": show_technician_tools,
             "profile_totp_devices": totp_devices,
             "profile_passkeys": profile_passkeys,
             "profile_m365_contacts": m365_contacts_status,
@@ -7648,6 +7661,7 @@ async def profile_m365_contacts_connect(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
+    await require_profile_technician_tools(request, user)
     redirect_uri = _build_m365_redirect_uri(request)
     verifier, challenge = m365_service.generate_pkce_pair()
     client_id = await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri)
@@ -7715,6 +7729,7 @@ async def profile_m365_contacts_disconnect(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
+    await require_profile_technician_tools(request, user)
     from app.repositories import user_m365_contacts as user_contacts_repo
     await user_contacts_repo.delete_integration(int(user["id"]))
     return flash_redirect("/admin/profile#integrations", "Outlook contacts disconnected.", "success")
@@ -7729,6 +7744,7 @@ async def profile_m365_contact_phones(request: Request, name: str = Query(..., m
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    await require_profile_technician_tools(request, user)
     try:
         phones = await user_m365_contacts_service.lookup_phones(int(user["id"]), name.strip())
     except ValueError as exc:
@@ -8530,7 +8546,7 @@ async def admin_scheduled_tasks(
     available_commands = (
         "update_mac_vendors", "update_chocolatey_catalog", "sync_staff", "sync_m365_data", "sync_m365_licenses",
         "sync_m365_contacts", "sync_m365_mailboxes", "refresh_m365_consent_status",
-        "sync_huntress", "lookup_asset_warranties", "sync_to_xero", "sync_to_xero_auto_send",
+        "sync_huntress", "lookup_asset_warranties", "lookup_cpu_release_dates", "sync_to_xero", "sync_to_xero_auto_send",
         "generate_invoice", "process_subscription_renewals",
         "unbill_time_entries", "send_price_change_notifications", "create_scheduled_ticket",
         "sync_recordings", "sync_unifi_talk_recordings", "queue_transcriptions",

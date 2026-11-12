@@ -2,7 +2,7 @@
 -- compatible-from: *
 -- compatible-to: *
 -- maintenance: false
--- Migration 555: Windows blue screen dumps reported by tray devices.
+-- Migration 558: Windows blue screen dumps reported by tray devices.
 --
 -- asset_minidumps keeps one row per kernel minidump the tray app found in
 -- %SystemRoot%\Minidump on an asset's computer (app.services.minidump_analysis).

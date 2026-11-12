@@ -595,6 +595,9 @@
                             </span>
                           {% endif %}
                         </div>
+                        {% with history_entry_type="call_recording", history_entry_id=reply.id, history_view='portal' %}
+                          {% include "tickets/_history_delete.html" %}
+                        {% endwith %}
                       </header>
                       <div class="timeline__body">
                         <div class="timeline__message" data-timeline-message>
@@ -687,6 +690,9 @@
                             </span>
                           {% endif %}
                         </div>
+                        {% with history_entry_type="reply", history_entry_id=reply.id, history_view='portal' %}
+                          {% include "tickets/_history_delete.html" %}
+                        {% endwith %}
                       </header>
                       <div class="timeline__body">
                         {% if reply.has_content %}

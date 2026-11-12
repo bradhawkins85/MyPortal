@@ -62,11 +62,12 @@ async def test_load_quote_to_cart_appends_items():
         # Setup mocks
         mock_main.return_value._load_company_section_context = AsyncMock(return_value=(
             {"id": 1},  # user
-            {"id": 1},  # membership
+            {"id": 1, "menu_permissions": {"menu.shop": "write", "menu.quotes": "all"}},  # membership
             {"id": 1},  # company
             1,  # company_id
             None,  # redirect
         ))
+        mock_shop_repo.get_quote_summary = AsyncMock(return_value={"user_id": 1})
         mock_session_manager.load_session = AsyncMock(return_value=mock_session)
         mock_shop_repo.list_quote_items = AsyncMock(return_value=mock_quote_items)
         mock_shop_repo.get_product_by_id = AsyncMock(return_value=mock_product)
@@ -154,11 +155,12 @@ async def test_load_quote_to_cart_redirects_to_cart():
         # Setup mocks
         mock_main.return_value._load_company_section_context = AsyncMock(return_value=(
             {"id": 1},  # user
-            {"id": 1},  # membership
+            {"id": 1, "menu_permissions": {"menu.shop": "write", "menu.quotes": "all"}},  # membership
             {"id": 1},  # company
             1,  # company_id
             None,  # redirect
         ))
+        mock_shop_repo.get_quote_summary = AsyncMock(return_value={"user_id": 1})
         mock_session_manager.load_session = AsyncMock(return_value=mock_session)
         mock_shop_repo.list_quote_items = AsyncMock(return_value=mock_quote_items)
         mock_shop_repo.get_product_by_id = AsyncMock(return_value=mock_product)

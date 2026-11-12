@@ -5,16 +5,20 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import sqlite3
 from dataclasses import dataclass
 from typing import Any, Callable
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
+import aiomysql
 import httpx
 from fastapi import Request
 
 from app.repositories import companies as company_repo
+from app.repositories import sso_provisioning
 from app.repositories import user_sso_identities as sso_identity_repo
 from app.repositories import users as user_repo
+from app.security.passwords import hash_password
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
 from app.services import m365_oauth_transactions, sso_policy
@@ -26,7 +30,7 @@ AUTHORIZE_URL = "https://login.microsoftonline.com/organizations/oauth2/v2.0/aut
 TOKEN_URL = "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
 AUTHENTICATION_METHOD = "m365_sso"
 GENERIC_FAILURE = (
-    "No MyPortal account is linked to this Microsoft account. Contact your administrator."
+    "This Microsoft account is not eligible to sign in to MyPortal. Contact your administrator."
 )
 TENANT_NOT_ENABLED_MESSAGE = "Microsoft sign-in is not enabled for your organisation."
 
@@ -128,7 +132,23 @@ async def redeem_code(transaction: dict[str, Any], code: str) -> dict[str, Any]:
     except httpx.HTTPError as exc:
         raise m365_service.M365Error("Microsoft token request failed") from exc
     if response.status_code < 200 or response.status_code >= 300:
-        raise m365_service.M365Error("Microsoft rejected the sign-in code")
+        message = "Microsoft rejected the sign-in code"
+        try:
+            failure = response.json()
+        except ValueError:
+            failure = None
+        error_codes = failure.get("error_codes") if isinstance(failure, dict) else None
+        if isinstance(error_codes, list):
+            # Keep only bounded numeric AADSTS codes; descriptions can contain
+            # identities, authorization codes or other credentials.
+            codes = [
+                "AADSTS" + str(value)
+                for value in error_codes[:5]
+                if type(value) is int and 0 <= value <= 999999999
+            ]
+            if codes:
+                message += " (" + ", ".join(codes) + ")"
+        raise m365_service.M365Error(message, http_status=response.status_code)
     try:
         payload = response.json()
     except ValueError as exc:
@@ -197,9 +217,13 @@ async def _resolve_linked(
     if int(user.get("is_active", 1)) != 1:
         await _audit_failure("account_disabled", user, tenant_id, request)
         return _failure("account_disabled")
-    if not (await sso_policy.user_company_ids(user) & {int(c) for c in companies}):
+    matching_companies = await sso_policy.user_company_ids(user) & {int(c) for c in companies}
+    if not matching_companies:
         await _audit_failure("company_mismatch", user, tenant_id, request)
         return _failure("company_mismatch")
+    if not await _enabled_directory_user(min(matching_companies), str(claims.get("oid") or "").lower()):
+        await _audit_failure("microsoft_account_disabled", user, tenant_id, request)
+        return _failure("microsoft_account_disabled")
     return Outcome(
         user=user,
         identity=identity,
@@ -221,9 +245,48 @@ def _auto_link_address(claims: dict[str, Any]) -> str | None:
     raw = claims.get("email") if _email_verified(claims) else claims.get("preferred_username")
     address = str(raw or "").strip().lower()
     local, _, domain = address.partition("@")
-    if address.count("@") != 1 or not local or not domain:
+    if (
+        len(address) > 255 or address.count("@") != 1 or not local or not domain
+        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in address)
+    ):
         return None
     return address
+
+
+async def _enabled_directory_user(company_id: int, object_id: str) -> dict[str, Any] | None:
+    """Check the immutable subject in the company's effective Microsoft tenant."""
+    try:
+        token = await m365_service.acquire_access_token(company_id)
+        user = await m365_service._graph_get(
+            token,
+            "https://graph.microsoft.com/v1.0/users/" + quote(object_id, safe="")
+            + "?$select=id,accountEnabled,givenName,surname",
+        )
+    except m365_service.M365Error as exc:
+        if exc.http_status == 404:
+            return None
+        raise
+    if (
+        not isinstance(user, dict) or user.get("accountEnabled") is not True
+        or str(user.get("id") or "").lower() != object_id
+    ):
+        return None
+    return user
+
+
+async def _audit_link(
+    user: dict[str, Any], identity: dict[str, Any], tenant_id: str, object_id: str,
+    request: Request | None, *, provisioned: bool = False,
+) -> None:
+    await audit_service.record(
+        action="auth.sso.link", request=request, user_id=int(user["id"]),
+        entity_type="user_sso_identity", entity_id=identity.get("id"),
+        metadata={
+            "linked_via": "auto", "tenant_id": tenant_id,
+            "object_id_hash": hashlib.sha256(object_id.encode()).hexdigest()[:16],
+            "account_provisioned": provisioned,
+        },
+    )
 
 
 async def _resolve_auto_link(
@@ -240,16 +303,42 @@ async def _resolve_auto_link(
     domain = address.rpartition("@")[2]
     if domain not in await company_repo.list_email_domains_for_companies(company_ids):
         return _failure("no_link")
+    company = await company_repo.get_company_by_email_domain(domain)
+    if not company or int(company["id"]) not in company_ids:
+        return _failure("no_link")
     candidates = await user_repo.list_active_users_by_email_in_companies(address, company_ids)
+    if not candidates:
+        # Never replace a disabled account or one in an unrelated company.
+        if await user_repo.get_user_by_email(address):
+            return _failure("no_link")
+        directory_user = await _enabled_directory_user(int(company["id"]), object_id)
+        if not directory_user:
+            return _failure("microsoft_account_disabled")
+        try:
+            user, identity = await sso_provisioning.create_user_with_identity(
+                email=address, password_hash=hash_password(secrets.token_urlsafe(48)),
+                first_name=str(directory_user.get("givenName") or "")[:255] or None,
+                last_name=str(directory_user.get("surname") or "")[:255] or None,
+                company_id=int(company["id"]), tenant_id=tenant_id, object_id=object_id,
+                upn=claims.get("preferred_username"), identity_email=claims.get("email"),
+            )
+        except (aiomysql.IntegrityError, sqlite3.IntegrityError):
+            # A concurrent callback may already have provisioned this subject.
+            identity = await sso_identity_repo.get_by_subject(PROVIDER, tenant_id, object_id)
+            if identity:
+                return await _resolve_linked(identity, claims, companies, tenant_id, request)
+            return _failure("no_link")
+        await _audit_link(user, identity, tenant_id, object_id, request, provisioned=True)
+        return Outcome(user, identity, None, mfa_satisfied(claims), "")
     if len(candidates) != 1:
         return _failure("no_link")
     user = candidates[0]
     if await sso_identity_repo.get_for_user(int(user["id"]), PROVIDER):
         return _failure("no_link")
-    if user.get("is_super_admin"):
-        return _failure("no_link")
     if not await sso_policy.user_company_ids(user) <= set(company_ids):
         return _failure("no_link")
+    if not await _enabled_directory_user(int(company["id"]), object_id):
+        return _failure("microsoft_account_disabled")
     identity = await sso_identity_repo.create(
         user_id=int(user["id"]),
         provider=PROVIDER,
@@ -260,18 +349,7 @@ async def _resolve_auto_link(
         linked_via="auto",
         linked_by_user_id=None,
     )
-    await audit_service.record(
-        action="auth.sso.link",
-        request=request,
-        user_id=int(user["id"]),
-        entity_type="user_sso_identity",
-        entity_id=identity.get("id"),
-        metadata={
-            "linked_via": "auto",
-            "tenant_id": tenant_id,
-            "object_id_hash": hashlib.sha256(object_id.encode()).hexdigest()[:16],
-        },
-    )
+    await _audit_link(user, identity, tenant_id, object_id, request)
     return Outcome(
         user=user,
         identity=identity,

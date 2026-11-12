@@ -1290,6 +1290,17 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "settings": {},
     },
     {
+        "slug": "cpu-age-lookup",
+        "name": "CPU age lookup",
+        "description": (
+            "Estimate each device's age from its processor's launch date and store it "
+            "as the asset's Approx age, recalculated daily. Launch dates are recorded "
+            "on Assets -> CPU launch dates, with links to Intel ARK for Intel processors."
+        ),
+        "icon": "🧮",
+        "settings": {},
+    },
+    {
         "slug": "trello",
         "name": "Trello",
         "description": "Link companies to Trello boards. Cards created in Trello become tickets; ticket replies sync back as card comments.",
@@ -2684,6 +2695,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "gitea",  # Gitea - RMM script source, not a trigger action module
     "huntress",  # Huntress - report data ingester, not a trigger action module
     "warranty-lookup",  # Warranty lookup - asset data ingester, not a trigger action module
+    "cpu-age-lookup",  # CPU age lookup - asset data ingester, not a trigger action module
     "solidtime",  # Solidtime - dedicated ticket/reply sync, not a generic trigger action module
 }
 

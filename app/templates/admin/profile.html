@@ -85,31 +85,6 @@
         </div>
       </section>
 
-      <section class="card card--panel profile-card" aria-labelledby="profile-marketing-title">
-        <header class="card__header profile-card__header">
-          <span class="profile-card__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false"><path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Zm0 4-8 5-8-5V6l8 5 8-5Z"/></svg>
-          </span>
-          <div class="profile-card__heading">
-            <h2 class="card__title" id="profile-marketing-title">Marketing emails</h2>
-            <p class="card__subtitle">Receive sales and marketing emails. Service and security updates are always sent.</p>
-          </div>
-        </header>
-        <div class="card__body">
-          <form method="post" action="/admin/profile/marketing-opt-out" class="profile-form" data-profile-marketing>
-            {% include "partials/csrf.html" %}
-            <input type="hidden" name="enabled" value="0" />
-            <div class="profile-marketing">
-              <label class="toggle">
-                <input type="checkbox" name="enabled" value="1"{% if not profile_sales_opt_out %} checked{% endif %} data-profile-marketing-toggle />
-                <span>Send me sales and marketing emails</span>
-              </label>
-              <button type="submit" class="button button--ghost button--small" data-profile-marketing-save>Save</button>
-            </div>
-          </form>
-        </div>
-      </section>
-
       <section class="card card--panel profile-card" aria-labelledby="profile-passkeys-title" data-passkeys>
         <header class="card__header profile-card__header">
           <span class="profile-card__icon" aria-hidden="true">
@@ -154,33 +129,6 @@
           {% else %}
             <p><span class="status status--neutral">Not linked</span></p>
             <p class="form-help">If your organisation uses Microsoft sign-in, choose <strong>Sign in with Microsoft</strong> on the sign-in page and your account is linked automatically when your email matches.</p>
-          {% endif %}
-        </div>
-      </section>
-      <section class="card card--panel profile-card profile-card--full" aria-labelledby="profile-anonymise-title">
-        <header class="card__header profile-card__header">
-          <span class="profile-card__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false"><path d="M9 3v1H4v2h16V4h-5V3H9zM6 7l1 13h10l1-13H6zm2 2h2v9H8V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9z"/></svg>
-          </span>
-          <div class="profile-card__heading">
-            <h2 class="card__title" id="profile-anonymise-title">Delete or anonymise my account</h2>
-            <p class="card__subtitle">Ask us to remove your personal details from {{ app_name | default('MyPortal') }}.</p>
-          </div>
-          {% set ar = profile_anonymisation_request %}
-          {% if not ar or ar.status == "rejected" %}
-          <button type="button" class="button button--danger button--small" data-profile-open="profile-anonymise-modal" aria-haspopup="dialog" aria-controls="profile-anonymise-modal">Request</button>
-          {% endif %}
-        </header>
-        <div class="card__body">
-          {% if ar and ar.status in ("pending", "approved") %}
-            <p><span class="status status--warning">Request in progress</span></p>
-            <p class="form-help">We received your request on <span data-utc="{{ ar.requested_at.isoformat() if ar.requested_at is not string else ar.requested_at }}">{{ ar.requested_at }}</span>. We'll email you once it has been reviewed.</p>
-          {% elif ar and ar.status == "rejected" %}
-            <p><span class="status status--neutral">Previous request not actioned</span></p>
-            {% if ar.notes %}<p class="form-help">Reason: {{ ar.notes }}</p>{% endif %}
-            <p class="form-help">You can submit a new request at any time.</p>
-          {% else %}
-            <p class="form-help">Your name, email address, phone numbers and sign-in details are removed, and you won't be able to sign in again. This can't be undone.</p>
           {% endif %}
         </div>
       </section>
@@ -388,6 +336,59 @@
           </footer>
         </form>
       </section>
+
+      <section class="card card--panel profile-card" aria-labelledby="profile-marketing-title">
+        <header class="card__header profile-card__header">
+          <span class="profile-card__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Zm0 4-8 5-8-5V6l8 5 8-5Z"/></svg>
+          </span>
+          <div class="profile-card__heading">
+            <h2 class="card__title" id="profile-marketing-title">Marketing emails</h2>
+            <p class="card__subtitle">Receive sales and marketing emails. Service and security updates are always sent.</p>
+          </div>
+        </header>
+        <div class="card__body">
+          <form method="post" action="/admin/profile/marketing-opt-out" class="profile-form" data-profile-marketing>
+            {% include "partials/csrf.html" %}
+            <input type="hidden" name="enabled" value="0" />
+            <div class="profile-marketing">
+              <label class="toggle">
+                <input type="checkbox" name="enabled" value="1"{% if not profile_sales_opt_out %} checked{% endif %} data-profile-marketing-toggle />
+                <span>Send me sales and marketing emails</span>
+              </label>
+              <button type="submit" class="button button--ghost button--small" data-profile-marketing-save>Save</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="card card--panel profile-card profile-card--full" aria-labelledby="profile-anonymise-title">
+        <header class="card__header profile-card__header">
+          <span class="profile-card__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M9 3v1H4v2h16V4h-5V3H9zM6 7l1 13h10l1-13H6zm2 2h2v9H8V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9z"/></svg>
+          </span>
+          <div class="profile-card__heading">
+            <h2 class="card__title" id="profile-anonymise-title">Delete or anonymise my account</h2>
+            <p class="card__subtitle">Ask us to remove your personal details from {{ app_name | default('MyPortal') }}.</p>
+          </div>
+          {% set ar = profile_anonymisation_request %}
+          {% if not ar or ar.status == "rejected" %}
+          <button type="button" class="button button--danger button--small" data-profile-open="profile-anonymise-modal" aria-haspopup="dialog" aria-controls="profile-anonymise-modal">Request</button>
+          {% endif %}
+        </header>
+        <div class="card__body">
+          {% if ar and ar.status in ("pending", "approved") %}
+            <p><span class="status status--warning">Request in progress</span></p>
+            <p class="form-help">We received your request on <span data-utc="{{ ar.requested_at.isoformat() if ar.requested_at is not string else ar.requested_at }}">{{ ar.requested_at }}</span>. We'll email you once it has been reviewed.</p>
+          {% elif ar and ar.status == "rejected" %}
+            <p><span class="status status--neutral">Previous request not actioned</span></p>
+            {% if ar.notes %}<p class="form-help">Reason: {{ ar.notes }}</p>{% endif %}
+            <p class="form-help">You can submit a new request at any time.</p>
+          {% else %}
+            <p class="form-help">Your name, email address, phone numbers and sign-in details are removed, and you won't be able to sign in again. This can't be undone.</p>
+          {% endif %}
+        </div>
+      </section>
     </div>
   </section>
 
@@ -433,7 +434,7 @@
           <legend class="form-label">Top menu labels</legend>
           <label class="navigation-style__option">
             <input type="checkbox" name="top-menu-labels" />
-            <span><strong>Always show menu labels</strong><small>On standard resolution displays (1080p or lower) the top menu shows icons only, with a hover tooltip for each item. Turn this on to keep the labels visible at every resolution.</small></span>
+            <span><strong>Always show menu labels</strong><small>The top menu automatically hides labels when space is limited, with a hover tooltip for each item. Turn this on to keep labels visible regardless of available space.</small></span>
           </label>
         </fieldset>
         {% if role_switcher_allowed | default(false) %}

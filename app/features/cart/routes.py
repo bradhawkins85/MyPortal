@@ -1418,6 +1418,7 @@ async def place_order(request: Request) -> RedirectResponse:
 
         invoice_result = await invoice_generator_service.generate_order_invoice(
             order_number=order_number,
+            created_by=int(user["id"]),
             company_id=company_id,
             user_name=requested_by_name if on_behalf_of is not None else user_name,
             order_items=physical_items,

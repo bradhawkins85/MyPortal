@@ -14,7 +14,7 @@ from app.repositories import asset_minidumps as repo
 from tests.test_rmm_scripts import _SqliteDb, anyio_backend  # noqa: F401 - fixtures
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = "555_asset_minidumps.sql"
+MIGRATION = "558_asset_minidumps.sql"
 NOW = datetime(2026, 11, 11, 3, 0, 0)
 
 

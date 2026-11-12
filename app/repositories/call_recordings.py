@@ -475,6 +475,16 @@ async def link_recording_to_ticket(recording_id: int, ticket_id: int) -> dict[st
     return await update_call_recording(recording_id, linked_ticket_id=ticket_id)
 
 
+async def remove_recording_from_ticket(recording_id: int, ticket_id: int) -> bool:
+    """Remove a history entry while preserving the underlying recording."""
+    affected = await db.execute_rowcount(
+        "UPDATE call_recordings SET linked_ticket_id = NULL "
+        "WHERE id = %s AND linked_ticket_id = %s",
+        (recording_id, ticket_id),
+    )
+    return bool(affected)
+
+
 async def unlink_recording_from_ticket(recording_id: int) -> dict[str, Any]:
     """Unlink a call recording from its ticket."""
     await db.execute(

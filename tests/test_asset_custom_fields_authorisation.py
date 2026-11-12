@@ -54,6 +54,9 @@ def asset_in_company_4(monkeypatch):
     monkeypatch.setattr(
         route.membership_repo, "user_has_permission", AsyncMock(return_value=False)
     )
+    monkeypatch.setattr(
+        route.column_restrictions_repo, "list_restricted_keys", AsyncMock(return_value=set())
+    )
 
 
 @pytest.mark.asyncio
@@ -110,3 +113,61 @@ async def test_helpdesk_technician_can_delete_value(monkeypatch, asset_in_compan
 
     await route.delete_asset_custom_field(12, 3, current_user={"id": 9, "is_super_admin": False})
     deleter.assert_awaited_once_with(12, 3)
+
+
+def _value_row(definition_id: int, value: str) -> dict:
+    return {
+        "id": definition_id, "asset_id": 12, "field_definition_id": definition_id,
+        "value_text": value, "value_date": None, "value_boolean": None,
+        "field_name": f"field_{definition_id}", "field_type": "text", "display_order": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_end_users_do_not_receive_hidden_field_values(monkeypatch, asset_in_company_4):
+    monkeypatch.setattr(route.user_company_repo, "get_user_company",
+                        AsyncMock(return_value={"user_id": 7, "company_id": 4, "can_manage_assets": True}))
+    monkeypatch.setattr(route.custom_fields_repo, "get_asset_field_values",
+                        AsyncMock(return_value=[_value_row(1, "CC-42"), _value_row(2, "secret")]))
+    monkeypatch.setattr(route.column_restrictions_repo, "list_restricted_keys",
+                        AsyncMock(return_value={"cf_2", "health_score"}))
+
+    values = await route.get_asset_custom_fields(12, current_user={"id": 7, "is_super_admin": False})
+
+    assert [value.field_definition_id for value in values] == [1]
+
+
+@pytest.mark.asyncio
+async def test_end_users_cannot_change_hidden_field_values(monkeypatch, asset_in_company_4):
+    monkeypatch.setattr(route.user_company_repo, "get_user_company",
+                        AsyncMock(return_value={"user_id": 7, "company_id": 4, "can_manage_assets": True}))
+    monkeypatch.setattr(route.column_restrictions_repo, "list_restricted_keys",
+                        AsyncMock(return_value={"cf_2"}))
+    setter = AsyncMock()
+    deleter = AsyncMock()
+    monkeypatch.setattr(route.custom_fields_repo, "set_asset_field_value", setter)
+    monkeypatch.setattr(route.custom_fields_repo, "delete_asset_field_value", deleter)
+    user = {"id": 7, "is_super_admin": False}
+
+    with pytest.raises(HTTPException) as excinfo:
+        await route.set_asset_custom_fields(12, [FieldValueSet(field_definition_id=2, value="x")], current_user=user)
+    assert excinfo.value.status_code == 404
+    with pytest.raises(HTTPException) as excinfo:
+        await route.delete_asset_custom_field(12, 2, current_user=user)
+    assert excinfo.value.status_code == 404
+    setter.assert_not_awaited()
+    deleter.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_helpdesk_staff_receive_hidden_field_values(monkeypatch, asset_in_company_4):
+    monkeypatch.setattr(route.membership_repo, "user_has_permission", AsyncMock(return_value=True))
+    monkeypatch.setattr(route.custom_fields_repo, "get_asset_field_values",
+                        AsyncMock(return_value=[_value_row(1, "CC-42"), _value_row(2, "secret")]))
+    restricted = AsyncMock(return_value={"cf_2"})
+    monkeypatch.setattr(route.column_restrictions_repo, "list_restricted_keys", restricted)
+
+    values = await route.get_asset_custom_fields(12, current_user={"id": 7, "is_super_admin": False})
+
+    assert [value.field_definition_id for value in values] == [1, 2]
+    restricted.assert_not_awaited()

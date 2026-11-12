@@ -1728,6 +1728,9 @@
                             </span>
                           </div>
                           <div class="timeline__header-controls">
+                            {% with history_entry_type='call_recording', history_entry_id=recording.id %}
+                              {% include "tickets/_history_delete.html" %}
+                            {% endwith %}
                             <button
                               type="button"
                               class="button button--ghost button--icon timeline__edit-button"
@@ -1874,6 +1877,9 @@
                             </span>
                           </div>
                           <div class="timeline__header-controls">
+                            {% with history_entry_type='reply', history_entry_id=reply.id %}
+                              {% include "tickets/_history_delete.html" %}
+                            {% endwith %}
                             <button
                               type="button"
                               class="button button--ghost button--icon timeline__edit-button"

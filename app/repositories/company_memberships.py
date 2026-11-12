@@ -20,7 +20,7 @@ async def list_company_memberships(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
         SELECT m.*, u.email AS user_email, u.first_name, u.last_name, r.name AS role_name, r.permissions
-        FROM company_memberships AS m
+        FROM effective_company_memberships AS m
         INNER JOIN users AS u ON u.id = m.user_id
         INNER JOIN roles AS r ON r.id = m.role_id
         WHERE m.company_id = %s
@@ -74,7 +74,7 @@ async def get_membership_by_company_user(company_id: int, user_id: int) -> Optio
     row = await db.fetch_one(
         """
         SELECT m.*, u.email AS user_email, u.first_name, u.last_name, r.name AS role_name, r.permissions
-        FROM company_memberships AS m
+        FROM effective_company_memberships AS m
         INNER JOIN users AS u ON u.id = m.user_id
         INNER JOIN roles AS r ON r.id = m.role_id
         WHERE m.company_id = %s AND m.user_id = %s
@@ -94,12 +94,12 @@ async def list_memberships_for_user(user_id: int, *, status: str | None = "activ
         params.append(status)
     where_clause = " AND ".join(filters)
     rows = await db.fetch_all(
-        f"""
+        """
         SELECT m.*, u.email AS user_email, u.first_name, u.last_name, r.name AS role_name, r.permissions
-        FROM company_memberships AS m
+        FROM effective_company_memberships AS m
         INNER JOIN users AS u ON u.id = m.user_id
         INNER JOIN roles AS r ON r.id = m.role_id
-        WHERE {where_clause}
+        WHERE """ + where_clause + """
         ORDER BY m.company_id
         """,  # nosec B608
         tuple(params),
@@ -162,10 +162,10 @@ async def update_membership(membership_id: int, **updates: Any) -> dict[str, Any
         if column == "status" and value == "active":
             columns.append("joined_at = IFNULL(joined_at, %s)")
             params.append(datetime.utcnow())
-        columns.append(f"{column} = %s")
+        columns.append(column + " = %s")
         params.append(value)
     params.append(membership_id)
-    sql = f"UPDATE company_memberships SET {', '.join(columns)} WHERE id = %s"  # nosec B608
+    sql = "UPDATE company_memberships SET " + ", ".join(columns) + " WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
     updated = await get_membership_by_id(membership_id)
     if not updated:
@@ -263,11 +263,11 @@ async def list_users_with_permission(permission: str) -> List[dict[str, Any]]:
             u.is_super_admin,
             r.permissions
         FROM users AS u
-        LEFT JOIN company_memberships AS m
+        LEFT JOIN effective_company_memberships AS m
             ON m.user_id = u.id
             AND LOWER(m.status) = 'active'
         LEFT JOIN roles AS r ON r.id = m.role_id
-        WHERE m.id IS NOT NULL OR u.is_super_admin = 1
+        WHERE m.user_id IS NOT NULL OR u.is_super_admin = 1
         ORDER BY u.email
         """,
     )
@@ -326,7 +326,7 @@ async def list_impersonatable_memberships() -> list[dict[str, Any]]:
             r.name AS role_name,
             r.permissions,
             0 AS is_admin
-        FROM company_memberships AS m
+        FROM effective_company_memberships AS m
         INNER JOIN users AS u ON u.id = m.user_id
         INNER JOIN roles AS r ON r.id = m.role_id
         LEFT JOIN companies AS c ON c.id = m.company_id
@@ -355,7 +355,7 @@ async def list_impersonatable_memberships() -> list[dict[str, Any]]:
         LEFT JOIN roles AS r ON r.id = p.role_id
         WHERE (p.role_id IS NOT NULL OR p.is_admin = 1)
         AND NOT EXISTS (
-            SELECT 1 FROM company_memberships AS m2
+            SELECT 1 FROM effective_company_memberships AS m2
             WHERE m2.user_id = u.id AND m2.company_id = p.company_id
         )
         

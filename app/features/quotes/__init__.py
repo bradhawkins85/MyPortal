@@ -13,7 +13,7 @@ from .routes import router as quotes_router
 
 PACK = FeaturePack(
     slug="quotes",
-    version="1.0.1",
+    version="1.1.0",
     routers=(quotes_router,),
 )
 

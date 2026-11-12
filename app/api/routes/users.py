@@ -17,6 +17,7 @@ from app.repositories import sidebar_preferences as sidebar_preferences_repo
 from app.repositories import user_preferences as user_preferences_repo
 from app.repositories import users as user_repo
 from app.schemas.users import UserCreate, UserResponse, UserUpdate
+from app.security.profile_access import require_profile_technician_tools
 from app.services import ai_opt_out
 from app.services import audit as audit_service
 
@@ -261,6 +262,8 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     data = payload.model_dump(exclude_unset=True)
+    if {"mobile_phone", "booking_link_url", "email_signature", "matrix_user_id"}.intersection(data):
+        await require_profile_technician_tools(request, current_user)
     if not current_user.get("is_super_admin"):
         # A user's default company decides which tenant their session opens
         # in, so only super admins may change it.

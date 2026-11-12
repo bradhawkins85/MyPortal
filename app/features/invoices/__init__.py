@@ -13,7 +13,7 @@ from .routes import router as invoices_router
 
 PACK = FeaturePack(
     slug="invoices",
-    version="1.0.0",
+    version="1.1.0",
     routers=(invoices_router,),
 )
 

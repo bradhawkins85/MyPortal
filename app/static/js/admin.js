@@ -1470,6 +1470,40 @@
       return;
     }
 
+    const jobTitleSelect = form.querySelector('[data-job-title-select]');
+    const roleSelect = form.querySelector('[name="role_id"]');
+    if (jobTitleSelect) {
+      function updateAssignmentTarget() {
+        userSelect.required = !jobTitleSelect.value;
+        if (roleSelect) roleSelect.required = Boolean(jobTitleSelect.value);
+      }
+      jobTitleSelect.addEventListener('change', () => {
+        if (jobTitleSelect.value) userSelect.value = '';
+        updateAssignmentTarget();
+      });
+      userSelect.addEventListener('change', () => {
+        if (userSelect.value) jobTitleSelect.value = '';
+        updateAssignmentTarget();
+      });
+      document.querySelectorAll('[data-edit-job-title]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const title = button.dataset.editJobTitle;
+          let option = Array.from(jobTitleSelect.options).find((item) => item.value.toLowerCase() === title.toLowerCase());
+          if (!option) {
+            option = new Option(title, title);
+            jobTitleSelect.add(option);
+          }
+          jobTitleSelect.value = option.value;
+          userSelect.value = '';
+          if (roleSelect) roleSelect.value = button.dataset.roleId;
+          form.querySelector('[name="staffPermission"]').value = button.dataset.staffScope;
+          updateAssignmentTarget();
+          jobTitleSelect.focus();
+        });
+      });
+      updateAssignmentTarget();
+    }
+
     const optionsMap = parseJsonScript('company-assign-user-options', {});
     if (!optionsMap || typeof optionsMap !== 'object') {
       return;

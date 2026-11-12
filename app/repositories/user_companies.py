@@ -126,7 +126,14 @@ def _enrich_with_role_permissions(data: dict[str, Any], role_permissions_raw: An
         elif field_name in _PERMISSION_FIELDS:
             data[field_name] = False
 
-    data["can_access_quotes"] = menu_has_access(menu_permissions, "menu.quotes")
+    data["can_access_shop"] = menu_has_access(menu_permissions, "menu.shop")
+    data["can_access_cart"] = menu_has_access(menu_permissions, "menu.shop", write=True)
+    for field, key in (
+        ("can_access_quotes", "menu.quotes"),
+        ("can_access_orders", "menu.orders"),
+        ("can_manage_invoices", "menu.invoices"),
+    ):
+        data[field] = menu_has_access(menu_permissions, key)
 
 
 def _normalise(row: dict[str, Any]) -> dict[str, Any]:
@@ -140,13 +147,17 @@ def _normalise(row: dict[str, Any]) -> dict[str, Any]:
         normalised["company_id"] = int(normalised["company_id"])
     if "user_id" in normalised and normalised["user_id"] is not None:
         normalised["user_id"] = int(normalised["user_id"])
+    if row.get("job_title_staff_permission") is not None:
+        for field in _BOOLEAN_FIELDS:
+            normalised[field] = False
+        normalised["staff_permission"] = _normalize_staff_access_scope(row["job_title_staff_permission"])
     return normalised
 
 
 async def _ensure_company_membership(company_id: int, user_id: int) -> None:
     with suppress(Exception):
         membership = await membership_repo.get_membership_by_company_user(company_id, user_id)
-        if membership:
+        if membership and int(membership.get("id") or 0) > 0:
             membership_id = membership.get("id")
             if membership_id and membership.get("status") != "active":
                 await membership_repo.update_membership(int(membership_id), status="active")
@@ -235,7 +246,7 @@ def build_user_company_from_role_permissions(
 def _membership_row_to_user_company(row: dict[str, Any]) -> dict[str, Any]:
     """Build a legacy user_company-shaped record from an active role membership."""
 
-    return build_user_company_from_role_permissions(
+    result = build_user_company_from_role_permissions(
         user_id=row.get("user_id"),
         company={
             "company_id": row.get("company_id"),
@@ -247,6 +258,10 @@ def _membership_row_to_user_company(row: dict[str, Any]) -> dict[str, Any]:
         role_name=row.get("role_name"),
     )
 
+    if row.get("staff_permission") is not None:
+        result["staff_permission"] = _normalize_staff_access_scope(row["staff_permission"])
+    return result
+
 
 async def _get_active_membership_company(user_id: int, company_id: int) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
@@ -257,9 +272,10 @@ async def _get_active_membership_company(user_id: int, company_id: int) -> Optio
             c.name AS company_name,
             c.syncro_company_id,
             m.role_id,
+            m.staff_permission,
             r.name AS role_name,
             r.permissions AS role_permissions
-        FROM company_memberships AS m
+        FROM effective_company_memberships AS m
         INNER JOIN companies AS c ON c.id = m.company_id
         INNER JOIN roles AS r ON r.id = m.role_id
         WHERE m.user_id = %s AND m.company_id = %s AND m.status = 'active'
@@ -297,9 +313,10 @@ async def get_user_company(user_id: int, company_id: int) -> Optional[dict[str, 
         """
         SELECT 
             uc.*,
+            m.staff_permission AS job_title_staff_permission,
             r.permissions AS role_permissions
         FROM user_companies AS uc
-        LEFT JOIN company_memberships AS m 
+        LEFT JOIN effective_company_memberships AS m
             ON m.company_id = uc.company_id AND m.user_id = uc.user_id AND m.status = 'active'
         LEFT JOIN roles AS r ON r.id = m.role_id
         WHERE uc.user_id = %s AND uc.company_id = %s
@@ -321,13 +338,14 @@ async def list_companies_for_user(user_id: int) -> List[dict[str, Any]]:
     rows = await db.fetch_all(
         """
         SELECT 
-            uc.*, 
+            uc.*,
+            m.staff_permission AS job_title_staff_permission,
             c.name AS company_name, 
             c.syncro_company_id,
             r.permissions AS role_permissions
         FROM user_companies AS uc
         INNER JOIN companies AS c ON c.id = uc.company_id
-        LEFT JOIN company_memberships AS m 
+        LEFT JOIN effective_company_memberships AS m
             ON m.company_id = uc.company_id AND m.user_id = uc.user_id AND m.status = 'active'
         LEFT JOIN roles AS r ON r.id = m.role_id
         WHERE uc.user_id = %s
@@ -355,8 +373,11 @@ async def list_companies_for_user(user_id: int) -> List[dict[str, Any]]:
             m.company_id,
             c.name AS company_name,
             c.syncro_company_id,
+            m.role_id,
+            r.name AS role_name,
+            m.staff_permission,
             r.permissions AS role_permissions
-        FROM company_memberships AS m
+        FROM effective_company_memberships AS m
         INNER JOIN companies AS c ON c.id = m.company_id
         INNER JOIN roles AS r ON r.id = m.role_id
         WHERE m.user_id = %s AND m.status = 'active'
@@ -481,6 +502,8 @@ async def list_assignments(company_id: int | None = None) -> List[dict[str, Any]
     sql = """
         SELECT
             uc.*,
+            m.staff_permission AS job_title_staff_permission,
+            m.job_title AS membership_job_title,
             u.email,
             u.first_name,
             u.last_name,
@@ -493,7 +516,7 @@ async def list_assignments(company_id: int | None = None) -> List[dict[str, Any]
         FROM user_companies AS uc
         INNER JOIN users AS u ON u.id = uc.user_id
         INNER JOIN companies AS c ON c.id = uc.company_id
-        LEFT JOIN company_memberships AS m
+        LEFT JOIN effective_company_memberships AS m
             ON m.company_id = uc.company_id AND m.user_id = uc.user_id
         LEFT JOIN roles AS r ON r.id = m.role_id
     """
@@ -538,7 +561,7 @@ async def update_permission(
         raise ValueError(f"Unsupported permission field: {field}")
     # `field` is validated against the explicit permission-field allowlist above; values remain bound.
     await db.execute(  # nosec B608
-        f"UPDATE user_companies SET {field} = %s WHERE user_id = %s AND company_id = %s",  # nosec B608
+        "UPDATE user_companies SET " + field + " = %s WHERE user_id = %s AND company_id = %s",  # nosec B608
         (1 if value else 0, user_id, company_id),
     )
 

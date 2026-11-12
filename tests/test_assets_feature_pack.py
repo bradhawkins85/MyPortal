@@ -150,18 +150,19 @@ def test_assets_pack_loads_and_reloads_cleanly():
 
 
 @pytest.mark.anyio
-async def test_asset_detail_page_renders_canonical_asset(monkeypatch):
+@pytest.mark.parametrize("asset_company_id", [3, 99])
+async def test_asset_detail_read_only_access_is_company_scoped(monkeypatch, asset_company_id):
     import app.repositories.assets as asset_repo
 
     monkeypatch.setattr(
         assets_routes,
         "_load_asset_context",
-        AsyncMock(return_value=({"id": 7}, None, {"id": 3}, 3, None)),
+        AsyncMock(return_value=({"id": 7}, {"role_id": 4, "menu_permissions": {"menu.assets": "read"}}, {"id": 3}, 3, None)),
     )
     monkeypatch.setattr(
         asset_repo,
         "get_asset_by_id",
-        AsyncMock(return_value={"id": 42, "company_id": 3, "customer_visible": True}),
+        AsyncMock(return_value={"id": 42, "company_id": asset_company_id, "customer_visible": False, "notes": "Internal notes"}),
     )
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", AsyncMock(return_value=[]))
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", AsyncMock(return_value={}))
@@ -181,13 +182,45 @@ async def test_asset_detail_page_renders_canonical_asset(monkeypatch):
         "list_articles_for_context",
         AsyncMock(return_value=[]),
     )
+    # Read Only staff get the same internal view as Read Write.
+    monkeypatch.setattr(main_module, "_feature_pack_available", lambda _slug: False)
+    monkeypatch.setattr(main_module, "_is_helpdesk_technician", AsyncMock(return_value=False))
+    monkeypatch.setattr(assets_routes.processes_repo, "list_relationship_targets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.websites_repo, "list_websites", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.websites_repo, "list_for_asset", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.infrastructure_repo, "for_asset",
+                        AsyncMock(return_value={"addresses": [], "placements": []}))
+    monkeypatch.setattr(assets_routes.tray_repo, "list_active_devices_by_asset_ids", AsyncMock(return_value={}))
+    monkeypatch.setattr(asset_repo, "list_reconciliation_candidates", AsyncMock(return_value=[]))
+    sources = AsyncMock(return_value=[])
+    monkeypatch.setattr(asset_repo, "list_asset_sources", sources)
+    monkeypatch.setattr(assets_routes, "_warranty_context", AsyncMock(return_value={}))
+    monkeypatch.setattr(assets_routes, "_asset_type_picker", AsyncMock(return_value={}))
     renderer = AsyncMock(return_value=assets_routes.HTMLResponse("detail"))
     monkeypatch.setattr(main_module, "_render_template", renderer)
 
-    response = await assets_routes.asset_detail_page(_make_request("/assets/42"), 42)
+    if asset_company_id != 3:
+        with pytest.raises(assets_routes.HTTPException) as excinfo:
+            await assets_routes.asset_detail_page(_make_request("/assets/42"), 42)
+        assert excinfo.value.status_code == 404
+        renderer.assert_not_awaited()
+        return
+
+    response = await assets_routes.asset_detail_page(_make_request("/assets/42"), 42, customer_preview=False)
 
     assert response.status_code == 200
     assert renderer.await_args.args[0] == "assets/detail.html"
+    extra = renderer.await_args.kwargs["extra"]
+    assert extra["can_edit"] is False
+    assert extra["can_wake"] is False
+    assert extra["customer_safe"] is False
+    assert extra["asset"]["notes"] == "Internal notes"
+    # Custom fields, data provenance, visibility and archive stay with super admins.
+    assert extra["can_manage_asset"] is False
+    assert extra["custom_fields"] == []
+    assert extra["asset_sources"] == []
+    assert extra["customer_roles"] == []
+    sources.assert_not_awaited()
 
 
 @pytest.mark.anyio
