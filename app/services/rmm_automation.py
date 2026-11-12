@@ -4,9 +4,10 @@ Both build on the manual flow in :mod:`app.services.rmm_scripts`: the values a
 technician enters are saved (encrypted) with the schedule or onboarding step,
 and are resolved per device each time a run is queued.
 
-* **Schedules** run a script on a cron schedule, or one time at a chosen date
-  and time, separate from MyPortal's own scheduled tasks. A one-time schedule
-  turns itself off once it has run. :func:`automation_loop` checks for due schedules every
+* **Schedules** run a script on a cron schedule, one time at a chosen date
+  and time, or straight away when saved ("run now"), separate from MyPortal's
+  own scheduled tasks. A one-time schedule turns itself off once it has run; a
+  run-now schedule is saved already off, so it can be run again later. :func:`automation_loop` checks for due schedules every
   :data:`TICK_SECONDS` on one instance at a time. A device that still has an
   unfinished run from the same schedule is skipped rather than given a second.
 * **Onboarding** runs a company's ordered list of scripts the first time one of
@@ -240,7 +241,13 @@ async def save_schedule(
     tz_name = validate_timezone(payload.get("timezone"))
     enabled = bool(payload.get("enabled", True))
     run_once_at: datetime | None = None
-    if str(payload.get("frequency") or "recurring") == "once":
+    frequency = str(payload.get("frequency") or "recurring")
+    if frequency == "now":
+        # Run straight away (the caller runs it): saved as a one-time run that has already happened.
+        cron = ""
+        run_once_at = _utcnow().replace(second=0, microsecond=0)
+        enabled = False
+    elif frequency == "once":
         cron = ""
         run_once_at = parse_run_once(payload.get("run_once_at"), tz_name)
         if enabled and run_once_at <= _utcnow():

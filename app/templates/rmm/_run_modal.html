@@ -62,6 +62,7 @@
             <div class="rmm-segmented" role="radiogroup" aria-labelledby="rmm-frequency-label">
               <label class="rmm-segmented__option"><input type="radio" name="rmm-frequency" value="recurring" checked data-rmm-frequency /><span>Repeats</span></label>
               <label class="rmm-segmented__option"><input type="radio" name="rmm-frequency" value="once" data-rmm-frequency /><span>One time</span></label>
+              <label class="rmm-segmented__option"><input type="radio" name="rmm-frequency" value="now" data-rmm-frequency /><span>Run now</span></label>
             </div>
             <div data-rmm-frequency-only="recurring">
               <label class="visually-hidden" for="rmm-cron-preset">How often</label>
@@ -88,6 +89,7 @@
               </div>
             </div>
             <p class="form-help" data-rmm-cron-preview role="status" aria-live="polite"></p>
+            <p class="form-help" data-rmm-frequency-only="now" hidden>Runs on the chosen devices as soon as you save. The schedule is kept, turned off, so you can use <strong>Run now</strong> or edit it to run it again.</p>
             <p class="form-help" data-rmm-frequency-only="once" hidden>Runs once at this time in the schedule's time zone, then the schedule turns itself off. Use <strong>Run now</strong> to run it again.</p>
             <p class="form-help form-help--error" data-rmm-error="cron" hidden></p>
             <p class="form-help form-help--error" data-rmm-error="run_once_at" hidden></p>

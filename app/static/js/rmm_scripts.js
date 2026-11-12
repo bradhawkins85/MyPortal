@@ -496,6 +496,10 @@
     if (value === 'once' && !runOnceInput.value) {
       runOnceInput.value = nextHourIn(timezoneInput.value.trim());
     }
+    enabledBox.disabled = value === 'now';
+    if (state.mode === 'schedule') {
+      submitButton.textContent = value === 'now' ? 'Save and run now' : 'Save schedule';
+    }
   }
 
   // The next whole hour as YYYY-MM-DDTHH:MM in the schedule's time zone
@@ -518,6 +522,10 @@
   function refreshCronPreview() {
     window.clearTimeout(previewTimer);
     if (state.mode !== 'schedule') {
+      return;
+    }
+    if (frequency() === 'now') {
+      cronPreview.textContent = 'Runs as soon as you save.';
       return;
     }
     const once = frequency() === 'once';
@@ -928,7 +936,7 @@
         scope: scopeSelect.value,
         name: scheduleName.value.trim(),
         frequency: frequency(),
-        cron: frequency() === 'once' ? '' : cronInput.value.trim(),
+        cron: frequency() === 'recurring' ? cronInput.value.trim() : '',
         run_once_at: frequency() === 'once' ? runOnceInput.value : null,
         timezone: timezoneInput.value.trim(),
         target_mode: targetMode.value,

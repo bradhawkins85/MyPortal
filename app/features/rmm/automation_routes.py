@@ -7,7 +7,8 @@ admins.
 
 * ``GET /rmm/automation`` schedules, onboarding steps and onboarding history
 * ``/api/rmm/schedules`` create, edit, enable, run now and delete schedules;
-  a schedule repeats on a cron expression or runs one time at a chosen date
+  a schedule repeats on a cron expression, runs one time at a chosen date, or
+  (``frequency="now"``) is saved and run straight away
 * ``/api/rmm/onboarding/steps`` add, edit, reorder and remove onboarding steps
 * ``/api/rmm/onboarding/runs`` start, view and cancel onboarding on a device
 * the Chocolatey apps panel pushes installs and updates through
@@ -124,7 +125,7 @@ class ScheduleRequest(BaseModel):
     name: str = Field(default="", max_length=255)
     scope: Scope = "company"
     script_id: int
-    frequency: Literal["recurring", "once"] = "recurring"
+    frequency: Literal["recurring", "once", "now"] = "recurring"
     cron: str = Field(default="", max_length=128)
     run_once_at: str | None = Field(default=None, max_length=64)
     timezone: str = Field(default="", max_length=64)
@@ -187,7 +188,15 @@ async def _save_schedule(request: Request, payload: ScheduleRequest, schedule_id
                   "cron": payload.cron, "run_once_at": payload.run_once_at, "company_id": scope_company,
                   "run_as": payload.run_as},
     )
-    return {"schedule": _schedule_public(await automation_repo.get_schedule(saved_id) or {})}
+    response: dict[str, Any] = {}
+    if payload.frequency == "now":
+        result = await automation.run_schedule(saved_id, requested_by_user_id=user.get("id"))
+        await audit_service.record(
+            action="rmm.schedule.run", request=request, user_id=user.get("id"), entity_type="rmm_schedule",
+            entity_id=saved_id, metadata={"runs": [item["run_id"] for item in result["queued"]]},
+        )
+        response = {"summary": result["summary"], "queued": len(result["queued"]), "problems": result["problems"]}
+    return {**response, "schedule": _schedule_public(await automation_repo.get_schedule(saved_id) or {})}
 
 
 @router.post("/api/rmm/schedules", summary="Create a schedule")

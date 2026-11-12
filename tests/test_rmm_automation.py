@@ -677,3 +677,45 @@ def test_one_time_schedule_migration_is_idempotent():
     sql = (Path(__file__).resolve().parents[1] / "migrations" / "559_rmm_schedule_run_once.sql").read_text()
     assert sql.startswith("-- phase: expand")
     assert "ADD COLUMN IF NOT EXISTS run_once_at DATETIME NULL" in sql
+
+
+@pytest.mark.anyio
+async def test_run_now_schedule_is_saved_off_and_left_for_reruns(sqlite_db, monkeypatch):
+    scripts = await _scripts(monkeypatch)
+    await _enrol(sqlite_db)
+    # The time and enabled flag sent are ignored: a run-now schedule has already had its one run.
+    schedule_id = await automation.save_schedule(schedule_id=None, company_id=1, user_id=9, payload={
+        "name": "Right away", "script_id": scripts["Second"]["id"], "frequency": "now", "cron": "bad",
+        "run_once_at": "2001-01-01T00:00", "enabled": True,
+    })
+    schedule = await automation_repo.get_schedule(schedule_id)
+    assert schedule["cron"] == "" and schedule["run_once_at"] is not None
+    assert not schedule["is_enabled"] and schedule["next_run_at"] is None
+    await _make_due(sqlite_db, schedule_id)
+    await sqlite_db.execute("UPDATE rmm_schedules SET next_run_at = NULL WHERE id = %s", (schedule_id,))
+    assert await automation.run_due_schedules() == 0
+    result = await automation.run_schedule(schedule_id, requested_by_user_id=9)
+    assert result["summary"] == "Queued on 1 device."
+
+
+def test_schedule_api_runs_a_run_now_schedule_straight_away():
+    import inspect
+
+    from app.features.rmm import automation_routes
+
+    assert automation_routes.ScheduleRequest(script_id=1, frequency="now").frequency == "now"
+    source = inspect.getsource(automation_routes._save_schedule)
+    assert 'payload.frequency == "now"' in source and "automation.run_schedule(saved_id" in source
+
+
+def test_schedule_editor_offers_run_now():
+    from tests.test_rmm_scripts import _environment
+
+    env = _environment()
+    env.globals["static_url"] = lambda path: path
+    html = env.get_template("rmm/automation.html").render(
+        company={"name": "Contoso"}, schedules=[], steps=[], onboarding_runs=[], agents=[], tags=[],
+        can_run=True, is_super_admin=False, default_timezone="UTC",
+    )
+    assert 'value="now" data-rmm-frequency' in html and "<span>Run now</span>" in html
+    assert 'data-rmm-frequency-only="now"' in html
