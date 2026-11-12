@@ -186,6 +186,7 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tickets/{ticket_id}/troubleshoot-complete` | POST | Device bearer | AI agent reports generated guidance + sanitized log bundle for a ticket (multipart) |
 | `/api/health-checks/{id}/device-status` | POST | Device bearer | Health check progress (see [Health Check](../administration/Health%20Check.md)) |
 | `/api/health-checks/{id}/device-result` | POST | Device bearer | Health check snapshot and redacted log bundle (multipart) |
+| `/api/tray/minidumps` | POST | Device bearer | Windows blue screen dumps the device decoded; only a summary is sent, never the dump file (see [Minidump Analysis](../administration/Minidump%20Analysis.md)) |
 
 All endpoints appear in the Swagger UI at `/docs` per project convention.
 

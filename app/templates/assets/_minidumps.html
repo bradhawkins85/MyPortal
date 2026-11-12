@@ -1,0 +1,108 @@
+{# The asset page's Minidumps section (app.features.health_check.minidump_routes.asset_context).
+   Everything shown from a dump or from the AI model is plain text and escaped by Jinja. #}
+{% set md = minidumps %}
+<section class="card card--panel ce-section" id="minidumps" data-asset-edit-section="minidumps" aria-labelledby="asset-minidumps-heading" data-md-root data-md-url="/api/assets/{{ asset.id }}/minidumps">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="asset-minidumps-heading">Minidumps</h2>
+      <p class="card__subtitle">Blue screen crashes found on this computer by its tray app. Analyse one to have the AI troubleshooter explain the likely cause and how to fix it.</p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    <p class="form-help md-live" role="status" aria-live="polite" data-md-live>{% if md.analysing %}An analysis is running. This page updates when it finishes.{% endif %}</p>
+    {% if md.dumps %}
+    <ul class="md-list" aria-label="Blue screen crashes">
+      {% for dump in md.dumps %}
+      {% set report = dump.analysis %}
+      {% set running = dump.analysis_status == 'analysing' %}
+      <li class="md-dump" data-md-dump="{{ dump.id }}" data-md-status="{{ dump.analysis_status }}">
+        <div class="md-dump__head">
+          <div class="md-dump__title">
+            <h3 class="md-dump__when">{% if dump.crashed_at %}<span data-utc="{{ dump.crashed_at }}">{{ dump.crashed_at }}</span>{% else %}Crash time unknown{% endif %}</h3>
+            <p class="md-dump__file text-muted">{{ dump.file_name }}</p>
+          </div>
+          {% if dump.supported %}<span class="status status--{{ {'danger': 'error', 'info': 'processing'}.get(dump.status_variant, dump.status_variant) }}">{{ dump.status_label }}</span>{% else %}<span class="status status--neutral">Not decoded</span>{% endif %}
+        </div>
+        <ul class="md-chips" aria-label="Crash details">
+          <li class="md-chip md-chip--code">{{ dump.stop_code }}</li>
+          {% if dump.supported %}<li class="md-chip{% if dump.suspect_driver %} md-chip--suspect{% endif %}">{% if dump.suspect_driver %}Suspected driver: {{ dump.suspect_driver }}{% else %}No third-party driver identified{% endif %}</li>{% endif %}
+          {% if dump.uptime_label %}<li class="md-chip">Up {{ dump.uptime_label }} before the crash</li>{% endif %}
+        </ul>
+        {% if not dump.supported %}
+        <p class="form-help">This dump could not be decoded{% if dump.error %}: {{ dump.error }}{% endif %}. It cannot be analysed here.</p>
+        {% else %}
+        {% if dump.analysis_status == 'failed' %}
+        <p class="form-help md-dump__error">The last analysis failed{% if dump.analysis_error %}: {{ dump.analysis_error }}{% endif %}</p>
+        {% endif %}
+        {% if report %}
+        <details class="md-result" open>
+          <summary>{% if dump.analysis_status == 'completed' %}Likely cause{% else %}Likely cause (previous analysis){% endif %}</summary>
+          <div class="md-result__body">
+            <ul class="md-chips" aria-label="Analysis summary">
+              {% if dump.confidence_label %}<li class="md-chip md-chip--{{ report.confidence if report.confidence in ('high', 'medium', 'low') else 'low' }}">{{ dump.confidence_label }}</li>{% endif %}
+              {% if dump.category_label %}<li class="md-chip">{{ dump.category_label }}</li>{% endif %}
+              {% if report.suspect %}<li class="md-chip md-chip--suspect">Suspect: {{ report.suspect }}</li>{% endif %}
+            </ul>
+            <p class="md-result__cause">{{ report.likely_cause }}</p>
+            {% if report.evidence %}<div class="md-result__group"><h4>Evidence</h4><ul>{% for item in report.evidence %}<li>{{ item }}</li>{% endfor %}</ul></div>{% endif %}
+            {% if report.steps %}<div class="md-result__group"><h4>What to do</h4><ol>{% for item in report.steps %}<li>{{ item }}</li>{% endfor %}</ol></div>{% endif %}
+            {% if report.further_checks %}<div class="md-result__group"><h4>Further checks</h4><ul>{% for item in report.further_checks %}<li>{{ item }}</li>{% endfor %}</ul></div>{% endif %}
+            {% set sources = [] %}{% for source in report.sources or [] %}{% set url = source.url | string %}{% if url.startswith('https://') or url.startswith('http://') or (url.startswith('/') and not url.startswith('//')) %}{% set _ = sources.append(source) %}{% endif %}{% endfor %}
+            {% if sources %}<div class="md-result__group"><h4>Sources</h4><ul>{% for source in sources %}<li><a href="{{ source.url }}" rel="noopener noreferrer"{% if not (source.url | string).startswith('/') %} target="_blank"{% endif %}>{{ source.title or source.url }}</a></li>{% endfor %}</ul></div>{% endif %}
+            {% if report.web_error %}<p class="form-help">The public web search could not be used for this analysis.</p>{% endif %}
+            <p class="form-help">{% if dump.analysed_at %}Analysed <span data-utc="{{ dump.analysed_at }}">{{ dump.analysed_at }}</span>. {% endif %}{% if dump.ticket_id %}{% if report.ticket_note == 'posted' %}Posted to <a href="/admin/tickets/{{ dump.ticket_id }}">ticket #{{ dump.ticket_id }}</a> as an internal note.{% elif report.ticket_note and report.ticket_note.startswith('skipped') %}Not posted to <a href="/admin/tickets/{{ dump.ticket_id }}">ticket #{{ dump.ticket_id }}</a>: its requester has opted out of AI processing.{% elif report.ticket_note == 'failed' %}Could not be posted to <a href="/admin/tickets/{{ dump.ticket_id }}">ticket #{{ dump.ticket_id }}</a>.{% endif %} {% endif %}The dump has no debugging symbols, so it names drivers, not functions; treat the result as a lead to confirm.</p>
+          </div>
+        </details>
+        {% endif %}
+        {% if md.can_run %}
+        <form class="md-analyse" method="post" action="/rmm/assets/{{ asset.id }}/minidumps/{{ dump.id }}/analyse">
+          {% include "partials/csrf.html" %}
+          {% if md.tickets %}
+          <label class="md-analyse__ticket"><span class="form-label">Also post to ticket <span class="text-muted">optional</span></span>
+            <select class="form-input" name="ticket_id">
+              <option value="">Don't post to a ticket</option>
+              {% for ticket in md.tickets %}<option value="{{ ticket.id }}">#{{ ticket.id }} — {{ ticket.subject }}</option>{% endfor %}
+            </select>
+          </label>
+          {% endif %}
+          <button class="button {% if report or dump.analysis_status == 'failed' %}button--secondary{% else %}button--primary{% endif %}" type="submit"{% if running %} disabled title="This dump is being analysed"{% elif not md.llm_ready %} disabled title="No AI model is configured for the AI troubleshooter"{% endif %}>{% if report or dump.analysis_status == 'failed' %}Analyse again{% else %}Analyse{% endif %}</button>
+          {% if not md.llm_ready %}<p class="form-help">No AI model is configured for the AI troubleshooter, so dumps cannot be analysed yet.</p>{% endif %}
+        </form>
+        {% endif %}
+        {% set summary = dump.summary %}
+        <details class="md-raw">
+          <summary>Decoded dump</summary>
+          <div class="md-raw__body">
+            <dl class="md-raw__facts">
+              {% if summary.windows_build %}<div><dt>Windows build</dt><dd>{{ summary.windows_build }}</dd></div>{% endif %}
+              {% if summary.architecture and summary.architecture != 'unknown' %}<div><dt>Processor</dt><dd>{{ summary.architecture }}{% if summary.processor_count %}, {{ summary.processor_count }} logical processors{% endif %}</dd></div>{% endif %}
+              {% if summary.faulting_address %}<div><dt>Faulting address</dt><dd><code>{{ summary.faulting_address.driver }}+{{ summary.faulting_address.offset }}</code></dd></div>{% endif %}
+              {% if summary.drivers %}<div><dt>Drivers loaded</dt><dd>{{ summary.drivers | length }}</dd></div>{% endif %}
+            </dl>
+            {% if summary.bugcheck_parameters %}
+            <h4>Stop code parameters</h4>
+            <ol class="md-raw__list">{% for value in summary.bugcheck_parameters %}<li><code>{{ value or 'unknown' }}</code>{% if dump.parameter_meanings and dump.parameter_meanings[loop.index0] %} <span class="text-muted">{{ dump.parameter_meanings[loop.index0] }}</span>{% endif %}</li>{% endfor %}</ol>
+            {% endif %}
+            {% if summary.stack_drivers %}
+            <h4>Drivers on the crash stack</h4>
+            <p class="form-help">In stack order. These are leads, not a verified call stack.</p>
+            <ol class="md-raw__list md-raw__list--stack">{% for ref in summary.stack_drivers %}<li><code>{{ ref.driver }}+{{ ref.offset }}</code></li>{% endfor %}</ol>
+            {% endif %}
+            {% if summary.unloaded_drivers %}
+            <h4>Recently unloaded drivers</h4>
+            <p class="md-raw__inline">{% for item in summary.unloaded_drivers %}<code>{{ item.name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+            {% endif %}
+          </div>
+        </details>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="md-empty">
+      <p><strong>No blue screens reported yet.</strong></p>
+      <p class="text-muted">When this computer has a blue screen, its tray app reports the crash here automatically after the restart. If a crash is missing, check that Windows is set to write small memory dumps and that the tray app is up to date.</p>
+    </div>
+    {% endif %}
+  </div>
+</section>

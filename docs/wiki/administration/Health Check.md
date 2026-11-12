@@ -277,3 +277,7 @@ Every way of starting a check refuses assets without a deployed RMM agent. Disab
 with `DISABLED_FEATURE_PACKS=health_check` (or disable `rmm`): the menu entries, the asset page's
 Actions entry and section, the monthly checks, the linked scripts and the routes go away, and the troubleshooter keeps recording the
 logs it could not read.
+
+See also [Minidump Analysis](Minidump%20Analysis.md): the asset page's Minidumps section, where the
+AI troubleshooter explains the likely cause of a Windows blue screen from the dump the tray app
+decoded.

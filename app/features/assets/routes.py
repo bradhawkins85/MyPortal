@@ -2320,6 +2320,13 @@ async def asset_detail_page(
 
         health_check_context = await health_check_routes.asset_context(
             dict(record), can_run=bool(rmm_context.get("can_run")))
+    # Blue screen dumps come from the tray app, so unlike the health check they need no RMM agent.
+    minidumps_context = None
+    if rmm_context and not customer_safe and main_module._feature_pack_available("health_check"):
+        from app.features.health_check import minidump_routes
+
+        minidumps_context = await minidump_routes.asset_context(
+            dict(record), can_run=bool(rmm_context.get("can_run")))
     # Tags belong to the tags pack; the card disappears with it.
     tags_context = None
     if not customer_safe and main_module._feature_pack_available("tags"):
@@ -2389,6 +2396,7 @@ async def asset_detail_page(
             "network_interfaces": network_interfaces,
             "rmm": rmm_context,
             "health_check": health_check_context,
+            "minidumps": minidumps_context,
             "asset_tags": tags_context,
             "logged_on_user": logged_on_user,
             "logged_on_user_is_last": logged_on_user_is_last,

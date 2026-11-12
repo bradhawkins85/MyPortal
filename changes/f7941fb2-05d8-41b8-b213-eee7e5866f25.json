@@ -1,0 +1,7 @@
+{
+  "guid": "f7941fb2-05d8-41b8-b213-eee7e5866f25",
+  "occurred_at": "2026-11-12T00:12Z",
+  "change_type": "Feature",
+  "summary": "Added a Minidumps section to the asset page: the tray app reports Windows blue screen dumps and the AI troubleshooter explains the likely cause.",
+  "content_hash": "42027e6632cf853258bd06c71307289f86500719d29878787528292a17c811b4"
+}
