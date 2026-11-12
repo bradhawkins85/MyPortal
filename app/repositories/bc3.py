@@ -535,7 +535,7 @@ async def get_users_pending_acknowledgment(
     query = """
         SELECT DISTINCT u.id, u.email, u.name
         FROM users u
-        INNER JOIN company_memberships cm ON cm.user_id = u.id
+        INNER JOIN effective_company_memberships cm ON cm.user_id = u.id
         INNER JOIN permissions p ON (
             (p.company_id = cm.company_id AND p.user_id IS NULL) OR
             (p.user_id = u.id AND p.company_id IS NULL)
@@ -565,7 +565,7 @@ async def get_acknowledgment_summary(plan_id: int, version_number: int) -> dict[
     total_query = """
         SELECT COUNT(DISTINCT u.id) as total_users
         FROM users u
-        INNER JOIN company_memberships cm ON cm.user_id = u.id
+        INNER JOIN effective_company_memberships cm ON cm.user_id = u.id
         INNER JOIN permissions p ON (
             (p.company_id = cm.company_id AND p.user_id IS NULL) OR
             (p.user_id = u.id AND p.company_id IS NULL)
