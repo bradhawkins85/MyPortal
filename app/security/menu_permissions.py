@@ -148,6 +148,9 @@ for item in MENU_PERMISSIONS:
         level: AccessLevel = "write" if any(part in legacy for part in ("manage", "order", "admin", "edit")) else "read"
         LEGACY_TO_MENU.setdefault(legacy, []).append((item.key, level))
 
+# The former cart permission grants purchasing, which now belongs to Shop write access.
+LEGACY_TO_MENU.setdefault("cart.access", []).append(("menu.shop", "write"))
+
 
 def catalogue_for_api() -> list[dict[str, Any]]:
     return [
@@ -214,6 +217,8 @@ def normalize_menu_permissions(raw: Any) -> dict[str, AccessLevel]:
         if isinstance(legacy, list):
             legacy_map = normalize_menu_permissions(legacy)
             for key, level in legacy_map.items():
+                if key == "menu.shop" and key in source:
+                    continue
                 normalized[key] = merge_access(normalized[key], normalize_menu_permission_level(key, level))
         return normalized
 
@@ -324,6 +329,15 @@ def build_menu_access_map(
         if menu_key in COMMERCE_MENU_PERMISSIONS and isinstance(raw_menu_permissions, dict):
             continue
         if membership_data.get(boolean_key):
+            if menu_key == "menu.shop":
+                # A role's Shop level is authoritative over stale membership flags.
+                source = raw_menu_permissions or {}
+                if isinstance(source, dict):
+                    source = source["menu"] if isinstance(source.get("menu"), dict) else source
+                    if "menu.shop" in source:
+                        continue
+                promote(menu_key, "write" if boolean_key == "can_access_cart" else "read")
+                continue
             promote(menu_key, "write" if boolean_key.startswith("can_manage") or boolean_key == "is_admin" else "read")
 
     # Pre-catalogue membership booleans receive the same compatibility-only

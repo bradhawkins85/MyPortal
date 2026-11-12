@@ -287,7 +287,7 @@
           {% set can_access_all_tickets = (can_access_all_tickets | default(false)) or is_super_admin or menu_access.get('menu.tickets') == 'write' %}
           {% set can_access_tickets = feature_pack_available('tickets') and ((can_access_tickets | default(false)) or is_super_admin or menu_access.get('menu.tickets') in ['read', 'write']) %}
           {% set can_access_shop = feature_pack_available('shop') and ((can_access_shop | default(false)) or is_super_admin or membership.get('can_access_shop') or menu_access.get('menu.shop') in ['read', 'write']) %}
-          {% set can_access_cart = feature_pack_available('cart') and ((can_access_cart | default(false)) or is_super_admin or membership.get('can_access_cart')) %}
+          {% set can_access_cart = feature_pack_available('cart') and (can_access_cart | default(is_super_admin or membership.get('can_access_cart'))) %}
           {% set can_access_quotes = feature_pack_available('quotes') and ((can_access_quotes | default(false)) or is_super_admin or membership.get('can_access_quotes') or menu_access.get('menu.quotes') in ['read', 'write']) %}
           {% set can_access_orders = feature_pack_available('orders') and ((can_access_orders | default(false)) or is_super_admin or membership.get('can_access_orders') or menu_access.get('menu.orders') in ['read', 'write']) %}
           {% set can_access_forms = feature_pack_available('forms') and ((can_access_forms | default(false)) or is_super_admin or membership.get('can_access_forms') or menu_access.get('menu.forms') in ['read', 'write']) %}

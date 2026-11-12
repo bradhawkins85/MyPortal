@@ -26,6 +26,7 @@ from app.repositories import freight_rules as freight_rules_repo
 from app.security.commerce_permissions import commerce_scope, commerce_record_visible, require_commerce_record
 from app.repositories import shop as shop_repo
 from app.repositories import users as user_repo
+from app.security.menu_permissions import membership_menu_can
 from app.security.session import session_manager
 from app.services import freight_rules as freight_rules_service
 from app.services.sanitization import sanitize_rich_text
@@ -578,6 +579,9 @@ async def load_quote_to_cart(request: Request, quote_number: str) -> RedirectRes
     if redirect:
         return redirect
 
+    if not membership_menu_can(user, membership, "menu.shop", write=True):
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
     session = await session_manager.load_session(request)
     if not session:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -643,6 +647,9 @@ async def save_as_quote(request: Request) -> RedirectResponse:
     )
     if redirect:
         return redirect
+
+    if not membership_menu_can(user, membership, "menu.shop", write=True):
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     session = await session_manager.load_session(request)
     if not session:

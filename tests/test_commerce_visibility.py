@@ -115,7 +115,7 @@ async def test_api_role_preview_uses_simulated_permissions(monkeypatch):
 async def test_mine_cannot_download_or_load_another_users_quote(monkeypatch, action):
     from app.features.quotes import routes
 
-    membership = {"menu_permissions": {"menu.quotes": "mine"}}
+    membership = {"menu_permissions": {"menu.quotes": "mine", "menu.shop": "write"}}
     main = SimpleNamespace(_load_company_section_context=AsyncMock(return_value=(USER, membership, {}, 7, None)))
     monkeypatch.setattr(routes, "_main", lambda: main)
     monkeypatch.setattr(routes.session_manager, "load_session", AsyncMock(return_value=SimpleNamespace(id=1)))

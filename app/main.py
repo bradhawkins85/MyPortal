@@ -2744,8 +2744,8 @@ async def _build_base_context(
                 can_edit_bcp = False
 
     permission_flags = {
-        "can_access_shop": _menu_can(menu_access, "menu.shop") or is_super_admin or _has_permission("can_access_shop"),
-        "can_access_cart": is_super_admin or _has_permission("can_access_cart"),
+        "can_access_shop": _menu_can(menu_access, "menu.shop"),
+        "can_access_cart": _menu_can(menu_access, "menu.shop", write=True),
         "can_access_orders": _menu_can(menu_access, "menu.orders") or is_super_admin or _has_permission("can_access_orders"),
         "can_access_quotes": _menu_can(menu_access, "menu.quotes") or is_super_admin or _has_permission("can_access_quotes"),
         "can_access_forms": _menu_can(menu_access, "menu.forms") or is_super_admin or _has_permission("can_access_forms"),
@@ -3166,6 +3166,10 @@ async def _load_company_section_context(
         has_permission = commerce_scope(user, membership, COMMERCE_PERMISSION_FIELDS[permission_field]) != "none"
     else:
         has_permission = bool(membership and membership.get(permission_field))
+    if permission_field in {"can_access_shop", "can_access_cart"}:
+        has_permission = _membership_menu_can(
+            user, membership, "menu.shop", write=permission_field == "can_access_cart"
+        )
     if not (is_super_admin or has_permission):
         return (
             user,

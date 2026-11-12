@@ -3,7 +3,7 @@
 {% import "partials/stock_status.html" as stock_helpers %}
 
 {% set cart_allowed = (can_access_cart | default(false)) %}
-{% if not cart_allowed %}
+{% if can_access_cart is not defined %}
   {% set cart_allowed = (is_super_admin | default(current_user and current_user.get('is_super_admin'))) or (active_membership and active_membership.get('can_access_cart')) %}
 {% endif %}
 
