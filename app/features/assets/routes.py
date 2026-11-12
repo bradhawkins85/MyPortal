@@ -210,6 +210,23 @@ async def _end_user_hidden_columns(user: Mapping[str, Any], request: Request) ->
     return await asset_column_restrictions_repo.list_restricted_keys()
 
 
+async def _is_asset_staff(user: Mapping[str, Any], membership: Any, request: Request) -> bool:
+    """Admins and technicians, who keep full asset management.
+
+    The Read Only / Read Write split (profile and photos only; no custom
+    fields, data provenance, asset type override or archiving) applies to
+    every other role."""
+    if user.get("is_super_admin"):
+        return True
+    main_module = _main()
+    if any(
+        main_module._membership_menu_can(dict(user), membership, key, write=True)
+        for key in ("menu.admin.company", "menu.admin.technician")
+    ):
+        return True
+    return bool(await main_module._is_helpdesk_technician(user, request))
+
+
 def _custom_field_column_key(definition: Mapping[str, Any]) -> str:
     return f"cf_{definition['id']}"
 
@@ -301,12 +318,12 @@ async def assets_page(request: Request):
     if not can_view_assets:
         rows = [_customer_asset(dict(row)) for row in rows]
     hidden_columns = await _end_user_hidden_columns(user, request)
-    # Custom fields are managed by super admins only.
+    # Custom field columns are for admins and technicians only.
     field_definitions = [
         definition
         for definition in (
             await asset_custom_fields_repo.list_field_definitions()
-            if is_super_admin else []
+            if await _is_asset_staff(user, membership, request) else []
         )
         if _custom_field_column_key(definition) not in hidden_columns
     ]
@@ -657,12 +674,19 @@ async def _asset_manage_context(request: Request, asset_id: int):
 
     Read Write asset access covers only the profile and photos; asset type
     overrides, warranty and reconciliation changes and archiving stay with
-    super admins."""
-    user, company, company_id, redirect = await _asset_write_context(request, asset_id)
+    admins and technicians who have asset write access."""
+    main_module = _main()
+    user, membership, company, company_id, redirect = await _load_asset_context(
+        request, asset_id=asset_id
+    )
     if redirect:
         return user, company, company_id, redirect
-    if not user.get("is_super_admin"):
-        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    if not await _is_asset_staff(user, membership, request):
+        raise HTTPException(status_code=403, detail="Admin or technician access required")
     return user, company, company_id, None
 
 
@@ -2136,13 +2160,15 @@ async def asset_detail_page(
     can_edit_photos = is_super_admin or main_module._membership_menu_can(
         user, membership, "menu.asset_photos", write=True
     )
-    # Read Only and Read Write staff see the same internal view; Read Write
-    # only adds editing of the profile (photos follow their own permission).
-    # Asset type overrides, custom fields, data provenance, warranty and
-    # reconciliation changes, customer visibility and archiving are reserved
-    # for super admins.
+    # Read Only and Read Write see the same internal view; Read Write only
+    # adds editing of the profile (photos follow their own permission).
+    # Custom fields and data provenance are shown to admins and technicians,
+    # who (with write access) also manage the asset type override, custom
+    # fields, warranty, reconciliation and archiving. Customer visibility
+    # stays with super admins.
     customer_safe = (not (is_super_admin or can_read)) or customer_preview
-    can_manage = is_super_admin and not customer_safe
+    is_staff = (not customer_safe) and await _is_asset_staff(user, membership, request)
+    can_manage = is_staff and can_write
     if (record_company_id is None or int(record_company_id) != company_id
             or (not is_super_admin and not can_read and (not bool(record.get("customer_visible")) or not await _customer_role_can_view_asset(membership, company_id, asset_id)))):
         raise HTTPException(
@@ -2163,8 +2189,8 @@ async def asset_detail_page(
         references = []
     if not isinstance(references, list):
         references = []
-    definitions = await _visible_custom_fields(user, request) if can_manage else []
-    values = await asset_custom_fields_repo.get_all_asset_field_values([asset_id]) if can_manage else {}
+    definitions = await _visible_custom_fields(user, request) if is_staff else []
+    values = await asset_custom_fields_repo.get_all_asset_field_values([asset_id]) if is_staff else {}
     custom_fields = [
         {**definition, "value": values.get(asset_id, {}).get(definition["id"])}
         for definition in definitions
@@ -2350,13 +2376,14 @@ async def asset_detail_page(
             **await _asset_type_picker(company_id),
             "synced_asset_type_groups": asset_types.grouped(),
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
-            "asset_sources": await asset_repo.list_asset_sources(company_id, asset_id) if can_manage else [],
+            "asset_sources": await asset_repo.list_asset_sources(company_id, asset_id) if is_staff else [],
             "customer_safe": customer_safe,
+            "is_asset_staff": is_staff,
             "can_manage_asset": can_manage,
             "warranty": None if customer_safe else await _warranty_context(record),
             "cpu_age": await _cpu_age_context(record, rmm_context),
-            "customer_roles": await role_repo.list_roles() if can_manage else [],
-            "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if can_manage else [],
+            "customer_roles": await role_repo.list_roles() if is_super_admin and not customer_safe else [],
+            "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if is_super_admin and not customer_safe else [],
             "bcp_context": bcp_context,
             "infrastructure_links": infrastructure_links,
             "network_interfaces": network_interfaces,
@@ -2872,8 +2899,8 @@ async def update_asset_documentation(request: Request, asset_id: int):
         values = await _manual_asset_values(form, company_id, record)
         await asset_repo.update_manual_inventory(asset_id, **values)
     # Custom fields are editable for every asset, not just manually created
-    # ones, but only by super admins: Read Write asset access covers the profile.
-    if user.get("is_super_admin"):
+    # ones, by admins and technicians: other roles' write access covers the profile.
+    if await _is_asset_staff(user, membership, request):
         await _save_submitted_custom_fields(asset_id, form, await _end_user_hidden_columns(user, request))
     criticality = _clean_optional(form, "criticality")
     review_status = str(form.get("review_status") or "not_reviewed")
@@ -3071,11 +3098,9 @@ async def approve_asset_reconciliation(request: Request, asset_id: int, source_r
 @router.post("/assets/{asset_id}/archive")
 async def archive_asset(request: Request, asset_id: int):
     main_module = _main()
-    user, _membership, _, company_id, redirect = await _load_asset_context(request, asset_id=asset_id)
+    user, _company, company_id, redirect = await _asset_manage_context(request, asset_id)
     if redirect:
         return redirect
-    if not user.get("is_super_admin"):
-        raise HTTPException(status_code=403, detail="Super admin privileges required")
     record = await asset_repo.get_asset_by_id(asset_id)
     if not record or int(record.get("company_id") or 0) != company_id:
         raise HTTPException(status_code=404, detail="Asset not found")

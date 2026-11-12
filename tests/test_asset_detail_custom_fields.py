@@ -47,7 +47,7 @@ def test_detail_page_custom_fields_are_editable_for_every_provenance():
     section = _custom_fields_section(template)
     # Editable inputs must no longer be gated on manual provenance.
     assert "asset.provenance == 'manual'" not in section
-    assert "{% if can_edit %}" in section
+    assert "{% if can_manage_asset %}" in section
     # The editable inputs remain present and bound to the settings form.
     assert 'name="custom_{{ field.id }}"' in section
     assert 'form="asset-settings-form"' in section

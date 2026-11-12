@@ -104,10 +104,11 @@ async def test_list_pages_ignore_the_asset_company(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_read_write_technician_cannot_override_the_asset_type(monkeypatch):
-    """Read Write asset access covers only the profile and photos."""
+async def test_read_write_role_cannot_override_the_asset_type(monkeypatch):
+    """Outside admins and technicians, Read Write covers only the profile and photos."""
     _install(monkeypatch, user={"id": 7, "company_id": ACTIVE_COMPANY},
              memberships={ACTIVE_COMPANY: TECH_MEMBERSHIP, ASSET_COMPANY: TECH_MEMBERSHIP})
+    monkeypatch.setattr(main_module, "_is_helpdesk_technician", AsyncMock(return_value=False))
     set_type = AsyncMock()
     monkeypatch.setattr(routes.asset_repo, "set_asset_type", set_type)
 
