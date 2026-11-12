@@ -83,12 +83,20 @@ def test_send_email_success(monkeypatch):
     monkeypatch.setattr(email_service.webhook_monitor, "record_manual_success", fake_record_manual_success)
     monkeypatch.setattr(email_service.webhook_monitor, "record_manual_failure", fake_record_manual_failure)
 
+    html_body = (
+        '<table role="presentation" width="600" cellpadding="0" cellspacing="0">'
+        '<tr><td bgcolor="#0f172a" style="padding:24px;color:#f8fafc;">'
+        '<h2 style="font-size:36px;">Meet MyPortal.</h2>'
+        '<a href="https://portal.hawkinsit.au" '
+        'style="background-color:#38bdf8;display:inline-block;padding:14px 22px;">'
+        'Sign up to MyPortal</a></td></tr></table>'
+    )
     result = asyncio.run(
         email_service.send_email(
             subject="Subject",
             recipients=["user@example.com"],
             text_body="Hello",
-            html_body="<p>Hello</p>",
+            html_body=html_body,
         )
     )
 
@@ -101,6 +109,7 @@ def test_send_email_success(monkeypatch):
     assert message["Subject"] == "Subject"
     assert "user@example.com" in message["To"]
     assert message["Bcc"] == "audit@example.com"
+    assert message.get_body(preferencelist=("html",)).get_content().strip() == html_body
     assert captured["enqueue_event"]["payload"]["recipients"] == ["user@example.com"]
     assert event_metadata["status"] == "succeeded"
     assert event_metadata["response_status"] == 250
