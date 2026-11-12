@@ -1,11 +1,10 @@
-"""CPU launch-date lookup used to estimate each device's age."""
+"""CPU launch dates used to estimate each device's age."""
 
 from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
 
-import httpx
 import pytest
 
 from app.services import cpu_release_dates as service
@@ -51,143 +50,100 @@ def test_identify_groups_spellings_of_the_same_model():
     assert service.identify(None) is None
 
 
+
 @pytest.mark.parametrize(
     ("text", "expected", "label"),
     [
-        ("Q3'17", date(2017, 7, 1), "Q3 2017"),
-        ("Q1 2020", date(2020, 1, 1), "Q1 2020"),
+        # As Intel ARK shows it, e.g. the i7-1065G7 "Launch Date" of Q3'19.
+        ("Q3'19", date(2019, 7, 1), "Q3 2019"),
+        ("q3 '19", date(2019, 7, 1), "Q3 2019"),
         ("Q4’08", date(2008, 10, 1), "Q4 2008"),
-        ("04/2016", date(2016, 4, 1), "Apr 2016"),
+        ("Q1 2020", date(2020, 1, 1), "Q1 2020"),
+        ("2019-07", date(2019, 7, 1), "Jul 2019"),
+        ("2019-07-23", date(2019, 7, 1), "Jul 2019"),
+        ("07/2019", date(2019, 7, 1), "Jul 2019"),
+        ("Jul 2019", date(2019, 7, 1), "Jul 2019"),
+        ("September 2021", date(2021, 9, 1), "Sep 2021"),
         ("2015", date(2015, 1, 1), "2015"),
     ],
 )
-def test_parse_release_text(text, expected, label):
+def test_parse_release_text_accepts_ark_and_month_formats(text, expected, label):
     assert service.parse_release_text(text) == (expected, label)
 
 
-ARK_PRODUCT_PAGE = """
-<div class="tech-section-row">
-  <div class="tech-label"><span>Lithography</span></div>
-  <div class="tech-data" data-key="Lithography"><span>14 nm</span></div>
-</div>
-<div class="tech-section-row">
-  <div class="tech-label"><span>Launch Date</span></div>
-  <div class="tech-data" data-key="BornOnDate"><span>Q3'17</span></div>
-</div>
-"""
-
-ARK_SEARCH_RESULTS = """
-<a href="/content/www/us/en/ark/products/124967/intel-core-i58350u-processor-6m-cache-up-to-3-60-ghz.html">i5-8350U</a>
-<a href="/content/www/us/en/ark/products/124968/intel-core-i78650u-processor-8m-cache-up-to-4-20-ghz.html">i7-8650U</a>
-"""
+@pytest.mark.parametrize("text", ["", None, "Q5'19", "2019-13", "13/2019", "Smarch 2019", "last year", "Q3'19 extra"])
+def test_parse_release_text_rejects_other_input(text):
+    assert service.parse_release_text(text) is None
 
 
-def test_parse_ark_launch_date_reads_born_on_date():
-    assert service.parse_ark_launch_date(ARK_PRODUCT_PAGE) == (date(2017, 7, 1), "Q3 2017")
+def test_parse_release_text_stays_fast_on_long_input():
+    """Regression for CodeQL's polynomial-regex finding on the quarter pattern."""
+    import time
 
-
-def test_parse_ark_launch_date_falls_back_to_label():
-    page = '<li><span class="label">Launch Date</span><span class="value">Q2\'13</span></li>'
-
-    assert service.parse_ark_launch_date(page) == (date(2013, 4, 1), "Q2 2013")
-    assert service.parse_ark_launch_date("<p>No dates here</p>") is None
-
-
-def test_find_ark_product_url_picks_matching_model():
-    url = service.find_ark_product_url(ARK_SEARCH_RESULTS, "i7-8650U")
-
-    assert url == (
-        "https://ark.intel.com/content/www/us/en/ark/products/124968/"
-        "intel-core-i78650u-processor-8m-cache-up-to-4-20-ghz.html"
-    )
-    assert service.find_ark_product_url(ARK_SEARCH_RESULTS, "i9-9900K") is None
+    started = time.perf_counter()
+    assert service.parse_release_text("q1" + " " * 20000 + "x") is None
+    assert service._QUARTER_RE.match("q1" + " " * 20000 + "x") is None
+    assert time.perf_counter() - started < 0.5
 
 
 def test_age_in_years_rounds_to_nearest_year():
+    assert service.age_in_years(date(2019, 7, 1), date(2026, 11, 11)) == 7
     assert service.age_in_years(date(2017, 7, 1), date(2026, 11, 11)) == 9
-    assert service.age_in_years(date(2020, 1, 1), date(2026, 11, 11)) == 7
     assert service.age_in_years(date(2030, 1, 1), date(2026, 11, 11)) == 0
 
 
-def _session_with(handler) -> service._ArkSession:
-    session = service._ArkSession()
-    session._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
-    return session
+def test_ark_search_url_links_intel_search_for_the_model():
+    assert service.ark_search_url("i7-1065G7") == (
+        "https://www.intel.com/content/www/us/en/search.html?ws=text#q=i7-1065G7"
+    )
+    assert service.ark_search_url("E5-2670 v3").endswith("#q=E5-2670%20v3")
+    assert service.ark_search_url(None) is None
+
+
+def test_clean_source_url_only_accepts_intel_https_links():
+    page = ("https://www.intel.com/content/www/us/en/products/sku/196597/"
+            "intel-core-i71065g7-processor-8m-cache-up-to-3-90-ghz/specifications.html")
+    assert service.clean_source_url(page) == page
+    assert service.clean_source_url("  ") is None
+    for bad in ("http://www.intel.com/x", "https://intel.com.evil.example/x",
+                "https://example.com/intel.com", "javascript:alert(1)"):
+        with pytest.raises(service.LaunchDateError):
+            service.clean_source_url(bad)
+
+
+def test_service_makes_no_network_requests():
+    """Intel blocks automated access to ARK, so the service must not fetch it."""
+    source = Path(service.__file__).read_text()
+
+    assert "httpx" not in source
+    assert "monitored_client" not in source
 
 
 @pytest.mark.asyncio
-async def test_intel_lookup_follows_search_results_to_product_page(monkeypatch):
-    monkeypatch.setattr(service, "_REQUEST_INTERVAL_SECONDS", 0)
-    requested: list[str] = []
+async def test_set_release_date_records_source_and_updates_devices(monkeypatch):
+    from unittest.mock import AsyncMock
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requested.append(str(request.url))
-        if "search.html" in request.url.path:
-            assert request.url.params.get("q") == "i7-8650U"
-            return httpx.Response(200, text=ARK_SEARCH_RESULTS)
-        return httpx.Response(200, text=ARK_PRODUCT_PAGE)
+    entry = {"id": 4, "cpu_key": "intel:i7-1065g7", "model": "i7-1065G7", "release_date": None}
+    monkeypatch.setattr(service.repo, "get", AsyncMock(return_value=entry))
+    set_manual = AsyncMock()
+    monkeypatch.setattr(service.repo, "set_manual", set_manual)
+    apply = AsyncMock(return_value=2)
+    monkeypatch.setattr(service, "apply_to_assets", apply)
+    page = "https://www.intel.com/content/www/us/en/products/sku/196597/x/specifications.html"
 
-    session = _session_with(handler)
-    try:
-        result = await session.lookup(service.identify("Intel(R) Core(TM) i7-8650U CPU @ 1.90GHz"))
-    finally:
-        await session._client.aclose()
+    await service.set_release_date(4, (date(2019, 7, 1), "Q3 2019"), source="intel_ark", source_url=page)
+    await service.set_release_date(4, None)
 
-    assert result.status == "found"
-    assert result.source == "intel_ark"
-    assert result.release_date == date(2017, 7, 1)
-    assert result.release_label == "Q3 2017"
-    assert "/124968/" in result.source_url
-    assert len(requested) == 2
-    assert all(url.startswith("https://ark.intel.com/") for url in requested)
-
-
-@pytest.mark.asyncio
-async def test_intel_lookup_uses_redirected_product_page(monkeypatch):
-    monkeypatch.setattr(service, "_REQUEST_INTERVAL_SECONDS", 0)
-    session = _session_with(lambda request: httpx.Response(200, text=ARK_PRODUCT_PAGE))
-    try:
-        result = await session.lookup(service.identify("Intel(R) Xeon(R) CPU E5-2670 v3 @ 2.30GHz"))
-    finally:
-        await session._client.aclose()
-
-    assert result.status == "found"
-    assert result.release_date == date(2017, 7, 1)
-
-
-@pytest.mark.asyncio
-async def test_intel_lookup_reports_not_found_and_errors(monkeypatch):
-    monkeypatch.setattr(service, "_REQUEST_INTERVAL_SECONDS", 0)
-    session = _session_with(lambda request: httpx.Response(200, text="<p>No products matching</p>"))
-    try:
-        missing = await session.lookup(service.identify("Intel(R) Core(TM) i7-8650U"))
-    finally:
-        await session._client.aclose()
-    session = _session_with(lambda request: httpx.Response(403, text="denied"))
-    try:
-        denied = await session.lookup(service.identify("Intel(R) Core(TM) i7-8650U"))
-    finally:
-        await session._client.aclose()
-
-    assert missing.status == "not_found"
-    assert denied.status == "error"
-    assert "access denied" in denied.message
-
-
-@pytest.mark.asyncio
-async def test_non_intel_and_virtual_cpus_are_not_sent_anywhere():
-    def handler(request):  # pragma: no cover - must not be called
-        raise AssertionError("no request expected")
-
-    session = _session_with(handler)
-    try:
-        amd = await session.lookup(service.identify("AMD Ryzen 7 5800X 8-Core Processor"))
-        virtual = await session.lookup(service.identify("Intel Core Processor (Broadwell)"))
-    finally:
-        await session._client.aclose()
-
-    assert amd.status == "unsupported"
-    assert virtual.status == "unsupported"
+    assert set_manual.await_args_list[0].kwargs == {
+        "release_date": date(2019, 7, 1), "release_label": "Q3 2019",
+        "source": "intel_ark", "source_url": page,
+    }
+    assert set_manual.await_args_list[1].kwargs == {"release_date": None, "release_label": None}
+    assert apply.await_count == 2
+    with pytest.raises(service.LaunchDateError):
+        await service.set_release_date(4, (date(2019, 7, 1), "Q3 2019"), source="guess")
+    with pytest.raises(service.LaunchDateError):
+        await service.set_release_date(4, (date(2019, 7, 1), "Q3 2019"), source_url="https://example.com/")
 
 
 @pytest.mark.asyncio
@@ -295,41 +251,55 @@ async def test_integration_sync_keeps_cpu_derived_age(monkeypatch):
     assert rows == [(7, 9), (8, 3.0)]
 
 
+
+
 @pytest.mark.asyncio
-async def test_api_manual_date_rejects_future_and_updates_assets(monkeypatch):
+async def test_refresh_registers_models_and_updates_ages(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(service, "is_module_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(service, "discover_cpus", AsyncMock(return_value=[
+        {"id": 1, "_cpu": service.identify("Intel Core i7-1065G7")},
+        {"id": 2, "_cpu": service.identify("Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz")},
+        {"id": 3, "_cpu": None},
+    ]))
+    monkeypatch.setattr(service, "apply_to_assets", AsyncMock(return_value=2))
+
+    assert await service.refresh() == {"status": "ok", "processors": 1, "assets_updated": 2}
+
+
+@pytest.mark.asyncio
+async def test_api_records_ark_date_and_rejects_bad_input(monkeypatch):
+    from unittest.mock import AsyncMock
+
     from app.api.routes import cpu_release_dates as api
 
-    entry = {"id": 3, "cpu_key": "amd:ryzen 7 5800x", "cpu_name": "AMD Ryzen 7 5800X",
-             "vendor": "amd", "model": "Ryzen 7 5800X", "release_date": None, "source": None}
-    calls: list[tuple[int, date | None]] = []
-    audits: list[dict] = []
-
-    async def fake_get(entry_id):
-        return dict(entry) if entry_id == 3 else None
-
-    async def fake_set(entry_id, release_date):
-        calls.append((entry_id, release_date))
-        return {**entry, "release_date": release_date, "source": "manual", "release_label": "Jan 2021"}
-
-    async def fake_audit(**kwargs):
-        audits.append(kwargs)
-
-    monkeypatch.setattr(api.cpu_repo, "get", fake_get)
-    monkeypatch.setattr(api.cpu_service, "set_manual_release_date", fake_set)
-    monkeypatch.setattr(api.audit_service, "record", fake_audit)
+    entry = {"id": 3, "cpu_key": "intel:i7-1065g7", "cpu_name": "Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz",
+             "vendor": "intel", "model": "i7-1065G7", "release_date": None, "source": None}
+    monkeypatch.setattr(api.cpu_repo, "get", AsyncMock(side_effect=lambda i: dict(entry) if i == 3 else None))
+    saved = AsyncMock(return_value={**entry, "release_date": date(2019, 7, 1), "release_label": "Q3 2019",
+                                    "source": "intel_ark"})
+    monkeypatch.setattr(api.cpu_service, "set_release_date", saved)
+    monkeypatch.setattr(api.audit_service, "record", AsyncMock())
     user = {"id": 1}
 
     with pytest.raises(api.HTTPException) as missing:
-        await api.update_cpu_release_date(99, api.CpuReleaseDateUpdate(release_date=None), None, user)
+        await api.update_cpu_release_date(99, api.CpuReleaseDateUpdate(launch_date=None), None, user)
+    with pytest.raises(api.HTTPException) as unreadable:
+        await api.update_cpu_release_date(3, api.CpuReleaseDateUpdate(launch_date="soon"), None, user)
     with pytest.raises(api.HTTPException) as future:
-        await api.update_cpu_release_date(3, api.CpuReleaseDateUpdate(release_date=date(2999, 1, 1)), None, user)
-    saved = await api.update_cpu_release_date(3, api.CpuReleaseDateUpdate(release_date=date(2021, 1, 5)), None, user)
+        await api.update_cpu_release_date(3, api.CpuReleaseDateUpdate(launch_date="2099-01"), None, user)
+    result = await api.update_cpu_release_date(
+        3, api.CpuReleaseDateUpdate(launch_date="Q3'19", source="intel_ark"), None, user,
+    )
 
     assert missing.value.status_code == 404
+    assert unreadable.value.status_code == 422
     assert future.value.status_code == 422
-    assert calls == [(3, date(2021, 1, 5))]
-    assert saved.source == "manual"
-    assert audits[0]["action"] == "cpu_release_date.update"
+    assert saved.await_args_list[-1].args == (3, (date(2019, 7, 1), "Q3 2019"))
+    assert saved.await_args_list[-1].kwargs == {"source": "intel_ark", "source_url": None}
+    assert result.source == "intel_ark"
+    assert api.audit_service.record.await_args.kwargs["action"] == "cpu_release_date.update"
 
 
 # ---------------------------------------------------------------------------
@@ -364,8 +334,8 @@ def _patch_cpu_routes(monkeypatch, entry):
     main = routes._main()
     monkeypatch.setattr(main, "_require_super_admin_page", AsyncMock(return_value=({"id": 8}, None)))
     monkeypatch.setattr(service.repo, "get", AsyncMock(return_value=entry))
-    saved = AsyncMock(return_value=entry)
-    monkeypatch.setattr(service, "set_manual_release_date", saved)
+    saved = AsyncMock(return_value={**(entry or {}), "source": "intel_ark", "source_url": None})
+    monkeypatch.setattr(service, "set_release_date", saved)
     monkeypatch.setattr(routes.audit_service, "record", AsyncMock())
 
     def flash(url, message, level):
@@ -376,49 +346,69 @@ def _patch_cpu_routes(monkeypatch, entry):
     return routes, flashes, saved
 
 
-_ENTRY = {"id": 3, "cpu_key": "amd:ryzen 7 5800x", "cpu_name": "AMD Ryzen 7 5800X 8-Core Processor",
-          "model": "Ryzen 7 5800X", "release_date": None, "source": None}
+_ENTRY = {"id": 3, "cpu_key": "intel:i7-1065g7", "cpu_name": "Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz",
+          "vendor": "intel", "model": "i7-1065G7", "release_date": None, "source": None}
 
 
 @pytest.mark.asyncio
-async def test_admin_page_saves_month_as_first_of_month(monkeypatch):
+async def test_admin_page_saves_ark_launch_date(monkeypatch):
     routes, flashes, saved = _patch_cpu_routes(monkeypatch, dict(_ENTRY))
+    body = (b"launch_date=Q3%2719&source=intel_ark&source_url=https%3A%2F%2Fwww.intel.com"
+            b"%2Fcontent%2Fwww%2Fus%2Fen%2Fproducts%2Fsku%2F196597%2Fx%2Fspecifications.html")
 
-    await routes.save_cpu_launch_date(_form_request("/assets/cpu-launch-dates/3", b"release_month=2020-11"), 3)
+    await routes.save_cpu_launch_date(_form_request("/assets/cpu-launch-dates/3", body), 3)
 
-    saved.assert_awaited_once_with(3, date(2020, 11, 1))
-    assert flashes[0][2] == "success"
-    assert "Ryzen 7 5800X launched November 2020" in flashes[0][1]
+    assert saved.await_args.args == (3, (date(2019, 7, 1), "Q3 2019"))
+    assert saved.await_args.kwargs["source"] == "intel_ark"
+    assert saved.await_args.kwargs["source_url"].endswith("/sku/196597/x/specifications.html")
+    assert flashes == [("/assets/cpu-launch-dates",
+                        "Saved: i7-1065G7 launched Q3 2019. Devices with it have been updated.", "success")]
     audit = routes.audit_service.record.await_args.kwargs
-    assert audit["action"] == "cpu_release_date.update"
-    assert audit["after"] == {"release_date": "2020-11-01", "source": "manual"}
+    assert audit["after"]["release_date"] == "2019-07-01"
 
 
 @pytest.mark.asyncio
-async def test_admin_page_clears_manual_date(monkeypatch):
-    entry = {**_ENTRY, "release_date": date(2020, 11, 1), "source": "manual"}
+async def test_admin_page_clears_date(monkeypatch):
+    entry = {**_ENTRY, "release_date": date(2019, 7, 1), "source": "intel_ark"}
     routes, flashes, saved = _patch_cpu_routes(monkeypatch, entry)
 
     await routes.save_cpu_launch_date(
-        _form_request("/assets/cpu-launch-dates/3", b"release_month=2020-11&action=clear"), 3,
+        _form_request("/assets/cpu-launch-dates/3", b"launch_date=Q3%2719&action=clear"), 3,
     )
 
-    saved.assert_awaited_once_with(3, None)
+    assert saved.await_args.args == (3, None)
     assert "Cleared" in flashes[0][1]
 
 
 @pytest.mark.asyncio
-async def test_admin_page_rejects_missing_future_and_bad_dates(monkeypatch):
+async def test_admin_page_rejects_missing_unreadable_and_future_dates(monkeypatch):
     routes, flashes, saved = _patch_cpu_routes(monkeypatch, dict(_ENTRY))
 
-    await routes.save_cpu_launch_date(_form_request("/x", b"release_month="), 3)
-    await routes.save_cpu_launch_date(_form_request("/x", b"release_month=2999-01"), 3)
-    with pytest.raises(routes.HTTPException) as bad:
-        await routes.save_cpu_launch_date(_form_request("/x", b"release_month=last+year"), 3)
+    await routes.save_cpu_launch_date(_form_request("/x", b"launch_date="), 3)
+    await routes.save_cpu_launch_date(_form_request("/x", b"launch_date=last+year"), 3)
+    await routes.save_cpu_launch_date(_form_request("/x", b"launch_date=2099-01"), 3)
 
     saved.assert_not_awaited()
-    assert [level for _url, _msg, level in flashes] == ["error", "error"]
-    assert bad.value.status_code == 422
+    assert [level for _url, _msg, level in flashes] == ["error", "error", "error"]
+    assert "Q3'19" in flashes[0][1]
+    assert "last year" in flashes[1][1]
+    assert "future" in flashes[2][1]
+
+
+@pytest.mark.asyncio
+async def test_admin_page_reports_bad_source_link(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    routes, flashes, _saved = _patch_cpu_routes(monkeypatch, dict(_ENTRY))
+    monkeypatch.setattr(service, "set_release_date",
+                        AsyncMock(side_effect=service.LaunchDateError("Paste the https:// link")))
+
+    await routes.save_cpu_launch_date(
+        _form_request("/x", b"launch_date=Q3%2719&source_url=https%3A%2F%2Fexample.com"), 3,
+    )
+
+    assert flashes == [("/assets/cpu-launch-dates", "Paste the https:// link", "error")]
+    routes.audit_service.record.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -426,29 +416,9 @@ async def test_admin_page_unknown_processor_is_404(monkeypatch):
     routes, _flashes, _saved = _patch_cpu_routes(monkeypatch, None)
 
     with pytest.raises(routes.HTTPException) as missing:
-        await routes.save_cpu_launch_date(_form_request("/x", b"release_month=2020-01"), 99)
+        await routes.save_cpu_launch_date(_form_request("/x", b"launch_date=Q3%2719"), 99)
 
     assert missing.value.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_admin_refresh_needs_module(monkeypatch):
-    from unittest.mock import AsyncMock, MagicMock
-
-    routes, flashes, _saved = _patch_cpu_routes(monkeypatch, dict(_ENTRY))
-    monkeypatch.setattr(service, "is_module_enabled", AsyncMock(return_value=False))
-    background = MagicMock()
-
-    await routes.refresh_cpu_launch_dates(_form_request("/x"), background)
-
-    background.add_task.assert_not_called()
-    assert flashes[0][2] == "error"
-
-    monkeypatch.setattr(service, "is_module_enabled", AsyncMock(return_value=True))
-    await routes.refresh_cpu_launch_dates(_form_request("/x"), background)
-
-    background.add_task.assert_called_once()
-    assert flashes[1][2] == "success"
 
 
 @pytest.mark.asyncio
@@ -462,7 +432,7 @@ async def test_overview_counts_devices_per_processor(monkeypatch):
     ]))
     monkeypatch.setattr(service.repo, "ensure", AsyncMock())
     monkeypatch.setattr(service.repo, "list_all", AsyncMock(return_value=[
-        {"id": 1, "cpu_key": "intel:i7-8650u", "cpu_name": "Intel Core i7-8650U", "vendor": "intel",
+        {"id": 1, "cpu_key": "intel:i7-8650u", "cpu_name": "Intel Core i7-8650U", "vendor": "intel", "model": "i7-8650U",
          "release_date": date(2017, 7, 1), "source": "intel_ark"},
         {"id": 2, "cpu_key": "amd:ryzen 7 5800x", "cpu_name": "AMD Ryzen 7 5800X", "vendor": "amd",
          "release_date": None, "source": None},
@@ -477,29 +447,44 @@ async def test_overview_counts_devices_per_processor(monkeypatch):
     assert rows["amd:ryzen 7 5800x"]["device_count"] == 1
     assert rows["amd:ryzen 7 5800x"]["age_years"] is None
     assert rows["amd:ryzen 7 5800x"]["vendor_label"] == "AMD"
+    assert rows["amd:ryzen 7 5800x"]["ark_url"] is None
+    assert rows["intel:i7-8650u"]["ark_url"] == (
+        "https://www.intel.com/content/www/us/en/search.html?ws=text#q=i7-8650U"
+    )
 
 
 def test_admin_page_template_renders():
     from app.main import templates
 
-    processors = [
-        {"id": 1, "cpu_key": "intel:i7-8650u", "cpu_name": "Intel(R) Core(TM) i7-8650U CPU @ 1.90GHz",
-         "model": "i7-8650U", "vendor_label": "Intel", "release_date": date(2017, 7, 1),
-         "release_label": "Q3 2017", "source": "intel_ark", "source_label": "Intel ARK",
-         "source_url": "https://ark.intel.com/x.html", "device_count": 2, "age_years": 9,
-         "lookup_status": "found", "lookup_message": None},
-        {"id": 2, "cpu_key": "amd:ryzen 7 5800x", "cpu_name": "AMD Ryzen 7 5800X", "model": "Ryzen 7 5800X",
-         "vendor_label": "AMD", "release_date": None, "release_label": None, "source": None,
-         "source_label": None, "source_url": None, "device_count": 1, "age_years": None,
-         "lookup_status": "unsupported", "lookup_message": "AMD has no free automated launch-date lookup."},
-    ]
-    template = templates.env.get_template("assets/cpu_launch_dates.html").make_module(
+    module = templates.env.get_template("assets/cpu_launch_dates.html").make_module(
         {"today_iso": "2026-11-11", "processors": [], "needs_date": [], "dated": [],
          "cpu_lookup_enabled": False, "device_total": 0}
     )
-    html = template.processor_item(processors[1], "2026-11")
-    assert 'action="/assets/cpu-launch-dates/2"' in html
-    assert "Needs a manual date" in html
-    html = template.processor_item(processors[0], "2026-11")
-    assert "Launched Q3 2017" in html
-    assert 'data-cpu-month="2017-07"' in html
+    undated_intel = {
+        "id": 5, "cpu_key": "intel:i7-1065g7", "cpu_name": "Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz",
+        "model": "i7-1065G7", "vendor": "intel", "vendor_label": "Intel", "release_date": None,
+        "release_label": None, "source": None, "source_label": None, "source_url": None,
+        "device_count": 3, "age_years": None,
+        "ark_url": "https://www.intel.com/content/www/us/en/search.html?ws=text#q=i7-1065G7",
+    }
+    dated_amd = {
+        "id": 2, "cpu_key": "amd:ryzen 7 5800x", "cpu_name": "AMD Ryzen 7 5800X", "model": "Ryzen 7 5800X",
+        "vendor": "amd", "vendor_label": "AMD", "release_date": date(2020, 11, 1), "release_label": "Nov 2020",
+        "source": "manual", "source_label": "Other source", "source_url": None, "device_count": 1,
+        "age_years": 6, "ark_url": None,
+    }
+
+    html = module.processor_item(undated_intel)
+    assert "Needs a date from Intel ARK" in html
+    assert "Open on Intel ARK" in html
+    assert 'href="https://www.intel.com/content/www/us/en/search.html?ws=text#q=i7-1065G7"' in html
+    assert 'rel="noopener noreferrer"' in html
+    assert 'data-cpu-intel="1"' in html
+    assert 'name="launch_date"' in html
+    assert 'action="/assets/cpu-launch-dates/5"' in html
+
+    html = module.processor_item(dated_amd)
+    assert "Launched Nov 2020" in html
+    assert "Other source" in html
+    assert "Open on Intel ARK" not in html
+    assert 'data-cpu-value="Nov 2020"' in html

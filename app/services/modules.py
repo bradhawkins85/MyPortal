@@ -1294,9 +1294,8 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "name": "CPU age lookup",
         "description": (
             "Estimate each device's age from its processor's launch date and store it "
-            "as the asset's Approx age. Intel processors are looked up on Intel ARK "
-            "(only the model number is sent); other processors can have their launch "
-            "date recorded by hand."
+            "as the asset's Approx age, recalculated daily. Launch dates are recorded "
+            "on Assets -> CPU launch dates, with links to Intel ARK for Intel processors."
         ),
         "icon": "🧮",
         "settings": {},

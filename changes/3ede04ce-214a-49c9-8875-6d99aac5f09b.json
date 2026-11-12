@@ -1,0 +1,7 @@
+{
+  "guid": "3ede04ce-214a-49c9-8875-6d99aac5f09b",
+  "occurred_at": "2026-11-12T05:07Z",
+  "change_type": "Fix",
+  "summary": "Intel CPU launch dates can now be recorded again: Intel no longer lets servers read Intel ARK, so the CPU launch dates page links each Intel processor to Intel's site and accepts the date exactly as ARK shows it (for example Q3'19), instead of an automatic lookup that always reported 'not found'.",
+  "content_hash": "9a9347d3d1e52ebae9aa65b40e8fd0c57581ad3305af4157e55d53dabdcad917"
+}

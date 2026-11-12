@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.dependencies.auth import require_super_admin
-from app.core.logging import log_error
 from app.repositories import cpu_release_dates as cpu_repo
 from app.services import audit as audit_service
 from app.services import cpu_release_dates as cpu_service
@@ -25,11 +24,9 @@ class CpuReleaseDate(BaseModel):
     model: str | None = None
     release_date: date | None = None
     release_label: str | None = None
-    source: str | None = Field(None, description="intel_ark or manual")
-    source_url: str | None = None
-    lookup_status: str | None = Field(None, description="found, not_found, unsupported or error")
-    lookup_message: str | None = None
-    checked_at: datetime | None = None
+    source: str | None = Field(None, description="intel_ark or manual (another source)")
+    source_url: str | None = Field(None, description="The intel.com page the date was read from, if recorded")
+    checked_at: datetime | None = Field(None, description="When the date was last recorded")
 
 
 class CpuReleaseDateList(BaseModel):
@@ -38,15 +35,24 @@ class CpuReleaseDateList(BaseModel):
 
 
 class CpuReleaseDateUpdate(BaseModel):
-    release_date: date | None = Field(
+    launch_date: str | None = Field(
         None,
-        description="The processor's launch date. Send null to clear a manual date so the next run looks it up again.",
+        max_length=32,
+        description="The launch date as Intel ARK shows it (Q3'19), or 2019-07, Jul 2019 or 2019. "
+                    "Send null to clear the date.",
+        examples=["Q3'19"],
+    )
+    source: Literal["intel_ark", "manual"] = Field("manual", description="Where the date came from")
+    source_url: str | None = Field(
+        None, max_length=512, description="Optional https link to the processor's page on intel.com",
     )
 
 
-class RefreshAccepted(BaseModel):
+class RefreshResult(BaseModel):
     status: str
-    message: str
+    processors: int | None = None
+    assets_updated: int | None = None
+    reason: str | None = None
 
 
 def _entry(row: dict[str, Any]) -> CpuReleaseDate:
@@ -64,36 +70,23 @@ async def list_cpu_release_dates(
     )
 
 
-async def _run_refresh() -> None:
-    try:
-        await cpu_service.refresh()
-    except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("CPU release date lookup failed", error=str(exc))
-
-
 @router.post(
     "/refresh",
-    response_model=RefreshAccepted,
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Look up missing CPU launch dates and refresh asset ages now",
+    response_model=RefreshResult,
+    summary="Register new processor models and recalculate asset ages now",
 )
 async def refresh_cpu_release_dates(
-    background_tasks: BackgroundTasks,
     current_user: dict = Depends(require_super_admin),
-) -> RefreshAccepted:
+) -> RefreshResult:
     if not await cpu_service.is_module_enabled():
         raise HTTPException(status_code=409, detail="Enable the CPU age lookup module first")
-    background_tasks.add_task(_run_refresh)
-    return RefreshAccepted(
-        status="queued",
-        message="Processors without a launch date are being looked up; asset ages update when it finishes.",
-    )
+    return RefreshResult(**await cpu_service.refresh())
 
 
 @router.put(
     "/{entry_id}",
     response_model=CpuReleaseDate,
-    summary="Record or clear a processor's launch date by hand",
+    summary="Record or clear a processor's launch date",
 )
 async def update_cpu_release_date(
     entry_id: int,
@@ -104,9 +97,19 @@ async def update_cpu_release_date(
     existing = await cpu_repo.get(entry_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Processor not found")
-    if payload.release_date and payload.release_date > date.today():
-        raise HTTPException(status_code=422, detail="The launch date cannot be in the future")
-    updated = await cpu_service.set_manual_release_date(entry_id, payload.release_date)
+    release = None
+    if payload.launch_date and payload.launch_date.strip():
+        release = cpu_service.parse_release_text(payload.launch_date)
+        if release is None:
+            raise HTTPException(status_code=422, detail="Use a launch date such as Q3'19, 2019-07 or Jul 2019")
+        if release[0] > date.today():
+            raise HTTPException(status_code=422, detail="The launch date cannot be in the future")
+    try:
+        updated = await cpu_service.set_release_date(
+            entry_id, release, source=payload.source, source_url=payload.source_url,
+        )
+    except cpu_service.LaunchDateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await audit_service.record(
         action="cpu_release_date.update",
         request=request,
@@ -114,8 +117,8 @@ async def update_cpu_release_date(
         entity_type="cpu_release_date",
         entity_id=entry_id,
         before={"release_date": existing["release_date"].isoformat() if existing.get("release_date") else None,
-                "source": existing.get("source")},
-        after={"release_date": payload.release_date.isoformat() if payload.release_date else None,
-               "source": "manual" if payload.release_date else None},
+                "source": existing.get("source"), "source_url": existing.get("source_url")},
+        after={"release_date": release[0].isoformat() if release else None,
+               "source": updated.get("source"), "source_url": updated.get("source_url")},
     )
     return _entry(updated)
