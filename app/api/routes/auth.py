@@ -1802,7 +1802,12 @@ async def _handle_sso_callback(
     try:
         claims = await sso_login.redeem_code(transaction, code)
     except m365_service.M365Error as exc:
-        log_warning("Microsoft sign-in code redemption failed", error=str(exc), ip=_client_ip(request))
+        log_warning(
+            "Microsoft sign-in code redemption failed",
+            error=str(exc),
+            http_status=exc.http_status,
+            ip=_client_ip(request),
+        )
         return _sso_failure(SSO_MICROSOFT_FAILED_MESSAGE)
 
     try:

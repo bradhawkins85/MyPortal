@@ -404,13 +404,52 @@ def test_callback_microsoft_error_redirects_to_login(client, stubs):
     assert stubs.sessions_created == [] and _binding_cleared(r)
 
 
-def test_callback_redeem_failure_redirects_to_login(client, stubs):
+def test_callback_redeem_failure_redirects_to_login(client, stubs, monkeypatch):
     stubs.outcome(user_id=1, mfa=True)
-    stubs.redeem_error = m365_service.M365Error("Microsoft identity nonce did not match")
+    stubs.redeem_error = m365_service.M365Error(
+        "Microsoft rejected the sign-in code (AADSTS7000218)", http_status=400
+    )
+    warnings = []
+    monkeypatch.setattr(auth_routes, "log_warning", lambda message, **fields: warnings.append(fields))
     state = stubs.begin(client)
     r = client.get(f"/m365/callback?code=c&state={state}", follow_redirects=False)
     assert r.headers["location"] == "/login"
     assert _flash(r)["message"] == MS_FAILED
+    assert stubs.sessions_created == []
+    assert warnings[0]["http_status"] == 400
+    assert "AADSTS7000218" in warnings[0]["error"]
+
+
+@pytest.mark.parametrize("state", [None, "invalid-signature", "other-envelope"])
+def test_callback_invalid_sso_state_is_logged_and_returns_to_login(client, stubs, monkeypatch, state):
+    stubs.begin(client)
+    if state == "other-envelope":
+        state = oauth_state_serializer.dumps({"unexpected": "value"})
+    failures = []
+    monkeypatch.setattr(auth_routes, "_log_login_failure", lambda *args: failures.append(args[2]))
+    params = {"code": "private-code"}
+    if state is not None:
+        params["state"] = state
+
+    response = client.get("/m365/callback", params=params, follow_redirects=False)
+
+    assert response.status_code == 303 and response.headers["location"] == "/login"
+    assert _flash(response) == {"message": EXPIRED, "variant": "error"}
+    assert failures == ["sso_state_rejected"]
+    assert _binding_cleared(response)
+    assert stubs.sessions_created == []
+
+
+def test_callback_invalid_state_without_binding_is_logged(client, stubs, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(main_module, "log_warning", lambda message, **fields: warnings.append((message, fields)))
+
+    response = client.get("/m365/callback?state=private-state&code=private-code", follow_redirects=False)
+
+    assert response.headers["location"] == "/m365"
+    assert warnings == [("Microsoft OAuth callback state rejected", {
+        "state_present": True, "sign_in_binding_present": False,
+    })]
     assert stubs.sessions_created == []
 
 
@@ -471,6 +510,9 @@ def test_sso_envelope_with_non_sso_flow_rejected(client, stubs):
 
 
 def test_existing_m365_callback_flows_unchanged(client, stubs, monkeypatch):
+    # An unfinished anonymous sign-in must not hijack an admin callback.
+    sign_in_state = stubs.begin(client)
+    sign_in_id = oauth_state_serializer.loads(sign_in_state)["sso_transaction_id"]
     stubs.sessions_by_token["token-2"] = _session(9, 2)
     client.cookies.set(SESSION_COOKIE, "token-2")
     reached: list[dict] = []
@@ -487,6 +529,7 @@ def test_existing_m365_callback_flows_unchanged(client, stubs, monkeypatch):
     assert reached, "session-bound flow must reach the existing handler"
     assert r.headers["location"] == "/admin/profile#integrations"
     assert stubs.sessions_created == []
+    assert sign_in_id in stubs.transactions
 
 
 def test_oauth_state_serializer_is_shared_with_main():

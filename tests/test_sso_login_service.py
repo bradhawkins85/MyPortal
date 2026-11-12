@@ -489,6 +489,34 @@ async def test_redeem_code_rejects_bad_token_responses(monkeypatch, response):
         await sso_login.redeem_code(TRANSACTION, "code")
 
 
+async def test_redeem_code_preserves_safe_microsoft_error_codes(monkeypatch):
+    response = FakeResponse(400, {
+        "error": "invalid_grant",
+        "error_codes": [7000218, 65001, "private-value", True, {"secret": "private-value"}],
+        "error_description": "private-code private-verifier private-email@example.com",
+        "access_token": "private-token",
+    })
+    _patch_redeem(monkeypatch, FakeClient(response), {})
+
+    with pytest.raises(M365Error) as caught:
+        await sso_login.redeem_code(TRANSACTION, "private-code")
+
+    assert str(caught.value) == "Microsoft rejected the sign-in code (AADSTS7000218, AADSTS65001)"
+    assert caught.value.http_status == 400
+    assert "private" not in str(caught.value)
+
+
+@pytest.mark.parametrize("payload", [None, [], {"error_codes": "private"}, {"error_codes": [True, -1, 10**20]}])
+async def test_redeem_code_handles_unexpected_error_payloads(monkeypatch, payload):
+    _patch_redeem(monkeypatch, FakeClient(FakeResponse(400, payload)), {})
+
+    with pytest.raises(M365Error) as caught:
+        await sso_login.redeem_code(TRANSACTION, "private-code")
+
+    assert str(caught.value) == "Microsoft rejected the sign-in code"
+    assert caught.value.http_status == 400
+
+
 async def test_redeem_code_wraps_http_errors(monkeypatch):
     import httpx
 

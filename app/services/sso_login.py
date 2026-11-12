@@ -128,7 +128,23 @@ async def redeem_code(transaction: dict[str, Any], code: str) -> dict[str, Any]:
     except httpx.HTTPError as exc:
         raise m365_service.M365Error("Microsoft token request failed") from exc
     if response.status_code < 200 or response.status_code >= 300:
-        raise m365_service.M365Error("Microsoft rejected the sign-in code")
+        message = "Microsoft rejected the sign-in code"
+        try:
+            failure = response.json()
+        except ValueError:
+            failure = None
+        error_codes = failure.get("error_codes") if isinstance(failure, dict) else None
+        if isinstance(error_codes, list):
+            # Keep only bounded numeric AADSTS codes; descriptions can contain
+            # identities, authorization codes or other credentials.
+            codes = [
+                "AADSTS" + str(value)
+                for value in error_codes[:5]
+                if type(value) is int and 0 <= value <= 999999999
+            ]
+            if codes:
+                message += " (" + ", ".join(codes) + ")"
+        raise m365_service.M365Error(message, http_status=response.status_code)
     try:
         payload = response.json()
     except ValueError as exc:
