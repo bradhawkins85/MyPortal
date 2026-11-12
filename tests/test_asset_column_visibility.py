@@ -36,6 +36,8 @@ def _request():
 def _wire_assets_page(monkeypatch, *, technician: bool, hidden: set[str], rmm: bool = False):
     user = {"id": 7, "company_id": 11, "is_super_admin": False}
     membership = {"menu_permissions": {"menu.assets": "write", "menu.rmm_scripts": "read"}}
+    if technician:
+        membership["menu_permissions"]["menu.admin.technician"] = "write"
     captured: dict = {}
 
     async def fake_render(template, request, current_user, *, extra=None):
@@ -107,6 +109,58 @@ async def test_technicians_still_see_every_column(monkeypatch):
     keys = _keys(captured)
     assert {"serial_number", "cf_1", "cf_2"} <= set(keys)
     restricted.assert_not_awaited()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("super_admin", "permissions", "legacy_admin", "can_bypass"),
+    [
+        (False, {"menu.assets": "write"}, False, False),
+        (False, {"menu.assets": "write", "menu.tickets": "write"}, False, False),
+        (False, {"menu.assets": "write", "menu.reporting": "write"}, False, False),
+        (False, {"menu.admin.company": "read"}, False, False),
+        (False, {"menu.admin.company": "none"}, True, False),
+        (False, {"menu.admin.company": "write"}, False, True),
+        (False, {"menu.admin.technician": "write"}, False, True),
+        (False, {}, True, True),
+        (True, {}, False, True),
+    ],
+)
+async def test_hidden_column_bypass_requires_explicit_admin_or_technician(
+    monkeypatch, super_admin, permissions, legacy_admin, can_bypass
+):
+    user = {"id": 7, "company_id": 11, "is_super_admin": super_admin}
+    membership = {"menu_permissions": permissions, "is_admin": legacy_admin}
+    monkeypatch.setattr(main_module, "_get_effective_company_membership", AsyncMock(return_value=membership))
+    # Ticket/reporting access can satisfy this broad check, so it must not grant a bypass.
+    broad_check = AsyncMock(return_value=True)
+    monkeypatch.setattr(main_module, "_is_helpdesk_technician", broad_check)
+    restricted = AsyncMock(return_value={"serial_number", "cf_2"})
+    monkeypatch.setattr(assets_routes.asset_column_restrictions_repo, "list_restricted_keys", restricted)
+
+    result = await assets_routes._end_user_hidden_columns(user, _request())
+
+    assert result == (set() if can_bypass else {"serial_number", "cf_2"})
+    broad_check.assert_not_awaited()
+    if can_bypass:
+        restricted.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_role_preview_cannot_inherit_underlying_admin_visibility(monkeypatch):
+    from app.services.role_switching import _virtual_membership
+
+    user = {"id": 1, "company_id": 11, "is_super_admin": False, "role_switcher_allowed": True}
+    membership = _virtual_membership({"id": 5, "permissions": {"menu.assets": "write", "menu.tickets": "write"}}, 11)
+    request = _request()
+    request.state.active_membership = membership
+    loader = AsyncMock(return_value={"is_admin": True})
+    monkeypatch.setattr(main_module, "_get_effective_company_membership", loader)
+    monkeypatch.setattr(assets_routes.asset_column_restrictions_repo, "list_restricted_keys",
+                        AsyncMock(return_value={"cf_2"}))
+
+    assert await assets_routes._end_user_hidden_columns(user, request) == {"cf_2"}
+    loader.assert_not_awaited()
 
 
 @pytest.mark.anyio

@@ -193,8 +193,19 @@ _RESTRICTABLE_ASSET_COLUMNS: list[dict[str, str]] = [
 
 
 async def _end_user_hidden_columns(user: Mapping[str, Any], request: Request) -> set[str]:
-    """Asset columns hidden from this user; staff (technicians) see every column."""
-    if await _main()._is_helpdesk_technician(user, request):
+    """Only explicit admins and technicians may bypass hidden asset columns."""
+    if user.get("is_super_admin"):
+        return set()
+    main_module = _main()
+    membership = getattr(request.state, "active_membership", None)
+    if membership is None and user.get("company_id") is not None:
+        membership = await main_module._get_effective_company_membership(
+            request, user["id"], int(user["company_id"])
+        )
+    if any(
+        main_module._membership_menu_can(dict(user), membership, key, write=True)
+        for key in ("menu.admin.company", "menu.admin.technician")
+    ):
         return set()
     return await asset_column_restrictions_repo.list_restricted_keys()
 

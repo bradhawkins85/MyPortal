@@ -1,0 +1,7 @@
+{
+  "guid": "cc6e18df-bd04-4758-b494-0308737a677b",
+  "occurred_at": "2026-11-12T03:43Z",
+  "change_type": "Fix",
+  "summary": "Only admins and technicians can see asset columns marked as hidden, even when other roles have asset or ticket write access.",
+  "content_hash": "9ed324af2c1043ed6880edd26ebbf722e38f3dbef5cd04e8fd1a31e6b580e47d"
+}
