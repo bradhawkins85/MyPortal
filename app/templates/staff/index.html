@@ -509,7 +509,7 @@
             </div>
             {% if has_admin_technician_access %}
               <div class="staff-custom-field-row">
-                <div class="form-field" data-stf-field="requested_on_behalf_of">
+                <div class="form-field" data-stf-field="requested_on_behalf_of" data-staff-requested-by>
                   <label class="form-label" for="staff-add-requested-on-behalf-of">Requested by</label>
                   <select class="form-input" id="staff-add-requested-on-behalf-of" name="requested_on_behalf_of_staff_id" data-searchable="on">
                     <option value="">Me ({{ ((current_user.first_name or '') ~ ' ' ~ (current_user.last_name or ''))|trim or current_user.email }})</option>
@@ -519,6 +519,23 @@
                   </select>
                   <p class="form-help">Choose the staff member who asked for this login. The request, approval updates and new account credentials are sent to them.</p>
                   <p class="stf-error" data-stf-error-for="requested_on_behalf_of_staff_id" hidden></p>
+                </div>
+              </div>
+              <div class="staff-custom-field-row">
+                <div class="form-field form-field--checkbox" data-stf-field="skip_onboarding_workflow">
+                  <label class="stf-switch" for="staff-add-skip-onboarding">
+                    <input
+                      id="staff-add-skip-onboarding"
+                      type="checkbox"
+                      name="skip_onboarding_workflow"
+                      value="1"
+                      aria-describedby="staff-add-skip-onboarding-help"
+                      data-staff-skip-onboarding
+                    />
+                    <span class="stf-switch__track" aria-hidden="true"></span>
+                    <span>Skip onboarding workflow</span>
+                  </label>
+                  <p class="form-help" id="staff-add-skip-onboarding-help">Use this for people who already work here. They're added straight to the staff list without an approval request, and no onboarding workflow runs.</p>
                 </div>
               </div>
             {% endif %}
@@ -590,7 +607,7 @@
         {% if staff_custom_field_definitions %}
           <button type="button" class="button" data-stf-next>Next</button>
         {% endif %}
-        <button type="submit" class="button">Send request</button>
+        <button type="submit" class="button" data-staff-add-submit>Send request</button>
       </footer>
     </form>
   </div>
@@ -847,6 +864,7 @@
                 <button type="button" class="button button--ghost button--small" id="edit-action-offboarding-request" data-edit-action="offboarding-request">Request offboarding</button>
               </div>
             </section>
+            {% if is_admin or has_admin_technician_access %}
             <section class="stf-action-group" data-stf-action-group aria-labelledby="staff-edit-actions-approval">
               <h4 class="stf-action-group__title" id="staff-edit-actions-approval">Approval</h4>
               <div class="stf-action-group__buttons">
@@ -854,6 +872,7 @@
                 <button type="button" class="button button--ghost button--small" id="edit-action-deny" data-edit-action="deny" hidden>Deny</button>
               </div>
             </section>
+            {% endif %}
             <section class="stf-action-group" data-stf-action-group aria-labelledby="staff-edit-actions-workflow">
               <h4 class="stf-action-group__title" id="staff-edit-actions-workflow">Workflow</h4>
               <div class="stf-action-group__buttons">

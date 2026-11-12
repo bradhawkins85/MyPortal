@@ -4,6 +4,7 @@ package ipc
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/user"
 	"strconv"
@@ -30,3 +31,7 @@ func configureSocket(path string) error {
 	}
 	return nil
 }
+
+// checkPeer accepts every client: the socket's staff group already limits
+// who can connect.
+func checkPeer(net.Conn) error { return nil }

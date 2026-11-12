@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 {% import "rmm/_macros.html" as rmm_ui %}
+{% from "rmm/_action_steps.html" import action_list %}
 {% block title %}Event log rules{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
 {% block header_title %}<span class="header__title-text">Event log rules</span>{% endblock %}
@@ -11,7 +12,8 @@
 {% from "macros/counters.html" import counter_strip %}
 {% set rules = rules or [] %}
 {% set enabled_rules = rules | selectattr("is_enabled") | list | length %}
-{% set action_names = {"drop": "Drop", "run_script": "Run a script", "schedule_script": "Schedule a script", "create_ticket": "Create a ticket"} %}
+{% set action_names = {"drop": "Drop", "create_ticket": "Create a ticket", "run_script": "Run a script", "schedule_script": "Schedule a script"} %}
+{% set action_counts = action_counts or {} %}
 <div class="settings-workspace rmm-page ce-workspace" data-rmm-event-log-rules data-ae-workspace data-ae-storage-key="myportal:rmm-event-log-rules:active-section" data-ae-default="rules"{% if run_now %} data-ae-initial="run-now"{% elif editing %} data-ae-initial="editor" data-ae-form="rmm-event-rule-settings-form"{% endif %}>
   <section class="ce-overview" aria-label="Event log rules at a glance">
     <div class="ce-overview__identity">
@@ -23,7 +25,7 @@
       </div>
     </div>
     {% set rule_counters = [{"label": "Rules", "value": rules | length, "variant": "neutral", "href": "#rmm-event-log-rules-list"}] %}
-    {% for key, label in action_names.items() %}{% set _ = rule_counters.append({"label": label, "value": rules | selectattr("action", "equalto", key) | list | length, "variant": "info", "href": "#rmm-event-log-rules-list"}) %}{% endfor %}
+    {% for key, label in action_names.items() %}{% set _ = rule_counters.append({"label": label, "value": action_counts.get(key, 0), "variant": "info", "href": "#rmm-event-log-rules-list"}) %}{% endfor %}
     {{ counter_strip(rule_counters, class="ce-overview__stats") }}
   </section>
 
@@ -85,7 +87,7 @@
   <section class="card card--panel ce-section" id="rmm-event-log-rules-list" data-ae-section="rules" aria-labelledby="rmm-event-log-rules-heading">
     <header class="ce-section__header"><div class="ce-section__heading">
       <h2 class="card__title" id="rmm-event-log-rules-heading">Rules</h2>
-      <p class="card__subtitle">Rules check each event as a device sends it. Drop rules stop matching events being stored; use a drop rule's <strong>Run now</strong> to delete the matching events already stored. Script rules run an RMM script on the device that sent the event, at most once per cooldown on each device. Schedule rules run a script on the device later, after a delay or at a time of day. Ticket rules raise a ticket for the device's company with the device linked; while that ticket is not closed, new matches on the device are added to it as internal updates. Every condition of a rule must match.</p>
+      <p class="card__subtitle">Rules check each event as a device sends it. Drop rules stop matching events being stored; use a drop rule's <strong>Run now</strong> to delete the matching events already stored. Other rules take their actions in the order you list them, in any combination: raise a ticket for the device's company with the device linked (while it is not closed, new matches on the device are added to it as internal updates), run scripts on the device that sent the event (at most once per cooldown on each device), or schedule scripts for later. Every condition of a rule must match.</p>
     </div></header>
     <div class="ce-section__body">
       {% if rules %}
@@ -107,7 +109,7 @@
               <td data-label="Rule" data-column-key="name"><strong>{{ rule.name }}</strong></td>
               <td data-label="Applies to" data-column-key="scope">{{ rule.scope_label }}</td>
               <td data-label="When" data-column-key="conditions">{% for text in rule.conditions_text %}{{ text }}{% if not loop.last %}<br>and {% endif %}{% endfor %}</td>
-              <td data-label="Then" data-column-key="action">{{ rule.action_label }}{% if rule.action == "run_script" %} <span class="text-muted">(cooldown {{ rule.cooldown_minutes }} min)</span>{% endif %}{% if rule.action == "create_ticket" %} <span class="text-muted">(one open ticket per device)</span>{% endif %}{% if rule.pending %}<br><span class="text-muted">Waiting on {{ rule.pending | length }} device{{ "s" if rule.pending | length != 1 }}, next <span data-utc="{{ rule.pending[0].run_at }}">{{ rule.pending[0].run_at }}</span></span>{% endif %}</td>
+              <td data-label="Then" data-column-key="action">{{ rmm_ui.action_summary(rule) }}{% if "run_script" in (rule.action_types or []) %} <span class="text-muted">(scripts cooldown {{ rule.cooldown_minutes }} min)</span>{% endif %}{% if "create_ticket" in (rule.action_types or []) %} <span class="text-muted">(one open ticket per device)</span>{% endif %}{% if rule.pending %}<br><span class="text-muted">Waiting on {{ rule.pending | length }} device{{ "s" if rule.pending | length != 1 }}, next <span data-utc="{{ rule.pending[0].run_at }}">{{ rule.pending[0].run_at }}</span></span>{% endif %}</td>
               <td data-label="Matches" data-column-key="matches" data-mobile-hidden="true">{{ rule.match_count or 0 }}{% if rule.last_matched_at %} <span class="text-muted">last <span data-utc="{{ rule.last_matched_at }}">{{ rule.last_matched_at }}</span></span>{% endif %}{% if rule.last_run_summary %}<br><span class="text-muted">{{ rule.last_run_summary }}</span>{% endif %}</td>
               <td data-label="Status" data-column-key="status"><span class="status status--{{ 'success' if rule.is_enabled else 'neutral' }}">{{ "On" if rule.is_enabled else "Off" }}</span></td>
               <td class="table__actions" data-column-key="actions">
@@ -202,79 +204,41 @@
         {% endfor %}
       </fieldset>
 
-      <div class="form-grid">
-        <div class="form-field">
-          <label class="form-label" for="rmm-rule-action">Then</label>
-          <select class="form-input" id="rmm-rule-action" name="action">
-            {% for key, label in actions.items() %}<option value="{{ key }}" {% if editing.action == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="rmm-rule-script">Script <span class="text-muted">for “Run a script” and “Schedule a script”</span></label>
-          <select class="form-input" id="rmm-rule-script" name="script_id">
-            <option value="">Choose a script</option>
-            {% for item in scripts %}<option value="{{ item.id }}" {% if editing.script_id == item.id %}selected{% endif %}>{{ item.name }} ({{ item.path }})</option>{% endfor %}
-          </select>
-          <p class="form-help">Rules for every company can only use scripts in the <code>Common</code> folder.</p>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="rmm-rule-timeout">Script timeout <span class="text-muted">seconds</span></label>
-          <input class="form-input" id="rmm-rule-timeout" name="timeout_seconds" type="number" min="30" max="86400" value="{{ editing.timeout_seconds }}">
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="rmm-rule-cooldown">Cooldown <span class="text-muted">minutes</span></label>
-          <input class="form-input" id="rmm-rule-cooldown" name="cooldown_minutes" type="number" min="0" max="10080" value="{{ editing.cooldown_minutes }}">
-          <p class="form-help">For “Run a script”: how long before the script can run again on the same device.</p>
-        </div>
-      </div>
-
-      <fieldset class="rmm-event-log-rule__schedule">
-        <legend class="form-label">When a scheduled script runs <span class="text-muted">for “Schedule a script”</span></legend>
-        <p class="form-help">The script runs on the device that sent the event. While a run is waiting on a device, more matching events there do not schedule another.</p>
-        <div class="form-grid">
-          <div class="form-field">
-            <label class="form-label" for="rmm-rule-schedule-mode">Run it</label>
-            <select class="form-input" id="rmm-rule-schedule-mode" name="schedule_mode">
-              {% for key, label in schedule_modes.items() %}<option value="{{ key }}" {% if editing.schedule_mode == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
-            </select>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="rmm-rule-delay">Delay <span class="text-muted">minutes, for “After a delay”</span></label>
-            <input class="form-input" id="rmm-rule-delay" name="delay_minutes" type="number" min="1" max="10080" value="{{ editing.delay_minutes }}">
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="rmm-rule-run-time">Time of day <span class="text-muted">for “At the next time of day”</span></label>
-            <input class="form-input" id="rmm-rule-run-time" name="run_time" type="time" value="{{ editing.run_time }}">
-            {% if errors.run_time %}<p class="form-error">{{ errors.run_time }}</p>{% endif %}
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="rmm-rule-timezone">Time zone</label>
-            <input class="form-input" id="rmm-rule-timezone" name="schedule_timezone" maxlength="64" value="{{ editing.schedule_timezone }}" placeholder="Australia/Sydney">
-          </div>
+      <fieldset class="rmm-choices rmm-rule-mode"{% if errors.get("action") %} aria-describedby="rmm-rule-error-action"{% endif %}>
+        <legend class="form-label">Then</legend>
+        <div class="rmm-choices__grid rmm-choices__grid--compact">
+          <label class="rmm-choice rmm-choice--compact" for="rmm-rule-mode-drop">
+            <input class="rmm-choice__input" type="radio" id="rmm-rule-mode-drop" name="action" value="drop" data-rmm-rule-mode {% if editing.action == "drop" %}checked{% endif %}>
+            <span class="rmm-choice__title">Drop the event</span>
+            <span class="rmm-choice__text">It is not stored and nothing else happens. A drop rule's Run now deletes the matching events already stored.</span>
+          </label>
+          <label class="rmm-choice rmm-choice--compact" for="rmm-rule-mode-actions">
+            <input class="rmm-choice__input" type="radio" id="rmm-rule-mode-actions" name="action" value="actions" data-rmm-rule-mode {% if editing.action != "drop" %}checked{% endif %}>
+            <span class="rmm-choice__title">Store it and take actions</span>
+            <span class="rmm-choice__text">Raise a ticket, run scripts or schedule them, in the order you list.</span>
+          </label>
         </div>
       </fieldset>
+      {% if errors.get("action") %}<p class="form-help form-help--error rmm-field-error" id="rmm-rule-error-action">{{ errors.get("action") }}</p>{% endif %}
 
-      {% if editing.action in script_actions and script %}
-      {% if script_fields %}
-      <fieldset class="rmm-event-log-rule__values">
-        <legend class="form-label">Script values</legend>
-        <p class="form-help">Given to the script each time the rule runs it. Use <code>{% raw %}{{event.message}}{% endraw %}</code>, <code>{% raw %}{{event.event_id}}{% endraw %}</code> and the other event variables to pass on the event that matched.</p>
-        <div class="form-grid">
-          {% for field in script_fields %}
-          <div class="form-field">
-            <label class="form-label" for="rmm-rule-entry-{{ loop.index }}">{{ field.name }}{% if field.mandatory %} <span class="text-muted">required</span>{% endif %}</label>
-            <input class="form-input" id="rmm-rule-entry-{{ loop.index }}" name="entry:{{ field.key }}" list="rmm-rule-variables" value="{{ field.value }}" {% if field.sensitive %}type="password" autocomplete="new-password"{% endif %} placeholder="{% if field.sensitive and field.value_set %}Saved: leave blank to keep it{% elif field.default %}Default: {{ field.default }}{% endif %}">
-            {% if field.help %}<p class="form-help">{{ field.help }}</p>{% endif %}
-          </div>
-          {% endfor %}
+      <fieldset class="rmm-rule-actions" data-rmm-rule-actions>
+        <legend class="visually-hidden">Actions</legend>
+        {{ action_list({
+          "prefix": "rmm-rule", "context": "rule", "steps": editing.actions, "types": actions, "info": {
+            "create_ticket": "Open one ticket per device; later matches are added to it while it is open.",
+            "run_script": "Run a script on the device that sent the event.",
+            "schedule_script": "Run a script on that device later, such as out of hours.",
+          },
+          "scripts": scripts, "step_scripts": step_scripts, "errors": errors, "schedule_modes": schedule_modes,
+          "variables_id": "rmm-rule-variables", "add_key": add_action_key, "max_steps": max_actions,
+          "blank_steps": blank_actions,
+        }) }}
+        <div class="form-field rmm-rule-actions__cooldown" data-rmm-rule-cooldown>
+          <label class="form-label" for="rmm-rule-cooldown">Run scripts again on a device at most every</label>
+          <div class="rmm-input-unit"><input class="form-input" id="rmm-rule-cooldown" name="cooldown_minutes" type="number" inputmode="numeric" min="0" max="10080" value="{{ editing.cooldown_minutes }}" aria-describedby="rmm-rule-cooldown-help"><span class="rmm-input-unit__suffix" aria-hidden="true">min</span></div>
+          <p class="form-help" id="rmm-rule-cooldown-help">A burst of matching events runs each script once. Tickets and scheduled scripts are not limited by this.</p>
         </div>
       </fieldset>
-      {% else %}
-      <p class="form-help">{{ script.name }} has no parameters or environment variables.</p>
-      {% endif %}
-      {% elif editing.action in script_actions %}
-      <p class="form-help">After choosing a script and saving, its parameters appear here.</p>
-      {% endif %}
 
       <label class="form-checkbox"><input type="checkbox" name="is_enabled" value="1" {% if editing.is_enabled %}checked{% endif %}> Rule is on</label>
       <div class="form-actions">
@@ -303,4 +267,6 @@
 <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_targeting.js') }}" defer></script>
 <script src="{{ static_url('/static/js/rmm_event_rule_targeting.js') }}" defer></script>
+<script src="{{ static_url('/static/js/rmm_action_steps.js') }}" defer></script>
+<script src="{{ static_url('/static/js/rmm_event_rule_actions.js') }}" defer></script>
 {% endblock %}

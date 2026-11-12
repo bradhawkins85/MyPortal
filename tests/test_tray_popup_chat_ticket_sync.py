@@ -54,7 +54,7 @@ async def test_popup_chat_send_message_syncs_linked_ticket(monkeypatch):
 
     async def fake_get_device_by_id(device_id: int) -> dict[str, object]:
         assert device_id == 7
-        return {"hostname": "CLIENT-PC"}
+        return {"hostname": "CLIENT-PC", "status": "active"}
 
     async def fake_add_message(**kwargs):
         assert kwargs["room_id"] == 42

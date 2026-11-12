@@ -128,6 +128,19 @@
           <p class="form-help">System runs with full rights on the device (LocalSystem on Windows, root on macOS and Linux). Logged in user runs as whoever is signed in, with their rights, profile and drive mappings; the run fails if nobody is signed in. Starts on the script's default.</p>
           <p class="form-help form-help--error" data-rmm-error="run_as" hidden></p>
         </div>
+        <fieldset class="rmm-fieldset rmm-when" data-rmm-when-section hidden>
+          <legend class="form-label">When</legend>
+          <div class="rmm-segmented" role="radiogroup" aria-label="When to run the script">
+            <label class="rmm-segmented__option"><input type="radio" name="rmm-when" value="now" checked data-rmm-when /><span>Now</span></label>
+            <label class="rmm-segmented__option"><input type="radio" name="rmm-when" value="later" data-rmm-when /><span>Later</span></label>
+          </div>
+          <div class="form-field" data-rmm-later-field hidden>
+            <label class="form-label" for="rmm-scheduled-for">Date and time</label>
+            <input class="form-input rmm-when__input" id="rmm-scheduled-for" type="datetime-local" step="60" aria-describedby="rmm-scheduled-for-help" data-rmm-scheduled-for />
+            <p class="form-help" id="rmm-scheduled-for-help" data-rmm-scheduled-for-help>In your time zone. The script is sent to each device at this time; until then you can cancel it from the run history. The offline wait timeout starts at this time.</p>
+            <p class="form-help form-help--error" data-rmm-error="scheduled_for" hidden></p>
+          </div>
+        </fieldset>
         <p class="form-help form-help--error" data-rmm-error="form" role="alert" hidden></p>
       </div>
 

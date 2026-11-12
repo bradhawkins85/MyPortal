@@ -68,6 +68,7 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(main_module.user_company_repo, "list_companies_for_user", fake_list_companies_for_user)
     monkeypatch.setattr(main_module.user_company_repo, "get_user_company", fake_get_user_company)
     monkeypatch.setattr(main_module.modules_service, "list_modules", fake_list_modules)
+    monkeypatch.setattr(main_module.m365_jobs_service, "stop_worker", AsyncMock(return_value=None))
 
 
 @pytest.fixture
@@ -824,3 +825,80 @@ def test_bulk_redistribute_rejects_invalid_hour(super_admin_context, csrf_sessio
     flash_cookie = response.headers.get("set-cookie", "")
     assert "_flash=" in flash_cookie
     assert "error" in flash_cookie
+
+
+def test_bulk_create_billing_tasks_queue_after_latest_existing_task(
+    super_admin_context, csrf_session, monkeypatch
+):
+    """Bulk-created invoice tasks take the next free month-end slots."""
+    created = []
+
+    async def fake_list_companies():
+        return [{"id": 1, "name": "Acme"}, {"id": 2, "name": "Globex"}]
+
+    async def fake_list_tasks(include_inactive=False):
+        assert include_inactive is True
+        return [
+            {"command": "generate_invoice", "cron": "3 18 L * *"},
+            {"command": "sync_to_xero", "cron": "5 18 L * *"},
+        ]
+
+    async def fake_create_task(**kwargs):
+        created.append(kwargs)
+
+    async def fake_refresh():
+        return None
+
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "list_tasks", fake_list_tasks)
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "create_task", fake_create_task)
+    monkeypatch.setattr(main_module.scheduler_service, "refresh", fake_refresh)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/admin/scheduled-tasks/bulk-create",
+            data={
+                "command": "generate_invoice",
+                "cron": "",
+                "companyIds": ["1", "2"],
+                "active": "on",
+                "_csrf": csrf_session.csrf_token,
+            },
+        )
+
+    assert response.status_code == 303
+    assert [task["cron"] for task in created] == ["4 18 L * *", "6 18 L * *"]
+
+
+def test_scheduled_tasks_page_defaults_next_invoice_slot(super_admin_context, monkeypatch):
+    """The editor's default schedule follows the latest generate_invoice task."""
+    import json
+    import re
+
+    calls = []
+
+    async def fake_list_tasks(include_inactive=False):
+        calls.append(include_inactive)
+        if not include_inactive:
+            return []
+        return [{"id": 9, "name": "Paused", "command": "generate_invoice", "cron": "3 18 L * *", "active": False}]
+
+    async def fake_list_companies():
+        return []
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "list_tasks", fake_list_tasks)
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/scheduled-tasks")
+
+    assert response.status_code == 200
+    match = re.search(
+        r'<script type="application/json" id="scheduled-tasks-data">(.*?)</script>',
+        response.text,
+        re.S,
+    )
+    data = json.loads(match.group(1))
+    assert data["commandDefaults"]["generate_invoice"] == "4 18 L * *"
+    assert data["commandDefaults"]["sync_to_xero"] == "1 15 L * *"
+    assert True in calls

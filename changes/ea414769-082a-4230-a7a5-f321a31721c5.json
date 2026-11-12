@@ -1,0 +1,7 @@
+{
+  "guid": "ea414769-082a-4230-a7a5-f321a31721c5",
+  "occurred_at": "2026-11-12T00:02Z",
+  "change_type": "Feature",
+  "summary": "Super admins can now review every processor model in use on the new Assets \u2192 CPU launch dates page and add or correct launch dates by hand, with a preview of the age each device will get.",
+  "content_hash": "f65b4ef313bffb756cdabc332809780c6798146148ef92b50a3aaf87a62a21e9"
+}

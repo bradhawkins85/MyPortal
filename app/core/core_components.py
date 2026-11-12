@@ -126,8 +126,8 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
     CoreComponent(
         "outlook_contacts",
         "Outlook Contacts",
-        "My Profile Outlook contacts connection and the ticket "
-        "\"Check Outlook contacts\" lookup.",
+        "My Profile Outlook contacts connection, the ticket "
+        "\"Check Outlook contacts\" lookup and \"Send To Outlook\".",
         ("/admin/profile/m365-contacts", "/api/profile/m365-contacts"),
     ),
     CoreComponent(

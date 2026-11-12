@@ -118,7 +118,7 @@ async def test_delayed_event_action_rechecks_device_rules(target_db, monkeypatch
         conditions=[{"field": "event_id", "operator": "is", "value": "7"}], user_id=9, is_super_admin=False)
     _, stats = await event_rules.apply(first, [_entry(1, event_id=7)])
     assert stats["scheduled"] == 1
-    await target_db.execute("UPDATE rmm_event_log_rule_pending SET run_at = '2000-01-01 00:00:00'")
+    await target_db.execute("UPDATE rmm_event_log_rule_action_schedules SET run_at = '2000-01-01 00:00:00'")
     await target_db.execute("UPDATE rmm_event_log_rules SET target_rules_json = %s WHERE id = %s",
         (json.dumps(group("and", condition("agent.id", value=999999))), rule_id))
     assert await event_rules.run_due_scheduled() == 0

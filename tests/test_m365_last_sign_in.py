@@ -132,6 +132,7 @@ async def test_sync_staff_assignments_stores_last_sign_in_on_create():
     with (
         patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
         patch.object(m365_service.staff_repo, "get_staff_by_company_and_email", AsyncMock(return_value=None)),
+        patch.object(m365_service.staff_repo, "get_pending_staff_request_by_name", AsyncMock(return_value=None)),
         patch.object(m365_service.staff_repo, "create_staff", side_effect=mock_create_staff),
         patch.object(m365_service.license_repo, "link_staff_to_license", AsyncMock()),
         patch.object(m365_service.license_repo, "list_staff_for_license", AsyncMock(return_value=[])),

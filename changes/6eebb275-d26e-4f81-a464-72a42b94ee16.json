@@ -1,0 +1,7 @@
+{
+  "guid": "6eebb275-d26e-4f81-a464-72a42b94ee16",
+  "occurred_at": "2026-11-09T11:53Z",
+  "change_type": "Security",
+  "summary": "Install tokens can no longer re-key tray devices that are already in use, the Windows tray removes the saved install token after enrolling, and each tray device is limited to one connected RMM agent.",
+  "content_hash": "e61e19864088e3683d0e09740f3c0113a12431919a83418cb4bea90a4dfaab25"
+}

@@ -3,22 +3,58 @@
 package ipc
 
 import (
+	"fmt"
 	"net"
-	"os"
+	"time"
+
+	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
 )
 
+// pipeSDDL lets SYSTEM and Administrators own the pipe and signed-in users
+// connect to it. The pipe is created with FILE_CREATE (first instance), so
+// a process that created the name first makes the service fail and retry
+// rather than share the pipe with it.
+const pipeSDDL = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)"
+
 func listenPlatform(path string) (net.Listener, error) {
-	// Named pipe support requires github.com/Microsoft/go-winio which is
-	// an optional build dependency.  For the MVP we fall back to TCP
-	// localhost so the code compiles and runs on Windows without cgo.
-	return net.Listen("tcp", "127.0.0.1:47832")
+	return winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: pipeSDDL})
 }
 
-func dialPlatform(_ string) (net.Conn, error) {
-	return net.Dial("tcp", "127.0.0.1:47832")
+func dialPlatform(path string) (net.Conn, error) {
+	timeout := 5 * time.Second
+	conn, err := winio.DialPipe(path, &timeout)
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyPipeServer(conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
-func removeSocket(_ string) {
-	// Nothing to remove on Windows (TCP).
-	_ = os.DevNull
+// verifyPipeServer checks the pipe is owned by LocalSystem or the
+// Administrators group, so the UI never takes chats or notifications from a
+// standard user's impostor pipe. It reads the pipe's owner rather than the
+// server process token, which standard users are not allowed to open.
+func verifyPipeServer(conn net.Conn) error {
+	f, ok := conn.(interface{ Fd() uintptr })
+	if !ok {
+		return fmt.Errorf("ipc: pipe handle unavailable")
+	}
+	sd, err := windows.GetSecurityInfo(windows.Handle(f.Fd()), windows.SE_KERNEL_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return fmt.Errorf("ipc: pipe owner: %w", err)
+	}
+	owner, _, err := sd.Owner()
+	if err != nil || owner == nil {
+		return fmt.Errorf("ipc: pipe owner: %v", err)
+	}
+	if owner.IsWellKnown(windows.WinLocalSystemSid) || owner.IsWellKnown(windows.WinBuiltinAdministratorsSid) {
+		return nil
+	}
+	return fmt.Errorf("ipc: pipe is owned by %s, not LocalSystem or Administrators", owner.String())
 }
+
+func removeSocket(_ string) {}

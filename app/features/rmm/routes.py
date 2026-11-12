@@ -50,6 +50,7 @@ from app.services import audit as audit_service
 from app.services import gitea
 from app.services import gitea_sign_in
 from app.services import rmm_agent_deploy
+from app.services import rmm_agent_key
 from app.services import rmm_agent_uninstall
 from app.services import rmm_automation
 from app.services import rmm_checks
@@ -695,6 +696,11 @@ class RunRequest(BaseModel):
     timeout_seconds: int | None = None
     queue_timeout_seconds: int | None = Field(default=None, ge=0, le=rmm_scripts.MAX_QUEUE_TIMEOUT_SECONDS)
     run_as: Literal["system", "user"] | None = None
+    scheduled_for: datetime | None = Field(
+        default=None,
+        description="Run later: the ISO 8601 date and time to send the script to the devices. "
+        "Times without an offset are UTC. Omit to run now.",
+    )
 
 
 @router.post("/api/rmm/scripts/{script_id:int}/runs", summary="Push a script to one or more devices")
@@ -712,6 +718,7 @@ async def run_script_api(
             queue_timeout_seconds=payload.queue_timeout_seconds,
             requested_by_user_id=user.get("id"),
             run_as=payload.run_as,
+            scheduled_for=payload.scheduled_for,
         )
     except rmm_scripts.RunRequestError as exc:
         return JSONResponse({"detail": "Check the highlighted fields.", "errors": exc.errors}, status_code=400)
@@ -728,6 +735,7 @@ async def run_script_api(
                 "runs": [item["run_id"] for item in result["queued"]],
                 "assets": [item["asset_id"] for item in result["queued"]],
                 "run_as": result["run_as"],
+                "scheduled_for": result["scheduled_for"],
             },
         )
     return result
@@ -1046,6 +1054,26 @@ class AgentDetails(BaseModel):
 
 class AgentEnrolRequest(AgentDetails):
     agent_uid: str = Field(min_length=8, max_length=64)
+    current_auth_token: str | None = Field(
+        default=None,
+        max_length=200,
+        description="The agent's existing auth token, proving it is the agent being re-enrolled.",
+    )
+    public_key: str | None = Field(
+        default=None,
+        max_length=64,
+        description="The agent's Ed25519 public key (32 bytes, base64).",
+    )
+    key_proof: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Signature by the agent's registered key over myportal-rmm-enrol-v1, the agent UID, "
+        "the SHA-256 of current_auth_token and public_key. Needed to re-key an agent that is in use.",
+    )
+
+
+class AgentKeyRequest(BaseModel):
+    public_key: str = Field(min_length=40, max_length=64, description="Ed25519 public key, base64")
 
 
 @router.post("/api/rmm/agent/enrol", summary="Enrol the RMM agent installed with a tray device")
@@ -1071,6 +1099,32 @@ async def agent_enrol(payload: AgentEnrolRequest, request: Request, tray_device:
     if result.pop("created", False):
         await rmm_automation.on_agent_enrolled(int(result["agent_id"]))
     return result
+
+
+@router.post(
+    "/api/rmm/agent/key",
+    summary="Register the RMM agent's public key",
+    responses={409: {"description": "A different key is already registered for this agent"}},
+)
+async def agent_register_key(payload: AgentKeyRequest, request: Request, agent: dict = Depends(get_current_rmm_agent)):
+    """Register the Ed25519 public key of an agent enrolled by an older release.
+    The first key is kept; re-enrolling the agent replaces it."""
+    try:
+        result = await rmm_agent_key.register(agent, payload.public_key)
+    except PermissionError as exc:
+        await audit_service.record(
+            action="rmm.agent.key_conflict", request=request, entity_type="rmm_agent",
+            entity_id=agent.get("id"), actor="rmm-agent",
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if result == "registered":
+        await audit_service.record(
+            action="rmm.agent.key_registered", request=request, entity_type="rmm_agent",
+            entity_id=agent.get("id"), actor="rmm-agent",
+        )
+    return {"status": result}
 
 
 @router.post("/api/rmm/agent/checkin", summary="Report RMM agent details")

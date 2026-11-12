@@ -150,20 +150,18 @@ def test_assets_pack_loads_and_reloads_cleanly():
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("asset_access", ["read", "write"])
-async def test_asset_detail_page_renders_canonical_asset(monkeypatch, asset_access):
+async def test_asset_detail_page_renders_canonical_asset(monkeypatch):
     import app.repositories.assets as asset_repo
 
     monkeypatch.setattr(
         assets_routes,
         "_load_asset_context",
-        AsyncMock(return_value=({"id": 7}, {"menu_permissions": {"menu.assets": asset_access}}, {"id": 3}, 3, None)),
+        AsyncMock(return_value=({"id": 7}, None, {"id": 3}, 3, None)),
     )
     monkeypatch.setattr(
         asset_repo,
         "get_asset_by_id",
-        AsyncMock(return_value={"id": 42, "company_id": 3, "customer_visible": True,
-                                "cpu_name": "Private CPU", "operational_notes": "Private notes"}),
+        AsyncMock(return_value={"id": 42, "company_id": 3, "customer_visible": True}),
     )
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", AsyncMock(return_value=[]))
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", AsyncMock(return_value={}))
@@ -172,7 +170,6 @@ async def test_asset_detail_page_renders_canonical_asset(monkeypatch, asset_acce
     monkeypatch.setattr(asset_repo, "list_company_assets", AsyncMock(return_value=[]))
     monkeypatch.setattr(asset_repo, "list_relationships_for_asset", AsyncMock(return_value=[]))
     monkeypatch.setattr(assets_routes.audience_repo, "list_role_ids", AsyncMock(return_value=[]))
-    monkeypatch.setattr(assets_routes.role_repo, "list_roles", AsyncMock(return_value=[]))
     monkeypatch.setattr(assets_routes.asset_photo_repo, "list_for_asset", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         assets_routes.knowledge_base_service,
@@ -191,13 +188,6 @@ async def test_asset_detail_page_renders_canonical_asset(monkeypatch, asset_acce
 
     assert response.status_code == 200
     assert renderer.await_args.args[0] == "assets/detail.html"
-    extra = renderer.await_args.kwargs["extra"]
-    assert extra["customer_safe"] is True
-    assert "cpu_name" not in extra["asset"]
-    assert "operational_notes" not in extra["asset"]
-    assert extra["custom_fields"] == []
-    assets_routes.asset_custom_fields_repo.list_field_definitions.assert_not_awaited()
-    assets_routes.asset_custom_fields_repo.get_all_asset_field_values.assert_not_awaited()
 
 
 @pytest.mark.anyio

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bradhawkins85/myportal-rmm/internal/agentkey"
 	"github.com/bradhawkins85/myportal-rmm/internal/live"
 	"github.com/bradhawkins85/myportal-rmm/internal/state"
 )
@@ -33,7 +34,19 @@ func startLiveSession(ctx context.Context, wg *sync.WaitGroup, active *sync.Map,
 			return
 		}
 		log.Printf("live session %d: connected", id)
-		live.Serve(ctx, conn, id, Version)
+		live.Serve(ctx, conn, id, Version, liveAnswer(st, id))
 		log.Printf("live session %d: ended", id)
 	}()
+}
+
+// liveAnswer signs a live session challenge with the agent's key, or is nil
+// when the agent has no usable key.
+func liveAnswer(st state.State, id int64) func(string) string {
+	key, err := agentkey.Parse(st.PrivateKey)
+	if err != nil {
+		return nil
+	}
+	return func(nonce string) string {
+		return agentkey.Sign(key, agentkey.LiveMessage(st.AgentUID, id, nonce))
+	}
 }

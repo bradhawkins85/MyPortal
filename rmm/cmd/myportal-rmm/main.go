@@ -36,6 +36,7 @@ import (
 
 	"github.com/kardianos/service"
 
+	"github.com/bradhawkins85/myportal-rmm/internal/agentkey"
 	"github.com/bradhawkins85/myportal-rmm/internal/checks"
 	"github.com/bradhawkins85/myportal-rmm/internal/client"
 	"github.com/bradhawkins85/myportal-rmm/internal/eventlog"
@@ -141,23 +142,90 @@ func enrol(args []string) error {
 	if !strings.HasPrefix(strings.ToLower(*portal), "https://") && os.Getenv("MYPORTAL_RMM_ALLOW_HTTP") != "1" {
 		return errors.New("--url must use https://")
 	}
+	prepareStateDir()
 	existing, err := state.Load()
 	uid := existing.AgentUID
+	currentToken := ""
+	if existing.PortalURL == strings.TrimRight(*portal, "/") {
+		currentToken = existing.AuthToken
+	}
 	if err != nil || uid == "" {
 		uid = newUID()
+		currentToken = ""
+	}
+	encodedKey, enrolKey, err := enrolmentKey(existing, uid, currentToken)
+	if err != nil {
+		return err
 	}
 	r := runner.New(os.TempDir())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	result, err := client.Enrol(ctx, *portal, token, uid, details(r))
+	result, err := client.Enrol(ctx, *portal, token, uid, currentToken, enrolKey, details(r))
 	if err != nil {
 		return err
 	}
-	if err := state.Save(state.State{PortalURL: strings.TrimRight(*portal, "/"), AgentUID: result.AgentUID, AuthToken: result.AuthToken}); err != nil {
+	if err := state.Save(state.State{
+		PortalURL:  strings.TrimRight(*portal, "/"),
+		AgentUID:   result.AgentUID,
+		AuthToken:  result.AuthToken,
+		PrivateKey: encodedKey,
+	}); err != nil {
 		return err
 	}
 	log.Printf("enrolled as %s; state saved to %s", result.AgentUID, state.Path())
 	return nil
+}
+
+// enrolmentKey keeps the agent's existing key (or makes one) and, when
+// re-keying with the current token, signs the request with that key so
+// MyPortal knows this is the agent's own installation.
+func enrolmentKey(existing state.State, uid, currentToken string) (string, client.EnrolKey, error) {
+	key, err := agentkey.Parse(existing.PrivateKey)
+	encoded := existing.PrivateKey
+	if err != nil || existing.AgentUID != uid {
+		if key, encoded, err = agentkey.New(); err != nil {
+			return "", client.EnrolKey{}, err
+		}
+		// A new key cannot prove anything about an earlier enrolment.
+		return encoded, client.EnrolKey{PublicKey: agentkey.PublicKey(key)}, nil
+	}
+	public := agentkey.PublicKey(key)
+	enrolKey := client.EnrolKey{PublicKey: public}
+	if currentToken != "" {
+		enrolKey.Proof = agentkey.Sign(key, agentkey.EnrolMessage(uid, currentToken, public))
+	}
+	return encoded, enrolKey, nil
+}
+
+// ensureAgentKey gives an agent enrolled by an older release its own key and
+// registers it with MyPortal. MyPortal keeps the first key it receives, so
+// later starts just confirm it.
+func ensureAgentKey(ctx context.Context, api *client.Client, st *state.State) {
+	if _, err := agentkey.Parse(st.PrivateKey); err != nil {
+		_, encoded, err := agentkey.New()
+		if err != nil {
+			log.Printf("could not make the agent key: %v", err)
+			return
+		}
+		updated := *st
+		updated.PrivateKey = encoded
+		if err := state.Save(updated); err != nil {
+			log.Printf("could not save the agent key: %v", err)
+			return
+		}
+		*st = updated
+	}
+	key, _ := agentkey.Parse(st.PrivateKey)
+	regCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	switch err := api.RegisterKey(regCtx, agentkey.PublicKey(key)); {
+	case err == nil:
+	case errors.Is(err, client.ErrKeyUnsupported):
+	case errors.Is(err, client.ErrKeyConflict):
+		log.Printf("MyPortal holds a different key for this agent; live sessions will be refused until it is re-enrolled")
+	default:
+		log.Printf("could not register the agent key: %v", err)
+	}
 }
 
 type program struct {
@@ -328,8 +396,21 @@ func jitter(d time.Duration) time.Duration {
 	return d*3/4 + mrand.N(d/2+1)
 }
 
+// prepareStateDir locks the state folder down before anything is read from
+// it, and logs anything removed because the service did not create it.
+func prepareStateDir() {
+	removed, err := state.Prepare()
+	if err != nil {
+		log.Printf("could not secure the state folder %s: %v", state.Dir(), err)
+	}
+	for _, p := range removed {
+		log.Printf("removed %s from the state folder: it was a link or was not created by the service", p)
+	}
+}
+
 // loop polls MyPortal for runs until ctx is cancelled.
 func loop(ctx context.Context) {
+	prepareStateDir()
 	var st state.State
 	for {
 		var err error
@@ -347,6 +428,7 @@ func loop(ctx context.Context) {
 	_ = os.MkdirAll(workDir, 0o700)
 	r := runner.New(workDir)
 	api := client.New(st.PortalURL, st.AuthToken)
+	ensureAgentKey(ctx, api, &st)
 	r.DownloadFile = api.DownloadRunFile
 	slots := make(chan struct{}, maxConcurrent)
 	runs := newRunTracker()

@@ -128,3 +128,81 @@ def test_tenant_id_falls_back_to_access_token_for_older_responses(monkeypatch):
     assert user_m365_contacts.tenant_id_from_token_response(
         {"access_token": "jwt-access-token"}
     ) == "tenant-legacy"
+
+
+def _graph_contacts_client(monkeypatch, response: httpx.Response) -> None:
+    monkeypatch.setattr(
+        user_m365_contacts, "acquire_access_token", AsyncMock(return_value="technician-access-token"),
+    )
+    async_client = httpx.AsyncClient
+
+    async def graph(request: httpx.Request) -> httpx.Response:
+        return response
+
+    monkeypatch.setattr(
+        user_m365_contacts.httpx,
+        "AsyncClient",
+        lambda **kwargs: async_client(transport=httpx.MockTransport(graph), **kwargs),
+    )
+
+
+@pytest.mark.anyio
+async def test_lookup_phones_asks_to_reconnect_when_graph_denies_contacts(monkeypatch):
+    _graph_contacts_client(monkeypatch, httpx.Response(403, json={
+        "error": {"code": "ErrorAccessDenied", "message": "Access is denied. Check credentials and try again."},
+    }))
+
+    with pytest.raises(user_m365_contacts.ReconnectRequired) as exc_info:
+        await user_m365_contacts.lookup_phones(42, "Ada Lovelace")
+
+    message = str(exc_info.value)
+    assert "Reconnect Outlook contacts" in message
+    assert "403" in message and "ErrorAccessDenied" in message
+
+
+@pytest.mark.anyio
+async def test_lookup_phones_explains_a_missing_mailbox(monkeypatch):
+    _graph_contacts_client(monkeypatch, httpx.Response(404, json={
+        "error": {"code": "MailboxNotEnabledForRESTAPI", "message": "The mailbox is either inactive or on-premise."},
+    }))
+
+    with pytest.raises(ValueError) as exc_info:
+        await user_m365_contacts.lookup_phones(42, "Ada Lovelace")
+
+    message = str(exc_info.value)
+    assert "mailbox" in message
+    assert "MailboxNotEnabledForRESTAPI" in message
+
+
+@pytest.mark.anyio
+async def test_lookup_phones_reports_unexpected_graph_errors(monkeypatch):
+    _graph_contacts_client(monkeypatch, httpx.Response(400, json={
+        "error": {"code": "BadRequest", "message": "Invalid request."},
+    }))
+
+    with pytest.raises(ValueError) as exc_info:
+        await user_m365_contacts.lookup_phones(42, "Ada Lovelace")
+
+    assert str(exc_info.value) == "Unable to read Outlook contacts (Microsoft Graph HTTP 400 BadRequest)"
+
+
+@pytest.mark.anyio
+async def test_lookup_phones_reports_graph_errors_without_a_json_body(monkeypatch):
+    _graph_contacts_client(monkeypatch, httpx.Response(401, text="Unauthorized"))
+
+    with pytest.raises(user_m365_contacts.ReconnectRequired) as exc_info:
+        await user_m365_contacts.lookup_phones(42, "Ada Lovelace")
+
+    assert "HTTP 401" in str(exc_info.value)
+
+
+@pytest.mark.anyio
+async def test_upsert_contact_reports_why_graph_refused_the_contact_read(monkeypatch):
+    _graph_contacts_client(monkeypatch, httpx.Response(403, json={
+        "error": {"code": "ErrorAccessDenied", "message": "Access is denied."},
+    }))
+
+    with pytest.raises(user_m365_contacts.ReconnectRequired) as exc_info:
+        await user_m365_contacts.upsert_contact(42, {"first_name": "Ada", "email": "ada@example.com"})
+
+    assert "ErrorAccessDenied" in str(exc_info.value)

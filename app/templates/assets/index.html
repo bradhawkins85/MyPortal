@@ -64,6 +64,7 @@
   {% endif %}
   {% if is_super_admin %}
     {% set _ = asset_actions.append({"label": "Settings", "type": "link", "href": "/assets/settings"}) %}
+    {% set _ = asset_actions.append({"label": "CPU launch dates", "type": "link", "href": "/assets/cpu-launch-dates", "attrs": {"title": "Review the processor launch dates used to estimate each device's age"}}) %}
     {% if show_tags %}{% set _ = asset_actions.append({"label": "Tags", "type": "link", "href": "/admin/tags"}) %}{% endif %}
   {% endif %}
   {% set _ = asset_actions.append({"label": "Network devices", "type": "link", "href": "/devices"}) %}
@@ -143,6 +144,18 @@
                     {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
                   >
                     {% if value %}{{ value }}{% else %}<span class="text-muted">—</span>{% endif %}
+                  </td>
+                {% elif key == 'health_score' %}
+                  <td
+                    data-label="{{ column.label }}"
+                    data-column="{{ key }}"
+                    data-value="{{ asset.get('health_score_sort', '') }}"
+                    {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+                  >
+                    {% if value is not none and asset.health_check_url %}
+                      {% set health_variant = {'healthy': 'success', 'attention': 'warning', 'critical': 'danger'}.get(asset.health_check_status, 'neutral') %}
+                      <a class="status status--{{ health_variant }}" href="{{ asset.health_check_url }}" title="Open the latest health check report">{{ value }}/100</a>
+                    {% else %}<span class="text-muted">—</span>{% endif %}
                   </td>
                 {% elif key == 'last_sync' %}
                   <td
@@ -315,6 +328,7 @@
 <div class="rmm-remote__status rmm-remote__status--floating" data-rmm-remote-status role="status" aria-live="polite" hidden>
   <span data-rmm-remote-message></span>
   <a class="button button--primary button--small" data-rmm-remote-link href="#" target="_blank" rel="noopener noreferrer" hidden>Open</a>
+  <button type="button" class="rmm-remote__dismiss" data-rmm-remote-dismiss aria-label="Dismiss remote control status"><span aria-hidden="true">&times;</span></button>
 </div>
 <div data-rmm-page hidden>
   <script type="application/json" id="rmm-config">{{ {"can_run": true, "asset_id": None} | tojson }}</script>

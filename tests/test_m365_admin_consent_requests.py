@@ -189,8 +189,9 @@ def test_catalog_and_permission_contract():
 @pytest.mark.anyio
 async def test_permission_repair_discovers_and_grants_consent_role(tenant, monkeypatch):
     principal_id = "11111111-1111-4111-8111-111111111111"
-    role_id = "22222222-2222-4222-8222-222222222222"
-    assigned = [{"appRoleId": role} for role in m365._PROVISION_APP_ROLES]
+    # Published Microsoft Graph application role ID for this permission.
+    role_id = "999f8c63-0a38-4f1b-91fd-ed1947bdd1a9"
+    assigned = [{"appRoleId": role} for role in m365._PROVISION_APP_ROLES if role != role_id]
 
     async def get(_token, url):
         if "appRoleAssignments" in url:

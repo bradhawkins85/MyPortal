@@ -46,12 +46,12 @@
     {% if ver.server_installers %}
     <div class="ce-subsection" aria-labelledby="tray-version-server-title">
       <h3 id="tray-version-server-title">Installers on this server</h3>
-      <p class="form-help">Downloaded from GitHub Releases and served by MyPortal. Publish one so tray apps update themselves from this server; its SHA-256 is published with it and checked on each device before it runs.</p>
+      <p class="form-help">Downloaded from GitHub Releases and served by MyPortal. Publish one so tray apps update themselves from this server; its SHA-256 is published with it and checked on each device before it runs. Devices also check the release signature, so they only install an installer marked <em>Signed</em>.</p>
       <div class="table-wrapper">
       <table class="data-table">
         <caption class="visually-hidden">Tray installers cached on this server</caption>
         <thead>
-          <tr><th scope="col">Installer</th><th scope="col">Version</th><th scope="col">Platform</th><th scope="col" class="data-table__col--actions">Actions</th></tr>
+          <tr><th scope="col">Installer</th><th scope="col">Version</th><th scope="col">Platform</th><th scope="col">Signature</th><th scope="col" class="data-table__col--actions">Actions</th></tr>
         </thead>
         <tbody>
           {% for inst in ver.server_installers %}
@@ -59,6 +59,13 @@
               <td><code>{{ inst.name }}</code></td>
               <td><strong>{{ inst.version }}</strong></td>
               <td>{{ inst.platform }}</td>
+              <td>
+                {% if inst.signature %}
+                  <span class="status status--success">Signed</span>
+                {% else %}
+                  <span class="status status--warning" title="Approve the Sign release run on GitHub; the next installer download picks the signature up.">Not signed yet</span>
+                {% endif %}
+              </td>
               <td class="data-table__col--actions">
                 <form method="post" action="/admin/tray/versions" class="inline-form">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

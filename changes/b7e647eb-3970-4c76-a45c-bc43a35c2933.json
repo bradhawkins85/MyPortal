@@ -1,0 +1,7 @@
+{
+  "guid": "b7e647eb-3970-4c76-a45c-bc43a35c2933",
+  "occurred_at": "2026-11-10T02:06Z",
+  "change_type": "Security",
+  "summary": "Only super administrators and MyPortal can change the files that link Gitea script folders to companies; Common and company scripts stay editable by technicians",
+  "content_hash": "bf96fe97874fb3f7e93ede631bc59ff634cebc2dbc2a51dd738b0e23c0f2b99c"
+}

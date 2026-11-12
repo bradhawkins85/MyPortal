@@ -9,7 +9,7 @@ import (
 	"github.com/webview/webview_go"
 )
 
-func openBrowser(url string) {
+func launchURL(url string) {
 	_ = exec.Command("open", url).Start()
 }
 

@@ -130,6 +130,49 @@ def test_company_admin_sees_authorised_menu_items(company_admin_context):
     assert "Log out" in html
 
 
+@pytest.mark.parametrize(
+    "is_super_admin,has_admin_technician_access,membership,is_helpdesk_technician,rmm_enabled,visible",
+    [
+        (False, False, {}, False, True, False),
+        (False, False, {"is_admin": True}, False, True, False),
+        (False, False, {"menu_permissions": {"menu.tickets": "write"}}, True, True, False),
+        (False, True, {}, True, True, True),
+        (True, False, {}, False, True, True),
+        (True, True, {}, True, False, False),
+        (False, True, {}, True, False, False),
+    ],
+)
+@pytest.mark.parametrize("llm_search_available", [False, True])
+def test_downloads_and_search_menus_are_reserved_for_technician_admins(
+    is_super_admin, has_admin_technician_access, membership,
+    is_helpdesk_technician, rmm_enabled, visible, llm_search_available,
+):
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+    env = Environment(loader=FileSystemLoader("app/templates"), autoescape=select_autoescape(["html"]))
+    env.globals["static_url"] = lambda path: path
+    env.globals["feature_pack_available"] = lambda slug: rmm_enabled if slug == "rmm" else True
+    html = env.get_template("base.html").render(
+        current_user={"id": 2, "is_super_admin": is_super_admin},
+        active_membership=membership,
+        has_admin_technician_access=has_admin_technician_access,
+        is_helpdesk_technician=is_helpdesk_technician,
+        llm_search_available=llm_search_available,
+        module_enabled={},
+        menu_access=membership.get("menu_permissions", {}),
+        available_companies=[],
+        cart_summary={"item_count": 0, "total_quantity": 0, "subtotal": 0},
+        notification_unread_count=0,
+        plausible_config={"enabled": False},
+        csrf_token="csrf-token",
+    )
+
+    assert ('href="/downloads"' in html) is visible
+    assert ('href="/search"' in html) is (
+        llm_search_available and (is_super_admin or has_admin_technician_access)
+    )
+
+
 def test_m365_menu_item_has_data_menu_key(monkeypatch):
     """Office 365 expandable menu item must have data-menu-key so it appears in left menu customisation."""
     user = {"id": 1, "email": "admin@example.com", "is_super_admin": False}

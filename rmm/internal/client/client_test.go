@@ -18,14 +18,15 @@ func TestEnrolSendsTrayTokenAndUID(t *testing.T) {
 		}
 		var body map[string]interface{}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["agent_uid"] != "uid-12345678" || body["hostname"] != "pc1" {
+		if body["agent_uid"] != "uid-12345678" || body["hostname"] != "pc1" || body["current_auth_token"] != "old-agent-token" ||
+			body["public_key"] != "pub" || body["key_proof"] != "proof" {
 			http.Error(w, "bad body", http.StatusBadRequest)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"agent_uid": "uid-12345678", "auth_token": "agent-token"})
 	}))
 	defer server.Close()
-	result, err := Enrol(context.Background(), server.URL+"/", "tray-token", "uid-12345678", Details{Hostname: "pc1"}) // gitleaks:allow (test value)
+	result, err := Enrol(context.Background(), server.URL+"/", "tray-token", "uid-12345678", "old-agent-token", EnrolKey{PublicKey: "pub", Proof: "proof"}, Details{Hostname: "pc1"}) // gitleaks:allow (test value)
 	if err != nil || result.AuthToken != "agent-token" {
 		t.Fatalf("Enrol = %#v, %v", result, err)
 	}
@@ -70,5 +71,31 @@ func TestJobsAndReport(t *testing.T) {
 	}
 	if _, err := New(server.URL, "wrong").Jobs(context.Background(), 25*time.Second, nil); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("expected ErrUnauthorized, got %v", err)
+	}
+}
+
+func TestRegisterKey(t *testing.T) {
+	for status, want := range map[int]error{
+		http.StatusOK:       nil,
+		http.StatusNotFound: ErrKeyUnsupported,
+		http.StatusConflict: ErrKeyConflict,
+	} {
+		var sent map[string]string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/rmm/agent/key" || r.Header.Get("Authorization") != "Bearer agent-token" {
+				t.Errorf("request %s with %q", r.URL.Path, r.Header.Get("Authorization"))
+			}
+			_ = json.NewDecoder(r.Body).Decode(&sent)
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte("{}"))
+		}))
+		err := New(server.URL, "agent-token").RegisterKey(context.Background(), "pub")
+		server.Close()
+		if !errors.Is(err, want) || (want == nil && err != nil) {
+			t.Errorf("HTTP %d: err = %v, want %v", status, err, want)
+		}
+		if sent["public_key"] != "pub" {
+			t.Errorf("HTTP %d: sent %v", status, sent)
+		}
 	}
 }

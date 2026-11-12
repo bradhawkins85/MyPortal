@@ -1,6 +1,8 @@
 {#- Add or edit an RMM check (rmm/checks.html). Driven by static/js/rmm_checks.js:
-    the check type, scope, device selection and action choices show only the
-    settings they use, and a summary says in words when the check fails. -#}
+    the check type, scope and device selection show only the settings they use,
+    and a summary says in words when the check fails. What happens when it fails
+    is an ordered list of actions (rmm/_action_steps.html, rmm_action_steps.js). -#}
+{% from "rmm/_action_steps.html" import action_list %}
 {% set e = editing %}
 {% set type_info = {
   "disk": ("Free space on a drive or mount point runs low.", "M4 6h16v12H4zM4 14h16M7 17h.01"),
@@ -17,11 +19,10 @@
   "offline": ("The device's agent stops checking in.", "M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5.2-2.8M19 13a10 10 0 0 0-2.4-1.6M2 9.5a15 15 0 0 1 4.3-2.7M12 20h.01"),
 } %}
 {% set action_info = {
-  "none": "Record the result on the device. Nobody is alerted.",
-  "run_script": "Run a script on the device as soon as the check fails.",
+  "create_ticket": "Open one ticket per device and update it when the check passes again.",
+  "run_script": "Run a script on the device straight away.",
   "schedule_script": "Run a script on the device later, such as out of hours.",
   "install_choco": "Install a package from the company’s enabled Chocolatey sources. Windows devices only.",
-  "create_ticket": "Open one ticket per device and update it when the check passes again.",
 } %}
 {#- The control each server error belongs to, for the error summary's links. -#}
 {% set error_targets = {
@@ -44,9 +45,8 @@
   "proxmox_condition": "rmm-check-proxmox-condition", "proxmox_target": "rmm-check-proxmox-target", "proxmox_threshold": "rmm-check-proxmox-threshold",
   "package_id": "rmm-check-package-id",
   "check_script_id": "rmm-check-script", "script_expect": "rmm-check-script-expect", "script_value": "rmm-check-script-value",
-  "duration_minutes": "rmm-check-duration", "action": "rmm-check-action-" ~ (e.action or "none"),
-  "script": "rmm-check-action-script", "script_id": "rmm-check-action-script",
-  "action_results": "rmm-check-action-results", "schedule_mode": "rmm-check-schedule-mode", "run_time": "rmm-check-run-time", "timezone": "rmm-check-timezone",
+  "duration_minutes": "rmm-check-duration", "action": "rmm-check-actions", "actions": "rmm-check-actions",
+  "action_results": "rmm-check-action-results",
 } %}
 {% macro field_error(key) -%}
   {%- if errors.get(key) %}<p class="form-help form-help--error rmm-field-error" id="rmm-check-error-{{ key }}">{{ errors.get(key) }}</p>{% endif -%}
@@ -77,7 +77,7 @@
     {% if errors %}
     <div class="alert alert--error rmm-error-summary" role="alert" tabindex="-1" data-rmm-error-summary aria-labelledby="rmm-check-error-summary-title">
       <h3 class="rmm-error-summary__title" id="rmm-check-error-summary-title">{{ "Fix this to save the check" if errors | length == 1 else "Fix these " ~ (errors | length) ~ " things to save the check" }}</h3>
-      <ul>{% for key, message in errors.items() %}<li>{% if error_targets.get(key) %}<a href="#{{ error_targets.get(key) }}">{{ message }}</a>{% else %}{{ message }}{% endif %}</li>{% endfor %}</ul>
+      <ul>{% for key, message in errors.items() %}{% set target = error_targets.get(key) or ("rmm-check-" ~ key if key.startswith("action-") else "") %}<li>{% if target %}<a href="#{{ target }}">{{ message }}</a>{% else %}{{ message }}{% endif %}</li>{% endfor %}</ul>
     </div>
     {% endif %}
 
@@ -366,6 +366,11 @@
             <label class="form-label" for="rmm-check-script-interval">Run every</label>
             <div class="rmm-input-unit"><input class="form-input" id="rmm-check-script-interval" name="script_interval" type="number" inputmode="numeric" min="5" max="10080" value="{{ e.script_interval }}"><span class="rmm-input-unit__suffix" aria-hidden="true">min</span></div>
           </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-timeout">Script timeout</label>
+            <div class="rmm-input-unit"><input class="form-input" id="rmm-check-timeout" name="timeout_seconds" type="number" inputmode="numeric" min="30" max="86400" value="{{ e.timeout_seconds }}" aria-describedby="rmm-check-timeout-help"><span class="rmm-input-unit__suffix" aria-hidden="true">sec</span></div>
+            <p class="form-help" id="rmm-check-timeout-help">The script is stopped after this long.</p>
+          </div>
         </div>
         <div class="rmm-field-row">
           <div class="form-field">
@@ -477,26 +482,19 @@
 
     {# 4. What happens next #}
     <section class="rmm-form-section" aria-labelledby="rmm-check-step-action">
-      {{ section_head(4, "rmm-check-step-action", "What happens when it fails", "Results always show on the device. You can also act on them.") }}
-      <fieldset class="rmm-choices"{% if errors.get("action") %} aria-describedby="rmm-check-error-action"{% endif %}>
-        <legend class="visually-hidden">When it fails</legend>
-        <div class="rmm-choices__grid rmm-choices__grid--compact">
-          {% for key, label in actions.items() %}
-          <label class="rmm-choice rmm-choice--compact" for="rmm-check-action-{{ key }}">
-            <input class="rmm-choice__input" type="radio" id="rmm-check-action-{{ key }}" name="action" value="{{ key }}" data-rmm-check-action {% if e.action == key %}checked{% endif %}>
-            <span class="rmm-choice__title">{{ label }}</span>
-            <span class="rmm-choice__text">{{ action_info.get(key, "") }}</span>
-          </label>
-          {% endfor %}
-        </div>
-      </fieldset>
-      {{ field_error("action") }}
+      {{ section_head(4, "rmm-check-step-action", "What happens when it fails", "Results always show on the device. Add what should happen as well, in the order it should happen.") }}
+      {{ action_list({
+        "prefix": "rmm-check", "context": "check", "steps": e.actions, "types": actions, "info": action_info,
+        "scripts": scripts, "step_scripts": step_scripts, "errors": errors, "schedule_modes": schedule_modes,
+        "variables_id": "rmm-check-variables", "add_key": add_action_key, "max_steps": max_actions,
+        "blank_steps": blank_actions,
+      }) }}
 
-      <div class="rmm-reveal" data-rmm-show="action:run_script,schedule_script,create_ticket,install_choco">
+      <div class="rmm-reveal" data-rmm-show="action:create_ticket,run_script,schedule_script,install_choco">
         <div class="form-field">
           <label class="form-label" for="rmm-check-action-results">Only act on these results <span class="rmm-optional">optional</span></label>
           <textarea class="form-input rmm-action-results" id="rmm-check-action-results" name="action_results" rows="3" maxlength="4200" spellcheck="false" placeholder="Not installed" data-rmm-action-results{{ invalid("action_results", "rmm-check-action-results-help") }}>{{ e.action_results or "" }}</textarea>
-          <p class="form-help" id="rmm-check-action-results-help">One per line. The action only happens when the check's result contains one of these (case does not matter), so you can install an app when a service is <q>Not installed</q> but not when it is <q>Unknown</q>. Other failures still show on the device. Leave blank to act on every failure.</p>
+          <p class="form-help" id="rmm-check-action-results-help">One per line. The actions only happen when the check's result contains one of these (case does not matter), so you can install an app when a service is <q>Not installed</q> but not when it is <q>Unknown</q>. Other failures still show on the device. Leave blank to act on every failure.</p>
           {{ field_error("action_results") }}
           {% for kind, examples in result_examples.items() %}
           <div class="rmm-result-examples" data-rmm-show="type:{{ kind }}">
@@ -509,100 +507,12 @@
         </div>
       </div>
 
-      <div class="rmm-reveal" data-rmm-show="action:install_choco">
-        <div class="form-field">
-          <label class="form-label" for="rmm-check-package-id">Chocolatey package ID</label>
-          <input class="form-input" id="rmm-check-package-id" name="package_id" maxlength="128" value="{{ e.package_id }}" placeholder="googlechrome" autocomplete="off" spellcheck="false"{{ invalid("package_id", "rmm-check-package-help") }}>
-          <p class="form-help" id="rmm-check-package-help">Use an exact package ID from the company’s enabled sources. Runs on active Windows devices and appears in patch run history. Installs Chocolatey if needed and never automatically reboots.</p>
-          {{ field_error("package_id") }}
-        </div>
-      </div>
-
-      <div class="rmm-reveal" data-rmm-show="action:run_script,schedule_script|type:script">
-        <div class="rmm-field-row">
-          <div class="form-field rmm-field--grow" data-rmm-show="action:run_script,schedule_script">
-            <label class="form-label" for="rmm-check-action-script">Script to run <span class="rmm-required" aria-hidden="true">*</span></label>
-            <select class="form-input" id="rmm-check-action-script" name="script_id" data-rmm-script-select="action" data-rmm-saved-script="{{ e.script_id or '' }}"{{ invalid("script", "rmm-check-action-script-help") }}>
-              <option value="">Choose a script</option>
-              {% for item in scripts %}<option value="{{ item.id }}" {% if e.script_id == item.id %}selected{% endif %}>{{ item.name }} ({{ item.path }})</option>{% endfor %}
-            </select>
-            <p class="form-help" id="rmm-check-action-script-help">Checks for every company can only use scripts in the <code>Common</code> folder.</p>
-            {{ field_error("script") }}
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="rmm-check-timeout">Script timeout</label>
-            <div class="rmm-input-unit"><input class="form-input" id="rmm-check-timeout" name="timeout_seconds" type="number" inputmode="numeric" min="30" max="86400" value="{{ e.timeout_seconds }}" aria-describedby="rmm-check-timeout-help"><span class="rmm-input-unit__suffix" aria-hidden="true">sec</span></div>
-            <p class="form-help" id="rmm-check-timeout-help">The script is stopped after this long.</p>
-          </div>
-        </div>
-      </div>
-
       <div class="rmm-field-row" data-rmm-show="action:run_script,install_choco">
         <div class="form-field">
-          <label class="form-label" for="rmm-check-cooldown">Run again while failing every</label>
+          <label class="form-label" for="rmm-check-cooldown">Run scripts and installs again while failing every</label>
           <div class="rmm-input-unit"><input class="form-input" id="rmm-check-cooldown" name="cooldown_minutes" type="number" inputmode="numeric" min="0" max="10080" value="{{ e.cooldown_minutes }}" aria-describedby="rmm-check-cooldown-help"><span class="rmm-input-unit__suffix" aria-hidden="true">min</span></div>
-          <p class="form-help" id="rmm-check-cooldown-help">0 runs it once each time the check fails.</p>
+          <p class="form-help" id="rmm-check-cooldown-help">They run again in the same order. 0 runs them once each time the check fails. Tickets and scheduled scripts happen once per failure.</p>
         </div>
-      </div>
-
-      <fieldset class="rmm-reveal rmm-schedule" data-rmm-show="action:schedule_script">
-        <legend class="form-label">When the script runs</legend>
-        <p class="form-help">Scheduled once each time the check starts failing. If the check passes before then, the run is dropped.</p>
-        <div class="rmm-field-row">
-          <div class="form-field">
-            <label class="form-label" for="rmm-check-schedule-mode">Run it</label>
-            <select class="form-input" id="rmm-check-schedule-mode" name="schedule_mode" data-rmm-check-schedule-mode{{ invalid("schedule_mode") }}>
-              {% for key, label in schedule_modes.items() %}<option value="{{ key }}" {% if e.schedule_mode == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
-            </select>
-            {{ field_error("schedule_mode") }}
-          </div>
-          <div class="form-field" data-rmm-show-schedule="delay">
-            <label class="form-label" for="rmm-check-delay">Delay</label>
-            <div class="rmm-input-unit"><input class="form-input" id="rmm-check-delay" name="delay_minutes" type="number" inputmode="numeric" min="1" max="10080" value="{{ e.delay_minutes }}"><span class="rmm-input-unit__suffix" aria-hidden="true">min</span></div>
-          </div>
-          <div class="form-field" data-rmm-show-schedule="time">
-            <label class="form-label" for="rmm-check-run-time">Time of day</label>
-            <input class="form-input" id="rmm-check-run-time" name="run_time" type="time" value="{{ e.run_time }}"{{ invalid("run_time") }}>
-            {{ field_error("run_time") }}
-          </div>
-          <div class="form-field" data-rmm-show-schedule="time">
-            <label class="form-label" for="rmm-check-timezone">Time zone</label>
-            <input class="form-input" id="rmm-check-timezone" name="schedule_timezone" maxlength="64" value="{{ e.schedule_timezone }}" placeholder="Australia/Sydney" autocomplete="off" spellcheck="false"{{ invalid("timezone") }}>
-            {{ field_error("timezone") }}
-          </div>
-        </div>
-      </fieldset>
-
-      <div class="rmm-reveal" data-rmm-show="action:run_script,schedule_script">
-        <div class="rmm-script-values" data-rmm-script-values="action">
-          {% if e.action in script_actions and script %}
-          {% if script_fields %}
-          <h4 class="rmm-subheading">{{ script.name }} values</h4>
-          <p class="form-help">Given to the script each time the check runs it. Use <code>{% raw %}{{check.result}}{% endraw %}</code>, <code>{% raw %}{{check.name}}{% endraw %}</code> and the other check variables to pass on what failed.</p>
-          <div class="form-grid">
-            {% for field in script_fields %}
-            <div class="form-field">
-              <label class="form-label" for="rmm-check-entry-{{ loop.index }}">{{ field.name }}{% if field.mandatory %} <span class="rmm-required" aria-hidden="true">*</span>{% endif %}</label>
-              <input class="form-input" id="rmm-check-entry-{{ loop.index }}" name="entry:{{ field.key }}" list="rmm-check-variables" value="{{ field.value }}" {% if field.sensitive %}type="password" autocomplete="new-password"{% endif %} placeholder="{% if field.sensitive and field.value_set %}Saved: leave blank to keep it{% elif field.default %}Default: {{ field.default }}{% endif %}"{% if field.help %} aria-describedby="rmm-check-entry-{{ loop.index }}-help"{% endif %}>
-              {% if field.help %}<p class="form-help" id="rmm-check-entry-{{ loop.index }}-help">{{ field.help }}</p>{% endif %}
-            </div>
-            {% endfor %}
-          </div>
-          {% else %}
-          <p class="rmm-note">{{ script.name }} has no parameters or environment variables.</p>
-          {% endif %}
-          {% endif %}
-        </div>
-        <p class="rmm-note" data-rmm-script-pending="action" {% if e.action in script_actions and script %}hidden{% endif %}>Once you save, the script's parameters appear here to fill in.</p>
-      </div>
-
-      <div class="rmm-reveal" data-rmm-show="action:create_ticket">
-        <p class="rmm-note">A device gets one open ticket for this check at a time. The ticket gets an update when the check passes again.</p>
-        <label class="toggle" for="rmm-check-auto-close">
-          <input type="checkbox" id="rmm-check-auto-close" name="auto_close_when_resolved" value="1" {% if e.auto_close_when_resolved %}checked{% endif %} aria-describedby="rmm-check-auto-close-help">
-          <span>Auto-close when resolved</span>
-        </label>
-        <p class="form-help" id="rmm-check-auto-close-help">When the check passes again, move its ticket to Resolved if that status exists, otherwise Closed.</p>
       </div>
     </section>
 

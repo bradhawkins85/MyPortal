@@ -280,6 +280,22 @@ async def authorize_browser(session_id: int, token: str) -> dict[str, Any] | Non
     return session
 
 
+async def claim_browser(session_id: int, token: str) -> dict[str, Any] | None:
+    """Authorise a browser socket and use up its one-time token.
+
+    Returns the session, or None if the token is wrong, already used, or the
+    session is closed or expired. Each Connect in the browser starts a new
+    session with a new token, so a token is never needed twice.
+    """
+
+    session = await authorize_browser(session_id, token)
+    if not session:
+        return None
+    if not await live_repo.claim_browser(session_id, hash_token(token)):
+        return None
+    return session
+
+
 async def authorize_agent_session(session_id: int, agent: dict[str, Any]) -> dict[str, Any] | None:
     """The live session the agent may serve, if it belongs to this agent."""
 

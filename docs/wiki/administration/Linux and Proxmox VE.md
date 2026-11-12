@@ -13,8 +13,9 @@ scripts, checks, inventory and the asset page's RMM actions like Windows and mac
    ```sh
    URL='https://portal.example.com'
    TOKEN='<install token>'
-   curl -fsSL "$URL/static/tray/myportal-tray-linux.tar.gz" | tar -xz -C /tmp
-   /tmp/myportal-tray/install.sh --url "$URL" --token "$TOKEN"
+   DIR="$(mktemp -d)"
+   curl -fsSL --proto =https "$URL/static/tray/myportal-tray-linux.tar.gz" | tar -xz -C "$DIR"
+   "$DIR/myportal-tray/install.sh" --url "$URL" --token "$TOKEN"
    ```
 
    The package is cached on MyPortal by the **Update Tray Icon Installer** scheduled task from the

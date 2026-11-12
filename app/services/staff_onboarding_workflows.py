@@ -34,6 +34,7 @@ from app.services import m365 as m365_service
 from app.services.m365 import M365Error
 from app.services import notifications as notifications_service
 from app.services import system_variables
+from app.services import workflow_variable_functions
 from app.services.sanitization import sanitize_rich_text
 from app.services import webhook_monitor
 from app.services import tickets as tickets_service
@@ -59,7 +60,7 @@ STATE_OFFBOARDING_FAILED = "offboarding_failed"
 
 DIRECTION_ONBOARDING = "onboarding"
 DIRECTION_OFFBOARDING = "offboarding"
-_VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)\}")
+_VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)(\s*\|[^{}]*)?\}")
 _SECRET_KEY_TOKENS = ("password", "secret", "token", "key", "verification_code")
 
 
@@ -855,16 +856,28 @@ def _get_nested_value(payload: Any, path: str) -> Any:
     return current
 
 
+def _lookup_template_var(match: re.Match[str], vars_map: dict[str, Any]) -> Any:
+    path = match.group(1)
+    value = vars_map.get(path) if path in vars_map else _get_nested_value(vars_map, path)
+    pipes = match.group(2)
+    if not pipes:
+        return value
+    try:
+        _, calls = workflow_variable_functions.parse_pipeline(path + pipes)
+        return workflow_variable_functions.apply_pipeline(value, calls)
+    except workflow_variable_functions.VariableFunctionError as exc:
+        log_warning("Workflow variable function failed", variable=path, error=str(exc))
+        return match.group(0)
+
+
 def _resolve_template_value(raw: Any, *, vars_map: dict[str, Any]) -> Any:
     if isinstance(raw, str):
         exact_match = _VAR_PATTERN.fullmatch(raw.strip())
         if exact_match:
-            path = exact_match.group(1)
-            return vars_map.get(path) if path in vars_map else _get_nested_value(vars_map, path)
+            return _lookup_template_var(exact_match, vars_map)
 
         def _replace(match: re.Match[str]) -> str:
-            path = match.group(1)
-            value = vars_map.get(path) if path in vars_map else _get_nested_value(vars_map, path)
+            value = _lookup_template_var(match, vars_map)
             if value is None:
                 return ""
             return str(value)

@@ -210,7 +210,8 @@ PROVISION_SCOPE = (
 # owner of its app registration (required for automatic credential renewal),
 # Directory.Read.All to look up service principals (including the Teams SP for
 # Teams.ManageAsApp grants), and RoleManagement.ReadWrite.Directory to assign the
-# Exchange Administrator and Teams Service Administrator directory roles.
+# Exchange Administrator, Teams Service Administrator and Compliance
+# Administrator directory roles.
 # Using explicit Graph scopes instead of ``/.default`` ensures the admin grants
 # those delegated permissions even if they are not statically configured on the
 # enterprise app registration (Microsoft Entra ID dynamic consent).
@@ -258,6 +259,9 @@ SCC_CONNECT_SCOPE = (
 
 # Minimal scopes used for the tenant-discovery sign-in step
 DISCOVER_SCOPE = "openid profile"
+# Guided setup also reads the signed-in tenant's name (GET /organization needs
+# only delegated User.Read) so the administrator can confirm it by name.
+DISCOVER_TENANT_SCOPE = f"{DISCOVER_SCOPE} https://graph.microsoft.com/User.Read"
 
 # Module slug used to store the admin app credentials for PKCE bootstrap flows
 _M365_ADMIN_MODULE_SLUG = "m365-admin"
@@ -1637,7 +1641,11 @@ async def _exchange_new_connection_token(
 
 
 async def activate_connection_candidate(company_id: int, connection_id: int) -> dict[str, Any]:
-    return await connection_repo.activate(company_id, connection_id)
+    active = await connection_repo.activate(company_id, connection_id)
+    from app.services import m365_sync_schedule
+
+    await m365_sync_schedule.ensure_sync_tasks_and_refresh(company_id)
+    return active
 
 
 async def rollback_connection(company_id: int) -> dict[str, Any]:
@@ -2106,9 +2114,8 @@ def _scc_delegated_reconnect_error(reason: str) -> M365Error:
         "Spam search and purge run under the delegated permissions of the "
         "Microsoft admin who last reconnected this company, not the MyPortal "
         "application. " + reason +
-        " Use the Configure Compliance Administrator action (Microsoft 365 "
-        "settings page) or reconnect from Microsoft 365 settings, sign in "
-        "with an account that is a Compliance Administrator in the customer "
+        " Reconnect from Microsoft 365 settings (Grant Microsoft consent), "
+        "sign in with an account that is a Compliance Administrator in the customer "
         "tenant (eDiscoveryManager membership for search; Search And Purge "
         "for purge), consent to the Security & Compliance permission when "
         "prompted, then retry the request.",
@@ -2755,7 +2762,7 @@ async def _scc_invoke_command(
                 interpretation = (
                     "adminconsenttoken missing = the tenant granted user "
                     "consent, not admin consent; have a Global Administrator "
-                    "re-capture Security & Compliance access or grant admin "
+                    "reconnect the company or grant admin "
                     "consent for the app's Microsoft Exchange Online "
                     "Protection delegated permissions"
                 )
@@ -4528,6 +4535,61 @@ async def clear_company_pkce_client_id(company_id: int) -> None:
     log_info("Cleared per-company M365 PKCE client ID", company_id=company_id)
 
 
+async def _adopt_or_create_license_staff(
+    *,
+    company_id: int,
+    user: dict[str, Any],
+    email: str,
+    account_enabled: bool,
+    last_sign_in: datetime | None,
+) -> dict[str, Any]:
+    """Return the staff record for a licensed M365 user with no email match.
+
+    A new staff request has no email until its account is created, so adopt
+    that request (by name) and fill in the email instead of creating a
+    duplicate that would lose the request's onboarding details.
+    """
+    first = (user.get("givenName") or "").strip() or "Unknown"
+    last = (user.get("surname") or "").strip() or user.get("displayName") or ""
+    pending = await staff_repo.get_pending_staff_request_by_name(
+        company_id, first, last
+    )
+    if pending:
+        await staff_repo.set_staff_email(int(pending["id"]), email)
+        if last_sign_in is not None:
+            await staff_repo.update_m365_last_sign_in(int(pending["id"]), last_sign_in)
+        log_info(
+            "M365 licence sync matched staff request by name",
+            company_id=company_id,
+            staff_id=pending["id"],
+        )
+        return {**pending, "email": email}
+    return await staff_repo.create_staff(
+        company_id=company_id,
+        first_name=first,
+        last_name=last,
+        email=email,
+        mobile_phone=None,
+        date_onboarded=None,
+        date_offboarded=None,
+        enabled=account_enabled,
+        is_ex_staff=not account_enabled,
+        street=None,
+        city=None,
+        state=None,
+        postcode=None,
+        country=None,
+        department=None,
+        job_title=None,
+        org_company=None,
+        manager_name=None,
+        account_action="Onboarded" if account_enabled else "Offboarded",
+        syncro_contact_id=None,
+        source="m365",
+        m365_last_sign_in=last_sign_in,
+    )
+
+
 async def _sync_staff_assignments(
     *,
     company_id: int,
@@ -4575,35 +4637,13 @@ async def _sync_staff_assignments(
                 account_enabled = bool(user.get("accountEnabled", True))
                 staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
                 if not staff:
-                    first = (user.get("givenName") or "").strip() or "Unknown"
-                    last = (
-                        (user.get("surname") or "").strip() or user.get("displayName") or ""
-                    )
-                    created = await staff_repo.create_staff(
+                    staff = await _adopt_or_create_license_staff(
                         company_id=company_id,
-                        first_name=first or "Unknown",
-                        last_name=last or "",
+                        user=user,
                         email=email,
-                        mobile_phone=None,
-                        date_onboarded=None,
-                        date_offboarded=None,
-                        enabled=account_enabled,
-                        is_ex_staff=not account_enabled,
-                        street=None,
-                        city=None,
-                        state=None,
-                        postcode=None,
-                        country=None,
-                        department=None,
-                        job_title=None,
-                        org_company=None,
-                        manager_name=None,
-                        account_action="Onboarded" if account_enabled else "Offboarded",
-                        syncro_contact_id=None,
-                        source="m365",
-                        m365_last_sign_in=last_sign_in,
+                        account_enabled=account_enabled,
+                        last_sign_in=last_sign_in,
                     )
-                    staff = created
                 elif last_sign_in is not None:
                     await staff_repo.update_m365_last_sign_in(
                         int(staff["id"]), last_sign_in
@@ -4646,35 +4686,13 @@ async def _sync_staff_assignments(
                     account_enabled = bool(user.get("accountEnabled", True))
                     staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
                     if not staff:
-                        first = (user.get("givenName") or "").strip() or "Unknown"
-                        last = (
-                            (user.get("surname") or "").strip() or user.get("displayName") or ""
-                        )
-                        created = await staff_repo.create_staff(
+                        staff = await _adopt_or_create_license_staff(
                             company_id=company_id,
-                            first_name=first or "Unknown",
-                            last_name=last or "",
+                            user=user,
                             email=email,
-                            mobile_phone=None,
-                            date_onboarded=None,
-                            date_offboarded=None,
-                            enabled=account_enabled,
-                            is_ex_staff=not account_enabled,
-                            street=None,
-                            city=None,
-                            state=None,
-                            postcode=None,
-                            country=None,
-                            department=None,
-                            job_title=None,
-                            org_company=None,
-                            manager_name=None,
-                            account_action="Onboarded" if account_enabled else "Offboarded",
-                            syncro_contact_id=None,
-                            source="m365",
-                            m365_last_sign_in=None,
+                            account_enabled=account_enabled,
+                            last_sign_in=None,
                         )
-                        staff = created
                     assigned_emails.add(email)
                     await license_repo.link_staff_to_license(int(staff["id"]), license_id)
                 url = payload.get("@odata.nextLink")
@@ -4997,6 +5015,48 @@ async def sync_email_domains(company_id: int) -> dict[str, Any]:
         )
 
     return {"added": new_domains, "existing": existing_domains}
+
+
+async def describe_signed_in_tenant(access_token: str, tenant_id: str) -> dict[str, str] | None:
+    """Return the display name and default domain of the signed-in tenant.
+
+    Guided setup shows these so the administrator can confirm the tenant by
+    name rather than by ID.  Best-effort: ``None`` when Microsoft Graph cannot
+    be read or returns a different tenant than the verified ID token.
+    """
+    try:
+        payload = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/organization?$select=id,displayName,verifiedDomains",
+        )
+    except Exception as exc:  # noqa: BLE001 - display-only lookup
+        log_warning(
+            "Could not read the signed-in Microsoft 365 tenant name",
+            tenant_id=tenant_id,
+            error=str(exc),
+        )
+        return None
+    organization = next(
+        (
+            row
+            for row in payload.get("value") or []
+            if isinstance(row, dict)
+            and str(row.get("id") or "").strip().lower() == tenant_id.strip().lower()
+        ),
+        None,
+    )
+    if not organization:
+        return None
+    domains = [
+        row for row in organization.get("verifiedDomains") or [] if isinstance(row, dict)
+    ]
+    domain = next(
+        (str(row.get("name") or "") for row in domains if row.get("isDefault")), ""
+    ) or next((str(row.get("name") or "") for row in domains if row.get("isInitial")), "")
+    return {
+        "name": " ".join(str(organization.get("displayName") or "").split())[:256],
+        "domain": domain.strip()[:255],
+    }
 
 
 async def test_connectivity(company_id: int) -> dict[str, Any]:
@@ -6083,6 +6143,10 @@ async def repair_enterprise_app_permissions(
             "Please use 'Authorize portal access' on the Office 365 page first."
         )
 
+    # Diagnostics checks the app registration as well as the grant, so list
+    # every baseline permission on it before granting.
+    await ensure_graph_app_roles_on_manifest(company_id, access_token)
+    await ensure_exchange_manage_as_app_on_manifest(company_id, access_token)
     granted = await try_grant_missing_permissions(
         company_id=company_id,
         access_token=access_token,

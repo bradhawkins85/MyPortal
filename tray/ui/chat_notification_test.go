@@ -54,3 +54,17 @@ func TestChatMessageNotificationTextIncludesSenderSubjectAndMessage(t *testing.T
 		t.Fatalf("body = %q, want fallback sender", body)
 	}
 }
+
+func TestChatOpenMessageIsNotAnnouncedTwice(t *testing.T) {
+	rememberAnnounced(7, "Hello ")
+	if !recentlyAnnounced(7, "Hello") {
+		t.Fatal("the chat_message echo of the chat_open message should be skipped")
+	}
+	if recentlyAnnounced(7, "Hello") {
+		t.Fatal("only the first echo is skipped")
+	}
+	rememberAnnounced(8, "Hello")
+	if recentlyAnnounced(8, "A different reply") {
+		t.Fatal("a different message must notify")
+	}
+}

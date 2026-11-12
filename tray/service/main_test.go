@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -159,6 +160,10 @@ func TestEnrolmentRetryRetainsIdentityAcrossServiceRestart(t *testing.T) {
 	t.Cleanup(func() { stateDir = previousStateDir })
 	var requests []api.EnrolRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/tray/ui-token" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		var req api.EnrolRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
@@ -192,6 +197,9 @@ func TestEnrolmentRetryRetainsIdentityAcrossServiceRestart(t *testing.T) {
 	}
 	if len(requests) != 2 || requests[0].DeviceUID != requests[1].DeviceUID {
 		t.Fatalf("enrolment identities changed: %#v", requests)
+	}
+	if requests[0].PublicKey == "" || requests[0].PublicKey != requests[1].PublicKey {
+		t.Fatalf("enrolment must send the same device key on retry: %#v", requests)
 	}
 	if d.client.DeviceUID() != pending.DeviceUID || loadState().AuthToken != "device-auth" {
 		t.Fatal("credentials were not installed and persisted")
@@ -281,5 +289,99 @@ func TestWolMagicPacketRepeatsMACSixteenTimes(t *testing.T) {
 		if !bytes.Equal(pkt[start:start+6], []byte(mac)) {
 			t.Fatalf("block %d = %v, want %v", i, pkt[start:start+6], mac)
 		}
+	}
+}
+
+func TestEnrolmentGivesTheUIItsOwnTokenAndKeepsTheDeviceTokenPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes are checked on Unix; Windows uses access lists")
+	}
+	previousStateDir := stateDir
+	dir := t.TempDir()
+	stateDir = func() string { return dir }
+	previousDesktop := linuxDesktopInstalled
+	linuxDesktopInstalled = func() bool { return true }
+	t.Cleanup(func() {
+		stateDir = previousStateDir
+		linuxDesktopInstalled = previousDesktop
+	})
+	uiTokens := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tray/enrol":
+			var req api.EnrolRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewEncoder(w).Encode(api.EnrolResponse{DeviceUID: req.DeviceUID, AuthToken: "device-auth"})
+		case "/api/tray/ui-token":
+			if r.Header.Get("Authorization") != "Bearer device-auth" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			uiTokens++
+			_ = json.NewEncoder(w).Encode(map[string]string{"ui_token": "ui-only"})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	cfg := &config.Config{PortalURL: server.URL, EnrolToken: "install-token"}
+	if err := newDaemon(cfg).ensureEnrolled(); err != nil {
+		t.Fatal(err)
+	}
+	u := loadUIState()
+	if u == nil || u.UIToken != "ui-only" || u.PortalURL != server.URL {
+		t.Fatalf("ui state = %#v", u)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, uiStateFileName))
+	if strings.Contains(string(raw), "device-auth") {
+		t.Fatal("the UI state must never hold the device token")
+	}
+	if info, _ := os.Stat(filepath.Join(dir, uiStateFileName)); info.Mode().Perm() != 0644 {
+		t.Fatalf("ui state mode = %o, want 644", info.Mode().Perm())
+	}
+	if info, _ := os.Stat(filepath.Join(dir, stateFileName)); info.Mode().Perm() != 0600 {
+		t.Fatalf("device state mode = %o, want 600", info.Mode().Perm())
+	}
+	// A restart keeps the token it already has.
+	if err := newDaemon(cfg).ensureEnrolled(); err != nil {
+		t.Fatal(err)
+	}
+	if uiTokens != 1 {
+		t.Fatalf("ui tokens issued = %d, want 1", uiTokens)
+	}
+}
+
+func TestOldPortalLeavesDeviceStateReadableForTheUI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes are checked on Unix; Windows uses access lists")
+	}
+	previousStateDir := stateDir
+	dir := t.TempDir()
+	stateDir = func() string { return dir }
+	previousDesktop := linuxDesktopInstalled
+	linuxDesktopInstalled = func() bool { return true }
+	t.Cleanup(func() {
+		stateDir = previousStateDir
+		linuxDesktopInstalled = previousDesktop
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tray/enrol" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var req api.EnrolRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewEncoder(w).Encode(api.EnrolResponse{DeviceUID: req.DeviceUID, AuthToken: "device-auth"})
+	}))
+	defer server.Close()
+	cfg := &config.Config{PortalURL: server.URL, EnrolToken: "install-token"}
+	if err := newDaemon(cfg).ensureEnrolled(); err != nil {
+		t.Fatal(err)
+	}
+	if loadUIState() != nil {
+		t.Fatal("no UI state without a UI token")
+	}
+	if info, _ := os.Stat(filepath.Join(dir, stateFileName)); info.Mode().Perm() != 0644 {
+		t.Fatalf("device state mode = %o, want 644 so an older UI keeps working", info.Mode().Perm())
 	}
 }

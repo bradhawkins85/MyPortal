@@ -5,7 +5,6 @@ import base64
 import hashlib
 from importlib import import_module
 import json
-import random
 import re
 import secrets
 from contextlib import suppress
@@ -102,6 +101,7 @@ from app.api.routes import (
     subscriptions as subscriptions_api,
     tag_exclusions,
     tag_synonyms,
+    cpu_release_dates as cpu_release_dates_api,
     tickets as tickets_api,
     tray as tray_api,
     tray_deployment as tray_deployment_api,
@@ -178,7 +178,11 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import clear_flash, flash_redirect, local_redirect, pop_flash, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
 from app.security.maintenance import MaintenanceMiddleware
-from app.security.oauth_state import oauth_state_serializer
+from app.security.oauth_state import (
+    DISCOVERED_TENANT_MAX_AGE_SECONDS,
+    discovered_tenant_serializer,
+    oauth_state_serializer,
+)
 from app.security.rate_limiter import (
     EndpointRateLimiter,
     EndpointRateLimiterMiddleware,
@@ -199,6 +203,7 @@ from app.services import background as background_tasks
 from app.services import automations as automations_service
 from app.services import change_log as change_log_service
 from app.services import cron_calendar as cron_calendar_service
+from app.services import scheduled_task_slots
 from app.services.cron_expression import validate as validate_cron_expression
 from app.services import company_access
 from app.services import dashboard as dashboard_service
@@ -206,6 +211,7 @@ from app.services import user_m365_contacts as user_m365_contacts_service
 from app.services import m365_oauth_transactions
 from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
+from app.services import m365_sync_schedule as m365_sync_schedule_service
 from app.services.m365_connection_health import build_connection_health
 from app.repositories import m365_connections as m365_connection_repo
 from app.services import cis_benchmark as cis_benchmark_service
@@ -440,9 +446,7 @@ _PWA_ICON_SOURCES = [
 
 def _random_daily_cron() -> str:
     """Return a randomised daily cron expression (``MM HH * * *``)."""
-    minute = random.randint(0, 59)
-    hour = random.randint(0, 23)
-    return f"{minute} {hour} * * *"
+    return m365_sync_schedule_service.random_daily_cron()
 
 
 def _build_xero_redirect_uri() -> str:
@@ -602,6 +606,7 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "process_transcription": "Process transcription",
     "sync_huntress": "Sync Huntress data",
     "lookup_asset_warranties": "Look up asset warranties",
+    "lookup_cpu_release_dates": "Estimate asset ages from CPU launch dates",
     "update_tray_icon_installer": "Update Tray Icon Installer",
     "rag_index_start": "RAG start indexing",
     "rag_index_stop": "RAG stop indexing",
@@ -631,7 +636,7 @@ _TASK_COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Microsoft 365", ("sync_m365_", "refresh_m365_", "m365_mail_sync:")),
     ("Staff and assets", (
         "sync_staff", "sync_assets", "sync_tactical_assets", "update_mac_vendors",
-        "lookup_asset_warranties", "update_chocolatey_catalog",
+        "lookup_asset_warranties", "lookup_cpu_release_dates", "update_chocolatey_catalog",
     )),
     ("Billing and Xero", (
         "sync_to_xero", "generate_invoice", "unbill_time_entries",
@@ -1338,14 +1343,21 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
         await websocket.close(code=4401)
         return
 
-    device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
-    if not device or device.get("device_uid") != device_uid:
+    token_hash = tray_service.hash_token(token)
+    device = await tray_repo.get_device_by_auth_hash(token_hash)
+    if not device or device.get("device_uid") != device_uid or device.get("status") != "active":
         await websocket.close(code=4401)
         return
 
     if not device.get("asset_id"):
         await tray_service.provision_device_for_checkin(device)
     await websocket.accept()
+    from app.services import tray_device_key
+
+    if not await tray_device_key.prove_possession(websocket, device):
+        log_warning("Tray WebSocket refused: device key challenge failed", device_uid=device_uid)
+        await websocket.close(code=4401)
+        return
     tray_service.register_connection(device_uid, websocket)
     await tray_service.mark_websocket_alive(device)
     # The device may hold a menu cached before a config change or a server
@@ -1377,6 +1389,10 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
             now = loop.time()
             if now - last_drain >= tray_service.QUEUED_COMMAND_DRAIN_INTERVAL_SECONDS:
                 last_drain = now
+                current = await tray_repo.get_device_by_id(int(device["id"]))
+                if not tray_service.connection_still_valid(current, token_hash):
+                    await websocket.close(code=4401)
+                    break
                 await tray_service.mark_websocket_alive(device)
                 try:
                     await tray_service.deliver_queued_commands(device)
@@ -1406,6 +1422,7 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
 async def _bridge_live_socket(
     websocket: WebSocket, session_id: int, *, send_direction: str, receive_direction: str,
     on_activity=None,
+    authenticate=None,
 ) -> None:
     """Relay JSON frames between one live tools socket and its peer.
 
@@ -1418,6 +1435,11 @@ async def _bridge_live_socket(
 
     relay = Relay(session_id)
     await websocket.accept()
+    # Nothing is relayed until the peer has proved who it is.
+    if authenticate is not None and not await authenticate(websocket):
+        log_warning("Live tools socket refused: key challenge failed", session_id=session_id)
+        await websocket.close(code=4401)
+        return
 
     async def pump_out() -> None:
         async def deliver(payload: str) -> bool:
@@ -1464,10 +1486,18 @@ async def rmm_live_agent_socket(websocket: WebSocket, session_id: int) -> None:
     if not session:
         await websocket.close(code=4404)
         return
-    await live_repo.mark_agent_connected(session_id)
+    from app.services import rmm_agent_key
+
+    async def prove(socket: WebSocket) -> bool:
+        if not await rmm_agent_key.prove_live_session(socket, agent, session_id):
+            return False
+        await live_repo.mark_agent_connected(session_id)
+        return True
+
     try:
         await _bridge_live_socket(
             websocket, session_id, send_direction="to_browser", receive_direction="to_agent",
+            authenticate=prove,
         )
     finally:
         await live_repo.mark_agent_disconnected(session_id)
@@ -1479,7 +1509,7 @@ async def rmm_live_browser_socket(websocket: WebSocket, session_id: int) -> None
 
     Authenticated by the one-time token issued when the session was started
     (query string, as a browser WebSocket cannot set Authorization headers),
-    plus the usual cross-site Origin check.
+    plus the usual cross-site Origin check. The token is used up on connect.
     """
 
     from app.security.websocket_origin import origin_allowed
@@ -1490,18 +1520,24 @@ async def rmm_live_browser_socket(websocket: WebSocket, session_id: int) -> None
         await websocket.close(code=4403)
         return
     token = (websocket.query_params.get("token") or "").strip()
-    session = await rmm_live.authorize_browser(session_id, token)
+    # The token works once: it is used up here, so a copy in a proxy or
+    # access log, or a second socket, cannot join the session.
+    session = await rmm_live.claim_browser(session_id, token)
     if not session:
         await websocket.close(code=4401)
         return
-    await live_repo.mark_browser_connected(session_id)
 
     async def touch() -> None:
         await live_repo.touch(session_id)
 
-    await _bridge_live_socket(
-        websocket, session_id, send_direction="to_agent", receive_direction="to_browser", on_activity=touch,
-    )
+    try:
+        await _bridge_live_socket(
+            websocket, session_id, send_direction="to_agent", receive_direction="to_browser", on_activity=touch,
+        )
+    finally:
+        # Nothing can rejoin with the used token, so end the session (and the
+        # device's shell) as soon as the technician's socket goes away.
+        await rmm_live.close_session(session_id, "browser disconnected")
 
 
 # MCP WebSocket endpoint (only enabled if MCP_ENABLED is true)
@@ -1616,6 +1652,7 @@ app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
+app.include_router(cpu_release_dates_api.router)
 app.include_router(tag_synonyms.router)
 app.include_router(chat_api.router)
 app.include_router(tray_api.router)
@@ -3434,6 +3471,11 @@ async def on_startup() -> None:
         if migrated:
             log_info("sync_m365_data migration complete", companies_migrated=migrated)
 
+    async def _migrate_and_backfill_m365_sync_tasks() -> None:
+        # Sequential so the backfill sees the split tasks the migration made.
+        await _migrate_sync_m365_data_tasks()
+        await m365_sync_schedule_service.backfill_sync_tasks()
+
     async def _seed_demo_data_once() -> None:
         from app.services import demo_seeding as demo_seeding_service
 
@@ -3451,7 +3493,7 @@ async def on_startup() -> None:
         ("ensure_default_modules", modules_service.ensure_default_modules()),
         ("refresh_all_schedules", automations_service.refresh_all_schedules()),
         ("bootstrap_default_bcp_template", _bootstrap_default_bcp_template()),
-        ("migrate_sync_m365_data_tasks", _migrate_sync_m365_data_tasks()),
+        ("migrate_sync_m365_data_tasks", _migrate_and_backfill_m365_sync_tasks()),
         ("seed_demo_data_once", _seed_demo_data_once()),
     ]
 
@@ -4074,6 +4116,39 @@ async def switch_role(request: Request):
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
+def _m365_discovered_tenant(request: Request, company_id: int) -> dict[str, str] | None:
+    """Return the tenant found by guided setup's sign-in, for confirmation.
+
+    The signed ``m365_discovered`` token carries the tenant name, so it is only
+    trusted when its signature is valid, it is recent and it was issued for
+    this company.  A bare ``m365_discovered_tenant`` ID from an older redirect
+    is still accepted, without a name.
+    """
+    token = request.query_params.get("m365_discovered")
+    if token:
+        try:
+            data = discovered_tenant_serializer.loads(
+                token, max_age=DISCOVERED_TENANT_MAX_AGE_SECONDS
+            )
+        except BadSignature:
+            return None
+        if not isinstance(data, dict) or data.get("company_id") != company_id:
+            return None
+        tenant_id = str(data.get("tenant_id") or "").strip()
+        if not tenant_id:
+            return None
+        return {
+            "tenant_id": tenant_id,
+            "name": str(data.get("name") or "").strip(),
+            "domain": str(data.get("domain") or "").strip(),
+            "account": str(data.get("account") or "").strip(),
+        }
+    legacy_tenant_id = str(request.query_params.get("m365_discovered_tenant") or "").strip()
+    if legacy_tenant_id:
+        return {"tenant_id": legacy_tenant_id, "name": "", "domain": "", "account": ""}
+    return None
+
+
 @app.get("/m365", response_class=HTMLResponse)
 async def m365_page(request: Request):
     user, membership, company, company_id, redirect = await _load_license_context(request)
@@ -4134,6 +4209,11 @@ async def m365_page(request: Request):
         "connection_health": connection_health,
         "has_admin_credentials": bool(admin_credential_view),
         "admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
+        "discovered_tenant": (
+            _m365_discovered_tenant(request, company_id) if user.get("is_super_admin") else None
+        ),
+        # A stored delegated sign-in means an administrator granted consent.
+        "consent_granted": bool((credentials or {}).get("refresh_token")),
     }
     return await _render_template("m365/index.html", request, user, extra=extra)
 
@@ -5371,9 +5451,10 @@ async def run_m365_diagnostics_check(request: Request):
         return redirect
     if not user.get("is_super_admin"):
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+    # The diagnostics page recomputes the required-access inventory on load,
+    # so only the stored enterprise-app results need refreshing here.
     try:
         await m365_service.check_enterprise_app_permissions(company_id)
-        await m365_service.diagnose_required_m365_access(company_id)
     except m365_service.M365Error as exc:
         return flash_redirect("/m365/diagnostics", str(exc), "error")
     return flash_redirect("/m365/diagnostics", "Permission check completed", "success")
@@ -5402,26 +5483,12 @@ async def repair_m365_permissions(request: Request):
         # permissions and then return to the diagnostics page.
         credentials = await m365_service.get_credentials(company_id)
         if credentials:
-            redirect_uri = _build_m365_redirect_uri(request)
-            state = await _new_m365_oauth_state(
-                request, company_id=company_id, flow="connect",
-                return_to="diagnostics", tenant_id=credentials["tenant_id"],
-                client_id=credentials["client_id"], redirect_uri=redirect_uri,
+            return await _start_m365_connect_authorize(
+                request,
+                company_id=company_id,
+                credentials=credentials,
+                return_to="diagnostics",
             )
-            params = {
-                "client_id": credentials["client_id"],
-                "response_type": "code",
-                "redirect_uri": redirect_uri,
-                "response_mode": "query",
-                "scope": m365_service.CONNECT_SCOPE,
-                "state": state,
-                "prompt": "consent",
-            }
-            authorize_url = (
-                f"https://login.microsoftonline.com/{credentials['tenant_id']}"
-                f"/oauth2/v2.0/authorize?{urlencode(params)}"
-            )
-            return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
         return flash_redirect("/m365/diagnostics", "No credentials configured", "error")
     except m365_service.M365Error as exc:
         return flash_redirect("/m365/diagnostics", str(exc), "error")
@@ -5657,28 +5724,31 @@ async def sync_m365(request: Request):
     return JSONResponse({"success": True, "mailboxes_synced": mailboxes_synced})
 
 
-@app.get("/m365/connect")
-async def m365_connect(request: Request):
-    user, membership, _, company_id, redirect = await _load_license_context(request)
-    if redirect:
-        return redirect
-    credentials = await m365_service.get_credentials(company_id)
-    if not credentials:
-        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+async def _start_m365_connect_authorize(
+    request: Request,
+    *,
+    company_id: int,
+    credentials: Mapping[str, Any],
+    return_to: str | None = None,
+) -> RedirectResponse:
+    """Redirect to Microsoft for the single connect/repair consent.
+
+    The callback grants missing application permissions, assigns the
+    directory roles MyPortal needs (including Compliance Administrator), and
+    chains the eDiscovery and Security & Compliance consents only when they
+    are still missing.  ``return_to="diagnostics"`` also re-checks
+    permissions and repairs the Purview configuration afterwards.
+    """
     redirect_uri = _build_m365_redirect_uri(request)
-    state_payload = {
+    state_payload: dict[str, Any] = {
         "company_id": company_id,
         "flow": "connect",
         "tenant_id": credentials["tenant_id"],
         "client_id": credentials["client_id"],
         "redirect_uri": redirect_uri,
     }
-    if request.query_params.get("setup") == "compliance_role":
-        state_payload["setup"] = "compliance_role"
-        requested_return = request.query_params.get("return_to", "m365")
-        state_payload["return_to"] = (
-            requested_return if requested_return in {"m365", "diagnostics"} else "m365"
-        )
+    if return_to == "diagnostics":
+        state_payload["return_to"] = "diagnostics"
     state = await _new_m365_oauth_state(request, **state_payload)
     params = {
         "client_id": credentials["client_id"],
@@ -5696,22 +5766,25 @@ async def m365_connect(request: Request):
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.get("/m365/connect/scc")
-async def m365_connect_scc(request: Request):
-    """Start the standalone Security & Compliance consent step.
+@app.get("/m365/connect")
+async def m365_connect(request: Request):
+    """Grant Microsoft consent, or reconnect to repair access.
 
-    Reconnects chain this consent automatically after the main Graph consent
-    (see :func:`_complete_connect_with_scc_consent`).  This endpoint exists so
-    an administrator can capture the consent when a reconnect ended before
-    the second consent screen, or when they denied it the first time.
+    This is the only interactive consent entry point.  Older links that pass
+    ``setup=compliance_role`` still work: the Compliance Administrator role is
+    now assigned by every connect.
     """
     user, membership, _, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
-    requested_return = request.query_params.get("return_to", "m365")
-    destination = "/m365/diagnostics" if requested_return == "diagnostics" else "/m365"
-    return await _start_scc_consent_authorize(
-        request, company_id=company_id, destination=destination
+    credentials = await m365_service.get_credentials(company_id)
+    if not credentials:
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+    return await _start_m365_connect_authorize(
+        request,
+        company_id=company_id,
+        credentials=credentials,
+        return_to=request.query_params.get("return_to"),
     )
 
 
@@ -5840,6 +5913,8 @@ async def m365_discover(request: Request):
         "code_verifier": code_verifier,
         "client_id": oauth_client_id,
         "redirect_uri": redirect_uri,
+        # Also read the tenant's name so the admin can confirm it by name.
+        "scope": m365_service.DISCOVER_TENANT_SCOPE,
     }
 
     state = await _new_m365_oauth_state(request, **state_payload)
@@ -5848,7 +5923,7 @@ async def m365_discover(request: Request):
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
-        "scope": m365_service.DISCOVER_SCOPE,
+        "scope": m365_service.DISCOVER_TENANT_SCOPE,
         "state": state,
         "prompt": "select_account",
         "code_challenge": code_challenge,
@@ -6146,10 +6221,21 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     sso_envelope = _sso_state_envelope(request, state)
     if sso_envelope is not None:
         return await auth.complete_sso_callback(request, sso_envelope, code, error)
+    # Unusable sign-in state must reach the logged SSO rejection. Valid
+    # session-bound state still belongs to the administration flow.
+    if request.cookies.get(auth.SSO_BINDING_COOKIE):
+        envelope = _decode_m365_oauth_state(request, state) if state else None
+        if not isinstance(envelope, dict) or "transaction_id" not in envelope:
+            return await auth.complete_sso_callback(request, {}, code, error)
     # Consume first, including denied-consent responses: a callback transaction
     # is single-use regardless of whether Microsoft returned a code.
     state_data = await _consume_m365_oauth_state(request, state)
     if not state_data:
+        log_warning(
+            "Microsoft OAuth callback state rejected",
+            state_present=bool(state),
+            sign_in_binding_present=bool(request.cookies.get(auth.SSO_BINDING_COOKIE)),
+        )
         return flash_redirect("/m365", "The Microsoft sign-in session expired or was already used.", "error")
     flow = str(state_data.get("flow") or "connect")
     company_id = int(state_data.get("company_id") or 0)
@@ -6189,7 +6275,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             # problem (AADSTS65001, AADSTS700021, ...) that retrying will
             # never fix.  Flash messages are capped at 200 characters, so
             # the base text is kept short and the detail is bounded.
-            aad_detail = " ".join(message.split())[:94]
+            aad_detail = " ".join(message.split())[:92]
             if "AADSTS650057" in message:
                 # The app registration does not list the Purview resource.
                 # A full reconnect adds it (ensure_scc_delegated_permission).
@@ -6199,9 +6285,10 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                     "Reconnect the company to add it, then consent."
                 )
             else:
+                # Reconnecting re-chains this consent whenever it is missing.
                 message = (
                     "Security & Compliance access was not captured; the "
-                    "connection is unaffected; retry the capture. "
+                    "connection is unaffected; reconnect to retry. "
                     f"AAD error: {aad_detail}"
                 )
         if "AADSTS700016" in message:
@@ -6333,6 +6420,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         code_verifier = str(state_data.get("code_verifier") or "")
         if not code_verifier:
             return _discover_error("The sign-in verifier is missing or expired.")
+        # Redeem the code for the scopes it was issued for: guided setup also
+        # asks for User.Read to read the tenant name; other entry points don't.
+        discover_scope = (
+            m365_service.DISCOVER_TENANT_SCOPE
+            if state_data.get("scope") == m365_service.DISCOVER_TENANT_SCOPE
+            else m365_service.DISCOVER_SCOPE
+        )
         token_endpoint = "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         token_data = {
             "client_id": str(state_data.get("client_id") or ""),
@@ -6340,7 +6434,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             "code": code,
             "redirect_uri": str(state_data.get("redirect_uri") or ""),
             "code_verifier": code_verifier,
-            "scope": m365_service.DISCOVER_SCOPE,
+            "scope": discover_scope,
         }
         async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
@@ -6391,8 +6485,21 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 f"{urlencode({'m365_discovered_tenant': discovered_tenant_id})}",
                 status_code=status.HTTP_303_SEE_OTHER,
             )
+        tenant_profile = None
+        graph_token = str(token_payload.get("access_token") or "")
+        if discover_scope == m365_service.DISCOVER_TENANT_SCOPE and graph_token:
+            tenant_profile = await m365_service.describe_signed_in_tenant(
+                graph_token, discovered_tenant_id
+            )
+        discovered = discovered_tenant_serializer.dumps({
+            "company_id": company_id,
+            "tenant_id": discovered_tenant_id,
+            "name": (tenant_profile or {}).get("name") or "",
+            "domain": (tenant_profile or {}).get("domain") or "",
+            "account": str(identity.get("preferred_username") or "")[:320],
+        })
         return RedirectResponse(
-            url=f"/m365?{urlencode({'m365_discovered_tenant': discovered_tenant_id})}",
+            url=f"/m365?{urlencode({'m365_discovered': discovered})}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
@@ -6736,36 +6843,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         access_token=None,
         token_expires_at=None,
     )
-    compliance_role_result = None
-    compliance_role_error = None
-    compliance_setup = state_data.get("setup") == "compliance_role"
-    if compliance_setup:
-        if not access_token:
-            compliance_role_error = (
-                "Microsoft did not return the delegated administrator token "
-                "required for Compliance Administrator setup. Reconnect and consent "
-                "RoleManagement.ReadWrite.Directory."
-            )
-        else:
-            try:
-                compliance_role_result = await m365_service.ensure_compliance_administrator_role(
-                    company_id=company_id,
-                    access_token=access_token,
-                )
-            except m365_service.M365Error as exc:
-                compliance_role_error = str(exc)
-                log_error(
-                    "Compliance Administrator remediation failed",
-                    company_id=company_id,
-                    error=str(exc),
-                )
-
-    # Best-effort: grant any newly-required app role assignments (e.g. the
-    # permissions added for mailbox sync) using the admin's delegated token.
-    # This ensures existing deployments pick up new permissions automatically
-    # when an administrator re-runs "Authorize portal access".
-    # The focused Purview remediation intentionally does not grant other API
-    # permissions or administrator roles; those remain separate setup checks.
+    # One consent performs every delegated setup step, so guided setup,
+    # reconnects and diagnostics repair all leave the tenant in the same
+    # state.  Each step is best-effort: a failure is reported, never allowed
+    # to undo the connection that was just authorised.
+    grant_failures: list[str] = []
+    compliance_role_error: str | None = None
     if access_token:
         # The chained Security & Compliance consent requests the Purview
         # ``/.default`` scope, which fails with AADSTS650057 unless the app
@@ -6776,12 +6859,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # in _complete_connect_with_scc_consent grant it.
         await m365_service.ensure_ediscovery_delegated_permission(company_id, access_token)
         await m365_service.ensure_ediscovery_download_permission(company_id, access_token)
-    grant_failures: list[str] = []
-    if access_token and not compliance_setup:
         # List every baseline application permission on the app registration
         # so Entra shows it as configured and admin consent covers it.
         await m365_service.ensure_graph_app_roles_on_manifest(company_id, access_token)
         await m365_service.ensure_exchange_manage_as_app_on_manifest(company_id, access_token)
+        # Grant newly-required application permissions and the Exchange and
+        # Teams administrator roles so existing deployments pick them up.
         new_permissions_granted = await m365_service.try_grant_missing_permissions(
             company_id=company_id,
             access_token=access_token,
@@ -6792,39 +6875,40 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "Granted missing M365 permissions via connect flow",
                 company_id=company_id,
             )
+        # The Purview diagnostics probes run app-only and need Compliance
+        # Administrator (or Exchange Administrator) on the enterprise app.
+        try:
+            await m365_service.ensure_compliance_administrator_role(
+                company_id=company_id,
+                access_token=access_token,
+            )
+        except Exception as exc:  # noqa: BLE001 - must not block the connection
+            compliance_role_error = (
+                str(exc)
+                if isinstance(exc, m365_service.M365Error)
+                else "Compliance Administrator could not be assigned."
+            )
+            log_error(
+                "Compliance Administrator assignment failed during connect",
+                company_id=company_id,
+                error=str(exc),
+            )
     log_info("Microsoft 365 OAuth callback processed", company_id=company_id)
+    await m365_sync_schedule_service.ensure_sync_tasks_and_refresh(company_id)
     asyncio.create_task(
         _best_effort_sync_m365_email_domains(company_id),
         name=f"sync_m365_email_domains_{company_id}",
     )
-    if compliance_setup:
-        destination = (
-            "/m365/diagnostics"
-            if state_data.get("return_to") == "diagnostics"
-            else "/m365"
+    problems: list[str] = []
+    if grant_failures:
+        problems.append(
+            "These Microsoft Graph permissions could not be granted: "
+            + "; ".join(grant_failures)[:1500]
+            + ". Grant them in Entra (App registrations > API permissions > "
+            "Grant admin consent) or reconnect as a Global Administrator."
         )
-        if compliance_role_error:
-            return flash_redirect(
-                destination,
-                compliance_role_error,
-                "error",
-            )
-        role_status = str((compliance_role_result or {}).get("status") or "")
-        role_message = (
-            "Compliance Administrator was already assigned."
-            if role_status == "existing"
-            else "Compliance Administrator was assigned and verified."
-        )
-        return await _complete_connect_with_scc_consent(
-            request,
-            company_id=company_id,
-            destination=destination,
-            message=(
-                role_message
-                + " Reconnect is complete; Purview provisioning and search support "
-                "must still be verified separately."
-            ),
-        )
+    if compliance_role_error:
+        problems.append(compliance_role_error)
     if state_data.get("return_to") == "diagnostics":
         # Re-run all diagnostics and complete the Purview-native setup now that
         # delegated consent and the EOP role assignment are available.
@@ -6842,22 +6926,16 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             company_id=company_id,
             destination="/m365/diagnostics",
             message=(
-                "Permissions and Purview configuration repaired and re-checked"
-                if not grant_failures
-                else "Re-checked, but these Microsoft Graph permissions could not be granted: "
-                + "; ".join(grant_failures)[:1500]
+                "Re-checked with warnings. " + " ".join(problems)
+                if problems
+                else "Permissions and Purview configuration repaired and re-checked"
             ),
-            variant="warning" if grant_failures else "success",
+            variant="warning" if problems else "success",
         )
-    if grant_failures:
+    if problems:
         return await _complete_connect_with_scc_consent(
             request, company_id=company_id, destination="/m365",
-            message=(
-                "Connected, but these Microsoft Graph permissions could not be "
-                "granted: " + "; ".join(grant_failures)[:1500]
-                + ". Grant them in Entra (App registrations > API permissions > "
-                "Grant admin consent) or reconnect as a Global Administrator."
-            ),
+            message="Connected with warnings. " + " ".join(problems),
             variant="warning",
         )
     return await _complete_connect_with_scc_consent(
@@ -7695,6 +7773,158 @@ async def attach_ticket_requester_mobile(request: Request, ticket_id: int):
     return JSONResponse({"ok": True, "staff_id": staff_id, "mobile_phone": phone})
 
 
+_TICKET_REQUESTER_PHONE_KINDS = ("mobile", "landline", "company")
+
+
+@app.post("/api/tickets/{ticket_id}/requester/phone", response_class=JSONResponse)
+async def add_ticket_requester_phone(request: Request, ticket_id: int):
+    """Record a mobile, landline or company number for the ticket requester.
+
+    Body: ``{"kind": "mobile" | "landline" | "company", "phone": "..."}``.
+    Mobile and landline numbers are stored on the requester's staff record;
+    a company number is stored on the ticket's linked company. Existing
+    numbers are never overwritten from this dialog.
+    """
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid request body")
+    kind = str(payload.get("kind") or "").strip().lower()
+    if kind not in _TICKET_REQUESTER_PHONE_KINDS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Choose mobile, landline or company")
+    phone = str(payload.get("phone") or "").strip()
+    normalized = re.sub(r"[^0-9+]", "", phone)
+    if len(phone) > 32 or not re.fullmatch(r"\+?[0-9]{3,15}", normalized):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Enter a valid phone number")
+
+    if kind == "company":
+        company_id = ticket.get("company_id")
+        company = await company_repo.get_company_by_id(int(company_id)) if company_id is not None else None
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link a company to the ticket first")
+        if str(company.get("phone") or "").strip():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The company already has a phone number")
+        await company_repo.update_company(int(company["id"]), phone=phone)
+        await audit_service.record(
+            action="ticket.requester.company_phone_added",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="company",
+            entity_id=int(company["id"]),
+            before={"phone": None},
+            after={"phone": phone},
+            metadata={"ticket_id": ticket_id},
+        )
+        return JSONResponse({
+            "ok": True, "kind": kind, "company_id": int(company["id"]), "phone": phone,
+            "display": _format_ticket_requester_phone(phone),
+        })
+
+    if ticket.get("requester_staff_id") is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
+    staff_id = int(ticket["requester_staff_id"])
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
+    column = "mobile_phone" if kind == "mobile" else "landline_phone"
+    if str(staff.get(column) or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"The requester already has a {kind} number",
+        )
+    if kind == "mobile":
+        await staff_repo.update_mobile_phone(staff_id, phone)
+    else:
+        await staff_repo.update_landline_phone(staff_id, phone)
+    await audit_service.record(
+        action=f"ticket.requester.{kind}_phone_added",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="staff",
+        entity_id=staff_id,
+        before={column: None},
+        after={column: phone},
+        metadata={"ticket_id": ticket_id},
+    )
+    return JSONResponse({
+        "ok": True, "kind": kind, "staff_id": staff_id, "phone": phone,
+        "display": _format_ticket_requester_phone(phone),
+    })
+
+
+async def _ticket_requester_contact_details(ticket: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Collect the requester details MyPortal holds for an Outlook contact."""
+    details: dict[str, Any] = {}
+    staff_id = ticket.get("requester_staff_id")
+    if staff_id is not None:
+        staff = await staff_repo.get_staff_by_id(int(staff_id))
+        if staff:
+            details = {
+                "first_name": staff.get("first_name"),
+                "last_name": staff.get("last_name"),
+                "email": staff.get("email"),
+                "mobile_phone": staff.get("mobile_phone"),
+                "landline_phone": staff.get("landline_phone"),
+                "job_title": staff.get("job_title") or staff.get("position"),
+            }
+    if not details and ticket.get("requester_id") is not None:
+        user = await user_repo.get_user_by_id(int(ticket["requester_id"]))
+        if user:
+            details = {
+                "first_name": user.get("first_name"),
+                "last_name": user.get("last_name"),
+                "email": user.get("email"),
+                "mobile_phone": user.get("mobile_phone"),
+            }
+    if not details:
+        return None
+    company_id = ticket.get("company_id")
+    if company_id is not None:
+        company = await company_repo.get_company_by_id(int(company_id))
+        if company:
+            details["company_name"] = company.get("name")
+            details["company_phone"] = company.get("phone")
+    return details
+
+
+@app.post("/api/tickets/{ticket_id}/requester/outlook", response_class=JSONResponse)
+async def send_ticket_requester_to_outlook(request: Request, ticket_id: int):
+    """Create or update the ticket requester in the technician's Outlook contacts."""
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not _feature_pack_available("outlook_contacts"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Outlook contacts are not available")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    details = await _ticket_requester_contact_details(ticket)
+    if not details:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester not found")
+    try:
+        result = await user_m365_contacts_service.upsert_contact(int(current_user["id"]), details)
+    except user_m365_contacts_service.ReconnectRequired as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    verb = "updated in" if result["action"] == "updated" else "added to"
+    return JSONResponse({
+        "ok": True,
+        "action": result["action"],
+        "message": f"{result['display_name']} {verb} your Outlook contacts.",
+    })
+
+
 @app.get("/api/rag/relationships/metrics", response_class=JSONResponse)
 async def rag_relationship_metrics(_: dict = Depends(require_super_admin)):
     from app.repositories import rag_relationships as rel_repo
@@ -8255,6 +8485,9 @@ async def admin_scheduled_tasks(
     if redirect:
         return redirect
     tasks = await scheduled_tasks_repo.list_tasks(include_inactive=show_inactive)
+    all_tasks = (
+        tasks if show_inactive else await scheduled_tasks_repo.list_tasks(include_inactive=True)
+    )
     companies = await company_repo.list_companies()
 
     company_lookup: dict[int, str] = {}
@@ -8311,7 +8544,7 @@ async def admin_scheduled_tasks(
     available_commands = (
         "update_mac_vendors", "update_chocolatey_catalog", "sync_staff", "sync_m365_data", "sync_m365_licenses",
         "sync_m365_contacts", "sync_m365_mailboxes", "refresh_m365_consent_status",
-        "sync_huntress", "lookup_asset_warranties", "sync_to_xero", "sync_to_xero_auto_send",
+        "sync_huntress", "lookup_asset_warranties", "lookup_cpu_release_dates", "sync_to_xero", "sync_to_xero_auto_send",
         "generate_invoice", "process_subscription_renewals",
         "unbill_time_entries", "send_price_change_notifications", "create_scheduled_ticket",
         "sync_recordings", "sync_unifi_talk_recordings", "queue_transcriptions",
@@ -8362,6 +8595,7 @@ async def admin_scheduled_tasks(
         "company_options": company_options,
         "bulk_company_options": bulk_company_options,
         "schedule_timezone": settings.default_timezone or "UTC",
+        "command_default_crons": scheduled_task_slots.command_default_crons(all_tasks),
     }
     return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
 
@@ -8550,8 +8784,18 @@ async def admin_bulk_create_scheduled_tasks(request: Request):
     active = form.get("active") is not None
     exclude_from_calendar = form.get("excludeFromCalendar") is not None
     created_count = 0
+    month_end_crons: list[str] | None = None
+    if command in scheduled_task_slots.SEQUENTIAL_COMMANDS:
+        month_end_crons = scheduled_task_slots.allocate_month_end_crons(
+            command,
+            await scheduled_tasks_repo.list_tasks(include_inactive=True),
+            len(company_ids),
+            start_cron=cron or None,
+        )
     for offset, company_id in enumerate(company_ids):
-        if start_hour is None or start_minute is None:
+        if month_end_crons is not None:
+            task_cron = month_end_crons[offset]
+        elif start_hour is None or start_minute is None:
             task_cron = _random_daily_cron()
         else:
             fields = list(cron_fields)
@@ -8835,6 +9079,7 @@ async def _tray_devices_context(
 ) -> dict[str, Any]:
     from app.repositories import tray as tray_repo
     from app.services import tray_installer as tray_installer_service
+    from app.services import tray_update_rollout as tray_update_rollout_service
 
     devices = await tray_repo.list_devices_with_company(status=(status or None))
     if search:
@@ -8860,6 +9105,7 @@ async def _tray_devices_context(
         "matrix_enabled": settings.matrix_enabled,
         "tray_release": tray_release,
         "outdated_device_count": outdated_device_count,
+        "update_rollout": tray_update_rollout_service.rollout_status(),
     }
 
 
@@ -8951,6 +9197,7 @@ async def admin_tray_bulk_update_outdated_devices(request: Request):
     from app.repositories import tray as tray_repo
     from app.services import tray as tray_service
     from app.services import tray_installer as tray_installer_service
+    from app.services import tray_update_rollout as tray_update_rollout_service
 
     tray_release = tray_installer_service.get_cached_latest_release_info()
     latest_tray_version = tray_release.get("version") if isinstance(tray_release, dict) else None
@@ -8975,31 +9222,25 @@ async def admin_tray_bulk_update_outdated_devices(request: Request):
             "info",
         )
 
-    sent_count = 0
-    queued_count = 0
-    already_queued_count = 0
-    for device in outdated_devices:
-        command_id, delivered = await tray_service.dispatch_update_command(
-            device,
-            initiated_by_user_id=current_user.get("id") if current_user else None,
-            extra_payload={
-                "latest_tray_version": latest_tray_version,
-                "current_agent_version": device.get("agent_version"),
-            },
+    started = tray_update_rollout_service.start_rollout(
+        outdated_devices,
+        target_version=latest_tray_version,
+        initiated_by_user_id=current_user.get("id") if current_user else None,
+        is_outdated=_is_tray_agent_outdated,
+    )
+    if not started:
+        return flash_redirect(
+            "/admin/tray#devices",
+            "An update rollout is already running. Devices are being updated one at a time.",
+            "info",
         )
-        if command_id is None:
-            already_queued_count += 1
-        elif delivered:
-            sent_count += 1
-        else:
-            queued_count += 1
-
-    message = f"Sent the update to {sent_count} outdated tray device(s)."
-    if queued_count:
-        message += f" Queued for {queued_count} offline device(s) until they reconnect."
-    if already_queued_count:
-        message += f" {already_queued_count} already had an update queued."
-    return flash_redirect("/admin/tray#devices", message, "success")
+    count = len(outdated_devices)
+    return flash_redirect(
+        "/admin/tray#devices",
+        f"Updating {count} outdated tray device(s) one at a time. Each device finishes "
+        "before the next one starts; offline devices update when they reconnect.",
+        "success",
+    )
 
 
 @app.post("/admin/tray/devices/{device_id}/revoke", response_class=HTMLResponse)
@@ -9007,10 +9248,40 @@ async def admin_tray_revoke_device(device_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    from app.repositories import tray as tray_repo
+    from app.services import tray as tray_service
 
-    await tray_repo.revoke_device(device_id)
+    await tray_service.revoke_device(device_id)
     return RedirectResponse(url="/admin/tray#devices", status_code=303)
+
+
+@app.post("/admin/tray/devices/{device_id}/reset-key", response_class=HTMLResponse)
+async def admin_tray_reset_device_key(device_id: int, request: Request):
+    """Forget a device's registered key, so it can register a new one. Use it
+    when a reinstall replaced the key but kept the device's token."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+    from app.services import tray as tray_service
+
+    device = await tray_repo.get_device_by_id(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Tray device not found")
+    await tray_repo.set_device_public_key(device_id, None)
+    # Close the live connection so it reconnects and registers its key.
+    await tray_service.close_device_connection(str(device.get("device_uid") or ""))
+    await audit_service.log_action(
+        action="tray_device_key_reset",
+        entity_type="tray_device",
+        entity_id=device_id,
+        user_id=int(current_user["id"]),
+        request=request,
+    )
+    return flash_redirect(
+        "/admin/tray#devices",
+        "Device key reset. The device registers its current key the next time it connects.",
+        "success",
+    )
 
 
 @app.post("/admin/tray/devices/{device_id}/reactivate", response_class=HTMLResponse)
@@ -12015,6 +12286,7 @@ async def _render_ticket_detail(
         requester_options.sort(key=_requester_sort_key)
 
     ticket_requester_phone_display: str | None = None
+    ticket_requester_landline_display: str | None = None
     requester_staff_id = ticket.get("requester_staff_id")
     requester_user_id = ticket.get("requester_id")
     def _same_identifier(left: Any, right: Any) -> bool:
@@ -12033,6 +12305,9 @@ async def _render_ticket_detail(
         ):
             ticket_requester_phone_display = _format_ticket_requester_phone(
                 requester_option.get("mobile_phone")
+            )
+            ticket_requester_landline_display = _format_ticket_requester_phone(
+                requester_option.get("landline_phone")
             )
             break
     if ticket_requester_phone_display is None:
@@ -12258,6 +12533,7 @@ async def _render_ticket_detail(
         "ticket_user_options": technician_users,
         "ticket_requester_options": requester_options,
         "ticket_requester_phone_display": ticket_requester_phone_display,
+        "ticket_requester_landline_display": ticket_requester_landline_display,
         "ticket_company_phone_display": ticket_company_phone_display,
         "ticket_requester_lookup_name": ticket_requester_lookup_name,
         "ticket_watcher_staff_options": watcher_staff_options,

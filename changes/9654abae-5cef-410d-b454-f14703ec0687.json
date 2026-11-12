@@ -1,0 +1,7 @@
+{
+  "guid": "9654abae-5cef-410d-b454-f14703ec0687",
+  "occurred_at": "2026-11-11T23:37Z",
+  "change_type": "Feature",
+  "summary": "Assets now get an estimated age from their processor's launch date: turn on the CPU age lookup module and MyPortal looks up each Intel CPU on Intel ARK, stores the result as the asset's Approx age, and lets you record launch dates by hand for other processors.",
+  "content_hash": "d54a906ea2ae141d1778b4026a0a88a13f1a92b22a49f153011061b18ddc8ef7"
+}

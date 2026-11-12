@@ -12,7 +12,8 @@ _SELECT = (
     "SELECT c.id, c.name, c.company_id, c.asset_id, c.check_type, c.target, c.settings_json, c.duration_minutes, "
     "c.check_script_id, c.check_entries_encrypted, c.check_inputs_json, c.action, c.script_id, c.entries_encrypted, "
     "c.inputs_json, c.timeout_seconds, c.cooldown_minutes, c.schedule_mode, c.delay_minutes, c.run_time, "
-    "c.schedule_timezone, c.is_enabled, c.auto_close_when_resolved, c.target_rules_json, c.last_failed_at, c.last_summary, "
+    "c.schedule_timezone, c.is_enabled, c.auto_close_when_resolved, c.target_rules_json, c.actions_json, "
+    "c.last_failed_at, c.last_summary, "
     "c.created_by_user_id, c.updated_by_user_id, c.created_at, c.updated_at, "
     "s.name AS script_name, cs.name AS check_script_name, a.name AS asset_name, co.name AS company_name "
     "FROM rmm_checks c "
@@ -70,9 +71,16 @@ def _check_row(row: dict[str, Any] | None, *, with_secrets: bool = False) -> dic
     check["is_enabled"] = bool(check.get("is_enabled"))
     check["auto_close_when_resolved"] = bool(check.get("auto_close_when_resolved"))
     check["target"] = str(check.get("target") or "")
+    # The ordered actions (app.services.rmm_action_steps); None keeps the older single action.
+    raw_actions = check.pop("actions_json", None)
+    actions = None if raw_actions is None else _decode_json(raw_actions, [])
+    check["actions"] = actions if isinstance(actions, list) or actions is None else []
     if not with_secrets:
         check.pop("entries_encrypted", None)
         check.pop("check_entries_encrypted", None)
+        if check["actions"]:
+            check["actions"] = [{key: value for key, value in step.items() if key != "entries_encrypted"}
+                                if isinstance(step, dict) else step for step in check["actions"]]
     return check
 
 
@@ -142,7 +150,8 @@ def _values(values: dict[str, Any]) -> tuple:
         values["cooldown_minutes"], values.get("schedule_mode"), values.get("delay_minutes"), values.get("run_time"),
         values.get("schedule_timezone"), 1 if values["is_enabled"] else 0,
         1 if values.get("auto_close_when_resolved") else 0,
-        json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None, values["user_id"],
+        json.dumps(values["target_rules"]) if values.get("target_rules") is not None else None,
+        json.dumps(values["actions"]) if values.get("actions") is not None else None, values["user_id"],
     )
 
 
@@ -152,8 +161,9 @@ async def create_check(values: dict[str, Any]) -> int:
         "INSERT INTO rmm_checks (name, company_id, asset_id, check_type, target, settings_json, duration_minutes, "
         "check_script_id, check_entries_encrypted, check_inputs_json, action, script_id, entries_encrypted, "
         "inputs_json, timeout_seconds, cooldown_minutes, schedule_mode, delay_minutes, run_time, schedule_timezone, "
-        "is_enabled, auto_close_when_resolved, target_rules_json, created_by_user_id, updated_by_user_id, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, "
-        "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "is_enabled, auto_close_when_resolved, target_rules_json, actions_json, created_by_user_id, updated_by_user_id, "
+        "created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, "
+        "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (*_values(values), values["user_id"], now, now),
     )
 
@@ -164,7 +174,8 @@ async def update_check(check_id: int, values: dict[str, Any]) -> None:
         "settings_json = %s, duration_minutes = %s, check_script_id = %s, check_entries_encrypted = %s, "
         "check_inputs_json = %s, action = %s, script_id = %s, entries_encrypted = %s, inputs_json = %s, "
         "timeout_seconds = %s, cooldown_minutes = %s, schedule_mode = %s, delay_minutes = %s, run_time = %s, "
-        "schedule_timezone = %s, is_enabled = %s, auto_close_when_resolved = %s, target_rules_json = %s, updated_by_user_id = %s, updated_at = %s WHERE id = %s",
+        "schedule_timezone = %s, is_enabled = %s, auto_close_when_resolved = %s, target_rules_json = %s, "
+        "actions_json = %s, updated_by_user_id = %s, updated_at = %s WHERE id = %s",
         (*_values(values), _utcnow(), check_id),
     )
     # A changed check starts again on every device.
@@ -173,6 +184,7 @@ async def update_check(check_id: int, values: dict[str, Any]) -> None:
         "next_run_at = NULL, scheduled_at = NULL WHERE check_id = %s",
         (check_id,),
     )
+    await db.execute("DELETE FROM rmm_check_action_schedules WHERE check_id = %s", (check_id,))
 
 
 async def set_check_enabled(check_id: int, enabled: bool, user_id: int | None) -> None:
@@ -183,6 +195,7 @@ async def set_check_enabled(check_id: int, enabled: bool, user_id: int | None) -
 
 
 async def delete_check(check_id: int) -> None:
+    await db.execute("DELETE FROM rmm_check_action_schedules WHERE check_id = %s", (check_id,))
     await db.execute("DELETE FROM rmm_check_states WHERE check_id = %s", (check_id,))
     await db.execute("DELETE FROM rmm_checks WHERE id = %s", (check_id,))
 
@@ -203,14 +216,43 @@ async def set_summary(check_id: int, summary: str) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _earliest(*values: Any) -> datetime | None:
+    times = [value for value in (_as_datetime(item) for item in values) if value is not None]
+    return min(times) if times else None
+
+
+async def _next_scheduled(agent_id: int, check_id: int | None = None) -> dict[int, datetime]:
+    """When each check's next scheduled script runs on a device (one per action)."""
+
+    sql = "SELECT check_id, MIN(run_at) AS run_at FROM rmm_check_action_schedules WHERE agent_id = %s"
+    params: list[Any] = [agent_id]
+    if check_id is not None:
+        sql += " AND check_id = %s"
+        params.append(check_id)
+    rows = await db.fetch_all(sql + " GROUP BY check_id", tuple(params))
+    return {int(row["check_id"]): _as_datetime(row["run_at"]) for row in rows or [] if row.get("run_at") is not None}
+
+
 async def get_state(check_id: int, agent_id: int) -> dict[str, Any] | None:
-    row = await db.fetch_one(_STATE_SELECT + "WHERE check_id = %s AND agent_id = %s", (check_id, agent_id))
-    return _state_row(row)
+    """A check's result on a device; ``scheduled_at`` is when its next scheduled script runs."""
+
+    state = _state_row(await db.fetch_one(_STATE_SELECT + "WHERE check_id = %s AND agent_id = %s", (check_id, agent_id)))
+    if state:
+        state["scheduled_at"] = _earliest(state.get("scheduled_at"),
+                                          (await _next_scheduled(agent_id, check_id)).get(check_id))
+    return state
 
 
-async def list_states_for_agent(agent_id: int) -> dict[int, dict[str, Any]]:
+async def list_states_for_agent(agent_id: int, *, with_schedules: bool = False) -> dict[int, dict[str, Any]]:
+    """Each check's result on a device; ``with_schedules`` fills in ``scheduled_at`` from every action."""
+
     rows = await db.fetch_all(_STATE_SELECT + "WHERE agent_id = %s", (agent_id,))
-    return {int(row["check_id"]): _state_row(row) for row in rows or []}
+    states = {int(row["check_id"]): _state_row(row) for row in rows or []}
+    if with_schedules and states:
+        upcoming = await _next_scheduled(agent_id)
+        for check_id, state in states.items():
+            state["scheduled_at"] = _earliest(state.get("scheduled_at"), upcoming.get(check_id))
+    return states
 
 
 async def list_states_for_agents(agent_ids: Iterable[int]) -> dict[int, dict[int, dict[str, Any]]]:
@@ -269,13 +311,20 @@ async def list_check_devices(check_id: int, company_id: int, statuses: Iterable[
     rows = await db.fetch_all(
         "SELECT s.check_id, s.agent_id, s.status, s.value_text, s.problem_since, s.checked_at, s.changed_at, "  # nosec B608
         "s.last_action_at, s.ticket_id, s.run_id, s.next_run_at, s.scheduled_at, "
+        "(SELECT MIN(x.run_at) FROM rmm_check_action_schedules x WHERE x.check_id = s.check_id "
+        "AND x.agent_id = s.agent_id) AS action_scheduled_at, "
         "g.asset_id, g.hostname, a.name AS asset_name "
         "FROM rmm_check_states s JOIN rmm_agents g ON g.id = s.agent_id LEFT JOIN assets a ON a.id = g.asset_id "
         f"WHERE s.check_id = %s AND g.company_id = %s AND s.status IN ({placeholders}) "
         "ORDER BY s.status, COALESCE(a.name, g.hostname), s.agent_id",
         (check_id, company_id, *wanted),
     )
-    return [_state_row(row) for row in rows or []]
+    states = []
+    for row in rows or []:
+        state = _state_row(row)
+        state["scheduled_at"] = _earliest(state.get("scheduled_at"), state.pop("action_scheduled_at", None))
+        states.append(state)
+    return states
 
 
 async def save_state(check_id: int, agent_id: int, state: dict[str, Any]) -> None:
@@ -298,41 +347,73 @@ async def save_state(check_id: int, agent_id: int, state: dict[str, Any]) -> Non
     )
 
 
-async def schedule_action(check_id: int, agent_id: int, run_at: datetime) -> bool:
-    """Schedule the check's script on a device unless one is already waiting there."""
+async def schedule_step(check_id: int, agent_id: int, action_key: str, run_at: datetime) -> bool:
+    """Schedule one of the check's scripts on a device unless that one is already waiting there."""
 
-    return await db.execute_rowcount(
-        "UPDATE rmm_check_states SET scheduled_at = %s WHERE check_id = %s AND agent_id = %s "
-        "AND scheduled_at IS NULL",
-        (run_at, check_id, agent_id),
-    ) > 0
+    existing = await db.fetch_one(
+        "SELECT run_at FROM rmm_check_action_schedules WHERE check_id = %s AND agent_id = %s AND action_key = %s",
+        (check_id, agent_id, action_key),
+    )
+    if existing:
+        return False
+    await db.execute(
+        "INSERT INTO rmm_check_action_schedules (check_id, agent_id, action_key, run_at, created_at) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (check_id, agent_id, action_key, run_at, _utcnow()),
+    )
+    return True
 
 
-async def clear_scheduled(check_id: int, agent_id: int) -> bool:
-    """Drop a scheduled script that has not run yet. True when one was waiting."""
+async def clear_scheduled(check_id: int, agent_id: int) -> int:
+    """Drop the scripts waiting to run on a device. Returns how many were waiting."""
 
-    return await db.execute_rowcount(
+    legacy = await db.execute_rowcount(
         "UPDATE rmm_check_states SET scheduled_at = NULL WHERE check_id = %s AND agent_id = %s "
         "AND scheduled_at IS NOT NULL",
         (check_id, agent_id),
-    ) > 0
+    )
+    listed = await db.execute_rowcount(
+        "DELETE FROM rmm_check_action_schedules WHERE check_id = %s AND agent_id = %s", (check_id, agent_id)
+    )
+    return max(0, legacy) + max(0, listed)
 
 
 async def due_scheduled(now: datetime, limit: int = 100) -> list[dict[str, Any]]:
-    rows = await db.fetch_all(
+    """Scheduled scripts due by ``now``, with the device's result for the check.
+
+    ``action_key`` names the action; None is a run scheduled by an earlier
+    release, which belongs to the check's first scheduled script."""
+
+    legacy = await db.fetch_all(
         _STATE_SELECT + "WHERE scheduled_at IS NOT NULL AND scheduled_at <= %s ORDER BY scheduled_at LIMIT %s",
         (now, limit),
     )
-    return [_state_row(row) for row in rows or []]
+    listed = await db.fetch_all(
+        "SELECT x.check_id, x.agent_id, x.action_key, x.run_at, s.status, s.value_text "
+        "FROM rmm_check_action_schedules x LEFT JOIN rmm_check_states s "
+        "ON s.check_id = x.check_id AND s.agent_id = x.agent_id "
+        "WHERE x.run_at <= %s ORDER BY x.run_at LIMIT %s",
+        (now, limit),
+    )
+    due = [{**_state_row(row), "action_key": None, "run_at": _as_datetime(row.get("scheduled_at"))} for row in legacy or []]
+    due += [{**dict(row), "run_at": _as_datetime(row.get("run_at"))} for row in listed or []]
+    due.sort(key=lambda item: item["run_at"] or now)
+    return due[:limit]
 
 
-async def claim_scheduled(check_id: int, agent_id: int, now: datetime) -> bool:
+async def claim_scheduled(check_id: int, agent_id: int, now: datetime, action_key: str | None = None) -> bool:
     """Take a due scheduled script; only the instance that clears it runs it."""
 
+    if action_key is None:
+        return await db.execute_rowcount(
+            "UPDATE rmm_check_states SET scheduled_at = NULL WHERE check_id = %s AND agent_id = %s "
+            "AND scheduled_at IS NOT NULL AND scheduled_at <= %s",
+            (check_id, agent_id, now),
+        ) > 0
     return await db.execute_rowcount(
-        "UPDATE rmm_check_states SET scheduled_at = NULL WHERE check_id = %s AND agent_id = %s "
-        "AND scheduled_at IS NOT NULL AND scheduled_at <= %s",
-        (check_id, agent_id, now),
+        "DELETE FROM rmm_check_action_schedules WHERE check_id = %s AND agent_id = %s AND action_key = %s "
+        "AND run_at <= %s",
+        (check_id, agent_id, action_key, now),
     ) > 0
 
 

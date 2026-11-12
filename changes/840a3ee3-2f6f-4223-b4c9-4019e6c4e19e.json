@@ -1,0 +1,7 @@
+{
+  "guid": "840a3ee3-2f6f-4223-b4c9-4019e6c4e19e",
+  "occurred_at": "2026-11-12T02:11Z",
+  "change_type": "Fix",
+  "summary": "Microsoft sign-in reports invalid callback sessions and records safe Microsoft error codes to help diagnose failed sign-ins.",
+  "content_hash": "00ed1ff78b262671cf2705ab10e5a1883a2c44b49ec1288eafe28bdebeba457b"
+}

@@ -1,5 +1,7 @@
 // RMM checks form: shows only the settings each choice uses, names the check,
-// says in words when it fails, and drives the advanced device targeting.
+// says in words when it fails, and drives the advanced device targeting. The
+// ordered actions are edited by rmm_action_steps.js; settings shared by them
+// show while the list holds an action that uses them.
 (function () {
   'use strict';
 
@@ -12,7 +14,6 @@
   const summary = form.querySelector('[data-rmm-check-summary]');
   const asset = form.querySelector('[name="asset_id"]');
   const deviceField = form.querySelector('[data-rmm-check-device]');
-  const scheduleMode = form.querySelector('[data-rmm-check-schedule-mode]');
   const rulesInput = form.querySelector('[data-rmm-check-target-rules]');
   const rulesField = form.querySelector('[data-rmm-rules-field]');
   const submit = form.querySelector('[data-rmm-check-submit]');
@@ -181,17 +182,23 @@
     }
   }
 
-  // [data-rmm-show="action:a,b|type:c"] shows when any clause matches.
+  // [data-rmm-show="action:a,b|type:c"] shows when any clause matches: the
+  // check's type, or any of the listed actions.
   function matches(rule, state) {
     return rule.split('|').some((clause) => {
       const parts = clause.split(':');
-      return (parts[1] || '').split(',').indexOf(state[parts[0]]) !== -1;
+      const wanted = (parts[1] || '').split(',');
+      const values = [].concat(state[parts[0]] || []);
+      return values.some((item) => wanted.indexOf(item) !== -1);
     });
   }
 
+  const actionTypes = () => Array.from(form.querySelectorAll('[data-rmm-steps] > [data-rmm-step]'))
+    .map((card) => card.getAttribute('data-rmm-step-type'));
+
   function update() {
     const type = checked('check_type');
-    const state = { type: type, action: checked('action') };
+    const state = { type: type, action: actionTypes() };
     form.querySelectorAll('[data-rmm-check-fields]').forEach((fieldset) => {
       const active = fieldset.getAttribute('data-rmm-check-fields') === type;
       fieldset.hidden = !active;
@@ -215,10 +222,6 @@
     if (programValue) programValue.hidden = value('program_version_operator') === 'none';
     form.querySelectorAll('[data-rmm-proxmox-show]').forEach((element) => {
       element.hidden = element.getAttribute('data-rmm-proxmox-show').split(',').indexOf(value('proxmox_condition')) === -1;
-    });
-    const mode = scheduleMode ? scheduleMode.value : 'delay';
-    form.querySelectorAll('[data-rmm-show-schedule]').forEach((element) => {
-      element.hidden = element.getAttribute('data-rmm-show-schedule') !== mode;
     });
     const offline = type === 'offline';
     if (durationLabel) durationLabel.textContent = offline ? 'Fails after no check-in for' : 'Problem must last at least';
@@ -258,7 +261,7 @@
 
   form.addEventListener('change', (event) => {
     const target = event.target;
-    if (target.matches('[data-rmm-check-type], [data-rmm-check-action], [data-rmm-check-schedule-mode], [data-rmm-service-expected], [data-rmm-program-expected], [data-rmm-program-operator], [data-rmm-proxmox-condition]')) update();
+    if (target.matches('[data-rmm-check-type], [data-rmm-service-expected], [data-rmm-program-expected], [data-rmm-program-operator], [data-rmm-proxmox-condition]')) update();
     if (target.matches('[data-rmm-check-target-mode]')) updateSelection();
     if (target.matches('[data-rmm-check-scope]')) {
       updateSelection();
@@ -283,6 +286,7 @@
     actionResults.focus();
   });
   rulesField.addEventListener('rmm:rules-change', writeRules);
+  form.addEventListener('rmm:steps-change', update);
 
   // Jump to the first control the browser's own validation stops on, wherever it is.
   form.addEventListener('invalid', (event) => {

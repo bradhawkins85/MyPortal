@@ -411,6 +411,7 @@ async def update_device_auth(
     await db.execute(
         f"UPDATE tray_devices SET auth_token_hash = {placeholder}, "  # nosec B608
         f"auth_token_prefix = {placeholder}, status = 'active', "
+        "ui_token_hash = NULL, ui_token_prefix = NULL, "
         f"updated_at = {placeholder} WHERE id = {placeholder}",
         (auth_token_hash, auth_token_prefix, now, device_id),
     )
@@ -440,6 +441,58 @@ async def get_device_by_auth_hash(auth_token_hash: str) -> dict[str, Any] | None
         f"SELECT * FROM tray_devices WHERE auth_token_hash = {placeholder} "  # nosec B608
         "AND status = 'active'",
         (auth_token_hash,),
+    )
+    return dict(row) if row else None
+
+
+async def set_device_ui_token(
+    device_id: int,
+    *,
+    ui_token_hash: str,
+    ui_token_prefix: str,
+) -> None:
+    placeholder = "?" if db.is_sqlite() else "%s"
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
+    await db.execute(
+        f"UPDATE tray_devices SET ui_token_hash = {placeholder}, "  # nosec B608
+        f"ui_token_prefix = {placeholder}, updated_at = {placeholder} "
+        f"WHERE id = {placeholder}",
+        (ui_token_hash, ui_token_prefix, now, device_id),
+    )
+
+
+async def register_device_public_key(device_id: int, public_key: str) -> bool:
+    """Store a device's public key unless it already has one. Returns whether
+    this call stored it."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # A static statement: the MySQL adapter turns the ``?`` placeholders into ``%s``.
+    changed = await db.execute_rowcount(
+        "UPDATE tray_devices SET public_key = ?, public_key_registered_at = ?, updated_at = ? "
+        "WHERE id = ? AND public_key IS NULL",
+        (public_key, now, now, device_id),
+    )
+    return changed > 0
+
+
+async def set_device_public_key(device_id: int, public_key: str | None) -> None:
+    """Replace (or with ``None`` clear) a device's public key."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    registered = now if public_key else None
+    # A static statement: the MySQL adapter turns the ``?`` placeholders into ``%s``.
+    await db.execute(
+        "UPDATE tray_devices SET public_key = ?, public_key_registered_at = ?, updated_at = ? "
+        "WHERE id = ?",
+        (public_key, registered, now, device_id),
+    )
+
+
+async def get_device_by_ui_token_hash(ui_token_hash: str) -> dict[str, Any] | None:
+    placeholder = "?" if db.is_sqlite() else "%s"
+    row = await db.fetch_one(
+        f"SELECT * FROM tray_devices WHERE ui_token_hash = {placeholder} "  # nosec B608
+        "AND status = 'active'",
+        (ui_token_hash,),
     )
     return dict(row) if row else None
 
@@ -525,17 +578,23 @@ async def update_device_heartbeat(
     console_user: str | None,
     last_ip: str | None,
     agent_version: str | None,
+    console_user_active: bool | None = None,
 ) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    active = None if console_user_active is None else int(bool(console_user_active))
+    if active == 0:
+        # Nobody is signed in: keep the last user but mark it as no longer current.
+        console_user = None
     # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
         f"UPDATE tray_devices SET last_seen_utc = {placeholder}, "  # nosec B608
         f"console_user = COALESCE({placeholder}, console_user), "
+        f"console_user_active = COALESCE({placeholder}, console_user_active), "
         f"last_ip = COALESCE({placeholder}, last_ip), "
         f"agent_version = COALESCE({placeholder}, agent_version), "
         f"updated_at = {placeholder} WHERE id = {placeholder}",
-        (now, console_user, last_ip, agent_version, now, device_id),
+        (now, console_user, active, last_ip, agent_version, now, device_id),
     )
 
 
@@ -597,6 +656,24 @@ async def revoke_device(device_id: int) -> None:
         f"UPDATE tray_devices SET status = 'revoked' WHERE id = {placeholder}",  # nosec B608
         (device_id,),
     )
+
+
+async def revoke_device_rmm_agents(device_id: int) -> int:
+    """Revoke the active RMM agents enrolled with a tray device."""
+    rows = await db.fetch_all(
+        "SELECT id FROM rmm_agents WHERE tray_device_id = ? AND status = 'active'",
+        (device_id,),
+    )
+    if not rows:
+        return 0
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # A static statement: the MySQL adapter turns the ``?`` placeholders into ``%s``.
+    await db.execute(
+        "UPDATE rmm_agents SET status = 'revoked', updated_at = ? "
+        "WHERE tray_device_id = ? AND status = 'active'",
+        (now, device_id),
+    )
+    return len(rows)
 
 
 async def reactivate_device(device_id: int) -> None:

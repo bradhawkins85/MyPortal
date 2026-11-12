@@ -5,15 +5,17 @@ const vm = require('node:vm');
 
 function setup(responses, {blockPopups = false} = {}) {
   class Element {
-    constructor() { this.hidden = true; this.attributes = {}; this.classList = {toggle() {}}; }
+    constructor() { this.hidden = true; this.attributes = {}; this.listeners = {}; this.classList = {toggle() {}}; }
+    addEventListener(name, callback) { this.listeners[name] = callback; }
     closest() { return this; }
     setAttribute(key, value) { this.attributes[key] = value; }
     removeAttribute(key) { delete this.attributes[key]; }
   }
   const message = new Element();
   const link = new Element();
+  const dismiss = new Element();
   const box = new Element();
-  box.querySelector = selector => selector.includes('message') ? message : link;
+  box.querySelector = selector => selector.includes('message') ? message : selector.includes('dismiss') ? dismiss : link;
   const button = new Element();
   button.dataset = {rmmRemote: 'meshcentral', rmmRemoteAsset: '10', rmmRemoteName: 'PC'};
   const clicks = [];
@@ -41,7 +43,7 @@ function setup(responses, {blockPopups = false} = {}) {
     setTimeout: callback => { timers.push(callback); return timers.length; },
     clearTimeout() {},
   });
-  return {message, link, button, opened, window, requests, tab,
+  return {message, link, button, box, dismiss, opened, window, requests, tab,
     click: async () => { for (const click of clicks) await click({target: button, preventDefault() {}}); },
     poll: async () => { timers.shift()(); await new Promise(resolve => setImmediate(resolve)); },
   };
@@ -177,4 +179,20 @@ test('RustDesk menu offers only the sessions the company allows', () => {
   // Older payloads without modes keep every session.
   assert.deepEqual(modesOf([{provider: 'rustdesk', label: 'RustDesk'}]),
     ['remote', 'remote_prompt', 'file_transfer', 'terminal']);
+});
+
+test('the status box can be dismissed and stays closed while the session finishes', async () => {
+  const app = setup([{...activating, label: 'RustDesk', open_url: ''},
+    {label: 'RustDesk', status: 'ready', launch_url: 'rustdesk://connection/new/123'}]);
+  app.button.dataset.rmmRemote = 'rustdesk';
+  await app.click();
+  assert.equal(app.box.hidden, false);
+  app.dismiss.listeners.click();
+  assert.equal(app.box.hidden, true);
+  await app.poll();
+  assert.equal(app.window.location.href, 'rustdesk://connection/new/123');
+  assert.equal(app.box.hidden, true);
+  // Starting another session shows the box again.
+  await app.click();
+  assert.equal(app.box.hidden, false);
 });

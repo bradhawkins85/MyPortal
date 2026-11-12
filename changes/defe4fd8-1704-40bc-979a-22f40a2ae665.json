@@ -1,0 +1,7 @@
+{
+  "guid": "defe4fd8-1704-40bc-979a-22f40a2ae665",
+  "occurred_at": "2026-11-10T07:01Z",
+  "change_type": "Fix",
+  "summary": "Tray build server installer now works when copied on its own: it fetches the tray source from GitHub (-SourceRef, default main) instead of failing with 'go.mod file not found'.",
+  "content_hash": "f5b0e527e29e3ec0f3ead260a01104969ae8552489cb208e2c1e36aaad3cf3cb"
+}

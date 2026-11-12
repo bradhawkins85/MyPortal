@@ -24,6 +24,18 @@ This feature adds support for custom fields on assets, allowing administrators t
   - Delete definitions (cascades to all asset values)
   - Reorder fields by display order
 
+### Columns end users can see
+- On the same Settings page, **Columns end users can see** lists every Assets
+  list column (for example *Serial number* or *Health check score*) and every
+  custom field. Untick a column and save to hide it from end users.
+- Hidden custom fields are also left off end users' asset pages and are not
+  returned or changeable for them through the asset custom-field API; saving
+  an asset as an end user leaves their stored values unchanged.
+- *Name* is always shown. Super admins and helpdesk technicians always see
+  every column.
+- End users with asset write access see the custom field columns that are not
+  hidden. Read-only customers keep the fixed customer-safe column set.
+
 ### 3. Asset-Level Field Values
 - Each asset can have values for all defined custom fields
 - Access via the "Edit" button on each asset row

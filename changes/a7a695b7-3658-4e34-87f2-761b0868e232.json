@@ -1,0 +1,7 @@
+{
+  "guid": "a7a695b7-3658-4e34-87f2-761b0868e232",
+  "occurred_at": "2026-11-09T12:02Z",
+  "change_type": "Security",
+  "summary": "On Windows the tray service and tray app now talk over a locked-down named pipe instead of a local TCP port, and the tray app only trusts it when the service runs as LocalSystem.",
+  "content_hash": "6953479a9ad5c63637a3e7073c1ec2924777fb7d9bea84c830a26a1e4a44be84"
+}

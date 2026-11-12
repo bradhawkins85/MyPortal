@@ -871,3 +871,147 @@ async def test_import_m365_no_duplicates_when_staff_exceeds_list_staff_page_size
 
 async def _async_return(value):
     return value
+
+
+def test_find_existing_staff_matches_pending_request_by_name_when_email_new():
+    existing = [
+        {"id": 1, "first_name": "Chandra", "last_name": "Perera", "email": ""},
+    ]
+    result = staff_importer._find_existing_staff(  # type: ignore[attr-defined]
+        existing,
+        first_name="Chandra",
+        last_name="Perera",
+        email="chandra.perera@example.com",
+    )
+    assert result == existing[0]
+
+
+def test_find_existing_staff_ignores_ambiguous_pending_requests():
+    existing = [
+        {"id": 1, "first_name": "Chandra", "last_name": "Perera", "email": None},
+        {"id": 2, "first_name": "Chandra", "last_name": "Perera", "email": ""},
+    ]
+    result = staff_importer._find_existing_staff(  # type: ignore[attr-defined]
+        existing,
+        first_name="Chandra",
+        last_name="Perera",
+        email="chandra.perera@example.com",
+    )
+    assert result is None
+
+
+def _patch_m365_import(monkeypatch, *, users, existing):
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 20, "syncro_company_id": None}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users", lambda *_, **__: _async_return(users)
+    )
+    monkeypatch.setattr(
+        "app.repositories.staff.list_all_staff_for_import",
+        lambda *_, **__: _async_return(existing),
+    )
+    calls: dict[str, list] = {"created": [], "updated": [], "deleted": []}
+
+    async def fake_create_staff(**kwargs):
+        calls["created"].append(kwargs)
+        return {**kwargs, "id": 900}
+
+    async def fake_update_staff(staff_id, **kwargs):
+        calls["updated"].append({"id": staff_id, **kwargs})
+        return {**kwargs, "id": staff_id}
+
+    async def fake_delete_staff(staff_id):
+        calls["deleted"].append(staff_id)
+
+    monkeypatch.setattr("app.repositories.staff.create_staff", fake_create_staff)
+    monkeypatch.setattr("app.repositories.staff.update_staff", fake_update_staff)
+    monkeypatch.setattr("app.repositories.staff.delete_staff", fake_delete_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
+    return calls
+
+
+@pytest.mark.anyio
+async def test_import_m365_merges_new_account_into_staff_request(monkeypatch):
+    """A new M365 account fills in the email on the pending staff request."""
+    request = {
+        "id": 7,
+        "first_name": "Chandra",
+        "last_name": "Perera",
+        "email": "",
+        "source": "manual",
+        "department": "Finance",
+        "account_action": "Onboard Requested",
+    }
+    calls = _patch_m365_import(
+        monkeypatch,
+        users=[
+            {
+                "givenName": "Chandra",
+                "surname": "Perera",
+                "mail": "Chandra.Perera@example.com",
+            }
+        ],
+        existing=[request],
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(20)
+
+    assert summary.created == 0
+    assert summary.updated == 1
+    assert calls["created"] == []
+    assert calls["updated"][0]["id"] == 7
+    assert calls["updated"][0]["email"] == "Chandra.Perera@example.com"
+    assert calls["updated"][0]["department"] == "Finance"
+    assert calls["updated"][0]["account_action"] == "Onboard Requested"
+
+
+@pytest.mark.anyio
+async def test_import_m365_folds_existing_duplicate_into_staff_request(monkeypatch):
+    """A duplicate created by an earlier sync is removed and the request kept."""
+    request = {"id": 7, "first_name": "Chandra", "last_name": "Perera", "email": None, "source": "manual"}
+    duplicate = {
+        "id": 8,
+        "first_name": "Chandra",
+        "last_name": "Perera",
+        "email": "chandra.perera@example.com",
+        "source": "m365",
+    }
+    calls = _patch_m365_import(
+        monkeypatch,
+        users=[{"givenName": "Chandra", "surname": "Perera", "mail": "chandra.perera@example.com"}],
+        existing=[request, duplicate],
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(20)
+
+    assert calls["deleted"] == [8]
+    assert calls["created"] == []
+    assert [c["id"] for c in calls["updated"]] == [7]
+    assert calls["updated"][0]["email"] == "chandra.perera@example.com"
+    assert summary.updated == 1
+
+
+@pytest.mark.anyio
+async def test_import_m365_keeps_older_m365_record_with_same_name(monkeypatch):
+    """An older M365 record with the same name is a different person."""
+    older = {"id": 3, "first_name": "Sam", "last_name": "Lee", "email": "sam@example.com", "source": "m365"}
+    request = {"id": 9, "first_name": "Sam", "last_name": "Lee", "email": "", "source": "manual"}
+    calls = _patch_m365_import(
+        monkeypatch,
+        users=[{"givenName": "Sam", "surname": "Lee", "mail": "sam@example.com"}],
+        existing=[older, request],
+    )
+
+    await staff_importer.import_m365_contacts_for_company(20)
+
+    assert calls["deleted"] == []
+    assert [c["id"] for c in calls["updated"]] == [3]

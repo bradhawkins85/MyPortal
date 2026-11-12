@@ -1,0 +1,7 @@
+{
+  "guid": "ea12d430-54fc-4efb-a9d5-7bec5129dc0e",
+  "occurred_at": "2026-11-10T00:31Z",
+  "change_type": "Fix",
+  "summary": "Tray chat replies show a Windows notification again: the tray app reconnects to the service's named pipe, each technician reply raises a BurntToast notification even when the chat is closed, and notification text can no longer break the BurntToast command.",
+  "content_hash": "f0028dfa03250e537aa6010a6e790eb87a661ec9d5727c3688e004d2dda43951"
+}

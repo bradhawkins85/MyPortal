@@ -330,14 +330,21 @@ def test_spam_purge_template_has_review_confirmation_and_live_refresh():
     assert "setup=compliance_role" not in source
 
 
-def test_compliance_role_setup_is_on_m365_configuration_and_diagnostics_pages():
+def test_compliance_role_and_scc_access_are_part_of_the_single_consent_step():
+    """Purview role setup and Security & Compliance access are not separate
+    buttons: guided setup's consent (and diagnostics Repair) perform them."""
     configuration = open("app/templates/m365/index.html", encoding="utf-8").read()
     diagnostics = open("app/templates/m365/diagnostics.html", encoding="utf-8").read()
 
-    assert "Configure Compliance Administrator" in configuration
-    assert "setup=compliance_role&amp;return_to=m365" in configuration
-    assert "Configure Compliance Administrator" in diagnostics
-    assert "setup=compliance_role&amp;return_to=diagnostics" in diagnostics
+    for source in (configuration, diagnostics):
+        assert "setup=compliance_role" not in source
+        assert "/m365/connect/scc" not in source
+        assert "Configure Compliance Administrator" not in source
+        assert "Capture Security &amp; Compliance access" not in source
+    assert configuration.count('href="/m365/connect"') == 1
+    assert "Compliance Administrator" in configuration
+    assert 'href="/m365/diagnostics"' in configuration
+    assert 'action": "/m365/diagnostics/repair"' in diagnostics
 
 
 def test_spam_purge_sidebar_requires_explicit_permission():
@@ -477,7 +484,8 @@ def test_delegated_reconnect_error_is_not_app_hints():
         )
     )
     assert "delegated permissions of the " in message
-    assert "Configure Compliance Administrator" in message
+    assert "Grant Microsoft consent" in message
+    assert "Configure Compliance Administrator" not in message
     assert "eDiscoveryManager" in message and "Search And Purge" in message
 
 
@@ -500,7 +508,7 @@ async def test_scc_access_token_requires_delegated_sign_in(monkeypatch):
 
     assert excinfo.value.http_status == 503
     assert "delegated permissions" in str(excinfo.value)
-    assert "Configure Compliance Administrator" in str(excinfo.value)
+    assert "Reconnect from Microsoft 365 settings" in str(excinfo.value)
     exchange.assert_not_called()
 
 

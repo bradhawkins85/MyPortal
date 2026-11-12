@@ -10,6 +10,11 @@ from app.core.database import db
 OPEN_STATUSES = ("requested", "connected")
 
 
+# Stored in place of a browser token hash once the token has been used. It is
+# not a 64-character hex digest, so no token can ever hash to it.
+USED_TOKEN_MARKER = "used"
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -93,6 +98,24 @@ async def mark_browser_connected(session_id: int) -> None:
         "UPDATE rmm_live_sessions SET browser_connected_at = %s, last_activity_at = %s WHERE id = %s",
         (now, now, session_id),
     )
+
+
+async def claim_browser(session_id: int, token_hash: str) -> bool:
+    """Mark the browser connected and use up its one-time token.
+
+    The token hash is replaced in the same statement that checks it, so of two
+    sockets presenting the same token only one gets in, and a token seen in a
+    proxy or access log cannot be replayed afterwards.
+    """
+
+    now = _utcnow()
+    changed = await db.execute_rowcount(
+        "UPDATE rmm_live_sessions SET browser_token_hash = %s, browser_connected_at = %s, "
+        "last_activity_at = %s WHERE id = %s AND browser_token_hash = %s "
+        "AND status IN ('requested', 'connected')",
+        (USED_TOKEN_MARKER, now, now, session_id, token_hash),
+    )
+    return bool(changed)
 
 
 async def touch(session_id: int) -> None:

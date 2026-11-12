@@ -18,6 +18,9 @@ func resetAnnouncedChatRooms(t *testing.T) {
 	announcedChatRoomsMu.Lock()
 	announcedChatRooms = map[int]bool{}
 	announcedChatRoomsMu.Unlock()
+	lastAnnouncedMu.Lock()
+	lastAnnounced = map[int]announcedMessage{}
+	lastAnnouncedMu.Unlock()
 	t.Cleanup(func() {
 		announcedChatRoomsMu.Lock()
 		announcedChatRooms = map[int]bool{}
@@ -25,7 +28,7 @@ func resetAnnouncedChatRooms(t *testing.T) {
 	})
 }
 
-func TestHandleIPCMessageAnnouncesFirstChatMessageOnly(t *testing.T) {
+func TestHandleIPCMessageNotifiesEveryChatMessage(t *testing.T) {
 	resetAnnouncedChatRooms(t)
 	previousNotify := showChatSessionNotificationFunc
 	previousOpen := openChatWindowFunc
@@ -34,11 +37,12 @@ func TestHandleIPCMessageAnnouncesFirstChatMessageOnly(t *testing.T) {
 	gPortalURL = "https://portal.example.test"
 	var notifyMu sync.Mutex
 	var titles, bodies []string
-	showChatSessionNotificationFunc = func(title, body, chatURL string) {
+	showChatSessionNotificationFunc = func(title, body, chatURL string) bool {
 		notifyMu.Lock()
 		defer notifyMu.Unlock()
 		titles = append(titles, title)
 		bodies = append(bodies, body)
+		return false
 	}
 	requestChatTokenFunc = func(roomID int) string {
 		return gPortalURL + "/tray/chat?token=test-token&room=" + itoa(roomID)
@@ -78,8 +82,8 @@ func TestHandleIPCMessageAnnouncesFirstChatMessageOnly(t *testing.T) {
 
 	notifyMu.Lock()
 	defer notifyMu.Unlock()
-	if len(titles) != 1 {
-		t.Fatalf("notifications = %d, want only the first message to notify", len(titles))
+	if len(titles) != 2 {
+		t.Fatalf("notifications = %d, want one for each message", len(titles))
 	}
 	for _, want := range []string{"Alex Tech", "Printer offline", "Please try printing again."} {
 		if !strings.Contains(bodies[0], want) {
@@ -101,10 +105,11 @@ func TestHandleIPCMessageChatOpenWithoutMessageWaitsForFirstMessage(t *testing.T
 
 	var notifyMu sync.Mutex
 	notified := 0
-	showChatSessionNotificationFunc = func(title, body, chatURL string) {
+	showChatSessionNotificationFunc = func(title, body, chatURL string) bool {
 		notifyMu.Lock()
 		notified++
 		notifyMu.Unlock()
+		return false
 	}
 	requestChatTokenFunc = func(roomID int) string {
 		return "https://portal.example.test/tray/chat?token=test-token&room=" + itoa(roomID)
@@ -160,7 +165,7 @@ func TestHandleIPCMessageDoesNotLaunchChatWhenRoomTokenRejected(t *testing.T) {
 		requestChatTokenFunc = previousRequest
 	}()
 
-	showChatSessionNotificationFunc = func(title, body, chatURL string) {}
+	showChatSessionNotificationFunc = func(title, body, chatURL string) bool { return false }
 	requestChatTokenFunc = func(roomID int) string { return "" }
 	opened := make(chan string, 1)
 	openChatWindowFunc = func(chatURL string, _ *api.ConfigResponse) {
@@ -198,10 +203,11 @@ func TestHandleIPCMessageDispatchesChatOpenNotificationAndLaunchesChatShell(t *t
 	var gotTitle string
 	var gotBody string
 	var gotActionURL string
-	showChatSessionNotificationFunc = func(title, body, chatURL string) {
+	showChatSessionNotificationFunc = func(title, body, chatURL string) bool {
 		gotTitle = title
 		gotBody = body
 		gotActionURL = chatURL
+		return false
 	}
 
 	requestChatTokenFunc = func(roomID int) string {
@@ -243,5 +249,40 @@ func TestHandleIPCMessageDispatchesChatOpenNotificationAndLaunchesChatShell(t *t
 	}
 	if gotActionURL == "" {
 		t.Fatalf("chat notification action URL should not be empty")
+	}
+}
+
+func TestChatWindowStaysClosedWhenNotificationCanOpenIt(t *testing.T) {
+	resetAnnouncedChatRooms(t)
+	previousNotify := showChatSessionNotificationFunc
+	previousOpen := openChatWindowFunc
+	previousRequest := requestChatTokenFunc
+	t.Cleanup(func() {
+		showChatSessionNotificationFunc = previousNotify
+		openChatWindowFunc = previousOpen
+		requestChatTokenFunc = previousRequest
+	})
+	notified := make(chan struct{}, 1)
+	showChatSessionNotificationFunc = func(title, body, chatURL string) bool {
+		notified <- struct{}{}
+		return true
+	}
+	requestChatTokenFunc = func(roomID int) string {
+		return "https://portal.example.test/tray/chat?token=t&room=" + itoa(roomID)
+	}
+	opened := make(chan string, 1)
+	openChatWindowFunc = func(chatURL string, _ *api.ConfigResponse) { opened <- chatURL }
+
+	payload, _ := json.Marshal(chatMessagePayload{RoomID: 9, Sender: "Alex Tech", Message: "Hi"})
+	handleIPCMessage(ipc.Message{Type: "chat_message", Payload: payload})
+	select {
+	case <-notified:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected a notification")
+	}
+	select {
+	case chatURL := <-opened:
+		t.Fatalf("chat window opened (%q) although the notification has an Open chat button", chatURL)
+	case <-time.After(150 * time.Millisecond):
 	}
 }

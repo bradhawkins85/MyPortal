@@ -18,7 +18,7 @@ func (d *daemon) fullTrayCheckin() {
 	defer d.manualCheckinMu.Unlock()
 	facts := collectFacts()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	if err := d.client.Heartbeat(ctx, api.HeartbeatRequest{ConsoleUser: facts.ConsoleUser, AgentVersion: updater.AgentVersion}); err != nil {
+	if err := d.client.Heartbeat(ctx, api.NewHeartbeatRequest(facts.ConsoleUser, updater.AgentVersion)); err != nil {
 		logger.Warn("Manual tray check-in: %v", err)
 	}
 	cancel()

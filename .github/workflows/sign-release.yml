@@ -1,0 +1,164 @@
+# Sign a release's tray installers and RMM agent builds.
+#
+# The tray app and its RMM installer only install a build whose signature
+# matches the release public key built into them
+# (tray/internal/release/release-public-key.pem). This workflow is the only place the
+# private key is used: it lives in the `release-signing` environment, which
+# needs a maintainer's approval for every run and only allows `main` and `v*`
+# tags. MyPortal relays the signatures to devices but cannot create them.
+#
+# Each asset gets an `<asset>.sig` file holding the base64 Ed25519 signature
+# of this text (see release.Manifest):
+#
+#   myportal-release-v1
+#   asset=<asset name>
+#   version=<tag without a leading v>
+#   sha256=<lower-case hex SHA-256 of the asset>
+#
+# It also uploads `myportal-source.sig`, signing the commit the tag points at
+# (`myportal-source-v1`, `tag=<tag>`, `commit=<sha>`), which the local build
+# server checks before building company installers from that tag.
+
+name: Sign release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to sign'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
+  ASSETS: >-
+    myportal-tray.msi
+    myportal-tray.pkg
+    myportal-tray.dmg
+    myportal-tray-linux.tar.gz
+    myportal-rmm-windows-amd64.exe
+    myportal-rmm-windows-arm64.exe
+    myportal-rmm-darwin-amd64
+    myportal-rmm-darwin-arm64
+    myportal-rmm-linux-amd64
+    myportal-rmm-linux-arm64
+
+jobs:
+  wait:
+    name: Wait for the release builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Wait until every build is uploaded
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$'; then
+            echo "Invalid tag: $TAG" >&2
+            exit 1
+          fi
+          deadline=$(( $(date +%s) + 140 * 60 ))
+          while :; do
+            present=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+            missing=""
+            for name in $ASSETS; do
+              grep -Fxq "$name" <<<"$present" || missing="$missing $name"
+            done
+            if [ -z "$missing" ]; then
+              echo "All builds are uploaded."
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::warning::Still missing after 140 minutes:$missing. Signing what is there; run this workflow again for $TAG once the rest are uploaded."
+              exit 0
+            fi
+            echo "Waiting for:$missing"
+            sleep 60
+          done
+
+  sign:
+    name: Sign
+    needs: wait
+    runs-on: ubuntu-latest
+    environment: release-signing
+    permissions:
+      contents: write
+    steps:
+      # No third-party actions run in this job: it holds the signing key.
+      - name: Sign the builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "The release-signing environment has no RELEASE_SIGNING_KEY secret." >&2
+            exit 1
+          fi
+          work="$RUNNER_TEMP/sign"
+          mkdir -p "$work/assets" "$work/sigs"
+          key="$work/key.pem"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key"
+
+          # Refuse to sign with a key the agents would not accept.
+          openssl pkey -in "$key" -pubout > "$work/pub.pem"
+          built_in=$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$GITHUB_REPOSITORY/contents/tray/internal/release/release-public-key.pem?ref=$GITHUB_SHA")
+          if [ "$(cat "$work/pub.pem")" != "$built_in" ]; then
+            echo "RELEASE_SIGNING_KEY does not match the public key in tray/internal/release/release-public-key.pem." >&2
+            exit 1
+          fi
+
+          version="${TAG#v}"
+          version="${version#V}"
+          present=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          signed=""
+          missing=""
+          for name in $ASSETS; do
+            if ! grep -Fxq "$name" <<<"$present"; then
+              missing="$missing $name"
+              continue
+            fi
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$work/assets" --clobber
+            sha=$(sha256sum "$work/assets/$name" | cut -d' ' -f1)
+            manifest="$work/$name.manifest"
+            printf 'myportal-release-v1\nasset=%s\nversion=%s\nsha256=%s\n' "$name" "$version" "$sha" > "$manifest"
+            openssl pkeyutl -sign -inkey "$key" -rawin -in "$manifest" -out "$work/$name.bin"
+            openssl pkeyutl -verify -pubin -inkey "$work/pub.pem" -rawin -in "$manifest" -sigfile "$work/$name.bin" >/dev/null
+            base64 -w0 "$work/$name.bin" > "$work/sigs/$name.sig"
+            echo "Signed $name ($sha)"
+            signed="$signed $name"
+          done
+
+          # The local build server builds company installers from the tag's
+          # source, so sign the commit the tag points at as well.
+          commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
+          if ! printf '%s' "$commit" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "Could not resolve $TAG to a commit." >&2
+            exit 1
+          fi
+          manifest="$work/source.manifest"
+          printf 'myportal-source-v1\ntag=%s\ncommit=%s\n' "$TAG" "$commit" > "$manifest"
+          openssl pkeyutl -sign -inkey "$key" -rawin -in "$manifest" -out "$work/source.bin"
+          openssl pkeyutl -verify -pubin -inkey "$work/pub.pem" -rawin -in "$manifest" -sigfile "$work/source.bin" >/dev/null
+          base64 -w0 "$work/source.bin" > "$work/sigs/myportal-source.sig"
+          echo "Signed the source of $TAG ($commit)"
+
+          rm -f "$key"
+          if [ -z "$signed" ]; then
+            echo "Nothing to sign for $TAG." >&2
+            exit 1
+          fi
+          # Signatures can be replaced safely: a wrong one is simply refused.
+          gh release upload "$TAG" "$work"/sigs/*.sig --clobber --repo "$GITHUB_REPOSITORY"
+          if [ -n "$missing" ]; then
+            echo "::error::Not signed because they are not uploaded yet:$missing"
+            exit 1
+          fi

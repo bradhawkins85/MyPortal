@@ -296,6 +296,7 @@ async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
             COALESCE(NULLIF(u.first_name, ''), s.first_name) AS first_name,
             COALESCE(NULLIF(u.last_name, ''), s.last_name) AS last_name,
             s.mobile_phone AS mobile_phone,
+            s.landline_phone AS landline_phone,
             s.company_id AS company_id,
             s.created_at AS created_at,
             s.updated_at AS updated_at,
@@ -548,6 +549,14 @@ async def update_mobile_phone(staff_id: int, mobile_phone: str) -> None:
     )
 
 
+async def update_landline_phone(staff_id: int, landline_phone: str) -> None:
+    """Update only the landline / direct-line number on an existing staff record."""
+    await db.execute(
+        "UPDATE staff SET landline_phone = %s WHERE id = %s",
+        (landline_phone, staff_id),
+    )
+
+
 async def get_staff_by_company_and_email(
     company_id: int, email: str
 ) -> dict[str, Any] | None:
@@ -561,6 +570,41 @@ async def get_staff_by_company_and_email(
         (company_id, email),
     )
     return _map_staff_row(row) if row else None
+
+
+async def get_pending_staff_request_by_name(
+    company_id: int, first_name: str, last_name: str
+) -> dict[str, Any] | None:
+    """Return the single staff record with no email matching the given name.
+
+    New staff requests have no email until their directory account exists.
+    Returns ``None`` when there is no match or the match is ambiguous.
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name
+        FROM staff AS s
+        LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
+        WHERE s.company_id = %s
+          AND (s.email IS NULL OR TRIM(s.email) = '')
+          AND LOWER(TRIM(s.first_name)) = LOWER(%s)
+          AND LOWER(TRIM(s.last_name)) = LOWER(%s)
+        ORDER BY s.id ASC
+        LIMIT 2
+        """,
+        (company_id, first_name.strip(), last_name.strip()),
+    )
+    if len(rows) != 1:
+        return None
+    return _map_staff_row(rows[0])
+
+
+async def set_staff_email(staff_id: int, email: str) -> None:
+    """Set only the email address on a staff record."""
+    await db.execute(
+        "UPDATE staff SET email = %s WHERE id = %s",
+        (email, staff_id),
+    )
 
 
 async def get_staff_by_email(email: str) -> dict[str, Any] | None:

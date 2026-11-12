@@ -1,0 +1,7 @@
+{
+  "guid": "294ec59e-5078-4015-9467-694ebe014b4c",
+  "occurred_at": "2026-11-10T02:22Z",
+  "change_type": "Security",
+  "summary": "Each tray device now has its own key and must sign a challenge when its WebSocket connects, so a copied device token alone cannot receive its commands; super administrators can reset a device's key",
+  "content_hash": "e0268015c98c8834506f4a754e65c99397a4ab1a1a6c8850288763742b9927b4"
+}

@@ -729,6 +729,26 @@
       if (timezoneField) {
         timezoneField.value = getBrowserTimezone();
       }
+      const skipOnboardingToggle = addForm.querySelector('[data-staff-skip-onboarding]');
+      if (skipOnboardingToggle) {
+        const requestedByField = addForm.querySelector('[data-staff-requested-by]');
+        const addSubmitButton = addForm.querySelector('[data-staff-add-submit]');
+        const syncSkipOnboarding = () => {
+          const skip = skipOnboardingToggle.checked;
+          if (requestedByField) {
+            requestedByField.hidden = skip;
+            const select = requestedByField.querySelector('select');
+            if (select) {
+              select.disabled = skip;
+            }
+          }
+          if (addSubmitButton) {
+            addSubmitButton.textContent = skip ? 'Add staff member' : 'Send request';
+          }
+        };
+        skipOnboardingToggle.addEventListener('change', syncSkipOnboarding);
+        syncSkipOnboarding();
+      }
       const addWrappers = Array.from(addForm.querySelectorAll('[data-custom-field-wrapper]'));
       initCustomFieldConditionals({
         wrappers: addWrappers,

@@ -1709,6 +1709,17 @@ async def create_reply(
     return _normalise_reply(fallback_row)
 
 
+async def delete_reply(reply_id: int, ticket_id: int) -> bool:
+    """Delete a conversation reply only when it belongs to this ticket."""
+    affected = await db.execute_rowcount(
+        "DELETE FROM ticket_replies WHERE id = %s AND ticket_id = %s",
+        (reply_id, ticket_id),
+    )
+    if affected:
+        await _rag_outbox_service().enqueue("tickets", ticket_id)
+    return bool(affected)
+
+
 async def set_reply_resolution_step(
     reply_id: int, ticket_id: int, flagged: bool, excluded: bool = False
 ) -> bool:

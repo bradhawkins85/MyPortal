@@ -49,18 +49,31 @@ func TestWindowsChatNotificationMessageMentionsTrayWhenURLProvided(t *testing.T)
 	}
 }
 
-func TestBurntToastArgsPassValuesAsParameters(t *testing.T) {
-	args := burntToastArgs("New MyPortal chat", "Hello", "Open chat", "http://127.0.0.1:1234/open-chat?id=x", "https://portal.example.test", false)
-	joined := strings.Join(args, "\x00")
-	for _, want := range []string{"-Title\x00New MyPortal chat", "-Message\x00Hello", "-ButtonText\x00Open chat", "-ButtonUrl\x00http://127.0.0.1:1234/open-chat?id=x", "-PortalUrl\x00https://portal.example.test"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("args missing %q: %q", want, args)
+func TestBurntToastPassesValuesOutsideTheScript(t *testing.T) {
+	args := burntToastArgs()
+	if args[len(args)-1] != burntToastPowerShellCommand() || args[len(args)-2] != "-Command" {
+		t.Fatalf("the script must be the last argument: %q", args)
+	}
+	hostile := "'; Start-Process calc; '"
+	for _, arg := range args {
+		if strings.Contains(arg, hostile) {
+			t.Fatalf("notification text reached the command line: %q", args)
 		}
 	}
-	if strings.Contains(joined, "-AllowInstall") {
-		t.Fatalf("args should not allow install after a failed install: %q", args)
+	env := strings.Join(burntToastEnv(hostile, "Hello", "Open chat", "http://127.0.0.1:1234/open-chat?id=x", "https://portal.example.test", false), "\x00")
+	for _, want := range []string{
+		"MYPORTAL_TOAST_TITLE=" + hostile,
+		"MYPORTAL_TOAST_MESSAGE=Hello",
+		"MYPORTAL_TOAST_BUTTON_TEXT=Open chat",
+		"MYPORTAL_TOAST_BUTTON_URL=http://127.0.0.1:1234/open-chat?id=x",
+		"MYPORTAL_TOAST_PORTAL_URL=https://portal.example.test",
+		"MYPORTAL_TOAST_ALLOW_INSTALL=\x00",
+	} {
+		if !strings.Contains(env+"\x00", want) {
+			t.Fatalf("env missing %q: %q", want, env)
+		}
 	}
-	if !strings.Contains(strings.Join(burntToastArgs("t", "b", "", "", "", true), " "), "-AllowInstall") {
-		t.Fatal("expected -AllowInstall when installs are allowed")
+	if !strings.Contains(strings.Join(burntToastEnv("t", "b", "", "", "", true), " "), "MYPORTAL_TOAST_ALLOW_INSTALL=1") {
+		t.Fatal("expected installs to be allowed")
 	}
 }

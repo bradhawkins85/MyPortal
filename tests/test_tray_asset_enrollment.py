@@ -51,7 +51,7 @@ async def asset_db(monkeypatch):
         CREATE TABLE tray_devices (
           id INTEGER PRIMARY KEY, company_id INT, asset_id INT, device_uid TEXT UNIQUE,
           os TEXT, os_version TEXT, hostname TEXT, serial_number TEXT,
-          console_user TEXT, status TEXT, last_seen_utc TEXT, created_at TEXT);
+          console_user TEXT, status TEXT, last_seen_utc TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE rmm_agents (
           id INTEGER PRIMARY KEY, tray_device_id INT, company_id INT, asset_id INT,
           status TEXT, last_seen_utc TEXT);

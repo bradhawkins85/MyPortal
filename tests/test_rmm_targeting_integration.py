@@ -239,7 +239,7 @@ async def test_delayed_actions_and_script_results_ignore_no_longer_matching_chec
                          schedule_mode="delay", delay_minutes="1")
     state = {**checks._blank_state(), "status": "failing"}
     await checks_repo.save_state(delayed, first["id"], state)
-    await checks_repo.schedule_action(delayed, first["id"], datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=1))
+    await checks_repo.schedule_step(delayed, first["id"], "1", datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=1))
     own_script = await save(rules, check_type="script", check_script_id=str(script["id"]),
                             script_expect="exit_code", script_value="0", action="run_script", script_id=str(script["id"]))
     await checks_repo.save_state(own_script, first["id"], {**checks._blank_state(), "run_id": 987})

@@ -390,16 +390,26 @@ def windows_script(portal_url: str, token: str) -> str:
             "$ErrorActionPreference = 'Stop'",
             "$PortalURL = '" + portal_url + "'",
             "$EnrolToken = '" + token + "'",
-            "$msiPath = Join-Path $env:TEMP 'myportal-tray.msi'",
+            # A new, randomly named folder only SYSTEM and Administrators can
+            # change: a fixed name in C:\Windows\Temp could be planted or
+            # swapped by another local user before msiexec runs it.
+            "$workDir = Join-Path $env:TEMP ('myportal-tray-' + [guid]::NewGuid().ToString('N'))",
+            "New-Item -ItemType Directory -Path $workDir | Out-Null",
+            "& icacls.exe $workDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F'"
+            + " '*S-1-5-32-544:(OI)(CI)F' | Out-Null",
+            "if ($LASTEXITCODE -ne 0) { throw \"Could not restrict access to $workDir\" }",
+            "$msiPath = Join-Path $workDir 'myportal-tray.msi'",
             "Invoke-WebRequest -Uri \"$PortalURL/static/tray/myportal-tray.msi\""
             + " -OutFile $msiPath -UseBasicParsing",
             "$msiArgs = @('/i', $msiPath, \"MYPORTAL_URL=$PortalURL\", \"ENROL_TOKEN=$EnrolToken\","
             + " 'AUTO_UPDATE=true', '/qn', '/norestart', '/l*v',"
-            + " (Join-Path $env:TEMP 'myportal-tray-install.log'))",
+            + " (Join-Path $workDir 'myportal-tray-install.log'))",
             "$proc = Start-Process msiexec.exe -ArgumentList $msiArgs -Wait -PassThru",
             "if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {",
-            "    throw \"MSI install exited with code $($proc.ExitCode)\"",
+            "    Remove-Item -LiteralPath $msiPath -Force -ErrorAction SilentlyContinue",
+            "    throw \"MSI install exited with code $($proc.ExitCode). Log: $workDir\\myportal-tray-install.log\"",
             "}",
+            "Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue",
             "Write-Host 'MyPortal Tray installed successfully.'",
             "",
         ]
@@ -421,6 +431,7 @@ def shell_script(portal_url: str, token: str) -> str:
             "set -euo pipefail",
             "PORTAL_URL='" + portal_url + "'",
             "ENROL_TOKEN='" + token + "'",
+            "umask 077",
             "WORK_DIR=\"$(mktemp -d)\"",
             "trap 'rm -rf \"$WORK_DIR\"' EXIT",
             "case \"$(uname -s)\" in",

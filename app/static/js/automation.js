@@ -799,8 +799,29 @@
     sync_to_xero_auto_send: '1 16 L * *',
   };
 
+  // The server works out the next free month-end slot for billing tasks
+  // (e.g. "3 18 L * *" -> "4 18 L * *") and supplies it here.
+  function loadServerCommandDefaults() {
+    const element = document.getElementById('automation-command-defaults');
+    if (!element) {
+      return {};
+    }
+    try {
+      const parsed = JSON.parse(element.textContent || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  const SERVER_COMMAND_DEFAULT_CRONS = loadServerCommandDefaults();
+
+  function hasDefaultCron(command) {
+    return Boolean(SERVER_COMMAND_DEFAULT_CRONS[command] || COMMAND_DEFAULT_CRONS[command]);
+  }
+
   function defaultCronForCommand(command) {
-    return COMMAND_DEFAULT_CRONS[command] || randomDailyCron();
+    return SERVER_COMMAND_DEFAULT_CRONS[command] || COMMAND_DEFAULT_CRONS[command] || randomDailyCron();
   }
 
   function getTaskNameFields() {
@@ -1417,6 +1438,11 @@
       commandField.addEventListener('change', () => {
         toggleJsonPayloadField();
         refreshTaskName();
+        const form = query('scheduled-task-form');
+        const cronField = query('task-cron');
+        if (form && form.dataset.taskMode !== 'edit' && cronField && hasDefaultCron(commandField.value)) {
+          cronField.value = defaultCronForCommand(commandField.value);
+        }
       });
       commandField.addEventListener('input', () => {
         toggleJsonPayloadField();
