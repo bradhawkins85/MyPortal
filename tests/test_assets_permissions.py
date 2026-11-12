@@ -63,6 +63,61 @@ async def test_assets_page_allows_read_only_menu_permission(monkeypatch):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("super_admin", "role_permissions", "legacy_admin", "expected_internal"),
+    [
+        (False, {"menu.assets": "read"}, False, False),
+        (False, {"menu.assets": "write"}, False, False),
+        (False, {"menu.assets": "write", "menu.tickets": "write"}, False, False),
+        (False, {"menu.assets": "write", "menu.rmm_scripts": "write"}, False, False),
+        (False, {"menu.assets": "write", "menu.admin.company": "read"}, False, False),
+        (False, {"menu.assets": "read", "menu.admin.company": "write"}, False, True),
+        (False, {"menu.assets": "write", "menu.admin.technician": "write"}, False, True),
+        (False, {"menu.assets": "write"}, True, True),
+        (True, {}, False, True),
+    ],
+)
+async def test_internal_asset_columns_require_admin_or_technician(
+    monkeypatch, super_admin, role_permissions, legacy_admin, expected_internal
+):
+    user = {"id": 7, "company_id": 42, "is_super_admin": super_admin}
+    membership = {"company_id": 42, "menu_permissions": role_permissions, "is_admin": legacy_admin}
+    record = {"id": 100, "company_id": 42, "name": "Laptop", "type": "workstation",
+              "cpu_name": "Internal CPU", "operational_notes": "Private notes", "customer_visible": True}
+    monkeypatch.setattr(assets_routes, "_load_asset_context", AsyncMock(return_value=(user, membership, {"id": 42}, 42, None)))
+    monkeypatch.setattr(assets_routes.asset_repo, "list_company_assets", AsyncMock(return_value=[record]))
+    monkeypatch.setattr(assets_routes, "_customer_visible_assets", AsyncMock(return_value=[record]))
+    definitions = AsyncMock(return_value=[{"id": 1, "name": "private", "display_name": "Private field", "field_type": "text"}])
+    values = AsyncMock(return_value={100: {1: "Secret custom value"}})
+    devices = AsyncMock(return_value={100: {"device_uid": "private-device-id", "agent_version": "1.2.3"}})
+    monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", definitions)
+    monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", values)
+    monkeypatch.setattr(assets_routes.tray_repo, "list_active_devices_by_asset_ids", devices)
+    monkeypatch.setattr(main_module, "_feature_pack_available", lambda _key: False)
+    monkeypatch.setattr(main_module, "_is_helpdesk_technician", AsyncMock(return_value=True))
+    renderer = AsyncMock(return_value=HTMLResponse("assets page"))
+    monkeypatch.setattr(main_module, "_render_template", renderer)
+
+    await assets_routes.assets_page(_request())
+
+    extra = renderer.await_args.kwargs["extra"]
+    keys = {column["key"] for column in extra["columns"]}
+    asset = extra["assets"][0]
+    assert ("cpu_name" in keys) is expected_internal
+    assert ("tray_agent_synced" in keys) is expected_internal
+    assert ("cf_1" in keys) is expected_internal
+    if expected_internal:
+        assert asset["cf_1"] == "Secret custom value"
+        assert asset["cpu_name"] == "Internal CPU"
+    else:
+        assert keys <= set(assets_routes._CUSTOMER_ASSET_FIELDS)
+        assert set(asset) == set(assets_routes._CUSTOMER_ASSET_FIELDS)
+        definitions.assert_not_awaited()
+        values.assert_not_awaited()
+        devices.assert_not_awaited()
+
+
+@pytest.mark.anyio
 async def test_assets_page_redirects_when_menu_permission_is_none(monkeypatch):
     user = {"id": 7, "company_id": 42, "is_super_admin": False}
     membership = {
@@ -87,7 +142,7 @@ async def test_assets_page_redirects_when_menu_permission_is_none(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_assets_page_adds_tray_agent_sync_column(monkeypatch):
+async def test_assets_page_omits_internal_columns_for_read_only_users(monkeypatch):
     user = {"id": 7, "company_id": 42, "is_super_admin": False}
     membership = {
         "company_id": 42,
@@ -136,20 +191,10 @@ async def test_assets_page_adds_tray_agent_sync_column(monkeypatch):
 
     async def fake_render_template(template, request, current_user, *, extra=None):
         assert template == "assets/index.html"
-        column = next(column for column in extra["columns"] if column["key"] == "tray_agent_synced")
-        assert column == {
-            "key": "tray_agent_synced",
-            "label": "TrayAgentID synced",
-            "sort": "number",
-            "field_type": "checkbox",
-        }
-        assets_by_id = {asset["id"]: asset for asset in extra["assets"]}
-        assert assets_by_id[100]["tray_agent_synced"] is True
-        assert assets_by_id[200]["tray_agent_synced"] is False
-        # Agent versions are technician detail, so read-only customers never see them.
         keys = {column["key"] for column in extra["columns"]}
-        assert not keys & {"tray_agent_version", "rmm_agent_version"}
-        assert "tray_agent_version" not in assets_by_id[100]
+        assert keys <= set(assets_routes._CUSTOMER_ASSET_FIELDS)
+        assert "tray_agent_synced" not in keys
+        assert all(set(asset) == set(assets_routes._CUSTOMER_ASSET_FIELDS) for asset in extra["assets"])
         return HTMLResponse("assets page")
 
     monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_authenticated_user)

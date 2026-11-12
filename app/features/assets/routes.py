@@ -182,6 +182,14 @@ def _customer_asset(record: dict[str, Any]) -> dict[str, Any]:
     return {key: record.get(key) for key in _CUSTOMER_ASSET_FIELDS}
 
 
+def _can_view_internal_asset_fields(user: dict[str, Any], membership: dict[str, Any] | None) -> bool:
+    """Asset write access alone does not grant admin/technician visibility."""
+    return any(
+        _main()._membership_menu_can(user, membership, key, write=True)
+        for key in ("menu.admin.company", "menu.admin.technician")
+    )
+
+
 def _main():
     from app import main as main_module
 
@@ -258,14 +266,17 @@ async def assets_page(request: Request):
         user, membership, "menu.assets", write=True
     )
     can_write_assets = bool(user.get("is_super_admin")) or can_export_assets
-    can_wake = can_write_assets and await main_module._is_helpdesk_technician(user, request)
+    can_view_internal = _can_view_internal_asset_fields(user, membership)
+    can_wake = can_view_internal and can_write_assets and await main_module._is_helpdesk_technician(user, request)
 
     rows = await asset_repo.list_company_assets(company_id)
     if not can_write_assets:
-        rows = [_customer_asset(dict(row)) for row in await _customer_visible_assets(membership, company_id, rows)]
+        rows = await _customer_visible_assets(membership, company_id, rows)
+    if not can_view_internal:
+        rows = [_customer_asset(dict(row)) for row in rows]
     field_definitions = (
         await asset_custom_fields_repo.list_field_definitions()
-        if user.get("is_super_admin") else []
+        if can_view_internal else []
     )
 
     def _clean_text(value: Any) -> str | None:
@@ -405,15 +416,15 @@ async def assets_page(request: Request):
     asset_ids = [r["id"] for r in prepared if r.get("id")]
     cf_values_by_asset = await asset_custom_fields_repo.get_all_asset_field_values(
         asset_ids
-    )
-    tray_devices_by_asset = await tray_repo.list_active_devices_by_asset_ids(asset_ids)
+    ) if can_view_internal else {}
+    tray_devices_by_asset = await tray_repo.list_active_devices_by_asset_ids(asset_ids) if can_view_internal else {}
     # Technicians who run RMM scripts can push the RMM agent through the tray app.
-    can_push_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
+    can_push_rmm_agent = can_view_internal and can_write_assets and main_module._feature_pack_available("rmm") and (
         bool(user.get("is_super_admin"))
         or main_module._membership_menu_can(user, membership, "menu.rmm_scripts", write=True)
     )
     # Technicians who see RMM scripts get a column showing each device's RMM agent.
-    show_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
+    show_rmm_agent = can_view_internal and can_write_assets and main_module._feature_pack_available("rmm") and (
         bool(user.get("is_super_admin"))
         or main_module._membership_menu_can(user, membership, "menu.rmm_scripts")
     )
@@ -453,7 +464,7 @@ async def assets_page(request: Request):
             tray_device.get("hostname") if tray_device else None
         )
         record["tray_agent_synced"] = bool(record["tray_device_uid"])
-        if can_write_assets:
+        if can_view_internal:
             record["tray_agent_version"] = _clean_text(
                 tray_device.get("agent_version") if tray_device else None
             )
@@ -505,7 +516,7 @@ async def assets_page(request: Request):
         for field_def in field_definitions
     ]
     all_columns = list(_ASSET_TABLE_COLUMNS) + custom_columns
-    if can_write_assets:
+    if can_view_internal:
         synced_index = next(i for i, column in enumerate(all_columns) if column["key"] == "tray_agent_synced")
         all_columns.insert(synced_index + 1, {"key": "tray_agent_version", "label": "Tray agent version", "sort": "string"})
     if show_rmm_agent:
@@ -514,7 +525,7 @@ async def assets_page(request: Request):
         all_columns.insert(status_index + 2, {"key": "rmm_agent_version", "label": "RMM agent version", "sort": "string"})
     # Tags belong to the tags pack and are internal, so customers never see them.
     show_tags = False
-    if can_write_assets and main_module._feature_pack_available("tags"):
+    if can_view_internal and can_write_assets and main_module._feature_pack_available("tags"):
         from app.features.tags import routes as tags_routes
 
         show_tags = await tags_routes.can_edit_tags(request, user, membership)
@@ -526,6 +537,10 @@ async def assets_page(request: Request):
             record["tags"] = tags_by_asset.get(int(record["id"]), []) if record.get("id") else []
         type_index = next((i for i, column in enumerate(all_columns) if column["key"] == "type"), 0)
         all_columns.insert(type_index + 1, {"key": "tags", "label": "Tags", "sort": "string"})
+
+    if not can_view_internal:
+        all_columns = [column for column in all_columns if column["key"] in _CUSTOMER_ASSET_FIELDS]
+        prepared = [_customer_asset(record) for record in prepared]
 
     stats = {
         "total": len(prepared),
@@ -1919,7 +1934,7 @@ async def asset_detail_page(
     can_edit_photos = is_super_admin or main_module._membership_menu_can(
         user, membership, "menu.asset_photos", write=True
     )
-    customer_safe = (not can_write) or customer_preview
+    customer_safe = (not can_write) or (not _can_view_internal_asset_fields(user, membership)) or customer_preview
     if (record_company_id is None or int(record_company_id) != company_id
             or (not is_super_admin and not can_write and (not bool(record.get("customer_visible")) or not await _customer_role_can_view_asset(membership, company_id, asset_id)))):
         raise HTTPException(

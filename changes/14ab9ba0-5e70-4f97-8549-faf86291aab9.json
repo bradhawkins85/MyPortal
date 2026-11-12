@@ -1,0 +1,7 @@
+{
+  "guid": "14ab9ba0-5e70-4f97-8549-faf86291aab9",
+  "occurred_at": "2026-11-12T03:28Z",
+  "change_type": "Fix",
+  "summary": "Hidden asset columns and internal details are now visible only to admins and technicians, including when other roles have asset write access.",
+  "content_hash": "e7432e1e76234bf7669eb6db2f10eda51f0aea92170239b1418328417ef78d22"
+}
