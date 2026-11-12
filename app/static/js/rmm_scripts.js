@@ -154,6 +154,8 @@
   const cronInput = runModal.querySelector('[data-rmm-cron]');
   const timezoneInput = runModal.querySelector('[data-rmm-timezone]');
   const cronPreview = runModal.querySelector('[data-rmm-cron-preview]');
+  const frequencyRadios = Array.from(runModal.querySelectorAll('[data-rmm-frequency]'));
+  const runOnceInput = runModal.querySelector('[data-rmm-run-once]');
   const enabledBox = runModal.querySelector('[data-rmm-enabled]');
   const continueBox = runModal.querySelector('[data-rmm-continue]');
   const skipExistingBox = runModal.querySelector('[data-rmm-skip-existing]');
@@ -480,27 +482,75 @@
     whenSection.hidden = automated || !state.detail;
   }
 
+  // 'recurring' follows the cron expression; 'once' runs at a single date and time.
+  function frequency() {
+    const chosen = frequencyRadios.find((radio) => radio.checked);
+    return chosen ? chosen.value : 'recurring';
+  }
+
+  function applyFrequency() {
+    const value = frequency();
+    runModal.querySelectorAll('[data-rmm-frequency-only]').forEach((node) => {
+      node.hidden = node.getAttribute('data-rmm-frequency-only') !== value;
+    });
+    if (value === 'once' && !runOnceInput.value) {
+      runOnceInput.value = nextHourIn(timezoneInput.value.trim());
+    }
+    enabledBox.disabled = value === 'now';
+    if (state.mode === 'schedule') {
+      submitButton.textContent = value === 'now' ? 'Save and run now' : 'Save schedule';
+    }
+  }
+
+  // The next whole hour as YYYY-MM-DDTHH:MM in the schedule's time zone
+  // (falling back to the browser's), since the server reads the value there.
+  function nextHourIn(zone) {
+    const next = new Date(Date.now() + 3600 * 1000);
+    try {
+      const parts = {};
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: zone || undefined, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23',
+      }).formatToParts(next).forEach((part) => { parts[part.type] = part.value; });
+      return parts.year + '-' + parts.month + '-' + parts.day + 'T' + parts.hour + ':00';
+    } catch (error) {
+      next.setMinutes(0, 0, 0);
+      return localInputValue(next);
+    }
+  }
+
   let previewTimer = null;
   function refreshCronPreview() {
     window.clearTimeout(previewTimer);
     if (state.mode !== 'schedule') {
       return;
     }
+    if (frequency() === 'now') {
+      cronPreview.textContent = 'Runs as soon as you save.';
+      return;
+    }
+    const once = frequency() === 'once';
     const cron = cronInput.value.trim();
-    if (!cron) {
-      cronPreview.textContent = 'Enter a cron expression.';
+    if (once ? !runOnceInput.value : !cron) {
+      cronPreview.textContent = once ? 'Choose the date and time to run the script.' : 'Enter a cron expression.';
       return;
     }
     previewTimer = window.setTimeout(async () => {
-      const query = '?cron=' + encodeURIComponent(cron) + '&timezone=' + encodeURIComponent(timezoneInput.value.trim());
+      const query = (once ? '?run_once_at=' + encodeURIComponent(runOnceInput.value) : '?cron=' + encodeURIComponent(cron))
+        + '&timezone=' + encodeURIComponent(timezoneInput.value.trim());
       try {
         const data = await api('/api/rmm/schedules/preview' + query);
-        cronPreview.textContent = data.next_runs.length
-          ? 'Next runs: ' + data.next_runs.map((value) => formatDate(value)).join(', ') + ' (your time).'
-          : 'This schedule never runs.';
+        if (once) {
+          cronPreview.textContent = data.next_runs.length
+            ? 'Runs once: ' + formatDate(data.next_runs[0]) + ' (your time).'
+            : 'This time has passed. Choose a time in the future.';
+        } else {
+          cronPreview.textContent = data.next_runs.length
+            ? 'Next runs: ' + data.next_runs.map((value) => formatDate(value)).join(', ') + ' (your time).'
+            : 'This schedule never runs.';
+        }
       } catch (error) {
         const errors = (error.data && error.data.errors) || {};
-        cronPreview.textContent = errors.cron || errors.timezone || error.message;
+        cronPreview.textContent = errors.run_once_at || errors.cron || errors.timezone || error.message;
       }
     }, 300);
   }
@@ -516,6 +566,10 @@
     cronInput.value = cron;
     cronPreset.value = Array.from(cronPreset.options).some((option) => option.value === cron) ? cron : '';
     timezoneInput.value = item.timezone || config.default_timezone || 'UTC';
+    const itemFrequency = item.frequency === 'once' ? 'once' : 'recurring';
+    frequencyRadios.forEach((radio) => { radio.checked = radio.value === itemFrequency; });
+    runOnceInput.value = item.run_once_local || '';
+    applyFrequency();
     enabledBox.checked = item.is_enabled === undefined ? true : Boolean(item.is_enabled);
     continueBox.checked = Boolean(item.continue_on_failure);
     skipExistingBox.checked = Boolean(item.skip_existing_assets);
@@ -539,6 +593,11 @@
     refreshCronPreview();
   });
   timezoneInput.addEventListener('input', refreshCronPreview);
+  frequencyRadios.forEach((radio) => radio.addEventListener('change', () => {
+    applyFrequency();
+    refreshCronPreview();
+  }));
+  runOnceInput.addEventListener('input', refreshCronPreview);
 
   function renderDevices(agents) {
     devicesList.replaceChildren();
@@ -876,7 +935,9 @@
       Object.assign(body, {
         scope: scopeSelect.value,
         name: scheduleName.value.trim(),
-        cron: cronInput.value.trim(),
+        frequency: frequency(),
+        cron: frequency() === 'recurring' ? cronInput.value.trim() : '',
+        run_once_at: frequency() === 'once' ? runOnceInput.value : null,
         timezone: timezoneInput.value.trim(),
         target_mode: targetMode.value,
         asset_ids: targetMode.value === 'assets' ? selectedAssets() : [],

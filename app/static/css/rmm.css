@@ -401,6 +401,10 @@
 
 .rmm-cron .form-input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
+.rmm-cron .rmm-cron__date { font-family: inherit; }
+
+.rmm-segmented + [data-rmm-frequency-only] { margin-top: var(--space-gap-tight); }
+
 .rmm-tag-options {
   display: flex;
   flex-wrap: wrap;

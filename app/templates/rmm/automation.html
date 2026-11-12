@@ -130,7 +130,7 @@
     <header class="ce-section__header">
       <div class="ce-section__heading">
         <h2 class="card__title" id="rmm-schedules-heading">Schedules</h2>
-        <p class="card__subtitle">Scripts that run on a schedule. A device still busy with the last run is skipped until it finishes.</p>
+        <p class="card__subtitle">Scripts that run on a schedule or one time at a chosen date. A device still busy with the last run is skipped until it finishes.</p>
       </div>
     </header>
     <div class="ce-section__body">
@@ -155,7 +155,8 @@
                 <strong>{{ schedule.name }}</strong>
                 <ul class="rmm-chips" aria-label="Schedule details">
                   {% if schedule.scope == 'all' %}<li class="rmm-chip rmm-chip--env">Every company</li>{% endif %}
-                  {% if not schedule.is_enabled %}<li class="rmm-chip rmm-chip--muted">Off</li>{% endif %}
+                  {% if schedule.frequency == 'once' %}<li class="rmm-chip">One time</li>{% endif %}
+                  {% if not schedule.is_enabled %}<li class="rmm-chip rmm-chip--muted">{{ 'Done' if schedule.frequency == 'once' and schedule.last_run_at else 'Off' }}</li>{% endif %}
                   {% if schedule.run_as == 'user' %}<li class="rmm-chip">Runs as logged in user</li>{% endif %}
                   {% if not schedule.script_active %}<li class="rmm-chip rmm-chip--warning">Script removed from Gitea</li>{% endif %}
                 </ul>
@@ -172,7 +173,7 @@
                   All with the agent
                 {%- endif -%}
               </td>
-              <td data-label="When" data-column-key="when">{{ CRON_LABELS.get(schedule.cron) or schedule.cron }} <span class="text-muted">({{ schedule.timezone }})</span></td>
+              <td data-label="When" data-column-key="when">{% if schedule.frequency == 'once' %}Once at <span data-utc="{{ schedule.run_once_at }}">{{ schedule.run_once_at }}</span>{% else %}{{ CRON_LABELS.get(schedule.cron) or schedule.cron }} <span class="text-muted">({{ schedule.timezone }})</span>{% endif %}</td>
               <td data-label="Next run" data-column-key="next" data-sort-value="{{ schedule.next_run_at or '' }}">{% if schedule.next_run_at %}<span data-utc="{{ schedule.next_run_at }}">{{ schedule.next_run_at }}</span>{% else %}<span class="text-muted">–</span>{% endif %}</td>
               <td data-label="Last run" data-column-key="last" data-mobile-hidden="true">{% if schedule.last_run_at %}<span data-utc="{{ schedule.last_run_at }}">{{ schedule.last_run_at }}</span><br><span class="text-muted">{{ schedule.last_run_summary or '' }}</span>{% else %}<span class="text-muted">Not run yet</span>{% endif %}</td>
               <td class="table__actions" data-column-key="actions">
@@ -191,7 +192,7 @@
       {% else %}
         <div class="empty-state">
           <h3 class="empty-state__title">No schedules yet</h3>
-          <p class="empty-state__subtitle">{% if can_run %}Choose <strong>New schedule</strong> to run a script every hour, day, week or on your own cron schedule.{% else %}Technicians who can run scripts can schedule them here.{% endif %}</p>
+          <p class="empty-state__subtitle">{% if can_run %}Choose <strong>New schedule</strong> to run a script one time, or every hour, day, week or on your own cron schedule.{% else %}Technicians who can run scripts can schedule them here.{% endif %}</p>
         </div>
       {% endif %}
       <p class="alert alert--info" data-rmm-automation-message role="status" aria-live="polite" hidden></p>

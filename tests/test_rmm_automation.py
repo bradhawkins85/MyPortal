@@ -592,3 +592,130 @@ def test_automation_page_shows_chocolatey_steps_and_editor():
     assert 'data-rmm-step-edit="5"' in html and "data-rmm-choco-step-new" in html
     assert 'id="rmm-choco-step-modal"' in html and '<option value="1">Server</option>' in html
     assert html.index("rmm_choco_picker.js") < html.index("rmm_onboarding_choco.js")
+
+
+def test_run_once_is_read_in_the_schedule_time_zone():
+    # 9am in Sydney (UTC+11 in January) is 22:00 UTC the day before.
+    assert automation.parse_run_once("2026-01-02T09:00", "Australia/Sydney") == datetime(2026, 1, 1, 22, 0)
+    assert automation.parse_run_once("2026-01-02T09:00:30Z", "Australia/Sydney") == datetime(2026, 1, 2, 9, 0)
+    assert automation.run_once_local(datetime(2026, 1, 1, 22, 0), "Australia/Sydney") == "2026-01-02T09:00"
+    assert automation.run_once_local("2026-01-01 22:00:00", "UTC") == "2026-01-01T22:00"
+    for bad in ("", None, "tomorrow"):
+        with pytest.raises(RunRequestError) as exc:
+            automation.parse_run_once(bad, "UTC")
+        assert "run_once_at" in exc.value.errors
+
+
+@pytest.mark.anyio
+async def test_one_time_schedule_runs_once_then_turns_off(sqlite_db, monkeypatch):
+    scripts = await _scripts(monkeypatch)
+    await _enrol(sqlite_db)
+    payload = {"name": "Once", "script_id": scripts["Second"]["id"], "frequency": "once", "timezone": "UTC"}
+
+    with pytest.raises(RunRequestError) as exc:
+        await automation.save_schedule(schedule_id=None, company_id=1, user_id=9, payload={**payload, "run_once_at": ""})
+    assert "run_once_at" in exc.value.errors and "cron" not in exc.value.errors
+    with pytest.raises(RunRequestError) as exc:
+        await automation.save_schedule(schedule_id=None, company_id=1, user_id=9,
+                                       payload={**payload, "run_once_at": "2001-01-01T00:00"})
+    assert "future" in exc.value.errors["run_once_at"]
+
+    when = (datetime.utcnow() + timedelta(days=1)).replace(second=0, microsecond=0)
+    schedule_id = await automation.save_schedule(schedule_id=None, company_id=1, user_id=9,
+                                                 payload={**payload, "run_once_at": when.strftime("%Y-%m-%dT%H:%M")})
+    schedule = await automation_repo.get_schedule(schedule_id)
+    assert schedule["cron"] == "" and schedule["is_enabled"]
+    assert automation._naive_utc(schedule["next_run_at"]) == when == automation._naive_utc(schedule["run_once_at"])
+    assert await automation.run_due_schedules() == 0
+
+    await _make_due(sqlite_db, schedule_id)
+    assert await automation.run_due_schedules() == 1
+    schedule = await automation_repo.get_schedule(schedule_id)
+    assert schedule["next_run_at"] is None and not schedule["is_enabled"]
+    assert schedule["last_run_summary"] == "Queued on 1 device."
+    await _make_due(sqlite_db, schedule_id)
+    assert await automation.run_due_schedules() == 0
+
+    # Turning it back on works only while its time is still ahead.
+    await sqlite_db.execute("UPDATE rmm_schedules SET run_once_at = '2001-01-01 00:00:00' WHERE id = %s", (schedule_id,))
+    with pytest.raises(RunRequestError):
+        await automation.set_schedule_enabled(await automation_repo.get_schedule(schedule_id), True)
+    await automation.set_schedule_enabled(await automation_repo.get_schedule(schedule_id), False)
+
+    # Switching to a repeating schedule clears the one-time run.
+    await automation.save_schedule(schedule_id=schedule_id, company_id=1, user_id=9,
+                                   payload={**payload, "frequency": "recurring", "cron": "0 2 * * *"})
+    schedule = await automation_repo.get_schedule(schedule_id)
+    assert schedule["run_once_at"] is None and schedule["cron"] == "0 2 * * *" and schedule["next_run_at"] is not None
+
+
+def test_automation_page_shows_one_time_schedules():
+    from tests.test_rmm_scripts import _environment
+
+    env = _environment()
+    env.globals["static_url"] = lambda path: path
+    base = {"scope": "company", "script_name": "Check", "target_mode": "all", "tag_ids": [], "asset_ids": [],
+            "cron": "", "timezone": "UTC", "script_active": True, "frequency": "once"}
+    html = env.get_template("rmm/automation.html").render(
+        company={"name": "Contoso"},
+        schedules=[
+            {**base, "id": 3, "name": "Soon", "is_enabled": True, "run_once_at": "2026-12-01T02:00:00",
+             "next_run_at": "2026-12-01T02:00:00", "last_run_at": None},
+            {**base, "id": 4, "name": "Ran", "is_enabled": False, "run_once_at": "2026-10-01T02:00:00",
+             "next_run_at": None, "last_run_at": "2026-10-01T02:00:05", "last_run_summary": "Queued on 1 device."},
+        ],
+        steps=[], onboarding_runs=[], agents=[], tags=[], can_run=True, is_super_admin=False, default_timezone="UTC",
+    )
+    assert 'Once at <span data-utc="2026-12-01T02:00:00">' in html
+    assert html.count(">One time</li>") == 2 and ">Done</li>" in html
+    assert 'data-rmm-frequency' in html and 'data-rmm-run-once' in html and 'data-rmm-error="run_once_at"' in html
+
+
+def test_one_time_schedule_migration_is_idempotent():
+    from pathlib import Path
+
+    sql = (Path(__file__).resolve().parents[1] / "migrations" / "559_rmm_schedule_run_once.sql").read_text()
+    assert sql.startswith("-- phase: expand")
+    assert "ADD COLUMN IF NOT EXISTS run_once_at DATETIME NULL" in sql
+
+
+@pytest.mark.anyio
+async def test_run_now_schedule_is_saved_off_and_left_for_reruns(sqlite_db, monkeypatch):
+    scripts = await _scripts(monkeypatch)
+    await _enrol(sqlite_db)
+    # The time and enabled flag sent are ignored: a run-now schedule has already had its one run.
+    schedule_id = await automation.save_schedule(schedule_id=None, company_id=1, user_id=9, payload={
+        "name": "Right away", "script_id": scripts["Second"]["id"], "frequency": "now", "cron": "bad",
+        "run_once_at": "2001-01-01T00:00", "enabled": True,
+    })
+    schedule = await automation_repo.get_schedule(schedule_id)
+    assert schedule["cron"] == "" and schedule["run_once_at"] is not None
+    assert not schedule["is_enabled"] and schedule["next_run_at"] is None
+    await _make_due(sqlite_db, schedule_id)
+    await sqlite_db.execute("UPDATE rmm_schedules SET next_run_at = NULL WHERE id = %s", (schedule_id,))
+    assert await automation.run_due_schedules() == 0
+    result = await automation.run_schedule(schedule_id, requested_by_user_id=9)
+    assert result["summary"] == "Queued on 1 device."
+
+
+def test_schedule_api_runs_a_run_now_schedule_straight_away():
+    import inspect
+
+    from app.features.rmm import automation_routes
+
+    assert automation_routes.ScheduleRequest(script_id=1, frequency="now").frequency == "now"
+    source = inspect.getsource(automation_routes._save_schedule)
+    assert 'payload.frequency == "now"' in source and "automation.run_schedule(saved_id" in source
+
+
+def test_schedule_editor_offers_run_now():
+    from tests.test_rmm_scripts import _environment
+
+    env = _environment()
+    env.globals["static_url"] = lambda path: path
+    html = env.get_template("rmm/automation.html").render(
+        company={"name": "Contoso"}, schedules=[], steps=[], onboarding_runs=[], agents=[], tags=[],
+        can_run=True, is_super_admin=False, default_timezone="UTC",
+    )
+    assert 'value="now" data-rmm-frequency' in html and "<span>Run now</span>" in html
+    assert 'data-rmm-frequency-only="now"' in html
