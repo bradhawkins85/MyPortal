@@ -1,0 +1,7 @@
+{
+  "guid": "0f018cba-1ca5-434d-8b7f-1315f3fdda7c",
+  "occurred_at": "2026-11-16T04:00Z",
+  "change_type": "Fix",
+  "summary": "Custom fields on the asset edit page now list one field per row, with its name, type and template token beside the input, so they stay readable however many fields you add.",
+  "content_hash": "5a620be14973b43c2c331fb85055836b7697acb07bd053333269dd4918a783c4"
+}
