@@ -123,6 +123,8 @@ RUNNING_EXPIRY_HOURS = 2
 
 DEFAULT_SNAPSHOT_EVENT_DAYS = 7
 MAX_EXTRA_LOG_REQUESTS = 6
+# The tray agent collects at most this many log sources per command.
+_AGENT_MAX_LOG_REQUESTS = 8
 MAX_STEPS = 15
 MAX_FINDINGS = 15
 
@@ -1073,6 +1075,9 @@ Rules:
   change. Put "back up the data" before any step on a failing drive, and say when a step
   needs a restart or downtime. "reference" is the title or URL of the web page or
   knowledge base article the step comes from, or "".
+- The "not-checked" record, when present, lists parts of the check that could not
+  run. Mark the areas they cover "unknown" unless other data covers them, mention them in
+  the summary, and never call an unchecked area healthy.
 - "required_logs": logs or data you did not have that would confirm or rule out a cause
   (an event log channel name or a full log file path), with why. Return [] if none.
 - "monitors": on Windows only (otherwise []), at most 6 Windows event log entries that would
@@ -1345,6 +1350,13 @@ async def expire_stale() -> int:
                 f"The health check did not finish within {RUNNING_EXPIRY_HOURS} hours. The tray app may have "
                 "gone offline, or be too old to run health checks (update it and try again)."
             )
+            stage = str(check.get("stage_message") or "").split(":", 1)[0].strip()
+            if stage in _STALL_STAGES:
+                message = (
+                    f"The device stopped responding at \"{stage}\" and did not finish within "
+                    f"{RUNNING_EXPIRY_HOURS} hours, so nothing it had collected was sent. Restart the tray "
+                    "service on the computer and run the health check again."
+                )
         command_id = _int_or_none(check.get("command_id"))
         if command_id:
             command = await tray_repo.get_command(command_id)
@@ -1532,14 +1544,18 @@ async def record_device_status(check: Mapping[str, Any], command: Mapping[str, A
     text = f"{heading}: {message}" if message else heading
     if stage == "failed":
         await tray_repo.mark_command_completed(int(command["id"]), error=(message or heading)[:1000])
-        if check.get("snapshot"):
-            # Only the extra logs failed: report on what the device already sent.
+        if check.get("snapshot") or _stored_samples(check):
+            # A later step failed: report on what the device already sent.
+            prefix = ("The extra logs could not be collected" if check.get("snapshot")
+                      else "The logs could not be collected")
             await repo.update(int(check["id"]), status=STATUS_ANALYSING, stage_message="Writing the report.",
-                              error=f"The extra logs could not be collected: {message or heading}")
+                              error=_join_errors(check.get("error"), f"{prefix}: {message or heading}"))
             _schedule(run_report(int(check["id"])), description="report", health_check_id=int(check["id"]))
             return
-        await repo.update(int(check["id"]), status=STATUS_FAILED, stage_message=text, error=message or heading,
-                          completed=True)
+        if await _fall_back_to_logs(check, command, message or heading):
+            return
+        await repo.update(int(check["id"]), status=STATUS_FAILED, stage_message=text,
+                          error=_join_errors(check.get("error"), message or heading), completed=True)
         await _ticket_note(check.get("ticket_id"), _note_header() + "health check failed on the device: "
                            + html.escape(message or heading) + "</p>")
         return
@@ -1549,6 +1565,56 @@ async def record_device_status(check: Mapping[str, Any], command: Mapping[str, A
     await repo.update(int(check["id"]), **fields)
     if command.get("status") == "queued":
         await tray_repo.mark_command_delivered(int(command["id"]))
+
+
+# Device progress stages a stalled check is reported against.
+_STALL_STAGES = frozenset(DEVICE_STAGES[key] for key in (
+    "received", "collecting_snapshot", "reading_smart", "reading_sensors", "collecting_logs", "uploading",
+))
+
+
+def _stored_samples(check: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return [s for s in _list(_dict(check.get("logs")).get("sources")) if isinstance(s, dict)]
+
+
+def _join_errors(*messages: Any) -> str:
+    parts = [str(m).strip() for m in messages if m and str(m).strip()]
+    return "; ".join(dict.fromkeys(parts))[:1000]
+
+
+async def _fall_back_to_logs(check: Mapping[str, Any], command: Mapping[str, Any], reason: str) -> bool:
+    """When the snapshot phase sent nothing, collect the baseline logs on their own so the
+    report still covers what can be checked. Returns True when the logs phase was sent."""
+
+    payload = ai_troubleshooter.command_payload(command)
+    if payload.get("phase") != PHASE_SNAPSHOT or "already running" in reason.lower():
+        # A busy tray app would refuse the logs phase too.
+        return False
+    device = await _device_for(check)
+    platform = str(check.get("platform") or "unknown")
+    requests = baseline_log_requests(platform)
+    if not device or not requests:
+        return False
+    check_id = int(check["id"])
+    command_id, delivered = await dispatch_command(
+        device=device,
+        payload={
+            "health_check_id": check_id,
+            "phase": PHASE_LOGS,
+            "log_requests": requests,
+            "extra_log_folders": ai_troubleshooter.extra_log_folders(platform),
+            "extra_event_logs": ai_troubleshooter.job_event_logs(platform, requests),
+            "allow_pawnio": False,
+        },
+        initiated_by_user_id=_int_or_none(check.get("requested_by_user_id")),
+    )
+    await repo.update(
+        check_id, command_id=command_id, status=STATUS_COLLECTING if delivered else STATUS_QUEUED,
+        error=_join_errors(check.get("error"), f"The built-in health metrics could not be read: {reason}"),
+        stage_message="The built-in health metrics could not be read; collecting the logs on their own.",
+    )
+    log_info("AI health check falling back to logs only", health_check_id=check_id, command_id=command_id)
+    return True
 
 
 def _record_unavailable_entries(samples: Sequence[Mapping[str, Any]], requests: Sequence[Mapping[str, Any]],
@@ -1608,17 +1674,28 @@ async def receive_device_result(
         fields["pawnio_status"] = pawnio_label(snapshot) or None
         fields["stage_message"] = "Snapshot received; reviewing the computer's health."
         if not snapshot and not samples:
-            fields.update(status=STATUS_FAILED, completed=True,
-                          error=error_text or "The device sent no snapshot and no logs.")
+            reason = error_text or "The device sent no snapshot and no logs."
+            await tray_repo.mark_command_completed(int(command["id"]), error=reason)
+            if await _fall_back_to_logs(check, command, reason):
+                return True
+            fields.update(status=STATUS_FAILED, completed=True, error=_join_errors(check.get("error"), reason))
             await repo.update(check_id, **fields)
-            await tray_repo.mark_command_completed(int(command["id"]), error=fields["error"])
             await _ticket_note(check.get("ticket_id"), _note_header() + "health check failed: "
                                + html.escape(fields["error"]) + "</p>")
             return False
+    elif not check.get("snapshot") and not stored:
+        # The logs-only fallback found nothing either.
+        reason = _join_errors(check.get("error"), error_text or "The device sent no logs.")
+        fields.update(status=STATUS_FAILED, completed=True, error=reason)
+        await repo.update(check_id, **fields)
+        await tray_repo.mark_command_completed(int(command["id"]), error=reason)
+        await _ticket_note(check.get("ticket_id"), _note_header() + "health check failed: "
+                           + html.escape(reason) + "</p>")
+        return False
     else:
         fields["stage_message"] = f"{len(samples)} more log(s) received; writing the report."
     if error_text:
-        fields["error"] = error_text
+        fields["error"] = _join_errors(check.get("error"), error_text)
     await repo.update(check_id, **fields)
     await tray_repo.mark_command_completed(int(command["id"]))
     if phase == PHASE_SNAPSHOT:
@@ -1681,6 +1758,12 @@ async def run_triage(health_check_id: int) -> None:
         (data or {}).get("log_requests"), allowed, platform, default_reason="Requested by the health check."
     )
     requests = [r for r in requests if r["source"] not in collected][:MAX_EXTRA_LOG_REQUESTS]
+    skipped = _skipped_baseline_logs(check, samples)
+    if skipped:
+        # The device ran out of time before its logs (a slow or stuck step such as installing
+        # CrystalDiskInfo); collect them on their own, ahead of the model's requests.
+        requests = [*skipped, *[r for r in requests if r["source"] not in {b["source"] for b in skipped}]]
+        requests = requests[:_AGENT_MAX_LOG_REQUESTS]
     triage["refused_logs"] = refused
     if refused:
         await ai_required_logs.record(
@@ -1711,6 +1794,68 @@ async def run_triage(health_check_id: int) -> None:
         return
     await repo.update(health_check_id, report={"triage": triage}, stage_message="Writing the report.")
     await run_report(health_check_id)
+
+
+def _skipped_baseline_logs(check: Mapping[str, Any], samples: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Baseline logs to collect again when the snapshot arrived without any of them."""
+
+    if not check.get("snapshot") or any(s.get("phase") == PHASE_SNAPSHOT for s in samples):
+        return []
+    requested = {str(_dict(r).get("source") or "") for r in _list(check.get("log_requests"))}
+    collected = {str(s.get("source")) for s in samples}
+    return [
+        r for r in baseline_log_requests(str(check.get("platform") or ""))
+        if r["source"] in requested and r["source"] not in collected
+    ]
+
+
+def _humanise(name: str) -> str:
+    text = str(name or "").replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
+
+
+def not_checked(check: Mapping[str, Any]) -> list[dict[str, str]]:
+    """The parts of the health check that could not be run, and why, for the report."""
+
+    gaps: list[dict[str, str]] = []
+
+    def add(label: str, detail: str) -> None:
+        gaps.append({"check": label[:120], "detail": _clean(detail, 400)})
+
+    snapshot = _dict(check.get("snapshot"))
+    platform = str(check.get("platform") or "")
+    if not snapshot:
+        add("Built-in health metrics", "The device could not read them, so drives, temperatures, performance, "
+            "updates and security were judged from the logs only.")
+    else:
+        errors = _dict(snapshot.get("errors"))
+        for name, message in errors.items():
+            if name == "disk_smart":
+                continue
+            add("Built-in health metrics" if name == "snapshot" else f"Built-in metrics: {_humanise(name)}",
+                str(message or "Could not be read."))
+        smart = _dict(snapshot.get("disk_smart"))
+        if platform == "windows" and snapshot.get("is_virtual") is not True:
+            if smart.get("status") == "error" or (not smart and errors.get("disk_smart")):
+                add("Drive SMART data (CrystalDiskInfo)",
+                    str(smart.get("detail") or errors.get("disk_smart") or "CrystalDiskInfo could not be run."))
+            elif not smart:
+                add("Drive SMART data (CrystalDiskInfo)", "The device did not reach this step.")
+        sensors = _dict(snapshot.get("sensors"))
+        if not sensors:
+            add("Hardware sensors", "The device did not reach this step; an earlier step took too long.")
+        elif sensors.get("status") == "error":
+            add("Hardware sensors", str(sensors.get("detail") or "The sensors could not be read."))
+    samples = _stored_samples(check)
+    present = [str(s.get("source")) for s in samples]
+    for request in _list(check.get("log_requests")):
+        source = str(_dict(request).get("source") or "")
+        if source and source not in present and not any(
+            ai_troubleshooter.file_source_matches(source, item) for item in present
+        ):
+            add(f"Log: {source}", "The device did not collect this log.")
+            present.append(source)
+    return gaps
 
 
 async def _research(check: Mapping[str, Any], terms: Sequence[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None]:
@@ -1764,6 +1909,12 @@ async def run_report(health_check_id: int) -> None:
             content=triage["issues"], allowed_use="Evidence for the computer's health",
         ))
     records += _log_records(samples)
+    gaps = not_checked(check)
+    if gaps:
+        records.append(ai_prompt_security.UntrustedRecord(
+            record_id="not-checked", provenance="Parts of the health check that could not be run on the device",
+            content=gaps, allowed_use="What the report cannot cover; mark those areas unknown, not healthy",
+        ))
     records += [
         ai_prompt_security.UntrustedRecord(
             record_id=f"kb-{article['id']}", provenance="Internal knowledge base article",
@@ -1815,8 +1966,11 @@ async def run_report(health_check_id: int) -> None:
         f"{len(signals)} problem(s) flagged by the automatic checks." if signals
         else "The automatic checks found no problems."
     )
+    if gaps and not parsed.get("summary"):
+        summary += f" {len(gaps)} part(s) of the check could not be run; see What could not be checked."
     report.update({
         "signals": signals,
+        "not_checked": gaps,
         "summary": summary,
         "areas": parsed["areas"],
         "findings": parsed["findings"],
@@ -1873,6 +2027,11 @@ def report_note(check: Mapping[str, Any], overall: str, health_score: int | None
         items = "".join(f"<li>{html.escape(str(r.get('label') or ''))}: {html.escape(str(r.get('summary') or ''))}</li>"
                         for r in fixes)
         parts.append(f"<p><strong>Automatic fixes</strong></p><ul>{items}</ul>")
+    gaps = [g for g in _list(report.get("not_checked")) if isinstance(g, Mapping)]
+    if gaps:
+        items = "".join(f"<li>{html.escape(str(g.get('check') or ''))}: {html.escape(str(g.get('detail') or ''))}</li>"
+                        for g in gaps[:10])
+        parts.append(f"<p><strong>Could not be checked</strong></p><ul>{items}</ul>")
     if report.get("ai_error"):
         parts.append("<p><em>The AI model could not be reached; the report shows the automatic checks only.</em></p>")
     return "".join(parts)
@@ -1906,6 +2065,7 @@ __all__ = [
     "baseline_log_requests",
     "collect_log_samples",
     "evaluate_snapshot",
+    "not_checked",
     "expire_stale",
     "parse_snapshot",
     "present",

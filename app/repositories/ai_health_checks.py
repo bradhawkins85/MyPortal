@@ -209,7 +209,7 @@ async def list_stale(*, queued_hours: int, running_hours: int) -> list[dict[str,
 
     now = _utcnow()
     rows = await db.fetch_all(
-        "SELECT id, command_id, status, CASE WHEN snapshot_json IS NULL THEN 0 ELSE 1 END AS has_snapshot "
+        "SELECT id, command_id, status, stage_message, CASE WHEN snapshot_json IS NULL THEN 0 ELSE 1 END AS has_snapshot "
         "FROM ai_health_checks WHERE "
         "(status = 'queued' AND snapshot_json IS NULL AND updated_at < %s) OR "
         "(status IN ('queued', 'collecting', 'analysing') AND (status <> 'queued' OR snapshot_json IS NOT NULL) "

@@ -71,6 +71,20 @@
     </div>
   </section>
 
+  {% if report.not_checked %}
+  <section class="card card--panel" aria-labelledby="hc-not-checked-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-not-checked-title">What could not be checked</h2><p class="card__subtitle">These parts of the health check could not run on the computer. The rest of the report covers everything else; treat these areas as unknown.</p></div></header>
+    <ul class="hc-cards" role="list">
+      {% for gap in report.not_checked %}
+        <li><article class="hc-card hc-card--{{ hc.tone('warning') }}">
+          <div class="hc-card__head"><h3 class="hc-card__title">{{ gap.check }}</h3><span class="hc-actions"><span class="status status--warning">Not checked</span></span></div>
+          {% if gap.detail %}<p class="hc-card__meta">{{ gap.detail }}</p>{% endif %}
+        </article></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
   <section class="card card--panel" aria-labelledby="hc-steps-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="hc-steps-title">Steps to optimal performance</h2><p class="card__subtitle">In order of importance. Review each step before you act on it; the AI model can be wrong.</p></div></header>
     {% if report.steps %}

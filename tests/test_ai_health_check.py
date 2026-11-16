@@ -742,19 +742,138 @@ async def test_device_failure_and_empty_results(store):
                                           device=await _device(5), requested_by=None)
     check = await repo.get(started["id"])
     command = await tray_repo.get_command(started["command_id"])
+    # An empty snapshot phase falls back to collecting the logs on their own.
     queued = await hc.receive_device_result(check, command, phase="snapshot", snapshot_text=b"", log_bytes=b"",
                                             error="powershell.exe not found")
-    assert not queued
+    assert queued
     check = await repo.get(started["id"])
-    assert check["status"] == "failed" and check["error"] == "powershell.exe not found"
+    assert check["status"] == "collecting" and check["command_id"] != started["command_id"]
+    assert "powershell.exe not found" in check["error"]
+    assert (await tray_repo.get_command(started["command_id"]))["status"] == "error"
+    _uid, payload = store["sent"][-1]
+    assert payload["phase"] == "logs" and payload["allow_pawnio"] is False
+    assert [r["source"] for r in payload["log_requests"]] == [r["source"] for r in hc.BASELINE_LOG_REQUESTS["windows"]]
 
-    # A failure before any snapshot fails the whole check.
+    # When the logs fail too, the whole check fails with both reasons.
+    await hc.record_device_status(check, await tray_repo.get_command(check["command_id"]), "failed", "Event log blocked")
+    check = await repo.get(started["id"])
+    assert check["status"] == "failed"
+    assert "powershell.exe not found" in check["error"] and "Event log blocked" in check["error"]
+
+    # A busy tray app would refuse the logs too, so the check fails straight away.
     started = await hc.start_health_check(asset={"id": 11, "company_id": 1, "name": "PC-02"},
                                           device=await _device(6), requested_by=None)
+    sent = len(store["sent"])
+    await hc.record_device_status(await repo.get(started["id"]), await tray_repo.get_command(started["command_id"]),
+                                  "failed", "Another health check is already running on this device.")
+    check = await repo.get(started["id"])
+    assert check["status"] == "failed" and "already running" in check["error"] and len(store["sent"]) == sent
+
+
+@pytest.mark.anyio
+async def test_a_failed_snapshot_still_reports_from_the_logs(store, monkeypatch):
+    started = await hc.start_health_check(asset={"id": 10, "company_id": 1, "name": "PC-01"},
+                                          device=await _device(5), requested_by=None, ticket={"id": 77})
     await hc.record_device_status(await repo.get(started["id"]), await tray_repo.get_command(started["command_id"]),
                                   "failed", "PowerShell is blocked")
     check = await repo.get(started["id"])
-    assert check["status"] == "failed" and check["error"] == "PowerShell is blocked"
+    assert check["status"] == "collecting" and "PowerShell is blocked" in check["error"]
+    assert "logs on their own" in check["stage_message"]
+
+    store["scheduled"].clear()
+    queued = await hc.receive_device_result(
+        check, await tray_repo.get_command(check["command_id"]), phase="logs", snapshot_text=None,
+        log_bytes=_bundle("### System Log\n2026-10-22 10:00:00 [Error] id=7 disk: bad block\n\n"), error="",
+    )
+    assert queued and store["scheduled"] == [("report", started["id"])]
+
+    async def no_model(llm, messages):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(hc, "_chat", no_model)
+    await hc.run_report(started["id"])
+    check = await repo.get(started["id"])
+    assert check["status"] == "completed"
+    gaps = {g["check"] for g in check["report"]["not_checked"]}
+    assert "Built-in health metrics" in gaps and "Log: System" not in gaps
+    assert "Log: Application" in gaps
+    assert "Could not be checked" in store["notes"][-1][1]
+
+
+SLOW_SMART_SNAPSHOT = {
+    **WINDOWS_SNAPSHOT,
+    "errors": {"disk_smart": "timed out: context deadline exceeded", "physical_disks": "Access denied"},
+    "disk_smart": {"status": "error", "detail": "timed out: context deadline exceeded", "disks": []},
+}
+SLOW_SMART_SNAPSHOT.pop("sensors", None)
+
+
+@pytest.mark.anyio
+async def test_a_stuck_smart_step_still_collects_logs_and_reports_the_gaps(store, monkeypatch):
+    started = await hc.start_health_check(asset={"id": 10, "company_id": 1, "name": "PC-01"},
+                                          device=await _device(5), requested_by=None)
+    # CrystalDiskInfo could not be installed and used up the device's time: no sensors and no logs.
+    queued = await hc.receive_device_result(
+        await repo.get(started["id"]), await tray_repo.get_command(started["command_id"]), phase="snapshot",
+        snapshot_text=json.dumps(SLOW_SMART_SNAPSHOT).encode(), log_bytes=b"", error="",
+    )
+    assert queued
+
+    async def triage(llm, messages):
+        return json.dumps({"issues": [], "search_terms": [], "log_requests": [
+            {"source": "Microsoft-Windows-Kernel-EventTracing/Admin", "reason": "ETW"}]})
+
+    monkeypatch.setattr(hc, "_chat", triage)
+    await hc.run_triage(started["id"])
+    check = await repo.get(started["id"])
+    assert check["status"] == "collecting"
+    _uid, payload = store["sent"][-1]
+    # The skipped baseline logs come first and the agent's eight-source limit is kept.
+    assert payload["phase"] == "logs" and len(payload["log_requests"]) == 8
+    assert [r["source"] for r in payload["log_requests"]] == [r["source"] for r in hc.BASELINE_LOG_REQUESTS["windows"]]
+
+    await hc.receive_device_result(
+        check, await tray_repo.get_command(check["command_id"]), phase="logs", snapshot_text=None,
+        log_bytes=_bundle("".join(f"### {r['source']} Log\nnothing\n\n" for r in payload["log_requests"])), error="",
+    )
+
+    async def no_model(llm, messages):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(hc, "_chat", no_model)
+    await hc.run_report(started["id"])
+    check = await repo.get(started["id"])
+    assert check["status"] == "completed" and check["health_score"] is not None
+    gaps = {g["check"]: g["detail"] for g in check["report"]["not_checked"]}
+    assert gaps["Drive SMART data (CrystalDiskInfo)"] == "timed out: context deadline exceeded"
+    assert "did not reach" in gaps["Hardware sensors"]
+    assert gaps["Built-in metrics: Physical disks"] == "Access denied"
+    assert not any(key.startswith("Log: ") for key in gaps)
+    html = _render("health_checks/report.html", **await _report_context(check))
+    assert "What could not be checked" in html and "timed out: context deadline exceeded" in html
+
+
+def test_nothing_is_listed_as_not_checked_when_every_step_ran():
+    snapshot = {**WINDOWS_SNAPSHOT, "errors": {},
+                "disk_smart": {"status": "available", "disks": []}, "sensors": {"status": "available", "readings": []}}
+    check = {"platform": "windows", "snapshot": snapshot, "log_requests": [{"source": "System"}],
+             "logs": {"sources": [{"source": "System", "phase": "snapshot"}]}}
+    assert hc.not_checked(check) == []
+    # Virtual machines never read SMART, so it is not a gap.
+    assert hc.not_checked({**check, "snapshot": {**snapshot, "is_virtual": True, "disk_smart": None}}) == []
+
+
+@pytest.mark.anyio
+async def test_a_stalled_device_is_reported_against_its_last_step(store):
+    started = await hc.start_health_check(asset={"id": 10, "company_id": 1, "name": "PC-01"},
+                                          device=await _device(5), requested_by=None)
+    await hc.record_device_status(await repo.get(started["id"]), await tray_repo.get_command(started["command_id"]),
+                                  "reading_smart", "Reading drive SMART data with CrystalDiskInfo")
+    await store["db"].execute("UPDATE ai_health_checks SET updated_at = %s WHERE id = %s",
+                              ((datetime.now(timezone.utc) - timedelta(hours=3)).replace(tzinfo=None), started["id"]))
+    await hc.expire_stale()
+    check = await repo.get(started["id"])
+    assert check["status"] == "failed" and '"Reading drive SMART data"' in check["error"]
 
 
 # --------------------------------------------------------------------------- #
@@ -952,6 +1071,16 @@ def _render(name, **context):
     env = _environment()
     env.globals["static_url"] = lambda path: path
     return env.get_template(name).render(csrf_token="tok", is_super_admin=True, **context)
+
+
+async def _report_context(check: dict) -> dict:
+    from app.features.health_check.routes import _snapshot_view
+
+    report = check.get("report") or {}
+    return {"check": hc.present({**check, "asset_name": "PC-01", "company_name": "Contoso"}), "report": report,
+            "signals": report.get("signals") or [], "can_run_again": False,
+            "snapshot": _snapshot_view(check.get("snapshot") or {}),
+            "logs": (check.get("logs") or {}).get("sources") or [], "areas": hc.AREAS, "previous": []}
 
 
 def test_report_template_renders_and_escapes():
