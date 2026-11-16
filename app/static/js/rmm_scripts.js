@@ -1116,6 +1116,8 @@
       status.append(' ', el('span', { className: 'text-muted' }, 'for ' + formatDate(run.scheduled_for)));
     }
     status.setAttribute('data-sort-value', run.status);
+    const statusKey = run.scheduled ? 'scheduled' : run.status;
+    status.setAttribute('data-value', (STATUS[statusKey] || ['neutral', statusKey])[1]);
     const actions = row.querySelector('[data-column-key="actions"]');
     if (config.can_run && RETRYABLE.has(run.status) && run.script_id && run.asset_id && !actions.querySelector('[data-rmm-retry-run-id]')) {
       actions.append(el('button', {

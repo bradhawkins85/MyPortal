@@ -2155,3 +2155,45 @@ async def test_live_session_challenge_uses_the_agent_key():
     unchallenged = Socket(private)
     assert await rmm_agent_key.prove_live_session(unchallenged, {"agent_uid": "x", "public_key": None}, 4)
     assert unchallenged.sent == []
+
+
+@pytest.mark.anyio
+async def test_asset_card_lists_the_devices_whole_script_history(sqlite_db, monkeypatch):
+    from app.features.rmm import routes
+
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": "echo hi"})
+    script = (await rmm_repo.list_scripts())[0]
+    for _ in range(12):
+        await rmm_scripts.queue_runs(script_id=script["id"], company_id=1, asset_ids=[10], submitted={},
+                                     timeout_seconds=60, requested_by_user_id=None)
+    context = await routes.asset_rmm_context(1, 10, can_run=True)
+    assert len(context["runs"]) == 12 and context["runs_truncated"] is False
+    assert len(await rmm_repo.list_runs(company_id=1, asset_id=10, limit=100_000)) == 12
+
+    monkeypatch.setattr(rmm_repo, "ASSET_RUN_HISTORY_LIMIT", 5)
+    context = await routes.asset_rmm_context(1, 10, can_run=True)
+    assert len(context["runs"]) == 5 and context["runs_truncated"] is True
+
+
+def test_run_rows_expose_status_labels_for_the_fixed_status_filter():
+    env = _environment()
+    macros = env.get_template("rmm/_macros.html").module
+    assert macros.RUN_STATUS_LABELS[:3] == ["Waiting for device", "Scheduled", "Sent to device"]
+    assert "Timed out" in macros.RUN_STATUS_LABELS
+    html = str(macros.run_rows([
+        {"id": 1, "script_name": "A", "status": "timed_out", "scheduled": False, "exit_code": None,
+         "queued_at": "2026-11-01T00:00:00Z", "run_source": "manual"},
+        {"id": 2, "script_name": "B", "status": "queued", "scheduled": True, "scheduled_for": "2026-12-01T00:00:00Z",
+         "exit_code": None, "queued_at": "2026-11-02T00:00:00Z", "run_source": "manual"},
+    ], show_device=False))
+    assert 'data-sort-value="timed_out" data-value="Timed out"' in html
+    assert 'data-sort-value="queued" data-value="Scheduled"' in html
+    assert 'data-value="2026-11-02T00:00:00Z"' in html
+
+
+def test_asset_scripts_table_has_column_filters_and_pagination():
+    template = (ROOT / "app/templates/assets/detail.html").read_text(encoding="utf-8")
+    assert 'id="asset-script-runs-table" data-table data-table-id="asset-script-runs" data-table-paginate' in template
+    assert 'data-filter-options="multiple" data-filter-values="{{ rmm_ui.RUN_STATUS_LABELS | tojson | forceescape }}"' in template
+    assert 'data-pagination="asset-script-runs-table"' in template
+    assert "/static/js/tables.js" in template

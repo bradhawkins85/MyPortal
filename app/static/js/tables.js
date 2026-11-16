@@ -16,6 +16,22 @@
     return value.toLowerCase();
   }
 
+  function parseFilterValues(raw) {
+    if (!raw) {
+      return null;
+    }
+    try {
+      const values = JSON.parse(raw);
+      if (!Array.isArray(values)) {
+        return null;
+      }
+      const cleaned = Array.from(new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean)));
+      return cleaned.length ? cleaned : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
   function sortTable(table, columnIndex, type, controller, forcedOrder) {
     const tbody = table.tBodies[0];
     if (!tbody) {
@@ -387,11 +403,13 @@
         if (type === 'multi') valueInput.placeholder = `Search ${label.toLowerCase()}`;
         const optionsList = document.createElement('span');
         optionsList.className = 'table-column-filter__options';
-        const optionValues = type === 'multi'
-          ? Array.from(new Set(Array.from(this.table.tBodies).flatMap((tbody) => (
+        // data-filter-values fixes the choices (a JSON list of labels, in order);
+        // otherwise they are the distinct values in the column.
+        const fixedValues = type === 'multi' ? parseFilterValues(header.getAttribute('data-filter-values')) : null;
+        const optionValues = type !== 'multi' ? []
+          : fixedValues || Array.from(new Set(Array.from(this.table.tBodies).flatMap((tbody) => (
             Array.from(tbody.rows).map((row) => (row.cells[index]?.textContent || '').trim()).filter(Boolean)
-          )))).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-          : [];
+          )))).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         optionValues.forEach((optionValue) => {
           const optionLabel = document.createElement('label');
           optionLabel.className = 'table-column-filter__option';

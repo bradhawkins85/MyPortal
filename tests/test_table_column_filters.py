@@ -24,3 +24,11 @@ def test_shared_table_filters_use_ticket_filter_visual_language() -> None:
     assert ".table-column-filter--active .table-column-filter__toggle" in css
     assert "var(--color-primary, #2563eb)" in css
 
+
+
+def test_multi_option_filters_can_offer_a_fixed_list_of_values() -> None:
+    javascript = (ROOT / "app/static/js/tables.js").read_text(encoding="utf-8")
+
+    assert "function parseFilterValues(raw)" in javascript
+    assert "header.getAttribute('data-filter-values')" in javascript
+    assert "fixedValues ||" in javascript
