@@ -719,17 +719,28 @@ async def index_document(
     # Otherwise a retry can mistake stale active chunks for the refreshed index.
     replacement_chunks = None
     if content_changed or chunks_missing:
-        replacement_chunks = [
-            {
-                "chunk_index": index,
-                "chunk_text": chunk,
-                "chunk_hash": content_hash(chunk),
-                "embedding_json": json.dumps(await embed_text(chunk)),
-                "embedding_model": embedding_model(),
-                "token_count": len(chunk.split()),
-            }
-            for index, chunk in enumerate(chunks)
-        ]
+        # Only send chunks whose text is new to the provider. Ticket replies and
+        # small edits otherwise re-embed every unchanged chunk of the record.
+        known = (
+            await rag_repo.get_chunk_embeddings(int(previous["id"]), embedding_model())
+            if previous
+            else {}
+        )
+        replacement_chunks = []
+        for index, chunk in enumerate(chunks):
+            chunk_hash = content_hash(chunk)
+            if chunk_hash not in known:
+                known[chunk_hash] = json.dumps(await embed_text(chunk))
+            replacement_chunks.append(
+                {
+                    "chunk_index": index,
+                    "chunk_text": chunk,
+                    "chunk_hash": chunk_hash,
+                    "embedding_json": known[chunk_hash],
+                    "embedding_model": embedding_model(),
+                    "token_count": len(chunk.split()),
+                }
+            )
     doc_id = await rag_repo.upsert_document(
         {
             "source_type": document.source_type,
@@ -800,7 +811,8 @@ async def index_agent_sources(
             iterable = ((source_type, item) for item in (values or []))
         for normalised_type, item in iterable:
             counts = diagnostics.setdefault(
-                str(normalised_type), {"received": 0, "indexed": 0, "skipped": 0}
+                str(normalised_type),
+                {"received": 0, "indexed": 0, "skipped": 0, "failed": 0},
             )
             counts["received"] += 1
             if job_id is not None and await rag_repo.job_stop_requested(job_id):
@@ -821,11 +833,23 @@ async def index_agent_sources(
             if document is None:
                 counts["skipped"] += 1
                 continue
-            await index_document(document)
+            try:
+                await index_document(document)
+            except Exception as exc:
+                # One record the provider rejects must not stop every record
+                # after it from being indexed; the next run retries only it.
+                counts["failed"] += 1
+                log_warning(
+                    "RAG source indexing failed",
+                    source_type=document.source_type,
+                    source_id=document.source_id,
+                    error_type=type(exc).__name__,
+                )
+                continue
             indexed += 1
             counts["indexed"] += 1
     for source_type, counts in diagnostics.items():
-        logger = log_warning if counts["skipped"] else log_info
+        logger = log_warning if counts["skipped"] or counts["failed"] else log_info
         logger("RAG source indexing diagnostics", source_type=source_type, **counts)
     if cleanup_missing:
         if job_id is not None and await rag_repo.job_stop_requested(job_id):
