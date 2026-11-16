@@ -202,3 +202,15 @@ async def test_detail_form_does_not_fire_tray_notification_by_default(monkeypatc
     await routes.update_asset_documentation(_form_request(b"owner=Sam"), asset_id=1)
 
     notify.assert_not_awaited()
+
+
+def test_detail_page_lists_custom_fields_vertically():
+    """Fields stack as rows instead of squeezing into ever more grid columns."""
+    section = _custom_fields_section(DETAIL_TEMPLATE.read_text())
+    assert 'class="ce-form-grid"' not in section
+    assert '<ul class="asset-cf-list"' in section
+    assert '<li class="asset-cf-row form-field">' in section
+    css = (ROOT / "app" / "static" / "css" / "app.css").read_text()
+    row_rule = css[css.index(".asset-cf-row {"):]
+    row_rule = row_rule[: row_rule.index("}")]
+    assert "grid-template-columns: minmax(12rem, 20rem) minmax(0, 1fr);" in row_rule

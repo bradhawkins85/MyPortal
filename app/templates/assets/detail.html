@@ -623,10 +623,14 @@
 
   {% if is_asset_staff %}<section class="card card--panel ce-section" id="asset-custom-fields" data-asset-edit-section="custom-fields" aria-labelledby="asset-custom-fields-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-custom-fields-title">Custom fields</h2><p class="card__subtitle">{{ 'Update additional inventory details alongside the asset profile.' if can_manage_asset else 'Additional inventory details recorded for this asset.' }} Insert a field's value into a script or template with its token.</p></div></header>
-    <div class="ce-section__body"><div class="ce-form-grid">
-      {% for field in custom_fields %}<div class="form-field">
-        {% if can_manage_asset %}<label class="form-label" for="asset-custom-{{ field.id }}">{{ field.display_name or field.name }}</label>{% else %}<span class="form-label">{{ field.display_name or field.name }}</span>{% endif %}
-        {% if field.field_type != 'image' %}{% set token = '{{ asset.variables.' ~ field.name ~ ' }}' %}<button type="button" class="ce-token" data-ce-copy="{{ token }}" title="Copy the template token"><span class="ce-token__text">{{ token }}</span><span class="ce-token__hint" data-ce-copy-status aria-live="polite">Copy</span></button>{% endif %}
+    <div class="ce-section__body">{% set cf_type_labels = {'text': 'Text', 'textarea': 'Multi-line', 'checkbox': 'Yes / No', 'date': 'Date', 'url': 'Link', 'image': 'Image'} %}<ul class="asset-cf-list" role="list" aria-labelledby="asset-custom-fields-title">
+      {% for field in custom_fields %}<li class="asset-cf-row form-field">
+        <div class="asset-cf-row__meta">
+          {% if can_manage_asset %}<label class="form-label asset-cf-row__label" for="asset-custom-{{ field.id }}">{{ field.display_name or field.name }}</label>{% else %}<span class="form-label asset-cf-row__label">{{ field.display_name or field.name }}</span>{% endif %}
+          <span class="status status--neutral asset-cf-row__type">{{ cf_type_labels.get(field.field_type, 'Text') }}</span>
+          {% if field.field_type != 'image' %}{% set token = '{{ asset.variables.' ~ field.name ~ ' }}' %}<button type="button" class="ce-token asset-cf-row__token" data-ce-copy="{{ token }}" title="Copy the template token {{ token }}"><span class="ce-token__text">{{ token }}</span><span class="ce-token__hint" data-ce-copy-status aria-live="polite">Copy</span></button>{% endif %}
+        </div>
+        <div class="asset-cf-row__control">
         {% if can_manage_asset %}
           {% if field.field_type == 'checkbox' %}<label class="checkbox"><input id="asset-custom-{{ field.id }}" form="asset-settings-form" name="custom_{{ field.id }}" value="1" type="checkbox" {% if field.value %}checked{% endif %}><span>Yes</span></label>
           {% elif field.field_type == 'date' %}<input id="asset-custom-{{ field.id }}" form="asset-settings-form" class="form-input" name="custom_{{ field.id }}" type="date" value="{{ field.value or '' }}">
@@ -634,8 +638,9 @@
           {% elif field.field_type == 'textarea' %}<textarea id="asset-custom-{{ field.id }}" form="asset-settings-form" class="form-textarea" name="custom_{{ field.id }}" rows="4">{{ field.value or '' }}</textarea>
           {% else %}<input id="asset-custom-{{ field.id }}" form="asset-settings-form" class="form-input" name="custom_{{ field.id }}" value="{{ field.value or '' }}">{% endif %}
         {% elif field.field_type == 'url' and field.value %}<a href="{{ field.value }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>{% elif field.field_type == 'checkbox' %}{{ 'Yes' if field.value else 'No' }}{% elif field.field_type == 'textarea' and field.value %}<span style="white-space: pre-wrap;">{{ field.value }}</span>{% else %}{{ field.value or '—' }}{% endif %}
-      </div>{% else %}<p class="text-muted">No custom fields configured.</p>{% endfor %}
-    </div>{% if can_manage_asset and custom_fields %}<div class="form-actions"><button class="button button--primary" type="submit" form="asset-settings-form" data-asset-save>Save changes</button><span class="form-help">Saves the profile and editable custom fields.</span></div>{% endif %}</div>
+        </div>
+      </li>{% else %}<li class="asset-cf-list__empty text-muted">No custom fields configured yet. Once custom fields are set up for assets, they appear here.</li>{% endfor %}
+    </ul>{% if can_manage_asset and custom_fields %}<div class="form-actions"><button class="button button--primary" type="submit" form="asset-settings-form" data-asset-save>Save changes</button><span class="form-help">Saves the profile and editable custom fields.</span></div>{% endif %}</div>
   </section>{% endif %}
   {% if not customer_safe %}<section class="card card--panel ce-section" id="asset-assignments" data-asset-edit-section="assignments" aria-labelledby="asset-assignments-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-assignments-title">Network and rack assignments</h2><p class="card__subtitle">Open the dedicated workspace to manage each assignment.</p></div></header>
