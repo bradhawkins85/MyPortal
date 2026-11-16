@@ -172,7 +172,7 @@ def _script_tree(groups: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) -> dict[str, Any]:
-    """The asset page's Scripts card: the device's RMM agent and its recent runs."""
+    """The asset page's Scripts card: the device's RMM agent and its script run history."""
 
     await rmm_repo.expire_stale_runs()
     agent = await rmm_repo.get_asset_agent(asset_id)
@@ -180,6 +180,12 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
         agent = None
     # Without an agent, technicians can push one through the device's tray app.
     deploy = _serialise(await rmm_agent_deploy.asset_deploy_state(asset_id, company_id))
+    runs = [
+        _serialise(run)
+        for run in await rmm_repo.list_runs(
+            company_id=company_id, asset_id=asset_id, limit=rmm_repo.ASSET_RUN_HISTORY_LIMIT
+        )
+    ]
     return {
         "agent": _serialise({key: agent.get(key) for key in _AGENT_PUBLIC_FIELDS}) if agent else None,
         "deploy": deploy,
@@ -187,7 +193,8 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
         "install_history": [
             _serialise(attempt) for attempt in await rmm_agent_deploy.asset_install_history(asset_id, limit=10)
         ],
-        "runs": [_serialise(run) for run in await rmm_repo.list_runs(company_id=company_id, asset_id=asset_id, limit=10)],
+        "runs": runs,
+        "runs_truncated": len(runs) >= rmm_repo.ASSET_RUN_HISTORY_LIMIT,
         "can_run": can_run,
         "agent_state": rmm_scripts.agent_state(agent),
         # RustDesk and MeshCentral are switched on through the agent, so they need one.
@@ -861,7 +868,11 @@ async def uninstall_agents_api(asset_id: int, payload: UninstallRequest, request
 
 
 @router.get("/api/rmm/runs", summary="List script runs for the current company")
-async def list_runs_api(request: Request, asset_id: int | None = Query(default=None), limit: int = Query(default=50, ge=1, le=500)):
+async def list_runs_api(
+    request: Request,
+    asset_id: int | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=rmm_repo.ASSET_RUN_HISTORY_LIMIT),
+):
     _user, _company, company_id, _can_run = await _context(request, api=True, asset_id=asset_id)
     await rmm_repo.expire_stale_runs()
     runs = await rmm_repo.list_runs(company_id=company_id, asset_id=asset_id, limit=limit)

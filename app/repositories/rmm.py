@@ -15,6 +15,8 @@ ACTIVE_RUN_STATUSES = ("queued", "dispatched", "running")
 _dispatch_locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
 
 FINISHED_RUN_STATUSES = ("completed", "failed", "timed_out", "cancelled", "expired", "aborted")
+# The asset page lists a device's whole script history up to this many runs.
+ASSET_RUN_HISTORY_LIMIT = 5000
 
 # Fixed SQL fragments naming what queued a run (manual, schedule or onboarding).
 _RUN_SOURCE_COLUMNS = "r.run_source, r.schedule_id, r.onboarding_run_id, r.run_as, s.name AS schedule_name"
@@ -606,7 +608,10 @@ async def get_run_file_payload(run_id: int, agent_id: int) -> dict[str, Any] | N
 async def list_runs(
     *, company_id: int, asset_id: int | None = None, limit: int = 100
 ) -> list[dict[str, Any]]:
-    capped = max(1, min(int(limit), 500))
+    """A company's runs, newest first; one device's history may go up to
+    ``ASSET_RUN_HISTORY_LIMIT`` rows, the whole company's to 500."""
+
+    capped = max(1, min(int(limit), ASSET_RUN_HISTORY_LIMIT if asset_id is not None else 500))
     if asset_id is None:
         rows = await db.fetch_all(
             "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "
