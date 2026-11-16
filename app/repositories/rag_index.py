@@ -32,6 +32,28 @@ async def has_active_chunks(document_id: int) -> bool:
     return row is not None
 
 
+async def get_chunk_embeddings(document_id: int, embedding_model: str) -> dict[str, str]:
+    """Return stored embeddings for a document keyed by chunk hash.
+
+    Inactive rows are included: they still hold vectors for text that may
+    reappear, and every row was produced by the same embedding fingerprint.
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT chunk_hash, embedding_json FROM rag_chunks
+        WHERE document_id = ? AND embedding_model = ?
+        ORDER BY is_active DESC, id DESC
+        """,
+        (document_id, embedding_model),
+    )
+    embeddings: dict[str, str] = {}
+    for row in rows or []:
+        chunk_hash = row.get("chunk_hash")
+        if chunk_hash and row.get("embedding_json"):
+            embeddings.setdefault(str(chunk_hash), str(row["embedding_json"]))
+    return embeddings
+
+
 async def get_document_diagnostic(source_type: str, source_id: str) -> dict[str, Any] | None:
     """Return index metadata and redacted chunk descriptors for one source record."""
     document = await db.fetch_one(
