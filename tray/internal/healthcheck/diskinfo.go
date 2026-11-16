@@ -1,6 +1,7 @@
 package healthcheck
 
 import (
+	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
@@ -253,10 +254,35 @@ func leadingNumber(value string) *float64 {
 
 // diskInfoOutput is what diskinfo_windows.ps1 prints.
 type diskInfoOutput struct {
-	Status    string `json:"status"`
-	Installed bool   `json:"installed"`
-	Detail    string `json:"detail"`
-	Text      string `json:"text"`
+	Status    string       `json:"status"`
+	Installed bool         `json:"installed"`
+	Detail    string       `json:"detail"`
+	Text      diskInfoText `json:"text"`
+}
+
+// diskInfoText is the report text. Windows PowerShell serialises a string
+// that carries note properties (as Get-Content's output does) as an object
+// holding the string under "value", so that form is accepted as well.
+type diskInfoText string
+
+func (t *diskInfoText) UnmarshalJSON(data []byte) error {
+	var text *string
+	if err := json.Unmarshal(data, &text); err == nil {
+		if text != nil {
+			*t = diskInfoText(*text)
+		}
+		return nil
+	}
+	var wrapped struct {
+		Value *string `json:"value"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return err
+	}
+	if wrapped.Value != nil {
+		*t = diskInfoText(*wrapped.Value)
+	}
+	return nil
 }
 
 // smartReport turns the script's output into the report sent to the server.
@@ -274,7 +300,7 @@ func smartReport(out diskInfoOutput) DiskSMARTReport {
 	if out.Status != SMARTAvailable {
 		return report
 	}
-	report.Version, report.Disks = parseDiskInfo(out.Text)
+	report.Version, report.Disks = parseDiskInfo(string(out.Text))
 	if len(report.Disks) == 0 {
 		report.Status = SMARTUnavailable
 		report.Detail = "CrystalDiskInfo found no drives with SMART data."

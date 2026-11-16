@@ -126,8 +126,11 @@ try {
         throw 'CrystalDiskInfo did not finish within 3 minutes.'
     }
     if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { throw 'CrystalDiskInfo did not write DiskInfo.txt.' }
-    # Get-Content detects the report's encoding (UTF-16 in recent versions) from its byte order mark.
-    $text = (Get-Content -LiteralPath $report -Raw)
+    # ReadAllText detects the report's encoding (UTF-16 in recent versions)
+    # from its byte order mark, falling back to the ANSI code page. It is used
+    # instead of Get-Content, whose string carries PSPath and other note
+    # properties that ConvertTo-Json writes out as an object, not a string.
+    $text = [System.IO.File]::ReadAllText($report, [System.Text.Encoding]::Default)
     if ($text.Length -gt 1500000) { $text = $text.Substring(0, 1500000) }
     $result.text = $text
     $result.status = 'available'

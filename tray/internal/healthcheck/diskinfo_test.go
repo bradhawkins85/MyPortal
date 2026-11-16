@@ -1,6 +1,7 @@
 package healthcheck
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -120,5 +121,29 @@ func TestSmartReport(t *testing.T) {
 	failed := smartReport(diskInfoOutput{Status: SMARTError, Detail: "Chocolatey could not be installed.", Text: sampleDiskInfo})
 	if failed.Status != SMARTError || len(failed.Disks) != 0 || failed.Detail == "" {
 		t.Fatalf("failed %+v", failed)
+	}
+}
+
+func TestDiskInfoOutputReadsTextAsStringOrWrappedObject(t *testing.T) {
+	text, _ := json.Marshal(sampleDiskInfo)
+	cases := map[string]string{
+		"string": `{"status":"available","installed":false,"detail":null,"text":` + string(text) + `}`,
+		// Windows PowerShell's form for Get-Content output, which carries note properties.
+		"wrapped": `{"status":"available","installed":false,"detail":null,"text":{"value":` + string(text) +
+			`,"PSPath":"C:\\Program Files\\CrystalDiskInfo\\DiskInfo.txt","PSChildName":"DiskInfo.txt","PSDrive":{"Name":"C"},"ReadCount":1}}`,
+	}
+	for name, raw := range cases {
+		var out diskInfoOutput
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		report := smartReport(out)
+		if report.Status != SMARTAvailable || len(report.Disks) != 2 {
+			t.Fatalf("%s: report %+v", name, report)
+		}
+	}
+	var missing diskInfoOutput
+	if err := json.Unmarshal([]byte(`{"status":"error","detail":"x","text":null}`), &missing); err != nil || missing.Text != "" {
+		t.Fatalf("null text: %v %q", err, missing.Text)
 	}
 }
