@@ -1,0 +1,7 @@
+{
+  "guid": "b57b1ca2-a29f-4663-bc3d-5a5d5536d8fa",
+  "occurred_at": "2026-11-17T00:41Z",
+  "change_type": "Fix",
+  "summary": "Editing an automation no longer erases trigger filters written in Advanced JSON that the condition builder can't display.",
+  "content_hash": "6aa1f6f34eec9e0b321d61f834c4c42afab5f35936929cb14e5f12c3f37d4b89"
+}
