@@ -1,0 +1,7 @@
+{
+  "guid": "7a70a304-0b35-4512-9985-b3c2ed1b882a",
+  "occurred_at": "2026-11-17T05:07Z",
+  "change_type": "Fix",
+  "summary": "The event and scheduled automation editors are now centred on the page instead of sitting against the left edge on wide screens.",
+  "content_hash": "f905ff226e21da50d642d967fb06cbf11b564ce31b27c0646f363f7745cd85fe"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "497c436d-b29b-41a6-a82c-c9ba1bf78d49",
+  "occurred_at": "2026-11-17T00:41Z",
+  "change_type": "Feature",
+  "summary": "Ticket automation steps can now save their result for later steps and run only when earlier results match, so you can run an AI prompt that picks from your own list of answers and then update the ticket, reply or email someone based on its choice.",
+  "content_hash": "746bbbba0e4e0e82bab235777d9616f00dac227968b06722e1a6371be4071cf1"
+}

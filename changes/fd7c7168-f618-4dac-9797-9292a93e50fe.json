@@ -1,0 +1,7 @@
+{
+  "guid": "fd7c7168-f618-4dac-9797-9292a93e50fe",
+  "occurred_at": "2026-11-17T00:41Z",
+  "change_type": "Improvement",
+  "summary": "The ticket automation editor now matches the onboarding and offboarding workflow designer, with a visual list of steps, a searchable action picker and a step editor with a variable helper.",
+  "content_hash": "4a5a37c8d7eada0e2fa59ecd84ae51479da7039f54fd98a81a9a4acf851fc32b"
+}
