@@ -461,7 +461,7 @@ async def _record_legacy_action_exception(
 # data reaches that module only through its own untrusted records.
 _UNRENDERED_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
     "rmm-script": ("values",),
-    "ai-custom-prompt": ("instructions", "desired_outcome"),
+    "ai-custom-prompt": ("instructions", "desired_outcome", "choices"),
 }
 
 
@@ -505,9 +505,265 @@ def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
         }
         if note:
             action["note"] = note
+        try:
+            output_var = normalise_step_output_var(entry.get("output_var"))
+        except ValueError:
+            output_var = None
+        if output_var:
+            action["output_var"] = output_var
+        try:
+            run_if = normalise_step_condition(entry.get("run_if"))
+        except ValueError as exc:
+            # Never fall back to "always run" when a condition is unreadable.
+            action["run_if_error"] = str(exc)
+        else:
+            if run_if:
+                action["run_if"] = run_if
         normalised.append(action)
     normalised.sort(key=lambda a: a["order"])
     return normalised
+
+
+_STEP_OUTPUT_VAR_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+_RESERVED_STEP_OUTPUT_VARS = frozenset(
+    {"context", "now", "ticket", "vars", "company", "user", "requester"}
+)
+_STEP_CONDITION_FIELD_PATTERN = re.compile(r"^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+){0,7}$")
+_STEP_CONDITION_VALUE_MAX_LENGTH = 500
+_STEP_CONDITION_MAX = 10
+_STEP_EMPTY_OPERATORS = frozenset({"is_empty", "is_not_empty"})
+_STEP_CONDITION_OPERATORS = frozenset(
+    {
+        "equals",
+        "not_equals",
+        "contains",
+        "not_contains",
+        "starts_with",
+        "ends_with",
+        "in",
+        "not_in",
+        "greater_than",
+        "greater_than_or_equal",
+        "less_than",
+        "less_than_or_equal",
+    }
+) | _STEP_EMPTY_OPERATORS
+# Modules whose results contain model-written text. Kept here rather than
+# imported from ``modules`` to avoid an import cycle; a test keeps it in step.
+_AI_OUTPUT_MODULE_SLUGS = frozenset(
+    {
+        "ai-rename-ticket",
+        "ai-classify-ticket",
+        "ai-link-related",
+        "ai-request-missing-info",
+        "ai-custom-prompt",
+        "run-troubleshooting-bot",
+        "reprocess-ai",
+        "whisperx",
+        "ollama",
+    }
+)
+# Values validated against an admin-written list, safe to compare verbatim.
+_AI_OUTPUT_UNESCAPED_KEYS = frozenset({"status", "choice"})
+_STEP_OUTPUT_DROPPED_KEYS = frozenset({"context", "response", "prompt"})
+
+
+def normalise_step_output_var(raw: Any) -> str | None:
+    """Return a step's "save result as" name, or ``None`` when not set."""
+
+    name = str(raw or "").strip()
+    if not name:
+        return None
+    if not _STEP_OUTPUT_VAR_PATTERN.fullmatch(name):
+        raise ValueError(
+            "Result names must start with a lowercase letter and use only "
+            "lowercase letters, numbers and underscores (up to 40 characters)."
+        )
+    if name in _RESERVED_STEP_OUTPUT_VARS:
+        raise ValueError(f'"{name}" is reserved; choose another result name.')
+    return name
+
+
+def normalise_step_condition(raw: Any) -> dict[str, Any] | None:
+    """Validate a step's "run only if" rules; ``None`` means always run."""
+
+    if raw is None or raw == {} or raw == "":
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError("Run-if conditions must be an object.")
+    match = str(raw.get("match") or "all").strip().lower()
+    if match not in {"all", "any"}:
+        raise ValueError('Run-if match must be "all" or "any".')
+    conditions_raw = raw.get("conditions")
+    if conditions_raw is None:
+        return None
+    if not isinstance(conditions_raw, list):
+        raise ValueError("Run-if conditions must be a list.")
+    if len(conditions_raw) > _STEP_CONDITION_MAX:
+        raise ValueError(f"A step can have at most {_STEP_CONDITION_MAX} conditions.")
+    conditions: list[dict[str, Any]] = []
+    for entry in conditions_raw:
+        if not isinstance(entry, Mapping):
+            raise ValueError("Each run-if condition must be an object.")
+        field = str(entry.get("field") or "").strip()
+        if not _STEP_CONDITION_FIELD_PATTERN.fullmatch(field):
+            raise ValueError(f'"{field}" is not a valid value to check.')
+        operator = str(entry.get("operator") or "equals").strip().lower()
+        if operator not in _STEP_CONDITION_OPERATORS:
+            raise ValueError(f'"{operator}" is not a supported comparison.')
+        condition: dict[str, Any] = {"field": field, "operator": operator}
+        if operator not in _STEP_EMPTY_OPERATORS:
+            value = entry.get("value")
+            if not isinstance(value, (bool, int, float)):
+                value = "" if value is None else str(value)
+                if len(value) > _STEP_CONDITION_VALUE_MAX_LENGTH:
+                    raise ValueError("Run-if values must be 500 characters or fewer.")
+            condition["value"] = value
+        conditions.append(condition)
+    if not conditions:
+        return None
+    return {"match": match, "conditions": conditions}
+
+
+def validate_step_flow(actions: Sequence[Mapping[str, Any]]) -> None:
+    """Check result names are unique and conditions only use earlier results.
+
+    ``actions`` must already be in run order.
+    """
+
+    saved: set[str] = set()
+    for index, action in enumerate(actions, start=1):
+        run_if = normalise_step_condition(action.get("run_if"))
+        for condition in (run_if or {}).get("conditions", []):
+            parts = condition["field"].split(".")
+            if parts[0] == "vars" and len(parts) > 1 and parts[1] not in saved:
+                raise ValueError(
+                    f'Step {index} checks "{condition["field"]}" before any '
+                    f'earlier step saves a result named "{parts[1]}".'
+                )
+        name = normalise_step_output_var(action.get("output_var"))
+        if name:
+            if name in saved:
+                raise ValueError(f'The result name "{name}" is used more than once.')
+            saved.add(name)
+
+
+def _is_empty_step_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (Mapping, list, tuple, set)):
+        return not value
+    return False
+
+
+def _step_condition_check(condition: Mapping[str, Any], context: Mapping[str, Any]) -> bool:
+    actual = _resolve_context_value(context, str(condition.get("field") or ""))
+    operator = str(condition.get("operator") or "equals")
+    if operator == "is_empty":
+        return _is_empty_step_value(actual)
+    if operator == "is_not_empty":
+        return not _is_empty_step_value(actual)
+    if actual is None:
+        return operator in {"not_equals", "not_contains", "not_in"}
+    if operator in {"contains", "not_contains", "starts_with", "ends_with"}:
+        # Plain-English comparisons: ignore letter case.
+        actual_text = str(actual).casefold() if not isinstance(actual, list) else [
+            str(item).casefold() for item in actual
+        ]
+        return _compare_values(
+            actual_text, str(condition.get("value") or "").casefold(), operator
+        )
+    return _compare_values(actual, condition.get("value"), operator)
+
+
+def _step_condition_matches(run_if: Mapping[str, Any], context: Mapping[str, Any]) -> bool:
+    checks = (
+        _step_condition_check(condition, context)
+        for condition in run_if.get("conditions") or []
+    )
+    return any(checks) if run_if.get("match") == "any" else all(checks)
+
+
+def _escape_ai_output(value: Any, key: str | None = None) -> Any:
+    if isinstance(value, str):
+        return value if key in _AI_OUTPUT_UNESCAPED_KEYS else html.escape(value)
+    if isinstance(value, Mapping):
+        return {k: _escape_ai_output(v, str(k)) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_escape_ai_output(item) for item in value]
+    return value
+
+
+def _step_output(module_slug: str, status: str, result: Any, error: str | None) -> dict[str, Any]:
+    output: dict[str, Any] = (
+        {k: v for k, v in result.items() if k not in _STEP_OUTPUT_DROPPED_KEYS}
+        if isinstance(result, Mapping)
+        else ({} if result is None else {"result": result})
+    )
+    output["status"] = status
+    if error and not output.get("error"):
+        output["error"] = error
+    if module_slug in _AI_OUTPUT_MODULE_SLUGS:
+        # Model text can be steered by whoever wrote the ticket; escape it so
+        # a later email or note cannot be made to carry markup or links.
+        output = _escape_ai_output(output)
+    return output
+
+
+class _StepFlow:
+    """Carries each step's saved result to later steps in one run."""
+
+    def __init__(self, context: Mapping[str, Any] | None) -> None:
+        base = dict(context) if isinstance(context, Mapping) else {}
+        existing = base.get("vars")
+        self.vars: dict[str, Any] = dict(existing) if isinstance(existing, Mapping) else {}
+        base["vars"] = self.vars
+        self.context: dict[str, Any] = base
+
+    def skip_reason(self, action: Mapping[str, Any]) -> str | None:
+        if action.get("run_if_error"):
+            return f"Run-if condition is invalid: {action['run_if_error']}"
+        run_if = action.get("run_if")
+        if not run_if or _step_condition_matches(run_if, self.context):
+            return None
+        return "Run-if conditions not met"
+
+    def record(
+        self,
+        action: Mapping[str, Any],
+        status: str,
+        result: Any = None,
+        error: str | None = None,
+    ) -> None:
+        name = action.get("output_var")
+        if name:
+            self.vars[str(name)] = _step_output(
+                str(action.get("module") or ""), status, result, error
+            )
+
+
+async def _record_skipped_step(
+    automation: Mapping[str, Any],
+    action: Mapping[str, Any],
+    flow: _StepFlow,
+    reason: str,
+    context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    module_slug = action["module"]
+    entry = {"module": module_slug, "status": "skipped", "reason": reason}
+    flow.record(action, "skipped", entry)
+    await _record_action_history(
+        automation,
+        action_name=action.get("note") or module_slug,
+        action_module=module_slug,
+        status="skipped",
+        result=entry,
+        error_message=None,
+        context=context,
+    )
+    return entry
 
 
 def _project_sequence_field(value: Sequence[Any], field: str) -> str | None:
@@ -1173,17 +1429,26 @@ async def _invoke_automation_actions_for_context_inner(
     if actions:
         results: list[dict[str, Any]] = []
         first_error: str | None = None
+        flow = _StepFlow(context)
         for action in actions:
             module_slug = action["module"]
+            skip_reason = flow.skip_reason(action)
+            if skip_reason:
+                results.append(
+                    await _record_skipped_step(
+                        automation, action, flow, skip_reason, context
+                    )
+                )
+                continue
             payload_source = action.get("payload")
             module_payload = (
                 dict(payload_source) if isinstance(payload_source, Mapping) else {}
             )
             module_payload = await _render_action_payload(
-                module_slug, module_payload, context
+                module_slug, module_payload, flow.context
             )
             if context:
-                module_payload.setdefault("context", context)
+                module_payload.setdefault("context", flow.context)
             try:
                 action_result = await module_dispatch.trigger_module(
                     module_slug,
@@ -1197,6 +1462,7 @@ async def _invoke_automation_actions_for_context_inner(
                 failure_entry = _action_failure_entry(
                     module_slug, exc_message, module_payload
                 )
+                flow.record(action, "failed", None, exc_message)
                 results.append(failure_entry)
                 await _record_action_history(
                     automation,
@@ -1243,6 +1509,12 @@ async def _invoke_automation_actions_for_context_inner(
                 or (action_status == "unknown" and action_error)
                 else "skipped" if action_status == "skipped"
                 else "succeeded"
+            )
+            flow.record(
+                action,
+                history_status,
+                action_result,
+                str(action_error) if action_error else None,
             )
             await _record_action_history(
                 automation,
@@ -1772,8 +2044,17 @@ async def _execute_automation_inner(
                     error_message = f"{failed_count} scheduled ticket action(s) failed"
             elif actions:
                 results: list[dict[str, Any]] = []
+                flow = _StepFlow(context)
                 for action in actions:
                     module_slug = action["module"]
+                    skip_reason = flow.skip_reason(action)
+                    if skip_reason:
+                        results.append(
+                            await _record_skipped_step(
+                                automation, action, flow, skip_reason, context
+                            )
+                        )
+                        continue
                     payload_source = action.get("payload")
                     module_payload = (
                         dict(payload_source)
@@ -1781,10 +2062,10 @@ async def _execute_automation_inner(
                         else {}
                     )
                     module_payload = await _render_action_payload(
-                        module_slug, module_payload, context
+                        module_slug, module_payload, flow.context
                     )
                     if context:
-                        module_payload.setdefault("context", context)
+                        module_payload.setdefault("context", flow.context)
                     try:
                         action_result = await module_dispatch.trigger_module(
                             module_slug,
@@ -1799,6 +2080,7 @@ async def _execute_automation_inner(
                         failure_entry = _action_failure_entry(
                             module_slug, exc_message, module_payload
                         )
+                        flow.record(action, "failed", None, exc_message)
                         results.append(failure_entry)
                         await _record_action_history(
                             automation,
@@ -1852,6 +2134,12 @@ async def _execute_automation_inner(
                         or (action_status == "unknown" and action_error)
                         else "skipped" if action_status == "skipped"
                         else "succeeded"
+                    )
+                    flow.record(
+                        action,
+                        history_status,
+                        action_result,
+                        str(action_error) if action_error else None,
                     )
                     await _record_action_history(
                         automation,

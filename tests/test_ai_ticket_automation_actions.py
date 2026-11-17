@@ -647,3 +647,86 @@ def test_ai_custom_prompt_instructions_are_not_template_rendered():
     assert rendered["ticket_id"] in (42, "42")
     assert rendered["instructions"] == "Summarise {{ticket.description}}"
     assert rendered["desired_outcome"] == "Mention {{ticket.subject}}"
+
+
+def test_ai_custom_prompt_choice_picks_from_admin_list(monkeypatch):
+    monkeypatch.setattr(
+        "app.repositories.tickets.get_ticket", AsyncMock(return_value=TICKET)
+    )
+    monkeypatch.setattr(
+        "app.repositories.tickets.list_replies", AsyncMock(return_value=[])
+    )
+    invoke_ai = _enable_ollama(
+        monkeypatch, {"response": json.dumps({"choice": "  OUTAGE ", "reason": "Site down"})}
+    )
+    _, create_reply, _ = _patch_ticket_writes(monkeypatch)
+
+    result = asyncio.run(
+        modules._invoke_ai_custom_prompt(
+            {},
+            {
+                "ticket_id": 42,
+                "instructions": "What kind of problem is this?",
+                "response_format": "choice",
+                "choices": "Billing, Outage, Other, Outage",
+            },
+        )
+    )
+
+    prompt = invoke_ai.await_args.args[1]["prompt"]
+    assert '["Billing", "Outage", "Other"]' in prompt
+    assert prompt.index("Outage") < prompt.index("BEGIN_UNTRUSTED_RECORDS")
+    assert result["status"] == "succeeded"
+    assert result["choice"] == "Outage"
+    assert result["text"] == "Site down"
+    body = create_reply.await_args.kwargs["body"]
+    assert "Outage" in body and "Site down" in body
+
+
+@pytest.mark.parametrize(
+    "response",
+    [{"choice": "Something else"}, {"choice": 3}, {"answer": "Outage"}],
+)
+def test_ai_custom_prompt_choice_rejects_answers_outside_the_list(monkeypatch, response):
+    monkeypatch.setattr(
+        "app.repositories.tickets.get_ticket", AsyncMock(return_value=TICKET)
+    )
+    monkeypatch.setattr(
+        "app.repositories.tickets.list_replies", AsyncMock(return_value=[])
+    )
+    _enable_ollama(monkeypatch, {"response": json.dumps(response)})
+    _, create_reply, _ = _patch_ticket_writes(monkeypatch)
+
+    result = asyncio.run(
+        modules._invoke_ai_custom_prompt(
+            {},
+            {"ticket_id": 42, "instructions": "Classify", "response_format": "choice",
+             "choices": ["Billing", "Outage"]},
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "choice" not in result
+    create_reply.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "choices",
+    [None, "", "Only one", ",".join(f"c{i}" for i in range(21)), "ok, " + "x" * 101],
+)
+def test_ai_custom_prompt_choice_needs_a_usable_list(monkeypatch, choices):
+    invoke_ai = _enable_ollama(monkeypatch, {"response": "{}"})
+    payload = {"ticket_id": 42, "instructions": "Classify", "response_format": "choice"}
+    if choices is not None:
+        payload["choices"] = choices
+
+    with pytest.raises(ValueError):
+        asyncio.run(modules._invoke_ai_custom_prompt({}, payload))
+
+    invoke_ai.assert_not_awaited()
+
+
+def test_ai_custom_prompt_choices_are_never_rendered_from_ticket_data():
+    from app.services import automations
+
+    assert "choices" in automations._UNRENDERED_PAYLOAD_KEYS["ai-custom-prompt"]

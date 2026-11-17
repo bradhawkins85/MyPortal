@@ -172,3 +172,63 @@ def test_parse_event_form_treats_empty_trigger_filter_object_as_none():
     assert status_code == 200
     assert data["trigger_filters"] is None
     assert form_state["triggerFiltersRaw"] == ""
+
+
+def test_parse_form_keeps_step_results_and_run_if_conditions():
+    payload = {
+        "actions": [
+            {"order": 0, "module": "email", "payload": {}, "note": "Classify", "output_var": "triage"},
+            {
+                "order": 1,
+                "module": "email",
+                "payload": {},
+                "note": "Tell billing",
+                "run_if": {
+                    "match": "all",
+                    "conditions": [
+                        {"field": "vars.triage.choice", "operator": "equals", "value": "Billing"}
+                    ],
+                },
+            },
+        ]
+    }
+    data, _, error_message, status_code = _parse_automation_form_submission(
+        _make_action_form("Branching automation", payload), kind="event"
+    )
+
+    assert error_message is None
+    assert status_code == 200
+    saved = data["action_payload"]["actions"]
+    assert saved[0]["output_var"] == "triage"
+    assert saved[1]["run_if"]["conditions"][0]["field"] == "vars.triage.choice"
+
+
+@pytest.mark.parametrize(
+    "actions, message",
+    [
+        (
+            [{"module": "email", "payload": {}, "output_var": "Bad Name"}],
+            "Trigger action 1: Result names",
+        ),
+        (
+            [{"module": "email", "payload": {}, "run_if": {"match": "maybe", "conditions": []}}],
+            "Trigger action 1: Run-if match",
+        ),
+        (
+            [
+                {"order": 0, "module": "email", "payload": {}, "run_if": {"match": "all", "conditions": [
+                    {"field": "vars.later.choice", "operator": "equals", "value": "x"}]}},
+                {"order": 1, "module": "email", "payload": {}, "output_var": "later"},
+            ],
+            "before any earlier step",
+        ),
+    ],
+)
+def test_parse_form_rejects_invalid_step_flow(actions, message):
+    data, _, error_message, status_code = _parse_automation_form_submission(
+        _make_action_form("Broken flow", {"actions": actions}), kind="event"
+    )
+
+    assert data is None
+    assert status_code == 400
+    assert message in error_message

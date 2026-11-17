@@ -208,6 +208,7 @@ def _parse_automation_form_submission(
     *,
     kind: str,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], str | None, int]:
+    from app.services import automations as automations_service
     from app.services import modules as modules_service
     from app.services.component_availability import get_component_availability
 
@@ -413,7 +414,36 @@ def _parse_automation_form_submission(
             note_value = str(entry.get("note") or "").strip()
             if note_value:
                 action_entry["note"] = note_value
+            try:
+                output_var = automations_service.normalise_step_output_var(
+                    entry.get("output_var")
+                )
+                run_if = automations_service.normalise_step_condition(entry.get("run_if"))
+            except ValueError as exc:
+                return (
+                    None,
+                    form_state,
+                    f"Trigger action {index}: {exc}",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            if output_var:
+                action_entry["output_var"] = output_var
+            if run_if:
+                action_entry["run_if"] = run_if
             normalised_actions.append(action_entry)
+        try:
+            # Validate in run order: the same order _normalise_actions uses.
+            automations_service.validate_step_flow(
+                [
+                    item
+                    for _, item in sorted(
+                        enumerate(normalised_actions),
+                        key=lambda pair: pair[1].get("order", pair[0]),
+                    )
+                ]
+            )
+        except ValueError as exc:
+            return (None, form_state, str(exc), status.HTTP_400_BAD_REQUEST)
         updated_payload = dict(action_payload)
         updated_payload["actions"] = normalised_actions
         action_payload = updated_payload
