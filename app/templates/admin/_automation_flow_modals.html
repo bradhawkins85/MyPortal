@@ -1,0 +1,153 @@
+{#
+  Modals for the automation step designer (see _automation_flow.html).
+  Include outside the automation <form>: their inputs must not be posted.
+#}
+{# ---------------------------------------------------------------- Step picker #}
+<div class="modal swf-modal" id="af-picker-modal" role="dialog" aria-modal="true" aria-labelledby="af-picker-title" hidden>
+  <div class="modal__panel modal__panel--wide scf-editor swf-picker">
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="swf-eyebrow" data-af-picker-eyebrow>Add a step</p>
+        <h2 class="modal__title" id="af-picker-title">What should happen next?</h2>
+        <p class="scf-editor__subtitle">Pick an action. You can fill in its details and reorder it afterwards.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close step picker"></button>
+    </header>
+    <div class="modal__body swf-picker__body">
+      <label class="visually-hidden" for="af-picker-search">Search actions</label>
+      <input type="search" class="form-input swf-picker__search" id="af-picker-search" placeholder="Search actions, e.g. email, AI, ticket" autocomplete="off" data-af-picker-search />
+      <div class="swf-picker__groups" data-af-picker-groups></div>
+      <p class="scf-empty scf-empty--search" data-af-picker-empty hidden>No actions match your search.</p>
+    </div>
+  </div>
+</div>
+
+{# ---------------------------------------------------------------- Step editor #}
+<div class="modal swf-modal" id="af-step-modal" role="dialog" aria-modal="true" aria-labelledby="af-step-title" hidden>
+  <div class="modal__panel modal__panel--wide scf-editor swf-step-editor" data-af-step-form>
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="swf-eyebrow" data-af-step-eyebrow></p>
+        <h2 class="modal__title" id="af-step-title" data-af-step-title>Edit step</h2>
+        <p class="scf-editor__subtitle" data-af-step-subtitle></p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close step editor"></button>
+    </header>
+
+    <nav class="scf-tabs" role="tablist" aria-label="Step settings">
+      <button type="button" class="scf-tab is-active" role="tab" id="af-tab-settings" aria-controls="af-panel-settings" aria-selected="true" data-af-tab="settings">What it does</button>
+      <button type="button" class="scf-tab" role="tab" id="af-tab-outputs" aria-controls="af-panel-outputs" aria-selected="false" tabindex="-1" data-af-tab="outputs">What it provides<span class="scf-tab__dot" aria-hidden="true" data-af-tab-dot="outputs" hidden></span></button>
+      <button type="button" class="scf-tab" role="tab" id="af-tab-conditions" aria-controls="af-panel-conditions" aria-selected="false" tabindex="-1" data-af-tab="conditions">Run when<span class="scf-tab__dot" aria-hidden="true" data-af-tab-dot="conditions" hidden></span></button>
+    </nav>
+
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        <section class="scf-panel" id="af-panel-settings" role="tabpanel" aria-labelledby="af-tab-settings" data-af-panel="settings">
+          <div class="scf-grid">
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="af-step-note">Step name</label>
+              <input class="form-input" id="af-step-note" maxlength="255" autocomplete="off" data-af-step-note />
+              <p class="form-help">Shown in the steps list and in the automation's history.</p>
+              <p class="scf-error" data-af-field-error="note" hidden></p>
+            </div>
+            <div class="form-field scf-grid__full" data-af-mode-field>
+              <span class="form-label" id="af-step-mode-label">Fill in as</span>
+              <div class="af-segmented" role="radiogroup" aria-labelledby="af-step-mode-label">
+                <label><input type="radio" name="af_payload_mode" value="schema" data-af-payload-mode /> <span>Form</span></label>
+                <label><input type="radio" name="af_payload_mode" value="raw" data-af-payload-mode /> <span>JSON</span></label>
+              </div>
+            </div>
+          </div>
+          <div class="scf-grid swf-fields af-schema" data-af-schema></div>
+          <div class="af-raw" data-af-raw hidden>
+            <div class="form-quick-add" data-af-snippets hidden>
+              <label class="visually-hidden" for="af-step-snippet">Start from an example</label>
+              <select class="form-input form-quick-add__select" id="af-step-snippet" data-af-snippet-select></select>
+              <button type="button" class="button button--ghost button--small" data-af-snippet-apply>Use example</button>
+            </div>
+            <label class="form-label" for="af-step-payload">Payload</label>
+            <textarea class="form-input af-raw__payload" id="af-step-payload" rows="10" spellcheck="false" data-af-step-payload></textarea>
+          </div>
+          <p class="scf-error" data-af-field-error="payload" hidden></p>
+        </section>
+
+        <section class="scf-panel" id="af-panel-outputs" role="tabpanel" aria-labelledby="af-tab-outputs" data-af-panel="outputs" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">Values later steps can use</h3>
+            <p class="text-muted">Name this step's result to use what it returns in the steps after it, in a field or in a <em>Run when</em> rule.</p>
+          </div>
+          <div class="scf-grid">
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="af-step-output">Save result as <span class="scf-optional">optional</span></label>
+              <input class="form-input scf-mono" id="af-step-output" maxlength="40" autocomplete="off" spellcheck="false" placeholder="triage" data-af-step-output />
+              <p class="form-help">Lowercase letters, numbers and underscores, e.g. <code>triage</code>. Leave blank if no later step needs it.</p>
+              <p class="scf-error" data-af-field-error="output" hidden></p>
+            </div>
+          </div>
+          <ul class="swf-provides" data-af-provides></ul>
+          <p class="af-callout" data-af-ai-note hidden>AI-written text is HTML-escaped before later steps see it. Branch on a <strong>choice</strong> (the AI custom prompt's <em>choice</em> format) rather than on free text, and read AI text before sending it to customers.</p>
+        </section>
+
+        <section class="scf-panel" id="af-panel-conditions" role="tabpanel" aria-labelledby="af-tab-conditions" data-af-panel="conditions" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">When should this step run?</h3>
+            <p class="text-muted">Skip the step when it doesn't apply. Skipped steps are recorded in the automation's history.</p>
+          </div>
+          <div class="scf-choice-list" role="radiogroup" aria-label="When to run">
+            <label class="scf-choice">
+              <input type="radio" name="af_condition_mode" value="" data-af-condition-mode />
+              <span><strong>Always run</strong><span class="text-muted">Every time the automation runs.</span></span>
+            </label>
+            <label class="scf-choice">
+              <input type="radio" name="af_condition_mode" value="all" data-af-condition-mode />
+              <span><strong>Only when all of these are true</strong><span class="text-muted">Every rule below must match.</span></span>
+            </label>
+            <label class="scf-choice">
+              <input type="radio" name="af_condition_mode" value="any" data-af-condition-mode />
+              <span><strong>Only when any of these are true</strong><span class="text-muted">One matching rule is enough.</span></span>
+            </label>
+          </div>
+          <div class="scf-condition af-conditions" data-af-conditions hidden>
+            <ol class="af-rules" data-af-rules aria-label="Rules"></ol>
+            <button type="button" class="button button--ghost button--small" data-af-rule-add>+ Add rule</button>
+            <p class="scf-sentence" data-af-condition-sentence></p>
+          </div>
+          <p class="scf-error" data-af-field-error="conditions" hidden></p>
+        </section>
+      </div>
+
+      <aside class="scf-preview swf-helper" aria-labelledby="af-helper-title">
+        <p class="scf-preview__eyebrow" id="af-helper-title">Variable helper</p>
+        <p class="swf-helper__target text-muted" data-af-helper-target>Click into a field, then pick a value to insert it.</p>
+        <label class="visually-hidden" for="af-helper-search">Search variables</label>
+        <input type="search" class="form-input swf-helper__search" id="af-helper-search" placeholder="Search variables" autocomplete="off" data-af-helper-search />
+        <div class="swf-vars" data-af-helper-groups></div>
+      </aside>
+    </div>
+
+    <footer class="modal__footer scf-editor__footer">
+      <button type="button" class="button button--danger" data-af-step-delete>Remove step</button>
+      <span class="scf-editor__spacer" aria-hidden="true"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="button" class="button button--primary" data-af-step-apply>Apply</button>
+    </footer>
+  </div>
+</div>
+
+{# ------------------------------------------------------- Variables reference #}
+<div class="modal swf-modal" id="af-variables-modal" role="dialog" aria-modal="true" aria-labelledby="af-variables-title" hidden>
+  <div class="modal__panel modal__panel--wide scf-editor swf-variables">
+    <header class="modal__header scf-editor__header">
+      <div>
+        <h2 class="modal__title" id="af-variables-title">Variables in this automation</h2>
+        <p class="scf-editor__subtitle">Type <code>{{ '{{ticket.subject}}' }}</code> in any field, or use the variable helper while editing a step. A step's saved result is only available to the steps after it, as <code>{{ '{{vars.name.field}}' }}</code>.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close variables reference"></button>
+    </header>
+    <div class="modal__body">
+      <label class="visually-hidden" for="af-variables-search">Search variables</label>
+      <input type="search" class="form-input swf-helper__search" id="af-variables-search" placeholder="Search variables" autocomplete="off" data-af-reference-search />
+      <div class="swf-vars swf-vars--reference" data-af-reference-groups></div>
+    </div>
+  </div>
+</div>

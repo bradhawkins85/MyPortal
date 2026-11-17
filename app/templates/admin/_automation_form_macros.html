@@ -1,0 +1,101 @@
+{#
+  Building blocks shared by the event and scheduled automation editors
+  (automations_create_event.html, automations_create_scheduled.html).
+  Styled by app/static/css/automation_flow.css on top of the .scf-* and
+  .swf-* editor pieces.
+#}
+
+{% macro card_header(eyebrow, title, title_id, subtitle) %}
+  <header class="af-card__header">
+    <p class="swf-eyebrow">{{ eyebrow }}</p>
+    <h2 class="af-card__title" id="{{ title_id }}">{{ title }}</h2>
+    {% if subtitle %}<p class="text-muted af-lead">{{ subtitle }}</p>{% endif %}
+  </header>
+{% endmacro %}
+
+{% macro details_card(values, order_help) %}
+  <section class="card card--panel af-card" aria-labelledby="automation-details-title">
+    {{ card_header("Details", "About this automation", "automation-details-title", "Name it so technicians recognise it in the automation list and history.") }}
+    <div class="scf-grid">
+      <div class="form-field scf-grid__full">
+        <label class="form-label" for="automation-name">Name</label>
+        <input id="automation-name" name="name" class="form-input" maxlength="255" required autocomplete="off" placeholder="e.g. Triage new tickets with AI" value="{{ values.get('name', '') }}" />
+      </div>
+      <div class="form-field scf-grid__full">
+        <label class="form-label" for="automation-description">Description <span class="scf-optional">optional</span></label>
+        <textarea id="automation-description" name="description" class="form-input" rows="2" placeholder="What this automation is for and who relies on it">{{ values.get('description', '') }}</textarea>
+      </div>
+      <fieldset class="scf-grid__full scf-fieldset">
+        <legend class="form-label">Status</legend>
+        <div class="scf-type-grid af-status">
+          <label class="scf-type-card">
+            <input type="radio" name="status" value="active" {% if values.get('status') == 'active' %}checked{% endif %} />
+            <span class="swf-type-icon af-status-icon af-status-icon--on" aria-hidden="true"></span>
+            <span class="scf-type-card__label">On</span>
+            <span class="scf-type-card__help">Runs whenever it's triggered.</span>
+          </label>
+          <label class="scf-type-card">
+            <input type="radio" name="status" value="inactive" {% if values.get('status', 'inactive') != 'active' %}checked{% endif %} />
+            <span class="swf-type-icon af-status-icon af-status-icon--off" aria-hidden="true"></span>
+            <span class="scf-type-card__label">Off</span>
+            <span class="scf-type-card__help">Saved, but doesn't run.</span>
+          </label>
+        </div>
+      </fieldset>
+      <div class="form-field">
+        <label class="form-label" for="automation-execution-order">Order</label>
+        <input id="automation-execution-order" name="executionOrder" type="number" min="0" class="form-input" value="{{ values.get('executionOrder', 0) }}" />
+        <p class="form-help">{{ order_help }}</p>
+      </div>
+    </div>
+  </section>
+{% endmacro %}
+
+{% macro filters_field(values, label, help_html, placeholder) %}
+  <div class="form-field scf-grid__full af-filters" data-filter-builder data-filter-raw="{{ values.get('triggerFiltersRaw', '') | e }}">
+    <span class="form-label">{{ label }}</span>
+    <input type="hidden" id="automation-filters-data" name="triggerFilters" value="{{ values.get('triggerFiltersRaw', '') }}" />
+    <input type="hidden" id="automation-filters-mode" name="triggerFiltersMode" value="builder" />
+    <div class="automation-filters" data-filter-builder-list></div>
+    <div class="af-filters__actions">
+      <button type="button" class="button button--ghost button--small" data-filter-add-condition>+ Add condition</button>
+      <button type="button" class="button button--ghost button--small" data-filter-advanced-toggle aria-expanded="false">Advanced JSON</button>
+    </div>
+    <div data-filter-advanced-panel hidden>
+      <label class="visually-hidden" for="automation-filters-advanced">{{ label }} as JSON</label>
+      <textarea id="automation-filters-advanced" class="form-input scf-mono af-filters__json" rows="6" placeholder='{{ placeholder }}'>{{ values.get('triggerFiltersRaw', '') }}</textarea>
+    </div>
+    <p class="scf-error" data-filter-builder-error hidden></p>
+    <p class="form-help">{{ help_html }}</p>
+  </div>
+{% endmacro %}
+
+{% macro savebar(submit_text) %}
+  <div class="ce-savebar af-savebar" role="region" aria-label="Save automation">
+    <p class="ce-savebar__text text-muted">Steps and settings are saved together.</p>
+    <span class="swf-savebar__spacer" aria-hidden="true"></span>
+    <a class="button button--ghost" href="/admin/automations">Cancel</a>
+    <button type="submit" class="button button--primary">{{ submit_text }}</button>
+  </div>
+{% endmacro %}
+
+{% macro delete_card(values, csrf_token) %}
+  {% if values.get('id') %}
+    <section class="card card--panel af-card af-card--danger" aria-labelledby="automation-delete-title">
+      {{ card_header("Remove", "Delete this automation", "automation-delete-title", "Deleting stops it running and removes its steps. This can't be undone.") }}
+      <form
+        action="/admin/automations/{{ values.get('id') }}/delete"
+        method="post"
+        class="inline-form"
+        data-automation-delete
+        data-automation-id="{{ values.get('id') }}"
+        data-automation-name="{{ values.get('name', '') }}"
+      >
+        {% if csrf_token %}
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <button type="submit" class="button button--danger">Delete automation</button>
+      </form>
+    </section>
+  {% endif %}
+{% endmacro %}

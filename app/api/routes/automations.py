@@ -39,6 +39,25 @@ def _reject_unavailable_action_modules(data: dict) -> None:
         )
 
 
+def _reject_invalid_step_flow(data: dict) -> None:
+    payload = data.get("action_payload")
+    actions = payload.get("actions") if isinstance(payload, dict) else None
+    if not isinstance(actions, list):
+        return
+    try:
+        for action in actions:
+            if isinstance(action, dict):
+                automation_service.normalise_step_output_var(action.get("output_var"))
+                automation_service.normalise_step_condition(action.get("run_if"))
+        automation_service.validate_step_flow(
+            automation_service._normalise_actions(actions)
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
 @router.get("/", response_model=list[AutomationResponse])
 async def list_automations(
     status_filter: str | None = Query(default=None, alias="status"),
@@ -64,6 +83,7 @@ async def create_automation(
 ) -> AutomationResponse:
     data = payload.model_dump()
     _reject_unavailable_action_modules(data)
+    _reject_invalid_step_flow(data)
     next_run = None
     if data.get("status") == "active":
         next_run = automation_service.calculate_next_run(data)
@@ -121,6 +141,7 @@ async def update_automation(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
     data = payload.model_dump(exclude_unset=True)
     _reject_unavailable_action_modules(data)
+    _reject_invalid_step_flow(data)
     if data:
         await automation_repo.update_automation(automation_id, **data)
     refreshed = await automation_service.refresh_schedule(automation_id)

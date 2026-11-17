@@ -1,21 +1,33 @@
 {# Expects: values (form values), kind ("event" | "scheduled") #}
 {% set bh_mode = values.get('businessHoursMode', '') %}
 {% set bh_source = values.get('businessHoursSource', 'company') or 'company' %}
-<fieldset class="form-field">
+<fieldset class="scf-grid__full scf-fieldset af-business-hours">
   <legend class="form-label">Business hours</legend>
-  <label class="form-checkbox"><input type="radio" name="businessHoursMode" value="" {% if not bh_mode %}checked{% endif %} /> Run at any time</label>
-  {% if kind == 'event' %}
-    <label class="form-checkbox"><input type="radio" name="businessHoursMode" value="pause" {% if bh_mode == 'pause' %}checked{% endif %} /> Outside business hours, pause until business hours open, then run</label>
-  {% endif %}
-  <label class="form-checkbox"><input type="radio" name="businessHoursMode" value="skip" {% if bh_mode == 'skip' %}checked{% endif %} /> Outside business hours, skip this automation</label>
-  <label class="form-label" for="automation-business-hours-source">Use the business hours of</label>
-  <select id="automation-business-hours-source" name="businessHoursSource" class="form-input">
-    <option value="company" {% if bh_source == 'company' %}selected{% endif %}>The ticket's company (falls back to global hours)</option>
-    <option value="global" {% if bh_source == 'global' %}selected{% endif %}>Our business (global hours)</option>
-  </select>
-  <p class="form-help">
-    Use the company's hours to avoid messaging customers when they are closed, or global hours to hold actions while your team is away.
-    {% if kind == 'event' %}Paused runs keep the original event details and run when business hours next open.{% else %}Ticket scans check each matched ticket's company hours.{% endif %}
-    Configure schedules under <a href="/admin/business-hours">Business hours</a>. Filters can also use <code>business_hours.company_open</code> and <code>business_hours.global_open</code>.
-  </p>
+  <div class="scf-choice-list">
+    <label class="scf-choice">
+      <input type="radio" name="businessHoursMode" value="" {% if not bh_mode %}checked{% endif %} />
+      <span><strong>Run at any time</strong><span class="text-muted">Business hours don't matter.</span></span>
+    </label>
+    {% if kind == 'event' %}
+    <label class="scf-choice">
+      <input type="radio" name="businessHoursMode" value="pause" {% if bh_mode == 'pause' %}checked{% endif %} />
+      <span><strong>Wait for business hours</strong><span class="text-muted">Outside business hours, pause until they open, then run with the original event details.</span></span>
+    </label>
+    {% endif %}
+    <label class="scf-choice">
+      <input type="radio" name="businessHoursMode" value="skip" {% if bh_mode == 'skip' %}checked{% endif %} />
+      <span><strong>Skip outside business hours</strong><span class="text-muted">{% if kind == 'event' %}The automation doesn't run for events outside business hours.{% else %}Runs that fall outside business hours skip the matched tickets; with company hours, each ticket's company is checked.{% endif %}</span></span>
+    </label>
+  </div>
+  <div class="form-field">
+    <label class="form-label" for="automation-business-hours-source">Use the business hours of</label>
+    <select id="automation-business-hours-source" name="businessHoursSource" class="form-input">
+      <option value="company" {% if bh_source == 'company' %}selected{% endif %}>The ticket's company (falls back to global hours)</option>
+      <option value="global" {% if bh_source == 'global' %}selected{% endif %}>Our business (global hours)</option>
+    </select>
+    <p class="form-help">
+      Use the company's hours to avoid messaging customers when they are closed, or global hours to hold actions while your team is away.
+      Configure schedules under <a href="/admin/business-hours">Business hours</a>. Filters can also use <code>business_hours.company_open</code> and <code>business_hours.global_open</code>.
+    </p>
+  </div>
 </fieldset>

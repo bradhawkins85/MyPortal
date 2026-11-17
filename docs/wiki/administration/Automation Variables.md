@@ -252,6 +252,63 @@ same context as the surrounding payload before being substituted.
 All tokens resolve to empty strings when the underlying value is missing, so
 payloads can safely reference them without additional guards.
 
+## Passing results between automation steps
+
+Ticket automation steps run in order, and each one can hand its result to the
+steps after it. The automation editor shows the steps as a flow, like the staff
+onboarding and offboarding workflow designer: click **+ Add a step** (or a **+**
+between two steps) to pick an action, and **Edit** to open a step. The step
+editor has three tabs, and a **Variable helper** beside them inserts the value
+you click into the field you were last typing in.
+
+- **What it does** holds the action's settings, as a form or as JSON.
+- **What it provides** › **Save result as** names the step's result, e.g. `triage`. Names start with a
+  lowercase letter and use only lowercase letters, numbers and underscores; each
+  name can be used once per automation, and `ticket`, `vars`, `context`, `now`,
+  `company`, `user` and `requester` are reserved.
+- Later steps read the result as `{{vars.<name>.<field>}}` in any payload field,
+  such as an email subject or body. Every saved result has `status`
+  (`succeeded`, `failed` or `skipped`) and, when the step failed, `error`. The
+  other fields are whatever the action returns; for the
+  [Custom LLM Prompt Action](../tickets/Custom%20LLM%20Prompt%20Action.md) that is
+  `choice`, `text` or `items`.
+- **Run when** is *Always run* by default. Choose *Only when all of these are
+  true* or *Only when any of these are true* and add rules such as
+  `vars.triage.choice` **is** `Billing`. Conditions can check saved results or
+  ticket fields (`ticket.priority`), and offer: is, is not, contains, does not
+  contain, starts with, ends with, is one of / is not one of (comma-separated),
+  greater/less than, is empty and is not empty. Text comparisons ignore letter
+  case. A step whose conditions don't match is recorded as skipped in the
+  automation history, and its saved result has `status` `skipped`.
+- A condition can only check a result saved by an earlier step; the editor and
+  the API reject a check on a later or unknown result. A condition that can't be
+  read at run time never runs its step.
+
+Example: an *AI custom prompt* step with `response_format` `choice` and choices
+`Billing, Outage, Other` saved as `triage`, then:
+
+1. *Update Ticket* with category `Billing`, run only if `vars.triage.choice`
+   is `Billing`.
+2. *Send Email* to the on-call engineer with subject
+   `Outage reported: {{ticket.subject}}` and body `{{vars.triage.text}}`, run
+   only if `vars.triage.choice` is `Outage`.
+3. *Update Ticket* with status *Waiting on customer*, run only if
+   `vars.triage.status` is `failed`.
+
+### AI output is untrusted
+
+AI steps read ticket text written by customers, who can try to steer the answer.
+
+- Branch on the `choice` format: its value is always one of your own choices,
+  so the AI can only pick which of your steps runs, never what they do.
+- Every other text an AI step returns (`text`, `items`, classifications) is
+  HTML-escaped before later steps see it, so it cannot add links or markup to an
+  email or note. Read it before sending it to customers, and don't use AI text
+  as an email recipient.
+- An AI step's earlier output is never inserted into another AI step's
+  `instructions`, `desired_outcome` or `choices`; those fields are not
+  template-rendered.
+
 ## Staff onboarding/offboarding workflow variables
 
 Staff workflow steps (onboarding and offboarding) support `${vars.*}` interpolation in step fields such as rename/display templates, email subjects, and request payload bodies.

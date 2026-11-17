@@ -19,140 +19,80 @@
   </div>
 {% endblock %}
 
+{% block styles %}
+  <link rel="stylesheet" href="{{ static_url('/static/css/staff_workflows.css') }}">
+  <link rel="stylesheet" href="{{ static_url('/static/css/automation_flow.css') }}">
+{% endblock %}
+
+{% from "admin/_automation_form_macros.html" import card_header, details_card, filters_field, savebar, delete_card %}
+
 {% block content %}
   {% set values = form_values or {} %}
   {% set trigger_select = values.get('triggerSelectValue', '') %}
   {% set trigger_custom = values.get('triggerCustomValue', '') %}
-  {% set header_title = page_title or 'Create event automation' %}
-  {% set header_subtitle = page_subtitle or 'Link webhook payloads and application events to integration modules for immediate processing.' %}
   {% set submit_text = submit_label or 'Save automation' %}
   {% set action_url = form_action or '/admin/automations' %}
+  {% set trigger_label = namespace(value='') %}
+  {% for trigger in automation_trigger_options %}{% if trigger.value == values.get('triggerEvent') %}{% set trigger_label.value = trigger.label %}{% endif %}{% endfor %}
 
-  <div class="management management--single" data-layout>
+  <div class="af-page">
+    <p class="text-muted af-page__lead">{{ page_subtitle or 'Run steps automatically when something happens to a ticket or another event arrives.' }}</p>
 
-    <section class="management__content">
-      <p class="management__subtitle">{{ header_subtitle }}</p>
+    <form action="{{ action_url }}" method="post" class="af-form" data-automation-form>
+      {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
+      <input type="hidden" id="automation-kind" name="kind" value="event" />
 
-      <div class="management__body">
-        <section class="card card--panel">
-          <header class="card__header card__header--stacked">
-            <h2 class="card__title">Trigger and action configuration</h2>
-            <p class="card__subtitle">Provide deterministic JSON filters to keep automations secure and auditable.</p>
-          </header>
-          <div class="card__body">
-            <form action="{{ action_url }}" method="post" class="form management__form">
-              {% if csrf_token %}
-                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <input type="hidden" id="automation-kind" name="kind" value="event" />
-              <div class="form-field">
-                <label class="form-label" for="automation-name">Name</label>
-                <input id="automation-name" name="name" class="form-input" maxlength="255" required value="{{ values.get('name', '') }}" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="automation-description">Description</label>
-                <textarea id="automation-description" name="description" class="form-input" rows="3" placeholder="Explain the business outcome">{{ values.get('description', '') }}</textarea>
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="automation-status">Status</label>
-                <select id="automation-status" name="status" class="form-input">
-                  <option value="inactive" {% if values.get('status', 'inactive') != 'active' %}selected{% endif %}>Inactive</option>
-                  <option value="active" {% if values.get('status') == 'active' %}selected{% endif %}>Active</option>
-                </select>
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="automation-execution-order">Order</label>
-                <input id="automation-execution-order" name="executionOrder" type="number" min="0" class="form-input" value="{{ values.get('executionOrder', 0) }}" />
-                <p class="form-help">Lower numbers run first when multiple automations match the same event.</p>
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="automation-trigger-select">Trigger event</label>
-                <select id="automation-trigger-select" class="form-input" data-trigger-select>
-                  <option value="">Select a trigger</option>
-                  {% for trigger in automation_trigger_options %}
-                    <option value="{{ trigger.value }}" {% if trigger_select == trigger.value %}selected{% endif %}>{{ trigger.label }}</option>
-                  {% endfor %}
-                  <option value="__custom__" {% if trigger_select == '__custom__' %}selected{% endif %}>Custom event…</option>
-                </select>
-                <input
-                  id="automation-trigger-custom"
-                  class="form-input"
-                  type="text"
-                  name="triggerEventCustom"
-                  placeholder="custom.event"
-                  data-trigger-custom
-                  {% if trigger_select != '__custom__' %}hidden{% endif %}
-                  value="{{ trigger_custom }}"
-                />
-                <input type="hidden" id="automation-trigger" name="triggerEvent" value="{{ values.get('triggerEvent', '') }}" />
-                <p class="form-help">Only trusted services should be allowed to emit the chosen event name.</p>
-              </div>
-              <div class="form-field" data-filter-builder data-filter-raw="{{ values.get('triggerFiltersRaw', '') | e }}">
-                <label class="form-label" for="automation-filters-advanced">Trigger filters</label>
-                <input type="hidden" id="automation-filters-data" name="triggerFilters" value="{{ values.get('triggerFiltersRaw', '') }}" />
-                <input type="hidden" id="automation-filters-mode" name="triggerFiltersMode" value="builder" />
-                <div class="automation-filters" data-filter-builder-list></div>
-                <button type="button" class="button button--ghost" data-filter-add-condition>Add condition</button>
-                <div class="form-actions" style="justify-content: flex-start;">
-                  <button type="button" class="button button--ghost" data-filter-advanced-toggle aria-expanded="false">Advanced JSON</button>
-                </div>
-                <div data-filter-advanced-panel hidden>
-                  <textarea
-                    id="automation-filters-advanced"
-                    class="form-input"
-                    rows="6"
-                    style="resize: vertical;"
-                    placeholder='{"match":{"ticket.status":"open"}}'
-                  >{{ values.get('triggerFiltersRaw', '') }}</textarea>
-                </div>
-                <p class="form-help" data-filter-builder-error hidden></p>
-                <p class="form-help">Build common trigger filters with structured conditions. For reply-backed events, <code>ticket.body</code> matches the reply that triggered the event; use <code>ticket.initial_body</code> for the initial request. Use in/not in with comma-separated values such as Resolved, Closed for multi-value ticket status filters. Use Advanced JSON for complex nested logic.</p>
-              </div>
-              {% set kind = "event" %}{% include "partials/automation_business_hours.html" %}
-              <div class="form-field" data-automation-actions>
-                <label class="form-label">Trigger actions</label>
-                <p class="form-help">Securely forward event payloads to connected modules with structured JSON arguments.</p>
-                <div
-                  class="automation-actions"
-                  id="automation-actions-list"
-                  data-action-list
-                  data-modules='{{ automation_modules | tojson }}'
-                ></div>
-                <button type="button" class="button button--ghost" data-action-add>Add action</button>
-                <p class="form-help" data-action-error hidden></p>
-                <input type="hidden" id="automation-action-module-primary" name="actionModule" value="{{ values.get('actionModule', '') }}" />
-                <input type="hidden" id="automation-actions-data" name="actionPayload" value="{{ values.get('actionPayloadRaw', '') }}" />
-              </div>
-              <div class="form-actions">
-                <button type="submit" class="button button--primary">{{ submit_text }}</button>
-              </div>
-            </form>
-            {% if values.get('id') %}
-              <div class="form-actions">
-                <form
-                  action="/admin/automations/{{ values.get('id') }}/delete"
-                  method="post"
-                  class="inline-form"
-                  data-automation-delete
-                  data-automation-id="{{ values.get('id') }}"
-                  data-automation-name="{{ values.get('name', '') }}"
-                >
-                  {% if csrf_token %}
-                    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                  {% endif %}
-                  <button type="submit" class="button button--danger">Delete automation</button>
-                </form>
-              </div>
-            {% endif %}
+      {{ details_card(values, "Lower numbers run first when several automations match the same event.") }}
+
+      <section class="card card--panel af-card" id="automation-when" aria-labelledby="automation-when-title" tabindex="-1">
+        {{ card_header("Trigger", "When it runs", "automation-when-title", "Pick the event that starts this automation, then narrow it down to the tickets it applies to.") }}
+        <div class="scf-grid">
+          <div class="form-field scf-grid__full">
+            <label class="form-label" for="automation-trigger-select">Event</label>
+            <select id="automation-trigger-select" class="form-input" data-trigger-select>
+              <option value="">Select an event</option>
+              {% for trigger in automation_trigger_options %}
+                <option value="{{ trigger.value }}" {% if trigger_select == trigger.value %}selected{% endif %}>{{ trigger.label }}</option>
+              {% endfor %}
+              <option value="__custom__" {% if trigger_select == '__custom__' %}selected{% endif %}>Custom event…</option>
+            </select>
+            <label class="visually-hidden" for="automation-trigger-custom">Custom event name</label>
+            <input
+              id="automation-trigger-custom"
+              class="form-input scf-mono"
+              type="text"
+              name="triggerEventCustom"
+              placeholder="custom.event"
+              data-trigger-custom
+              {% if trigger_select != '__custom__' %}hidden{% endif %}
+              value="{{ trigger_custom }}"
+            />
+            <input type="hidden" id="automation-trigger" name="triggerEvent" value="{{ values.get('triggerEvent', '') }}" />
+            <p class="form-help">Only trusted services should be allowed to emit a custom event name.</p>
           </div>
-        </section>
-      </div>
-    </section>
+          {{ filters_field(values, "Only for tickets where", "Leave empty to run for every event. For reply events, <code>ticket.body</code> is the reply that triggered it and <code>ticket.initial_body</code> is the original request. Use <em>is one of</em> with comma-separated values such as Resolved, Closed." | safe, '{"match":{"ticket.status":"open"}}') }}
+          {% set kind = "event" %}{% include "partials/automation_business_hours.html" %}
+        </div>
+      </section>
+
+      {% set af_trigger_title = ("When " ~ trigger_label.value) if trigger_label.value else ("When " ~ values.get('triggerEvent')) if values.get('triggerEvent') else "When the chosen event happens" %}
+      {% set af_trigger_text = "Only for tickets that match the filters above." if values.get('triggerFiltersRaw') else "" %}
+      {% include "admin/_automation_flow.html" %}
+
+      {{ savebar(submit_text) }}
+    </form>
+
+    {{ delete_card(values, csrf_token) }}
   </div>
+
+  {% include "admin/_automation_flow_modals.html" %}
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/automation_flow.js') }}" defer></script>
 {% endblock %}

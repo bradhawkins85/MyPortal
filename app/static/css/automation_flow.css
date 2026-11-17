@@ -1,0 +1,273 @@
+/* ---------------------------------------------------------------------------
+ * Ticket automation editor (event + scheduled)
+ * Markup: app/templates/admin/automations_create_{event,scheduled}.html,
+ *         _automation_form_macros.html, _automation_flow*.html
+ * Script: app/static/js/automation_flow.js
+ * Builds on staff_workflows.css (.swf-*) and the .scf-* editor pieces so the
+ * step designer matches the staff onboarding/offboarding workflow designer.
+ * ------------------------------------------------------------------------ */
+
+.af-page {
+  --af-cat-ai: var(--hf-accent-strong);
+  --af-cat-tickets: var(--hf-warning);
+  --af-cat-email: var(--hf-success);
+  --af-cat-devices: var(--hf-accent);
+  --af-cat-passwords: var(--hf-danger);
+  --af-cat-integrations: var(--hf-accent);
+  --af-cat-records: var(--hf-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-roomy);
+  max-width: 64rem;
+}
+
+.af-page [hidden] {
+  display: none !important;
+}
+
+.af-page__lead,
+.af-lead {
+  margin: 0;
+}
+
+.af-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-roomy);
+}
+
+/* Cards --------------------------------------------------------------------- */
+
+.af-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  scroll-margin-top: var(--space-gap-roomy);
+}
+
+.af-card:focus {
+  outline: none;
+}
+
+.af-card__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.af-card__header .swf-eyebrow,
+.af-steps .swf-eyebrow {
+  margin: 0;
+}
+
+.af-card__title {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.af-card--danger {
+  border-color: color-mix(in srgb, var(--hf-danger) 35%, var(--hf-line));
+}
+
+.af-card--danger .inline-form {
+  align-self: flex-start;
+}
+
+/* Status cards ---------------------------------------------------------------- */
+
+.af-status {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.af-status-icon--on { --swf-icon-color: var(--hf-success); }
+.af-status-icon--off { --swf-icon-color: var(--hf-muted); }
+
+.af-status-icon--on::before {
+  content: "●";
+}
+
+.af-status-icon--off::before {
+  content: "○";
+}
+
+/* Filters and business hours ------------------------------------------------------ */
+
+.af-filters__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+}
+
+.af-filters__json {
+  width: 100%;
+  resize: vertical;
+}
+
+.af-business-hours {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+}
+
+/* Step designer ------------------------------------------------------------------ */
+
+.af-cat-icon--ai { --swf-icon-color: var(--af-cat-ai); font-size: 0.7rem; }
+.af-cat-icon--tickets { --swf-icon-color: var(--af-cat-tickets); }
+.af-cat-icon--email { --swf-icon-color: var(--af-cat-email); }
+.af-cat-icon--devices { --swf-icon-color: var(--af-cat-devices); }
+.af-cat-icon--passwords { --swf-icon-color: var(--af-cat-passwords); }
+.af-cat-icon--integrations { --swf-icon-color: var(--af-cat-integrations); }
+.af-cat-icon--records { --swf-icon-color: var(--af-cat-records); }
+
+/* The automation steps are reordered with the arrow buttons, not dragged. */
+.af-step {
+  cursor: default;
+}
+
+.af-error {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--hf-danger);
+  border-radius: 0 var(--hf-radius-sm) var(--hf-radius-sm) 0;
+  background: color-mix(in srgb, var(--hf-danger) 8%, transparent);
+}
+
+/* Step editor ---------------------------------------------------------------------- */
+
+.af-segmented {
+  display: inline-flex;
+  padding: 0.2rem;
+  border: 1px solid var(--hf-line);
+  border-radius: 999px;
+  background: var(--hf-bg-sunken);
+}
+
+.af-segmented label {
+  position: relative;
+  cursor: pointer;
+}
+
+.af-segmented input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.af-segmented span {
+  display: inline-block;
+  padding: 0.25rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--hf-muted);
+}
+
+.af-segmented input:checked + span {
+  background: var(--hf-accent-soft);
+  color: var(--hf-copy-strong);
+}
+
+.af-segmented input:focus-visible + span {
+  outline: 2px solid var(--hf-focus);
+  outline-offset: 1px;
+}
+
+.af-raw {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  margin-top: var(--space-gap-roomy);
+}
+
+.af-raw .form-quick-add {
+  margin: 0;
+}
+
+.af-raw__payload {
+  width: 100%;
+  min-height: 10rem;
+  resize: vertical;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 0.85rem;
+}
+
+.af-provides__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.af-callout {
+  margin: var(--space-gap-base) 0 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--hf-warning);
+  border-radius: 0 var(--hf-radius-sm) var(--hf-radius-sm) 0;
+  background: color-mix(in srgb, var(--hf-warning) 8%, transparent);
+  font-size: 0.85rem;
+}
+
+.af-conditions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-gap-tight);
+  margin-top: var(--space-gap-base);
+}
+
+.af-rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.af-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.1fr) minmax(0, 1.3fr) auto;
+  gap: var(--space-gap-tight);
+  align-items: center;
+}
+
+.af-rule > .scf-icon-button {
+  grid-column: 4;
+}
+
+/* Save bar --------------------------------------------------------------------- */
+
+.af-savebar.ce-savebar {
+  margin-left: 0;
+  border-color: var(--hf-line-strong);
+}
+
+@media (max-width: 900px) {
+  /* Once the editor stacks into one column, a scrolling helper gets a 0px
+     grid row and spills over the form; let it take its natural height. */
+  #af-step-modal .swf-helper {
+    overflow: visible;
+    order: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .af-status {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .af-rule {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .af-rule > .form-input {
+    grid-column: 1;
+  }
+
+  .af-rule > .scf-icon-button {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}

@@ -22,7 +22,8 @@ are skipped like every other AI ticket action.
 | `ticket_id` | No | Ticket to process. Defaults to the triggering ticket (`{{ticket.id}}`). |
 | `instructions` | Yes | What the AI should do with the ticket (up to 4000 characters). |
 | `desired_outcome` | No | What a good answer looks like: length, tone, one item per product, "empty list when none", and so on. |
-| `response_format` | No | `text` (default) for a written answer, or `list` for one item per finding, posted as a bullet list. |
+| `response_format` | No | `text` (default) for a written answer, `list` for one item per finding, posted as a bullet list, or `choice` to pick exactly one of `choices`. |
+| `choices` | For `choice` | 2–20 comma-separated answers (each up to 100 characters), e.g. `Billing, Outage, Other`. The AI must return one of them, plus a one-sentence reason. |
 | `conversation` | No | `public` (default) includes public replies, `all` also includes internal notes, `none` sends only the ticket subject and description. |
 | `history_limit` | No | Number of most recent replies to include, 1–50 (default 10). |
 | `note_title` | No | Heading for the internal note (default "AI response"). |
@@ -47,11 +48,20 @@ the examples above.
 - The ticket subject, description, status, priority, category and the selected
   conversation history are sent as untrusted records, separate from your
   instructions. Instructions found inside ticket content are not followed.
-- `instructions` and `desired_outcome` are **not** template-rendered: a
+- `instructions`, `desired_outcome` and `choices` are **not** template-rendered: a
   placeholder such as `{{ticket.description}}` is sent literally. Ticket data
   reaches the model only through the records above, so customer text cannot
   rewrite your instructions. Use `conversation` and `history_limit` to choose
   what the model sees.
+- With `choice`, the note reads "Picked: *choice*" followed by the reason. A
+  pick that isn't one of your `choices` (letter case and spacing aside) is
+  rejected and recorded as an error, so a later step never branches on an
+  unexpected value.
+- The action's result is available to later steps when you give the step a
+  result name: `{{vars.<name>.choice}}`, `{{vars.<name>.text}}` (the answer, or
+  the reason for a choice) and `{{vars.<name>.items}}`. Text is HTML-escaped;
+  `choice` is not. See
+  [Passing results between automation steps](../administration/Automation%20Variables.md#passing-results-between-automation-steps).
 - When the AI finds nothing (an empty answer or empty list), no note is posted
   and the action is recorded as skipped.
 - Answers that are not valid JSON in the requested shape, longer than 8000

@@ -19,149 +19,78 @@
   </div>
 {% endblock %}
 
+{% block styles %}
+  <link rel="stylesheet" href="{{ static_url('/static/css/staff_workflows.css') }}">
+  <link rel="stylesheet" href="{{ static_url('/static/css/automation_flow.css') }}">
+{% endblock %}
+
+{% from "admin/_automation_form_macros.html" import card_header, details_card, filters_field, savebar, delete_card %}
+
 {% block content %}
   {% set values = form_values or {} %}
-  {% set trigger_select = values.get('triggerSelectValue', '') %}
-  {% set trigger_custom = values.get('triggerCustomValue', '') %}
-  {% set header_title = page_title or 'Create scheduled automation' %}
-  {% set header_subtitle = page_subtitle or 'Configure cadence, triggers, and action payloads to run on a predictable rhythm.' %}
   {% set submit_text = submit_label or 'Save automation' %}
   {% set action_url = form_action or '/admin/automations' %}
+  {% set cadence = 'once' if values.get('runOnce') else values.get('cadence', '') %}
+  {% set cadence_labels = {'hourly': 'Every hour', 'daily': 'Every day', 'weekly': 'Every week', 'monthly': 'Every month', 'once': 'Once, at the scheduled time'} %}
 
-  <div class="management management--single" data-layout>
+  <div class="af-page">
+    <p class="text-muted af-page__lead">{{ page_subtitle or 'Run steps on a schedule for every ticket that matches your filters.' }}</p>
 
-    <section class="management__content">
-      <p class="management__subtitle">{{ header_subtitle }}</p>
+    <form action="{{ action_url }}" method="post" class="af-form" data-automation-form>
+      {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
+      <input type="hidden" id="automation-kind" name="kind" value="scheduled" />
+      <input type="hidden" id="automation-trigger" name="triggerEvent" value="" />
 
-      <div class="management__body">
-        <section class="card card--panel">
-          <header class="card__header card__header--stacked">
-            <h2 class="card__title">Workflow definition</h2>
-            <p class="card__subtitle">Scheduled automations run on cadence, scan tickets with the filters below, and execute actions for every matching ticket.</p>
-          </header>
-          <div class="card__body">
-            <form action="{{ action_url }}" method="post" class="form management__form">
-              {% if csrf_token %}
-                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <input type="hidden" id="automation-kind" name="kind" value="scheduled" />
-              <div class="form-field">
-                <label class="form-label" for="automation-name">Name</label>
-                <input id="automation-name" name="name" class="form-input" maxlength="255" required value="{{ values.get('name', '') }}" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="automation-description">Description</label>
-                <textarea id="automation-description" name="description" class="form-input" rows="3" placeholder="Explain the business outcome">{{ values.get('description', '') }}</textarea>
-              </div>
-              <div class="form-grid" data-schedule-fields>
-                <div class="form-field">
-                  <label class="form-label" for="automation-status">Status</label>
-                  <select id="automation-status" name="status" class="form-input">
-                    <option value="inactive" {% if values.get('status', 'inactive') != 'active' %}selected{% endif %}>Inactive</option>
-                    <option value="active" {% if values.get('status') == 'active' %}selected{% endif %}>Active</option>
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="automation-execution-order">Order</label>
-                  <input id="automation-execution-order" name="executionOrder" type="number" min="0" class="form-input" value="{{ values.get('executionOrder', 0) }}" />
-                  <p class="form-help">Lower numbers run first. Controls priority when multiple automations are due at the same time.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="automation-cadence">Cadence</label>
-                  <select id="automation-cadence" name="cadence" class="form-input" data-cadence-select>
-                    <option value="" {% if not values.get('cadence') %}selected{% endif %}>Custom</option>
-                    <option value="hourly" {% if values.get('cadence') == 'hourly' %}selected{% endif %}>Hourly</option>
-                    <option value="daily" {% if values.get('cadence') == 'daily' %}selected{% endif %}>Daily</option>
-                    <option value="weekly" {% if values.get('cadence') == 'weekly' %}selected{% endif %}>Weekly</option>
-                    <option value="monthly" {% if values.get('cadence') == 'monthly' %}selected{% endif %}>Monthly</option>
-                    <option value="once" {% if values.get('cadence') == 'once' or values.get('runOnce') %}selected{% endif %}>One-time</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-field" data-cron-field>
-                <label class="form-label" for="automation-cron">Cron expression</label>
-                <input id="automation-cron" name="cronExpression" class="form-input" placeholder="0 0 * * *" value="{{ values.get('cronExpression', '') }}" />
-                <p class="form-help">When provided, the cron expression overrides the cadence selection and should be supplied in UTC.</p>
-              </div>
-              <div class="form-field" data-onetime-field style="display: none;">
-                <input type="hidden" id="automation-run-once" name="runOnce" value="{{ 'true' if values.get('runOnce') else 'false' }}" />
-                <label class="form-label" for="automation-scheduled-time">Scheduled date and time</label>
-                <input 
-                  id="automation-scheduled-time" 
-                  name="scheduledTime" 
-                  type="datetime-local" 
-                  class="form-input" 
-                  value="{{ values.get('scheduledTime', '') }}" 
-                />
-                <p class="form-help">Select the date and time when this automation should run. The automation will run once and will not repeat.</p>
-              </div>
-              <input type="hidden" id="automation-trigger" name="triggerEvent" value="" />
-              <div class="form-field" data-filter-builder data-filter-raw="{{ values.get('triggerFiltersRaw', '') | e }}">
-                <label class="form-label" for="automation-filters-advanced">Ticket selection filters</label>
-                <input type="hidden" id="automation-filters-data" name="triggerFilters" value="{{ values.get('triggerFiltersRaw', '') }}" />
-                <input type="hidden" id="automation-filters-mode" name="triggerFiltersMode" value="builder" />
-                <div class="automation-filters" data-filter-builder-list></div>
-                <button type="button" class="button button--ghost" data-filter-add-condition>Add condition</button>
-                <div class="form-actions" style="justify-content: flex-start;">
-                  <button type="button" class="button button--ghost" data-filter-advanced-toggle aria-expanded="false">Advanced JSON</button>
-                </div>
-                <div data-filter-advanced-panel hidden>
-                  <textarea
-                    id="automation-filters-advanced"
-                    class="form-input"
-                    rows="6"
-                    style="resize: vertical;"
-                    placeholder='{"match":{"status":"open"}}'
-                  >{{ values.get('triggerFiltersRaw', '') }}</textarea>
-                </div>
-                <p class="form-help" data-filter-builder-error hidden></p>
-                <p class="form-help">Use ticket fields such as <code>ticket.status</code>, <code>ticket.body</code>, <code>ticket.age_days</code>, <code>ticket.updated_age_hours</code>, <code>ticket.in_status_age_hours</code>, and <code>ticket.last_reply_age_hours</code>. Use Advanced JSON for complex nested logic.</p>
-              </div>
-              {% set kind = "scheduled" %}{% include "partials/automation_business_hours.html" %}
-              <div class="form-field" data-automation-actions>
-                <label class="form-label">Scheduled actions</label>
-                <p class="form-help">Define one or more module executions. Actions run once per matching ticket and can use templates such as <code>{{ '{{ ticket.id }}' }}</code>.</p>
-                <div
-                  class="automation-actions"
-                  id="automation-actions-list"
-                  data-action-list
-                  data-modules='{{ automation_modules | tojson }}'
-                ></div>
-                <button type="button" class="button button--ghost" data-action-add>Add action</button>
-                <p class="form-help" data-action-error hidden></p>
-                <input type="hidden" id="automation-action-module-primary" name="actionModule" value="{{ values.get('actionModule', '') }}" />
-                <input type="hidden" id="automation-actions-data" name="actionPayload" value="{{ values.get('actionPayloadRaw', '') }}" />
-              </div>
-              <div class="form-actions">
-                <button type="submit" class="button button--primary">{{ submit_text }}</button>
-              </div>
-            </form>
-            {% if values.get('id') %}
-              <div class="form-actions">
-                <form
-                  action="/admin/automations/{{ values.get('id') }}/delete"
-                  method="post"
-                  class="inline-form"
-                  data-automation-delete
-                  data-automation-id="{{ values.get('id') }}"
-                  data-automation-name="{{ values.get('name', '') }}"
-                >
-                  {% if csrf_token %}
-                    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                  {% endif %}
-                  <button type="submit" class="button button--danger">Delete automation</button>
-                </form>
-              </div>
-            {% endif %}
+      {{ details_card(values, "Lower numbers run first when several automations are due at the same time.") }}
+
+      <section class="card card--panel af-card" id="automation-when" aria-labelledby="automation-when-title" tabindex="-1">
+        {{ card_header("Schedule", "When it runs", "automation-when-title", "Choose how often it runs, then which tickets each run works through.") }}
+        <div class="scf-grid" data-schedule-fields>
+          <div class="form-field">
+            <label class="form-label" for="automation-cadence">How often</label>
+            <select id="automation-cadence" name="cadence" class="form-input" data-cadence-select>
+              <option value="" {% if not cadence %}selected{% endif %}>Custom (cron expression)</option>
+              <option value="hourly" {% if cadence == 'hourly' %}selected{% endif %}>Hourly</option>
+              <option value="daily" {% if cadence == 'daily' %}selected{% endif %}>Daily</option>
+              <option value="weekly" {% if cadence == 'weekly' %}selected{% endif %}>Weekly</option>
+              <option value="monthly" {% if cadence == 'monthly' %}selected{% endif %}>Monthly</option>
+              <option value="once" {% if cadence == 'once' %}selected{% endif %}>One-time</option>
+            </select>
           </div>
-        </section>
-      </div>
-    </section>
+          <div class="form-field" data-cron-field>
+            <label class="form-label" for="automation-cron">Cron expression <span class="scf-optional">optional</span></label>
+            <input id="automation-cron" name="cronExpression" class="form-input scf-mono" placeholder="0 0 * * *" autocomplete="off" spellcheck="false" value="{{ values.get('cronExpression', '') }}" />
+            <p class="form-help">In UTC. When set, it overrides the cadence.</p>
+          </div>
+          <div class="form-field" data-onetime-field style="display: none;">
+            <input type="hidden" id="automation-run-once" name="runOnce" value="{{ 'true' if values.get('runOnce') else 'false' }}" />
+            <label class="form-label" for="automation-scheduled-time">Date and time</label>
+            <input id="automation-scheduled-time" name="scheduledTime" type="datetime-local" class="form-input" value="{{ values.get('scheduledTime', '') }}" />
+            <p class="form-help">Runs once at this time and doesn't repeat.</p>
+          </div>
+          {{ filters_field(values, "Work through tickets where", "Each run finds the tickets that match and runs the steps once per ticket. Useful fields include <code>ticket.status</code>, <code>ticket.age_days</code>, <code>ticket.updated_age_hours</code>, <code>ticket.in_status_age_hours</code> and <code>ticket.last_reply_age_hours</code>." | safe, '{"match":{"status":"open"}}') }}
+          {% set kind = "scheduled" %}{% include "partials/automation_business_hours.html" %}
+        </div>
+      </section>
+
+      {% set af_trigger_title = cadence_labels.get(cadence) if cadence_labels.get(cadence) else ("On schedule " ~ values.get('cronExpression')) if values.get('cronExpression') else "On a schedule" %}
+      {% set af_trigger_text = "Runs the steps once for each ticket that matches the filters above." %}
+      {% include "admin/_automation_flow.html" %}
+
+      {{ savebar(submit_text) }}
+    </form>
+
+    {{ delete_card(values, csrf_token) }}
   </div>
+
+  {% include "admin/_automation_flow_modals.html" %}
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/automation_flow.js') }}" defer></script>
 {% endblock %}

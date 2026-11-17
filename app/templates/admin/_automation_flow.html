@@ -1,0 +1,36 @@
+{#
+  Step designer for ticket automations, shared by the event and scheduled
+  automation editors. Mirrors the staff workflow designer
+  (staff/_workflow_designer.html): a flow of step cards, a step picker and a
+  tabbed step editor with a variable helper. Driven by
+  app/static/js/automation_flow.js and styled by staff_workflows.css plus the
+  .af-* rules in automation_flow.css.
+
+  The including page sets ``af_trigger_title`` and ``af_trigger_text``.
+  Actions are posted as JSON in the hidden ``actionPayload`` input. Include
+  this card inside the form and _automation_flow_modals.html after it.
+#}
+<section class="card card--panel af-steps swf" aria-labelledby="af-steps-title" data-af data-modules='{{ automation_modules | tojson }}'>
+  <header class="swf-designer__header">
+    <div class="swf-designer__heading">
+      <p class="swf-eyebrow">Steps</p>
+      <h2 class="swf-designer__title" id="af-steps-title">What happens</h2>
+      <p class="text-muted af-lead">Steps run in order. A step can save its result for the steps after it, and run only when earlier results match.</p>
+    </div>
+    <div class="swf-designer__actions">
+      <button type="button" class="button button--ghost button--small" data-af-variables-open aria-haspopup="dialog" aria-controls="af-variables-modal">Variables</button>
+    </div>
+  </header>
+
+  <noscript>
+    <p>The step designer needs JavaScript. Turn it on in your browser to add or change this automation's steps.</p>
+  </noscript>
+
+  <ol class="swf-flow" data-af-flow aria-label="Automation steps"></ol>
+  <p class="af-error" data-af-error role="alert" hidden></p>
+  <p class="visually-hidden" data-af-announce role="status" aria-live="polite"></p>
+
+  <script type="application/json" data-af-trigger>{{ {"title": af_trigger_title, "text": af_trigger_text} | tojson }}</script>
+  <input type="hidden" id="automation-action-module-primary" name="actionModule" value="{{ values.get('actionModule', '') }}" />
+  <input type="hidden" id="automation-actions-data" name="actionPayload" value="{{ values.get('actionPayloadRaw', '') }}" />
+</section>

@@ -2699,7 +2699,10 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "solidtime",  # Solidtime - dedicated ticket/reply sync, not a generic trigger action module
 }
 
-_AI_CUSTOM_PROMPT_FORMATS = ("text", "list")
+_AI_CUSTOM_PROMPT_FORMATS = ("text", "list", "choice")
+_AI_CUSTOM_PROMPT_MAX_CHOICES = 20
+_AI_CUSTOM_PROMPT_CHOICE_MAX_LENGTH = 100
+_AI_CUSTOM_PROMPT_REASON_MAX_LENGTH = 1000
 _AI_CUSTOM_PROMPT_CONVERSATIONS = ("public", "all", "none")
 _AI_CUSTOM_PROMPT_DEFAULT_HISTORY = 10
 _AI_CUSTOM_PROMPT_MAX_HISTORY = 50
@@ -2887,9 +2890,15 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             {
                 "name": "response_format",
-                "label": "Response format (text, or list of items; defaults to text)",
+                "label": "Response format (text, list of items, or one choice from your list; defaults to text)",
                 "type": "string",
                 "enum": list(_AI_CUSTOM_PROMPT_FORMATS),
+            },
+            {
+                "name": "choices",
+                "label": "Choices the AI must pick from (for the choice format; comma-separated)",
+                "type": "string",
+                "placeholder": "Billing, Outage, Other",
             },
             {
                 "name": "conversation",
@@ -7364,6 +7373,36 @@ def _ai_custom_prompt_choice(name: str, value: Any, choices: tuple[str, ...]) ->
     return choice
 
 
+def _ai_custom_prompt_choices(value: Any) -> list[str]:
+    """Return the admin's distinct choices, in order, for the choice format."""
+
+    if isinstance(value, str):
+        raw = value.split(",")
+    elif isinstance(value, (list, tuple)):
+        raw = [str(item) for item in value]
+    else:
+        raw = []
+    choices: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        choice = " ".join(str(item).split())
+        if not choice or choice.casefold() in seen:
+            continue
+        if len(choice) > _AI_CUSTOM_PROMPT_CHOICE_MAX_LENGTH:
+            raise ValueError(
+                f"each choice must be {_AI_CUSTOM_PROMPT_CHOICE_MAX_LENGTH} characters or fewer"
+            )
+        seen.add(choice.casefold())
+        choices.append(choice)
+    if len(choices) < 2:
+        raise ValueError("the choice format needs at least two choices")
+    if len(choices) > _AI_CUSTOM_PROMPT_MAX_CHOICES:
+        raise ValueError(
+            f"the choice format allows at most {_AI_CUSTOM_PROMPT_MAX_CHOICES} choices"
+        )
+    return choices
+
+
 def _ai_custom_prompt_speaker(
     reply: Mapping[str, Any], ticket: Mapping[str, Any]
 ) -> str:
@@ -7411,6 +7450,11 @@ async def _invoke_ai_custom_prompt(
         )
     response_format = _ai_custom_prompt_choice(
         "response_format", payload.get("response_format"), _AI_CUSTOM_PROMPT_FORMATS
+    )
+    choices = (
+        _ai_custom_prompt_choices(payload.get("choices"))
+        if response_format == "choice"
+        else []
     )
     conversation = _ai_custom_prompt_choice(
         "conversation", payload.get("conversation"), _AI_CUSTOM_PROMPT_CONVERSATIONS
@@ -7476,6 +7520,13 @@ async def _invoke_ai_custom_prompt(
             'Return only a JSON object: {"items": [string, ...]}. Each item is one '
             "short finding. Use an empty list when nothing relevant is found."
         )
+    elif response_format == "choice":
+        task = (
+            'Return only a JSON object: {"choice": string, "reason": string}. '
+            "choice must be exactly one of these values: "
+            + json.dumps(choices)
+            + ". reason is one short plain-text sentence explaining the pick."
+        )
     else:
         task = (
             'Return only a JSON object: {"answer": string}. Use plain text '
@@ -7495,8 +7546,22 @@ async def _invoke_ai_custom_prompt(
     if not module_result_succeeded(ai_result):
         return {**ai_result, "ticket_id": ticket_id}
 
+    choice_lookup = {choice.casefold(): choice for choice in choices}
     try:
-        if response_format == "list":
+        if response_format == "choice":
+            parsed = validate_object(
+                _ai_response_object(ai_result.get("response"), {"choice", "reason"}),
+                {
+                    "choice": lambda value: isinstance(value, str)
+                    and " ".join(value.split()).casefold() in choice_lookup,
+                    "reason": lambda value: value is None
+                    or (
+                        isinstance(value, str)
+                        and len(value.strip()) <= _AI_CUSTOM_PROMPT_REASON_MAX_LENGTH
+                    ),
+                },
+            )
+        elif response_format == "list":
             parsed = validate_object(
                 _ai_response_object(ai_result.get("response"), {"items"}),
                 {
@@ -7532,7 +7597,15 @@ async def _invoke_ai_custom_prompt(
         "response_format": response_format,
         "replies_included": included_replies,
     }
-    if response_format == "list":
+    if response_format == "choice":
+        choice = choice_lookup[" ".join(parsed["choice"].split()).casefold()]
+        reason = str(parsed.get("reason") or "").strip()
+        result["choice"] = choice
+        result["text"] = reason
+        content = f"<p>Picked: <strong>{html_escape(choice)}</strong></p>" + (
+            _ai_custom_prompt_html(reason) if reason else ""
+        )
+    elif response_format == "list":
         items = [
             item for item in dict.fromkeys(item.strip() for item in parsed["items"]) if item
         ]
