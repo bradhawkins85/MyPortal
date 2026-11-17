@@ -192,7 +192,51 @@ def test_pick_primary_template_prefers_priority_then_default_then_schedule():
     assert primary["id"] == 2
 
 
-def test_pick_primary_template_uses_default_for_equal_priority():
+def test_pick_primary_template_uses_default_only_as_fallback():
+    templates = [
+        {
+            "id": 10,
+            "name": "Infinity Signature",
+            "status": "published",
+            "priority": 10,
+            "is_default": True,
+            "schedule_start_on": None,
+            "schedule_end_on": None,
+        },
+        {
+            "id": 11,
+            "name": "Infinity Christmas Signature (2026)",
+            "status": "published",
+            "priority": 0,
+            "is_default": False,
+            "schedule_start_on": date(2026, 11, 16),
+            "schedule_end_on": date(2027, 1, 4),
+        },
+    ]
+
+    during = m365_signatures.pick_primary_template(templates, on_date=date(2026, 11, 17))
+    before = m365_signatures.pick_primary_template(templates, on_date=date(2026, 11, 15))
+    after = m365_signatures.pick_primary_template(templates, on_date=date(2027, 1, 5))
+
+    assert during is not None and during["id"] == 11
+    assert before is not None and before["id"] == 10
+    assert after is not None and after["id"] == 10
+
+
+def test_resolve_staff_signatures_keeps_fallback_as_additional():
+    resolved = m365_signatures.resolve_staff_signatures(
+        [
+            {"id": 1, "status": "published", "priority": 10, "is_default": True},
+            {"id": 2, "status": "published", "priority": 0, "is_default": False},
+        ],
+        on_date=date(2026, 11, 17),
+    )
+
+    assert resolved["primary"]["id"] == 2
+    assert [template["id"] for template in resolved["additional"]] == [1]
+
+
+def test_pick_primary_template_prefers_non_default_for_equal_priority():
     primary = m365_signatures.pick_primary_template(
         [
             {
@@ -216,7 +260,7 @@ def test_pick_primary_template_uses_default_for_equal_priority():
     )
 
     assert primary is not None
-    assert primary["id"] == 5
+    assert primary["id"] == 4
 
 
 def test_is_template_active_respects_inclusive_schedule_bounds():

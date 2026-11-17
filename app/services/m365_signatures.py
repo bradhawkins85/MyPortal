@@ -274,8 +274,9 @@ def resolve_staff_signatures(
     """Return ``{"primary": template | None, "additional": [templates]}``.
 
     Every active template that applies to the staff member is available to
-    them; the highest ranked primary-role template is their primary signature
-    and the rest are additional signatures, highest ranked first.
+    them; the highest ranked non-default primary-role template is their
+    primary signature (the default is only the fallback) and the rest are
+    additional signatures, highest ranked first.
     """
     effective_date = on_date or current_schedule_date()
     applicable = sorted(
@@ -288,9 +289,14 @@ def resolve_staff_signatures(
         key=_rank,
         reverse=True,
     )
+    primaries = [
+        template for template in applicable if _normalise_role(template.get("signature_role")) == "primary"
+    ]
+    # The default template is the fallback: any other active primary template
+    # that applies wins over it, whatever its priority.
     primary = next(
-        (template for template in applicable if _normalise_role(template.get("signature_role")) == "primary"),
-        None,
+        (template for template in primaries if not template.get("is_default")),
+        primaries[0] if primaries else None,
     )
     additional = [template for template in applicable if template is not primary]
     return {"primary": primary, "additional": additional}

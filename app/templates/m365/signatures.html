@@ -122,7 +122,7 @@
         <div class="card card--panel">
           <div class="card__body">
             <strong>Primary for everyone:</strong> {{ current_primary.name }} <code>{{ current_primary.slug }}</code>
-            <br><small class="text-muted">Staff matched by a higher-priority targeted signature get that one as their primary instead.</small>
+            <br><small class="text-muted">Staff matched by a higher-priority targeted signature get that one as their primary instead.{% if current_primary.is_default %} The default is a fallback, so any other active signature that applies to someone takes its place.{% endif %}</small>
           </div>
         </div>
       {% endif %}

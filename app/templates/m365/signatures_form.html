@@ -203,7 +203,7 @@
                 <span class="scf-switch__track" aria-hidden="true"></span>
                 <span>Use as the default primary template</span>
               </label>
-              <p class="form-help">The default is used as the fallback when no higher-priority active template applies. Only primary signatures can be the default.</p>
+              <p class="form-help">The default is the fallback: it is only used when no other active primary signature applies, whatever its priority. Only primary signatures can be the default.</p>
             </div>
             <div class="form-field">
               <label class="form-label" for="signature-schedule-start">Activation start date <span class="scf-optional">optional</span></label>
@@ -215,7 +215,7 @@
               <p class="scf-error" data-sig-error="schedule" hidden></p>
             </div>
             <p class="scf-sentence scf-grid__full" role="status" aria-live="polite" data-sig-schedule-summary>Dates use {{ schedule_timezone }}.</p>
-            <p class="form-help scf-grid__full">Dates use <strong>{{ schedule_timezone }}</strong>. When several published primary templates apply to a person, MyPortal picks by priority, then the default, then the earliest start date. Publishing doesn't deploy to Outlook on the web; use Deploy for that. Classic Outlook sync (when enabled) installs the primary and additional signatures on devices.</p>
+            <p class="form-help scf-grid__full">Dates use <strong>{{ schedule_timezone }}</strong>. When several published primary templates apply to a person, MyPortal picks by priority, then the earliest start date; the default is only used when no other primary template applies. Publishing doesn't deploy to Outlook on the web; use Deploy for that. Classic Outlook sync (when enabled) installs the primary and additional signatures on devices.</p>
           </div>
         </section>
       </div>
