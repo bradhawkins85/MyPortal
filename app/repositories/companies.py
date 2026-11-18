@@ -179,6 +179,26 @@ async def get_company_by_trello_board_id(trello_board_id: str) -> Optional[dict[
     return company
 
 
+async def set_trello_oauth_tokens(
+    company_id: int,
+    *,
+    access_token: str | None,
+    refresh_token: str | None,
+    expires_at: Any,
+    member: str | None = None,
+) -> None:
+    """Store (already encrypted) Trello OAuth 2.0 tokens for a company.
+
+    Passing ``None`` for every value disconnects the company.
+    """
+    await db.execute(
+        "UPDATE companies SET trello_oauth_access_token = %s, "
+        "trello_oauth_refresh_token = %s, trello_oauth_expires_at = %s, "
+        "trello_oauth_member = %s WHERE id = %s",
+        (access_token, refresh_token, expires_at, member, company_id),
+    )
+
+
 async def get_company_by_name(name: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
         "SELECT * FROM companies WHERE LOWER(name) = LOWER(%s) LIMIT 1",

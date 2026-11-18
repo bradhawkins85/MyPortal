@@ -646,7 +646,7 @@
       <header class="ce-section__header">
         <div class="ce-section__heading">
           <h2 class="card__title" id="ce-trello-title">Trello</h2>
-          <p class="card__subtitle">Configure this company's Trello board, credentials, and webhook.</p>
+          <p class="card__subtitle">Connect this company's Trello account, link its board, and register the webhook.</p>
         </div>
       </header>
       <div class="ce-section__body">
@@ -656,6 +656,40 @@
             value="{{ form_data.trello_board_id or '' }}" maxlength="255" placeholder="e.g. 5abbe4b7ddc1b351ef961414" />
           <p class="form-help">Link this company to a Trello board. Cards created on the board will become tickets. Find the board ID in the board URL or via the Trello API.</p>
         </div>
+        {% set trello_oauth = trello_oauth or {} %}
+        <div class="form-field">
+          <span class="form-label" id="trello-oauth-label">Trello connection</span>
+          <p class="form-help" role="status" aria-live="polite" aria-labelledby="trello-oauth-label">
+            {% if trello_oauth.connected %}
+              <span class="status status--success">Connected with OAuth 2.0</span>
+              {% if trello_oauth.member %}as <strong>@{{ trello_oauth.member }}</strong>{% endif %}
+            {% elif form_data.trello_api_key and form_data.trello_token %}
+              <span class="status status--warning">Using a legacy API key and token</span>
+            {% else %}
+              <span class="status status--neutral">Not connected</span>
+            {% endif %}
+          </p>
+          {% if trello_oauth.available %}
+            <div class="form-field__group">
+              <a class="button{% if trello_oauth.connected %} button--ghost{% endif %}"
+                href="/trello/connect?company_id={{ company.id }}">
+                {% if trello_oauth.connected %}Reconnect Trello{% else %}Connect Trello{% endif %}
+              </a>
+              {% if trello_oauth.connected %}
+                <form action="/trello/companies/{{ company.id }}/disconnect" method="post" class="inline-form">
+                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                  <button type="submit" class="button button--ghost">Disconnect</button>
+                </form>
+              {% endif %}
+            </div>
+            <p class="form-help">Sign in to Trello and approve access to this company's boards. MyPortal keeps the connection fresh automatically. After connecting, register the webhook again so events use the new connection.</p>
+          {% else %}
+            <p class="form-help">To connect with OAuth 2.0, a super admin adds the Trello OAuth client ID and secret to the Trello module. The callback URL to register is under <strong>Integration modules → Trello → Actions → OAuth Callback URL</strong>.</p>
+          {% endif %}
+        </div>
+        <details class="form-field"{% if not trello_oauth.connected and (form_data.trello_api_key or not trello_oauth.available) %} open{% endif %}>
+          <summary class="form-label">Use an API key and token instead <span class="scf-optional">optional</span></summary>
+          <p class="form-help">Only needed when OAuth 2.0 isn't set up. An OAuth connection takes priority when both exist.</p>
         <div class="form-field">
           <label class="form-label" for="edit-company-trello-api-key">Trello API key</label>
           <input id="edit-company-trello-api-key" name="trelloApiKey" form="company-settings-form" class="form-input" type="password"
@@ -663,11 +697,12 @@
           <p class="form-help">Stored securely. Leave blank to keep the existing value. Copy the <strong>Key</strong> (not the Secret) from <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>.</p>
         </div>
         <div class="form-field">
-          <label class="form-label" for="edit-company-trello-token">Trello OAuth token</label>
+          <label class="form-label" for="edit-company-trello-token">Trello API token</label>
           <input id="edit-company-trello-token" name="trelloToken" form="company-settings-form" class="form-input" type="password"
-            autocomplete="off" placeholder="{% if form_data.trello_token %}Token saved — enter to replace{% else %}Enter OAuth token{% endif %}" maxlength="255" />
-          <p class="form-help">Stored securely. Leave blank to keep the existing value. This is the <strong>OAuth Token</strong> — <em>not</em> the Secret shown on the app-key page. Go to <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>, then click <strong>Token</strong> and authorise the app to generate it.</p>
+            autocomplete="off" placeholder="{% if form_data.trello_token %}Token saved — enter to replace{% else %}Enter API token{% endif %}" maxlength="255" />
+          <p class="form-help">Stored securely. Leave blank to keep the existing value. This is the <strong>Token</strong> — <em>not</em> the Secret shown on the app-key page. Go to <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>, then click <strong>Token</strong> and authorise the app to generate it.</p>
         </div>
+        </details>
         <div class="form-field">
           <label class="form-label">Register Trello webhook</label>
           <div class="form-field__group">
