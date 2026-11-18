@@ -199,6 +199,14 @@ async def set_trello_oauth_tokens(
     )
 
 
+async def set_trello_webhook_id(company_id: int, webhook_id: str | None) -> None:
+    """Remember (or forget, with ``None``) the company's Trello webhook id."""
+    await db.execute(
+        "UPDATE companies SET trello_webhook_id = %s WHERE id = %s",
+        (webhook_id, company_id),
+    )
+
+
 async def get_company_by_name(name: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
         "SELECT * FROM companies WHERE LOWER(name) = LOWER(%s) LIMIT 1",
