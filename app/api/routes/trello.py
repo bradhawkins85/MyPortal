@@ -379,9 +379,12 @@ async def register_trello_webhook(
         board_id,
         callback_url,
     )
-    result = await trello_service.register_webhook(
-        board_id, callback_url, company=company
-    )
+    try:
+        result = await trello_service.register_webhook(
+            board_id, callback_url, company=company
+        )
+    except trello_service.TrelloWebhookConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if not result:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

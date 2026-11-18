@@ -56,6 +56,19 @@ class TrelloOAuthError(RuntimeError):
     """Raised when a Trello OAuth 2.0 token exchange or refresh fails."""
 
 
+class TrelloWebhookConflictError(RuntimeError):
+    """Raised when Trello already has a webhook MyPortal cannot see or repair."""
+
+
+TRELLO_OAUTH_WEBHOOK_CONFLICT_MESSAGE = (
+    "Trello already has a webhook for this board under this Trello connection, "
+    "but MyPortal has no record of it, so it cannot check whether Trello has "
+    "disabled it. Remove MyPortal from the Trello account's connected apps "
+    "(Atlassian account settings > Connected apps), which deletes the old "
+    "webhook, then connect Trello again and register the webhook."
+)
+
+
 @dataclass(frozen=True)
 class TrelloAuth:
     """Credentials for one Trello API call.
@@ -720,6 +733,98 @@ async def delete_webhook(webhook_id: str, auth: TrelloAuth) -> bool:
         return False
 
 
+async def _fetch_webhook(
+    webhook_id: str, auth: TrelloAuth
+) -> tuple[str, dict[str, Any] | None]:
+    """Return ``("found", hook)``, ``("missing", None)`` or ``("error", None)``."""
+    url = f"{TRELLO_API_BASE}/webhooks/{quote(webhook_id, safe='')}"
+    try:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
+            response = await client.get(url, params=auth.params, headers=auth.headers)
+            if response.status_code == 404:
+                return "missing", None
+            response.raise_for_status()
+            hook = response.json()
+    except Exception as exc:
+        logger.warning("Trello get webhook {} error: {}", webhook_id, exc)
+        return "error", None
+    if not isinstance(hook, dict):
+        return "error", None
+    return "found", hook
+
+
+async def reactivate_webhook(webhook_id: str, auth: TrelloAuth) -> dict[str, Any] | None:
+    """Set a disabled Trello webhook back to active. Returns the hook or ``None``."""
+    url = f"{TRELLO_API_BASE}/webhooks/{quote(webhook_id, safe='')}"
+    try:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
+            response = await client.put(
+                url, params=auth.params, headers=auth.headers, json={"active": True}
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as exc:
+        logger.warning("Trello reactivate webhook {} error: {}", webhook_id, exc)
+        return None
+
+
+async def _remember_webhook_id(company: dict[str, Any], webhook_id: str | None) -> None:
+    company_id = company.get("id")
+    if company_id is None:
+        return
+    try:
+        await company_repo.set_trello_webhook_id(int(company_id), webhook_id)
+    except Exception as exc:
+        logger.warning(
+            "Trello: unable to store webhook id for company {}: {}", company_id, exc
+        )
+
+
+async def _reuse_stored_webhook(
+    board_id: str,
+    callback_url: str,
+    company: dict[str, Any],
+    auth: TrelloAuth,
+) -> dict[str, Any] | None:
+    """Return the company's stored webhook when it still fits, reactivating it.
+
+    Trello cannot list OAuth 2.0 webhooks, so the id saved at creation is the
+    only way to see whether Trello has disabled one after failed deliveries.
+    """
+    hook_id = str(company.get("trello_webhook_id") or "").strip()
+    if not _TRELLO_ID_RE.fullmatch(hook_id):
+        return None
+    state, hook = await _fetch_webhook(hook_id, auth)
+    if state == "missing":
+        await _remember_webhook_id(company, None)
+        return None
+    if state != "found" or hook is None:
+        return None
+    same_board = str(hook.get("idModel") or "") == board_id
+    same_callback = _canonical_webhook_callback_url(
+        str(hook.get("callbackURL") or "")
+    ) == _canonical_webhook_callback_url(callback_url)
+    if not (same_board and same_callback):
+        logger.info(
+            "Trello register_webhook: replacing webhook {} (board {}, callback {})",
+            hook_id,
+            hook.get("idModel"),
+            hook.get("callbackURL"),
+        )
+        await delete_webhook(hook_id, auth)
+        await _remember_webhook_id(company, None)
+        return None
+    if hook.get("active") is False:
+        logger.warning(
+            "Trello register_webhook: webhook {} for board {} was disabled by Trello; "
+            "reactivating",
+            hook_id,
+            board_id,
+        )
+        return await reactivate_webhook(hook_id, auth)
+    return hook
+
+
 async def register_webhook(
     board_id: str,
     callback_url: str,
@@ -738,6 +843,11 @@ async def register_webhook(
       an HTTP→HTTPS migration) the stale webhook is deleted and a fresh one is
       created with the new *callback_url*.
 
+    For OAuth 2.0 connections, which Trello cannot list, the webhook id stored
+    on the company is checked first and a webhook Trello disabled is
+    reactivated. :exc:`TrelloWebhookConflictError` is raised when Trello
+    reports a conflicting OAuth webhook MyPortal has no id for.
+
     Returns the webhook object on success, or ``None`` on failure.
     """
     if not await _get_module_enabled():
@@ -754,6 +864,9 @@ async def register_webhook(
 
     if auth.is_oauth:
         await _remove_legacy_webhooks(board_id, callback_url, company)
+        stored_hook = await _reuse_stored_webhook(board_id, callback_url, company, auth)
+        if stored_hook:
+            return stored_hook
 
     existing_hook = await _reconcile_existing_webhooks(board_id, callback_url, auth)
     if existing_hook:
@@ -777,7 +890,10 @@ async def register_webhook(
                 },
             )
             response.raise_for_status()
-            return response.json()
+            created = response.json()
+            if isinstance(created, dict) and created.get("id"):
+                await _remember_webhook_id(company, str(created["id"]))
+            return created
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and "already exists" in exc.response.text:
             # A webhook for this board/token combination already exists.
@@ -790,18 +906,15 @@ async def register_webhook(
                 board_id,
             )
             if auth.is_oauth:
-                # OAuth 2.0 webhooks belong to the member's grant and cannot
-                # be listed per token; an existing one already delivers here.
-                logger.info(
-                    "Trello register_webhook: OAuth webhook for board {} already exists",
+                # OAuth 2.0 webhooks cannot be listed, and Trello disables a
+                # webhook after a month of failed deliveries, so an unseen
+                # existing webhook must not be reported as working.
+                logger.warning(
+                    "Trello register_webhook: OAuth webhook for board {} already "
+                    "exists but its id is unknown; it cannot be checked",
                     board_id,
                 )
-                return {
-                    "idModel": board_id,
-                    "callbackURL": callback_url,
-                    "active": True,
-                    "already_registered": True,
-                }
+                raise TrelloWebhookConflictError(TRELLO_OAUTH_WEBHOOK_CONFLICT_MESSAGE)
             existing = await list_webhooks(auth)
             for hook in existing:
                 if str(hook.get("idModel") or "") == board_id:
