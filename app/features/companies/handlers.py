@@ -1035,8 +1035,8 @@ async def _render_company_edit_page(
 
     from app.repositories import company_job_title_access as job_title_access_repo
     job_title_rules = await job_title_access_repo.list_rules(company_id) if is_super_admin else []
-    title_labels = {str(row.get("job_title") or "").strip().lower(): str(row.get("job_title") or "").strip()
-                    for row in company_staff if str(row.get("job_title") or "").strip()}
+    company_job_titles = await staff_repo.list_company_job_titles(company_id) if is_super_admin else []
+    title_labels = {title.lower(): title for title in company_job_titles}
     for rule in job_title_rules:
         title_labels.setdefault(rule["job_title"], rule["job_title"])
     job_titles = sorted(title_labels.values(), key=str.lower)

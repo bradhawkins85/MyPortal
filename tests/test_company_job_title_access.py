@@ -155,3 +155,18 @@ async def test_role_permission_checks_follow_title_changes(access_db, monkeypatc
     access_db.execute("UPDATE staff SET job_title = 'Manager'")
     assert not await memberships.user_has_permission(10, 'staff.manage')
     assert await memberships.user_has_role_permission(10, 'assets.manage')
+
+
+@pytest.mark.asyncio
+async def test_company_job_titles_include_every_staff_member_beyond_list_page(access_db):
+    from app.repositories import staff as staff_repo
+    access_db.executemany(
+        'INSERT INTO staff VALUES (?, 1, ?, ?, 1, 0)',
+        [(100 + i, f'user{i}@example.test', 'Clerk') for i in range(250)],
+    )
+    access_db.execute("INSERT INTO staff VALUES (999, 1, 'sam@example.test', 'Sales Manager', 1, 0)")
+    access_db.execute("INSERT INTO staff VALUES (998, 1, 'pat@example.test', 'sales manager', 0, 1)")
+    access_db.execute("INSERT INTO staff VALUES (997, 1, 'nobody@example.test', '   ', 1, 0)")
+    access_db.execute("INSERT INTO staff VALUES (996, 2, 'other@example.test', 'Other Title', 1, 0)")
+    titles = await staff_repo.list_company_job_titles(1)
+    assert titles == ['Clerk', 'Production Supervisor', 'Sales Manager']

@@ -146,6 +146,21 @@ async def list_staff_labels_by_ids(staff_ids: Iterable[int]) -> list[dict[str, A
     ))
 
 
+async def list_company_job_titles(company_id: int) -> list[str]:
+    """Return every distinct non-empty job title held by the company's staff."""
+    rows = await db.fetch_all(
+        "SELECT DISTINCT job_title FROM staff "
+        "WHERE company_id = %s AND job_title IS NOT NULL AND TRIM(job_title) <> ''",
+        (company_id,),
+    )
+    titles: dict[str, str] = {}
+    for row in rows:
+        title = str(row.get("job_title") or "").strip()
+        if title:
+            titles.setdefault(title.lower(), title)
+    return sorted(titles.values(), key=str.lower)
+
+
 async def list_staff(
     company_id: int,
     *,
