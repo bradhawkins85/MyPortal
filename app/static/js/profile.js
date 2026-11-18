@@ -649,6 +649,7 @@
   // Groups start collapsed so the whole menu fits on screen; the ones a user
   // opens stay open across saves and re-renders.
   const expandedGroupKeys = new Set();
+  const expandedSubitemKeys = new Set();
 
   function setGroupCollapsed(group, collapsed) {
     group.collapsed = collapsed;
@@ -686,10 +687,18 @@
           label: item.label,
           icon: item.icon || '',
           hidden: !SIDEBAR_PROTECTED_KEYS.has(item.key) && hiddenKeys.has(item.key),
+          subitems: (item.children || []).map((child) => ({
+            type: 'subitem',
+            key: child.key,
+            label: child.label,
+            icon: child.icon || '',
+            hidden: hiddenKeys.has(child.key),
+          })),
         },
       ]),
     );
     const knownKeys = new Set(available.keys());
+    available.forEach((item) => item.subitems.forEach((subitem) => knownKeys.add(subitem.key)));
     const defaultGroupIds = new Set((menu.getDefaults().groups || []).map((group) => group.id));
     const groups = new Map();
     (preferences.groups || []).forEach((group) => {
@@ -1003,7 +1012,80 @@
     controls.append(moveSelect, makeMoveControls(entry), toggle);
     row.append(makeHandle(entry, row, entry.label), icon, label, controls);
     bindDropTarget(row, entry);
-    return row;
+    const subitems = entry.subitems || [];
+    if (!subitems.length) {
+      return row;
+    }
+    const fragment = document.createDocumentFragment();
+    fragment.append(row, renderSubitemList(entry));
+    return fragment;
+  }
+
+  // Links inside a drop-down such as Office 365 keep their place in it but
+  // can each be shown or hidden.
+  function renderSubitemList(entry) {
+    const shownCount = entry.subitems.filter((subitem) => !subitem.hidden).length;
+    const wrapper = document.createElement('li');
+    wrapper.className = 'menu-editor__subitems';
+    wrapper.classList.toggle('menu-editor__subitems--inactive', Boolean(entry.hidden));
+    wrapper.dataset.subitemsFor = entry.key;
+    const details = document.createElement('details');
+    details.open = expandedSubitemKeys.has(entry.key);
+    details.addEventListener('toggle', () => {
+      if (details.open) expandedSubitemKeys.add(entry.key);
+      else expandedSubitemKeys.delete(entry.key);
+    });
+    const summary = document.createElement('summary');
+    summary.className = 'menu-editor__subitems-summary';
+    summary.textContent = entry.hidden
+      ? `${entry.label} links · hidden with ${entry.label}`
+      : `${entry.label} links · ${shownCount} of ${entry.subitems.length} shown`;
+    const list = document.createElement('ul');
+    list.className = 'menu-editor__subitems-list';
+    entry.subitems.forEach((subitem) => {
+      const row = document.createElement('li');
+      row.className = 'menu-editor__row menu-editor__row--subitem';
+      row.dataset.entryKey = subitem.key;
+      row.classList.toggle('menu-editor__row--hidden', Boolean(subitem.hidden || entry.hidden));
+      const icon = document.createElement('span');
+      icon.className = 'menu-editor__item-icon';
+      icon.innerHTML = subitem.icon || glyph('link');
+      const label = document.createElement('span');
+      label.className = 'menu-editor__label';
+      label.textContent = subitem.label;
+      if (subitem.hidden) {
+        const tag = document.createElement('span');
+        tag.className = 'menu-editor__tag menu-editor__tag--muted';
+        tag.textContent = 'Hidden';
+        label.appendChild(tag);
+      }
+      const controls = document.createElement('div');
+      controls.className = 'menu-editor__controls';
+      const toggle = document.createElement('label');
+      toggle.className = 'menu-editor__switch';
+      toggle.title = entry.hidden ? `Show ${entry.label} first` : `Show in the ${entry.label} menu`;
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = !subitem.hidden;
+      checkbox.disabled = Boolean(entry.hidden);
+      checkbox.dataset.control = 'visible';
+      checkbox.setAttribute('aria-label', `Show ${subitem.label} in the ${entry.label} menu`);
+      checkbox.addEventListener('change', () => {
+        subitem.hidden = !checkbox.checked;
+        setSidebarDirty(true);
+        renderSidebarItems({ focusKey: subitem.key, focusControl: 'visible' });
+      });
+      const track = document.createElement('span');
+      track.className = 'menu-editor__switch-track';
+      track.setAttribute('aria-hidden', 'true');
+      toggle.append(checkbox, track);
+      controls.append(toggle);
+      row.append(icon, label, controls);
+      list.appendChild(row);
+    });
+    details.append(summary, list);
+    wrapper.appendChild(details);
+    return wrapper;
   }
 
   function renderSeparatorRow(entry) {
@@ -1218,10 +1300,15 @@
   function buildSidebarPayload() {
     const hidden = new Set(preservedHidden);
     const groups = [];
+    const collectHidden = (entry) => {
+      if (entry.type !== 'item') return;
+      if (entry.hidden) hidden.add(entry.key);
+      (entry.subitems || []).forEach((subitem) => { if (subitem.hidden) hidden.add(subitem.key); });
+    };
     sidebarEntries.forEach((entry) => {
-      if (entry.type === 'item' && entry.hidden) hidden.add(entry.key);
+      collectHidden(entry);
       if (entry.type === 'group') {
-        entry.children.forEach((child) => { if (child.hidden) hidden.add(child.key); });
+        entry.children.forEach(collectHidden);
         groups.push({
           id: entry.key,
           label: (entry.label || '').trim(),
