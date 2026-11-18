@@ -258,6 +258,43 @@ def test_hidden_expandable_sidebar_items_are_not_displayed():
     assert "display: none" in hidden_rule
 
 
+def test_hidden_expandable_items_stay_hidden_in_top_navigation():
+    """The top menu's `display: block` on drop-downs must not beat [hidden]."""
+    stylesheet = Path("app/static/css/app.css").read_text()
+
+    selector = "body.navigation--top .menu .menu__item--expandable[hidden]"
+    assert selector in stylesheet
+    hidden_rule = stylesheet.split(selector, 1)[1].split("}", 1)[0]
+    assert "display: none" in hidden_rule
+    assert ".menu .menu__subitem[hidden]" in stylesheet
+
+
+def test_dropdown_links_can_be_hidden_individually():
+    """Links inside drop-downs such as Office 365 get their own show/hide toggle."""
+    layout_script = Path("app/static/js/layout.js").read_text()
+    profile_script = Path("app/static/js/profile.js").read_text()
+
+    # Sub-link keys are namespaced by the parent so /m365 (Configuration)
+    # never collides with the Office 365 group's own key.
+    assert "SIDEBAR_SUBITEM_KEY_SEPARATOR = '>'" in layout_script
+    assert "const applyMenuEntryVisibility = (key, element, hidden) =>" in layout_script
+    assert "allSubmenuEntriesHidden" in layout_script
+    assert "children: listMenuSubitems(element)" in layout_script
+    assert "function renderSubitemList(entry)" in profile_script
+    assert "item.subitems.forEach((subitem) => knownKeys.add(subitem.key))" in profile_script
+    assert "(entry.subitems || []).forEach((subitem) => { if (subitem.hidden) hidden.add(subitem.key); });" in profile_script
+
+
+def test_sidebar_preferences_keep_namespaced_dropdown_link_keys():
+    from app.repositories.sidebar_preferences import _coerce_preferences
+
+    prefs = _coerce_preferences(
+        {"version": 2, "hidden": ["/m365>/m365/signatures", "/m365>/m365"], "order": [], "groups": []}
+    )
+
+    assert prefs["hidden"] == ["/m365>/m365/signatures", "/m365>/m365"]
+
+
 def test_sidebar_custom_groups_have_profile_controls_and_nested_styles():
     # The shared layout script ships as app/static/js/layout.js.
     base_template = Path("app/templates/base.html").read_text() + Path("app/static/js/layout.js").read_text()

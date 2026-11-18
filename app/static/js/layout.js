@@ -347,6 +347,51 @@
     return copy.textContent.replace(/\s+/g, ' ').trim();
   };
 
+  // Links inside a server-rendered drop-down (e.g. Office 365) can be hidden
+  // one by one. Their keys are namespaced by the parent so a link sharing
+  // the parent's own path (/m365 → Configuration) never hides the group.
+  const SIDEBAR_SUBITEM_KEY_SEPARATOR = '>';
+  const listMenuSubitems = (menuItem) => {
+    const parentKey = menuItem.dataset.menuKey || '';
+    if (!parentKey || !menuItem.classList.contains('menu__item--expandable')) {
+      return [];
+    }
+    return Array.from(menuItem.querySelectorAll(':scope > .menu__submenu > .menu__subitem'))
+      .map((subitem) => {
+        const link = subitem.querySelector(':scope > a[href]');
+        const href = link?.getAttribute('href') || '';
+        if (!href.startsWith('/')) {
+          return null;
+        }
+        const copy = link.cloneNode(true);
+        copy.querySelectorAll('.menu__badge, .menu__icon').forEach((node) => node.remove());
+        const label = copy.textContent.replace(/\s+/g, ' ').trim();
+        if (!label) {
+          return null;
+        }
+        return {
+          key: `${parentKey}${SIDEBAR_SUBITEM_KEY_SEPARATOR}${href}`,
+          label,
+          icon: link.querySelector('.menu__icon svg')?.outerHTML || '',
+          element: subitem,
+        };
+      })
+      .filter(Boolean);
+  };
+
+  // A drop-down whose links are all hidden disappears as well; the page the
+  // user is on always stays reachable.
+  const applyMenuEntryVisibility = (key, element, hidden) => {
+    listMenuSubitems(element).forEach((subitem) => {
+      const isCurrentSubitem = subitem.element.querySelector('a[aria-current="page"]');
+      subitem.element.hidden = hidden.has(subitem.key) && !isCurrentSubitem;
+    });
+    const submenuEntries = Array.from(element.querySelectorAll(':scope > .menu__submenu > li'));
+    const allSubmenuEntriesHidden = submenuEntries.length > 0 && submenuEntries.every((entry) => entry.hidden);
+    const isCurrentPage = element.querySelector('a[aria-current="page"]');
+    element.hidden = (hidden.has(key) || allSubmenuEntriesHidden) && !isCurrentPage;
+  };
+
   const buildCustomSeparator = (key) => {
     if (!sidebarMenuRoot || typeof key !== 'string') {
       return null;
@@ -425,8 +470,7 @@
     children.forEach(([key, child]) => {
       child.classList.add('menu__custom-group-child');
       submenu.appendChild(child);
-      const isCurrentPage = child.querySelector('a[aria-current="page"]');
-      child.hidden = hidden.has(key) && !isCurrentPage;
+      applyMenuEntryVisibility(key, child, hidden);
       if (!child.hidden) {
         visibleChildren += 1;
         child.querySelectorAll('.menu__badge').forEach((badge) => {
@@ -648,8 +692,7 @@
       if (row.isGroup) {
         return;
       }
-      const isCurrentPage = row.element.querySelector('a[aria-current="page"]');
-      row.element.hidden = hidden.has(row.key) && !isCurrentPage;
+      applyMenuEntryVisibility(row.key, row.element, hidden);
     });
     if (activeSidebarPreferences.navigation_style === 'top') {
       sidebarMenuRoot.querySelectorAll(':scope > .menu__item--expandable').forEach((item) => {
@@ -725,6 +768,12 @@
         icon: element.querySelector('.menu__icon svg')?.outerHTML || '',
         hidden: activeSidebarPreferences.hidden.includes(key),
         groupId: groupByItem.get(key) || '',
+        children: listMenuSubitems(element).map((subitem) => ({
+          key: subitem.key,
+          label: subitem.label,
+          icon: subitem.icon,
+          hidden: activeSidebarPreferences.hidden.includes(subitem.key),
+        })),
       }));
     },
     groupIcons: () => ({ ...sidebarGroupIcons }),

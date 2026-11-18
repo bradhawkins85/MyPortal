@@ -3609,6 +3609,37 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
   opacity: 0.35;
 }
 
+.menu-editor__subitems {
+  margin-left: 1.4rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--hf-line-soft);
+}
+
+.menu-editor__subitems-summary {
+  cursor: pointer;
+  padding: 0.2rem 0.25rem;
+  font-size: 0.875rem;
+  color: var(--hf-muted);
+}
+
+.menu-editor__subitems-list {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.menu-editor__row--subitem {
+  min-height: 2.4rem;
+  padding-left: 0.5rem;
+}
+
+.menu-editor__subitems--inactive .menu-editor__subitems-list {
+  opacity: 0.6;
+}
+
 .menu-editor__drop-before::before,
 .menu-editor__drop-after::after {
   content: '';
@@ -11354,9 +11385,14 @@ dialog.dialog::backdrop {
   gap: 0.35rem;
 }
 
-/* Keep sidebar preferences effective for expandable items. The author-level
- * flex display above otherwise overrides the browser's default [hidden] rule. */
-.menu__item--expandable[hidden] {
+/* Keep sidebar preferences effective for every menu entry. Author-level
+ * display rules (the flex column above, and the top navigation's
+ * `body.navigation--top .menu__item--expandable { display: block }`, which
+ * is more specific) otherwise override the browser's default [hidden] rule,
+ * leaving hidden drop-downs such as Office 365 on screen. */
+.menu .menu__item[hidden],
+.menu .menu__subitem[hidden],
+body.navigation--top .menu .menu__item--expandable[hidden] {
   display: none;
 }
 
