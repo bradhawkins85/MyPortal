@@ -3244,6 +3244,9 @@
           if (listItem) {
             listItem.remove();
           }
+          document.dispatchEvent(new CustomEvent('ticket-watcher-removed', {
+            detail: { userId, watcherEmail },
+          }));
 
           // Add back to select if it was a user ID
           if (userId && displayText) {
@@ -3647,7 +3650,40 @@
         }
       }
       showError(assignmentError());
+      updateBlocklistWarning();
     };
+    const blocklistWarning = form.querySelector('[data-reply-blocklist-warning]');
+    const updateBlocklistWarning = () => {
+      if (!(blocklistWarning instanceof HTMLElement)) return;
+      const groupChecked = (name) => {
+        const input = form.querySelector(`input[name="${name}"]`);
+        return !(input instanceof HTMLInputElement) || input.checked;
+      };
+      const roleVisible = {
+        requester: groupChecked('emailRequester'),
+        watcher: groupChecked('emailWatchers'),
+      };
+      let visibleCount = 0;
+      blocklistWarning.querySelectorAll('[data-reply-blocklist-item]').forEach((item) => {
+        const visible = roleVisible[item.dataset.recipientRole] !== false;
+        item.hidden = !visible;
+        if (visible) visibleCount += 1;
+      });
+      blocklistWarning.hidden = internal.checked || visibleCount === 0;
+    };
+    form.querySelectorAll('input[name="emailRequester"], input[name="emailWatchers"]').forEach((input) => {
+      input.addEventListener('change', updateBlocklistWarning);
+    });
+    document.addEventListener('ticket-watcher-removed', (event) => {
+      if (!(blocklistWarning instanceof HTMLElement)) return;
+      const { userId, watcherEmail } = event.detail || {};
+      blocklistWarning.querySelectorAll('[data-reply-blocklist-item][data-recipient-role="watcher"]').forEach((item) => {
+        const matchesUser = userId && item.dataset.watcherUserId === String(userId);
+        const matchesEmail = watcherEmail && (item.dataset.watcherEmail || '').toLowerCase() === String(watcherEmail).toLowerCase();
+        if (matchesUser || matchesEmail) item.remove();
+      });
+      updateBlocklistWarning();
+    });
     form.addEventListener('submit', (event) => {
       const message = assignmentError();
       if (!message) return;

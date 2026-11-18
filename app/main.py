@@ -12322,6 +12322,7 @@ async def _render_ticket_detail(
         company.get("phone") if company else None
     )
     ticket_requester_lookup_name = ""
+    ticket_requester_email: str | None = None
     for requester_option in requester_options:
         if (_same_identifier(requester_option.get("staff_id"), requester_staff_id)
                 or _same_identifier(requester_option.get("user_id"), requester_user_id)
@@ -12330,7 +12331,16 @@ async def _render_ticket_detail(
                 str(requester_option.get("first_name") or "").strip(),
                 str(requester_option.get("last_name") or "").strip(),
             )))
+            ticket_requester_email = requester_option.get("email")
             break
+    if not ticket_requester_email:
+        requester_record = user_lookup.get(requester_user_id)
+        if requester_record:
+            ticket_requester_email = requester_record.get("email")
+    ticket_blocked_reply_recipients = await tickets_service.blocked_reply_recipients(
+        ticket_requester_email,
+        enriched_watchers,
+    )
 
     default_priorities = ["urgent", "high", "normal", "low"]
     current_priority = str(ticket.get("priority") or "normal")
@@ -12538,6 +12548,7 @@ async def _render_ticket_detail(
         "ticket_requester_landline_display": ticket_requester_landline_display,
         "ticket_company_phone_display": ticket_company_phone_display,
         "ticket_requester_lookup_name": ticket_requester_lookup_name,
+        "ticket_blocked_reply_recipients": ticket_blocked_reply_recipients,
         "ticket_watcher_staff_options": watcher_staff_options,
         "ticket_approval_configurations": ticket_approval_configurations,
         "ticket_approval_workflow": ticket_approval_workflow,
