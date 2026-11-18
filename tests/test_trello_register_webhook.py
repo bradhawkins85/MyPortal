@@ -137,7 +137,9 @@ async def test_register_webhook_replaces_stale_http_webhook():
         )
 
     assert result == new_hook
-    mock_delete.assert_awaited_once_with("wh_old", "key123", "tok456")
+    mock_delete.assert_awaited_once()
+    assert mock_delete.await_args.args[0] == "wh_old"
+    assert mock_delete.await_args.args[1].params == {"key": "key123", "token": "tok456"}
 
 
 # ---------------------------------------------------------------------------

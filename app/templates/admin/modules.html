@@ -172,6 +172,26 @@
                             </button>
                           </li>
                         {% endif %}
+                        {% if module.slug == "trello" %}
+                          {% set trello_oauth_callback_url = (module_webhook_urls or {}).get("trello_oauth_callback") %}
+                          {% if trello_oauth_callback_url %}
+                            <li class="header-title-menu__item" role="none">
+                              <button
+                                type="button"
+                                class="header-title-menu__link"
+                                role="menuitem"
+                                data-webhook-url-open
+                                data-webhook-url="{{ trello_oauth_callback_url | e }}"
+                                data-webhook-url-title="OAuth 2.0 Callback URL"
+                                data-webhook-url-description="Copy this URL and add it as the Callback URL on your OAuth 2.0 (3LO) app in the Atlassian developer console, then connect each company from its Trello settings."
+                                data-webhook-url-label="OAuth 2.0 Callback URL"
+                                aria-label="View OAuth 2.0 callback URL for {{ module.name }}"
+                              >
+                                OAuth Callback URL
+                              </button>
+                            </li>
+                          {% endif %}
+                        {% endif %}
                         {% if module.slug == "xero" and module.enabled %}
                           {% set xero_webhook_url = (module_webhook_urls or {}).get("xero_webhook") %}
                           {% if xero_webhook_url %}

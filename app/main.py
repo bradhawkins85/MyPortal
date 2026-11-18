@@ -12594,9 +12594,14 @@ async def _render_modules_dashboard(
     if not public_base:
         public_base = str(request.base_url).rstrip("/")
 
+    from app.services import trello as _trello_service
+
     module_webhook_urls = {
         "smtp2go": f"{public_base}/api/webhooks/smtp2go/events",
         "trello": f"{public_base}/api/integration-modules/trello/webhook",
+        "trello_oauth_callback": _trello_service.build_oauth_redirect_uri(
+            str(request.base_url)
+        ),
         "uptimekuma": f"{public_base}/api/integration-modules/uptimekuma/alerts",
         "huntress": f"{public_base}/api/integration-modules/huntress/callback",
         "xero": f"{public_base}/api/integration-modules/xero/callback",

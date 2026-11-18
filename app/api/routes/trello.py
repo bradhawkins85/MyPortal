@@ -9,17 +9,189 @@ import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 from loguru import logger
 
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.modules import require_module_enabled
 from app.core.config import get_settings
+from app.repositories import companies as company_repo
+from app.repositories import users as user_repo
+from app.security.encryption import decrypt_secret, encrypt_secret
+from app.security.flash import flash_redirect
+from app.security.session import session_manager
 from app.services import tickets as tickets_service
 from app.services import trello as trello_service
 from app.services import webhook_monitor
 
-router = APIRouter(prefix="/api/integration-modules/trello", tags=["Trello"], dependencies=[Depends(require_module_enabled("trello"))])
+_require_trello_enabled = require_module_enabled("trello")
+router = APIRouter(prefix="/api/integration-modules/trello", tags=["Trello"], dependencies=[Depends(_require_trello_enabled)])
+oauth_router = APIRouter(prefix="/trello", tags=["Trello OAuth"], dependencies=[Depends(_require_trello_enabled)])
+
+# OAuth state tokens are only valid for this long (seconds).
+_OAUTH_STATE_MAX_AGE_SECONDS = 600
+
+
+def _oauth_state_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(get_settings().secret_key, salt="trello-oauth")
+
+
+def _company_edit_url(company_id: int) -> str:
+    return f"/admin/companies/{int(company_id)}/edit#ce-trello"
+
+
+async def _load_super_admin_session(request: Request):
+    """Return the session of a logged-in super admin, or a response to send."""
+    session_data = await session_manager.load_session(request)
+    if not session_data:
+        return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    user = await user_repo.get_user_by_id(session_data.user_id)
+    if not user or not user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super administrators can connect Trello",
+        )
+    return session_data, None
+
+
+# ---------------------------------------------------------------------------
+# OAuth 2.0 (Atlassian 3LO) connect / callback / disconnect
+# ---------------------------------------------------------------------------
+
+
+@oauth_router.get("/connect", name="trello_oauth_connect")
+async def trello_oauth_connect(request: Request, company_id: int):
+    """Start the Trello OAuth 2.0 flow for a company.
+
+    Redirects the super admin to Atlassian's consent page. The signed ``state``
+    binds the flow to this session and company and carries the encrypted PKCE
+    verifier so it never leaves the server in readable form.
+    """
+    session_data, redirect = await _load_super_admin_session(request)
+    if redirect:
+        return redirect
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    client = await trello_service.get_oauth_client_settings()
+    if not client["client_id"] or not client["client_secret"]:
+        return flash_redirect(
+            _company_edit_url(company_id),
+            "Trello OAuth 2.0 is not set up. Add the client ID and secret to the Trello module first.",
+            "error",
+        )
+
+    verifier, challenge = trello_service.generate_pkce_pair()
+    state = _oauth_state_serializer().dumps(
+        {
+            "user_id": session_data.user_id,
+            "session_id": session_data.id,
+            "company_id": int(company_id),
+            "verifier": encrypt_secret(verifier),
+        }
+    )
+    redirect_uri = trello_service.build_oauth_redirect_uri(str(request.base_url))
+    authorize_url = trello_service.build_authorize_url(
+        client_id=client["client_id"],
+        redirect_uri=redirect_uri,
+        state=state,
+        code_challenge=challenge,
+    )
+    logger.info(
+        "Trello OAuth: starting authorization for company {} (redirect_uri={})",
+        company_id,
+        redirect_uri,
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@oauth_router.get("/callback", name="trello_oauth_callback")
+async def trello_oauth_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+):
+    """Complete the Trello OAuth 2.0 flow and store the company's tokens."""
+    if not state:
+        return flash_redirect("/admin/companies", "Trello authorization failed: missing state.", "error")
+    try:
+        state_data = _oauth_state_serializer().loads(
+            state, max_age=_OAUTH_STATE_MAX_AGE_SECONDS
+        )
+    except BadSignature:
+        return flash_redirect("/admin/companies", "Trello authorization failed: invalid or expired state.", "error")
+    if not isinstance(state_data, dict):
+        return flash_redirect("/admin/companies", "Trello authorization failed: invalid state.", "error")
+
+    session_data, redirect = await _load_super_admin_session(request)
+    if redirect:
+        return redirect
+    try:
+        state_user_id = int(state_data.get("user_id"))
+        company_id = int(state_data.get("company_id"))
+    except (TypeError, ValueError):
+        return flash_redirect("/admin/companies", "Trello authorization failed: invalid state.", "error")
+    if state_user_id != session_data.user_id or state_data.get("session_id") != session_data.id:
+        logger.warning("Trello OAuth callback state does not match the current session")
+        return flash_redirect("/admin/companies", "Trello authorization failed: invalid state.", "error")
+
+    target = _company_edit_url(company_id)
+    if error:
+        # Log Atlassian's description but never reflect it into the redirect.
+        logger.warning(
+            "Trello OAuth error for company {}: {} {}",
+            company_id,
+            error,
+            str(request.query_params.get("error_description") or "")[:200],
+        )
+        return flash_redirect(target, "Trello authorization was cancelled or denied.", "error")
+    if not code:
+        return flash_redirect(target, "Trello authorization failed: no code returned.", "error")
+
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        return flash_redirect("/admin/companies", "Trello authorization failed: company not found.", "error")
+
+    try:
+        verifier = decrypt_secret(str(state_data.get("verifier") or ""), allow_plaintext=False)
+    except Exception:
+        return flash_redirect(target, "Trello authorization failed: invalid state.", "error")
+
+    try:
+        result = await trello_service.exchange_authorization_code(
+            company_id,
+            code=code,
+            code_verifier=verifier,
+            redirect_uri=trello_service.build_oauth_redirect_uri(str(request.base_url)),
+        )
+    except trello_service.TrelloOAuthError as exc:
+        logger.error("Trello OAuth token exchange failed for company {}: {}", company_id, exc)
+        return flash_redirect(target, "Trello authorization failed. Check the OAuth client settings and try again.", "error")
+
+    member = result.get("member")
+    logger.info("Trello OAuth: company {} connected as {}", company_id, member or "unknown")
+    message = "Trello connected"
+    if member:
+        message += f" as @{member}"
+    message += ". Register the webhook again so events use the new connection."
+    return flash_redirect(target, message, "success")
+
+
+@oauth_router.post("/companies/{company_id}/disconnect", name="trello_oauth_disconnect")
+async def trello_oauth_disconnect(
+    company_id: int,
+    _current_user: dict = Depends(require_super_admin),
+):
+    """Forget a company's Trello OAuth 2.0 tokens."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    await trello_service.disconnect_oauth(company_id)
+    logger.info("Trello OAuth: company {} disconnected", company_id)
+    return flash_redirect(_company_edit_url(company_id), "Trello disconnected.", "success")
 
 # ---------------------------------------------------------------------------
 # Webhook endpoint (Trello verification + event ingestion)
@@ -395,6 +567,10 @@ async def _verify_trello_webhook_signature(
     _add_secret(getattr(settings, "trello_api_secret", None))
 
     module_settings = await modules_service.get_module_settings("trello") or {}
+    # Webhooks created with an OAuth 2.0 access token are signed with the
+    # OAuth client's secret rather than the legacy app-key secret.
+    _add_secret(module_settings.get("oauth_client_secret"))
+    _add_secret(os.getenv("TRELLO_OAUTH_CLIENT_SECRET", ""))
     api_secret_setting = module_settings.get("api_secret")
     board_id = _extract_trello_board_id(payload)
     company_api_key = ""

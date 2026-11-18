@@ -382,6 +382,22 @@ async def admin_company_sso_unlink(company_id: int, request: Request):
     return _sso_redirect(company_id, "Microsoft account unlinked.", "success")
 
 
+async def _build_trello_oauth_context(company_record: dict[str, Any]) -> dict[str, Any]:
+    """Summarise the company's Trello OAuth 2.0 connection for the edit page."""
+    from app.services import trello as trello_service
+
+    try:
+        client = await trello_service.get_oauth_client_settings()
+        available = bool(client["client_id"] and client["client_secret"])
+    except Exception:  # pragma: no cover - defensive; settings load failure
+        available = False
+    return {
+        "available": available,
+        "connected": trello_service.company_has_oauth_connection(company_record),
+        "member": str(company_record.get("trello_oauth_member") or "").strip(),
+    }
+
+
 async def _render_company_edit_page(
     request: Request,
     user: dict[str, Any],
@@ -1052,10 +1068,13 @@ async def _render_company_edit_page(
         "permissions": assign_permissions,
     }
 
+    trello_oauth = await _build_trello_oauth_context(company_record)
+
     extra = {
         "title": f"Edit {company_record.get('name') or 'company'}",
         "company": company_record,
         "form_data": form_data,
+        "trello_oauth": trello_oauth,
         "managed_companies": managed_companies,
         "is_super_admin": is_super_admin,
         "assignments": assignments,

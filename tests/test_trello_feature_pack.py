@@ -20,6 +20,9 @@ EXPECTED = {
     ("GET", "/api/integration-modules/trello/webhook"),
     ("POST", "/api/integration-modules/trello/webhook"),
     ("POST", "/api/integration-modules/trello/boards/{board_id}/register-webhook"),
+    ("GET", "/trello/connect"),
+    ("GET", "/trello/callback"),
+    ("POST", "/trello/companies/{company_id}/disconnect"),
 }
 
 

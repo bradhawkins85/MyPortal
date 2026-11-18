@@ -1307,7 +1307,14 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "icon": "📋",
         # ``api_secret`` is the Trello application secret (trello.com/app-key)
         # used to verify the X-Trello-Webhook signature on incoming events.
-        "settings": {"api_secret": str(os.getenv("TRELLO_API_SECRET", ""))},
+        # ``oauth_client_id``/``oauth_client_secret`` come from the OAuth 2.0
+        # (3LO) app in the Atlassian developer console; companies then connect
+        # Trello from their edit page instead of pasting a key and token.
+        "settings": {
+            "api_secret": str(os.getenv("TRELLO_API_SECRET", "")),
+            "oauth_client_id": str(os.getenv("TRELLO_OAUTH_CLIENT_ID", "")),
+            "oauth_client_secret": str(os.getenv("TRELLO_OAUTH_CLIENT_SECRET", "")),
+        },
         "enabled": True,  # Enabled by default so it appears as a trigger action when the module is configured
     },
     {
@@ -2421,6 +2428,24 @@ def _coerce_settings(
         _env = os.getenv("GITEA_VERIFY_SSL", "").strip()
         if _env:
             merged["verify_ssl"] = _env.lower() not in ("false", "0", "no", "off")
+    elif slug == "trello":
+        trello_overrides = payload or {}
+
+        def _keep_trello_secret(field: str) -> str:
+            candidate = str(trello_overrides.get(field) or "").strip()
+            if candidate and candidate != "********":
+                return candidate
+            if existing_settings and existing_settings.get(field):
+                return str(existing_settings.get(field) or "").strip()
+            return str(defaults.get(field) or "").strip()
+
+        merged.update(
+            {
+                "api_secret": _keep_trello_secret("api_secret"),
+                "oauth_client_id": str(merged.get("oauth_client_id") or "").strip(),
+                "oauth_client_secret": _keep_trello_secret("oauth_client_secret"),
+            }
+        )
     elif slug == "solidtime":
         overrides = payload or {}
 
@@ -2575,7 +2600,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "hudu": ("api_key",),
         "gitea": ("api_token",),
         "solidtime": ("api_token", "webhook_secret"),
-        "trello": ("api_secret",),
+        "trello": ("api_secret", "oauth_client_secret"),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
