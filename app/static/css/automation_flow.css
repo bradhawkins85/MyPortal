@@ -19,7 +19,7 @@
   flex-direction: column;
   gap: var(--space-gap-roomy);
   width: 100%;
-  max-width: 64rem;
+  max-width: 80rem;
   margin-inline: auto;
 }
 
@@ -93,6 +93,50 @@
 }
 
 /* Filters and business hours ------------------------------------------------------ */
+
+.automation-filters {
+  container: af-filters / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+/* Outline each condition so its fields read as one group. */
+.automation-filters__row.form-grid {
+  gap: var(--space-gap-tight);
+  padding: var(--space-gap-tight);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-sm);
+  background: var(--hf-panel);
+}
+
+.automation-filters__row.form-grid:nth-child(even) {
+  background: var(--hf-bg-sunken);
+}
+
+.automation-filters__row.form-grid:focus-within {
+  border-color: var(--hf-line-strong);
+}
+
+/* One condition per line when the card is wide enough; otherwise the rows
+   fall back to the wrapping .form-grid layout. */
+@container af-filters (min-width: 52rem) {
+  .automation-filters__row.form-grid {
+    grid-template-columns:
+      minmax(5.5rem, 0.7fr)
+      minmax(9rem, 1.5fr)
+      minmax(8rem, 1fr)
+      minmax(6rem, 0.75fr)
+      minmax(8rem, 1.5fr)
+      auto;
+    gap: var(--space-gap-tight);
+    align-items: center;
+  }
+
+  .automation-filters__remove {
+    white-space: nowrap;
+  }
+}
 
 .af-filters__actions {
   display: flex;

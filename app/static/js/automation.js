@@ -1890,7 +1890,7 @@
       }
       builderState.all.forEach((row, index) => {
         const rowWrap = document.createElement('div');
-        rowWrap.className = 'form-grid';
+        rowWrap.className = 'form-grid automation-filters__row';
 
         const typeSelect = document.createElement('select');
         typeSelect.className = 'form-input';
@@ -2017,7 +2017,7 @@
 
         const removeButton = document.createElement('button');
         removeButton.type = 'button';
-        removeButton.className = 'button button--ghost';
+        removeButton.className = 'button button--ghost automation-filters__remove';
         removeButton.textContent = 'Remove';
         removeButton.addEventListener('click', () => removeRow(index));
 
