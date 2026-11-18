@@ -1,0 +1,7 @@
+{
+  "guid": "febb07cb-b1d1-47dd-ad55-6eb7b9f94276",
+  "occurred_at": "2026-11-18T04:12Z",
+  "change_type": "Fix",
+  "summary": "The Assign staff access job title list now shows every job title held by the company's staff, including titles that were missing for larger companies.",
+  "content_hash": "983b5da097a819a1c325b29366a6505ca88e84de084d5fa4cac24ac7df55aaa9"
+}
