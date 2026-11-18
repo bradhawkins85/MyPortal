@@ -101,6 +101,23 @@
   gap: var(--space-gap-tight);
 }
 
+/* Outline each condition so its fields read as one group. */
+.automation-filters__row.form-grid {
+  gap: var(--space-gap-tight);
+  padding: var(--space-gap-tight);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-sm);
+  background: var(--hf-panel);
+}
+
+.automation-filters__row.form-grid:nth-child(even) {
+  background: var(--hf-bg-sunken);
+}
+
+.automation-filters__row.form-grid:focus-within {
+  border-color: var(--hf-line-strong);
+}
+
 /* One condition per line when the card is wide enough; otherwise the rows
    fall back to the wrapping .form-grid layout. */
 @container af-filters (min-width: 52rem) {

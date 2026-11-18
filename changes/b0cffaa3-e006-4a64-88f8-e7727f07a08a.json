@@ -1,0 +1,7 @@
+{
+  "guid": "b0cffaa3-e006-4a64-88f8-e7727f07a08a",
+  "occurred_at": "2026-11-18T04:38Z",
+  "change_type": "Improvement",
+  "summary": "The ticket automation editor is wider, and each \"Only for tickets where\" condition now fits on a single line when the screen has room.",
+  "content_hash": "c378a6bfe485ce7931b43f3fdb7f5be4c1736ad92d067c64d3bcd53348d224fb"
+}
