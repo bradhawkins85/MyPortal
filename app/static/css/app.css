@@ -3254,12 +3254,14 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
   display: grid;
   gap: 0.6rem;
   left: 0;
+  max-width: calc(100vw - 1rem);
   min-width: 15rem;
+  overflow-y: auto;
   padding: 0.75rem;
   position: absolute;
   text-align: left;
   top: calc(100% + 0.4rem);
-  z-index: 30;
+  z-index: 1000;
 }
 
 .table-column-filter__panel[hidden] { display: none; }

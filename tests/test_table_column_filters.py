@@ -32,3 +32,13 @@ def test_multi_option_filters_can_offer_a_fixed_list_of_values() -> None:
     assert "function parseFilterValues(raw)" in javascript
     assert "header.getAttribute('data-filter-values')" in javascript
     assert "fixedValues ||" in javascript
+
+
+def test_open_filter_panels_float_above_scrolling_table_wrappers() -> None:
+    """Short tables sit in overflow-x: auto wrappers, which clipped the menu."""
+    javascript = (ROOT / "app/static/js/tables.js").read_text(encoding="utf-8")
+
+    assert "function positionColumnFilterPanel(panel, anchor)" in javascript
+    assert "panel.style.position = 'fixed'" in javascript
+    assert "if (!panel.hidden) positionColumnFilterPanel(panel, wrapper);" in javascript
+    assert "window.addEventListener('scroll', repositionOpenPanels, true);" in javascript

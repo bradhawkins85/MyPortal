@@ -16,6 +16,37 @@
     return value.toLowerCase();
   }
 
+  /**
+   * Float an open column-filter panel above the page so scrolling table
+   * wrappers (overflow-x: auto) cannot clip it on short tables.
+   */
+  function positionColumnFilterPanel(panel, anchor) {
+    const gap = 6;
+    const margin = 8;
+    const anchorRect = anchor.getBoundingClientRect();
+    panel.style.position = 'fixed';
+    panel.style.left = '0px';
+    panel.style.top = '0px';
+    panel.style.maxHeight = '';
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+    const panelRect = panel.getBoundingClientRect();
+    const left = Math.max(margin, Math.min(anchorRect.left, viewportWidth - panelRect.width - margin));
+    const spaceBelow = viewportHeight - anchorRect.bottom - gap - margin;
+    const spaceAbove = anchorRect.top - gap - margin;
+    let top;
+    if (panelRect.height <= spaceBelow || spaceBelow >= spaceAbove) {
+      top = anchorRect.bottom + gap;
+      if (panelRect.height > spaceBelow) panel.style.maxHeight = `${Math.max(spaceBelow, 120)}px`;
+    } else {
+      const height = Math.min(panelRect.height, spaceAbove);
+      if (panelRect.height > spaceAbove) panel.style.maxHeight = `${spaceAbove}px`;
+      top = anchorRect.top - gap - height;
+    }
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.top = `${Math.round(top)}px`;
+  }
+
   function parseFilterValues(raw) {
     if (!raw) {
       return null;
@@ -451,6 +482,7 @@
           });
           panel.hidden = !panel.hidden;
           toggle.setAttribute('aria-expanded', String(!panel.hidden));
+          if (!panel.hidden) positionColumnFilterPanel(panel, wrapper);
         });
         panel.addEventListener('click', (event) => event.stopPropagation());
         if (type === 'multi') {
@@ -497,6 +529,14 @@
           close();
         });
       });
+      const repositionOpenPanels = () => {
+        this.table.querySelectorAll('[data-table-column-filter-menu]').forEach((menu) => {
+          const panel = menu.querySelector('.table-column-filter__panel');
+          if (panel && !panel.hidden) positionColumnFilterPanel(panel, menu);
+        });
+      };
+      window.addEventListener('resize', repositionOpenPanels);
+      window.addEventListener('scroll', repositionOpenPanels, true);
       document.addEventListener('click', () => {
         this.table.querySelectorAll('[data-table-column-filter-menu]').forEach((menu) => {
           menu.querySelector('.table-column-filter__panel').hidden = true;
