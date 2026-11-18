@@ -5976,6 +5976,20 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
   color: #fef08a;
 }
 
+.ticket-reply-blocklist {
+  margin-bottom: var(--space-3);
+}
+
+.ticket-reply-blocklist__list {
+  margin: var(--space-2) 0;
+  padding-left: var(--space-5);
+}
+
+.ticket-reply-blocklist a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .notification-toast--warning {
   background: rgba(253, 224, 71, 0.18);
   border: 1px solid rgba(253, 224, 71, 0.4);

@@ -14,7 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from app.core.config import get_settings
 from app.core.database import db
-from app.core.logging import log_error
+from app.core.logging import log_error, log_warning
 from app.repositories import tickets as tickets_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
@@ -940,6 +940,48 @@ def reply_email_excluded_recipients(
     for wanted, group in ((email_requester, requester), (email_watchers, watchers)):
         (kept if wanted else excluded).update(group)
     return sorted(excluded - kept)
+
+
+async def blocked_reply_recipients(
+    requester_email: Any,
+    watchers: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Return reply recipients whose address is on the email blocklist.
+
+    Each entry carries the address, whether it is the ``requester`` or a
+    ``watcher`` and, for watchers, the identifiers used to remove them so the
+    reply form can warn technicians before an email is silently suppressed.
+    """
+
+    candidates: list[dict[str, Any]] = []
+    requester = str(requester_email or "").strip()
+    if requester:
+        candidates.append({"email": requester, "role": "requester"})
+    for watcher in watchers or []:
+        if not isinstance(watcher, Mapping):
+            continue
+        user = watcher.get("user") if isinstance(watcher.get("user"), Mapping) else None
+        address = str((user or {}).get("email") or watcher.get("email") or "").strip()
+        if address:
+            candidates.append(
+                {
+                    "email": address,
+                    "role": "watcher",
+                    "user_id": watcher.get("user_id"),
+                    "watcher_email": watcher.get("email"),
+                }
+            )
+    if not candidates:
+        return []
+    from app.repositories import email_blocklist as email_blocklist_repo
+
+    try:
+        _, blocked = await email_blocklist_repo.filter_allowed([c["email"] for c in candidates])
+    except Exception as exc:  # pragma: no cover - defensive, never block rendering
+        log_warning("Email blocklist lookup failed for ticket reply recipients", error=str(exc))
+        return []
+    blocked_keys = {address.lower() for address in blocked}
+    return [c for c in candidates if c["email"].lower() in blocked_keys]
 
 
 async def _emit_ticket_event(

@@ -1398,6 +1398,25 @@
                 data-ticket-reply-error
                 {% if not reply_error %}hidden{% endif %}
               >{{ reply_error or '' }}</p>
+              {% if ticket_blocked_reply_recipients %}
+                <div class="alert alert--warning ticket-reply-blocklist" role="status" aria-live="polite" data-reply-blocklist-warning>
+                  <strong>Some recipients won't receive this email.</strong>
+                  These addresses are on the <a href="/admin/tickets/email-blocklist">email blocklist</a>, so the reply will not be delivered to them:
+                  <ul class="ticket-reply-blocklist__list">
+                    {% for recipient in ticket_blocked_reply_recipients %}
+                      <li
+                        data-reply-blocklist-item
+                        data-recipient-role="{{ recipient.role }}"
+                        {% if recipient.role == 'watcher' %}
+                          data-watcher-user-id="{{ recipient.user_id if recipient.user_id else '' }}"
+                          data-watcher-email="{{ recipient.watcher_email if recipient.watcher_email else '' }}"
+                        {% endif %}
+                      >{{ recipient.email }} <span class="text-muted">({{ 'Requester' if recipient.role == 'requester' else 'Watcher' }})</span></li>
+                    {% endfor %}
+                  </ul>
+                  Remove the watcher, untick the recipient below or change the requester before sending.
+                </div>
+              {% endif %}
               {% if ticket_suggest_reply_available %}
                 <div class="ticket-reply-suggestion" data-ticket-suggest-reply-panel hidden>
                   <p class="ticket-reply-suggestion__status" role="status" aria-live="polite" data-ticket-suggest-reply-status></p>
