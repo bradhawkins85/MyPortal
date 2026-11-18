@@ -53,3 +53,14 @@ def test_active_section_is_remembered_across_company_pages():
     assert "window.localStorage.getItem(STORAGE_KEY)" in script
     assert "window.localStorage.setItem(STORAGE_KEY" in script
     assert "ce:section-shown" in script
+
+
+def test_register_webhook_button_asks_for_json_errors():
+    """Without an Accept header the API answers errors with the HTML error
+    page, which the button then fails to parse ("Unexpected token '<'")."""
+    template = TEMPLATE.read_text()
+    start = template.index("trello-register-webhook-btn');")
+    script = template[start:template.index("</script>", start)]
+
+    assert "'Accept': 'application/json'" in script
+    assert "try { data = await resp.json(); }" in script

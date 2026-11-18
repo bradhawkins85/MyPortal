@@ -730,8 +730,9 @@
           btn.disabled = true;
           statusEl.textContent = 'Registering…';
           try {
-            var resp = await fetch('/api/integration-modules/trello/boards/' + encodeURIComponent(boardId) + '/register-webhook', {method: 'POST', headers: {'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || ''}});
-            var data = await resp.json();
+            var resp = await fetch('/api/integration-modules/trello/boards/' + encodeURIComponent(boardId) + '/register-webhook', {method: 'POST', headers: {'Accept': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || ''}});
+            var data = {};
+            try { data = await resp.json(); } catch (parseError) { data = {detail: 'HTTP ' + resp.status + ' ' + resp.statusText}; }
             if (resp.ok) { statusEl.textContent = 'Webhook registered successfully.'; }
             else { statusEl.textContent = 'Error: ' + (data.detail || 'Unknown error'); }
           } catch (e) { statusEl.textContent = 'Request failed: ' + e.message; }
