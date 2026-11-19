@@ -9,7 +9,11 @@ import pytest
 from app.core.database import Database
 from app.repositories import ai_quality as repo
 
-MIGRATIONS = ("migrations/387_ai_quality_feedback.sql", "migrations/563_ai_quality_outputs.sql")
+MIGRATIONS = (
+    "migrations/387_ai_quality_feedback.sql",
+    "migrations/563_ai_quality_outputs.sql",
+    "migrations/565_ai_link_learning.sql",
+)
 
 
 @pytest.fixture

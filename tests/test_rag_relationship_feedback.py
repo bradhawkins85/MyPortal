@@ -16,6 +16,7 @@ FEEDBACK_MIGRATIONS = (
     "migrations/453_rag_relationship_feedback.sql",
     "migrations/387_ai_quality_feedback.sql",
     "migrations/563_ai_quality_outputs.sql",
+    "migrations/565_ai_link_learning.sql",
 )
 BACKFILL_MIGRATION = "migrations/564_ai_quality_related_backfill.sql"
 
