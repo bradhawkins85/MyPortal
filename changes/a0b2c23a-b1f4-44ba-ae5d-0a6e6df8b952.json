@@ -1,0 +1,7 @@
+{
+  "guid": "a0b2c23a-b1f4-44ba-ae5d-0a6e6df8b952",
+  "occurred_at": "2026-11-19T10:58Z",
+  "change_type": "Feature",
+  "summary": "When technicians mark a Related item as unrelated, MyPortal now shows it less for similar tickets and searches, and admins can see and undo what it learned on the AI Quality page.",
+  "content_hash": "ad0118f1ce8458f18bce2e93c13762ddaf40e634e0106ee35c6b7fe9158c8cbb"
+}
