@@ -547,6 +547,83 @@ def test_ai_custom_prompt_text_includes_internal_notes_when_asked(monkeypatch):
     assert result["replies_included"] == 1
 
 
+def _custom_prompt_replies_with_automation():
+    return [
+        *_custom_prompt_replies(),
+        {
+            "id": 5,
+            "author_id": None,
+            "is_internal": True,
+            "body": "Automation ran: assign technician",
+            "external_reference": "automation:9:run:note",
+        },
+        {
+            "id": 6,
+            "author_id": None,
+            "is_internal": False,
+            "body": "Shipment delivered",
+            "external_reference": "shipment-watch:abc",
+        },
+    ]
+
+
+@pytest.mark.parametrize("conversation", ["public", "internal", "all"])
+def test_ai_custom_prompt_never_includes_automation_entries(monkeypatch, conversation):
+    monkeypatch.setattr(
+        "app.repositories.tickets.get_ticket", AsyncMock(return_value=TICKET)
+    )
+    list_replies = AsyncMock(return_value=_custom_prompt_replies_with_automation())
+    monkeypatch.setattr("app.repositories.tickets.list_replies", list_replies)
+    invoke_ai = _enable_ollama(monkeypatch, {"response": json.dumps({"answer": "Done"})})
+    _patch_ticket_writes(monkeypatch)
+
+    result = asyncio.run(
+        modules._invoke_ai_custom_prompt(
+            {},
+            {
+                "ticket_id": 42,
+                "instructions": "Summarise",
+                "conversation": conversation,
+                "history_limit": 1,
+            },
+        )
+    )
+
+    prompt = invoke_ai.await_args.args[1]["prompt"]
+    assert "Automation ran" not in prompt
+    assert "Shipment delivered" not in prompt
+    assert result["replies_included"] == 1
+    assert list_replies.await_args.kwargs["include_internal"] is (conversation != "public")
+
+
+def test_ai_custom_prompt_internal_includes_only_internal_notes(monkeypatch):
+    monkeypatch.setattr(
+        "app.repositories.tickets.get_ticket", AsyncMock(return_value=TICKET)
+    )
+    monkeypatch.setattr(
+        "app.repositories.tickets.list_replies",
+        AsyncMock(return_value=_custom_prompt_replies_with_automation()),
+    )
+    invoke_ai = _enable_ollama(monkeypatch, {"response": json.dumps({"answer": "Done"})})
+    _patch_ticket_writes(monkeypatch)
+
+    result = asyncio.run(
+        modules._invoke_ai_custom_prompt(
+            {}, {"ticket_id": 42, "instructions": "Summarise", "conversation": "internal"}
+        )
+    )
+
+    prompt = invoke_ai.await_args.args[1]["prompt"]
+    assert "Checked the PSU" in prompt
+    assert "It smells like burning" not in prompt
+    assert result["replies_included"] == 1
+    schema = modules.get_action_payload_schema("ai-custom-prompt")
+    conversation_field = next(
+        field for field in schema["fields"] if field["name"] == "conversation"
+    )
+    assert "internal" in conversation_field["enum"]
+
+
 def test_ai_custom_prompt_without_conversation_skips_replies(monkeypatch):
     monkeypatch.setattr(
         "app.repositories.tickets.get_ticket", AsyncMock(return_value=TICKET)

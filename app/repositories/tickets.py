@@ -4,7 +4,7 @@ import json
 import re
 from datetime import date, datetime, timezone
 from importlib import import_module
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from app.core.ai_identity import normalise_agent_reply
 from app.core.database import db
@@ -24,6 +24,12 @@ AUTOMATION_AUDIT_REFERENCE_PREFIX = "automation:"
 # a technician. They always count as technician replies, even when the
 # technician is also the ticket requester.
 WORKFLOW_TECHNICIAN_REPLY_REFERENCE_PREFIX = "staff-workflow-reply:"
+# Conversation entries the ticket timeline labels "Automation": automation
+# audit notes and shipment-tracking updates.
+AUTOMATION_HISTORY_REFERENCE_PREFIXES = (
+    AUTOMATION_AUDIT_REFERENCE_PREFIX,
+    "shipment-watch:",
+)
 _SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SQL_UPDATE_TICKET_REPLIES = "UPDATE ticket_replies SET "
 _SQL_INSERT_TICKET_WATCHERS = "INSERT INTO ticket_watchers (ticket_id, user_id) VALUES "
@@ -1748,6 +1754,13 @@ async def get_latest_reply(ticket_id: int) -> TicketRecord | None:
         (ticket_id,),
     )
     return _normalise_reply(row) if row else None
+
+
+def is_automation_reply(reply: Mapping[str, Any]) -> bool:
+    """Return True for conversation entries shown as "Automation" on the timeline."""
+
+    reference = str(reply.get("external_reference") or "")
+    return reference.startswith(AUTOMATION_HISTORY_REFERENCE_PREFIXES)
 
 
 async def list_replies(

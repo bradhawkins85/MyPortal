@@ -27,6 +27,7 @@ from loguru import logger
 from app.core.config import get_settings as _get_app_settings
 from app.repositories import audit_logs as audit_logs_repo
 from app.repositories import tickets as tickets_repo
+from app.services import ai_consent
 from app.services import modules as modules_service
 from app.services import tickets as tickets_service
 
@@ -596,8 +597,8 @@ async def _get_ticket(
             rpc_code=ERR_NOT_FOUND,
         )
     include_internal = bool(settings.get("include_internal_replies"))
-    replies = await tickets_repo.list_replies(
-        ticket_id, include_internal=include_internal
+    replies = ai_consent.exclude_automation_replies(
+        await tickets_repo.list_replies(ticket_id, include_internal=include_internal)
     )
     watchers = await tickets_repo.list_watchers(ticket_id)
     return {
