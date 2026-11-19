@@ -1,0 +1,55 @@
+{#
+  👍/👎 control for any AI output recorded with ai_quality.record_output.
+  Works as a plain form; app/static/js/ai_rating.js saves without leaving
+  the page. Renders nothing without an output or when AI Quality is off.
+#}
+{% set AI_RATING_REASONS = [
+  ("incorrect", "Incorrect"),
+  ("unrelated", "Unrelated"),
+  ("incomplete", "Incomplete"),
+  ("irrelevant", "Not useful here"),
+  ("uncited", "Missing sources"),
+  ("unsafe", "Unsafe"),
+  ("other", "Other"),
+] %}
+{% macro ai_rating(response_id, current_rating=None, return_to="", csrf_token="", label="AI output") %}
+{%- if response_id and feature_pack_available('ai_quality') %}
+<form class="air" method="post" action="/api/ai-quality/feedback" data-ai-rating
+      aria-label="Rate this {{ label }}">
+  <input type="hidden" name="response_id" value="{{ response_id }}">
+  <input type="hidden" name="return_to" value="{{ return_to }}">
+  {%- if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+  <span class="air__prompt" aria-hidden="true">Was this helpful?</span>
+  <button type="submit" class="air__vote" name="rating" value="up"
+          aria-pressed="{{ 'true' if current_rating == 'up' else 'false' }}"
+          aria-label="{{ label }} was helpful" data-ai-rating-vote>
+    <span aria-hidden="true">👍</span>
+  </button>
+  <button type="submit" class="air__vote" name="rating" value="down"
+          aria-pressed="{{ 'true' if current_rating == 'down' else 'false' }}"
+          aria-label="{{ label }} was not helpful" data-ai-rating-vote>
+    <span aria-hidden="true">👎</span>
+  </button>
+  <details class="air__why" data-ai-rating-why {% if current_rating == 'down' %}open{% endif %}>
+    <summary>Tell us why <span class="air__optional">optional</span></summary>
+    <fieldset class="air__reasons">
+      <legend class="sr-only">Why wasn't it helpful?</legend>
+      {%- for value, text in AI_RATING_REASONS %}
+      <label class="air__reason">
+        <input type="radio" name="reason" value="{{ value }}" data-ai-rating-reason>
+        <span>{{ text }}</span>
+      </label>
+      {%- endfor %}
+    </fieldset>
+    <label class="air__comment">
+      <span class="sr-only">Comment</span>
+      <textarea class="form-input" name="comment" rows="2" maxlength="1000" placeholder="Anything else? (optional)"
+                data-ai-rating-comment></textarea>
+    </label>
+    <button type="submit" class="button button--ghost button--small" name="rating" value="down"
+            data-ai-rating-send>Send feedback</button>
+  </details>
+  <span class="air__status" role="status" aria-live="polite" data-ai-rating-status></span>
+</form>
+{%- endif %}
+{% endmacro %}
