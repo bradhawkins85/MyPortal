@@ -8,6 +8,37 @@ from typing import Any
 from app.core.database import db
 
 
+# Tokens on the compatibility row are bound to the application that issued
+# them.  When a cutover or rollback changes that application, a delegated
+# refresh token from the previous app is rejected by Entra when presented with
+# the new client ID and secret, so every cached token must be discarded.
+_RESET_TOKEN_ASSIGNMENTS = (
+    "refresh_token = NULL, access_token = NULL, token_expires_at = NULL, "
+    "token_cache_tenant_id = NULL, token_cache_client_id = NULL, "
+    "token_cache_grant_type = NULL, app_access_token = NULL, "
+    "app_token_expires_at = NULL, app_token_cache_tenant_id = NULL, "
+    "app_token_cache_client_id = NULL"
+)
+
+
+async def _application_identity_changes(
+    company_id: int, tenant_id: str, client_id: str
+) -> bool:
+    """Return whether the compatibility row currently names another app."""
+    row = await db.fetch_one(
+        "SELECT tenant_id, client_id FROM company_m365_credentials WHERE company_id = %s",
+        (company_id,),
+    )
+    if not row:
+        return False
+    return (
+        str(row.get("tenant_id") or "").strip().casefold()
+        != str(tenant_id or "").strip().casefold()
+        or str(row.get("client_id") or "").strip().casefold()
+        != str(client_id or "").strip().casefold()
+    )
+
+
 async def get(connection_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one("SELECT * FROM m365_connections WHERE id = %s", (connection_id,))
     return dict(row) if row else None
@@ -231,13 +262,20 @@ async def activate(company_id: int, connection_id: int) -> dict[str, Any]:
                 candidate.get("app_object_id"), candidate.get("client_secret_key_id"),
                 candidate.get("client_secret_expires_at"), company_id,
             )
+            # Migrating from a legacy app replaces the client ID and secret;
+            # tokens issued to the legacy app cannot be used with them.
+            reset_tokens = await _application_identity_changes(
+                company_id, str(candidate["tenant_id"]), str(candidate["client_id"])
+            )
             # Initial setup writes a compatibility row before consent so that
             # existing consumers can complete the setup journey.  An admin-only
             # configuration can also leave a placeholder row for the company.
             # Neither case has a previous active connection, so deciding between
             # INSERT and UPDATE from ``previous`` races the unique company_id key.
-            # Upsert unconditionally and preserve token/admin columns just as the
-            # former UPDATE path did.
+            # Upsert unconditionally and preserve admin columns just as the
+            # former UPDATE path did.  Tokens are preserved only while the
+            # application identity is unchanged (consent granted to the
+            # staged app during first-time setup remains valid).
             await db.execute(
                 """INSERT INTO company_m365_credentials
                    (tenant_id, client_id, client_secret, app_object_id,
@@ -249,7 +287,8 @@ async def activate(company_id: int, connection_id: int) -> dict[str, Any]:
                      client_secret = VALUES(client_secret),
                      app_object_id = VALUES(app_object_id),
                      client_secret_key_id = VALUES(client_secret_key_id),
-                     client_secret_expires_at = VALUES(client_secret_expires_at)""",
+                     client_secret_expires_at = VALUES(client_secret_expires_at)"""
+                + (", " + _RESET_TOKEN_ASSIGNMENTS if reset_tokens else ""),
                 credential_values,
             )
         except Exception:
@@ -294,10 +333,15 @@ async def rollback(company_id: int) -> dict[str, Any]:
         "UPDATE m365_connection_dependencies SET connection_id = %s "
         "WHERE connection_id = %s", (previous["id"], active["id"])
     )
+    reset_tokens = await _application_identity_changes(
+        company_id, str(previous["tenant_id"]), str(previous["client_id"])
+    )
     await db.execute(
         """UPDATE company_m365_credentials SET tenant_id = %s, client_id = %s,
            client_secret = %s, app_object_id = %s, client_secret_key_id = %s,
-           client_secret_expires_at = %s WHERE company_id = %s""",
+           client_secret_expires_at = %s"""
+        + (", " + _RESET_TOKEN_ASSIGNMENTS if reset_tokens else "")
+        + " WHERE company_id = %s",
         (previous["tenant_id"], previous["client_id"], previous["client_secret"],
          previous.get("app_object_id"), previous.get("client_secret_key_id"),
          previous.get("client_secret_expires_at"), company_id),

@@ -1516,9 +1516,10 @@ async def stage_connection_candidate(
     # credentials.  Such a placeholder is not a legacy connection and must not
     # be inventoried before the company's first managed connection is staged.
     if has_complete_current:
-        legacy = current.copy()
-        legacy["client_secret"] = _encrypt(str(current["client_secret"]))
-        await connection_repo.ensure_legacy(company_id, legacy)
+        # The repository returns the stored ciphertext.  Inventory it as-is so a
+        # rollback restores the legacy secret exactly; encrypting it again would
+        # leave the restored connection with an unusable secret.
+        await connection_repo.ensure_legacy(company_id, current.copy())
     candidate = await connection_repo.stage_candidate(
         company_id=company_id,
         tenant_id=tenant_id,
