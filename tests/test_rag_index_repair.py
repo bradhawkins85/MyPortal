@@ -274,3 +274,70 @@ def test_split_retries_are_bounded(monkeypatch):
     # One original request plus one request per level down the first branch.
     assert embed.await_count == rag_index._MAX_EMBED_SPLIT_DEPTH + 1
     replace.assert_not_awaited()
+
+
+# llama.cpp with n_ctx=512 (nomic-embed-text) rejects inputs over the context.
+_CONTEXT_EXCEEDED = {"error": {
+    "code": 400,
+    "message": "input (513 tokens) is larger than the max context size (512 tokens). skipping",
+    "type": "exceed_context_size_error",
+    "n_prompt_tokens": 513,
+    "n_ctx": 512,
+}}
+
+# Log-heavy ticket note that reached the provider as one 513-token input.
+_WINDOWS_UPDATE_LOG = (
+    "auto-updating to a version with the fix. (log-file:C:\\Windows\\SoftwareDistribution"
+    "\\ReportingEvents.log)2026-08-24 23:47:45:243+1000 1 182 [AGENT_INSTALLING_FAILED] 101 "
+    "{F66E6AC6-3E05-449E-8911-9E305D0E6056} 1 80073d02 Update;ScanForUpdates Failure Content "
+    "Install Installation Failure: Windows failed to install the following update with error "
+    "0x80073d02: 9NBLGGH4NNS1-Microsoft.DesktopAppInstaller.\\n2026-08-24 23:47:45:625+1000 1 "
+    "182 [AGENT_INSTALLING_FAILED] 101 {845A59D5-F060-46E0-A54F-762FD5A414A2} 1 80073d02 "
+    "Update;ScanForUpdates Failure Content Install Installation Failure: Windows failed to "
+    "install the following update with error 0x80073d02: 9WZDNCRD29V9-MICROSOFT."
+    "MICROSOFTOFFICEHUB.A generic .NET Runtime profiling-API error was logged but is not "
+    "Teams-specific; it may be unrelated to the screen-share issue. (Application)2026-10-06 "
+    "08:38:46 [Error] id=1022 .NET Runtime: .NET Runtime version 4.0.30319.0 - There was a "
+    "failure initializing profiling API attach infrastructure. This process will not allow a "
+    "profiler to attach. HRESULT: 0x80004005. Process ID (decimal): 5748.Likely causesTCP/IP "
+    "local-port exhaustion (Event 4227) preventing Teams from establishing a new media-socket "
+    "connection for the second meeting's screen share, while the first meeting's port was "
+    "still held or the port range was depleted.Firmware-level CPU throttling of Processor 7 "
+    "degrading the real-time media-encode pipeline after the first capture session, causing "
+    "the share stream to stall or not transmit.The MyPortal Tray Service (a third-party "
+    "overlay/capture utility) interfering with Teams' screen-capture"
+)
+
+
+def test_context_size_error_is_recognised_as_too_large():
+    assert rag_index._is_input_too_large(_status_error(400, _CONTEXT_EXCEEDED))
+    # The error type alone is enough, whatever the provider's wording.
+    reworded = {"error": {"type": "exceed_context_size_error", "message": "nope"}}
+    assert rag_index._is_input_too_large(_status_error(400, reworded))
+
+
+def test_context_size_error_is_split_and_retried(monkeypatch):
+    document = _ticket(_WINDOWS_UPDATE_LOG)
+    calls = []
+
+    async def embed(chunk):
+        calls.append(chunk)
+        if len(calls) == 1:
+            raise _status_error(400, _CONTEXT_EXCEEDED)
+        return [1.0]
+
+    replace = _index_with_embed(monkeypatch, document, embed)
+
+    assert asyncio.run(rag_index.index_document(document)) == 71
+    assert len(calls) == 3
+    assert len(replace.await_args.args[1]) == 2
+
+
+def test_log_heavy_note_is_chunked_within_default_token_budget(monkeypatch):
+    monkeypatch.setattr(rag_index, "get_settings", lambda: SimpleNamespace(
+        rag_chunk_words=180, rag_chunk_overlap_words=0, rag_chunk_max_chars=2000,
+        rag_chunk_max_tokens=400,
+    ))
+    chunks = rag_index.chunk_text(_WINDOWS_UPDATE_LOG)
+    assert len(chunks) > 1
+    assert all(rag_index.estimate_tokens(chunk) <= 400 for chunk in chunks)

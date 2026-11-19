@@ -32,6 +32,12 @@ and queue state. The following additions expand the operational tooling:
   large AI prompt sent to an LLM endpoint), the request cannot be resent
   faithfully, so the API returns HTTP 409 with an explanation instead of
   sending a broken request. Run the feature that made the request again.
+- A request the server rejected because its input is larger than the model's
+  context size (llama.cpp `exceed_context_size_error`, for example an embedding
+  input over 512 tokens) would fail the same way if resent, so retry also
+  returns HTTP 409. Rebuild the RAG index instead: indexing splits oversized
+  inputs into smaller chunks automatically. The failed attempt keeps the
+  provider's `n_prompt_tokens` and `n_ctx` values so the size is visible.
 
 ## Admin UI controls
 

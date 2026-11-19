@@ -52,6 +52,21 @@ class WebhookNotReplayableError(Exception):
     """Raised when a stored event no longer holds the request that was sent."""
 
 
+def _exceeded_provider_context(response_body: Any) -> bool:
+    """Return whether a stored failure says the input exceeded the model context.
+
+    llama.cpp reports ``exceed_context_size_error``; an identical replay can never
+    succeed, so it is refused rather than recorded as another failed attempt.
+    """
+    if isinstance(response_body, (str, bytes)):
+        try:
+            response_body = json.loads(response_body)
+        except (TypeError, ValueError):
+            return False
+    error = response_body.get("error") if isinstance(response_body, Mapping) else None
+    return isinstance(error, Mapping) and error.get("type") == "exceed_context_size_error"
+
+
 def replay_blocker(event: Mapping[str, Any]) -> str | None:
     """Explain why ``event`` cannot be resent, or return ``None`` when it can.
 
@@ -67,6 +82,13 @@ def replay_blocker(event: Mapping[str, Any]) -> str | None:
             "This request was recorded for monitoring only: its body was shortened "
             "or redacted when stored, so it cannot be resent. Run the feature that "
             "made the request again instead."
+        )
+    if _exceeded_provider_context(event.get("response_body")):
+        return (
+            "The server rejected this request because its input is larger than the "
+            "model's context size. Resending the same input fails the same way. Run "
+            "the feature that made the request again (for embeddings, rebuild the "
+            "RAG index) so the input is split into smaller pieces."
         )
     payload = event.get("payload")
     if isinstance(payload, str) and len(payload) >= MONITOR_BODY_LIMIT and payload.endswith("..."):

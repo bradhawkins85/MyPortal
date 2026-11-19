@@ -154,9 +154,16 @@ def sanitise_error_body(content: bytes | str | None, content_type: str = "") -> 
     if message is not None and "message" in error:
         error["message"] = message
     try:
-        raw_code = json.loads(content)["error"].get("code")  # type: ignore[arg-type,index]
-    except (TypeError, ValueError, KeyError, AttributeError):
-        raw_code = None
+        raw_error = json.loads(content)["error"]  # type: ignore[arg-type,index]
+    except (TypeError, ValueError, KeyError):
+        raw_error = None
+    raw_code = raw_error.get("code") if isinstance(raw_error, Mapping) else None
+    if isinstance(raw_error, Mapping):
+        # Token counts (llama.cpp context errors) are numbers, not secrets.
+        for counter in ("n_prompt_tokens", "n_ctx"):
+            value = raw_error.get(counter)
+            if counter in error and isinstance(value, int) and not isinstance(value, bool):
+                error[counter] = value
     if isinstance(raw_code, int) and not isinstance(raw_code, bool):
         error["code"] = raw_code
     elif isinstance(raw_code, str) and _ERROR_CODE_RE.fullmatch(raw_code):

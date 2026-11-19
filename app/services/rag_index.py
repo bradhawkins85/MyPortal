@@ -408,12 +408,22 @@ _MAX_EMBED_SPLIT_DEPTH = 4
 _MIN_EMBED_SPLIT_CHARS = 40
 
 
+def _error_type(response: httpx.Response) -> str | None:
+    try:
+        error = json.loads(response.content).get("error")
+    except (httpx.ResponseNotRead, TypeError, ValueError, AttributeError):
+        return None
+    return error.get("type") if isinstance(error, Mapping) else None
+
+
 def _is_input_too_large(exc: httpx.HTTPStatusError) -> bool:
     status = exc.response.status_code
     if status == 413:
         return True
     if status not in {400, 422, 500}:
         return False
+    if _error_type(exc.response) == "exceed_context_size_error":
+        return True
     return bool(_INPUT_TOO_LARGE_RE.search(_response_error(exc.response) or ""))
 
 

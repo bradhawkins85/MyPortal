@@ -69,3 +69,17 @@ async def test_force_retry_refuses_shortened_body_without_sending():
             await webhook_monitor.force_retry(9)
     repo.force_retry.assert_not_awaited()
     attempt.assert_not_awaited()
+
+
+def test_context_size_rejection_is_not_replayable():
+    response_body = (
+        '{"error": {"code": 400, "message": "input (513 tokens) is larger than the max '
+        'context size (512 tokens). skipping", "type": "exceed_context_size_error", '
+        '"n_prompt_tokens": 513, "n_ctx": 512}}'
+    )
+    event = {"payload": {"model": "nomic-embed-text", "input": "x"}, "response_body": response_body}
+    reason = webhook_monitor.replay_blocker(event)
+    assert reason and "context size" in reason
+    other_failure = {"payload": {"a": 1}, "response_body": '{"error": {"type": "server_error"}}'}
+    assert webhook_monitor.replay_blocker(other_failure) is None
+    assert webhook_monitor.replay_blocker({"payload": {"a": 1}, "response_body": "not json"}) is None
