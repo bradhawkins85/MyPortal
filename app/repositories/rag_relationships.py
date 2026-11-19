@@ -1190,3 +1190,38 @@ async def list_kb_supporting_on_tickets_fixed_elsewhere() -> list[dict[str, Any]
         """,
         (),
     )
+
+
+# Behind newly discovered pairs (1000/1100) so re-checks never delay new work.
+LEARNING_RECHECK_PRIORITY = 900
+
+
+async def requeue_ticket_links_for_target(source_type: str, source_id: str) -> int:
+    """Re-check every stored ticket link to one item after its learning changes.
+
+    Stored relationships carry the score learning produced when they were
+    evaluated, so undoing or restoring learning only takes effect once they are
+    evaluated again. Clearing the stored hash makes the pair stale.
+    """
+    documents = await db.fetch_all(
+        "SELECT id FROM rag_documents WHERE source_type = ? AND source_id = ?", (source_type, source_id)
+    )
+    requeued = 0
+    for document in documents:
+        document_id = int(document["id"])
+        rows = await db.fetch_all(
+            """
+            SELECT r.id, r.source_document_id, r.target_document_id
+            FROM rag_relationships r
+            JOIN rag_documents other ON other.id = CASE WHEN r.source_document_id = ?
+                THEN r.target_document_id ELSE r.source_document_id END
+            WHERE (r.source_document_id = ? OR r.target_document_id = ?) AND other.source_type = 'tickets'
+            """,
+            (document_id, document_id, document_id),
+        )
+        for row in rows:
+            await db.execute("UPDATE rag_relationships SET source_hash = '' WHERE id = ?", (int(row["id"]),))
+            if await enqueue(int(row["source_document_id"]), int(row["target_document_id"]),
+                             priority=LEARNING_RECHECK_PRIORITY):
+                requeued += 1
+    return requeued

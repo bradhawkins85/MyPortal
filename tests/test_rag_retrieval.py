@@ -289,7 +289,7 @@ def _retrieve_kb(monkeypatch, lessons):
     monkeypatch.setattr(rag_retrieval, "embed_text", AsyncMock(return_value=[1.0, 0.0]))
     monkeypatch.setattr(rag_retrieval, "can_access_current_candidate", AsyncMock(return_value=True))
     if isinstance(lessons, Exception):
-        async def broken():
+        async def broken(*, since=None):
             raise lessons
         monkeypatch.setattr(ai_learning.quality_repo, "list_link_votes", broken)
         ai_learning.invalidate_cache()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import asyncio
 import html
 import json
 import re
@@ -1085,6 +1086,10 @@ async def list_accessible_search_articles(
     return visible
 
 
+# Learning is a nudge; a slow embedding server must not hold up KB search.
+_LEARNING_EMBED_TIMEOUT_SECONDS = 3.0
+
+
 async def _apply_link_learning(
     query: str, scored: list[tuple[float, float, Mapping[str, Any]]], min_score: float
 ) -> list[tuple[float, float, Mapping[str, Any]]]:
@@ -1094,7 +1099,7 @@ async def _apply_link_learning(
     if not any(keyed):
         return scored
     try:
-        query_embedding = await embed_text(query)
+        query_embedding = await asyncio.wait_for(embed_text(query), _LEARNING_EMBED_TIMEOUT_SECONDS)
     except Exception as exc:
         log_warning("Could not embed KB search query for AI link lessons", error=str(exc))
         return scored
@@ -1141,7 +1146,9 @@ async def search_articles(
             updated_ts = updated.timestamp()
         scored.append((score, updated_ts, article))
 
-    scored = await _apply_link_learning(query, scored, min_score_threshold)
+    if context.user_id is not None:
+        # Anonymous searches never trigger the outbound embedding call.
+        scored = await _apply_link_learning(query, scored, min_score_threshold)
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
     visible = [dict(item[2]) for item in scored[:limit]]
     results: list[dict[str, Any]] = []

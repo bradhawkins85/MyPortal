@@ -62,14 +62,19 @@ def votes(monkeypatch):
          "rating": "down", "voted_at": "2026-11-18 12:00:00"},
     ]}
 
-    async def list_link_votes():
+    async def list_link_votes(*, since=None):
+        import asyncio
+
+        await asyncio.sleep(0)  # a real query yields to other requests
         state["calls"] += 1
+        state["since"] = since
         return state["rows"]
 
     async def store(output_id, embedding, model):
         state["stored"].append((output_id, embedding, model))
 
     async def get_document_by_source(source_type, source_id, model):
+        state.setdefault("doc_lookups", []).append(source_id)
         return {"id": 70} if (source_type, source_id) == ("tickets", "7") else None
 
     async def mean_embedding(document_id, *, embedding_model=None):
@@ -81,6 +86,7 @@ def votes(monkeypatch):
     monkeypatch.setattr(ai_learning.rel_repo, "document_mean_embedding", mean_embedding)
     monkeypatch.setattr(ai_learning, "_current_embedding_model", lambda: "m1")
     ai_learning.invalidate_cache()
+    ai_learning._missing_embeddings.clear()
     yield state
     ai_learning.invalidate_cache()
 
@@ -116,7 +122,7 @@ async def test_stale_embedding_model_is_recomputed(votes, monkeypatch):
 
 @pytest.mark.anyio
 async def test_adjustment_for_never_raises(monkeypatch):
-    async def broken():
+    async def broken(*, since=None):
         raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(ai_learning.quality_repo, "list_link_votes", broken)
@@ -166,3 +172,26 @@ async def test_saving_a_vote_clears_the_lesson_cache(monkeypatch, rating):
     await quality_repo.save_feedback(response_id=1, user_id=5, rating=rating, reason=None, comment=None,
                                      is_technician=True)
     assert ai_learning._cache is None
+
+
+@pytest.mark.anyio
+async def test_concurrent_reloads_share_one_load(votes):
+    import asyncio
+
+    await asyncio.gather(*(ai_learning.load_link_lessons() for _ in range(5)))
+    assert votes["calls"] == 1
+
+
+@pytest.mark.anyio
+async def test_only_votes_from_the_last_three_half_lives_are_loaded(votes):
+    await ai_learning.load_link_lessons()
+    expected = datetime.now(timezone.utc) - timedelta(days=3 * ai_learning.HALF_LIFE_DAYS)
+    assert abs((votes["since"] - expected).total_seconds()) < 60
+
+
+@pytest.mark.anyio
+async def test_tickets_without_a_rag_document_are_not_looked_up_on_every_reload(votes):
+    await ai_learning.load_link_lessons()
+    ai_learning.invalidate_cache()
+    await ai_learning.load_link_lessons()
+    assert votes["doc_lookups"].count("9") == 1

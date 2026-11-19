@@ -119,3 +119,32 @@ async def test_changing_a_vote_after_undo_counts_again(link_db):
     await repo.set_link_learning_ignored("knowledge_base", "vpn", ignored=True)
     await _vote(output_id, 5, "up")
     assert [v["rating"] for v in await repo.list_link_votes()] == ["up"]
+
+
+@pytest.mark.anyio
+async def test_undo_and_restore_keep_the_vote_time(link_db, monkeypatch):
+    # MariaDB stamps updated_at ON UPDATE; SQLite does not, so check the SQL
+    # keeps it explicitly — updated_at is the vote time used for decay.
+    statements = []
+    real = repo.db.execute_rowcount
+
+    async def spy(sql, params=None):
+        statements.append(sql)
+        return await real(sql, params)
+
+    monkeypatch.setattr(repo.db, "execute_rowcount", spy)
+    await _vote(await _link(7), 5, "down")
+    await repo.set_link_learning_ignored("knowledge_base", "vpn", ignored=True)
+    await repo.set_link_learning_ignored("knowledge_base", "vpn", ignored=False)
+    assert len(statements) == 2
+    assert all("updated_at = updated_at" in sql for sql in statements)
+
+
+@pytest.mark.anyio
+async def test_learned_links_counts_survive_an_embedding_model_change(link_db):
+    # rag_documents keeps one row per embedding model; a second row must not double the counts.
+    await link_db.execute("INSERT INTO rag_documents VALUES (3, 'knowledge_base', 'vpn', 'VPN setup')")
+    await link_db.commit()
+    await _vote(await _link(7), 5, "down")
+    (vpn,) = await repo.learned_links()
+    assert (vpn["unhelpful"], vpn["title"]) == (1, "VPN setup")

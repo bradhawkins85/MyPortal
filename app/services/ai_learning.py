@@ -8,10 +8,11 @@ adjustment number crosses companies; no text does.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
 
 from app.core.logging import logger
@@ -25,6 +26,10 @@ MAX_PENALTY = 0.3
 MAX_BOOST = 0.15
 HALF_LIFE_DAYS = 180
 LESSON_CACHE_SECONDS = 60
+# Votes older than three half-lives count for under 1/8; don't load them.
+LESSON_WINDOW_DAYS = 3 * HALF_LIFE_DAYS
+# A voted ticket with no RAG document is retried at most this often.
+MISSING_EMBEDDING_RETRY_SECONDS = 3600
 
 LessonKey = tuple[str, str]
 
@@ -40,6 +45,8 @@ class LinkLesson:
 
 _cache: dict[LessonKey, list[LinkLesson]] | None = None
 _cache_loaded_at = 0.0
+_reload_lock = asyncio.Lock()
+_missing_embeddings: dict[tuple[int, str], float] = {}
 
 
 def invalidate_cache() -> None:
@@ -95,23 +102,46 @@ async def _subject_embedding(vote: dict[str, Any], model: str) -> tuple[float, .
             return stored
     if vote.get("subject_type") != "ticket":
         return None
+    miss_key = (int(vote["output_id"]), model)
+    retry_at = _missing_embeddings.get(miss_key)
+    if retry_at is not None and time.monotonic() < retry_at:
+        return None
     document = await rag_index_repo.get_document_by_source("tickets", str(vote.get("subject_id")), model)
-    if not document:
-        return None
-    vector = await rel_repo.document_mean_embedding(int(document["id"]), embedding_model=model)
+    vector = (
+        await rel_repo.document_mean_embedding(int(document["id"]), embedding_model=model) if document else None
+    )
     if not vector:
+        _missing_embeddings[miss_key] = time.monotonic() + MISSING_EMBEDDING_RETRY_SECONDS
         return None
+    _missing_embeddings.pop(miss_key, None)
     await quality_repo.store_subject_embedding(int(vote["output_id"]), vector, model)
     return tuple(vector)
 
 
-async def load_link_lessons() -> dict[LessonKey, list[LinkLesson]]:
-    global _cache, _cache_loaded_at
+def _fresh_cache() -> dict[LessonKey, list[LinkLesson]] | None:
     if _cache is not None and time.monotonic() - _cache_loaded_at < LESSON_CACHE_SECONDS:
         return _cache
+    return None
+
+
+async def load_link_lessons() -> dict[LessonKey, list[LinkLesson]]:
+    cached = _fresh_cache()
+    if cached is not None:
+        return cached
+    async with _reload_lock:
+        # Another request may have reloaded while this one waited.
+        cached = _fresh_cache()
+        if cached is not None:
+            return cached
+        return await _reload_link_lessons()
+
+
+async def _reload_link_lessons() -> dict[LessonKey, list[LinkLesson]]:
+    global _cache, _cache_loaded_at
     model = _current_embedding_model()
+    since = datetime.now(timezone.utc) - timedelta(days=LESSON_WINDOW_DAYS)
     lessons: dict[LessonKey, list[LinkLesson]] = {}
-    for vote in await quality_repo.list_link_votes():
+    for vote in await quality_repo.list_link_votes(since=since):
         key = (str(vote["target_type"]), str(vote["target_id"]))
         lessons.setdefault(key, []).append(LinkLesson(
             target_type=key[0],

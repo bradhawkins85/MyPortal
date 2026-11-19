@@ -326,13 +326,17 @@ async def rating_overview(*, since: datetime) -> dict[str, Any]:
 LINK_FEATURE = "rag_relationships"
 
 
-async def list_link_votes() -> list[dict[str, Any]]:
-    """Technician votes on linked items that MyPortal may learn from."""
-    rows = await db.fetch_all("""SELECT o.id AS output_id, o.subject_type, o.subject_id, o.target_type,
+async def list_link_votes(*, since: datetime | None = None) -> list[dict[str, Any]]:
+    """Technician votes on linked items that MyPortal may learn from (newest window only)."""
+    sql = """SELECT o.id AS output_id, o.subject_type, o.subject_id, o.target_type,
         o.target_id, o.subject_embedding_json, o.subject_embedding_model, f.rating, f.updated_at AS voted_at
         FROM ai_outputs o JOIN ai_output_feedback f ON f.response_id = o.id
-        WHERE o.feature = ? AND o.target_type <> '' AND f.is_technician = 1 AND f.learning_ignored_at IS NULL
-        ORDER BY f.id""", (LINK_FEATURE,))
+        WHERE o.feature = ? AND o.target_type <> '' AND f.is_technician = 1 AND f.learning_ignored_at IS NULL"""
+    params: tuple[Any, ...] = (LINK_FEATURE,)
+    if since is not None:
+        sql += " AND f.updated_at >= ?"
+        params += (since.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),)
+    rows = await db.fetch_all(sql + " ORDER BY f.id", params)
     return [dict(row) for row in rows]
 
 
@@ -350,11 +354,13 @@ async def set_link_learning_ignored(target_type: str, target_id: str, *, ignored
     if ignored:
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         return await db.execute_rowcount(
-            "UPDATE ai_output_feedback SET learning_ignored_at = ? WHERE learning_ignored_at IS NULL AND " + targets,
+            "UPDATE ai_output_feedback SET learning_ignored_at = ?, updated_at = updated_at "
+            "WHERE learning_ignored_at IS NULL AND " + targets,
             (stamp, LINK_FEATURE, target_type, target_id),
         )
     return await db.execute_rowcount(
-        "UPDATE ai_output_feedback SET learning_ignored_at = NULL WHERE learning_ignored_at IS NOT NULL AND "
+        "UPDATE ai_output_feedback SET learning_ignored_at = NULL, updated_at = updated_at "
+        "WHERE learning_ignored_at IS NOT NULL AND "
         + targets,
         (LINK_FEATURE, target_type, target_id),
     )
@@ -362,7 +368,9 @@ async def set_link_learning_ignored(target_type: str, target_id: str, *, ignored
 
 async def learned_links() -> list[dict[str, Any]]:
     """Each linked item technicians voted on, with what MyPortal learned from it."""
-    rows = await db.fetch_all("""SELECT o.target_type, o.target_id, MAX(d.title) AS title,
+    rows = await db.fetch_all("""SELECT o.target_type, o.target_id,
+        (SELECT MAX(d.title) FROM rag_documents d
+         WHERE d.source_type = o.target_type AND d.source_id = o.target_id) AS title,
         SUM(CASE WHEN f.rating = 'down' THEN 1 ELSE 0 END) AS unhelpful,
         SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END) AS helpful,
         COUNT(DISTINCT o.subject_id) AS tickets,
@@ -370,7 +378,6 @@ async def learned_links() -> list[dict[str, Any]]:
         SUM(CASE WHEN f.learning_ignored_at IS NOT NULL THEN 1 ELSE 0 END) AS ignored_votes,
         MAX(f.updated_at) AS last_voted_at
         FROM ai_outputs o JOIN ai_output_feedback f ON f.response_id = o.id
-        LEFT JOIN rag_documents d ON d.source_type = o.target_type AND d.source_id = o.target_id
         WHERE o.feature = ? AND o.target_type <> '' AND f.is_technician = 1
         GROUP BY o.target_type, o.target_id""", (LINK_FEATURE,))
     links = [{

@@ -119,6 +119,12 @@ def link_routes(monkeypatch):
     monkeypatch.setattr(quality_repo, "learned_links", links)
     monkeypatch.setattr(main_module.audit_service, "record", audit)
     monkeypatch.setattr(ai_learning, "invalidate_cache", invalidate)
+
+    async def requeue(target_type, target_id):
+        calls.setdefault("requeued", []).append((target_type, target_id))
+        return 2
+
+    monkeypatch.setattr(main_module.rag_relationship_repo, "requeue_ticket_links_for_target", requeue)
     real_flash_redirect = main_module.flash_redirect
 
     def flash(url, message, variant="info", **kwargs):
@@ -142,6 +148,7 @@ async def test_undo_and_restore_routes(link_routes, route, ignored, action, mess
     assert response.headers["location"] == "/admin/ai-quality#ai-quality-learned-links"
     assert link_routes["ignored"] == [("knowledge_base", "11", ignored)]
     assert link_routes["invalidated"] == 1
+    assert link_routes["requeued"] == [("knowledge_base", "11")]
     assert link_routes["audit"][0]["action"] == action
     assert link_routes["audit"][0]["metadata"] == {"target_type": "knowledge_base", "target_id": "11", "votes": 3}
     assert link_routes["flash"] == (message, "success")
@@ -159,3 +166,15 @@ async def test_link_routes_require_super_admin(link_routes, monkeypatch):
         _FormRequest({"target_type": "knowledge_base", "target_id": "11"}))
     assert response.headers["location"] == "/login"
     assert link_routes["ignored"] == []
+
+
+@pytest.mark.anyio
+async def test_undo_still_works_when_rechecking_links_fails(link_routes, monkeypatch):
+    async def broken(target_type, target_id):
+        raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr(main_module.rag_relationship_repo, "requeue_ticket_links_for_target", broken)
+    response = await main_module.admin_ai_quality_ignore_link(
+        _FormRequest({"target_type": "knowledge_base", "target_id": "11"}))
+    assert response.status_code == 303
+    assert link_routes["ignored"] == [("knowledge_base", "11", True)]

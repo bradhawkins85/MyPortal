@@ -26,7 +26,7 @@ def search(monkeypatch):
 
     async def run(lessons):
         if isinstance(lessons, Exception):
-            async def broken():
+            async def broken(*, since=None):
                 raise lessons
             monkeypatch.setattr(ai_learning.quality_repo, "list_link_votes", broken)
             ai_learning.invalidate_cache()
@@ -78,3 +78,27 @@ async def test_learning_failure_keeps_normal_results(search):
 async def test_embedding_failure_keeps_normal_results(search):
     search.embed.side_effect = RuntimeError("embedding server down")
     assert sorted(await search(_lessons(11, 10, (1.0, 0.0)))) == [11, 12]
+
+
+@pytest.mark.anyio
+async def test_anonymous_searches_never_trigger_an_embedding_call(monkeypatch, search):
+    monkeypatch.setattr(ai_learning, "lessons_or_empty", AsyncMock(return_value=_lessons(11, 10, (1.0, 0.0))))
+    context = kb_service.ArticleAccessContext(user=None, user_id=None, is_super_admin=False, memberships={})
+    result = await kb_service.search_articles("printer jam", context, use_ollama=False)
+    assert sorted(article.get("id") for article in result["results"]) == [11, 12]
+    search.embed.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_slow_embedding_server_does_not_hold_up_search(monkeypatch, search):
+    import asyncio
+
+    async def slow(query):
+        await asyncio.sleep(5)
+        return [1.0, 0.0]
+
+    search.embed.side_effect = slow
+    monkeypatch.setattr(kb_service, "_LEARNING_EMBED_TIMEOUT_SECONDS", 0.05)
+    started = asyncio.get_running_loop().time()
+    assert sorted(await search(_lessons(11, 10, (1.0, 0.0)))) == [11, 12]
+    assert asyncio.get_running_loop().time() - started < 2

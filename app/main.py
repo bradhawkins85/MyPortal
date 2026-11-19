@@ -7989,6 +7989,12 @@ async def _set_link_learning(request: Request, *, ignored: bool) -> RedirectResp
         return flash_redirect(destination, "Choose an item to change.", "error")
     votes = await quality_repo.set_link_learning_ignored(target_type, target_id, ignored=ignored)
     ai_learning.invalidate_cache()
+    try:
+        # Stored links carry the learned score; re-check them so Undo brings hidden links back.
+        await rag_relationship_repo.requeue_ticket_links_for_target(target_type, target_id)
+    except Exception as exc:
+        log_error("Failed to re-check links after changing AI link learning", target_type=target_type,
+                  target_id=target_id, error=str(exc))
     await audit_service.record(
         action="ai_quality.link_learning." + ("ignore" if ignored else "restore"),
         request=request,
