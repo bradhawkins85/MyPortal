@@ -106,3 +106,52 @@ async def test_response_counts(quality_db):
     for user_id, rating in ((1, "up"), (3, "down"), (5, "down")):
         await repo.save_feedback(response_id=response_id, user_id=user_id, rating=rating, reason=None, comment=None)
     assert await repo.response_counts(response_id) == {"helpful": 1, "unhelpful": 2}
+
+
+@pytest.mark.anyio
+async def test_aggregate_by_feature(quality_db):
+    summary = await repo.record_output(feature="ticket_ai_summary", user_id=1, company_id=2,
+                                       subject_type="ticket", subject_id=7, output_text="a")
+    other = await repo.record_output(feature="ticket_ai_summary", user_id=1, company_id=2,
+                                     subject_type="ticket", subject_id=8, output_text="b")
+    link = await repo.record_output(feature="rag_relationships", user_id=1, company_id=2,
+                                    subject_type="ticket", subject_id=7, target_type="knowledge_base", target_id="vpn")
+    await repo.record_output(feature="product_descriptions", user_id=1, company_id=None, output_text="unrated")
+    await repo.save_feedback(response_id=summary, user_id=5, rating="down", reason="incomplete", comment=None,
+                             is_technician=True)
+    await repo.save_feedback(response_id=summary, user_id=6, rating="up", reason=None, comment=None)
+    await repo.save_feedback(response_id=other, user_id=5, rating="down", reason="incomplete", comment=None,
+                             is_technician=True)
+    await repo.save_feedback(response_id=link, user_id=5, rating="down", reason="unrelated", comment=None,
+                             is_technician=True)
+
+    groups = {row["feature"]: row for row in await repo.aggregate_by_feature()}
+
+    summary_row = groups["ticket_ai_summary"]
+    assert (summary_row["outputs"], summary_row["helpful"], summary_row["unhelpful"]) == (2, 1, 2)
+    assert (summary_row["technician_votes"], summary_row["customer_votes"]) == (2, 1)
+    assert summary_row["top_reason"] == "incomplete"
+    assert summary_row["last_rated_at"].endswith("+00:00")
+    assert groups["rag_relationships"]["top_reason"] == "unrelated"
+    unrated = groups["product_descriptions"]
+    assert (unrated["outputs"], unrated["helpful"], unrated["unhelpful"]) == (1, 0, 0)
+    assert unrated["top_reason"] is None and unrated["last_rated_at"] is None
+    assert [row["feature"] for row in await repo.aggregate_by_feature()][0] == "ticket_ai_summary"
+
+
+@pytest.mark.anyio
+async def test_rating_overview(quality_db):
+    from datetime import datetime, timedelta, timezone
+
+    assert await repo.rating_overview(since=datetime.now(timezone.utc) - timedelta(days=30)) == {
+        "ratings_since": 0, "helpful_pct": None, "features_rated": 0,
+    }
+    first = await repo.record_output(feature="ticket_ai_summary", user_id=1, company_id=2, output_text="a")
+    second = await repo.record_output(feature="agent", user_id=1, company_id=2, output_text="b")
+    await repo.save_feedback(response_id=first, user_id=5, rating="up", reason=None, comment=None)
+    await repo.save_feedback(response_id=first, user_id=6, rating="up", reason=None, comment=None)
+    await repo.save_feedback(response_id=second, user_id=5, rating="down", reason=None, comment=None)
+    overview = await repo.rating_overview(since=datetime.now(timezone.utc) - timedelta(days=30))
+    assert overview == {"ratings_since": 3, "helpful_pct": 67, "features_rated": 2}
+    future = await repo.rating_overview(since=datetime.now(timezone.utc) + timedelta(days=1))
+    assert future["ratings_since"] == 0

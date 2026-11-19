@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
@@ -241,3 +242,69 @@ async def response_counts(response_id: int) -> dict[str, int]:
         (response_id,),
     ) or {}
     return {"helpful": int(row.get("helpful") or 0), "unhelpful": int(row.get("unhelpful") or 0)}
+
+
+def _utc_iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat()
+    return str(value)
+
+
+async def aggregate_by_feature() -> list[dict[str, Any]]:
+    """Outputs and votes per AI feature, worst-rated first."""
+    rows = await db.fetch_all("""SELECT r.feature, COUNT(DISTINCT r.id) AS outputs,
+        SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END) AS helpful,
+        SUM(CASE WHEN f.rating = 'down' THEN 1 ELSE 0 END) AS unhelpful,
+        SUM(CASE WHEN f.id IS NOT NULL AND f.is_technician = 1 THEN 1 ELSE 0 END) AS technician_votes,
+        SUM(CASE WHEN f.id IS NOT NULL AND f.is_technician = 0 THEN 1 ELSE 0 END) AS customer_votes,
+        MAX(f.updated_at) AS last_rated_at
+        FROM ai_quality_responses r LEFT JOIN ai_quality_feedback f ON f.response_id = r.id
+        GROUP BY r.feature""")
+    reasons = await db.fetch_all("""SELECT r.feature, f.reason, COUNT(*) AS votes
+        FROM ai_quality_feedback f JOIN ai_quality_responses r ON r.id = f.response_id
+        WHERE f.rating = 'down' AND f.reason IS NOT NULL
+        GROUP BY r.feature, f.reason""")
+    top_reason: dict[str, tuple[int, str]] = {}
+    for row in reasons:
+        candidate = (int(row["votes"]), str(row["reason"]))
+        if candidate > top_reason.get(row["feature"], (0, "")):
+            top_reason[row["feature"]] = candidate
+    groups = []
+    for row in rows:
+        feature = str(row["feature"])
+        groups.append({
+            "feature": feature,
+            "outputs": int(row["outputs"] or 0),
+            "helpful": int(row["helpful"] or 0),
+            "unhelpful": int(row["unhelpful"] or 0),
+            "technician_votes": int(row["technician_votes"] or 0),
+            "customer_votes": int(row["customer_votes"] or 0),
+            "top_reason": top_reason[feature][1] if feature in top_reason else None,
+            "last_rated_at": _utc_iso(row["last_rated_at"]),
+        })
+    groups.sort(key=lambda group: (-group["unhelpful"], -group["outputs"], group["feature"]))
+    return groups
+
+
+async def rating_overview(*, since: datetime) -> dict[str, Any]:
+    cutoff = since.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    row = await db.fetch_one("""SELECT COUNT(*) AS ratings,
+        SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END) AS helpful,
+        COUNT(DISTINCT r.feature) AS features
+        FROM ai_quality_feedback f JOIN ai_quality_responses r ON r.id = f.response_id
+        WHERE f.updated_at >= ?""", (cutoff,)) or {}
+    ratings = int(row.get("ratings") or 0)
+    return {
+        "ratings_since": ratings,
+        "helpful_pct": round(100 * int(row.get("helpful") or 0) / ratings) if ratings else None,
+        "features_rated": int(row.get("features") or 0),
+    }

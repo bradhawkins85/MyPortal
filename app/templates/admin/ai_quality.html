@@ -1,41 +1,86 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
-{% block header_title %}
-<div class="page-header-bar">
-  <span class="header__title-text">AI Quality</span>
-  <div class="page-header-toolbar">
-    <label class="visually-hidden" for="ai-quality-filter">Filter AI quality records</label>
-    <input id="ai-quality-filter" class="form-input page-header-toolbar__search" type="search" placeholder="Filter records" data-table-filter="ai-quality-table">
+{% from "macros/counters.html" import counter_strip %}
+{% from "macros/tables.html" import data_table, table_toolbar %}
+{% block header_title %}AI Quality{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label": "Export related labels", "type": "link", "variant": "ghost", "href": "/api/agent/quality/related-labels.json"}, {"label": "Export CSV", "type": "link", "variant": "primary", "href": "/api/agent/quality/export.csv"}]) }}{% endblock %}
+{% block content %}
+{% set REASON_LABELS = {"incorrect": "Incorrect", "unrelated": "Unrelated", "incomplete": "Incomplete", "irrelevant": "Not useful here", "uncited": "Missing sources", "unsafe": "Unsafe", "other": "Other"} %}
+{% set helpful_pct = overview.helpful_pct %}
+<div class="settings-workspace ce-workspace" data-ae-workspace data-ae-storage-key="myportal:ai-quality:active-section" data-ae-default="by-feature">
+  <section class="ce-overview" aria-label="AI quality at a glance">
+    {{ counter_strip([
+      {"label": "Ratings, last 30 days", "value": overview.ratings_since, "variant": "neutral", "href": "#ai-quality-by-feature"},
+      {"label": "Rated helpful", "value": (helpful_pct ~ "%") if helpful_pct is not none else "—", "variant": "success" if (helpful_pct or 0) >= 70 else "warning" if helpful_pct is not none else "neutral", "href": "#ai-quality-by-feature"},
+      {"label": "Features rated", "value": overview.features_rated, "variant": "info", "href": "#ai-quality-by-feature"},
+    ], class="ce-overview__stats") }}
+  </section>
+
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="AI quality sections" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="ai-quality-nav-search">Find an AI quality section</label>
+        <input type="search" id="ai-quality-nav-search" class="form-input" placeholder="Find a setting…" autocomplete="off" data-ae-search>
+      </div>
+      {% set ai_quality_groups = [
+        ("Ratings", [("by-feature", "By feature", feature_groups | length)]),
+      ] %}
+      {% for group_label, items in ai_quality_groups %}
+        <div class="ce-nav__group" data-ae-nav-group>
+          <p class="ce-nav__group-title" id="ai-quality-nav-group-{{ loop.index }}">{{ group_label }}</p>
+          <ul class="ce-nav__list" aria-labelledby="ai-quality-nav-group-{{ loop.index }}">
+            {% for key, label, count in items %}
+              <li><a class="ce-nav__link" href="#ai-quality-{{ key }}" data-ae-link="{{ key }}">
+                <span class="ce-nav__label">{{ label }}</span>
+                {% if count != "" %}<span class="ce-nav__count">{{ count }}</span>{% endif %}
+              </a></li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endfor %}
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No sections match your search.</p>
+    </nav>
+
+    <div class="ce-panels">
+      <section class="card card--panel ce-section" id="ai-quality-by-feature" data-ae-section="by-feature" aria-labelledby="ai-quality-by-feature-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="ai-quality-by-feature-title">By feature</h2>
+          <p class="card__subtitle">How people rated each kind of AI output. Only technicians' ratings will teach MyPortal; customers' ratings are shown here for reference. Worst-rated features are listed first.</p>
+        </div></header>
+        <div class="ce-section__body">
+          {% set columns = [
+            {"key": "feature", "label": "Feature", "mobile_priority": "essential"},
+            {"key": "outputs", "label": "Outputs", "sort_type": "number"},
+            {"key": "helpful", "label": "Helpful", "sort_type": "number", "mobile_priority": "essential"},
+            {"key": "unhelpful", "label": "Not helpful", "sort_type": "number", "mobile_priority": "essential"},
+            {"key": "top_reason", "label": "Most common reason"},
+            {"key": "voters", "label": "Technician / customer votes", "sortable": false},
+            {"key": "last_rated", "label": "Last rated", "sort_type": "date"},
+          ] %}
+          {{ table_toolbar("ai-quality-features", search=true, search_placeholder="Filter features", columns=columns) }}
+          {% call data_table(columns, table_id="ai-quality-features", columns=columns, aria_label="Ratings for each AI feature") %}
+            {% for row in feature_groups %}
+            <tr>
+              <td data-column-key="feature">{{ row.label }}</td>
+              <td data-column-key="outputs" data-sort-value="{{ row.outputs }}">{{ row.outputs }}</td>
+              <td data-column-key="helpful" data-sort-value="{{ row.helpful }}">{{ row.helpful }}</td>
+              <td data-column-key="unhelpful" data-sort-value="{{ row.unhelpful }}">{% if row.unhelpful %}<span class="status status--warning">{{ row.unhelpful }}</span>{% else %}0{% endif %}</td>
+              <td data-column-key="top_reason">{{ REASON_LABELS.get(row.top_reason, row.top_reason) if row.top_reason else "—" }}</td>
+              <td data-column-key="voters">{{ row.technician_votes }} / {{ row.customer_votes }}</td>
+              <td data-column-key="last_rated" data-sort-value="{{ row.last_rated_at or '' }}">{% if row.last_rated_at %}<span data-utc="{{ row.last_rated_at }}">{{ row.last_rated_at }}</span>{% else %}Not yet rated{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="table__empty">No AI output has been rated yet. Ratings appear here as people use 👍/👎 on AI content.</td></tr>
+            {% endfor %}
+          {% endcall %}
+        </div>
+      </section>
+    </div>
   </div>
 </div>
 {% endblock %}
-{% block header_actions %}{{ page_header_actions([{"label": "Export related labels", "type": "link", "variant": "ghost", "href": "/api/agent/quality/related-labels.json"}, {"label": "Export CSV", "type": "link", "variant": "primary", "href": "/api/agent/quality/export.csv"}]) }}{% endblock %}
-{% block content %}
-<section class="card card--panel" aria-labelledby="ai-quality-agent-heading">
-  <header class="card__header"><h2 class="card__title" id="ai-quality-agent-heading">AI search answers</h2><p class="card__subtitle">De-identified feedback on AI search answers, grouped by feature, provider and confidence band. Source content and user queries are not included.</p></header>
-  <div class="table-responsive">
-    <table id="ai-quality-table" class="data-table" data-table-sortable>
-      <caption class="visually-hidden">Feedback on AI search answers</caption>
-      <thead><tr><th data-sort="string">Feature</th><th data-sort="string">Source type</th><th data-sort="string">Provider</th><th data-sort="string">Confidence</th><th data-sort="int">Responses</th><th data-sort="int">Helpful</th><th data-sort="int">Unhelpful</th><th data-sort="int">Average latency (ms)</th></tr></thead>
-      <tbody>{% for row in quality_groups %}<tr>
-        <td>{{ row.feature }}</td><td>{{ row.source_type or 'No evidence' }}</td><td>{{ row.provider or 'Not reported' }}</td><td>{{ row.confidence_band or 'Unknown' }}</td>
-        <td>{{ row.response_count }}</td><td>{{ row.helpful or 0 }}</td><td>{{ row.unhelpful or 0 }}</td><td>{{ (row.average_latency_ms or 0)|round|int }}</td>
-      </tr>{% else %}<tr><td colspan="8">No AI search answers have been recorded yet.</td></tr>{% endfor %}</tbody>
-    </table>
-  </div>
-</section>
-<section class="card card--panel" aria-labelledby="ai-quality-related-heading">
-  <header class="card__header"><h2 class="card__title" id="ai-quality-related-heading">Ticket related items</h2><p class="card__subtitle">Technician 👍/👎 votes on the <em>Related</em> items suggested on tickets, grouped by relationship type, item type and the model that suggested them. Ticket text and item titles are not included.</p></header>
-  <div class="table-responsive">
-    <table id="ai-quality-related-table" class="data-table" data-table-sortable>
-      <caption class="visually-hidden">Technician feedback on ticket related items</caption>
-      <thead><tr><th data-sort="string">Relationship</th><th data-sort="string">Item type</th><th data-sort="string">Model</th><th data-sort="int">Votes</th><th data-sort="int">Helpful</th><th data-sort="int">Unhelpful</th><th data-sort="float">Average relevance</th><th data-sort="string">Last vote</th></tr></thead>
-      <tbody>{% for row in related_feedback_groups %}<tr>
-        <td>{{ row.relationship_type or 'Unknown' }}</td><td>{{ row.target_source_type or 'Unknown' }}</td><td>{{ row.evaluated_model or 'Not reported' }}</td>
-        <td>{{ row.vote_count }}</td><td>{{ row.helpful or 0 }}</td><td>{{ row.unhelpful or 0 }}</td><td>{{ '%.2f'|format((row.average_relevance_score or 0)|float) }}</td>
-        <td>{% if row.last_voted_at %}<span data-utc="{{ row.last_voted_at }}">{{ row.last_voted_at }}</span>{% else %}—{% endif %}</td>
-      </tr>{% else %}<tr><td colspan="8">No technician votes on ticket related items yet. Use 👍/👎 on a ticket's Related panel to rate suggestions.</td></tr>{% endfor %}</tbody>
-    </table>
-  </div>
-</section>
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
 {% endblock %}

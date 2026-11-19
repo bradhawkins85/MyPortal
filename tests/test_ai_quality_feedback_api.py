@@ -131,3 +131,41 @@ def test_rating_api_is_off_when_ai_quality_is_disabled():
     policy = ComponentAvailability(disabled_feature_packs=frozenset({"ai_quality"}))
     assert not policy.path_available("/api/ai-quality/feedback")
     assert ComponentAvailability(disabled_feature_packs=frozenset()).path_available("/api/ai-quality/feedback")
+
+
+def _admin_client(monkeypatch):
+    from app.api.dependencies.auth import require_super_admin
+
+    async def by_feature():
+        return [{"feature": "ticket_ai_summary", "outputs": 2, "helpful": 1, "unhelpful": 2, "technician_votes": 2,
+                 "customer_votes": 1, "top_reason": "incomplete", "last_rated_at": "2026-11-18T03:00:00+00:00"}]
+
+    async def empty():
+        return []
+
+    monkeypatch.setattr(agent_routes.quality_repo, "aggregate_by_feature", by_feature)
+    monkeypatch.setattr(agent_routes.quality_repo, "aggregate", empty)
+    monkeypatch.setattr(agent_routes.rag_relationship_repo, "relationship_feedback_aggregate", empty)
+    app = FastAPI()
+    app.include_router(agent_routes.router)
+    app.dependency_overrides[require_super_admin] = lambda: {"id": 1, "is_super_admin": True}
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://portal.example.com")
+
+
+@pytest.mark.anyio
+async def test_summary_includes_every_feature(monkeypatch):
+    async with _admin_client(monkeypatch) as client:
+        body = (await client.get("/api/agent/quality/summary")).json()
+    assert body["features"][0]["feature"] == "ticket_ai_summary"
+    assert body["features"][0]["label"] == "Ticket AI summary"
+    assert "groups" in body and "related_feedback_groups" in body
+
+
+@pytest.mark.anyio
+async def test_csv_export_is_by_feature(monkeypatch):
+    async with _admin_client(monkeypatch) as client:
+        text = (await client.get("/api/agent/quality/export.csv")).text
+    lines = text.strip().splitlines()
+    assert lines[0] == ("feature,label,outputs,helpful,unhelpful,technician_votes,customer_votes,"
+                        "top_reason,last_rated_at")
+    assert lines[1].startswith("ticket_ai_summary,Ticket AI summary,2,1,2,2,1,incomplete,")

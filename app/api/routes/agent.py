@@ -194,10 +194,18 @@ async def submit_feedback(payload: AgentFeedbackRequest, request: Request,
     await ai_quality_routes.submit_rating(current_user, payload, request=request)
 
 
+async def _feature_rows() -> list[dict]:
+    from app.services import llm_usage
+
+    return [{**row, "label": llm_usage.feature_label(row["feature"])}
+            for row in await quality_repo.aggregate_by_feature()]
+
+
 @router.get("/quality/summary")
 async def quality_summary(_: dict = Depends(require_super_admin)) -> dict:
     """Return only de-identified aggregates; source records are never exposed."""
     return {
+        "features": await _feature_rows(),
         "groups": await quality_repo.aggregate(),
         "related_feedback_groups": await rag_relationship_repo.relationship_feedback_aggregate(),
         "pipeline_version": quality_repo.PIPELINE_VERSION,
@@ -207,9 +215,10 @@ async def quality_summary(_: dict = Depends(require_super_admin)) -> dict:
 @router.get("/quality/export.csv", response_class=Response)
 async def quality_export(_: dict = Depends(require_super_admin)) -> Response:
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=["feature", "source_type", "provider", "confidence_band", "response_count", "helpful", "unhelpful", "average_latency_ms"])
+    writer = csv.DictWriter(output, fieldnames=["feature", "label", "outputs", "helpful", "unhelpful",
+                                                "technician_votes", "customer_votes", "top_reason", "last_rated_at"])
     writer.writeheader()
-    writer.writerows(await quality_repo.aggregate())
+    writer.writerows(await _feature_rows())
     return Response(output.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=ai-quality-summary.csv"})
 
