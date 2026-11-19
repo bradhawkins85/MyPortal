@@ -7,7 +7,9 @@ from typing import Any
 from app.core.database import db
 
 PIPELINE_VERSION = "agent-rag-v1"
-REASONS = {"incorrect", "uncited", "irrelevant", "incomplete", "unsafe", "other"}
+OUTPUT_PIPELINE_VERSION = "output-v1"
+_EMPTY_QUERY_HASH = "0" * 64
+REASONS = {"incorrect", "uncited", "irrelevant", "unrelated", "incomplete", "unsafe", "other"}
 _MAX_REDACTION_INPUT_CHARS = 5000
 _LOCAL_EMAIL_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-")
 _DOMAIN_EMAIL_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
@@ -122,7 +124,7 @@ async def record_response(*, user_id: int, company_id: int | None, feature: str,
                           confidence_band: str | None, outcome: str) -> int:
     identifiers, source_types = evidence_ids(evidence)
     provider = model.split(":", 1)[0] if model and ":" in model else None
-    return await db.execute_insert(
+    return await db.execute_returning_lastrowid(
         """INSERT INTO ai_quality_responses
         (user_id, company_id, feature, query_hash, query_redacted,
          evidence_identifiers, source_types, primary_source_type, provider, model, pipeline_version,
@@ -135,21 +137,82 @@ async def record_response(*, user_id: int, company_id: int | None, feature: str,
     )
 
 
-async def save_feedback(*, response_id: int, user_id: int, rating: str,
-                        reason: str | None, comment: str | None) -> None:
+def _optional_key(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+async def record_output(*, feature: str, user_id: int, company_id: int | None,
+                        subject_type: str | None = None, subject_id: str | int | None = None,
+                        target_type: str | None = None, target_id: str | int | None = None,
+                        output_text: str | None = None, model: str | None = None,
+                        prompt_version: str | None = None, latency_ms: int = 0,
+                        outcome: str = "answered") -> int:
+    """Record one AI output so it can be rated; the same output is recorded once."""
+    from app.services.llm_usage import FEATURES_BY_KEY
+
+    if feature not in FEATURES_BY_KEY:
+        raise ValueError(f"Unknown AI feature: {feature}")
+    subject_key = (_optional_key(subject_type), _optional_key(subject_id))
+    target_key = (_optional_key(target_type), _optional_key(target_id))
+    output_hash = hashlib.sha256((output_text or "").encode()).hexdigest()
+    existing = await db.fetch_one(
+        """SELECT id FROM ai_quality_responses
+        WHERE feature = ? AND COALESCE(subject_type, '') = ? AND COALESCE(subject_id, '') = ?
+          AND COALESCE(target_type, '') = ? AND COALESCE(target_id, '') = ? AND output_hash = ?
+        ORDER BY id LIMIT 1""",
+        (feature, subject_key[0] or "", subject_key[1] or "", target_key[0] or "",
+         target_key[1] or "", output_hash),
+    )
+    if existing:
+        return int(existing["id"])
+    provider = model.split(":", 1)[0] if model and ":" in model else None
+    return await db.execute_returning_lastrowid(
+        """INSERT INTO ai_quality_responses
+        (user_id, company_id, feature, query_hash, query_redacted, evidence_identifiers, source_types,
+         provider, model, pipeline_version, latency_ms, outcome, subject_type, subject_id,
+         target_type, target_id, output_text, output_hash, prompt_version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, company_id, feature, _EMPTY_QUERY_HASH, "", "[]", "[]", provider, model,
+         OUTPUT_PIPELINE_VERSION, max(0, latency_ms), outcome, subject_key[0], subject_key[1],
+         target_key[0], target_key[1], output_text, output_hash, prompt_version),
+    )
+
+
+async def get_response(response_id: int) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        """SELECT id, user_id, company_id, feature, subject_type, subject_id, target_type, target_id,
+        output_text, model, prompt_version, created_at FROM ai_quality_responses WHERE id = ?""",
+        (response_id,),
+    )
+
+
+async def save_feedback(*, response_id: int, user_id: int, rating: str | None,
+                        reason: str | None, comment: str | None, is_technician: bool = False) -> None:
+    """Save a user's vote on one output; ``rating=None`` clears it."""
+    if rating is None:
+        await db.execute(
+            "DELETE FROM ai_quality_feedback WHERE response_id = ? AND user_id = ?",
+            (response_id, user_id),
+        )
+        return
     existing = await db.fetch_one(
         "SELECT id FROM ai_quality_feedback WHERE response_id = ? AND user_id = ?",
         (response_id, user_id),
     )
-    values = (rating, reason, comment or None)
+    values = (rating, reason, (comment or "").strip() or None, 1 if is_technician else 0)
     if existing:
         await db.execute(
-            "UPDATE ai_quality_feedback SET rating = ?, reason = ?, comment = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE ai_quality_feedback SET rating = ?, reason = ?, comment = ?, is_technician = ?, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             values + (int(existing["id"]),),
         )
     else:
         await db.execute(
-            "INSERT INTO ai_quality_feedback (response_id, user_id, rating, reason, comment) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO ai_quality_feedback (response_id, user_id, rating, reason, comment, is_technician) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             (response_id, user_id) + values,
         )
 
