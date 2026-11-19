@@ -1,0 +1,7 @@
+{
+  "guid": "6566003e-7722-42bc-ac16-f910e283328b",
+  "occurred_at": "2026-11-19T02:27Z",
+  "change_type": "Fix",
+  "summary": "Customers who can see all of their company's tickets can now reply from the ticket page, without being shown the technician-only resolution step options or the reply status menu.",
+  "content_hash": "22a07cffb18c5aa921da6e87fa69b96ddd6268e725d418a25ff5b399b6155119"
+}

@@ -11049,8 +11049,11 @@ async def _render_portal_ticket_detail(
             log_error("Failed to determine ticket watcher state", error=str(exc))
             is_watcher = False
 
+    # Mirrors the reply POST handler: company users with ``menu.tickets`` write
+    # access may view and reply to any ticket in their company, including
+    # tickets they only watch.
     has_company_ticket_access = False
-    if not (has_helpdesk_access or is_super_admin or is_requester or is_watcher):
+    if not (has_helpdesk_access or is_super_admin or is_requester):
         has_all_ticket_access = await _has_menu_page_access(request, user, "menu.tickets", write=True)
         if has_all_ticket_access:
             available_companies = await company_access.list_accessible_companies(user)
@@ -11504,7 +11507,9 @@ async def _render_portal_ticket_detail(
         "matrix_chat_enabled": settings.matrix_enabled,
         "ticket_chat_room": ticket_chat_room,
         "merged_child_tickets": merged_child_tickets,
-        "can_reply": bool(has_helpdesk_access or is_super_admin or is_requester),
+        "can_reply": bool(
+            has_helpdesk_access or is_super_admin or is_requester or has_company_ticket_access
+        ),
         "is_requester": is_requester,
         "is_watcher": is_watcher,
         "has_helpdesk_access": has_helpdesk_access,

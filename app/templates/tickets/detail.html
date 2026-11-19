@@ -332,7 +332,7 @@
             </div>
           </article>
 
-          {% if ticket.status in ['resolved', 'closed'] %}
+          {% if (has_helpdesk_access or is_super_admin) and ticket.status in ['resolved', 'closed'] %}
           <details class="card card--panel" id="resolution-steps">
             <summary class="card__header">
               <span class="card__title">Resolution Steps</span>
