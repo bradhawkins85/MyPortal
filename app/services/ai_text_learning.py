@@ -11,6 +11,7 @@ Two kinds of learning reach a prompt:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -25,6 +26,9 @@ EXAMPLE_WINDOW_DAYS = 180
 LESSON_WINDOW_DAYS = 90
 LESSON_MIN_VOTES = 3
 LESSON_MIN_SHARE = 0.2
+# Same shape as ai_prompt_security's citation check: copied citations from an
+# old output would make a new draft cite records it was never given.
+_CITATION_RE = re.compile(r"\[[A-Za-z][A-Za-z0-9 _-]*:[^\]\n]+\]")
 EXAMPLE_ALLOWED_USE = (
     "Use only as a style and completeness reference; never copy facts, names, numbers or details from it"
 )
@@ -74,7 +78,8 @@ def _example_record(feature: str, row: dict) -> UntrustedRecord:
     content = {"rating": "helpful" if helpful else "not helpful"}
     if not helpful:
         content["reason"] = row.get("reason")
-    content["text"] = str(row.get("output_text") or "")[:EXAMPLE_MAX_CHARS]
+    text = _CITATION_RE.sub("[citation]", str(row.get("output_text") or ""))
+    content["text"] = text[:EXAMPLE_MAX_CHARS]
     return UntrustedRecord(
         f"rated-example:{row['output_id']}",
         f"a previous {_feature_label(feature)} that a technician at this company rated "
