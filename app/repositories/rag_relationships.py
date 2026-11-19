@@ -4,6 +4,7 @@ import json
 import math
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -854,6 +855,44 @@ async def list_relationship_feedback_labels() -> list[dict[str, Any]]:
         ORDER BY f.relationship_id, MAX(f.updated_at)
         """
     )
+
+
+async def relationship_feedback_aggregate() -> list[dict[str, Any]]:
+    """De-identified 👍/👎 counts on ticket Related items for /admin/ai-quality."""
+    rows = await db.fetch_all(
+        """
+        SELECT f.relationship_type, f.target_source_type, f.evaluated_model,
+               COUNT(*) AS vote_count,
+               SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END) AS helpful,
+               SUM(CASE WHEN f.rating = 'down' THEN 1 ELSE 0 END) AS unhelpful,
+               AVG(f.relevance_score) AS average_relevance_score,
+               MAX(f.updated_at) AS last_voted_at
+        FROM rag_relationship_feedback f
+        GROUP BY f.relationship_type, f.target_source_type, f.evaluated_model
+        ORDER BY unhelpful DESC, vote_count DESC
+        """
+    )
+    groups = []
+    for row in rows:
+        group = dict(row)
+        group["last_voted_at"] = _utc_iso(group.get("last_voted_at"))
+        groups.append(group)
+    return groups
+
+
+def _utc_iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat()
+    return str(value)
 
 
 RELATED_FEEDBACK_DATASET_VERSION = 1

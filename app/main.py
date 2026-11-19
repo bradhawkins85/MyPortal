@@ -7953,9 +7953,14 @@ async def admin_ai_quality_page(request: Request):
     if redirect:
         return redirect
     from app.repositories import ai_quality as quality_repo
+    from app.repositories import rag_relationships as rag_relationship_repo
     return await _render_template(
         "admin/ai_quality.html", request, current_user,
-        extra={"title": "AI Quality", "quality_groups": await quality_repo.aggregate()},
+        extra={
+            "title": "AI Quality",
+            "quality_groups": await quality_repo.aggregate(),
+            "related_feedback_groups": await rag_relationship_repo.relationship_feedback_aggregate(),
+        },
     )
 
 
