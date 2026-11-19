@@ -70,6 +70,19 @@ def sanitise_headers(headers: Mapping[str, Any] | None) -> dict[str, str] | None
     return {str(key): REDACTED if _is_sensitive(key) else _truncate(str(value)) or "" for key, value in headers.items()}
 
 
+def body_is_complete(content: bytes | str | None, stored: Any) -> bool:
+    """Return whether ``stored`` (from :func:`sanitise_body`) equals the sent body."""
+    if not content:
+        return stored is None
+    text = content.decode(errors="replace") if isinstance(content, bytes) else content
+    if isinstance(stored, str):
+        return stored == text
+    try:
+        return json.loads(text) == stored
+    except (TypeError, ValueError):
+        return False
+
+
 def _redact_value(value: Any, key: object | None = None) -> Any:
     if key is not None and _is_sensitive(key):
         return REDACTED
@@ -184,6 +197,8 @@ class MonitoredAsyncClient(httpx.AsyncClient):
         safe_body = sanitise_body(content, request.headers.get("content-type", ""))
         try:
             metadata: dict[str, Any] = {"http_method": request.method}
+            if not body_is_complete(content, safe_body):
+                metadata["replayable"] = False
             if request.extensions.get("myportal.operation_id"):
                 metadata["operation_id"] = str(request.extensions["myportal.operation_id"])
             if request.extensions.get("myportal.attempt"):

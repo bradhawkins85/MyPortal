@@ -191,6 +191,61 @@ def test_ai_findings_keep_only_known_devices_and_valid_fields():
         findings.parse_ai_findings("I could not find anything", devices, signals)
 
 
+def _large_signals() -> dict:
+    devices = [{"device_id": i, "name": f"PC-{i:03}", "company_id": i % 5 + 1, "os": "Windows 11 Pro",
+                "model": "Dell Latitude 7440", "cpu": "13th Gen Intel(R) Core(TM) i7-1365U", "ram_gb": 16}
+               for i in range(1, 501)]
+    return {
+        "window": {"current": "last 24 hours"},
+        "event_spikes": [{"source": f"Source{n}", "event_id": n, "last_24h": 9000, "device_count": 40,
+                          "sample_message": "x" * 200,
+                          "top_devices": [{"device_id": d, "last_24h": 50} for d in range(n * 8 + 1, n * 8 + 9)]}
+                         for n in range(12)],
+        "software_changes": [{"name": f"App {n}", "device_count": 12, "devices": list(range(n * 12 + 1, n * 12 + 13))}
+                             for n in range(40)],
+        "rule_findings": [{"key": f"rule-{n}", "title": "A rule finding " * 4, "severity": "medium"} for n in range(40)],
+        "devices": devices,
+        "companies": [{"company_id": c, "name": f"Company {c}"} for c in range(1, 6)],
+    }
+
+
+def test_fit_signals_shrinks_to_budget_and_keeps_references_consistent():
+    signals = _large_signals()
+    size = lambda content: len(json.dumps(content))  # noqa: E731
+    assert size(signals) > 60_000
+    fitted = findings.fit_signals(signals, size, 8_000)
+
+    assert size(fitted) <= 8_000
+    assert fitted["event_spikes"], "the most important list is kept"
+    referenced = findings._referenced_device_ids({k: v for k, v in fitted.items() if k not in ("devices", "companies")})
+    assert {ref["device_id"] for ref in fitted["devices"]} == referenced
+    assert {ref["company_id"] for ref in fitted["companies"]} == {ref["company_id"] for ref in fitted["devices"]}
+    assert fitted["omitted"]["rule_findings"] > 0
+    assert len(signals["devices"]) == 500, "the caller's signals are not changed"
+
+
+def test_fit_signals_leaves_small_signals_alone():
+    signals = _large_signals()
+    size = lambda content: len(json.dumps(content))  # noqa: E731
+    assert findings.fit_signals(signals, size, size(signals)) == signals
+
+
+@pytest.mark.anyio
+async def test_ai_findings_prompt_respects_configured_budget(monkeypatch):
+    sent: list = []
+
+    async def fake_chat(llm, messages):
+        sent.append(messages)
+        return json.dumps({"findings": []})
+
+    monkeypatch.setattr(findings, "_chat", fake_chat)
+    monkeypatch.setattr(findings, "build_llm_config", lambda: {"base_url": "http://llm", "model": "m", "api_key": ""})
+    monkeypatch.setattr(findings.get_settings(), "findings_llm_max_prompt_chars", 30_000)
+    await findings.ai_findings(_large_signals(), _devices())
+
+    assert sum(len(message["content"]) for message in sent[0]) <= 30_000
+
+
 def test_llm_config_prefers_findings_settings(monkeypatch):
     settings = findings.get_settings()
     monkeypatch.setattr(settings, "findings_llm_base_url", "https://llm.example.com/")

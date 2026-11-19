@@ -37,7 +37,10 @@ confidence score.
 
 What is sent: device and company names, event counts with a 240-character excerpt of one sample
 message per event type, account, service and program names, and spec and usage figures. Full event
-logs are never sent. The reply is checked before it is stored: only devices and companies that were
+logs are never sent. The prompt is kept within `FINDINGS_LLM_MAX_PROMPT_CHARS` so it fits the
+model's context window: when there is more evidence than that, the device lists on each item are
+shortened first, then the least important lists (existing and rule findings, failing checks, low disk,
+software changes) are halved in turn before event spikes. The model is told which lists were cut. The reply is checked before it is stored: only devices and companies that were
 in the data are kept, and malformed items are dropped. Requests appear under **RMM findings** in
 LLM usage.
 
@@ -69,6 +72,7 @@ log database being down) keeps its findings until it can be read again.
 | `FINDINGS_INTERVAL_HOURS` | `6` | Hours between scheduled analyses (1-168). |
 | `FINDINGS_BASELINE_DAYS` | `7` | Days the last 24 hours are compared with (2-30). |
 | `FINDINGS_LLM_BASE_URL`, `_MODEL`, `_API_KEY` | empty | The findings model; empty uses `TROUBLESHOOT_LLM_*`. |
+| `FINDINGS_LLM_MAX_PROMPT_CHARS` | `60000` | Largest prompt in characters (8000-2000000). About 3 characters per token: 60000 suits a 32k-token context; raise it for larger models. |
 
 ## API
 
