@@ -841,6 +841,16 @@ async def admin_ticket_related_feedback(ticket_id: int, relationship_id: int, re
         user_id=int(current_user["id"]),
         rating=rating,
     )
+    try:
+        await rag_relationship_repo.mirror_feedback_to_quality(
+            relationship,
+            ticket_id=ticket_id,
+            user_id=int(current_user["id"]),
+            rating=rating,
+            company_id=ticket.get("company_id"),
+        )
+    except Exception as exc:  # the vote is saved; shared feedback is best effort
+        log_error("Failed to copy Related item vote to AI feedback", ticket_id=ticket_id, error=str(exc))
     await audit_service.record(
         action="tickets.related.feedback",
         request=request,

@@ -739,7 +739,7 @@ async def get_relationship_for_document(
     """Return the relationship only when ``document_id`` is one of its ends."""
     return await db.fetch_one(
         """
-        SELECT r.*, d.source_type AS other_source_type
+        SELECT r.*, d.source_type AS other_source_type, d.source_id AS other_source_id
         FROM rag_relationships r
         LEFT JOIN rag_documents d ON d.id = CASE WHEN r.source_document_id = ? THEN r.target_document_id ELSE r.source_document_id END
         WHERE r.id = ? AND (r.source_document_id = ? OR r.target_document_id = ?)
@@ -893,6 +893,35 @@ def _utc_iso(value: Any) -> str | None:
             value = value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc).isoformat()
     return str(value)
+
+
+RELATED_ITEM_FEATURE = "rag_relationships"
+
+
+async def mirror_feedback_to_quality(
+    relationship: Mapping[str, Any],
+    *,
+    ticket_id: int,
+    user_id: int,
+    rating: str | None,
+    company_id: int | None,
+) -> None:
+    """Copy a Related-item vote into the shared AI feedback that MyPortal learns from."""
+    from app.repositories import ai_quality as quality_repo
+
+    response_id = await quality_repo.record_output(
+        feature=RELATED_ITEM_FEATURE,
+        user_id=user_id,
+        company_id=company_id,
+        subject_type="ticket",
+        subject_id=ticket_id,
+        target_type=relationship.get("other_source_type"),
+        target_id=relationship.get("other_source_id"),
+        model=relationship.get("evaluated_model"),
+    )
+    await quality_repo.save_feedback(
+        response_id=response_id, user_id=user_id, rating=rating, reason=None, comment=None, is_technician=True
+    )
 
 
 RELATED_FEEDBACK_DATASET_VERSION = 1
