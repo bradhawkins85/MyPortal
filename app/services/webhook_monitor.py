@@ -12,7 +12,12 @@ import httpx
 
 from app.core.logging import log_error, log_info
 from app.repositories import webhook_events as webhook_repo
-from app.services.monitored_http import sanitise_body, sanitise_headers, sanitise_url
+from app.services.monitored_http import (
+    MONITOR_BODY_LIMIT,
+    sanitise_body,
+    sanitise_headers,
+    sanitise_url,
+)
 from app.services.outbound_url_guard import redirect_guard_hooks
 
 _STAFF_WORKFLOW_RESUME_SOURCE = "staff_workflow_http_post"
@@ -27,6 +32,50 @@ _SENSITIVE_HEADERS = {
     "x-access-token",
 }
 _SENSITIVE_RESPONSE_HEADERS = {"set-cookie", "set-cookie2"}
+# Transport headers describe the original connection and body encoding.  httpx
+# recomputes them for the replayed request; replaying a stale ``Content-Length``
+# against a different body fails with "Too little data for declared Content-Length".
+_TRANSPORT_HEADERS = {
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "keep-alive",
+    "proxy-connection",
+    "te",
+    "trailer",
+    "upgrade",
+}
+
+
+class WebhookNotReplayableError(Exception):
+    """Raised when a stored event no longer holds the request that was sent."""
+
+
+def replay_blocker(event: Mapping[str, Any]) -> str | None:
+    """Explain why ``event`` cannot be resent, or return ``None`` when it can.
+
+    Monitored requests keep at most :data:`MONITOR_BODY_LIMIT` characters of the
+    body and redact sensitive fields, so a large request (such as an AI prompt)
+    is stored as a shortened copy.  Resending that copy would deliver a broken
+    request, so these events are refused with an explanation instead.
+    """
+
+    metadata = event.get("metadata")
+    if isinstance(metadata, Mapping) and metadata.get("replayable") is False:
+        return (
+            "This request was recorded for monitoring only: its body was shortened "
+            "or redacted when stored, so it cannot be resent. Run the feature that "
+            "made the request again instead."
+        )
+    payload = event.get("payload")
+    if isinstance(payload, str) and len(payload) >= MONITOR_BODY_LIMIT and payload.endswith("..."):
+        return (
+            f"This request body was larger than {MONITOR_BODY_LIMIT:,} characters and "
+            "only a shortened copy was stored, so it cannot be resent. Run the "
+            "feature that made the request again instead."
+        )
+    return None
 
 
 def _truncate(value: str | None, *, limit: int = 4000) -> str | None:
@@ -519,6 +568,12 @@ async def fail_stalled_events(*, timeout_seconds: int = 600) -> int:
 
 
 async def force_retry(event_id: int) -> dict[str, Any] | None:
+    event = await webhook_repo.get_event(event_id)
+    if not event:
+        return None
+    reason = replay_blocker(event)
+    if reason:
+        raise WebhookNotReplayableError(reason)
     await webhook_repo.force_retry(event_id)
     event = await webhook_repo.get_event(event_id)
     if not event:
@@ -565,7 +620,11 @@ async def _attempt_event(event: dict[str, Any]) -> None:
     attempt = int(event.get("attempt_count") or 0) + 1
     max_attempts = int(event.get("max_attempts") or 1)
     backoff_seconds = int(event.get("backoff_seconds") or 300)
-    headers = {str(key): str(value) for key, value in (event.get("headers") or {}).items()}
+    headers = {
+        str(key): str(value)
+        for key, value in (event.get("headers") or {}).items()
+        if str(key).lower() not in _TRANSPORT_HEADERS
+    }
     payload = event.get("payload")
     if str(event.get("name") or "").startswith(_OLLAMA_EVENT_PREFIX):
         headers, payload = await _prepare_ollama_retry(headers, payload)

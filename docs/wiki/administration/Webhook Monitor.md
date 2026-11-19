@@ -21,6 +21,18 @@ and queue state. The following additions expand the operational tooling:
 - Deletion cascades to attempt records via existing foreign keys; no additional
   cleanup is required.
 
+## Retrying a delivery
+
+- `POST /scheduler/webhooks/{event_id}/retry` (the **Retry delivery** button)
+  resends the stored request. Connection headers from the original attempt
+  such as `Content-Length` and `Host` are not replayed; they are recalculated
+  for the resent body.
+- The monitor stores at most 4,000 characters of each request body and redacts
+  sensitive fields. When the stored copy is shorter or redacted (for example a
+  large AI prompt sent to an LLM endpoint), the request cannot be resent
+  faithfully, so the API returns HTTP 409 with an explanation instead of
+  sending a broken request. Run the feature that made the request again.
+
 ## Admin UI controls
 
 - The **Webhook delivery queue** page now includes a **Delete** action next to

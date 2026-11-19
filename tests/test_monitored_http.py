@@ -174,3 +174,23 @@ def test_failed_body_redacts_message_outside_error_object_and_bad_codes():
     assert result["message"] == monitored_http.REDACTED
     assert result["error"]["message"] == "bad input"
     assert result["error"]["code"] == monitored_http.REDACTED
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize(
+    ("body", "replayable"),
+    [
+        ({"model": "m", "prompt": "short"}, True),
+        ({"model": "m", "prompt": "x" * (monitored_http.MONITOR_BODY_LIMIT * 2)}, False),
+        ({"model": "m", "password": "secret"}, False),
+    ],
+)
+async def test_lossy_stored_body_is_marked_not_replayable(repo, body, replayable):
+    create, *_ = repo
+    async with monitored_http.MonitoredAsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={}))
+    ) as client:
+        await client.post("https://llm.example.test/v1/chat/completions", json=body)
+
+    metadata = create.await_args.kwargs["metadata"]
+    assert ("replayable" not in metadata) is replayable

@@ -380,13 +380,20 @@ async def list_webhook_attempts(
     return [WebhookEventAttemptResponse.model_validate(attempt) for attempt in attempts]
 
 
-@router.post("/webhooks/{event_id}/retry", response_model=WebhookEventResponse)
+@router.post(
+    "/webhooks/{event_id}/retry",
+    response_model=WebhookEventResponse,
+    responses={409: {"description": "The stored request was shortened or redacted and cannot be resent"}},
+)
 async def retry_webhook_event(
     event_id: int,
     _: None = Depends(require_database),
     __: dict[str, Any] = Depends(require_super_admin),
 ) -> WebhookEventResponse:
-    event = await webhook_monitor.force_retry(event_id)
+    try:
+        event = await webhook_monitor.force_retry(event_id)
+    except webhook_monitor.WebhookNotReplayableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if not event:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Event not found"
