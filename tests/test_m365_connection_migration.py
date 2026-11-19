@@ -112,11 +112,11 @@ def test_legacy_inventory_uses_next_version_and_restores_matching_row(monkeypatc
     inventory.assert_awaited_once_with(7, 1, "tenant")
 
 
-def test_existing_credentials_are_reencrypted_for_legacy_inventory(monkeypatch):
+def test_existing_credentials_are_inventoried_without_double_encryption(monkeypatch):
     current = {
         "tenant_id": "tenant",
         "client_id": "client",
-        "client_secret": "decrypted-secret",
+        "client_secret": "stored-ciphertext",
     }
     ensure_legacy = AsyncMock()
     monkeypatch.setattr(m365.m365_repo, "get_credentials", AsyncMock(return_value=current))
@@ -135,8 +135,10 @@ def test_existing_credentials_are_reencrypted_for_legacy_inventory(monkeypatch):
     )
 
     inventoried = ensure_legacy.await_args.args[1]
-    assert inventoried["client_secret"] == "encrypted:decrypted-secret"
-    assert current["client_secret"] == "decrypted-secret"
+    # The repository row already holds ciphertext; a rollback must restore it
+    # unchanged rather than a doubly-encrypted, unusable secret.
+    assert inventoried["client_secret"] == "stored-ciphertext"
+    assert current["client_secret"] == "stored-ciphertext"
     upsert_credentials.assert_not_awaited()
 
 
@@ -262,6 +264,10 @@ def test_failed_cutover_restores_previous_active_connection(monkeypatch):
         if "INSERT INTO company_m365_credentials" in sql:
             raise RuntimeError("database failure")
     monkeypatch.setattr(m365_connections.db, "execute", execute)
+    monkeypatch.setattr(
+        m365_connections.db, "fetch_one",
+        AsyncMock(return_value={"tenant_id": "tenant", "client_id": "old"}),
+    )
 
     @asynccontextmanager
     async def lock(*args, **kwargs):
@@ -288,6 +294,10 @@ def test_first_connection_cutover_upserts_existing_compatibility_row(monkeypatch
     )
     execute = AsyncMock()
     monkeypatch.setattr(m365_connections.db, "execute", execute)
+    monkeypatch.setattr(
+        m365_connections.db, "fetch_one",
+        AsyncMock(return_value={"tenant_id": "tenant", "client_id": "new"}),
+    )
 
     @asynccontextmanager
     async def lock(*args, **kwargs):
@@ -305,6 +315,95 @@ def test_first_connection_cutover_upserts_existing_compatibility_row(monkeypatch
     sql, params = compatibility_calls[0].args
     assert "ON DUPLICATE KEY UPDATE" in sql
     assert params[-1] == 69
+    # Consent granted to the staged app during first-time setup is kept.
+    assert "refresh_token = NULL" not in sql
+
+
+def _activate_with_compatibility_row(monkeypatch, compatibility_row):
+    candidate = {
+        "id": 11, "company_id": 5, "state": "pending", "tenant_id": "tenant",
+        "client_id": "new-client", "client_secret": "encrypted-new-secret",
+        "app_object_id": "new-app", "client_secret_key_id": "new-key",
+        "client_secret_expires_at": None,
+        "verification_tenant": 1, "verification_workload": 1,
+        "verification_renewal": 1,
+    }
+    legacy = {"id": 10, "company_id": 5, "state": "active"}
+    monkeypatch.setattr(m365_connections, "get", AsyncMock(return_value=candidate))
+    monkeypatch.setattr(
+        m365_connections, "get_active", AsyncMock(side_effect=[legacy, candidate])
+    )
+    monkeypatch.setattr(
+        m365_connections.db, "fetch_one", AsyncMock(return_value=compatibility_row)
+    )
+    execute = AsyncMock()
+    monkeypatch.setattr(m365_connections.db, "execute", execute)
+
+    @asynccontextmanager
+    async def lock(*args, **kwargs):
+        yield True
+    monkeypatch.setattr(m365_connections.db, "acquire_lock", lock)
+
+    asyncio.run(m365_connections.activate(5, 11))
+    calls = [
+        call.args for call in execute.await_args_list
+        if "INSERT INTO company_m365_credentials" in call.args[0]
+    ]
+    assert len(calls) == 1
+    return calls[0]
+
+
+def test_legacy_migration_cutover_stores_new_secret_and_drops_legacy_tokens(
+    monkeypatch,
+):
+    sql, params = _activate_with_compatibility_row(
+        monkeypatch, {"tenant_id": "tenant", "client_id": "legacy-client"}
+    )
+
+    assert params[:3] == ("tenant", "new-client", "encrypted-new-secret")
+    assert "client_secret = VALUES(client_secret)" in sql
+    # The legacy app's refresh token would otherwise be presented with the
+    # new client ID and secret, which Entra rejects after the migration.
+    for column in (
+        "refresh_token", "access_token", "token_expires_at",
+        "token_cache_client_id", "app_access_token", "app_token_cache_client_id",
+    ):
+        assert f"{column} = NULL" in sql
+
+
+def test_cutover_keeps_tokens_when_application_is_unchanged(monkeypatch):
+    sql, _ = _activate_with_compatibility_row(
+        monkeypatch, {"tenant_id": "TENANT", "client_id": "New-Client"}
+    )
+
+    assert "refresh_token = NULL" not in sql
+
+
+def test_rollback_restores_legacy_secret_and_drops_new_app_tokens(monkeypatch):
+    active = {"id": 11, "company_id": 5, "state": "active", "previous_connection_id": 10}
+    previous = {
+        "id": 10, "company_id": 5, "state": "rollback", "tenant_id": "tenant",
+        "client_id": "legacy-client", "client_secret": "encrypted-legacy-secret",
+    }
+    monkeypatch.setattr(m365_connections, "get_active", AsyncMock(return_value=active))
+    monkeypatch.setattr(m365_connections, "get", AsyncMock(return_value=previous))
+    monkeypatch.setattr(
+        m365_connections.db, "fetch_one",
+        AsyncMock(return_value={"tenant_id": "tenant", "client_id": "new-client"}),
+    )
+    execute = AsyncMock()
+    monkeypatch.setattr(m365_connections.db, "execute", execute)
+
+    asyncio.run(m365_connections.rollback(5))
+
+    sql, params = next(
+        call.args for call in execute.await_args_list
+        if "UPDATE company_m365_credentials" in call.args[0]
+    )
+    assert params[:3] == ("tenant", "legacy-client", "encrypted-legacy-secret")
+    assert params[-1] == 5
+    assert "refresh_token = NULL" in sql
+    assert sql.rstrip().endswith("WHERE company_id = %s")
 
 
 def test_retirement_requires_empty_dependency_inventory(monkeypatch):
