@@ -201,7 +201,11 @@ async def submit_feedback(payload: AgentFeedbackRequest,
 @router.get("/quality/summary")
 async def quality_summary(_: dict = Depends(require_super_admin)) -> dict:
     """Return only de-identified aggregates; source records are never exposed."""
-    return {"groups": await quality_repo.aggregate(), "pipeline_version": quality_repo.PIPELINE_VERSION}
+    return {
+        "groups": await quality_repo.aggregate(),
+        "related_feedback_groups": await rag_relationship_repo.relationship_feedback_aggregate(),
+        "pipeline_version": quality_repo.PIPELINE_VERSION,
+    }
 
 
 @router.get("/quality/export.csv", response_class=Response)

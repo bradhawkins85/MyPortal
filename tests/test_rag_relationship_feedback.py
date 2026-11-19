@@ -190,3 +190,26 @@ async def test_feedback_route_rejects_bad_input(route_env, relationship_id, payl
         await admin_routes.admin_ticket_related_feedback(4, relationship_id, _Request(payload))
     assert excinfo.value.status_code == expected
     assert route_env == []
+
+
+@pytest.mark.anyio
+async def test_feedback_aggregate_groups_ticket_related_votes(feedback_db):
+    for relationship_id, user_id, rating in ((10, 8, "up"), (11, 8, "down"), (11, 9, "down")):
+        relationship = await repo.get_relationship_for_document(relationship_id, 1)
+        await repo.save_relationship_feedback(
+            relationship=relationship, ticket_id=4, user_id=user_id, rating=rating
+        )
+
+    groups = await repo.relationship_feedback_aggregate()
+
+    by_type = {row["relationship_type"]: row for row in groups}
+    assert by_type["RELATED"]["target_source_type"] == "products"
+    assert by_type["RELATED"]["evaluated_model"] == "model-a"
+    assert int(by_type["RELATED"]["vote_count"]) == 2
+    assert int(by_type["RELATED"]["helpful"]) == 0
+    assert int(by_type["RELATED"]["unhelpful"]) == 2
+    assert int(by_type["KNOWN_ISSUE"]["helpful"]) == 1
+    assert groups[0]["relationship_type"] == "RELATED"
+    assert "battery" not in json.dumps([dict(row) for row in groups], default=str).lower()
+    assert by_type["RELATED"]["last_voted_at"].endswith("+00:00")
+

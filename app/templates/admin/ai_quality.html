@@ -11,15 +11,30 @@
 {% endblock %}
 {% block header_actions %}{{ page_header_actions([{"label": "Export related labels", "type": "link", "variant": "ghost", "href": "/api/agent/quality/related-labels.json"}, {"label": "Export CSV", "type": "link", "variant": "primary", "href": "/api/agent/quality/export.csv"}]) }}{% endblock %}
 {% block content %}
-<section class="card card--panel">
-  <p>De-identified feedback grouped by feature, provider and confidence band. Source content and user queries are not included.</p>
+<section class="card card--panel" aria-labelledby="ai-quality-agent-heading">
+  <header class="card__header"><h2 class="card__title" id="ai-quality-agent-heading">AI search answers</h2><p class="card__subtitle">De-identified feedback on AI search answers, grouped by feature, provider and confidence band. Source content and user queries are not included.</p></header>
   <div class="table-responsive">
     <table id="ai-quality-table" class="data-table" data-table-sortable>
+      <caption class="visually-hidden">Feedback on AI search answers</caption>
       <thead><tr><th data-sort="string">Feature</th><th data-sort="string">Source type</th><th data-sort="string">Provider</th><th data-sort="string">Confidence</th><th data-sort="int">Responses</th><th data-sort="int">Helpful</th><th data-sort="int">Unhelpful</th><th data-sort="int">Average latency (ms)</th></tr></thead>
       <tbody>{% for row in quality_groups %}<tr>
         <td>{{ row.feature }}</td><td>{{ row.source_type or 'No evidence' }}</td><td>{{ row.provider or 'Not reported' }}</td><td>{{ row.confidence_band or 'Unknown' }}</td>
         <td>{{ row.response_count }}</td><td>{{ row.helpful or 0 }}</td><td>{{ row.unhelpful or 0 }}</td><td>{{ (row.average_latency_ms or 0)|round|int }}</td>
-      </tr>{% else %}<tr><td colspan="8">No AI quality records yet.</td></tr>{% endfor %}</tbody>
+      </tr>{% else %}<tr><td colspan="8">No AI search answers have been recorded yet.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+<section class="card card--panel" aria-labelledby="ai-quality-related-heading">
+  <header class="card__header"><h2 class="card__title" id="ai-quality-related-heading">Ticket related items</h2><p class="card__subtitle">Technician 👍/👎 votes on the <em>Related</em> items suggested on tickets, grouped by relationship type, item type and the model that suggested them. Ticket text and item titles are not included.</p></header>
+  <div class="table-responsive">
+    <table id="ai-quality-related-table" class="data-table" data-table-sortable>
+      <caption class="visually-hidden">Technician feedback on ticket related items</caption>
+      <thead><tr><th data-sort="string">Relationship</th><th data-sort="string">Item type</th><th data-sort="string">Model</th><th data-sort="int">Votes</th><th data-sort="int">Helpful</th><th data-sort="int">Unhelpful</th><th data-sort="float">Average relevance</th><th data-sort="string">Last vote</th></tr></thead>
+      <tbody>{% for row in related_feedback_groups %}<tr>
+        <td>{{ row.relationship_type or 'Unknown' }}</td><td>{{ row.target_source_type or 'Unknown' }}</td><td>{{ row.evaluated_model or 'Not reported' }}</td>
+        <td>{{ row.vote_count }}</td><td>{{ row.helpful or 0 }}</td><td>{{ row.unhelpful or 0 }}</td><td>{{ '%.2f'|format((row.average_relevance_score or 0)|float) }}</td>
+        <td>{% if row.last_voted_at %}<span data-utc="{{ row.last_voted_at }}">{{ row.last_voted_at }}</span>{% else %}—{% endif %}</td>
+      </tr>{% else %}<tr><td colspan="8">No technician votes on ticket related items yet. Use 👍/👎 on a ticket's Related panel to rate suggestions.</td></tr>{% endfor %}</tbody>
     </table>
   </div>
 </section>
