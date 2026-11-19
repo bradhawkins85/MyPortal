@@ -262,3 +262,73 @@ def test_vector_prefilter_is_never_ready_without_vector_support(monkeypatch):
 
     assert asyncio.run(rag_vector_index.prefilter_ready()) is False
     rag_vector_index.reset_state()
+
+
+def _kb_row():
+    import json
+
+    return {
+        "chunk_id": 1, "document_id": 1, "source_type": "knowledge_base", "source_id": "vpn",
+        "company_id": None, "title": "VPN setup", "chunk_text": "Printer jam fix steps",
+        # Scores about 0.49 for the query below: four 👎 (-0.20) take it under
+        # the 0.30 knowledge-base threshold.
+        "embedding_json": json.dumps([0.2, 0.98]), "metadata_json": "{}", "permission_scope_json": "{}",
+    }
+
+
+def _retrieve_kb(monkeypatch, lessons):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from app.services import ai_learning
+
+    async def fake_chunks(*, embedding_model, source_types, limit):
+        return [_kb_row()] if source_types == ["knowledge_base"] else []
+
+    monkeypatch.setattr(rag_retrieval.rag_repo, "list_active_chunks", fake_chunks)
+    monkeypatch.setattr(rag_retrieval, "embed_text", AsyncMock(return_value=[1.0, 0.0]))
+    monkeypatch.setattr(rag_retrieval, "can_access_current_candidate", AsyncMock(return_value=True))
+    if isinstance(lessons, Exception):
+        async def broken():
+            raise lessons
+        monkeypatch.setattr(ai_learning.quality_repo, "list_link_votes", broken)
+        ai_learning.invalidate_cache()
+    else:
+        monkeypatch.setattr(ai_learning, "lessons_or_empty", AsyncMock(return_value=lessons))
+    return asyncio.run(rag_retrieval.retrieve_candidates(
+        "printer jam", {"id": 1, "is_super_admin": True}, source_filters=["knowledge_base"],
+        min_score=0.0, rerank=False,
+    ))
+
+
+def _vpn_lessons(count, embedding):
+    from datetime import datetime, timezone
+
+    from app.services.ai_learning import LinkLesson
+
+    now = datetime.now(timezone.utc)
+    return {("knowledge_base", "vpn"): [LinkLesson("knowledge_base", "vpn", -1, embedding, now)] * count}
+
+
+def test_technician_downvotes_on_similar_tickets_drop_a_candidate(monkeypatch):
+    assert _retrieve_kb(monkeypatch, {})  # present without lessons
+    assert _retrieve_kb(monkeypatch, _vpn_lessons(4, (1.0, 0.0))) == []
+
+
+def test_downvotes_on_unrelated_tickets_change_nothing(monkeypatch):
+    baseline = _retrieve_kb(monkeypatch, {})[0]
+    candidate = _retrieve_kb(monkeypatch, _vpn_lessons(4, (0.0, 1.0)))[0]
+    assert candidate["score"] == baseline["score"]
+    assert candidate["learning_adjustment"] == 0.0
+
+
+def test_technician_downvotes_lower_the_stored_score(monkeypatch):
+    baseline = _retrieve_kb(monkeypatch, {})[0]["score"]
+    candidate = _retrieve_kb(monkeypatch, _vpn_lessons(1, (1.0, 0.0)))[0]
+    assert candidate["learning_adjustment"] == -0.05
+    assert candidate["score"] == round(baseline - 0.05, 4)
+
+
+def test_learning_failure_does_not_break_retrieval(monkeypatch):
+    baseline = _retrieve_kb(monkeypatch, {})
+    assert _retrieve_kb(monkeypatch, RuntimeError("database unavailable")) == baseline
