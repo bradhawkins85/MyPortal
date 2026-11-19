@@ -1815,8 +1815,10 @@ async def execute_agent_query(
             status = ticket.get("status") or "unknown"
             priority = ticket.get("priority") or "normal"
             try:
-                replies = await tickets_repo.list_replies(
-                    int(ticket.get("id")), include_internal=False
+                replies = ai_consent.exclude_automation_replies(
+                    await tickets_repo.list_replies(
+                        int(ticket.get("id")), include_internal=False
+                    )
                 )
                 attachments = await ticket_attachments_repo.list_attachments(
                     int(ticket.get("id")), access_levels=("open", "closed")
@@ -1825,8 +1827,10 @@ async def execute_agent_query(
                     int(ticket.get("id"))
                 )
                 if is_super_admin:
-                    all_replies = await tickets_repo.list_replies(
-                        int(ticket.get("id")), include_internal=True
+                    all_replies = ai_consent.exclude_automation_replies(
+                        await tickets_repo.list_replies(
+                            int(ticket.get("id")), include_internal=True
+                        )
                     )
                     for reply in all_replies:
                         if not reply.get("is_internal"):

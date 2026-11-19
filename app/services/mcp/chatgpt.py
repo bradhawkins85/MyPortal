@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from fastapi import status
 
 from app.repositories import tickets as tickets_repo
+from app.services import ai_consent
 from app.services import modules as modules_service
 from app.services import tickets as tickets_service
 
@@ -234,7 +235,9 @@ async def _get_ticket(arguments: Mapping[str, Any]) -> dict[str, Any]:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise ChatGPTMCPError(status.HTTP_404_NOT_FOUND, f"Ticket {ticket_id} not found")
-    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+    replies = ai_consent.exclude_automation_replies(
+        await tickets_repo.list_replies(ticket_id, include_internal=True)
+    )
     watchers = await tickets_repo.list_watchers(ticket_id)
     return {
         "ticket": _serialise_ticket(ticket),

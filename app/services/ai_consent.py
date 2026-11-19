@@ -15,6 +15,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from app.core.logging import log_error
 from app.repositories import ai_consent as ai_consent_repo
+from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
 
 AGENT_OPTED_OUT_MESSAGE = (
@@ -165,12 +166,28 @@ async def is_ai_allowed_for_call(recording: Mapping[str, Any] | None) -> bool:
     return True
 
 
+def exclude_automation_replies(
+    replies: Iterable[Mapping[str, Any]] | None,
+) -> list[Mapping[str, Any]]:
+    """Drop conversation entries recorded by automations.
+
+    Automation audit notes and shipment-tracking updates describe what the
+    system did, not the conversation, so AI never reads them.
+    """
+
+    return [
+        reply
+        for reply in replies or []
+        if isinstance(reply, Mapping) and not tickets_repo.is_automation_reply(reply)
+    ]
+
+
 async def filter_replies_for_ai(
     replies: Sequence[Mapping[str, Any]] | None,
 ) -> list[Mapping[str, Any]]:
-    """Drop replies written by people who opted out of AI processing."""
+    """Drop automation entries and replies by people who opted out of AI."""
 
-    items = [reply for reply in replies or [] if isinstance(reply, Mapping)]
+    items = exclude_automation_replies(replies)
     blocked = await opted_out_user_ids(reply.get("author_id") for reply in items)
     if not blocked:
         return list(items)

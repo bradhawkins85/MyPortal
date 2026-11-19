@@ -18,7 +18,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
 import time
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping, TypedDict
+from typing import Any, Awaitable, Callable, Mapping, Sequence, TypedDict
 from urllib.parse import urljoin
 
 import httpx
@@ -2728,7 +2728,7 @@ _AI_CUSTOM_PROMPT_FORMATS = ("text", "list", "choice")
 _AI_CUSTOM_PROMPT_MAX_CHOICES = 20
 _AI_CUSTOM_PROMPT_CHOICE_MAX_LENGTH = 100
 _AI_CUSTOM_PROMPT_REASON_MAX_LENGTH = 1000
-_AI_CUSTOM_PROMPT_CONVERSATIONS = ("public", "all", "none")
+_AI_CUSTOM_PROMPT_CONVERSATIONS = ("public", "internal", "all", "none")
 _AI_CUSTOM_PROMPT_DEFAULT_HISTORY = 10
 _AI_CUSTOM_PROMPT_MAX_HISTORY = 50
 _AI_CUSTOM_PROMPT_INSTRUCTIONS_MAX_LENGTH = 4000
@@ -2927,7 +2927,7 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             {
                 "name": "conversation",
-                "label": "Conversation history to include (public replies, all including internal notes, or none; defaults to public)",
+                "label": "Conversation history to include (public replies, internal notes only, all replies and internal notes, or none; automation entries are never included; defaults to public)",
                 "type": "string",
                 "enum": list(_AI_CUSTOM_PROMPT_CONVERSATIONS),
             },
@@ -7301,8 +7301,10 @@ async def _invoke_ai_request_missing_info(
             ticket_id, ticket, "Use only to decide which details the requester gave"
         )
     ]
-    replies = await _tickets_repo().list_replies(ticket_id, include_internal=False)
-    for reply in list(replies)[-5:]:
+    replies = _exclude_automation_replies(
+        await _tickets_repo().list_replies(ticket_id, include_internal=False)
+    )
+    for reply in replies[-5:]:
         body = _ai_prompt_ticket_text(reply.get("body"), limit=1500)
         if body:
             records.append(
@@ -7439,6 +7441,15 @@ def _ai_custom_prompt_speaker(
     return "support team" if author_id is not None else "email or system message"
 
 
+def _exclude_automation_replies(
+    replies: Sequence[Mapping[str, Any]] | None,
+) -> list[Mapping[str, Any]]:
+    """Drop automation conversation entries so AI never reads them."""
+
+    ai_consent = import_module("app.services.ai_consent")
+    return ai_consent.exclude_automation_replies(replies)
+
+
 def _ai_custom_prompt_html(text: str) -> str:
     paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
     return "".join(
@@ -7511,10 +7522,14 @@ async def _invoke_ai_custom_prompt(
     ]
     included_replies = 0
     if conversation != "none":
-        replies = await _tickets_repo().list_replies(
-            ticket_id, include_internal=conversation == "all"
+        replies = _exclude_automation_replies(
+            await _tickets_repo().list_replies(
+                ticket_id, include_internal=conversation != "public"
+            )
         )
-        for reply in list(replies)[-history_limit:]:
+        if conversation == "internal":
+            replies = [reply for reply in replies if reply.get("is_internal")]
+        for reply in replies[-history_limit:]:
             body = _ai_prompt_ticket_text(reply.get("body"), limit=1500)
             if not body:
                 continue

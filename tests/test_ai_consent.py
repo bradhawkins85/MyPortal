@@ -78,6 +78,21 @@ async def test_filter_replies_for_ai_drops_opted_out_authors(monkeypatch):
     assert [reply["id"] for reply in kept] == [2, 3]
 
 
+@pytest.mark.anyio
+async def test_filter_replies_for_ai_drops_automation_entries(monkeypatch):
+    _opt_out(monkeypatch, set())
+    replies = [
+        {"id": 1, "author_id": 12, "body": "tech reply"},
+        {"id": 2, "author_id": None, "body": "audit", "external_reference": "automation:3:run:n"},
+        {"id": 3, "author_id": None, "body": "parcel", "external_reference": "shipment-watch:x"},
+        {"id": 4, "author_id": None, "body": "email", "external_reference": "imap:abc"},
+    ]
+
+    kept = await ai_consent.filter_replies_for_ai(replies)
+
+    assert [reply["id"] for reply in kept] == [1, 4]
+
+
 def test_opt_out_updates_records_timestamp_once():
     turned_on = ai_opt_out.opt_out_updates(True, {"ai_opt_out": 0})
     assert turned_on["ai_opt_out"] == 1 and turned_on["ai_opt_out_at"] is not None

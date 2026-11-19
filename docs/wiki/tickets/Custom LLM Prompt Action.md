@@ -24,7 +24,7 @@ are skipped like every other AI ticket action.
 | `desired_outcome` | No | What a good answer looks like: length, tone, one item per product, "empty list when none", and so on. |
 | `response_format` | No | `text` (default) for a written answer, `list` for one item per finding, posted as a bullet list, or `choice` to pick exactly one of `choices`. |
 | `choices` | For `choice` | 2–20 comma-separated answers (each up to 100 characters), e.g. `Billing, Outage, Other`. The AI must return one of them, plus a one-sentence reason. |
-| `conversation` | No | `public` (default) includes public replies, `all` also includes internal notes, `none` sends only the ticket subject and description. |
+| `conversation` | No | `public` (default) includes public replies, `internal` includes only internal notes, `all` includes public replies and internal notes, `none` sends only the ticket subject and description. Automation entries are never included. |
 | `history_limit` | No | Number of most recent replies to include, 1–50 (default 10). |
 | `note_title` | No | Heading for the internal note (default "AI response"). |
 | `model` | No | Overrides the Ollama module's model for this action. |
@@ -53,6 +53,10 @@ the examples above.
   reaches the model only through the records above, so customer text cannot
   rewrite your instructions. Use `conversation` and `history_limit` to choose
   what the model sees.
+- Conversation entries recorded by automations (automation audit notes and
+  shipment-tracking updates, shown as *Automation* on the ticket timeline)
+  are never sent to the model, and they do not count towards `history_limit`.
+  This applies to every AI feature that reads a ticket, including AI summary.
 - With `choice`, the note reads "Picked: *choice*" followed by the reason. A
   pick that isn't one of your `choices` (letter case and spacing aside) is
   rejected and recorded as an error, so a later step never branches on an

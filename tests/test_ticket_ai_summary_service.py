@@ -92,6 +92,56 @@ async def test_refresh_ticket_ai_summary_updates_summary(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_refresh_ticket_ai_summary_ignores_automation_entries(monkeypatch):
+    prompts: list[str] = []
+
+    async def fake_get_ticket(ticket_id):
+        return {"id": ticket_id, "subject": "Printer issue", "description": "Jammed", "status": "open", "priority": "high"}
+
+    async def fake_list_replies(ticket_id, include_internal=True):
+        return [
+            {"author_id": 12, "body": "Replaced the toner.", "is_internal": False, "created_at": None},
+            {
+                "author_id": None,
+                "body": "Automation audit: set priority to urgent",
+                "is_internal": True,
+                "external_reference": "automation:4:run:note",
+                "created_at": None,
+            },
+            {
+                "author_id": None,
+                "body": "Shipment out for delivery",
+                "is_internal": False,
+                "external_reference": "shipment-watch:123",
+                "created_at": None,
+            },
+        ]
+
+    async def fake_get_user(user_id):
+        return {"id": user_id, "email": f"user{user_id}@example.test"}
+
+    async def fake_trigger(slug, payload, *, background=True, on_complete=None):
+        prompts.append(payload.get("prompt", ""))
+        return {"status": "queued"}
+
+    async def fake_update(ticket_id, **fields):
+        return None
+
+    monkeypatch.setattr(tickets_service.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_service.tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_service.tickets_repo, "update_ticket", fake_update)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(tickets_service.modules_service, "trigger_module", fake_trigger)
+
+    await tickets_service.refresh_ticket_ai_summary(5)
+
+    assert prompts
+    assert "Replaced the toner." in prompts[0]
+    assert "Automation audit" not in prompts[0]
+    assert "Shipment out for delivery" not in prompts[0]
+
+
+@pytest.mark.anyio
 async def test_refresh_ticket_ai_summary_handles_missing_module(monkeypatch):
     updates: list[dict[str, Any]] = []
 
