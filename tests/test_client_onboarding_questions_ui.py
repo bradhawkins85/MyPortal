@@ -250,3 +250,55 @@ def test_review_server_errors_select_review_and_custom_controls_fit_mobile(onboa
         page.set_viewport_size({"width": width, "height": 900})
         bounds = page.locator("#custom-1").bounding_box()
         assert bounds and bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
+
+
+_FORM_DEFINITION = {"entry_label": "Stakeholder", "fields": [
+    {"key": "f1", "label": "Name", "field_type": "short_text", "required": True, "options": []},
+    {"key": "f2", "label": "Email", "field_type": "email", "required": False, "options": []},
+]}
+
+
+def test_custom_form_entries_can_be_added_removed_validated_and_reviewed(onboarding_page):
+    page = onboarding_page
+    _mount(page, [_question(1, "form", required=True, form=_FORM_DEFINITION)])
+    question = page.locator('[data-cof-custom-question="1"]')
+    assert question.locator('[data-cof-form-entry]').count() == 1
+    _continue(page, "business")
+    assert page.locator("#custom-1-error").inner_text() == "Add at least one stakeholder."
+    page.locator("#custom-1-0-f2").fill("not-an-email")
+    _continue(page, "business")
+    assert page.locator("#custom-1-error").inner_text() == "Stakeholder 1, Name: Answer this question."
+    assert page.locator("#custom-1-0-f1").get_attribute("aria-invalid") == "true"
+    assert page.locator("#custom-1-0-f2").get_attribute("aria-invalid") == "false"
+    page.locator("#custom-1-0-f1").fill("Jo Smith")
+    page.locator("#custom-1-0-f2").fill("jo@acme.com.au")
+    question.locator('[data-cof-form-add]').click()
+    assert page.locator("#custom-1-1-f1").evaluate("input => document.activeElement === input")
+    page.locator("#custom-1-1-f1").fill("Sam Lee")
+    question.locator('[data-cof-form-add]').click()
+    entries = question.locator('[data-cof-form-entry]')
+    assert entries.count() == 3
+    entries.nth(0).locator('[data-cof-form-remove]').click()
+    assert entries.count() == 2
+    assert entries.nth(0).locator('.cof-form-entry__title').inner_text() == "Stakeholder 1"
+    _continue(page, "business")
+    _continue(page, "sites")
+    _continue(page, "billing")
+    review = page.locator('[data-cof-review]')
+    assert review.get_by_text("1 stakeholder: Sam Lee", exact=True).count() == 1
+    submitted = page.evaluate("() => Array.from(new FormData(document.querySelector('[data-cof-form]')).entries())")
+    assert ["custom-1-entry", "1"] in submitted and ["custom-1-entry", "2"] in submitted
+    assert ["custom-1-1-f1", "Sam Lee"] in submitted
+    assert not any(name.startswith("custom-1-0-") for name, _ in submitted)
+
+
+def test_custom_form_in_a_new_site_uses_that_sites_names(onboarding_page):
+    page = onboarding_page
+    _mount(page, [_question(1, "form", "site_contact", form=_FORM_DEFINITION)])
+    _continue(page, "business")
+    page.locator('[data-cof-site-add]').click()
+    modal = page.locator('[data-cof-site-modal="1"]')
+    modal.locator('[data-cof-tab="contact"]').click()
+    modal.locator('[data-cof-form-add]').click()
+    assert modal.locator("#site-1-custom-1-1-f1").count() == 1
+    assert modal.locator('[data-cof-form-entry]').count() == 2

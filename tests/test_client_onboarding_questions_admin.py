@@ -31,6 +31,8 @@ def _render(**overrides):
         "field_types": FIELD_TYPES, "question_sections": SECTIONS, "questions": [],
         "question_form": {}, "question_errors": [], "editing_question_id": None,
         "csrf_token": "test-csrf", "max_questions": 100,
+        "form_field_types": {"short_text": "Short answer", "phone": "Phone number", "dropdown": "Dropdown"},
+        "max_form_fields": 20,
     }
     return env.get_template("admin/client_onboarding_questions.html").render(context | overrides)
 
@@ -118,7 +120,8 @@ def test_question_limit_preserves_failed_add_fields_but_disables_adding():
     assert _selected(add, "field_type") == ["email"]
     assert _selected(add, "section") == ["billing"]
     assert ">Unsaved help</textarea>" in add
-    assert "disabled" in _tags(add, "button")[0]
+    submit = [button for button in _tags(add, "button") if button.get("type") == "submit"][0]
+    assert "disabled" in submit
     assert "Remove a question before adding another." in html
 
 

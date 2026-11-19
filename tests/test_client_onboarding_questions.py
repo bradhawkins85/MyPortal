@@ -256,9 +256,10 @@ async def question_database(monkeypatch):
     database = Database()
     database._use_sqlite = True
     database._sqlite_conn = _SQLiteConnection()
-    migration = Path("migrations/463_client_onboarding_questions.sql").read_text(encoding="utf-8")
-    for statement in database._split_sql_statements(database._adapt_sql_for_sqlite(migration)):
-        await database.execute(statement)
+    for name in ("463_client_onboarding_questions.sql", "562_client_onboarding_question_forms.sql"):
+        migration = (Path("migrations") / name).read_text(encoding="utf-8")
+        for statement in database._split_sql_statements(database._adapt_sql_for_sqlite(migration)):
+            await database.execute(statement)
     monkeypatch.setattr(questions_repo, "db", database)
     try:
         yield database

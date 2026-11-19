@@ -9,7 +9,7 @@ from app.core.database import db
 
 _SELECT = (
     "SELECT id, label, field_type, section, help_text, required, options_json, "
-    "display_order FROM client_onboarding_questions"
+    "form_json, display_order FROM client_onboarding_questions"
 )
 
 
@@ -27,6 +27,12 @@ def _normalise(row: dict[str, Any] | None) -> dict[str, Any] | None:
         options = []
     record["options"] = options if isinstance(options, list) and all(isinstance(option, str) for option in options) else []
     record["help_text"] = str(record.get("help_text") or "")
+    raw_form = record.pop("form_json", None)
+    try:
+        form = json.loads(raw_form) if isinstance(raw_form, str) else raw_form
+    except (TypeError, ValueError):
+        form = None
+    record["form"] = form if isinstance(form, dict) else None
     return record
 
 
@@ -43,19 +49,20 @@ async def save_question(question_id: int | None, data: dict[str, Any]) -> dict[s
     values = (
         data["label"], data["field_type"], data["section"], data.get("help_text") or None,
         int(bool(data.get("required"))), json.dumps(data.get("options") or [], ensure_ascii=False),
+        json.dumps(data["form"], ensure_ascii=False) if data.get("form") else None,
         int(data.get("display_order") or 0),
     )
     if question_id is None:
         question_id = int(await db.execute_returning_lastrowid(
             """INSERT INTO client_onboarding_questions
-               (label, field_type, section, help_text, required, options_json, display_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""", values,
+               (label, field_type, section, help_text, required, options_json, form_json, display_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", values,
         ))
     else:
         await db.execute(
             """UPDATE client_onboarding_questions
                SET label = ?, field_type = ?, section = ?, help_text = ?,
-                   required = ?, options_json = ?, display_order = ?,
+                   required = ?, options_json = ?, form_json = ?, display_order = ?,
                    updated_at = CURRENT_TIMESTAMP
                WHERE id = ?""", (*values, int(question_id)),
         )
