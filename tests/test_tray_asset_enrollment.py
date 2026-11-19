@@ -56,8 +56,9 @@ async def asset_db(monkeypatch):
           id INTEGER PRIMARY KEY, tray_device_id INT, company_id INT, asset_id INT,
           status TEXT, last_seen_utc TEXT);
     """)
-    migration = Path(__file__).resolve().parents[1] / "migrations/485_tray_device_assets.sql"
-    await conn.executescript(adapter._adapt_sql_for_sqlite(migration.read_text()))
+    for name in ("485_tray_device_assets.sql", "566_asset_wan_ips.sql"):
+        migration = Path(__file__).resolve().parents[1] / "migrations" / name
+        await conn.executescript(adapter._adapt_sql_for_sqlite(migration.read_text()))
     async def refresh_tags(asset_id):
         pass
     monkeypatch.setattr(assets, "_refresh_auto_tags", refresh_tags)

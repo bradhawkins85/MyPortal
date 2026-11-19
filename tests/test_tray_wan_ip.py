@@ -123,9 +123,9 @@ def test_heartbeat_rejects_wrong_family_and_junk(monkeypatch):
 
 
 def test_heartbeat_falls_back_to_observed_public_address(monkeypatch):
-    record = _heartbeat(monkeypatch, TrayHeartbeatRequest(), client=("198.51.100.8", 1))
+    record = _heartbeat(monkeypatch, TrayHeartbeatRequest(), client=("8.8.8.8", 1))
     record.assert_awaited_once_with(
-        42, wan_ipv4="198.51.100.8", wan_ipv6=None, replace_both=False
+        42, wan_ipv4="8.8.8.8", wan_ipv6=None, replace_both=False
     )
 
 
