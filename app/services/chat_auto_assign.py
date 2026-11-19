@@ -152,6 +152,10 @@ async def apply_auto_assign(
         return None
 
     try:
+        room = await chat_repo.get_room(room_id)
+        existing_tech = (room or {}).get("assigned_tech_user_id")
+        if existing_tech and int(existing_tech) != int(tech_user_id):
+            return None
         await chat_repo.assign_tech(room_id, tech_user_id)
         log_info(
             "chat_auto_assign: assigned room",
@@ -164,4 +168,58 @@ async def apply_auto_assign(
         log_error("chat_auto_assign: failed to assign tech", room_id=room_id, error=str(exc))
         return None
 
+    await _invite_assigned_tech(room_id, (room or {}).get("matrix_room_id"), int(tech_user_id))
+
     return tech_user_id
+
+
+async def _invite_assigned_tech(room_id: int, matrix_room_id: str | None, tech_user_id: int) -> None:
+    """Invite the auto-assigned technician into the Matrix room.
+
+    Mirrors the manual assign route: invite, grant moderator power, and record
+    the technician as a participant.  Technicians without a Matrix username
+    stay assigned but cannot be invited.  Failures are logged, never raised,
+    so the assignment itself is kept.
+    """
+    from app.repositories import chat as chat_repo
+    from app.repositories import users as users_repo
+    from app.services import matrix as matrix_service
+
+    try:
+        tech = await users_repo.get_user_by_id(tech_user_id)
+    except Exception as exc:
+        log_error("chat_auto_assign: failed to load technician", room_id=room_id, error=str(exc))
+        return
+    tech_mxid = ((tech or {}).get("matrix_user_id") or "").strip()
+    if not tech_mxid:
+        log_info(
+            "chat_auto_assign: technician has no Matrix username; not invited",
+            room_id=room_id,
+            tech_user_id=tech_user_id,
+        )
+        return
+
+    if matrix_room_id:
+        try:
+            await matrix_service.invite_user(matrix_room_id, tech_mxid)
+        except Exception as exc:
+            log_error(
+                "chat_auto_assign: failed to invite technician to Matrix room",
+                room_id=room_id,
+                mxid=tech_mxid,
+                error=str(exc),
+            )
+        try:
+            await matrix_service.set_user_power_level(matrix_room_id, tech_mxid, 100)
+        except Exception as exc:
+            log_error(
+                "chat_auto_assign: failed to set Matrix power level for technician",
+                room_id=room_id,
+                mxid=tech_mxid,
+                error=str(exc),
+            )
+
+    try:
+        await chat_repo.add_participant(room_id, tech_mxid, role="technician", user_id=tech_user_id)
+    except Exception as exc:
+        log_error("chat_auto_assign: failed to record technician participant", room_id=room_id, error=str(exc))
