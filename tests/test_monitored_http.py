@@ -176,6 +176,19 @@ def test_failed_body_redacts_message_outside_error_object_and_bad_codes():
     assert result["error"]["code"] == monitored_http.REDACTED
 
 
+def test_failed_response_keeps_context_token_counts():
+    body = (
+        b'{"error": {"code": 400, "message": "input (513 tokens) is larger than the max '
+        b'context size (512 tokens). skipping", "type": "exceed_context_size_error", '
+        b'"n_prompt_tokens": 513, "n_ctx": 512}}'
+    )
+    error = monitored_http.sanitise_error_body(body, "application/json")["error"]
+    assert error["n_prompt_tokens"] == 513
+    assert error["n_ctx"] == 512
+    assert error["code"] == 400
+    assert error["message"].startswith("input (513 tokens)")
+
+
 @pytest.mark.anyio("asyncio")
 @pytest.mark.parametrize(
     ("body", "replayable"),

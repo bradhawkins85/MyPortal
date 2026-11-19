@@ -1,0 +1,7 @@
+{
+  "guid": "e517ebbc-3529-4820-ad8d-690db2335831",
+  "occurred_at": "2026-11-19T05:21Z",
+  "change_type": "Fix",
+  "summary": "RAG indexing now splits ticket text that is too long for the embedding model's context instead of failing, and Webhook Monitor explains that such requests need a RAG index rebuild rather than a retry.",
+  "content_hash": "672d747f4f5b45cf4e8a4c6a9944f3ad79e1e94d1f2a87125d473594e5dc3ed3"
+}
