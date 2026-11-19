@@ -171,6 +171,30 @@ def _json_vector(value: Any) -> list[float]:
         return []
 
 
+async def document_mean_embedding(document_id: int, *, embedding_model: str | None = None) -> list[float] | None:
+    """Return the L2-normalised mean of a document's active chunk vectors."""
+    if embedding_model is None:
+        rows = await db.fetch_all(
+            "SELECT embedding_json FROM rag_chunks WHERE document_id = ? AND is_active = 1",
+            (document_id,),
+        )
+    else:
+        rows = await db.fetch_all(
+            "SELECT embedding_json FROM rag_chunks WHERE document_id = ? AND is_active = 1 AND embedding_model = ?",
+            (document_id, embedding_model),
+        )
+    vectors = [vector for vector in (_json_vector(row.get("embedding_json")) for row in rows) if vector]
+    if not vectors:
+        return None
+    width = len(vectors[0])
+    vectors = [vector for vector in vectors if len(vector) == width]
+    mean = [sum(column) / len(vectors) for column in zip(*vectors)]
+    norm = math.sqrt(sum(value * value for value in mean))
+    if not norm:
+        return None
+    return [value / norm for value in mean]
+
+
 def _is_authorised_global(document: Mapping[str, Any]) -> bool:
     scope = _json(document.get("permission_scope_json"), {})
     return str(scope.get("visibility") or "") in {"anonymous", "authenticated"}

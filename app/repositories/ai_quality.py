@@ -195,6 +195,17 @@ async def get_response(response_id: int) -> dict[str, Any] | None:
 async def save_feedback(*, response_id: int, user_id: int, rating: str | None,
                         reason: str | None, comment: str | None, is_technician: bool = False) -> None:
     """Save a user's vote on one output; ``rating=None`` clears it."""
+    try:
+        await _write_feedback(response_id=response_id, user_id=user_id, rating=rating, reason=reason,
+                              comment=comment, is_technician=is_technician)
+    finally:
+        from app.services import ai_learning
+
+        ai_learning.invalidate_cache()
+
+
+async def _write_feedback(*, response_id: int, user_id: int, rating: str | None,
+                          reason: str | None, comment: str | None, is_technician: bool) -> None:
     if rating is None:
         await db.execute(
             "DELETE FROM ai_output_feedback WHERE response_id = ? AND user_id = ?",
