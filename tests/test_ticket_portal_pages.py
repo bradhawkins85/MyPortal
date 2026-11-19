@@ -856,3 +856,81 @@ async def test_portal_tickets_page_ignores_default_view_load_errors(monkeypatch)
     assert captured["extra"]["status_filter"] is None
     assert captured["extra"]["search_term"] == ""
     assert captured["extra"]["filters_active"] is False
+
+
+async def _render_detail_for_company_user(monkeypatch, *, is_watcher: bool) -> dict[str, Any]:
+    request = _make_request("/tickets/41")
+    user = {"id": 77, "is_super_admin": False}
+    ticket = {
+        "id": 41,
+        "subject": "Printer offline",
+        "description": "",
+        "status": "open",
+        "priority": "normal",
+        "company_id": 22,
+        "requester_id": 5,
+        "assigned_user_id": None,
+        "created_at": datetime(2025, 1, 9, 16, 45, tzinfo=timezone.utc),
+        "updated_at": datetime(2025, 1, 10, 9, 30, tzinfo=timezone.utc),
+    }
+    request.state.active_company_id = 22
+
+    monkeypatch.setattr(main.tickets_repo, "get_ticket", AsyncMock(return_value=ticket))
+    monkeypatch.setattr(main.tickets_repo, "list_replies", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "is_ticket_watcher", AsyncMock(return_value=is_watcher))
+    monkeypatch.setattr(main, "_has_admin_technician_access", AsyncMock(return_value=False))
+    monkeypatch.setattr(main, "_is_helpdesk_technician", AsyncMock(return_value=False))
+    monkeypatch.setattr(main, "_has_menu_page_access", AsyncMock(return_value=True))
+    monkeypatch.setattr(main.company_access, "list_accessible_companies", AsyncMock(return_value=[{"company_id": 22}]))
+    monkeypatch.setattr(main.tickets_service, "get_public_status_map", AsyncMock(return_value={"open": "Open"}))
+    monkeypatch.setattr(main.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 22, "name": "Example"}))
+    monkeypatch.setattr(main.user_repo, "get_user_by_id", AsyncMock(return_value=None))
+
+    from app.repositories import call_recordings as call_recordings_repo
+    monkeypatch.setattr(call_recordings_repo, "list_ticket_call_recordings", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_watchers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_ticket_assets", AsyncMock(return_value=[]))
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request_obj, user_obj, *, extra):
+        captured["extra"] = extra
+        return HTMLResponse("OK")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    response = await main._render_portal_ticket_detail(request, user, ticket_id=41)
+    assert response.status_code == status.HTTP_200_OK
+    return captured["extra"]
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("is_watcher", [False, True])
+async def test_render_portal_ticket_detail_company_user_can_reply(monkeypatch, is_watcher):
+    """End users with company ticket access get the reply box (the POST allows them)."""
+    extra = await _render_detail_for_company_user(monkeypatch, is_watcher=is_watcher)
+
+    assert extra["can_reply"] is True
+    assert extra["has_helpdesk_access"] is False
+    assert extra["is_requester"] is False
+
+
+def test_portal_ticket_detail_template_hides_technician_reply_controls_from_end_users():
+    """Resolution-step flags, the status dropdown and resolution editor are technician-only."""
+    template = Path("app/templates/tickets/detail.html").read_text()
+    gate = "{% if has_helpdesk_access or is_super_admin %}"
+
+    for marker in (
+        'name="isResolutionStep"',
+        'name="isNotResolutionStep"',
+        "data-ticket-reply-status-input",
+        "ticket-reply-submit__toggle",
+    ):
+        before = template[: template.index(marker)]
+        assert before.rsplit("{% if", 1)[1].startswith(gate[len("{% if"):]), marker
+        assert "{% else %}" not in before[before.rindex(gate):], marker
+
+    resolution_card = template.index('id="resolution-steps"')
+    assert "(has_helpdesk_access or is_super_admin) and ticket.status in ['resolved', 'closed']" in template[
+        :resolution_card
+    ].rsplit("{% if", 1)[1]
