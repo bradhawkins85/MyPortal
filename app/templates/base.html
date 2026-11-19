@@ -329,7 +329,9 @@
           {% set can_access_m365_out_of_office = can_access_m365_out_of_office and feature_pack_available('m365_admin') %}
           {% set can_access_m365_spam_purge = (can_access_m365_spam_purge | default(false)) and feature_pack_available('m365_admin') %}
           {% set can_access_m365_group_cleanup = (can_access_m365_group_cleanup | default(false)) and feature_pack_available('m365_admin') %}
+          {% set can_access_m365_policies = is_super_admin and feature_pack_available('m365_policies') %}
           {% if not feature_pack_available('office365') %}
+            {% set can_access_m365_policies = false %}
             {% set can_manage_licenses = false %}
             {% set can_access_m365_configuration = false %}
             {% set can_access_m365_licenses = false %}
@@ -682,7 +684,7 @@
                   </a>
                 </li>
                 {% endif %}
-                {% if is_super_admin and feature_pack_available('m365_policies') %}
+                {% if can_access_m365_policies %}
                 <li class="menu__subitem">
                   <a href="/m365/policies" {% if current_path.startswith('/m365/policies') %}aria-current="page"{% endif %}>
                     <span class="menu__icon" aria-hidden="true">
@@ -781,7 +783,7 @@
               </ul>
             </li>
           {% endif %}
-          {% if not can_manage_licenses and ((is_super_admin and feature_pack_available('m365_policies')) or can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_signatures or can_access_m365_out_of_office or can_access_m365_group_cleanup or can_access_m365_spam_purge) %}
+          {% if not can_manage_licenses and (can_access_m365_policies or can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_signatures or can_access_m365_out_of_office or can_access_m365_group_cleanup or can_access_m365_spam_purge) %}
             {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/policies') or current_path.startswith('/m365/mailboxes') or current_path.startswith('/m365/signatures') or current_path.startswith('/m365/out-of-office') or current_path.startswith('/m365/spam-purge') or current_path.startswith('/m365/group-cleanup') %}
             <li class="menu__item menu__item--expandable {% if m365_active %}menu__item--expanded{% endif %}" data-menu-key="/m365">
               <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if m365_active %}true{% else %}false{% endif %}">
@@ -804,7 +806,7 @@
                   </a>
                 </li>
                 {% endif %}
-                {% if is_super_admin and feature_pack_available('m365_policies') %}
+                {% if can_access_m365_policies %}
                 <li class="menu__subitem">
                   <a href="/m365/policies" {% if current_path.startswith('/m365/policies') %}aria-current="page"{% endif %}>
                     <span class="menu__icon" aria-hidden="true">

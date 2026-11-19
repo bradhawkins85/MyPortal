@@ -153,6 +153,16 @@ def test_sidebar_hides_disabled_core_components(monkeypatch):
     assert 'href="/m365/best-practices"' not in body
 
 
+def test_disabled_office365_removes_entire_menu_including_policies(monkeypatch):
+    # m365_policies stays loaded; Office 365 being off must still hide every
+    # entry so neither the sidebar nor the navigation editor lists it.
+    assert 'href="/m365/policies"' in _render_sidebar(monkeypatch)
+    body = _render_sidebar(monkeypatch, "office365")
+    assert "Office 365" not in body
+    assert 'data-menu-key="/m365"' not in body
+    assert 'href="/m365/policies"' not in body
+
+
 def _render(monkeypatch, template: str, *disabled: str, **context) -> str:
     policy = ComponentAvailability(disabled_feature_packs=frozenset(disabled))
     monkeypatch.setattr(main_module, "get_component_availability", lambda: policy)
