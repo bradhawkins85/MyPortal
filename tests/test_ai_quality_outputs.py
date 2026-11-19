@@ -217,3 +217,12 @@ async def test_each_ai_search_answer_is_its_own_output(quality_db):
         for _ in range(2)
     }
     assert len(ids) == 2
+
+
+@pytest.mark.anyio
+async def test_user_rating(quality_db):
+    response_id = await repo.record_output(feature="ticket_ai_summary", user_id=1, company_id=2,
+                                           subject_type="ticket", subject_id=7, output_text="x")
+    assert await repo.user_rating(response_id, 5) is None
+    await repo.save_feedback(response_id=response_id, user_id=5, rating="down", reason=None, comment=None)
+    assert await repo.user_rating(response_id, 5) == "down"

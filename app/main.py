@@ -11523,8 +11523,11 @@ async def _render_portal_ticket_detail(
         except Exception as exc:
             log_error("Failed to load linked chat room for ticket", ticket_id=ticket_id, error=str(exc))
 
+    from app.services import ai_text_outputs
+
     extra = {
         "title": f"Ticket {ticket_id}",
+        "ai_rating_ids": await ai_text_outputs.ticket_rating_ids(ticket, viewer_id=user.get("id")),
         "ticket": {
             **ticket,
             "status_label": status_label,
@@ -12562,8 +12565,11 @@ async def _render_ticket_detail(
     from app.services import ai_consent
 
     ticket_ai_opted_out = not await ai_consent.is_ai_allowed_for_ticket(ticket)
+    from app.services import ai_text_outputs
+
     extra = {
         "title": f"Ticket #{ticket_id}",
+        "ai_rating_ids": await ai_text_outputs.ticket_rating_ids(ticket, viewer_id=user.get("id")),
         "ticket": ticket,
         "ticket_sla": ticket_sla,
         "ticket_business_hours": ticket_business_hours,

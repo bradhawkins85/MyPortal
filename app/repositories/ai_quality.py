@@ -471,3 +471,10 @@ async def prune_orphan_ticket_outputs() -> int:
     """Delete stored AI output (and its votes) for tickets that no longer exist."""
     return await db.execute_rowcount("""DELETE FROM ai_outputs WHERE subject_type = 'ticket'
         AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.id = ai_outputs.subject_id)""")
+
+
+async def user_rating(response_id: int, user_id: int) -> str | None:
+    row = await db.fetch_one(
+        "SELECT rating FROM ai_output_feedback WHERE response_id = ? AND user_id = ?", (response_id, user_id)
+    )
+    return str(row["rating"]) if row else None
