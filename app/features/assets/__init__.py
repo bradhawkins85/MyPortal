@@ -20,7 +20,7 @@ from .routes import router as assets_router
 
 PACK = FeaturePack(
     slug="assets",
-    version="1.24.2",
+    version="1.25.0",
     routers=(assets_router,),
 )
 

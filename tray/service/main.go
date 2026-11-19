@@ -1388,8 +1388,9 @@ func (d *daemon) heartbeatLoop() {
 		user := consoleUserName()
 		now := time.Now()
 		if now.After(nextRoutine) || user != lastUser {
+			req := d.heartbeatRequest(user)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			err := d.client.Heartbeat(ctx, api.NewHeartbeatRequest(user, updater.AgentVersion))
+			err := d.client.Heartbeat(ctx, req)
 			cancel()
 			if err != nil {
 				logger.Warn("Heartbeat: %v", err)

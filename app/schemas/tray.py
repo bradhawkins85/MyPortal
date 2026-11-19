@@ -69,6 +69,22 @@ class TrayHeartbeatRequest(BaseModel):
     console_user_active: Optional[bool] = None
     agent_version: Optional[str] = Field(default=None, max_length=32)
     last_ip: Optional[str] = Field(default=None, max_length=64)
+    # Public addresses of the device's network, found by the agent through the
+    # server owner's whoami source (or icanhazip.com). Validated by the route
+    # so a bad value never rejects the heartbeat itself.
+    wan_ipv4: Optional[str] = Field(
+        default=None, max_length=64, description="Public IPv4 address of the device's network"
+    )
+    wan_ipv6: Optional[str] = Field(
+        default=None, max_length=64, description="Public IPv6 address of the device's network"
+    )
+    # Cloudflare location headers (Cf-Ipcity, Cf-Ipcountry, Cf-Region-Code)
+    # returned by the whoami source; trimmed rather than rejected when too long.
+    wan_city: Optional[str] = Field(default=None, description="Cf-Ipcity from whoami")
+    wan_country: Optional[str] = Field(default=None, description="Cf-Ipcountry from whoami")
+    wan_region_code: Optional[str] = Field(
+        default=None, description="Cf-Region-Code from whoami"
+    )
 
 
 class TrayOverseerServiceState(BaseModel):

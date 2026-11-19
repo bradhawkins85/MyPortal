@@ -1218,8 +1218,10 @@ class Settings(BaseSettings):
         validation_alias="TRUSTED_PROXIES",
     )
 
-    # Optional whoami-compatible endpoint used by tray network scanners to
-    # discover the WAN address from the scanner's own network.
+    # Optional traefik/whoami-compatible endpoint hosted by the server owner.
+    # Tray agents call it over IPv4 and IPv6 to discover their network's WAN
+    # addresses (falling back to icanhazip.com), and network scanners use it
+    # for the scanned network's WAN address.
     wan_ip_source_url: AnyHttpUrl | None = Field(
         default=None,
         validation_alias="WAN_IP_SOURCE_URL",
@@ -1443,6 +1445,17 @@ class Settings(BaseSettings):
 
         if isinstance(value, str) and value.strip() == "":
             return None
+        return value
+
+    @field_validator("wan_ip_source_url", mode="before")
+    @classmethod
+    def _default_wan_ip_source_scheme(cls, value: Any) -> Any:
+        """Accept a bare host such as ``whoami.mydomain.com`` as an https URL."""
+
+        if isinstance(value, str):
+            value = value.strip()
+            if value and "://" not in value:
+                return "https://" + value
         return value
 
     @field_validator(

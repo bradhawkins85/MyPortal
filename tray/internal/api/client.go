@@ -172,69 +172,283 @@ type NetworkHost struct {
 	OpenPorts  string `json:"open_ports,omitempty"`
 }
 
+// wanIPSource is what the portal tells the agent about WAN address discovery:
+// either a whoami-compatible source to call, or the address the portal saw.
+type wanIPSource struct {
+	WANIP       string `json:"wan_ip"`
+	SourceURL   string `json:"source_url"`
+	SourceField string `json:"source_field"`
+}
+
+func (c *Client) getWANIPSource(ctx context.Context) (*wanIPSource, error) {
+	resp, err := c.get(ctx, "/api/tray/wan-ip")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("WAN IP lookup: HTTP %d", resp.StatusCode)
+	}
+	var out wanIPSource
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // GetWANIP obtains the public address using the whoami-compatible source
 // configured by the portal. The source is called by this agent so it observes
 // the WAN address of the network being scanned.
 func (c *Client) GetWANIP(ctx context.Context) (string, error) {
-	resp, err := c.get(ctx, "/api/tray/wan-ip")
+	src, err := c.getWANIPSource(ctx)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("WAN IP lookup: HTTP %d", resp.StatusCode)
+	if src.SourceURL != "" {
+		ip, err := queryWANIPSource(ctx, c.http, src.SourceURL, src.SourceField)
+		if err != nil {
+			return "", err
+		}
+		return ip.String(), nil
 	}
-	var out struct {
-		WANIP       string `json:"wan_ip"`
-		SourceURL   string `json:"source_url"`
-		SourceField string `json:"source_field"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
-	}
-	if out.SourceURL != "" {
-		return c.getWANIPFromSource(ctx, out.SourceURL, out.SourceField)
-	}
-	if net.ParseIP(out.WANIP) == nil {
+	if net.ParseIP(src.WANIP) == nil {
 		return "", fmt.Errorf("WAN IP lookup returned an invalid address")
 	}
-	return out.WANIP, nil
+	return src.WANIP, nil
 }
 
-func (c *Client) getWANIPFromSource(ctx context.Context, sourceURL, sourceField string) (string, error) {
+// WANAddresses are the public addresses this device's network uses. Either
+// may be empty when the network has no route for that address family.
+type WANAddresses struct {
+	IPv4 string
+	IPv6 string
+	// Geo comes from the whoami source only (the IPv4 answer first).
+	Geo WANGeo
+}
+
+// wanFamilyTimeout bounds each per-family lookup so a network without IPv6
+// does not hold up the heartbeat.
+const wanFamilyTimeout = 10 * time.Second
+
+// wanFallbackURL is the public plain-text address service used when the
+// portal's whoami source is not configured or does not answer. Each lookup
+// dials over one address family, so the same host serves IPv4 and IPv6.
+var wanFallbackURL = "https://icanhazip.com/"
+
+// LookupWANAddresses finds this network's public addresses, once over IPv4
+// and once over IPv6. The portal's whoami-compatible source is the primary
+// source; icanhazip.com is used for a family whoami could not answer. An
+// error is returned only when neither family produced an address.
+func (c *Client) LookupWANAddresses(ctx context.Context) (WANAddresses, error) {
+	var out WANAddresses
+	var errs []error
+	src, err := c.getWANIPSource(ctx)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("whoami source: %w", err))
+		src = &wanIPSource{}
+	}
+	for _, network := range []string{"tcp4", "tcp6"} {
+		httpClient := familyHTTPClient(network)
+		var ip net.IP
+		if src.SourceURL != "" {
+			var geo WANGeo
+			ip, err = lookupFamily(ctx, network, func(ctx context.Context) (net.IP, error) {
+				found, foundGeo, err := queryWhoami(ctx, httpClient, src.SourceURL, src.SourceField)
+				geo = foundGeo
+				return found, err
+			})
+			if ip != nil && out.Geo.empty() {
+				out.Geo = geo
+			}
+			if err != nil {
+				errs = append(errs, fmt.Errorf("whoami %s: %w", network, err))
+			}
+		}
+		if ip == nil {
+			ip, err = lookupFamily(ctx, network, func(ctx context.Context) (net.IP, error) {
+				return queryPlainWANIP(ctx, httpClient, wanFallbackURL)
+			})
+			if err != nil {
+				errs = append(errs, fmt.Errorf("icanhazip %s: %w", network, err))
+			}
+		}
+		if ip == nil {
+			continue
+		}
+		if network == "tcp4" {
+			out.IPv4 = ip.String()
+		} else {
+			out.IPv6 = ip.String()
+		}
+	}
+	if out.IPv4 == "" && out.IPv6 == "" {
+		return out, errors.Join(errs...)
+	}
+	return out, nil
+}
+
+// lookupFamily runs one bounded lookup and rejects an answer in the other
+// address family (from a proxy or NAT64), which is not this family's address.
+func lookupFamily(ctx context.Context, network string, query func(context.Context) (net.IP, error)) (net.IP, error) {
+	ctx, cancel := context.WithTimeout(ctx, wanFamilyTimeout)
+	defer cancel()
+	ip, err := query(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if (network == "tcp4") != (ip.To4() != nil) {
+		return nil, fmt.Errorf("source reported %s", ip)
+	}
+	return ip, nil
+}
+
+// queryPlainWANIP reads a service such as icanhazip.com that answers with
+// only the caller's address.
+func queryPlainWANIP(ctx context.Context, httpClient *http.Client, sourceURL string) (net.IP, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("WAN IP source request: %w", err)
+		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("WAN IP source request: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("WAN IP source: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256))
+	if err != nil {
+		return nil, err
+	}
+	ip := net.ParseIP(strings.TrimSpace(string(body)))
+	if ip == nil {
+		return nil, fmt.Errorf("response was not an IP address")
+	}
+	return ip, nil
+}
+
+// familyHTTPClient connects only over the given network ("tcp4" or "tcp6"),
+// so the whoami source sees this network's address for that family.
+func familyHTTPClient(network string) *http.Client {
+	dialer := &net.Dialer{Timeout: wanFamilyTimeout}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DisableKeepAlives = true
+	transport.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) {
+		return dialer.DialContext(ctx, network, addr)
+	}
+	return &http.Client{Timeout: wanFamilyTimeout, Transport: transport}
+}
+
+// parseWANAddress accepts a bare address or a whoami "RemoteAddr" style
+// host:port (including "[v6]:port").
+func parseWANAddress(value string) net.IP {
+	value = strings.TrimSpace(value)
+	if ip := net.ParseIP(value); ip != nil {
+		return ip
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		return net.ParseIP(host)
+	}
+	return nil
+}
+
+func isPublicAddress(ip net.IP) bool {
+	return ip.IsGlobalUnicast() && !ip.IsPrivate()
+}
+
+// WANGeo is the location Cloudflare attached to the whoami request
+// (Cf-Ipcity, Cf-Ipcountry, Cf-Region-Code). Fields are empty when whoami is
+// not behind Cloudflare or the location headers are not enabled.
+type WANGeo struct {
+	City       string
+	Country    string
+	RegionCode string
+}
+
+func (g WANGeo) empty() bool { return g.City == "" && g.Country == "" && g.RegionCode == "" }
+
+// geoHeaderValue keeps a short, printable header value.
+func geoHeaderValue(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	if r := []rune(value); len(r) > limit {
+		value = string(r[:limit])
+	}
+	return value
+}
+
+// queryWANIPSource reads a traefik/whoami style response. The configured
+// field (normally X-Forwarded-For behind a reverse proxy) wins; when it is
+// absent, a public RemoteAddr is used so a directly exposed whoami also works.
+func queryWANIPSource(ctx context.Context, httpClient *http.Client, sourceURL, sourceField string) (net.IP, error) {
+	ip, _, err := queryWhoami(ctx, httpClient, sourceURL, sourceField)
+	return ip, err
+}
+
+func queryWhoami(ctx context.Context, httpClient *http.Client, sourceURL, sourceField string) (net.IP, WANGeo, error) {
+	var geo WANGeo
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return nil, geo, fmt.Errorf("WAN IP source request: %w", err)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, geo, fmt.Errorf("WAN IP source request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, geo, fmt.Errorf("WAN IP source: HTTP %d", resp.StatusCode)
 	}
 
+	sourceField = strings.TrimSpace(sourceField)
+	var fieldValue *string
+	var remoteAddr net.IP
 	scanner := bufio.NewScanner(io.LimitReader(resp.Body, 1<<20))
 	for scanner.Scan() {
 		name, value, found := strings.Cut(scanner.Text(), ":")
-		if !found || !strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(sourceField)) {
+		if !found {
 			continue
 		}
-		// Forwarded fields can contain a comma-separated proxy chain. The first
-		// valid address is the original client and therefore the scanner WAN IP.
-		for _, candidate := range strings.Split(value, ",") {
-			candidate = strings.TrimSpace(candidate)
-			if net.ParseIP(candidate) != nil {
-				return candidate, nil
+		name = strings.TrimSpace(name)
+		switch {
+		case strings.EqualFold(name, sourceField):
+			if fieldValue == nil {
+				v := value
+				fieldValue = &v
 			}
+		case strings.EqualFold(name, "RemoteAddr") && remoteAddr == nil:
+			remoteAddr = parseWANAddress(value)
+		case strings.EqualFold(name, "Cf-Ipcity") && geo.City == "":
+			geo.City = geoHeaderValue(value, 128)
+		case strings.EqualFold(name, "Cf-Ipcountry") && geo.Country == "":
+			geo.Country = geoHeaderValue(value, 8)
+		case strings.EqualFold(name, "Cf-Region-Code") && geo.RegionCode == "":
+			geo.RegionCode = geoHeaderValue(value, 16)
 		}
-		return "", fmt.Errorf("WAN IP source field %q did not contain a valid address", sourceField)
 	}
 	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("read WAN IP source: %w", err)
+		return nil, geo, fmt.Errorf("read WAN IP source: %w", err)
 	}
-	return "", fmt.Errorf("WAN IP source field %q was not found", sourceField)
+	if fieldValue != nil {
+		// Forwarded fields can contain a comma-separated proxy chain. The
+		// first valid address is the original client: this network's WAN IP.
+		for _, candidate := range strings.Split(*fieldValue, ",") {
+			if ip := parseWANAddress(candidate); ip != nil {
+				return ip, geo, nil
+			}
+		}
+		return nil, geo, fmt.Errorf("WAN IP source field %q did not contain a valid address", sourceField)
+	}
+	if remoteAddr != nil && isPublicAddress(remoteAddr) {
+		return remoteAddr, geo, nil
+	}
+	return nil, geo, fmt.Errorf("WAN IP source field %q was not found", sourceField)
 }
 
 func (c *Client) UploadNetworkScan(ctx context.Context, wanIP string, subnets []string, hosts []NetworkHost) error {
@@ -278,6 +492,14 @@ type HeartbeatRequest struct {
 	// ConsoleUserActive is false when nobody is signed in, so the portal
 	// keeps showing the last user marked as no longer signed in.
 	ConsoleUserActive *bool `json:"console_user_active,omitempty"`
+	// WANIPv4/WANIPv6 are this network's public addresses as seen by the
+	// portal's whoami source; empty when that family could not be resolved.
+	WANIPv4 string `json:"wan_ipv4,omitempty"`
+	WANIPv6 string `json:"wan_ipv6,omitempty"`
+	// Cloudflare location headers returned by the whoami source, if any.
+	WANCity       string `json:"wan_city,omitempty"`
+	WANCountry    string `json:"wan_country,omitempty"`
+	WANRegionCode string `json:"wan_region_code,omitempty"`
 }
 
 // NewHeartbeatRequest reports user as the signed-in user ("" for nobody).
