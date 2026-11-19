@@ -12,6 +12,7 @@ from loguru import logger
 
 from app.core.config import get_settings
 from app.repositories import rag_relationships as rel_repo
+from app.services import ai_learning
 from app.services import modules as modules_service
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.services.component_availability import rag_available
@@ -440,6 +441,7 @@ def parse_relationship_response(value: Any, *, min_score: float) -> dict[str, An
         relationship_type = RelationshipType(relationship)
     except ValueError:
         relationship_type = RelationshipType.NOT_RELEVANT
+    model_relationship_type = relationship_type
     score = _unit_interval(payload.get("score") or payload.get("relevance_score"))
     confidence = _unit_interval(payload.get("confidence"))
     match_status = (
@@ -451,12 +453,61 @@ def parse_relationship_response(value: Any, *, min_score: float) -> dict[str, An
         relationship_type = RelationshipType.NOT_RELEVANT
     return {
         "relationship_type": relationship_type.value,
+        "model_relationship_type": model_relationship_type.value,
         "match_status": match_status.value,
         "relevance_score": score,
         "confidence": confidence,
         "reason": str(payload.get("reason") or "")[:2000],
         "supporting_excerpt": str(payload.get("supporting_excerpt") or "")[:2000],
     }
+
+
+def apply_learning(parsed: Mapping[str, Any], adjustment: float, *, min_score: float) -> dict[str, Any]:
+    """Apply technician feedback on similar tickets to one evaluation."""
+    result = dict(parsed)
+    if not adjustment:
+        return result
+    score = round(min(1.0, max(0.0, float(parsed.get("relevance_score") or 0) + adjustment)), 4)
+    try:
+        model_type = RelationshipType(str(parsed.get("model_relationship_type") or parsed.get("relationship_type")))
+    except ValueError:
+        model_type = RelationshipType.NOT_RELEVANT
+    matched = model_type in _POSITIVE_TYPES and score >= min_score
+    result["relevance_score"] = score
+    result["match_status"] = (MatchStatus.MATCH if matched else MatchStatus.NO_MATCH).value
+    result["relationship_type"] = (model_type if matched else RelationshipType.NOT_RELEVANT).value
+    note = (
+        f"Technician feedback on similar tickets adjusted the score by {adjustment:+.2f}. "
+        f"The model judged it {model_type.value}. "
+    )
+    result["reason"] = (note + str(parsed.get("reason") or ""))[:2000]
+    return result
+
+
+def _embedding_model() -> str:
+    from app.services import rag_index
+
+    return rag_index.embedding_model()
+
+
+async def _learned_evaluation(
+    source: Mapping[str, Any], target: Mapping[str, Any], parsed: Mapping[str, Any], *, min_score: float
+) -> dict[str, Any]:
+    """Adjust a ticket-to-item evaluation by technician votes on similar tickets."""
+    source_is_ticket = source.get("source_type") == "tickets"
+    target_is_ticket = target.get("source_type") == "tickets"
+    if source_is_ticket == target_is_ticket:
+        return dict(parsed)
+    ticket, item = (source, target) if source_is_ticket else (target, source)
+    try:
+        embedding = await rel_repo.document_mean_embedding(int(ticket["id"]), embedding_model=_embedding_model())
+        adjustment = await ai_learning.adjustment_for(
+            str(item.get("source_type")), str(item.get("source_id")), embedding
+        )
+    except Exception as exc:
+        logger.warning("Could not apply AI link lessons to a relationship: {}", exc)
+        return dict(parsed)
+    return apply_learning(parsed, adjustment, min_score=min_score)
 
 
 async def evaluate_next_batch(*, limit: int | None = None) -> int:
@@ -556,6 +607,9 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                 raw = _relationship_response_payload(response)
                 parsed = parse_relationship_response(
                     raw, min_score=settings.rag_relationship_min_score
+                )
+                parsed = await _learned_evaluation(
+                    source, target, parsed, min_score=settings.rag_relationship_min_score
                 )
                 if not await rel_repo.heartbeat_queue_item(int(job["id"]), claim_token):
                     return
