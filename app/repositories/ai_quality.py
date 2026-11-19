@@ -328,15 +328,13 @@ LINK_FEATURE = "rag_relationships"
 
 async def list_link_votes(*, since: datetime | None = None) -> list[dict[str, Any]]:
     """Technician votes on linked items that MyPortal may learn from (newest window only)."""
-    sql = """SELECT o.id AS output_id, o.subject_type, o.subject_id, o.target_type,
+    cutoff = (since or datetime(1970, 1, 1, tzinfo=timezone.utc)).astimezone(timezone.utc)
+    rows = await db.fetch_all("""SELECT o.id AS output_id, o.subject_type, o.subject_id, o.target_type,
         o.target_id, o.subject_embedding_json, o.subject_embedding_model, f.rating, f.updated_at AS voted_at
         FROM ai_outputs o JOIN ai_output_feedback f ON f.response_id = o.id
-        WHERE o.feature = ? AND o.target_type <> '' AND f.is_technician = 1 AND f.learning_ignored_at IS NULL"""
-    params: tuple[Any, ...] = (LINK_FEATURE,)
-    if since is not None:
-        sql += " AND f.updated_at >= ?"
-        params += (since.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),)
-    rows = await db.fetch_all(sql + " ORDER BY f.id", params)
+        WHERE o.feature = ? AND o.target_type <> '' AND f.is_technician = 1 AND f.learning_ignored_at IS NULL
+          AND f.updated_at >= ?
+        ORDER BY f.id""", (LINK_FEATURE, cutoff.strftime("%Y-%m-%d %H:%M:%S")))
     return [dict(row) for row in rows]
 
 
@@ -348,20 +346,23 @@ async def store_subject_embedding(output_id: int, embedding: list[float], model:
 
 
 async def set_link_learning_ignored(target_type: str, target_id: str, *, ignored: bool) -> int:
-    """Stop (or resume) learning from technician votes on one linked item."""
-    targets = """response_id IN (SELECT id FROM ai_outputs
-        WHERE feature = ? AND target_type = ? AND target_id = ?) AND is_technician = 1"""
+    """Stop (or resume) learning from technician votes on one linked item.
+
+    ``updated_at = updated_at`` keeps each vote's time: MariaDB would otherwise
+    stamp it ON UPDATE, restarting the vote's decay.
+    """
     if ignored:
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         return await db.execute_rowcount(
-            "UPDATE ai_output_feedback SET learning_ignored_at = ?, updated_at = updated_at "
-            "WHERE learning_ignored_at IS NULL AND " + targets,
+            """UPDATE ai_output_feedback SET learning_ignored_at = ?, updated_at = updated_at
+            WHERE learning_ignored_at IS NULL AND is_technician = 1 AND response_id IN (
+                SELECT id FROM ai_outputs WHERE feature = ? AND target_type = ? AND target_id = ?)""",
             (stamp, LINK_FEATURE, target_type, target_id),
         )
     return await db.execute_rowcount(
-        "UPDATE ai_output_feedback SET learning_ignored_at = NULL, updated_at = updated_at "
-        "WHERE learning_ignored_at IS NOT NULL AND "
-        + targets,
+        """UPDATE ai_output_feedback SET learning_ignored_at = NULL, updated_at = updated_at
+        WHERE learning_ignored_at IS NOT NULL AND is_technician = 1 AND response_id IN (
+            SELECT id FROM ai_outputs WHERE feature = ? AND target_type = ? AND target_id = ?)""",
         (LINK_FEATURE, target_type, target_id),
     )
 
