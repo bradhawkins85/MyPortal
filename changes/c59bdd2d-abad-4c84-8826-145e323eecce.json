@@ -1,0 +1,7 @@
+{
+  "guid": "c59bdd2d-abad-4c84-8826-145e323eecce",
+  "occurred_at": "2026-11-19T01:58Z",
+  "change_type": "Fix",
+  "summary": "Matrix chat auto-assignment rules now invite the assigned technician into new chat rooms instead of only recording the assignment.",
+  "content_hash": "6dadd104fd7f5dd11a6ffbe291a7794f5885fa555435fd1a228b7e6c6cfd8faf"
+}
