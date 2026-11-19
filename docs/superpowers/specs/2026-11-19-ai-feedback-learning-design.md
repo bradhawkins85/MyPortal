@@ -1,7 +1,7 @@
 # AI feedback that MyPortal learns from
 
 Date: 2026-11-19
-Status: Draft for approval
+Status: Approved 2026-11-19
 
 ## Intent and why
 
@@ -223,6 +223,12 @@ injection (parameterised only).
 - Per-subject-type access resolvers for the feedback endpoint.
 - Whether to cache document mean embeddings.
 - Exact wording of generated lessons.
+
+## Who teaches
+
+Only ratings from technicians (staff users) feed learning. Customer ratings
+are recorded and reported on the admin page but never change link scores,
+examples or lessons. (Recommended and accepted with design approval.)
 
 ## Calls I made (not discussed)
 
