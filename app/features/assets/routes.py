@@ -149,6 +149,11 @@ _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "cpu_name", "label": "CPU", "sort": "string"},
     {"key": "ram_gb", "label": "RAM (GB)", "sort": "number"},
     {"key": "hdd_size", "label": "Storage", "sort": "string"},
+    {"key": "wan_ipv4", "label": "WAN IPv4", "sort": "string"},
+    {"key": "wan_ipv6", "label": "WAN IPv6", "sort": "string"},
+    {"key": "wan_city", "label": "WAN city", "sort": "string"},
+    {"key": "wan_region_code", "label": "WAN region", "sort": "string"},
+    {"key": "wan_country", "label": "WAN country", "sort": "string"},
     {"key": "last_sync", "label": "Last sync", "sort": "date", "priority": "essential"},
     {"key": "boot_time", "label": "Boot time", "sort": "date"},
     {

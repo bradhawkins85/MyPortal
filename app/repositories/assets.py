@@ -130,6 +130,12 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
             syncro_asset_id,
             tactical_asset_id,
             mac_address,
+            wan_ipv4,
+            wan_ipv6,
+            wan_city,
+            wan_country,
+            wan_region_code,
+            wan_ip_updated_at,
             customer_visible,
             provenance,
             archived_at,
@@ -141,6 +147,39 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
         (company_id,),
     )
     return [cpu_catalog.enrich_asset(row) for row in rows or []]
+
+
+async def update_asset_wan_ips(
+    asset_id: int,
+    *,
+    wan_ipv4: str | None,
+    wan_ipv6: str | None,
+    wan_city: str | None = None,
+    wan_country: str | None = None,
+    wan_region_code: str | None = None,
+    replace_both: bool = True,
+) -> None:
+    """Record the public addresses (and whoami location) a tray agent's network uses.
+
+    ``replace_both`` stores exactly what the agent found, clearing a family or
+    location it could not resolve. Otherwise only the supplied address family
+    is updated and the location is kept (the server-observed fallback only
+    ever sees one family and no location).
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if replace_both:
+        await db.execute(
+            "UPDATE assets SET wan_ipv4 = %s, wan_ipv6 = %s, wan_city = %s, "
+            "wan_country = %s, wan_region_code = %s, wan_ip_updated_at = %s "
+            "WHERE id = %s",
+            (wan_ipv4, wan_ipv6, wan_city, wan_country, wan_region_code, now, asset_id),
+        )
+        return
+    await db.execute(
+        "UPDATE assets SET wan_ipv4 = COALESCE(%s, wan_ipv4), "
+        "wan_ipv6 = COALESCE(%s, wan_ipv6), wan_ip_updated_at = %s WHERE id = %s",
+        (wan_ipv4, wan_ipv6, now, asset_id),
+    )
 
 
 async def list_assets_for_knowledge_base_editor() -> list[dict[str, Any]]:

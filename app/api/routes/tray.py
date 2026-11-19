@@ -862,6 +862,14 @@ async def run_trmm_script(
 @router.post(
     "/heartbeat",
     summary="Lightweight liveness ping; updates last_seen / console user / IP",
+    description=(
+        "Records the device's liveness, signed-in user and agent version. When the agent "
+        "sends `wan_ipv4` / `wan_ipv6` (its network's public addresses from the "
+        "WAN_IP_SOURCE_URL whoami source or icanhazip.com) they are stored on the linked "
+        "asset, with `wan_city` / `wan_country` / `wan_region_code` from whoami's "
+        "Cf-Ipcity, Cf-Ipcountry and Cf-Region-Code headers when present; otherwise "
+        "the public address the portal observed is recorded."
+    ),
 )
 async def heartbeat(
     payload: TrayHeartbeatRequest,
@@ -876,9 +884,77 @@ async def heartbeat(
         agent_version=payload.agent_version,
         console_user_active=payload.console_user_active,
     )
-    if not device.get("asset_id") or not device.get("setup_ticket_processed", 1):
-        await tray_service.provision_device_for_checkin(device)
+    asset_id = device.get("asset_id")
+    if not asset_id or not device.get("setup_ticket_processed", 1):
+        asset_id = await tray_service.provision_device_for_checkin(device) or asset_id
+    if asset_id:
+        try:
+            await _record_wan_addresses(int(asset_id), payload, request)
+        except Exception as exc:  # WAN details must never fail the liveness ping.
+            log_warning(
+                "Could not record tray WAN addresses",
+                device_id=device.get("id"),
+                error=f"{type(exc).__name__}: {exc}",
+            )
     return JSONResponse({"status": "ok"})
+
+
+def _reported_wan_address(value: str | None, version: int) -> str | None:
+    """Return a usable agent-reported address of the given IP version."""
+    try:
+        address = ipaddress.ip_address(str(value or "").strip())
+    except ValueError:
+        return None
+    if (
+        address.version != version
+        or address.is_loopback
+        or address.is_unspecified
+        or address.is_link_local
+        or address.is_multicast
+    ):
+        return None
+    return str(address)
+
+
+def _wan_geo_value(value: str | None, limit: int) -> str | None:
+    """Keep a short, printable whoami location value; blank becomes ``None``."""
+    text = "".join(ch for ch in str(value or "") if ch.isprintable()).strip()
+    return text[:limit] or None
+
+
+async def _record_wan_addresses(
+    asset_id: int, payload: TrayHeartbeatRequest, request: Request
+) -> None:
+    """Store the agent's WAN IPv4/IPv6, or the public address the portal saw."""
+    wan_ipv4 = _reported_wan_address(payload.wan_ipv4, 4)
+    wan_ipv6 = _reported_wan_address(payload.wan_ipv6, 6)
+    if wan_ipv4 or wan_ipv6:
+        await assets_repo.update_asset_wan_ips(
+            asset_id,
+            wan_ipv4=wan_ipv4,
+            wan_ipv6=wan_ipv6,
+            wan_city=_wan_geo_value(payload.wan_city, 128),
+            wan_country=_wan_geo_value(payload.wan_country, 8),
+            wan_region_code=_wan_geo_value(payload.wan_region_code, 16),
+        )
+        return
+    # Older agents (or a lookup that failed both ways) report nothing; use the
+    # connecting address when it is genuinely public, never a proxy or LAN IP.
+    observed = get_client_ip(request, default=None)
+    try:
+        address = ipaddress.ip_address(str(observed or ""))
+    except ValueError:
+        return
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    if not address.is_global:
+        return
+    await assets_repo.update_asset_wan_ips(
+        asset_id,
+        wan_ipv4=str(address) if address.version == 4 else None,
+        wan_ipv6=str(address) if address.version == 6 else None,
+        replace_both=False,
+    )
 
 
 @router.post(
