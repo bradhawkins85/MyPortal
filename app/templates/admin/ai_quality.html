@@ -24,7 +24,8 @@
       </div>
       {% set ai_quality_groups = [
         ("Ratings", [("by-feature", "By feature", feature_groups | length)]),
-        ("What MyPortal learned", [("learned-links", "Learned: links", learned_links | length)]),
+        ("What MyPortal learned", [("learned-links", "Learned: links", learned_links | length),
+                                   ("learned-lessons", "Learned: lessons", learned_lessons | length)]),
       ] %}
       {% for group_label, items in ai_quality_groups %}
         <div class="ce-nav__group" data-ae-nav-group>
@@ -108,6 +109,40 @@
           </ul>
           {% else %}
           <p class="table__empty">Nothing learned yet. When technicians mark a Related item 👍 or 👎, it appears here.</p>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="card card--panel ce-section" id="ai-quality-learned-lessons" data-ae-section="learned-lessons" aria-labelledby="ai-quality-learned-lessons-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="ai-quality-learned-lessons-title">Learned: lessons</h2>
+          <p class="card__subtitle">Guidance MyPortal adds to AI prompts because technicians kept giving the same reason for 👎. It is built from reasons and counts only — never from ticket text. Undo stops MyPortal using a lesson.</p>
+        </div></header>
+        <div class="ce-section__body">
+          {% if learned_lessons %}
+          <ul class="aql-list" aria-label="Lessons MyPortal adds to AI prompts">
+            {% for lesson in learned_lessons %}
+            <li class="aql-item{% if lesson.ignored %} aql-item--ignored{% endif %}">
+              <div class="aql-item__summary">
+                <p class="aql-item__title">{{ lesson.label }}</p>
+                <p class="aql-item__meta">{{ lesson.guidance }}</p>
+                <ul class="scf-item__chips" aria-label="Why MyPortal learned this">
+                  <li class="scf-chip">{{ lesson.votes }} 👎 with this reason</li>
+                  <li class="scf-chip">{{ (lesson.share * 100) | round | int }}% of 👎</li>
+                  {% if lesson.ignored %}<li><span class="status status--neutral">Ignored</span></li>{% endif %}
+                </ul>
+              </div>
+              <form method="post" action="/admin/ai-quality/lessons/{{ 'restore' if lesson.ignored else 'ignore' }}" class="aql-item__action">
+                {% include "partials/csrf.html" %}
+                <input type="hidden" name="feature" value="{{ lesson.feature }}">
+                <input type="hidden" name="reason" value="{{ lesson.reason }}">
+                <button type="submit" class="button button--ghost button--small">{{ "Restore" if lesson.ignored else "Undo" }}<span class="visually-hidden"> lesson for {{ lesson.label }}</span></button>
+              </form>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="table__empty">No lessons yet. Lessons appear when technicians give the same reason for 👎 at least three times.</p>
           {% endif %}
         </div>
       </section>

@@ -7963,10 +7963,17 @@ async def admin_ai_quality_page(request: Request):
     ]
     overview = await quality_repo.rating_overview(since=datetime.now(timezone.utc) - timedelta(days=30))
     learned_links = [{**link, "label": _learned_link_label(link)} for link in await quality_repo.learned_links()]
+    from app.services import ai_text_learning
+
+    learned_lessons = [
+        {**lesson, "label": llm_usage.feature_label(lesson["feature"]),
+         "guidance": ai_text_learning.guidance_for(lesson["feature"], lesson["reason"])}
+        for lesson in await quality_repo.list_lessons()
+    ]
     return await _render_template(
         "admin/ai_quality.html", request, current_user,
         extra={"title": "AI Quality", "feature_groups": feature_groups, "overview": overview,
-               "learned_links": learned_links},
+               "learned_links": learned_links, "learned_lessons": learned_lessons},
     )
 
 
@@ -8008,6 +8015,42 @@ async def _set_link_learning(request: Request, *, ignored: bool) -> RedirectResp
     message = (f"MyPortal will stop using feedback on {label}." if ignored
                else f"MyPortal will use feedback on {label} again.")
     return flash_redirect(destination, message, "success")
+
+
+async def _set_lesson_learning(request: Request, *, ignored: bool) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import ai_quality as quality_repo
+
+    destination = "/admin/ai-quality#ai-quality-learned-lessons"
+    form = await request.form()
+    feature = str(form.get("feature") or "").strip()
+    reason = str(form.get("reason") or "").strip()
+    if not feature or len(feature) > 40 or reason not in quality_repo.REASONS:
+        return flash_redirect(destination, "Choose a lesson to change.", "error")
+    await quality_repo.set_lesson_ignored(feature, reason, ignored=ignored)
+    await audit_service.record(
+        action="ai_quality.lesson." + ("ignore" if ignored else "restore"),
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ai_lesson",
+        metadata={"feature": feature, "reason": reason},
+    )
+    message = "MyPortal will stop using this lesson." if ignored else "MyPortal will use this lesson again."
+    return flash_redirect(destination, message, "success")
+
+
+@app.post("/admin/ai-quality/lessons/ignore", response_class=HTMLResponse)
+async def admin_ai_quality_ignore_lesson(request: Request):
+    """Undo a text lesson: stop adding its guidance to AI prompts."""
+    return await _set_lesson_learning(request, ignored=True)
+
+
+@app.post("/admin/ai-quality/lessons/restore", response_class=HTMLResponse)
+async def admin_ai_quality_restore_lesson(request: Request):
+    """Add a text lesson's guidance to AI prompts again."""
+    return await _set_lesson_learning(request, ignored=False)
 
 
 @app.post("/admin/ai-quality/links/ignore", response_class=HTMLResponse)
