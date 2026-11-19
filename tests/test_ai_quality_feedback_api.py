@@ -169,3 +169,16 @@ async def test_csv_export_is_by_feature(monkeypatch):
     assert lines[0] == ("feature,label,outputs,helpful,unhelpful,technician_votes,customer_votes,"
                         "top_reason,last_rated_at")
     assert lines[1].startswith("ticket_ai_summary,Ticket AI summary,2,1,2,2,1,incomplete,")
+
+
+@pytest.mark.anyio
+async def test_multipart_post_with_a_file_is_rejected_cleanly(calls):
+    async with _client() as client:
+        response = await client.post(
+            "/api/ai-quality/feedback",
+            data={"rating": "up", "return_to": "/tickets/7"},
+            files={"response_id": ("x.txt", b"11", "text/plain")},
+        )
+    assert response.status_code == 422
+    assert "x.txt" not in response.text
+    assert calls["saved"] == []

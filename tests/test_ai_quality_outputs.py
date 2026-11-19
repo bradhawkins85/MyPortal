@@ -17,7 +17,8 @@ async def quality_db(monkeypatch):
     connection = await aiosqlite.connect(":memory:")
     connection.row_factory = aiosqlite.Row
     await connection.executescript(
-        "CREATE TABLE users (id INTEGER PRIMARY KEY); INSERT INTO users VALUES (1), (3), (5), (6);"
+        "PRAGMA foreign_keys = ON; CREATE TABLE users (id INTEGER PRIMARY KEY);"
+        " INSERT INTO users VALUES (1), (3), (5), (6);"
     )
     database = Database()
     for path in MIGRATIONS:
@@ -73,11 +74,11 @@ async def test_feedback_upsert_and_clear(quality_db):
                              is_technician=True)
     await repo.save_feedback(response_id=response_id, user_id=5, rating="down", reason="unrelated",
                              comment=" ", is_technician=True)
-    assert await _rows(quality_db, "SELECT rating, reason, comment, is_technician FROM ai_quality_feedback") == [
+    assert await _rows(quality_db, "SELECT rating, reason, comment, is_technician FROM ai_output_feedback") == [
         ("down", "unrelated", None, 1)
     ]
     await repo.save_feedback(response_id=response_id, user_id=5, rating=None, reason=None, comment=None)
-    assert await _rows(quality_db, "SELECT id FROM ai_quality_feedback") == []
+    assert await _rows(quality_db, "SELECT id FROM ai_output_feedback") == []
 
 
 def test_unrelated_is_a_known_reason():
@@ -155,3 +156,60 @@ async def test_rating_overview(quality_db):
     assert overview == {"ratings_since": 3, "helpful_pct": 67, "features_rated": 2}
     future = await repo.rating_overview(since=datetime.now(timezone.utc) + timedelta(days=1))
     assert future["ratings_since"] == 0
+
+
+def test_new_tables_use_the_same_collation_as_rag_documents():
+    # MariaDB refuses to compare utf8mb4 columns with different collations
+    # (error 1267); the backfill compares these columns with rag_documents.
+    sql = Path("migrations/563_ai_quality_outputs.sql").read_text(encoding="utf-8")
+    for table in ("ai_outputs", "ai_output_feedback"):
+        definition = sql.split("CREATE TABLE IF NOT EXISTS " + table, 1)[1].split(";", 1)[0]
+        assert "COLLATE=utf8mb4_unicode_ci" in definition, table
+
+
+def test_backfill_never_compares_strings_from_cast():
+    sql = Path("migrations/564_ai_quality_related_backfill.sql").read_text(encoding="utf-8")
+    assert "= CAST(" not in sql.replace(" ", " ")
+
+
+@pytest.mark.anyio
+async def test_deleting_the_output_owner_keeps_everyone_elses_votes(quality_db):
+    response_id = await repo.record_output(feature="rag_relationships", user_id=1, company_id=2,
+                                           subject_type="ticket", subject_id=7, target_type="knowledge_base",
+                                           target_id="vpn")
+    await repo.save_feedback(response_id=response_id, user_id=5, rating="down", reason=None, comment=None,
+                             is_technician=True)
+    await quality_db.execute("DELETE FROM users WHERE id = 1")
+    await quality_db.commit()
+    assert (await repo.get_response(response_id))["user_id"] is None
+    assert await repo.response_counts(response_id) == {"helpful": 0, "unhelpful": 1}
+
+
+@pytest.mark.anyio
+async def test_record_output_survives_a_concurrent_insert(quality_db, monkeypatch):
+    first = await repo.record_output(feature="ticket_ai_summary", user_id=1, company_id=2,
+                                     subject_type="ticket", subject_id=7, output_text="same")
+    real_fetch_one = repo.db.fetch_one
+    calls = {"n": 0}
+
+    async def miss_first_lookup(sql, params=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None  # another request inserted between our lookup and insert
+        return await real_fetch_one(sql, params)
+
+    monkeypatch.setattr(repo.db, "fetch_one", miss_first_lookup)
+    again = await repo.record_output(feature="ticket_ai_summary", user_id=3, company_id=2,
+                                     subject_type="ticket", subject_id=7, output_text="same")
+    assert again == first
+    assert await _rows(quality_db, "SELECT COUNT(*) FROM ai_outputs") == [(1,)]
+
+
+@pytest.mark.anyio
+async def test_each_ai_search_answer_is_its_own_output(quality_db):
+    ids = {
+        await repo.record_response(user_id=1, company_id=2, feature="agent", query="vpn", evidence={},
+                                   model=None, latency_ms=5, confidence_band=None, outcome="answered")
+        for _ in range(2)
+    }
+    assert len(ids) == 2

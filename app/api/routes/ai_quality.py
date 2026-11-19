@@ -81,8 +81,9 @@ async def rate_ai_output(request: Request, current_user: dict = Depends(get_curr
     is_form = content_type.startswith(_FORM_CONTENT_TYPES)
     if is_form:
         form = await request.form()
+        # Only plain text fields count; a file part is never a valid value.
         raw = {key: form.get(key) for key in ("response_id", "rating", "reason", "comment")}
-        raw = {key: (value or None) for key, value in raw.items()}
+        raw = {key: (value if isinstance(value, str) and value else None) for key, value in raw.items()}
     else:
         try:
             raw = await request.json()
@@ -91,7 +92,7 @@ async def rate_ai_output(request: Request, current_user: dict = Depends(get_curr
     try:
         payload = AiFeedbackRequest.model_validate(raw)
     except ValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.errors(include_url=False))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.errors(include_url=False, include_input=False))
     result = await submit_rating(current_user, payload, request=request)
     if is_form:
         return RedirectResponse(safe_return_path(form.get("return_to")), status_code=status.HTTP_303_SEE_OTHER)

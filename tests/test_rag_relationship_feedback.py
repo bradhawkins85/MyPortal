@@ -32,7 +32,7 @@ async def _shared(connection):
     cursor = await connection.execute(
         """SELECT r.feature, r.subject_type, r.subject_id, r.target_type, r.target_id, r.company_id,
                   r.model, f.user_id, f.rating, f.is_technician
-           FROM ai_quality_responses r JOIN ai_quality_feedback f ON f.response_id = r.id
+           FROM ai_outputs r JOIN ai_output_feedback f ON f.response_id = r.id
            ORDER BY r.target_id, f.user_id"""
     )
     return [tuple(row) for row in await cursor.fetchall()]
@@ -287,5 +287,5 @@ async def test_backfill_copies_existing_votes_once(feedback_db):
     # The mirror finds the backfilled output rather than creating a second one.
     relationship = await repo.get_relationship_for_document(10, 1)
     await repo.mirror_feedback_to_quality(relationship, ticket_id=4, user_id=9, rating="up", company_id=2)
-    cursor = await feedback_db.execute("SELECT COUNT(*) FROM ai_quality_responses")
+    cursor = await feedback_db.execute("SELECT COUNT(*) FROM ai_outputs")
     assert (await cursor.fetchone())[0] == 2
