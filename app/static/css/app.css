@@ -24117,3 +24117,43 @@ a.sch-item__company:focus-visible {
     transition: background-color 120ms ease, border-color 120ms ease;
   }
 }
+
+/* AI Quality → Learned: links (admin/ai_quality.html) */
+.aql-list {
+  display: grid;
+  gap: var(--space-gap-tight);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aql-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+  padding: var(--space-gap-base);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+}
+
+.aql-item--ignored {
+  opacity: 0.75;
+}
+
+.aql-item__summary {
+  display: grid;
+  gap: var(--space-gap-tight);
+  min-width: 0;
+}
+
+.aql-item__title {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.aql-item__meta {
+  margin: 0;
+}

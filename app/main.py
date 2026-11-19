@@ -7962,10 +7962,58 @@ async def admin_ai_quality_page(request: Request):
         for group in await quality_repo.aggregate_by_feature()
     ]
     overview = await quality_repo.rating_overview(since=datetime.now(timezone.utc) - timedelta(days=30))
+    learned_links = [{**link, "label": _learned_link_label(link)} for link in await quality_repo.learned_links()]
     return await _render_template(
         "admin/ai_quality.html", request, current_user,
-        extra={"title": "AI Quality", "feature_groups": feature_groups, "overview": overview},
+        extra={"title": "AI Quality", "feature_groups": feature_groups, "overview": overview,
+               "learned_links": learned_links},
     )
+
+
+def _learned_link_label(link: Mapping[str, Any]) -> str:
+    return str(link.get("title") or f"{link.get('target_type')} {link.get('target_id')}")
+
+
+async def _set_link_learning(request: Request, *, ignored: bool) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import ai_quality as quality_repo
+    from app.services import ai_learning
+
+    destination = "/admin/ai-quality#ai-quality-learned-links"
+    form = await request.form()
+    target_type = str(form.get("target_type") or "").strip()
+    target_id = str(form.get("target_id") or "").strip()
+    if not target_type or not target_id or len(target_type) > 40 or len(target_id) > 64:
+        return flash_redirect(destination, "Choose an item to change.", "error")
+    votes = await quality_repo.set_link_learning_ignored(target_type, target_id, ignored=ignored)
+    ai_learning.invalidate_cache()
+    await audit_service.record(
+        action="ai_quality.link_learning." + ("ignore" if ignored else "restore"),
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ai_link_target",
+        metadata={"target_type": target_type, "target_id": target_id, "votes": votes},
+    )
+    links = {(link["target_type"], link["target_id"]): link for link in await quality_repo.learned_links()}
+    label = _learned_link_label(links.get((target_type, target_id)) or {"target_type": target_type,
+                                                                          "target_id": target_id})
+    message = (f"MyPortal will stop using feedback on {label}." if ignored
+               else f"MyPortal will use feedback on {label} again.")
+    return flash_redirect(destination, message, "success")
+
+
+@app.post("/admin/ai-quality/links/ignore", response_class=HTMLResponse)
+async def admin_ai_quality_ignore_link(request: Request):
+    """Undo link learning: stop MyPortal using technicians' votes on one item."""
+    return await _set_link_learning(request, ignored=True)
+
+
+@app.post("/admin/ai-quality/links/restore", response_class=HTMLResponse)
+async def admin_ai_quality_restore_link(request: Request):
+    """Use technicians' votes on one item for link learning again."""
+    return await _set_link_learning(request, ignored=False)
 
 
 @app.get("/admin/llm-usage", response_class=HTMLResponse)
