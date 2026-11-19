@@ -1085,6 +1085,9 @@ class Settings(BaseSettings):
     findings_llm_api_key: str | None = Field(
         default=None, validation_alias="FINDINGS_LLM_API_KEY"
     )
+    findings_llm_max_prompt_chars: int = Field(
+        default=60_000, ge=8_000, le=2_000_000, validation_alias="FINDINGS_LLM_MAX_PROMPT_CHARS"
+    )
     # Marketing Assistant: writes marketing page sections from websites an
     # admin lists for the page. Dedicated LLM settings; when none are set the
     # troubleshooter's LLM (build_troubleshoot_llm_config) is used.

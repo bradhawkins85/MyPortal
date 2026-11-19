@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import hashlib
+import json
 import math
 import re
 import statistics
@@ -1111,6 +1112,92 @@ def build_signals(
     return signals
 
 
+# Lists dropped first when the prompt is over budget, least important first.
+_TRIM_ORDER = (
+    "existing_ai_findings", "rule_findings", "failing_checks", "low_disk", "software_changes",
+    "performance_outliers", "admin_group_additions", "new_services", "new_accounts", "account_lockouts",
+    "event_spikes",
+)
+# Per-item lists of device ids (or device rows) that can be shortened.
+_DEVICE_REF_KEYS = ("devices", "logged_on", "top_devices")
+
+
+def _referenced_device_ids(value: Any) -> set[int]:
+    found: set[int] = set()
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if key == "device_id" and isinstance(item, int):
+                found.add(item)
+            elif key in ("devices", "logged_on", "event_log_cleared_on") and isinstance(item, list):
+                found.update(v for v in item if isinstance(v, int) and not isinstance(v, bool))
+                found |= _referenced_device_ids(item)
+            else:
+                found |= _referenced_device_ids(item)
+    elif isinstance(value, list):
+        for item in value:
+            found |= _referenced_device_ids(item)
+    return found
+
+
+def _cap_device_refs(signals: dict[str, Any], limit: int) -> bool:
+    changed = False
+    for key in _TRIM_ORDER:
+        for item in signals.get(key) or []:
+            for ref_key in _DEVICE_REF_KEYS:
+                refs = item.get(ref_key) if isinstance(item, dict) else None
+                if isinstance(refs, list) and len(refs) > limit:
+                    item[ref_key] = refs[:limit]
+                    changed = True
+    cleared = signals.get("event_log_cleared_on")
+    if isinstance(cleared, list) and len(cleared) > limit:
+        signals["event_log_cleared_on"] = cleared[:limit]
+        changed = True
+    return changed
+
+
+def _drop_unreferenced(signals: dict[str, Any]) -> None:
+    body = {key: value for key, value in signals.items() if key not in ("devices", "companies")}
+    referenced = _referenced_device_ids(body)
+    signals["devices"] = [ref for ref in signals.get("devices") or [] if ref.get("device_id") in referenced]
+    company_ids = {ref.get("company_id") for ref in signals["devices"]}
+    signals["companies"] = [ref for ref in signals.get("companies") or [] if ref.get("company_id") in company_ids]
+
+
+def fit_signals(signals: Mapping[str, Any], size: Any, budget: int) -> dict[str, Any]:
+    """Shrink ``signals`` until ``size(signals)`` is within ``budget`` characters.
+
+    Per-item device lists are shortened first, then the lists are halved in
+    turn, least important first. Devices and companies nobody refers to any more are removed,
+    and ``omitted`` tells the model which lists were cut so it does not read a
+    missing item as "nothing happened".
+    """
+
+    fitted: dict[str, Any] = json.loads(json.dumps(signals, default=str))
+    original = {key: len(fitted.get(key) or []) for key in _TRIM_ORDER}
+    for limit in (6, 3, 1):
+        if size(fitted) <= budget:
+            break
+        if _cap_device_refs(fitted, limit):
+            _drop_unreferenced(fitted)
+    # Halve each list in turn, least important first, so no single list is
+    # emptied while others stay whole.
+    while size(fitted) > budget and any(fitted.get(key) for key in _TRIM_ORDER):
+        for key in _TRIM_ORDER:
+            items = fitted.get(key)
+            if not items:
+                continue
+            fitted[key] = items[: len(items) // 2]
+            _drop_unreferenced(fitted)
+            omitted = {name: original[name] - len(fitted.get(name) or []) for name in _TRIM_ORDER}
+            fitted["omitted"] = {
+                "note": "Lists were shortened to fit the model's input limit; counts are items left out.",
+                **{name: count for name, count in omitted.items() if count},
+            }
+            if size(fitted) <= budget:
+                break
+    return fitted
+
+
 def has_signals(signals: Mapping[str, Any]) -> bool:
     keys = ("event_spikes", "account_lockouts", "new_accounts", "new_services", "admin_group_additions",
             "event_log_cleared_on", "software_changes", "performance_outliers", "low_disk", "failing_checks")
@@ -1238,16 +1325,27 @@ def parse_ai_findings(text: str, devices: Devices, signals: Mapping[str, Any]) -
 
 async def ai_findings(signals: Mapping[str, Any], devices: Devices) -> tuple[list[dict[str, Any]], str]:
     llm = build_llm_config()
-    record = ai_prompt_security.UntrustedRecord(
-        record_id="rmm-signals",
-        provenance="Telemetry from RMM agents on customer devices, aggregated by MyPortal",
-        content=signals,
-        allowed_use="Find abnormalities for technicians to review",
-    )
-    messages = ai_prompt_security.build_messages(
-        _AI_INSTRUCTIONS, [record], task="Assess the RMM signals and return the findings JSON object."
-    )
-    text = await _chat(llm, messages)
+    task = "Assess the RMM signals and return the findings JSON object."
+
+    def build(content: Mapping[str, Any]) -> list[dict[str, str]]:
+        record = ai_prompt_security.UntrustedRecord(
+            record_id="rmm-signals",
+            provenance="Telemetry from RMM agents on customer devices, aggregated by MyPortal",
+            content=content,
+            allowed_use="Find abnormalities for technicians to review",
+        )
+        return ai_prompt_security.build_messages(_AI_INSTRUCTIONS, [record], task=task)
+
+    def size(content: Mapping[str, Any]) -> int:
+        return sum(len(str(message.get("content") or "")) for message in build(content))
+
+    budget = int(get_settings().findings_llm_max_prompt_chars)
+    original_size = size(signals)
+    if original_size > budget:
+        signals = fit_signals(signals, size, budget)
+        log_info("RMM findings prompt shortened to fit the model", original_chars=original_size,
+                 budget_chars=budget, sent_chars=size(signals))
+    text = await _chat(llm, build(signals))
     return parse_ai_findings(text, devices, signals), llm["model"]
 
 
