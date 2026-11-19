@@ -12,6 +12,7 @@ import csv
 import io
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
+from app.api.routes import ai_quality as ai_quality_routes
 from app.schemas.agent import (
     AgentQueryRequest,
     AgentQueryResponse,
@@ -172,7 +173,8 @@ async def query_agent(
             confidence_band=result.get("answer_confidence_label"),
             outcome="answered" if result.get("answer") else "no_answer",
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to record AI search answer for feedback: {}", exc)
         result["quality_response_id"] = None
     await _persist_agent_turns(
         conversation_id,
@@ -186,16 +188,10 @@ async def query_agent(
 
 
 @router.post("/feedback", status_code=status.HTTP_204_NO_CONTENT)
-async def submit_feedback(payload: AgentFeedbackRequest,
+async def submit_feedback(payload: AgentFeedbackRequest, request: Request,
                           current_user: dict = Depends(get_current_user)) -> None:
-    user_id = int(current_user["id"])
-    if payload.reason and payload.reason not in quality_repo.REASONS:
-        raise HTTPException(status_code=422, detail="Unknown feedback reason")
-    if not await quality_repo.response_owned_by(payload.response_id, user_id):
-        raise HTTPException(status_code=404, detail="AI response not found")
-    await quality_repo.save_feedback(response_id=payload.response_id, user_id=user_id,
-                                     rating=payload.rating, reason=payload.reason,
-                                     comment=(payload.comment or "").strip())
+    """Kept for existing clients; see ``POST /api/ai-quality/feedback``."""
+    await ai_quality_routes.submit_rating(current_user, payload, request=request)
 
 
 @router.get("/quality/summary")

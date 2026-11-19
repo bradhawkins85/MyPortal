@@ -58,6 +58,7 @@ from http import HTTPStatus
 
 from app.api.routes import (
     agent,
+    ai_quality as ai_quality_routes,
     api_keys,
     asset_custom_fields,
     audit_logs,
@@ -1614,6 +1615,7 @@ async def credential_share_page(request: Request):
 app.include_router(auth.router)
 app.include_router(dashboard_api.router)
 app.include_router(agent.router)
+app.include_router(ai_quality_routes.router)
 app.include_router(users.router)
 app.include_router(click_to_call_api.router)
 app.include_router(call_recordings_api.router)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
+from app.schemas.ai_quality import AiFeedbackRequest
 from pydantic import BaseModel, Field, constr, field_validator
 
 
@@ -291,8 +292,5 @@ class AgentQueryResponse(BaseModel):
     clarification_options: list[str] = Field(default_factory=list)
 
 
-class AgentFeedbackRequest(BaseModel):
-    response_id: int = Field(gt=0)
-    rating: str = Field(pattern="^(up|down)$")
-    reason: str | None = Field(default=None, max_length=40)
-    comment: str | None = Field(default=None, max_length=1000)
+class AgentFeedbackRequest(AiFeedbackRequest):
+    """AI search answers use the shared AI output feedback contract."""

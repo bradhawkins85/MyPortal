@@ -108,8 +108,8 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
     CoreComponent(
         "ai_quality",
         "AI Quality",
-        "AI quality review dashboard.",
-        ("/admin/ai-quality",),
+        "AI quality review dashboard and 👍/👎 rating of AI output.",
+        ("/admin/ai-quality", "/api/ai-quality"),
     ),
     CoreComponent(
         "llm_usage",

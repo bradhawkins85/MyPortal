@@ -96,3 +96,13 @@ async def test_ai_search_answers_are_recorded(quality_db):
     stored = await repo.get_response(response_id)
     assert stored["feature"] == "agent"
     assert await repo.response_owned_by(response_id, 1)
+
+
+@pytest.mark.anyio
+async def test_response_counts(quality_db):
+    response_id = await repo.record_output(feature="ticket_ai_summary", user_id=1, company_id=2,
+                                           subject_type="ticket", subject_id=7, output_text="x")
+    assert await repo.response_counts(response_id) == {"helpful": 0, "unhelpful": 0}
+    for user_id, rating in ((1, "up"), (3, "down"), (5, "down")):
+        await repo.save_feedback(response_id=response_id, user_id=user_id, rating=rating, reason=None, comment=None)
+    assert await repo.response_counts(response_id) == {"helpful": 1, "unhelpful": 2}

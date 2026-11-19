@@ -231,3 +231,13 @@ async def aggregate() -> list[dict[str, Any]]:
         FROM ai_quality_responses r LEFT JOIN ai_quality_feedback f ON f.response_id = r.id
         GROUP BY r.feature, r.primary_source_type, r.provider, r.confidence_band
         ORDER BY response_count DESC""")
+
+
+async def response_counts(response_id: int) -> dict[str, int]:
+    row = await db.fetch_one(
+        """SELECT SUM(CASE WHEN rating = 'up' THEN 1 ELSE 0 END) AS helpful,
+        SUM(CASE WHEN rating = 'down' THEN 1 ELSE 0 END) AS unhelpful
+        FROM ai_quality_feedback WHERE response_id = ?""",
+        (response_id,),
+    ) or {}
+    return {"helpful": int(row.get("helpful") or 0), "unhelpful": int(row.get("unhelpful") or 0)}
