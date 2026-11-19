@@ -92,6 +92,8 @@ async def _render_questions(
             "title": "Custom onboarding questions",
             "questions": await questions_service.list_questions(),
             "field_types": questions_service.FIELD_TYPES,
+            "form_field_types": questions_service.FORM_FIELD_TYPES,
+            "max_form_fields": questions_service.MAX_FORM_FIELDS,
             "question_sections": questions_service.SECTIONS,
             "question_form": question_form or {},
             "question_errors": question_errors or [],
@@ -140,7 +142,10 @@ async def admin_save_client_onboarding_question(request: Request):
             question_form={
                 key: str(form.get(key) or "")
                 for key in ("label", "field_type", "section", "help_text", "options", "display_order")
-            } | {"required": bool(form.get("required"))},
+            } | {
+                "required": bool(form.get("required")),
+                "form": questions_service.posted_form_definition(form),
+            },
             question_errors=errors,
             editing_question_id=question_id,
             status_code=status.HTTP_400_BAD_REQUEST,

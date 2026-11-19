@@ -28,6 +28,19 @@ FIELD_TYPES = {
     "url": "Website URL",
     "time": "Time",
     "datetime_local": "Date and time",
+    "form": "Custom form (multiple entries)",
+}
+
+# Sub-question types a custom form can ask in each entry.
+FORM_FIELD_TYPES = {
+    "short_text": "Short answer",
+    "long_text": "Long answer",
+    "email": "Email address",
+    "phone": "Phone number",
+    "date": "Date",
+    "dropdown": "Dropdown",
+    "number": "Number",
+    "url": "Website URL",
 }
 
 SECTIONS = {
@@ -48,6 +61,10 @@ MAX_OPTIONS = 100
 MAX_OPTION_LENGTH = 255
 MAX_DISPLAY_ORDER = 10000
 MAX_QUESTIONS = 100
+MAX_FORM_FIELDS = 20
+MAX_FORM_ENTRIES = 50
+MAX_ENTRY_LABEL_LENGTH = 60
+DEFAULT_ENTRY_LABEL = "Entry"
 CHOICE_TYPES = frozenset({"dropdown", "multi_select", "radio"})
 ANSWER_LIMITS = {
     "short_text": MAX_SHORT_ANSWER_LENGTH,
@@ -64,6 +81,7 @@ ANSWER_LIMITS = {
     "time": 8,
     "datetime_local": 19,
 }
+_ENTRY_TOKEN = re.compile(r"[0-9]{1,6}")
 
 _TRUE_VALUES = frozenset({"1", "true", "on", "yes"})
 _FALSE_VALUES = frozenset({"", "0", "false", "off", "no"})
@@ -141,11 +159,132 @@ def validate_question(form: Mapping[str, Any]) -> tuple[dict[str, Any], list[str
             errors.append("Each choice option must be unique.")
     else:
         options = []
-    return {
+    form_definition = None
+    if field_type == "form":
+        form_definition, form_errors = validate_form_definition(form)
+        errors.extend(form_errors)
+    data = {
         "label": label, "field_type": field_type, "section": section,
         "help_text": help_text, "required": required, "options": options,
         "display_order": display_order,
-    }, errors
+    }
+    if form_definition is not None:
+        data["form"] = form_definition
+    return data, errors
+
+
+def _options_list(raw: Any) -> list[str]:
+    if isinstance(raw, str):
+        raw = raw.splitlines()
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [_string(option).strip() for option in raw if _string(option).strip()]
+
+
+def posted_form_definition(form: Mapping[str, Any]) -> dict[str, Any]:
+    """Read a custom form's entry name and sub-questions as the admin entered them.
+
+    Accepts either a saved ``form`` mapping or the editor's parallel
+    ``form_field_*`` inputs (one value per sub-question row).
+    """
+    definition = form.get("form")
+    if isinstance(definition, Mapping):
+        fields = definition.get("fields")
+        return {
+            "entry_label": _string(definition.get("entry_label")),
+            "fields": [dict(item) for item in fields if isinstance(item, Mapping)]
+            if isinstance(fields, (list, tuple)) else [],
+        }
+    labels = _getlist(form, "form_field_label")
+    types = _getlist(form, "form_field_type")
+    required = _getlist(form, "form_field_required")
+    options = _getlist(form, "form_field_options")
+
+    def at(values: list[str], index: int) -> str:
+        return values[index] if index < len(values) else ""
+
+    return {
+        "entry_label": _string(form.get("form_entry_label")),
+        "fields": [
+            {
+                "label": label, "field_type": at(types, index),
+                "required": at(required, index), "options": at(options, index),
+            }
+            for index, label in enumerate(labels)
+        ],
+    }
+
+
+def validate_form_definition(form: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Validate a custom form's sub-questions; blank editor rows are ignored."""
+    posted = posted_form_definition(form)
+    errors: list[str] = []
+    entry_label = posted["entry_label"].strip()
+    if len(entry_label) > MAX_ENTRY_LABEL_LENGTH or _has_controls(entry_label):
+        errors.append(f"The entry name must be a single line of no more than {MAX_ENTRY_LABEL_LENGTH} characters.")
+    fields: list[dict[str, Any]] = []
+    for raw in posted["fields"]:
+        label = _string(raw.get("label")).strip()
+        options = _options_list(raw.get("options"))
+        field_type = _string(raw.get("field_type") or "short_text").strip()
+        if not label and (not options or field_type != "dropdown"):
+            continue
+        position = len(fields) + 1
+        prefix = f"Form question {position}: "
+        if not label:
+            errors.append(prefix + "enter a label.")
+        elif len(label) > MAX_LABEL_LENGTH or _has_controls(label):
+            errors.append(prefix + f"labels must be a single line of no more than {MAX_LABEL_LENGTH} characters.")
+        if field_type not in FORM_FIELD_TYPES:
+            errors.append(prefix + "choose a supported answer type.")
+        raw_required = raw.get("required")
+        if isinstance(raw_required, bool):
+            required = raw_required
+        else:
+            text = _string(raw_required).strip().lower()
+            if text not in _TRUE_VALUES | _FALSE_VALUES:
+                errors.append(prefix + "choose whether an answer is required.")
+            required = text in _TRUE_VALUES
+        if field_type == "dropdown":
+            if not options:
+                errors.append(prefix + "add at least one dropdown option.")
+            elif len(options) > MAX_OPTIONS:
+                errors.append(prefix + f"add no more than {MAX_OPTIONS} dropdown options.")
+            if any(len(option) > MAX_OPTION_LENGTH or _has_controls(option) for option in options):
+                errors.append(prefix + f"each option must be a single line of no more than {MAX_OPTION_LENGTH} characters.")
+            if len(set(options)) != len(options):
+                errors.append(prefix + "each option must be unique.")
+        else:
+            options = []
+        fields.append({
+            "key": f"f{position}", "label": label, "field_type": field_type,
+            "required": required, "options": options,
+        })
+    if not fields:
+        errors.append("Add at least one question to the custom form.")
+    elif len(fields) > MAX_FORM_FIELDS:
+        errors.append(f"A custom form can ask no more than {MAX_FORM_FIELDS} questions.")
+    return {"entry_label": entry_label or DEFAULT_ENTRY_LABEL, "fields": fields}, errors
+
+
+def form_fields(question: Mapping[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    definition = question.get("form") if isinstance(question.get("form"), Mapping) else {}
+    entry_label = _string(definition.get("entry_label")).strip() or DEFAULT_ENTRY_LABEL
+    fields = definition.get("fields")
+    if not isinstance(fields, (list, tuple)):
+        return entry_label, []
+    return entry_label, [
+        dict(item) for item in fields
+        if isinstance(item, Mapping) and _string(item.get("key")) and item.get("field_type") in FORM_FIELD_TYPES
+    ]
+
+
+def _entry_tokens(form: Mapping[str, Any], name: str) -> tuple[list[str], bool]:
+    """Return the posted entry tokens in order and whether they were well formed."""
+    raw = _getlist(form, f"{name}-entry")
+    tokens = list(dict.fromkeys(raw))
+    valid = len(tokens) == len(raw) and all(_ENTRY_TOKEN.fullmatch(token) for token in tokens)
+    return (tokens if valid else [token for token in tokens if _ENTRY_TOKEN.fullmatch(token)]), valid
 
 
 async def save_question(question_id: int | None, data: dict[str, Any]) -> dict[str, Any] | None:
@@ -181,6 +320,18 @@ def answer_state(
         field_type = question["field_type"]
         if field_type == "multi_select":
             state[key] = _getlist(form, name) if form is not None else []
+        elif field_type == "form":
+            _, fields = form_fields(question)
+            tokens = _entry_tokens(form, name)[0][:MAX_FORM_ENTRIES] if form is not None else []
+            state[key] = [
+                {
+                    "token": token,
+                    "values": {
+                        field["key"]: _string(form.get(f"{name}-{token}-{field['key']}")) for field in fields
+                    },
+                }
+                for token in tokens
+            ]
         elif field_type == "checkbox":
             raw = _string(form.get(name)).strip().lower() if form is not None else ""
             state[key] = raw in _TRUE_VALUES if raw in _TRUE_VALUES | _FALSE_VALUES else raw
@@ -260,6 +411,72 @@ def _parse_scalar(field_type: str, value: str) -> tuple[str, str | None]:
     return value, None
 
 
+def _parse_text(
+    field_type: str, raw_value: str, *, posted_count: int, required: bool, options: list[str],
+) -> tuple[str, str, str | None]:
+    """Validate one single-value answer; return value, display value and error."""
+    value = raw_value.strip()
+    error: str | None = None
+    if posted_count > 1:
+        error = "provide one answer."
+    elif len(raw_value) > ANSWER_LIMITS[field_type]:
+        error = f"use no more than {ANSWER_LIMITS[field_type]} characters."
+    elif _has_controls(value, multiline=field_type == "long_text"):
+        error = "enter text without unsupported control characters."
+    elif not value:
+        if required:
+            error = "provide an answer."
+    elif field_type in CHOICE_TYPES:
+        if value not in options:
+            error = "select one of the available choices."
+    else:
+        value, error = _parse_scalar(field_type, value)
+    return value, (value if value else "Not provided"), error
+
+
+def _parse_form(
+    form: Mapping[str, Any], name: str, question: Mapping[str, Any],
+) -> tuple[list[list[dict[str, Any]]], str, list[str]]:
+    """Validate a custom form's entries; entries left completely blank are dropped."""
+    entry_label, fields = form_fields(question)
+    tokens, valid = _entry_tokens(form, name)
+    if not fields:
+        required_error = [f"add at least one {entry_label.lower()}."] if question.get("required") else []
+        return [], "Not provided", required_error
+    if not valid:
+        return [], "Not provided", ["the entries could not be read. Refresh the page and try again."]
+    if len(tokens) > MAX_FORM_ENTRIES:
+        return [], "Not provided", [f"add no more than {MAX_FORM_ENTRIES} entries."]
+    entries: list[list[dict[str, Any]]] = []
+    errors: list[str] = []
+    for number, token in enumerate(tokens, start=1):
+        names = [f"{name}-{token}-{field['key']}" for field in fields]
+        if not any(_string(value).strip() for field_name in names for value in _getlist(form, field_name)):
+            continue
+        entry: list[dict[str, Any]] = []
+        for field, field_name in zip(fields, names):
+            field_type = str(field["field_type"])
+            value, display_value, error = _parse_text(
+                field_type, _string(form.get(field_name)),
+                posted_count=len(_getlist(form, field_name)),
+                required=bool(field.get("required")), options=list(field.get("options") or []),
+            )
+            if error:
+                errors.append(f"{entry_label} {number}: {field['label']}: {error}")
+            entry.append({
+                "key": str(field["key"]), "label": str(field["label"]), "field_type": field_type,
+                "value": value, "display_value": display_value,
+            })
+        entries.append(entry)
+    if question.get("required") and not entries and not errors:
+        errors.append(f"add at least one {entry_label.lower()}.")
+    display_value = "\n\n".join(
+        f"{entry_label} {index}\n" + "\n".join(f"{cell['label']}: {cell['display_value']}" for cell in entry)
+        for index, entry in enumerate(entries, start=1)
+    ) or "Not provided"
+    return entries, display_value, errors
+
+
 def parse_answers(
     form: Mapping[str, Any], questions: Iterable[Mapping[str, Any]], *, sections: Iterable[str], prefix: str = "",
 ) -> tuple[list[dict[str, Any]], list[str]]:
@@ -300,30 +517,24 @@ def parse_answers(
             elif question.get("required") and not value:
                 error = "tick this box to continue."
             display_value = "Yes" if value else "No"
+        elif field_type == "form":
+            value, display_value, form_errors = _parse_form(form, name, question)
+            if form_errors:
+                errors.extend(error_prefix + item for item in form_errors)
+                continue
         else:
-            posted = _getlist(form, name)
-            raw_value = _string(form.get(name))
-            value = raw_value.strip()
-            if len(posted) > 1:
-                error = "provide one answer."
-            elif len(raw_value) > ANSWER_LIMITS[field_type]:
-                error = f"use no more than {ANSWER_LIMITS[field_type]} characters."
-            elif _has_controls(value, multiline=field_type == "long_text"):
-                error = "enter text without unsupported control characters."
-            elif not value:
-                if question.get("required"):
-                    error = "provide an answer."
-            elif field_type in CHOICE_TYPES:
-                if value not in (question.get("options") or []):
-                    error = "select one of the available choices."
-            else:
-                value, error = _parse_scalar(field_type, value)
-            display_value = value if value else "Not provided"
+            value, display_value, error = _parse_text(
+                field_type, _string(form.get(name)), posted_count=len(_getlist(form, name)),
+                required=bool(question.get("required")), options=list(question.get("options") or []),
+            )
         if error:
             errors.append(error_prefix + error)
             continue
-        answers.append({
+        answer = {
             "id": int(question["id"]), "label": label, "field_type": field_type,
             "section": section, "value": value, "display_value": display_value,
-        })
+        }
+        if field_type == "form":
+            answer["entry_label"] = form_fields(question)[0]
+        answers.append(answer)
     return answers, errors

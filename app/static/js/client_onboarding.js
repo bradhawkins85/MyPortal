@@ -131,15 +131,155 @@
     }
   }
 
-  function setCustomError(question, message) {
+  // A custom form marks only the entry control at fault; other questions mark all controls.
+  function setCustomError(question, message, badControl) {
     const error = question.querySelector('[data-cof-custom-error]');
     error.textContent = message || '';
     error.hidden = !message;
-    question.querySelectorAll('[data-cof-custom-control]').forEach((input) => {
-      input.classList.toggle('is-invalid', Boolean(message));
-      input.setAttribute('aria-invalid', message ? 'true' : 'false');
+    question.querySelectorAll('[data-cof-custom-control], [data-cof-form-control]').forEach((input) => {
+      const invalid = Boolean(message) && (badControl ? input === badControl : input.hasAttribute('data-cof-custom-control'));
+      input.classList.toggle('is-invalid', invalid);
+      input.setAttribute('aria-invalid', invalid ? 'true' : 'false');
     });
   }
+
+  function customValueMessage(type, input, required) {
+    if (required && !input.value.trim()) {
+      return type === 'dropdown' ? 'Select an option.' : 'Answer this question.';
+    }
+    if (input.value && type === 'email' && !isValidEmail(input.value)) {
+      return 'Enter a valid email address, like name@example.com.';
+    }
+    if (input.value && type === 'phone'
+      && (!/^\+?[0-9().\- ]+(?: *(?:x|ext\.?) *[0-9]{1,8})?$/i.test(input.value.trim())
+        || (input.value.match(/[0-9]/g) || []).length < 3
+        || (input.value.match(/[0-9]/g) || []).length > 20)) {
+      return 'Enter a valid phone number.';
+    }
+    if (input.value && type === 'url' && !isValidCustomUrl(input.value.trim())) {
+      return 'Enter a valid website URL beginning with http:// or https://.';
+    }
+    if (input.maxLength > -1 && input.value.length > input.maxLength) {
+      return `Use no more than ${input.maxLength} characters.`;
+    }
+    if (!input.validity.valid) {
+      return input.validationMessage || 'Enter a valid answer.';
+    }
+    return '';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Custom forms: the client adds one entry (card of sub-questions) at a time.
+  // Entries left completely blank are ignored, here and on the server.
+  // ---------------------------------------------------------------------------
+
+  const formEntries = (question) => Array.from(question.querySelectorAll('[data-cof-form-entry]'));
+  const entryControls = (entry) => Array.from(entry.querySelectorAll('[data-cof-form-control]'));
+  const entryFilled = (entry) => entryControls(entry).some((control) => control.value.trim());
+
+  function refreshCustomForm(question) {
+    const label = question.dataset.cofEntryLabel || 'Entry';
+    const entries = formEntries(question);
+    entries.forEach((entry, index) => {
+      entry.querySelectorAll('[data-cof-form-entry-title]').forEach((title) => {
+        title.textContent = `${label} ${index + 1}`;
+      });
+    });
+    const max = parseInt(question.dataset.cofMaxEntries || '50', 10);
+    question.querySelector('[data-cof-form-add]').disabled = entries.length >= max;
+    question.querySelector('[data-cof-form-empty]').hidden = entries.length > 0;
+  }
+
+  function customFormMessage(question) {
+    const label = question.dataset.cofEntryLabel || 'Entry';
+    const filled = formEntries(question).filter(entryFilled);
+    if (question.dataset.cofCustomRequired === 'true' && !filled.length) {
+      return { message: `Add at least one ${label.toLowerCase()}.`, control: null };
+    }
+    for (const entry of filled) {
+      const title = entry.querySelector('[data-cof-form-entry-title]').textContent;
+      for (const control of entryControls(entry)) {
+        const message = customValueMessage(
+          control.dataset.cofFormType, control, control.dataset.cofFormRequired === 'true',
+        );
+        if (message) {
+          return { message: `${title}, ${control.dataset.cofFormLabel}: ${message}`, control };
+        }
+      }
+    }
+    return { message: '', control: null };
+  }
+
+  function customFormSummary(question) {
+    const label = (question.dataset.cofEntryLabel || 'Entry').toLowerCase();
+    const filled = formEntries(question).filter(entryFilled);
+    if (!filled.length) {
+      return '';
+    }
+    const names = filled.map((entry) => {
+      const first = entryControls(entry).find((control) => control.value.trim());
+      return first ? first.value.trim() : '';
+    }).filter(Boolean);
+    return `${filled.length} ${filled.length === 1 ? label : `${label} entries`}: ${names.join(', ')}`;
+  }
+
+  function addFormEntry(question) {
+    const list = question.querySelector('[data-cof-form-entries]');
+    const entryTemplate = question.querySelector('[data-cof-form-template]');
+    const max = parseInt(question.dataset.cofMaxEntries || '50', 10);
+    if (formEntries(question).length >= max) {
+      return;
+    }
+    const used = formEntries(question).map((entry) => {
+      const token = entry.querySelector('input[type="hidden"]');
+      return token ? parseInt(token.value, 10) || 0 : 0;
+    });
+    const token = String(used.length ? Math.max(...used) + 1 : 0);
+    const holder = document.createElement('template');
+    holder.innerHTML = entryTemplate.innerHTML
+      .split('__ENTRY__').join(token)
+      .split('__ENTRYNUM__').join(String(formEntries(question).length + 1));
+    const entry = holder.content.querySelector('[data-cof-form-entry]');
+    list.append(entry);
+    refreshCustomForm(question);
+    const status = question.querySelector('[data-cof-form-status]');
+    status.textContent = `${entry.querySelector('[data-cof-form-entry-title]').textContent} added.`;
+    const first = entryControls(entry)[0];
+    if (first) {
+      first.focus();
+    }
+    dirty = true;
+  }
+
+  function removeFormEntry(question, entry) {
+    const title = entry.querySelector('[data-cof-form-entry-title]').textContent;
+    const next = entry.nextElementSibling || entry.previousElementSibling;
+    entry.remove();
+    refreshCustomForm(question);
+    setCustomError(question, '');
+    question.querySelector('[data-cof-form-status]').textContent = `${title} removed.`;
+    const focusTarget = next ? next.querySelector('[data-cof-form-remove]') : question.querySelector('[data-cof-form-add]');
+    if (focusTarget) {
+      focusTarget.focus();
+    }
+    dirty = true;
+  }
+
+  form.addEventListener('click', (event) => {
+    const add = event.target.closest('[data-cof-form-add]');
+    const remove = event.target.closest('[data-cof-form-remove]');
+    const question = event.target.closest('[data-cof-custom-type="form"]');
+    if (!question || (!add && !remove)) {
+      return;
+    }
+    event.preventDefault();
+    if (add) {
+      addFormEntry(question);
+    } else {
+      removeFormEntry(question, remove.closest('[data-cof-form-entry]'));
+    }
+  });
+  form.querySelectorAll('[data-cof-custom-type="form"]').forEach(refreshCustomForm);
 
   function validateCustomQuestions(root, show) {
     let firstBad = null;
@@ -149,7 +289,10 @@
       const type = question.dataset.cofCustomType;
       const required = question.dataset.cofCustomRequired === 'true';
       let message = '';
-      if (type === 'multi_select' || type === 'radio') {
+      let badControl = null;
+      if (type === 'form') {
+        ({ message, control: badControl } = customFormMessage(question));
+      } else if (type === 'multi_select' || type === 'radio') {
         if (required && !controls.some((control) => control.checked)) {
           message = type === 'multi_select' ? 'Select at least one option.' : 'Select an option.';
         }
@@ -157,24 +300,11 @@
         if (required && !input.checked) {
           message = 'Tick the box to answer this question.';
         }
-      } else if (required && !input.value.trim()) {
-        message = type === 'dropdown' ? 'Select an option.' : 'Answer this question.';
-      } else if (input.value && type === 'email' && !isValidEmail(input.value)) {
-        message = 'Enter a valid email address, like name@example.com.';
-      } else if (input.value && type === 'phone'
-        && (!/^\+?[0-9().\- ]+(?: *(?:x|ext\.?) *[0-9]{1,8})?$/i.test(input.value.trim())
-          || (input.value.match(/[0-9]/g) || []).length < 3
-          || (input.value.match(/[0-9]/g) || []).length > 20)) {
-        message = 'Enter a valid phone number.';
-      } else if (input.value && type === 'url' && !isValidCustomUrl(input.value.trim())) {
-        message = 'Enter a valid website URL beginning with http:// or https://.';
-      } else if (input.maxLength > -1 && input.value.length > input.maxLength) {
-        message = `Use no more than ${input.maxLength} characters.`;
-      } else if (!input.validity.valid) {
-        message = input.validationMessage || 'Enter a valid answer.';
+      } else {
+        message = customValueMessage(type, input, required);
       }
       if (show) {
-        setCustomError(question, message);
+        setCustomError(question, message, badControl);
       }
       if (message && !firstBad) {
         firstBad = question;
@@ -188,7 +318,9 @@
       const controls = Array.from(question.querySelectorAll('[data-cof-custom-control]'));
       const type = question.dataset.cofCustomType;
       let answer;
-      if (type === 'checkbox') {
+      if (type === 'form') {
+        answer = customFormSummary(question);
+      } else if (type === 'checkbox') {
         answer = controls[0].checked ? 'Yes' : 'No';
       } else if (type === 'multi_select' || type === 'radio') {
         answer = controls.filter((control) => control.checked).map((control) => control.value).join(', ');

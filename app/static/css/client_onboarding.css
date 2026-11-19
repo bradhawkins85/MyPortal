@@ -959,3 +959,63 @@
     transition: none;
   }
 }
+
+/* Custom form questions: the client adds one card per entry. */
+.cof-form-entries {
+  display: grid;
+  gap: var(--space-gap-base);
+  margin: var(--space-gap-tight) 0 var(--space-gap-base);
+  padding: 0;
+  list-style: none;
+}
+
+.cof-form-entry {
+  padding: var(--space-gap-base);
+  border: 1px solid var(--hf-line-soft);
+  border-radius: var(--hf-radius-md);
+}
+
+.cof-form-entry__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+  margin-bottom: var(--space-gap-tight);
+}
+
+.cof-form-entry__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.cof-form-entry__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-gap-base);
+}
+
+.cof-form-entry__field {
+  min-width: 0;
+  margin: 0;
+}
+
+.cof-form-entry__field--wide {
+  grid-column: 1 / -1;
+}
+
+.cof-form-empty {
+  margin: 0 0 var(--space-gap-base);
+}
+
+.cof-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-base);
+}
+
+.cof-form:not(.is-enhanced) [data-cof-form-remove],
+.cof-form:not(.is-enhanced) [data-cof-form-add] {
+  display: none;
+}

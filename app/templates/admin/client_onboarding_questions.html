@@ -7,6 +7,46 @@
   {%- else -%}{{ label }}{%- endif -%}
 {%- endmacro %}
 
+{% macro form_field_row(field, editor_id, index) -%}
+  {% set row_id = editor_id ~ '-ff-' ~ index %}
+  {% set field_options = field.options | default([]) %}
+  <li class="coq-form-field" data-coq-form-field>
+    <div class="coq-form-field__grid">
+      <div class="form-field">
+        <label class="form-label" for="{{ row_id }}-label">Question label</label>
+        <input class="form-input" id="{{ row_id }}-label" name="form_field_label" maxlength="255" value="{{ field.label | default('') }}" placeholder="e.g. Stakeholder name" data-coq-form-label />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ row_id }}-type">Answer type</label>
+        <select class="form-input" id="{{ row_id }}-type" name="form_field_type" data-coq-form-type>
+          {% for value, label in form_field_types.items() %}
+          <option value="{{ value }}"{% if value == (field.field_type | default('short_text')) %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ row_id }}-required">Answer</label>
+        {% set field_required = field.required | default(false) %}
+        {% set is_required = field_required is sameas true or (field_required is string and field_required | lower in ('1', 'true', 'on', 'yes')) %}
+        <select class="form-input" id="{{ row_id }}-required" name="form_field_required" data-coq-form-required>
+          <option value="0"{% if not is_required %} selected{% endif %}>Optional</option>
+          <option value="1"{% if is_required %} selected{% endif %}>Required</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-field" data-coq-form-options-field>
+      <label class="form-label" for="{{ row_id }}-options">Dropdown options</label>
+      <textarea class="form-input" id="{{ row_id }}-options" name="form_field_options" rows="3" aria-describedby="{{ row_id }}-options-help">{{ field_options if field_options is string else field_options | join('\n') }}</textarea>
+      <p class="form-help" id="{{ row_id }}-options-help">One option per line.</p>
+    </div>
+    <div class="coq-form-field__actions">
+      <button type="button" class="button button--ghost button--small" data-coq-form-move="-1">Move up<span class="visually-hidden">: <span data-coq-form-name></span></span></button>
+      <button type="button" class="button button--ghost button--small" data-coq-form-move="1">Move down<span class="visually-hidden">: <span data-coq-form-name></span></span></button>
+      <button type="button" class="button button--ghost button--small" data-coq-form-remove>Remove<span class="visually-hidden">: <span data-coq-form-name></span></span></button>
+    </div>
+  </li>
+{%- endmacro %}
+
 {% macro question_editor(form, editor_id, question_id=none, default_order=10, can_add=true) -%}
   {% set chosen_type = form.field_type | default('short_text') %}
   {% set chosen_section = form.section | default('business') %}
@@ -42,6 +82,27 @@
       <textarea class="form-input" id="{{ editor_id }}-options" name="options" rows="5" aria-describedby="{{ editor_id }}-options-help" data-coq-options-input>{{ entered_options if entered_options is string else entered_options | join('\n') }}</textarea>
       <p class="form-help" id="{{ editor_id }}-options-help">For dropdown, multi-select and radio questions, enter one option per line. Add up to 100 distinct options, with up to 255 characters each.</p>
     </div>
+    {% set form_definition = form.form if form.form is mapping else {} %}
+    {% set form_rows = form_definition.fields | default([]) %}
+    <fieldset class="coq-form" data-coq-form aria-describedby="{{ editor_id }}-form-help">
+      <legend class="form-label">Custom form</legend>
+      <p class="form-help" id="{{ editor_id }}-form-help">The client fills in these questions once for each entry they add, such as each stakeholder or each software vendor. Up to {{ max_form_fields | default(20) }} questions.</p>
+      <div class="form-field">
+        <label class="form-label" for="{{ editor_id }}-entry-label">What is each entry called? <span class="scf-optional">optional</span></label>
+        <input class="form-input" id="{{ editor_id }}-entry-label" name="form_entry_label" maxlength="60" value="{{ form_definition.entry_label | default('') }}" placeholder="e.g. Stakeholder" aria-describedby="{{ editor_id }}-entry-label-help" data-coq-entry-label />
+        <p class="form-help" id="{{ editor_id }}-entry-label-help">Used for the client's "+ Add …" button and to number each entry. Defaults to "Entry".</p>
+      </div>
+      <ol class="coq-form-fields" data-coq-form-fields>
+        {% for field in form_rows %}{{ form_field_row(field, editor_id, loop.index0) }}{% endfor %}
+        {% if not form_rows %}{{ form_field_row({}, editor_id, 0) }}{% endif %}
+      </ol>
+      <template data-coq-form-template>{{ form_field_row({}, editor_id, '__FIELD__') }}</template>
+      <button type="button" class="button button--ghost" data-coq-form-add data-max="{{ max_form_fields | default(20) }}">+ Add a question to the form</button>
+      <div class="coq-form-preview" aria-live="polite">
+        <p class="coq-form-preview__title">Preview</p>
+        <p class="form-help" data-coq-form-summary>Each entry asks the questions above.</p>
+      </div>
+    </fieldset>
     <div class="form-field">
       <label class="form-label" for="{{ editor_id }}-help">Help text <span class="scf-optional">optional</span></label>
       <textarea class="form-input" id="{{ editor_id }}-help" name="help_text" rows="2" maxlength="2000" aria-describedby="{{ editor_id }}-help-description">{{ form.help_text | default('') }}</textarea>
@@ -61,6 +122,7 @@
           <span>Require an answer</span>
         </label>
         <p class="form-help" id="{{ editor_id }}-required-help" data-coq-required-help>A required tick box must be checked before the client can submit.</p>
+        <p class="form-help" data-coq-form-required-help hidden>A required custom form needs at least one entry before the client can submit.</p>
       </div>
     </div>
     <div class="form-actions form-actions--inline">
@@ -135,15 +197,19 @@
             <li class="coq-item">
               <details class="coq-question" id="coq-question-{{ question.id }}"{% if is_editing %} open{% endif %}>
                 <summary class="scf-item coq-question__summary">
-                  <span class="scf-type-icon{% if question.field_type in ('dropdown', 'radio') %} scf-type-icon--select{% elif question.field_type == 'multi_select' %} scf-type-icon--multiselect{% elif question.field_type == 'checkbox' %} scf-type-icon--checkbox{% elif question.field_type in ('date', 'datetime_local', 'time') %} scf-type-icon--date{% endif %}" aria-hidden="true"></span>
+                  <span class="scf-type-icon{% if question.field_type in ('dropdown', 'radio') %} scf-type-icon--select{% elif question.field_type == 'multi_select' %} scf-type-icon--multiselect{% elif question.field_type == 'checkbox' %} scf-type-icon--checkbox{% elif question.field_type in ('date', 'datetime_local', 'time') %} scf-type-icon--date{% elif question.field_type == 'form' %} scf-type-icon--select{% endif %}" aria-hidden="true"></span>
                   <span class="scf-item__main">
                     <span class="coq-question__label">{{ question.label }}</span>
                     {% if question.help_text %}<span class="scf-item__help">{{ question.help_text }}</span>{% endif %}
+                    {% if question.field_type == 'form' and question.form %}<span class="scf-item__help">Asks: {{ question.form.fields | map(attribute='label') | join(' · ') }}</span>{% endif %}
                     <span class="scf-item__chips">
                       <span class="scf-chip">{{ field_types.get(question.field_type, question.field_type) }}</span>
                       <span class="scf-chip{% if question.required %} scf-chip--logic{% endif %}">{{ 'Required' if question.required else 'Optional' }}</span>
                       <span class="scf-chip">Order {{ question.display_order }}</span>
                       {% if question.options %}<span class="scf-chip">{{ question.options | length }} options</span>{% endif %}
+                      {% if question.field_type == 'form' and question.form %}
+                      <span class="scf-chip">{{ question.form.fields | length }} {{ 'question' if question.form.fields | length == 1 else 'questions' }} per {{ (question.form.entry_label or 'entry') | lower }}</span>
+                      {% endif %}
                     </span>
                   </span>
                   <span class="coq-question__action">Edit question <span class="coq-question__chevron" aria-hidden="true">⌄</span></span>
@@ -167,7 +233,7 @@
       {% else %}
       <div class="scf-empty">
         <p class="scf-empty__title">No custom questions yet</p>
-        <p class="text-muted">Add your first question above. You can ask once in a form section, or repeat a question for each site.</p>
+        <p class="text-muted">Add your first question above. You can ask once in a form section, repeat a question for each site, or build a custom form the client fills in for each stakeholder, vendor or similar.</p>
       </div>
       {% endif %}
     </div>

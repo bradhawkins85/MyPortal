@@ -79,3 +79,61 @@
     grid-column: 2;
   }
 }
+
+/* Custom form builder: one card per sub-question the client answers per entry. */
+.coq-form {
+  margin: 0 0 var(--space-gap-roomy);
+  padding: var(--space-gap-roomy);
+  border: 1px solid var(--hf-line-soft);
+  border-radius: var(--hf-radius-md);
+  min-width: 0;
+}
+
+.coq-form > legend {
+  padding: 0 var(--space-gap-tight);
+}
+
+.coq-form-fields {
+  display: grid;
+  gap: var(--space-gap-base);
+  margin: 0 0 var(--space-gap-base);
+  padding: 0;
+  list-style: none;
+}
+
+.coq-form-field {
+  padding: var(--space-gap-base);
+  border: 1px solid var(--hf-line-soft);
+  border-radius: var(--hf-radius-md);
+}
+
+.coq-form-field__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-gap-base);
+}
+
+.coq-form-field__actions {
+  display: flex;
+  margin-top: var(--space-gap-tight);
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+}
+
+.coq-form-preview {
+  margin-top: var(--space-gap-base);
+  padding-top: var(--space-gap-base);
+  border-top: 1px solid var(--hf-line-soft);
+}
+
+.coq-form-preview__title {
+  margin: 0 0 var(--space-gap-tight);
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+@media (max-width: 640px) {
+  .coq-form-field__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

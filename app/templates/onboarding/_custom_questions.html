@@ -1,4 +1,68 @@
 {# Native controls shared by all onboarding sections and each site's editor. #}
+{% macro form_entry_input(field, name, input_id, value) -%}
+  {% set attrs %} id="{{ input_id }}" name="{{ name }}" data-cof-form-control data-cof-form-type="{{ field.field_type }}" data-cof-form-label="{{ field.label }}" data-cof-form-required="{{ 'true' if field.required else 'false' }}"{% endset %}
+  {% if field.field_type == "long_text" %}
+  <textarea class="form-input" rows="3" maxlength="10000"{{ attrs }}>{{ value }}</textarea>
+  {% elif field.field_type == "dropdown" %}
+  <select class="form-input"{{ attrs }}>
+    <option value="">Select an option</option>
+    {% for option in field.options or [] %}<option value="{{ option }}"{% if option == value %} selected{% endif %}>{{ option }}</option>{% endfor %}
+  </select>
+  {% else %}
+  {% set input_types = {"short_text": "text", "email": "email", "phone": "tel", "date": "date", "number": "number", "url": "url"} %}
+  {% set limits = {"short_text": 1000, "email": 255, "phone": 50, "url": 2048, "number": 100, "date": 10} %}
+  <input class="form-input" type="{{ input_types.get(field.field_type, 'text') }}" value="{{ value }}"
+    {% if field.field_type in limits %}maxlength="{{ limits[field.field_type] }}"{% endif %}
+    {% if field.field_type == "number" %}step="any" min="-1e100" max="1e100"{% endif %}
+    {% if field.field_type == "date" %}min="0001-01-01" max="9999-12-31"{% endif %}{{ attrs }} />
+  {% endif %}
+{%- endmacro %}
+
+{% macro form_entry(fields, base, token, values, number, entry_label) -%}
+<li class="cof-form-entry" data-cof-form-entry>
+  <input type="hidden" name="{{ base }}-entry" value="{{ token }}" />
+  <div class="cof-form-entry__header">
+    <h4 class="cof-form-entry__title"><span data-cof-form-entry-title>{{ entry_label }} {{ number }}</span></h4>
+    <button type="button" class="button button--ghost button--small" data-cof-form-remove>Remove<span class="visually-hidden"> <span data-cof-form-entry-title>{{ entry_label }} {{ number }}</span></span></button>
+  </div>
+  <div class="cof-form-entry__fields">
+    {% for field in fields %}
+    {% set input_id = base ~ "-" ~ token ~ "-" ~ field.key %}
+    <div class="form-field cof-form-entry__field{% if field.field_type == 'long_text' %} cof-form-entry__field--wide{% endif %}">
+      <label class="form-label" for="{{ input_id }}">{{ field.label }} <span class="{{ 'cof-required' if field.required else 'scf-optional' }}">{{ 'required' if field.required else 'optional' }}</span></label>
+      {{ form_entry_input(field, input_id, input_id, values.get(field.key, "")) }}
+    </div>
+    {% endfor %}
+  </div>
+</li>
+{%- endmacro %}
+
+{% macro custom_form_question(question, answer, field_id, description) -%}
+  {% set definition = question.form if question.form is mapping else {} %}
+  {% set entry_label = definition.entry_label or "Entry" %}
+  {% set fields = definition.fields or [] %}
+  {% set entries = answer if answer is not string and answer is iterable else [] %}
+  {% set max_entries = 50 %}
+  <fieldset class="form-field cof-custom-question cof-form-question" data-cof-custom-question="{{ question.id }}" data-cof-custom-type="form" data-cof-custom-label="{{ question.label }}" data-cof-custom-required="{{ 'true' if question.required else 'false' }}" data-cof-entry-label="{{ entry_label }}" data-cof-max-entries="{{ max_entries }}" aria-describedby="{{ description }}">
+    <legend class="form-label">{{ question.label }} <span class="{{ 'cof-required' if question.required else 'scf-optional' }}">{{ 'required' if question.required else 'optional' }}</span></legend>
+    {% if question.help_text %}<p class="form-help" id="{{ field_id }}-help">{{ question.help_text }}</p>{% endif %}
+    <ol class="cof-form-entries" data-cof-form-entries>
+      {% for entry in entries %}
+      {{ form_entry(fields, field_id, entry.token, entry["values"], loop.index, entry_label) }}
+      {% else %}
+      {{ form_entry(fields, field_id, "0", {}, 1, entry_label) }}
+      {% endfor %}
+    </ol>
+    <p class="form-help cof-form-empty" data-cof-form-empty hidden>No {{ entry_label | lower }} added yet.</p>
+    <template data-cof-form-template>{{ form_entry(fields, field_id, "__ENTRY__", {}, "__ENTRYNUM__", entry_label) }}</template>
+    <div class="cof-form-actions">
+      <button type="button" class="button button--ghost" data-cof-form-add>+ Add {{ entry_label | lower }}</button>
+      <span class="visually-hidden" role="status" aria-live="polite" data-cof-form-status></span>
+    </div>
+    <p class="scf-error" id="{{ field_id }}-error" data-cof-custom-error hidden></p>
+  </fieldset>
+{%- endmacro %}
+
 {% macro custom_questions(questions, answers={}, prefix="") -%}
 {% if questions %}
 <div class="cof-custom-questions" data-cof-custom-questions>
@@ -8,6 +72,9 @@
   {% set answer = answers.get(key, "") %}
   {% set grouped = question.field_type in ("multi_select", "radio") %}
   {% set description = field_id ~ "-help " ~ field_id ~ "-error" if question.help_text else field_id ~ "-error" %}
+  {% if question.field_type == "form" %}
+  {{ custom_form_question(question, answer, field_id, description) }}
+  {% else %}
   <{{ "fieldset" if grouped else "div" }} class="form-field cof-custom-question" data-cof-custom-question="{{ key }}" data-cof-custom-type="{{ question.field_type }}" data-cof-custom-label="{{ question.label }}" data-cof-custom-required="{{ 'true' if question.required else 'false' }}"{% if grouped %} aria-describedby="{{ description }}"{% endif %}>
     {% if grouped %}
     <legend class="form-label">{{ question.label }} <span class="{{ 'cof-required' if question.required else 'scf-optional' }}">{{ 'required' if question.required else 'optional' }}</span></legend>
@@ -49,6 +116,7 @@
     {% if question.help_text %}<p class="form-help" id="{{ field_id }}-help">{{ question.help_text }}</p>{% endif %}
     <p class="scf-error" id="{{ field_id }}-error" data-cof-custom-error hidden></p>
   </{{ "fieldset" if grouped else "div" }}>
+  {% endif %}
   {% endfor %}
 </div>
 {% endif %}

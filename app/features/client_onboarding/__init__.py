@@ -14,7 +14,7 @@ from .routes import router
 
 PACK = FeaturePack(
     slug="client_onboarding",
-    version="1.0.0",
+    version="1.1.0",
     routers=(router,),
 )
 

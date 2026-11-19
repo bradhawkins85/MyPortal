@@ -64,9 +64,25 @@ add help text to explain what the client should enter.
 
 Available field types are **Short answer**, **Long answer**, **Email**, **Phone number**,
 **Date**, **Dropdown**, **Multi-select**, **Tick box**, **Single choice (radio buttons)**,
-**Number**, **Website URL**, **Time** and **Date and time**. Dropdown, multi-select and
+**Number**, **Website URL**, **Time**, **Date and time** and **Custom form (multiple
+entries)**. Dropdown, multi-select and
 single-choice questions need their choices entered **one per line**. Use a tick box for a
 single yes/no answer, and multi-select when the client can choose several options.
+
+### Custom forms
+
+Choose **Custom form (multiple entries)** to collect a list of similar records, such as the
+other stakeholders in the business or the key software applications and their vendor support
+contracts. Give each entry a name (for example *Stakeholder* or *Vendor*) and build the form
+row by row: each row is a question with its own label, answer type (short or long answer,
+email, phone, date, dropdown, number or website URL) and whether it is required. Reorder rows
+with **Move up** / **Move down**; a custom form can ask up to 20 questions.
+
+The client sees one card per entry and uses **+ Add stakeholder** (or your entry name) to add
+up to 50 entries, removing any they don't need. Entries left completely blank are ignored.
+Required questions only apply to entries the client has started; marking the whole custom form
+as required means at least one entry must be added. Submitted entries are shown to staff as a
+table, one row per entry.
 
 Saved questions apply to every open onboarding form, including links created before the
 question was added. Required questions and field formats are checked before submission.

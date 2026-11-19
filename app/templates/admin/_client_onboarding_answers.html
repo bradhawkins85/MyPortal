@@ -2,7 +2,32 @@
 {% macro answer_rows(answers) -%}
   {% for answer in answers or [] %}
     <dt>{{ answer.label }}</dt>
+    {% if answer.field_type == 'form' and answer.value is iterable and answer.value is not string and answer.value | length %}
+    {% set columns = answer.value[0] %}
+    <dd class="cof-answer-form">
+      <div class="table-wrapper">
+        <table class="table">
+          <caption class="visually-hidden">{{ answer.label }}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{{ answer.entry_label | default('Entry') }}</th>
+              {% for cell in columns %}<th scope="col">{{ cell.label }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in answer.value %}
+            <tr>
+              <th scope="row">{{ loop.index }}</th>
+              {% for cell in entry %}<td style="white-space: pre-wrap; overflow-wrap: anywhere;">{{ cell.display_value if cell.display_value else 'Not provided' }}</td>{% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </dd>
+    {% else %}
     <dd style="white-space: pre-wrap; overflow-wrap: anywhere;">{{ answer.display_value if answer.display_value is defined and answer.display_value is not none and answer.display_value != '' else 'Not answered' }}</dd>
+    {% endif %}
   {% endfor %}
 {%- endmacro %}
 
