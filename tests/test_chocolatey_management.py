@@ -526,8 +526,9 @@ async def test_upgrade_uses_device_state_even_when_portal_inventory_is_empty(sql
 
 @pytest.mark.anyio
 @pytest.mark.parametrize('mode', ['install', 'upgrade', 'uninstall'])
-@pytest.mark.parametrize('force,ignore_reboots', [(False, True), (True, False)])
-async def test_package_options_survive_queue_and_dispatch(sqlite_db, monkeypatch, mode, force, ignore_reboots):
+@pytest.mark.parametrize('force,ignore_reboots,ignore_checksums', [(False, True, False), (True, False, True)])
+async def test_package_options_survive_queue_and_dispatch(sqlite_db, monkeypatch, mode, force, ignore_reboots,
+                                                          ignore_checksums):
     monkeypatch.setattr(catalog_repo, 'db', sqlite_db)
     _, agent = await _enrol(sqlite_db)
     monkeypatch.setattr(inventory_repo, 'list_software', AsyncMock(return_value=[]))
@@ -536,23 +537,37 @@ async def test_package_options_survive_queue_and_dispatch(sqlite_db, monkeypatch
         # is absent from the catalog and the portal's last inventory.
         await sources.save(int(agent['company_id']), [])
     run_id = await updates.queue_apps(agent, ['private-app'], mode, 9,
-        force=force, ignore_pending_reboots=ignore_reboots)
+        force=force, ignore_pending_reboots=ignore_reboots, ignore_checksums=ignore_checksums)
     jobs = await rmm_scripts.claim_jobs(agent)
     assert len(jobs) == 1
     config = json.loads(jobs[0]['env']['MYPORTAL_PATCH_PLAN'])
     assert config['manual_apps'] == {'mode': mode, 'package_ids': ['private-app'],
-                                     'force': force, 'ignore_pending_reboots': ignore_reboots}
+                                     'force': force, 'ignore_pending_reboots': ignore_reboots,
+                                     'ignore_checksums': ignore_checksums}
     assert await patch.job_is_current(agent, jobs[0])
     assert (await rmm_repo.get_run(run_id))['status'] == 'dispatched'
-    for field in ('force', 'ignore_pending_reboots'):
+    chosen = {'force': force, 'ignore_pending_reboots': ignore_reboots, 'ignore_checksums': ignore_checksums}
+    for field, value in chosen.items():
         config['manual_apps'][field] = 'false'
         assert not patch.manual_apps_current(agent, config)
-        config['manual_apps'][field] = force if field == 'force' else ignore_reboots
+        config['manual_apps'][field] = value
+    # Jobs queued before the option existed still dispatch.
+    del config['manual_apps']['ignore_checksums']
+    assert patch.manual_apps_current(agent, config)
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize('mode,force,ignore_reboots', [('install', False, True), ('upgrade', True, False), ('uninstall', True, True)])
-async def test_asset_package_form_passes_selected_options(monkeypatch, mode, force, ignore_reboots):
+async def test_queue_apps_rejects_non_boolean_ignore_checksums(sqlite_db, monkeypatch):
+    monkeypatch.setattr(catalog_repo, 'db', sqlite_db)
+    _, agent = await _enrol(sqlite_db)
+    with pytest.raises(rmm_scripts.RunRequestError, match='ignore checksums'):
+        await updates.queue_apps(agent, ['7zip'], 'install', 9, ignore_checksums='true')
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('mode,force,ignore_reboots,ignore_checksums',
+                         [('install', False, True, True), ('upgrade', True, False, False), ('uninstall', True, True, False)])
+async def test_asset_package_form_passes_selected_options(monkeypatch, mode, force, ignore_reboots, ignore_checksums):
     from starlette.datastructures import FormData
     monkeypatch.setattr(patch_routes, '_context', AsyncMock(return_value=({'id': 9}, {}, 1, True)))
     agent = {'id': 7, 'company_id': 1, 'os': 'windows', 'status': 'active'}
@@ -561,7 +576,10 @@ async def test_asset_package_form_passes_selected_options(monkeypatch, mode, for
     monkeypatch.setattr(updates, 'queue_apps', queue)
     audit = AsyncMock()
     monkeypatch.setattr(patch_routes.audit, 'record', audit)
-    values = [('package_id', '7zip'), ('mode', mode), ('force', 'false'), ('ignore_pending_reboots', 'false')]
+    values = [('package_id', '7zip'), ('mode', mode), ('force', 'false'), ('ignore_checksums', 'false'),
+              ('ignore_pending_reboots', 'false')]
+    if ignore_checksums:
+        values.append(('ignore_checksums', 'true'))
     if force:
         values.append(('force', 'true'))
     if ignore_reboots:
@@ -569,8 +587,10 @@ async def test_asset_package_form_passes_selected_options(monkeypatch, mode, for
     request = SimpleNamespace(form=AsyncMock(return_value=FormData(values)))
     response = await patch_routes.software_install(10, request)
     assert response.status_code == 303
-    queue.assert_awaited_once_with(agent, ['7zip'], mode, 9, force=force, ignore_pending_reboots=ignore_reboots)
+    queue.assert_awaited_once_with(agent, ['7zip'], mode, 9, force=force, ignore_pending_reboots=ignore_reboots,
+                                   ignore_checksums=ignore_checksums)
     assert audit.call_args.kwargs['action'] == f'rmm.software.{mode}'
+    assert audit.call_args.kwargs['metadata']['ignore_checksums'] is ignore_checksums
 
 
 @pytest.mark.anyio
@@ -582,9 +602,11 @@ async def test_push_api_passes_force_and_unchecked_reboot_option(monkeypatch):
     monkeypatch.setattr(updates, 'queue_apps', queue)
     monkeypatch.setattr(patch_routes.audit, 'record', AsyncMock())
     response = await patch_routes.push_apps(SimpleNamespace(), patch_routes.AppPushRequest(
-        package_ids=['7zip'], mode='uninstall', force=True, ignore_pending_reboots=False, all_devices=True))
+        package_ids=['7zip'], mode='uninstall', force=True, ignore_pending_reboots=False, ignore_checksums=True,
+        all_devices=True))
     assert response['queued'] == 1
-    queue.assert_awaited_once_with(agent, ['7zip'], 'uninstall', 9, force=True, ignore_pending_reboots=False)
+    queue.assert_awaited_once_with(agent, ['7zip'], 'uninstall', 9, force=True, ignore_pending_reboots=False,
+                                   ignore_checksums=True)
 
 
 @pytest.mark.anyio
@@ -597,7 +619,7 @@ async def test_push_api_targets_only_this_companys_windows_devices(monkeypatch):
     queued = []
     async def queue_apps(agent, ids, mode, user_id, **options):
         queued.append((agent['id'], ids, mode))
-        assert options == {'force': False, 'ignore_pending_reboots': True}
+        assert options == {'force': False, 'ignore_pending_reboots': True, 'ignore_checksums': False}
         if agent['id'] == 3:
             raise rmm_scripts.RunRequestError({'device': 'Chocolatey apps need an active Windows device.'})
         return None if agent['id'] == 4 else 100 + agent['id']
@@ -657,6 +679,8 @@ def test_asset_rmm_menu_offers_install_choco_package_with_modal():
     assert 'value="install"' in modal and 'value="upgrade"' in modal and 'value="uninstall"' in modal
     assert 'name="force" value="true"' in modal
     assert 'name="ignore_pending_reboots" value="true" checked' in modal
+    assert 'name="ignore_checksums" value="true" aria-describedby' in modal
+    assert 'name="ignore_checksums" value="true" checked' not in modal
 
 
 def test_asset_page_shows_choco_install_only_for_windows_agents_with_run_access():

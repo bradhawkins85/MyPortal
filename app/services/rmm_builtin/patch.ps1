@@ -178,6 +178,8 @@ try {
                         if ($ignorePendingReboots) { $chocoArgs += '--ignore-detected-reboot' }
                         if ($mode -eq 'upgrade') { $chocoArgs += '--fail-on-not-installed' }
                         if ($mode -ne 'uninstall') {
+                            # Only install and upgrade download installers to verify.
+                            if ($plan.manual_apps.ignore_checksums -eq $true) { $chocoArgs += '--ignore-checksums' }
                             $latest = Latest-ChocolateyVersion $id
                             $chocoArgs += "--version=$latest"
                         }

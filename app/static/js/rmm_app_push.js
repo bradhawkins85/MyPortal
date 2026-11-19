@@ -39,6 +39,7 @@
     const mode = form.querySelector('[name="mode"]').value;
     const force = form.querySelector('input[type="checkbox"][name="force"]').checked;
     const ignorePendingReboots = form.querySelector('input[type="checkbox"][name="ignore_pending_reboots"]').checked;
+    const ignoreChecksums = form.querySelector('input[type="checkbox"][name="ignore_checksums"]').checked;
     const devices = allDevices ? 'every Windows device' : agentIds.length + ' device' + (agentIds.length === 1 ? '' : 's');
     const action = { install: 'Install', upgrade: 'Upgrade', uninstall: 'Uninstall' }[mode];
     if (!window.confirm(action + ' ' + ids.join(', ') + ' on ' + devices + '?')) return;
@@ -49,7 +50,7 @@
         method: 'POST', credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrf ? csrf.content : '' },
         body: JSON.stringify({ package_ids: ids, mode: mode, force: force,
-          ignore_pending_reboots: ignorePendingReboots, all_devices: allDevices, agent_ids: agentIds }),
+          ignore_pending_reboots: ignorePendingReboots, ignore_checksums: ignoreChecksums, all_devices: allDevices, agent_ids: agentIds }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not push the applications.');

@@ -953,7 +953,8 @@ async def test_check_creates_real_chocolatey_job_and_records_rejection(sqlite_db
     job = rmm_scripts._job_payload(row)
     plan = json.loads(job["env"]["MYPORTAL_PATCH_PLAN"])
     assert plan["manual_apps"] == {"mode": "install", "package_ids": ["googlechrome"],
-                                   "force": False, "ignore_pending_reboots": True}
+                                   "force": False, "ignore_pending_reboots": True,
+                                   "ignore_checksums": False}
     assert plan["apps"][0]["install_missing"] is True
     assert plan["sources"] and plan["reboot"] == {"reboot_mode": "never"}
     assert await rmm_patching.job_is_current(agent, job)

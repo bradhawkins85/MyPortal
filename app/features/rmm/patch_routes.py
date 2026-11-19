@@ -228,15 +228,17 @@ async def software_install(asset_id: int, request: Request):
     mode = str(form.get('mode') or 'install')
     force = patching.flag(form.get('force'))
     ignore_pending_reboots = patching.flag(form.get('ignore_pending_reboots', 'true'))
+    ignore_checksums = patching.flag(form.get('ignore_checksums'))
     try:
         ids = rmm_software_updates.package_ids([form.get('package_id')])
         run_id = await rmm_software_updates.queue_apps(agent, ids, mode, user['id'],
-            force=force, ignore_pending_reboots=ignore_pending_reboots)
+            force=force, ignore_pending_reboots=ignore_pending_reboots, ignore_checksums=ignore_checksums)
     except RunRequestError as exc:
         return flash_redirect(f'/assets/{asset_id}#software', ' '.join(exc.errors.values()), 'error')
     await audit.record(action=f'rmm.software.{mode}', request=request, user_id=user['id'], entity_type='asset',
                        entity_id=asset_id, metadata={'package_ids': ids, 'run_id': run_id, 'mode': mode,
-                                                    'force': force, 'ignore_pending_reboots': ignore_pending_reboots})
+                                                    'force': force, 'ignore_pending_reboots': ignore_pending_reboots,
+                                                    'ignore_checksums': ignore_checksums})
     if run_id is None:
         return flash_redirect(f'/assets/{asset_id}#software', 'No matching installed applications to upgrade.', 'info')
     return flash_redirect(f'/assets/{asset_id}#software',
@@ -248,6 +250,7 @@ class AppPushRequest(BaseModel):
     mode: Literal['install', 'upgrade', 'uninstall'] = 'install'
     force: bool = False
     ignore_pending_reboots: bool = True
+    ignore_checksums: bool = False
     all_devices: bool = False
     agent_ids: list[int] = Field(default_factory=list, max_length=1000)
 
@@ -273,7 +276,8 @@ async def push_apps(request: Request, payload: AppPushRequest):
     for agent in agents:
         try:
             run_id = await rmm_software_updates.queue_apps(agent, ids, payload.mode, user['id'],
-                force=payload.force, ignore_pending_reboots=payload.ignore_pending_reboots)
+                force=payload.force, ignore_pending_reboots=payload.ignore_pending_reboots,
+                ignore_checksums=payload.ignore_checksums)
         except RunRequestError as exc:
             problems.append({'agent_id': agent['id'], 'hostname': agent.get('hostname') or agent.get('agent_uid'),
                              'detail': ' '.join(exc.errors.values())})
@@ -284,7 +288,8 @@ async def push_apps(request: Request, payload: AppPushRequest):
             not_needed += 1
     await audit.record(action='rmm.software.push', request=request, user_id=user['id'], entity_type='company',
                        entity_id=company_id, metadata={'package_ids': ids, 'mode': payload.mode, 'run_ids': run_ids,
-                                                      'force': payload.force, 'ignore_pending_reboots': payload.ignore_pending_reboots})
+                                                      'force': payload.force, 'ignore_pending_reboots': payload.ignore_pending_reboots,
+                                                      'ignore_checksums': payload.ignore_checksums})
     return {'queued': len(run_ids), 'run_ids': run_ids, 'not_needed': not_needed, 'problems': problems}
 
 

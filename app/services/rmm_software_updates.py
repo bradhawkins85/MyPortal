@@ -106,7 +106,8 @@ async def plan_apps(agent: dict, ids: list[str], mode: str) -> list[dict]:
 
 async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None, *,
                      onboarding_run_id: int | None = None, force: bool = False,
-                     ignore_pending_reboots: bool = True) -> int | None:
+                     ignore_pending_reboots: bool = True,
+                     ignore_checksums: bool = False) -> int | None:
     """Queue one package action; ``None`` when nothing applies.
 
     Jobs wait and execute in the ordinary script queue, including when another
@@ -116,8 +117,8 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None
     """
     if mode not in MODES:
         raise RunRequestError({'mode': 'Choose install, upgrade or uninstall.'})
-    if not isinstance(force, bool) or not isinstance(ignore_pending_reboots, bool):
-        raise RunRequestError({'options': 'Force and ignore pending reboots must be true or false.'})
+    if not all(isinstance(value, bool) for value in (force, ignore_pending_reboots, ignore_checksums)):
+        raise RunRequestError({'options': 'Force, ignore pending reboots and ignore checksums must be true or false.'})
     ids = package_ids(ids)
     if not _windows(agent):
         raise RunRequestError({'device': 'Chocolatey apps need an active Windows device.'})
@@ -125,7 +126,8 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None
     if not apps:
         return None
     config = {'manual_apps': {'mode': mode, 'package_ids': ids, 'force': force,
-                              'ignore_pending_reboots': ignore_pending_reboots}, 'apps': apps,
+                              'ignore_pending_reboots': ignore_pending_reboots,
+                              'ignore_checksums': ignore_checksums}, 'apps': apps,
               'windows': None, 'reboot': {'reboot_mode': 'never'},
               'sources': await sources.for_company(int(agent['company_id']), secrets=True)}
     if mode != 'uninstall' and not any(s['enabled'] for s in config['sources']):
@@ -144,7 +146,9 @@ async def queue_apps(agent: dict, ids: list[str], mode: str, user_id: int | None
                 {'key': 'mode', 'label': 'Action', 'value': mode.title()},
                 {'key': 'force', 'label': 'Force', 'value': 'Yes' if force else 'No'},
                 {'key': 'ignore_pending_reboots', 'label': 'Ignore pending reboots',
-                 'value': 'Yes' if ignore_pending_reboots else 'No'}],
+                 'value': 'Yes' if ignore_pending_reboots else 'No'},
+                {'key': 'ignore_checksums', 'label': 'Ignore checksums',
+                 'value': 'Yes' if ignore_checksums else 'No'}],
         payload_encrypted=encrypt_secret(json.dumps({'env': {'MYPORTAL_PATCH_PLAN': json.dumps(config)}})),
         timeout_seconds=7200, run_source='patch', onboarding_run_id=onboarding_run_id,
         expires_at=patch.utcnow() + rmm_scripts.QUEUE_LIFETIME)
