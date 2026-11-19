@@ -179,6 +179,7 @@ def manual_apps_current(agent: Mapping[str, Any], config: Mapping[str, Any]) -> 
                 and manual.get("mode") in {"install", "upgrade", "uninstall"} and apps
                 and isinstance(manual.get("force", False), bool)
                 and isinstance(manual.get("ignore_pending_reboots", True), bool)
+                and isinstance(manual.get("ignore_checksums", False), bool)
                 and all(PACKAGE.fullmatch(str(i)) for i in ids)
                 and all(a.get("package_id") in ids and a.get("display_name")
                         and (manual["mode"] == "install" or not a.get("install_missing")) for a in apps)

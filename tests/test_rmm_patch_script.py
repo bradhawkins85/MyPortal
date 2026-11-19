@@ -93,7 +93,8 @@ function Sync-ChocolateySources { param($sources); $script:choco = $env:TEST_CHO
 function Test-Path { param($Path); $Path -like '*RebootPending' }
 function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
 ''' + (ROOT / 'app/services/rmm_builtin/patch.ps1').read_text(), encoding='utf-8')
-    options = {'mode': mode, 'package_ids': ['testapp'], 'force': force}
+    # Ignore checksums follows force here to keep the matrix small.
+    options = {'mode': mode, 'package_ids': ['testapp'], 'force': force, 'ignore_checksums': force}
     if ignore_reboots is not None:
         options['ignore_pending_reboots'] = ignore_reboots
     plan = {'manual_apps': options,
@@ -115,6 +116,7 @@ function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
         action = commands[-1].split()
         assert action[:2] == [mode, 'testapp']
         assert ('--force' in action) == force
+        assert ('--ignore-checksums' in action) == (force and mode != 'uninstall')
         assert '--ignore-detected-reboot' in action
         assert ('--fail-on-not-installed' in action) == (mode == 'upgrade')
         assert ('--version=2.0' in action) == (mode != 'uninstall')
@@ -155,6 +157,7 @@ function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
     command = log.read_text(encoding='utf-8-sig').split()
     assert command[:2] == [mode, 'testapp']
     assert '--ignore-detected-reboot' not in command and '--force' not in command
+    assert '--ignore-checksums' not in command
     assert 'Chocolatey returned 1' in result.stdout
 
 

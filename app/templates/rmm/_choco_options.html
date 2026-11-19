@@ -13,6 +13,11 @@
   <p class="form-help" id="{{ choco_options_id }}-force-help">Run the selected action even when Chocolatey would normally skip it.</p>
 </div>
 <div class="form-field">
+  <input type="hidden" name="ignore_checksums" value="false">
+  <label for="{{ choco_options_id }}-ignore-checksums"><input type="checkbox" id="{{ choco_options_id }}-ignore-checksums" name="ignore_checksums" value="true" aria-describedby="{{ choco_options_id }}-ignore-checksums-help"> Ignore checksums</label>
+  <p class="form-help" id="{{ choco_options_id }}-ignore-checksums-help">Install or upgrade even when the downloaded installer does not match the package's checksum, such as after a vendor updates a file in place. Only use this for packages you trust.</p>
+</div>
+<div class="form-field">
   <input type="hidden" name="ignore_pending_reboots" value="false">
   <label for="{{ choco_options_id }}-ignore-reboots"><input type="checkbox" id="{{ choco_options_id }}-ignore-reboots" name="ignore_pending_reboots" value="true" checked aria-describedby="{{ choco_options_id }}-ignore-reboots-help"> Ignore pending reboots</label>
   <p class="form-help" id="{{ choco_options_id }}-ignore-reboots-help">Continue even if the device already needs a restart. The device is not restarted.</p>
