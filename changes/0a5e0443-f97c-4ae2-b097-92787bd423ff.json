@@ -1,0 +1,7 @@
+{
+  "guid": "0a5e0443-f97c-4ae2-b097-92787bd423ff",
+  "occurred_at": "2026-11-19T04:58Z",
+  "change_type": "Fix",
+  "summary": "RAG indexing no longer fails on tickets with long links, file lists or logs: oversized text is split to fit the embedding server, and Webhook Monitor now shows the provider's reason when an AI request fails.",
+  "content_hash": "14b9ce647b534776538175dd401e69714e7b38d111ae0d13f0b9fd277d69cd63"
+}

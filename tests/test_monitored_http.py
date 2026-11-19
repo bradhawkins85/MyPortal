@@ -137,3 +137,40 @@ async def test_monitor_exposes_link_on_timeout_and_clears_it_for_unmonitored_req
         assert client.webhook_event_id == 42
         await client.get("https://provider.test/ok", extensions={"myportal.skip_monitor": True})
         assert client.webhook_event_id is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_failed_response_keeps_provider_error_message(repo):
+    *_, attempt, completed, failed = repo
+    body = {"error": {
+        "code": 500, "type": "server_error",
+        "message": "input (612 tokens) is too large to process. ask admin@example.test",
+    }}
+    async with monitored_http.MonitoredAsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(500, json=body))
+    ) as client:
+        await client.post("http://172.16.0.5:8484/v1/embeddings", json={"input": "x"})
+    recorded = attempt.await_args.kwargs["response_body"]
+    assert "is too large to process" in recorded
+    assert "admin@example.test" not in recorded
+    assert '"code": 500' in recorded
+    failed.assert_awaited_once()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_successful_response_message_stays_redacted(repo):
+    *_, attempt, completed, failed = repo
+    body = {"error": {"message": "private text"}, "message": "private text"}
+    async with monitored_http.MonitoredAsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+    ) as client:
+        await client.get("https://api.example.test/inbox")
+    assert "private text" not in attempt.await_args.kwargs["response_body"]
+
+
+def test_failed_body_redacts_message_outside_error_object_and_bad_codes():
+    body = '{"message": "secret", "error": {"message": "bad input", "code": "abc def!"}}'
+    result = monitored_http.sanitise_error_body(body, "application/json")
+    assert result["message"] == monitored_http.REDACTED
+    assert result["error"]["message"] == "bad input"
+    assert result["error"]["code"] == monitored_http.REDACTED

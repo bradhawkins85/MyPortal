@@ -11,7 +11,7 @@ from typing import Any, Mapping, Sequence
 
 import httpx
 
-from app.services.monitored_http import monitored_client
+from app.services.monitored_http import monitored_client, provider_error_message
 
 from app.core.config import get_settings
 from app.core.logging import log_info, log_warning
@@ -220,6 +220,53 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+_TOKEN_ESTIMATE_RE = re.compile(r"[^\W\d_]+|\d+|\S", re.UNICODE)
+
+
+def estimate_tokens(text: str) -> int:
+    """Return a deliberately generous token estimate for embedding models.
+
+    Subword tokenisers spend one token on a common word but several on random
+    strings (tracking URLs, hashes), digits and punctuation. Overestimating keeps
+    chunks inside the embedding server's batch, which rejects larger inputs.
+    """
+    total = 0
+    for piece in _TOKEN_ESTIMATE_RE.findall(text):
+        if not piece.isascii():
+            total += len(piece)
+        elif piece.isdigit():
+            total += -(-len(piece) // 2)
+        elif piece.isalpha():
+            mixed_case = not (piece.islower() or piece.isupper() or piece.istitle())
+            total += -(-len(piece) // (2 if mixed_case else 4))
+        else:
+            total += 1
+    return total
+
+
+def _split_in_half(text: str) -> tuple[str, str]:
+    """Split text near its middle, preferring a space so words stay whole."""
+    middle = len(text) // 2
+    boundary = text.rfind(" ", 0, middle + 1)
+    if boundary <= 0:
+        boundary = text.find(" ", middle)
+    if boundary <= 0:
+        boundary = middle
+    return text[:boundary].rstrip(), text[boundary:].lstrip()
+
+
+def _split_to_token_budget(text: str, max_tokens: int) -> list[str]:
+    if len(text) < 2 or estimate_tokens(text) <= max_tokens:
+        return [text]
+    left, right = _split_in_half(text)
+    if not left or not right:
+        return [text]
+    return [
+        *_split_to_token_budget(left, max_tokens),
+        *_split_to_token_budget(right, max_tokens),
+    ]
+
+
 def _lexical_embedding(text: str) -> list[float]:
     """Hash-projection vector used only by the explicit lexical provider.
 
@@ -317,13 +364,16 @@ async def embed_text(text: str) -> list[float]:
             duration_ms=int((time.monotonic() - started) * 1000),
             webhook_event_id=getattr(client, "webhook_event_id", None),
         )
-        # Log only the error class and status, never provider bodies or inputs.
+        # Log the error class, status and the provider's error message (masked and
+        # truncated), never provider bodies or inputs.
+        is_status_error = isinstance(exc, httpx.HTTPStatusError)
         log_warning(
             "RAG embedding request failed",
             provider=provider,
             model=settings.rag_embedding_model,
             error_type=type(exc).__name__,
-            response_status=exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None,
+            response_status=exc.response.status_code if is_status_error else None,
+            provider_error=_response_error(exc.response) if is_status_error else None,
         )
         raise
     reported = llm_usage.extract_token_usage(body)
@@ -340,6 +390,72 @@ async def embed_text(text: str) -> list[float]:
     return result
 
 
+def _response_error(response: httpx.Response) -> str | None:
+    try:
+        return provider_error_message(response.content)
+    except httpx.ResponseNotRead:
+        return None
+
+
+# Provider messages meaning "this input is too long", e.g. llama.cpp "input is too
+# large to process. increase the physical batch size", OpenAI "maximum context
+# length" and Ollama "input length exceeds the context length".
+_INPUT_TOO_LARGE_RE = re.compile(
+    r"too large|too long|batch size|context (?:length|size|window)|exceeds?|maximum",
+    re.IGNORECASE,
+)
+_MAX_EMBED_SPLIT_DEPTH = 4
+_MIN_EMBED_SPLIT_CHARS = 40
+
+
+def _is_input_too_large(exc: httpx.HTTPStatusError) -> bool:
+    status = exc.response.status_code
+    if status == 413:
+        return True
+    if status not in {400, 422, 500}:
+        return False
+    return bool(_INPUT_TOO_LARGE_RE.search(_response_error(exc.response) or ""))
+
+
+async def _embed_chunk(
+    prefix: str, body: str, known: dict[str, str], depth: int = 0
+) -> list[tuple[str, str]]:
+    """Embed ``prefix + body``; split the body and retry when it is too large.
+
+    Token estimates cannot match every model's tokeniser, so an input the
+    provider rejects for size is split in half (each half keeping the section
+    label) instead of failing the whole record.
+    """
+    chunk = prefix + body
+    chunk_hash = content_hash(chunk)
+    if chunk_hash in known:
+        return [(chunk, known[chunk_hash])]
+    try:
+        known[chunk_hash] = json.dumps(await embed_text(chunk))
+        return [(chunk, known[chunk_hash])]
+    except httpx.HTTPStatusError as exc:
+        if (
+            depth >= _MAX_EMBED_SPLIT_DEPTH
+            or len(body) < _MIN_EMBED_SPLIT_CHARS * 2
+            or not _is_input_too_large(exc)
+        ):
+            raise
+        left, right = _split_in_half(body)
+        if not left or not right:
+            raise
+        log_info(
+            "RAG embedding input too large; retrying as two smaller chunks",
+            response_status=exc.response.status_code,
+            chunk_chars=len(chunk),
+            estimated_tokens=estimate_tokens(chunk),
+            split_depth=depth + 1,
+        )
+    return [
+        *await _embed_chunk(prefix, left, known, depth + 1),
+        *await _embed_chunk(prefix, right, known, depth + 1),
+    ]
+
+
 def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
     return float(sum(a * b for a, b in zip(left, right)))
 
@@ -352,6 +468,8 @@ def chunk_text(text: str) -> list[str]:
     chunk_words = _chunk_words()
     # Word limits alone do not bound URLs, encoded mail or unspaced content.
     max_chars = getattr(get_settings(), "rag_chunk_max_chars", 2000)
+    # Characters do not bound tokens either: URLs and logs are token-dense.
+    max_tokens = getattr(get_settings(), "rag_chunk_max_tokens", 400)
     step = max(1, chunk_words - _chunk_overlap_words())
     for start in range(0, len(words), step):
         segment = words[start : start + chunk_words]
@@ -362,10 +480,10 @@ def chunk_text(text: str) -> list[str]:
             boundary = remaining.rfind(" ", 0, max_chars + 1)
             if boundary <= 0:
                 boundary = max_chars
-            chunks.append(remaining[:boundary])
+            chunks.extend(_split_to_token_budget(remaining[:boundary], max_tokens))
             remaining = remaining[boundary:].lstrip()
         if remaining:
-            chunks.append(remaining)
+            chunks.extend(_split_to_token_budget(remaining, max_tokens))
         if start + chunk_words >= len(words):
             break
     return chunks
@@ -702,13 +820,14 @@ async def index_document(
     chunks_missing = bool(previous) and not await rag_repo.has_active_chunks(
         int(previous["id"])
     )
-    chunks = []
+    # (section prefix, body) pairs: an oversized body is split under its label.
+    chunks: list[tuple[str, str]] = []
     for label, section_text in document.sections or [("Document", document.text)]:
         chunks.extend(
-            f"[Section: {label}] {chunk}" for chunk in chunk_text(section_text)
+            (f"[Section: {label}] ", chunk) for chunk in chunk_text(section_text)
         )
     if not chunks:
-        chunks = [normalise_text(document.title)]
+        chunks = [("", normalise_text(document.title))]
     canonical_url = canonical_source_url(
         document.source_type,
         document.source_id,
@@ -726,21 +845,20 @@ async def index_document(
             if previous
             else {}
         )
-        replacement_chunks = []
-        for index, chunk in enumerate(chunks):
-            chunk_hash = content_hash(chunk)
-            if chunk_hash not in known:
-                known[chunk_hash] = json.dumps(await embed_text(chunk))
-            replacement_chunks.append(
-                {
-                    "chunk_index": index,
-                    "chunk_text": chunk,
-                    "chunk_hash": chunk_hash,
-                    "embedding_json": known[chunk_hash],
-                    "embedding_model": embedding_model(),
-                    "token_count": len(chunk.split()),
-                }
-            )
+        embedded: list[tuple[str, str]] = []
+        for prefix, body in chunks:
+            embedded.extend(await _embed_chunk(prefix, body, known))
+        replacement_chunks = [
+            {
+                "chunk_index": index,
+                "chunk_text": chunk,
+                "chunk_hash": content_hash(chunk),
+                "embedding_json": embedding_json,
+                "embedding_model": embedding_model(),
+                "token_count": len(chunk.split()),
+            }
+            for index, (chunk, embedding_json) in enumerate(embedded)
+        ]
     doc_id = await rag_repo.upsert_document(
         {
             "source_type": document.source_type,

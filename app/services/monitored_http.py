@@ -13,6 +13,7 @@ host-name guesses while making the exclusion reviewable.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -96,6 +97,60 @@ def sanitise_body(content: bytes | str | None, content_type: str = "") -> Any:
     return _truncate(text)
 
 
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_ERROR_CODE_RE = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
+PROVIDER_ERROR_LIMIT = 500
+
+
+def provider_error_message(content: bytes | str | None) -> str | None:
+    """Return the ``error.message`` of a provider JSON error body, made safe to store.
+
+    Error envelopes such as ``{"error": {"message": ...}}`` (OpenAI, llama.cpp,
+    Ollama) explain why a request failed. Email addresses are masked and the
+    text is truncated so diagnostics never become a copy of the payload.
+    """
+    if not content:
+        return None
+    text = content.decode(errors="replace") if isinstance(content, bytes) else content
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    error = parsed.get("error") if isinstance(parsed, Mapping) else None
+    message = error.get("message") if isinstance(error, Mapping) else error
+    if not isinstance(message, str) or not message.strip():
+        return None
+    cleaned = _EMAIL_RE.sub(REDACTED, " ".join(message.split()))
+    if len(cleaned) > PROVIDER_ERROR_LIMIT:
+        cleaned = cleaned[: PROVIDER_ERROR_LIMIT - 3] + "..."
+    return cleaned
+
+
+def sanitise_error_body(content: bytes | str | None, content_type: str = "") -> Any:
+    """Sanitise a failed response, keeping the provider's error description.
+
+    ``message`` and ``code`` are redacted everywhere else because inbound
+    payloads use them for personal data and OAuth codes. Inside a failed
+    response's ``error`` object they are the only explanation of the failure.
+    """
+    redacted = sanitise_body(content, content_type)
+    error = redacted.get("error") if isinstance(redacted, dict) else None
+    if not isinstance(error, dict):
+        return redacted
+    message = provider_error_message(content)
+    if message is not None and "message" in error:
+        error["message"] = message
+    try:
+        raw_code = json.loads(content)["error"].get("code")  # type: ignore[arg-type,index]
+    except (TypeError, ValueError, KeyError, AttributeError):
+        raw_code = None
+    if isinstance(raw_code, int) and not isinstance(raw_code, bool):
+        error["code"] = raw_code
+    elif isinstance(raw_code, str) and _ERROR_CODE_RE.fullmatch(raw_code):
+        error["code"] = raw_code
+    return redacted
+
+
 def _provider(url: httpx.URL) -> str:
     host = (url.host or "third-party").lower()
     known = {
@@ -164,8 +219,9 @@ class MonitoredAsyncClient(httpx.AsyncClient):
         try:
             response_body = None
             if response is not None:
+                sanitiser = sanitise_body if success else sanitise_error_body
                 try:
-                    response_body = sanitise_body(response.content, response.headers.get("content-type", ""))
+                    response_body = sanitiser(response.content, response.headers.get("content-type", ""))
                 except httpx.ResponseNotRead:
                     response_body = "<streaming response>"
                 if not isinstance(response_body, str):
