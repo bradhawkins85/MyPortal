@@ -4,11 +4,12 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from app.api.dependencies.auth import get_current_user
 from app.repositories import ai_quality as quality_repo
+from app.security.flash import _safe_redirect_target, local_redirect
 from app.schemas.ai_quality import AiFeedbackRequest, AiFeedbackResponse
 from app.services import ai_quality_access as access
 from app.services import audit as audit_service
@@ -19,11 +20,8 @@ _FORM_CONTENT_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data
 
 
 def safe_return_path(value: Any) -> str:
-    """Only same-site relative paths; anything else returns to the dashboard."""
-    path = str(value or "").strip()
-    if not path.startswith("/") or path.startswith("//") or path.startswith("/\\"):
-        return "/"
-    return path
+    """Only same-site paths; anything else (or anything with control characters) returns to ``/``."""
+    return _safe_redirect_target(value if isinstance(value, str) else "", fallback="/")
 
 
 async def submit_rating(
@@ -95,5 +93,5 @@ async def rate_ai_output(request: Request, current_user: dict = Depends(get_curr
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.errors(include_url=False, include_input=False))
     result = await submit_rating(current_user, payload, request=request)
     if is_form:
-        return RedirectResponse(safe_return_path(form.get("return_to")), status_code=status.HTTP_303_SEE_OTHER)
+        return local_redirect(safe_return_path(form.get("return_to")), status_code=status.HTTP_303_SEE_OTHER)
     return JSONResponse(result)

@@ -98,6 +98,10 @@ async def test_unrateable_or_missing_output_is_not_found(calls, response_id, use
     ("//evil.example", "/"),
     ("/\\evil.example", "/"),
     ("", "/"),
+    ("/\t/evil.example", "/"),
+    ("/\n/evil.example", "/"),
+    ("/%2F/evil.example", "/"),
+    ("/tickets/7?tab=ai", "/tickets/7?tab=ai"),
 ])
 async def test_form_post_redirects_back_safely(calls, return_to, expected):
     async with _client() as client:
