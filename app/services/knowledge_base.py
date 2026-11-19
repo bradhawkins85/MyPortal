@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import asyncio
 import html
 import json
 import re
@@ -10,10 +11,11 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import nh3
 
-from app.core.logging import log_error
+from app.core.logging import log_error, log_warning
 from app.repositories import knowledge_base as kb_repo
 from app.repositories import customer_content_audience as audience_repo
-from app.services import company_access
+from app.services import ai_learning, company_access
+from app.services.rag_index import embed_text
 from app.services import modules as modules_service
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.services.tagging import (
@@ -1084,6 +1086,35 @@ async def list_accessible_search_articles(
     return visible
 
 
+# Learning is a nudge; a slow embedding server must not hold up KB search.
+_LEARNING_EMBED_TIMEOUT_SECONDS = 3.0
+
+
+async def _apply_link_learning(
+    query: str, scored: list[tuple[float, float, Mapping[str, Any]]], min_score: float
+) -> list[tuple[float, float, Mapping[str, Any]]]:
+    """Scale keyword scores by technician feedback on similar tickets."""
+    lessons = await ai_learning.lessons_or_empty()
+    keyed = [lessons.get(("knowledge_base", str(article.get("id")))) for _, _, article in scored]
+    if not any(keyed):
+        return scored
+    try:
+        query_embedding = await asyncio.wait_for(embed_text(query), _LEARNING_EMBED_TIMEOUT_SECONDS)
+    except Exception as exc:
+        log_warning("Could not embed KB search query for AI link lessons", error=str(exc))
+        return scored
+    now = datetime.now(timezone.utc)
+    adjusted: list[tuple[float, float, Mapping[str, Any]]] = []
+    for (score, updated_ts, article), article_lessons in zip(scored, keyed):
+        if article_lessons:
+            adjustment = ai_learning.link_adjustment(article_lessons, query_embedding, now=now)
+            score = score * (1 + adjustment / ai_learning.MAX_PENALTY * 0.9)
+            if score < min_score:
+                continue
+        adjusted.append((score, updated_ts, article))
+    return adjusted
+
+
 async def search_articles(
     query: str,
     context: ArticleAccessContext,
@@ -1115,6 +1146,9 @@ async def search_articles(
             updated_ts = updated.timestamp()
         scored.append((score, updated_ts, article))
 
+    if context.user_id is not None:
+        # Anonymous searches never trigger the outbound embedding call.
+        scored = await _apply_link_learning(query, scored, min_score_threshold)
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
     visible = [dict(item[2]) for item in scored[:limit]]
     results: list[dict[str, Any]] = []

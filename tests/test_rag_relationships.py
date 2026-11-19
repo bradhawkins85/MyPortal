@@ -917,3 +917,102 @@ async def test_context_overflow_retries_smaller_then_fails_only_that_job(monkeyp
     assert len(failed_calls) == 1
     assert "context size exceeded" in failed_calls[0][1]
     assert not rag_relationships._evaluator_in_backoff()
+
+
+def _parsed(relationship, status, score, model_type=None):
+    return {
+        "relationship_type": relationship, "match_status": status, "relevance_score": score, "confidence": 0.8,
+        "reason": "Same VPN client error.", "supporting_excerpt": "",
+        "model_relationship_type": model_type or relationship,
+    }
+
+
+def test_apply_learning_can_turn_a_match_into_no_match():
+    from app.services.rag_relationships import apply_learning
+
+    result = apply_learning(_parsed("KNOWN_ISSUE", "MATCH", 0.6), -0.1, min_score=0.55)
+    assert (result["match_status"], result["relationship_type"], result["relevance_score"]) == (
+        "NO_MATCH", "NOT_RELEVANT", 0.5)
+    assert result["reason"].startswith("Technician feedback on similar tickets adjusted the score by -0.10. ")
+    assert "KNOWN_ISSUE" in result["reason"]
+
+
+def test_apply_learning_can_lift_a_no_match():
+    from app.services.rag_relationships import apply_learning
+
+    result = apply_learning(_parsed("NOT_RELEVANT", "NO_MATCH", 0.5, model_type="RELATED"), 0.1, min_score=0.55)
+    assert (result["match_status"], result["relationship_type"], result["relevance_score"]) == (
+        "MATCH", "RELATED", 0.6)
+    assert result["reason"].startswith("Technician feedback on similar tickets adjusted the score by +0.10. ")
+
+
+def test_apply_learning_never_lifts_a_model_rejection():
+    from app.services.rag_relationships import apply_learning
+
+    result = apply_learning(_parsed("NOT_RELEVANT", "NO_MATCH", 0.5), 0.15, min_score=0.55)
+    assert result["match_status"] == "NO_MATCH"
+
+
+def test_apply_learning_without_adjustment_is_unchanged():
+    from app.services.rag_relationships import apply_learning
+
+    parsed = _parsed("RELATED", "MATCH", 0.7)
+    assert apply_learning(parsed, 0.0, min_score=0.55) == parsed
+
+
+def test_parse_keeps_the_models_relationship_type():
+    parsed = parse_relationship_response('{"relationship":"RELATED","score":0.3,"confidence":0.5}', min_score=0.55)
+    assert parsed["relationship_type"] == "NOT_RELEVANT"
+    assert parsed["model_relationship_type"] == "RELATED"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("source,target,expected_target,expected_adjustment", [
+    ({"id": 1, "source_type": "tickets", "source_id": "4"}, {"id": 2, "source_type": "knowledge_base",
+                                                             "source_id": "vpn"}, ("knowledge_base", "vpn"), -0.2),
+    ({"id": 2, "source_type": "knowledge_base", "source_id": "vpn"}, {"id": 1, "source_type": "tickets",
+                                                                      "source_id": "4"}, ("knowledge_base", "vpn"), -0.2),
+    ({"id": 1, "source_type": "tickets", "source_id": "4"}, {"id": 3, "source_type": "tickets",
+                                                             "source_id": "5"}, None, 0.0),
+])
+async def test_learned_evaluation_uses_the_ticket_side(monkeypatch, source, target, expected_target,
+                                                       expected_adjustment):
+    from app.services import rag_relationships
+
+    calls = []
+
+    async def mean_embedding(document_id, *, embedding_model=None):
+        calls.append(("embedding", document_id))
+        return [1.0, 0.0]
+
+    async def adjustment_for(target_type, target_id, embedding):
+        calls.append(("adjust", (target_type, target_id), embedding))
+        return -0.2
+
+    monkeypatch.setattr(rag_relationships.rel_repo, "document_mean_embedding", mean_embedding)
+    monkeypatch.setattr(rag_relationships.ai_learning, "adjustment_for", adjustment_for)
+    monkeypatch.setattr(rag_relationships, "_embedding_model", lambda: "m1")
+
+    result = await rag_relationships._learned_evaluation(source, target, _parsed("RELATED", "MATCH", 0.7),
+                                                         min_score=0.55)
+
+    assert result["relevance_score"] == round(0.7 + expected_adjustment, 4)
+    if expected_target is None:
+        assert calls == []
+    else:
+        assert calls == [("embedding", 1), ("adjust", expected_target, [1.0, 0.0])]
+
+
+@pytest.mark.anyio
+async def test_learned_evaluation_survives_errors(monkeypatch):
+    from app.services import rag_relationships
+
+    async def broken(document_id, *, embedding_model=None):
+        raise RuntimeError("chunks unavailable")
+
+    monkeypatch.setattr(rag_relationships.rel_repo, "document_mean_embedding", broken)
+    monkeypatch.setattr(rag_relationships, "_embedding_model", lambda: "m1")
+    parsed = _parsed("RELATED", "MATCH", 0.7)
+    assert await rag_relationships._learned_evaluation(
+        {"id": 1, "source_type": "tickets", "source_id": "4"},
+        {"id": 2, "source_type": "knowledge_base", "source_id": "vpn"}, parsed, min_score=0.55) == parsed

@@ -194,7 +194,11 @@ async def get_response(response_id: int) -> dict[str, Any] | None:
 
 async def save_feedback(*, response_id: int, user_id: int, rating: str | None,
                         reason: str | None, comment: str | None, is_technician: bool = False) -> None:
-    """Save a user's vote on one output; ``rating=None`` clears it."""
+    """Save a user's vote on one output; ``rating=None`` clears it.
+
+    Callers clear the link-lesson cache (``ai_learning.invalidate_cache``);
+    repositories never import services.
+    """
     if rating is None:
         await db.execute(
             "DELETE FROM ai_output_feedback WHERE response_id = ? AND user_id = ?",
@@ -209,7 +213,7 @@ async def save_feedback(*, response_id: int, user_id: int, rating: str | None,
     if existing:
         await db.execute(
             "UPDATE ai_output_feedback SET rating = ?, reason = ?, comment = ?, is_technician = ?, "
-            "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "learning_ignored_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             values + (int(existing["id"]),),
         )
     else:
@@ -310,3 +314,75 @@ async def rating_overview(*, since: datetime) -> dict[str, Any]:
         "helpful_pct": round(100 * int(row.get("helpful") or 0) / ratings) if ratings else None,
         "features_rated": int(row.get("features") or 0),
     }
+
+
+LINK_FEATURE = "rag_relationships"
+
+
+async def list_link_votes(*, since: datetime | None = None) -> list[dict[str, Any]]:
+    """Technician votes on linked items that MyPortal may learn from (newest window only)."""
+    cutoff = (since or datetime(1970, 1, 1, tzinfo=timezone.utc)).astimezone(timezone.utc)
+    rows = await db.fetch_all("""SELECT o.id AS output_id, o.subject_type, o.subject_id, o.target_type,
+        o.target_id, o.subject_embedding_json, o.subject_embedding_model, f.rating, f.updated_at AS voted_at
+        FROM ai_outputs o JOIN ai_output_feedback f ON f.response_id = o.id
+        WHERE o.feature = ? AND o.target_type <> '' AND f.is_technician = 1 AND f.learning_ignored_at IS NULL
+          AND f.updated_at >= ?
+        ORDER BY f.id""", (LINK_FEATURE, cutoff.strftime("%Y-%m-%d %H:%M:%S")))
+    return [dict(row) for row in rows]
+
+
+async def store_subject_embedding(output_id: int, embedding: list[float], model: str) -> None:
+    await db.execute(
+        "UPDATE ai_outputs SET subject_embedding_json = ?, subject_embedding_model = ? WHERE id = ?",
+        (json.dumps(embedding), model, output_id),
+    )
+
+
+async def set_link_learning_ignored(target_type: str, target_id: str, *, ignored: bool) -> int:
+    """Stop (or resume) learning from technician votes on one linked item.
+
+    ``updated_at = updated_at`` keeps each vote's time: MariaDB would otherwise
+    stamp it ON UPDATE, restarting the vote's decay.
+    """
+    if ignored:
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        return await db.execute_rowcount(
+            """UPDATE ai_output_feedback SET learning_ignored_at = ?, updated_at = updated_at
+            WHERE learning_ignored_at IS NULL AND is_technician = 1 AND response_id IN (
+                SELECT id FROM ai_outputs WHERE feature = ? AND target_type = ? AND target_id = ?)""",
+            (stamp, LINK_FEATURE, target_type, target_id),
+        )
+    return await db.execute_rowcount(
+        """UPDATE ai_output_feedback SET learning_ignored_at = NULL, updated_at = updated_at
+        WHERE learning_ignored_at IS NOT NULL AND is_technician = 1 AND response_id IN (
+            SELECT id FROM ai_outputs WHERE feature = ? AND target_type = ? AND target_id = ?)""",
+        (LINK_FEATURE, target_type, target_id),
+    )
+
+
+async def learned_links() -> list[dict[str, Any]]:
+    """Each linked item technicians voted on, with what MyPortal learned from it."""
+    rows = await db.fetch_all("""SELECT o.target_type, o.target_id,
+        (SELECT MAX(d.title) FROM rag_documents d
+         WHERE d.source_type = o.target_type AND d.source_id = o.target_id) AS title,
+        SUM(CASE WHEN f.rating = 'down' THEN 1 ELSE 0 END) AS unhelpful,
+        SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END) AS helpful,
+        COUNT(DISTINCT o.subject_id) AS tickets,
+        COUNT(*) AS votes,
+        SUM(CASE WHEN f.learning_ignored_at IS NOT NULL THEN 1 ELSE 0 END) AS ignored_votes,
+        MAX(f.updated_at) AS last_voted_at
+        FROM ai_outputs o JOIN ai_output_feedback f ON f.response_id = o.id
+        WHERE o.feature = ? AND o.target_type <> '' AND f.is_technician = 1
+        GROUP BY o.target_type, o.target_id""", (LINK_FEATURE,))
+    links = [{
+        "target_type": str(row["target_type"]),
+        "target_id": str(row["target_id"]),
+        "title": row["title"],
+        "unhelpful": int(row["unhelpful"] or 0),
+        "helpful": int(row["helpful"] or 0),
+        "tickets": int(row["tickets"] or 0),
+        "ignored": int(row["ignored_votes"] or 0) == int(row["votes"] or 0),
+        "last_voted_at": _utc_iso(row["last_voted_at"]),
+    } for row in rows]
+    links.sort(key=lambda link: (-link["unhelpful"], -link["helpful"], link["target_type"], link["target_id"]))
+    return links

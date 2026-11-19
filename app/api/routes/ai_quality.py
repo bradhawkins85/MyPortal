@@ -11,6 +11,7 @@ from app.api.dependencies.auth import get_current_user
 from app.repositories import ai_quality as quality_repo
 from app.security.flash import _safe_redirect_target, local_redirect
 from app.schemas.ai_quality import AiFeedbackRequest, AiFeedbackResponse
+from app.services import ai_learning
 from app.services import ai_quality_access as access
 from app.services import audit as audit_service
 
@@ -38,14 +39,17 @@ async def submit_rating(
     if not response or not await access.can_rate(user, response, is_technician=technician):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI output not found")
     user_id = int(user["id"])
-    await quality_repo.save_feedback(
-        response_id=payload.response_id,
-        user_id=user_id,
-        rating=payload.rating,
-        reason=payload.reason if payload.rating == "down" else None,
-        comment=(payload.comment or "").strip() or None,
-        is_technician=technician,
-    )
+    try:
+        await quality_repo.save_feedback(
+            response_id=payload.response_id,
+            user_id=user_id,
+            rating=payload.rating,
+            reason=payload.reason if payload.rating == "down" else None,
+            comment=(payload.comment or "").strip() or None,
+            is_technician=technician,
+        )
+    finally:
+        ai_learning.invalidate_cache()
     await audit_service.record(
         action="ai_quality.feedback",
         request=request,

@@ -6,6 +6,7 @@ import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 import httpx
@@ -16,7 +17,7 @@ from app.core.config import get_settings
 from app.core.logging import log_info, log_warning
 from app.repositories import rag_index as rag_repo
 from app.repositories import rag_vector_index
-from app.services import company_access
+from app.services import ai_learning, company_access
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.services.rag_index import (
     cosine_similarity,
@@ -607,6 +608,9 @@ async def retrieve_candidates(
         ],
         metadata_by_chunk,
     )
+    # Technician 👍/👎 on linked items, applied to similar queries/tickets.
+    link_lessons = await ai_learning.lessons_or_empty()
+    learned_at = datetime.now(timezone.utc)
     candidates_by_doc: dict[int, dict[str, Any]] = {}
     discarded = 0
     per_source_counts: defaultdict[str, int] = defaultdict(int)
@@ -627,6 +631,11 @@ async def retrieve_candidates(
             + (float(settings.rag_bm25_weight) * lexical)
             + (float(settings.rag_metadata_weight) * meta)
         ) * float(_SOURCE_WEIGHTS.get(source_type, 0.75))
+        learning_adjustment = 0.0
+        lessons = link_lessons.get((source_type, str(row.get("source_id")))) if link_lessons else None
+        if lessons:
+            learning_adjustment = ai_learning.link_adjustment(lessons, query_embedding, now=learned_at)
+            final += learning_adjustment
         if final < _threshold(source_type, resolved_min_score):
             discarded += 1
             continue
@@ -648,6 +657,7 @@ async def retrieve_candidates(
             "semantic_score": round(semantic, 4),
             "bm25_score": round(lexical, 4),
             "metadata_score": round(meta, 4),
+            "learning_adjustment": learning_adjustment,
             "permission_scope": _loads(row.get("permission_scope_json"), {}),
             "metadata": metadata if isinstance(metadata, dict) else {},
             "entities": profile.entities,

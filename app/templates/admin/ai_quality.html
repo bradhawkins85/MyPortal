@@ -24,6 +24,7 @@
       </div>
       {% set ai_quality_groups = [
         ("Ratings", [("by-feature", "By feature", feature_groups | length)]),
+        ("What MyPortal learned", [("learned-links", "Learned: links", learned_links | length)]),
       ] %}
       {% for group_label, items in ai_quality_groups %}
         <div class="ce-nav__group" data-ae-nav-group>
@@ -73,6 +74,41 @@
             <tr><td colspan="7" class="table__empty">No AI output has been rated yet. Ratings appear here as people use 👍/👎 on AI content.</td></tr>
             {% endfor %}
           {% endcall %}
+        </div>
+      </section>
+
+      <section class="card card--panel ce-section" id="ai-quality-learned-links" data-ae-section="learned-links" aria-labelledby="ai-quality-learned-links-title">
+        <header class="ce-section__header"><div class="ce-section__heading">
+          <h2 class="card__title" id="ai-quality-learned-links-title">Learned: links</h2>
+          <p class="card__subtitle">Items technicians marked as unrelated or useful. MyPortal lowers or raises them for similar tickets and searches. Undo stops MyPortal using those votes; new votes count again.</p>
+        </div></header>
+        <div class="ce-section__body">
+          {% if learned_links %}
+          <ul class="aql-list" aria-label="Linked items MyPortal learned about">
+            {% for link in learned_links %}
+            <li class="aql-item{% if link.ignored %} aql-item--ignored{% endif %}">
+              <div class="aql-item__summary">
+                <p class="aql-item__title">{{ link.label }}</p>
+                <ul class="scf-item__chips" aria-label="What technicians said about {{ link.label }}">
+                  {% if link.unhelpful %}<li class="scf-chip">{{ link.unhelpful }} not helpful</li>{% endif %}
+                  {% if link.helpful %}<li class="scf-chip">{{ link.helpful }} helpful</li>{% endif %}
+                  <li class="scf-chip">on {{ link.tickets }} ticket{{ "" if link.tickets == 1 else "s" }}</li>
+                  {% if link.ignored %}<li><span class="status status--neutral">Ignored</span></li>{% endif %}
+                </ul>
+                {% if link.last_voted_at %}<p class="aql-item__meta text-muted">Last vote <span data-utc="{{ link.last_voted_at }}">{{ link.last_voted_at }}</span></p>{% endif %}
+              </div>
+              <form method="post" action="/admin/ai-quality/links/{{ 'restore' if link.ignored else 'ignore' }}" class="aql-item__action">
+                {% include "partials/csrf.html" %}
+                <input type="hidden" name="target_type" value="{{ link.target_type }}">
+                <input type="hidden" name="target_id" value="{{ link.target_id }}">
+                <button type="submit" class="button button--ghost button--small">{{ "Restore" if link.ignored else "Undo" }}<span class="visually-hidden"> learning for {{ link.label }}</span></button>
+              </form>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="table__empty">Nothing learned yet. When technicians mark a Related item 👍 or 👎, it appears here.</p>
+          {% endif %}
         </div>
       </section>
     </div>
