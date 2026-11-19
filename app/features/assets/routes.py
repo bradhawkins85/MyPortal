@@ -296,6 +296,43 @@ async def _load_asset_context(
     return user, membership, company, company_id, None
 
 
+async def _tactical_rmm_enabled() -> bool:
+    from app.services import modules as modules_service
+
+    try:
+        module = await modules_service.get_module("tacticalrmm", redact=True)
+    except Exception:  # pragma: no cover - defensive
+        return False
+    return bool(module and module.get("enabled"))
+
+
+def _tray_last_seen(device: Mapping[str, Any]) -> datetime | None:
+    """Return the latest time the tray agent was seen online."""
+    seen = [
+        parsed
+        for parsed in (
+            _as_utc_datetime(device.get("last_seen_utc")),
+            _as_utc_datetime(device.get("ws_last_seen_utc")),
+        )
+        if parsed
+    ]
+    return max(seen) if seen else None
+
+
+def _as_utc_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    if isinstance(value, str) and value.strip():
+        text = value.strip().replace(" ", "T", 1)
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            return _as_utc_datetime(datetime.fromisoformat(text))
+        except ValueError:
+            return None
+    return None
+
+
 @router.get("/assets", response_class=HTMLResponse)
 async def assets_page(request: Request):
     main_module = _main()
@@ -422,11 +459,6 @@ async def assets_page(request: Request):
         record["boot_time_iso"] = boot_time_iso
         record["boot_time_sort"] = boot_time_iso or ""
 
-        if last_sync_iso:
-            parsed_last_sync = _parse_iso(last_sync_iso)
-            if parsed_last_sync and parsed_last_sync >= recent_threshold:
-                recent_sync += 1
-
         warranty_value = row.get("warranty_end_date")
         warranty_display: str | None
         warranty_sort = ""
@@ -467,6 +499,9 @@ async def assets_page(request: Request):
         asset_ids
     )
     tray_devices_by_asset = await tray_repo.list_active_devices_by_asset_ids(asset_ids)
+    # Without Tactical RMM nothing refreshes ``last_sync``, so the tray agent's
+    # last check-in is the most recent sign of life for the device.
+    tray_sets_last_sync = not await _tactical_rmm_enabled()
     # Technicians who run RMM scripts can push the RMM agent through the tray app.
     can_push_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
         bool(user.get("is_super_admin"))
@@ -524,6 +559,15 @@ async def assets_page(request: Request):
             tray_device.get("hostname") if tray_device else None
         )
         record["tray_agent_synced"] = bool(record["tray_device_uid"])
+        if tray_sets_last_sync and tray_device:
+            tray_seen_iso = main_module._to_iso(_tray_last_seen(tray_device))
+            if tray_seen_iso:
+                record["last_sync"] = tray_seen_iso
+                record["last_sync_iso"] = tray_seen_iso
+                record["last_sync_sort"] = tray_seen_iso
+        parsed_last_sync = _parse_iso(record.get("last_sync_iso"))
+        if parsed_last_sync and parsed_last_sync >= recent_threshold:
+            recent_sync += 1
         if can_view_assets:
             record["tray_agent_version"] = _clean_text(
                 tray_device.get("agent_version") if tray_device else None
