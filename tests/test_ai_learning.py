@@ -159,19 +159,15 @@ async def test_document_mean_embedding(monkeypatch):
         await connection.close()
 
 
-@pytest.mark.anyio
-@pytest.mark.parametrize("rating", ["down", None])
-async def test_saving_a_vote_clears_the_lesson_cache(monkeypatch, rating):
-    from unittest.mock import AsyncMock
+def test_repositories_do_not_import_the_learning_service():
+    # Repositories stay below services; importing ai_learning from one creates an import cycle.
+    from pathlib import Path
 
-    from app.repositories import ai_quality as quality_repo
+    import re
 
-    monkeypatch.setattr(quality_repo.db, "fetch_one", AsyncMock(return_value=None))
-    monkeypatch.setattr(quality_repo.db, "execute", AsyncMock())
-    ai_learning._cache = {("knowledge_base", "vpn"): []}
-    await quality_repo.save_feedback(response_id=1, user_id=5, rating=rating, reason=None, comment=None,
-                                     is_technician=True)
-    assert ai_learning._cache is None
+    pattern = re.compile(r"^\s*(from\s+\S+\s+)?import\s+.*\bai_learning\b|^\s*from\s+\S*ai_learning\b", re.M)
+    for path in Path("app/repositories").glob("*.py"):
+        assert not pattern.search(path.read_text(encoding="utf-8")), path
 
 
 @pytest.mark.anyio

@@ -55,6 +55,7 @@ from app.repositories import attachment_blocklist as attachment_blocklist_repo
 from app.repositories import approval_matrix as approval_matrix_repo
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
+from app.services import ai_learning
 from app.repositories import users as user_repo
 from app.repositories import site_settings as site_settings_repo
 from app.services import agent as agent_service
@@ -851,6 +852,7 @@ async def admin_ticket_related_feedback(ticket_id: int, relationship_id: int, re
         )
     except Exception as exc:  # the vote is saved; shared feedback is best effort
         log_error("Failed to copy Related item vote to AI feedback", ticket_id=ticket_id, error=str(exc))
+    ai_learning.invalidate_cache()
     await audit_service.record(
         action="tickets.related.feedback",
         request=request,

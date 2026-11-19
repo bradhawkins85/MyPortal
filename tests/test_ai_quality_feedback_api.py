@@ -186,3 +186,14 @@ async def test_multipart_post_with_a_file_is_rejected_cleanly(calls):
     assert response.status_code == 422
     assert "x.txt" not in response.text
     assert calls["saved"] == []
+
+
+@pytest.mark.anyio
+async def test_a_vote_clears_the_lesson_cache(calls):
+    from app.services import ai_learning
+
+    ai_learning._cache = {("knowledge_base", "vpn"): []}
+    async with _client() as client:
+        response = await client.post("/api/ai-quality/feedback", json={"response_id": 11, "rating": "down"})
+    assert response.status_code == 200
+    assert ai_learning._cache is None

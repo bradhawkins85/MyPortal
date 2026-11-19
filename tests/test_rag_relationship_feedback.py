@@ -290,3 +290,12 @@ async def test_backfill_copies_existing_votes_once(feedback_db):
     await repo.mirror_feedback_to_quality(relationship, ticket_id=4, user_id=9, rating="up", company_id=2)
     cursor = await feedback_db.execute("SELECT COUNT(*) FROM ai_outputs")
     assert (await cursor.fetchone())[0] == 2
+
+
+@pytest.mark.anyio
+async def test_related_vote_clears_the_lesson_cache(route_env):
+    from app.services import ai_learning
+
+    ai_learning._cache = {("knowledge_base", "vpn"): []}
+    await admin_routes.admin_ticket_related_feedback(4, 10, _Request({"rating": "down"}))
+    assert ai_learning._cache is None
