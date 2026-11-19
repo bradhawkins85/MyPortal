@@ -1,0 +1,7 @@
+{
+  "guid": "f573d189-39d2-4e14-92cf-34694ee5fc48",
+  "occurred_at": "2026-11-19T05:58Z",
+  "change_type": "Feature",
+  "summary": "AI output can now be rated with thumbs up or down through one shared control, AI search answers are recorded so they can be rated again, and the AI Quality page shows ratings for every AI feature.",
+  "content_hash": "867b4807707cf00f21f0cbbf61d5189fcbd6349e5286c161372efc6bae2522ec"
+}

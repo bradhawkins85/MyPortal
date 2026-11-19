@@ -12,6 +12,31 @@ from app.features.tickets import admin_routes
 from app.repositories import rag_relationships as repo
 from scripts.evaluate_ai_quality import evaluate_related_feedback
 
+FEEDBACK_MIGRATIONS = (
+    "migrations/453_rag_relationship_feedback.sql",
+    "migrations/387_ai_quality_feedback.sql",
+    "migrations/563_ai_quality_outputs.sql",
+)
+BACKFILL_MIGRATION = "migrations/564_ai_quality_related_backfill.sql"
+
+
+async def _apply(connection, path):
+    database = Database()
+    sql = Path(path).read_text(encoding="utf-8")
+    for statement in database._split_sql_statements(database._adapt_sql_for_sqlite(sql)):
+        await connection.execute(statement)
+    await connection.commit()
+
+
+async def _shared(connection):
+    cursor = await connection.execute(
+        """SELECT r.feature, r.subject_type, r.subject_id, r.target_type, r.target_id, r.company_id,
+                  r.model, f.user_id, f.rating, f.is_technician
+           FROM ai_outputs r JOIN ai_output_feedback f ON f.response_id = r.id
+           ORDER BY r.target_id, f.user_id"""
+    )
+    return [tuple(row) for row in await cursor.fetchall()]
+
 
 @pytest.fixture
 async def feedback_db(monkeypatch):
@@ -19,10 +44,11 @@ async def feedback_db(monkeypatch):
     connection.row_factory = aiosqlite.Row
     await connection.executescript("""
         CREATE TABLE users (id INTEGER PRIMARY KEY);
-        CREATE TABLE tickets (id INTEGER PRIMARY KEY);
+        CREATE TABLE tickets (id INTEGER PRIMARY KEY, company_id INTEGER);
         CREATE TABLE rag_documents (
             id INTEGER PRIMARY KEY, source_type TEXT, source_id TEXT, title TEXT, url TEXT,
-            permission_scope_json TEXT, metadata_json TEXT, is_active INTEGER NOT NULL DEFAULT 1
+            permission_scope_json TEXT, metadata_json TEXT, is_active INTEGER NOT NULL DEFAULT 1,
+            company_id INTEGER
         );
         CREATE TABLE rag_chunks (
             id INTEGER PRIMARY KEY, document_id INTEGER, chunk_text TEXT, is_active INTEGER DEFAULT 1
@@ -35,7 +61,7 @@ async def feedback_db(monkeypatch):
             evaluated_model TEXT
         );
         INSERT INTO users VALUES (8), (9);
-        INSERT INTO tickets VALUES (4);
+        INSERT INTO tickets VALUES (4, 2);
         INSERT INTO rag_documents (id, source_type, source_id, title) VALUES
             (1, 'tickets', '4', 'Ticket 4'),
             (2, 'knowledge_base', 'vpn', 'VPN'),
@@ -45,9 +71,10 @@ async def feedback_db(monkeypatch):
             (11, 1, 3, 'RELATED', 'MATCH', 0.7, 0.6, 'battery', NULL, 'model-a');
         """)
     database = Database()
-    migration = Path("migrations/453_rag_relationship_feedback.sql").read_text(encoding="utf-8")
-    for statement in database._split_sql_statements(database._adapt_sql_for_sqlite(migration)):
-        await connection.execute(statement)
+    for name in FEEDBACK_MIGRATIONS:
+        migration = Path(name).read_text(encoding="utf-8")
+        for statement in database._split_sql_statements(database._adapt_sql_for_sqlite(migration)):
+            await connection.execute(statement)
     await connection.commit()
     monkeypatch.setattr(repo.db, "_use_sqlite", True)
     monkeypatch.setattr(repo.db, "_sqlite_conn", connection)
@@ -146,7 +173,10 @@ def route_env(monkeypatch):
         return {"id": 8}, None
 
     async def get_ticket(ticket_id):
-        return {"id": ticket_id}
+        return {"id": ticket_id, "company_id": 2}
+
+    async def mirror(relationship, **kwargs):
+        calls.append({"mirror": relationship["id"], **kwargs})
 
     async def document_id(_ticket_id):
         return 1
@@ -162,6 +192,7 @@ def route_env(monkeypatch):
     monkeypatch.setattr(admin_routes, "_ticket_rag_document_id", document_id)
     monkeypatch.setattr(admin_routes.rag_relationship_repo, "get_relationship_for_document", relationship_for)
     monkeypatch.setattr(admin_routes.rag_relationship_repo, "save_relationship_feedback", save)
+    monkeypatch.setattr(admin_routes.rag_relationship_repo, "mirror_feedback_to_quality", mirror)
 
     async def record(**kwargs):
         calls.append({"audit": kwargs["action"], "metadata": kwargs["metadata"]})
@@ -176,8 +207,20 @@ async def test_feedback_route_records_vote(route_env):
     assert json.loads(response.body) == {"relationship_id": 10, "rating": "down", "hidden": True}
     assert route_env == [
         {"relationship": {"id": 10}, "ticket_id": 4, "user_id": 8, "rating": "down"},
+        {"mirror": 10, "ticket_id": 4, "user_id": 8, "rating": "down", "company_id": 2},
         {"audit": "tickets.related.feedback", "metadata": {"relationship_id": 10, "rating": "down"}},
     ]
+
+
+@pytest.mark.anyio
+async def test_feedback_route_still_saves_vote_when_mirror_fails(route_env, monkeypatch):
+    async def broken(relationship, **kwargs):
+        raise RuntimeError("shared tables unavailable")
+
+    monkeypatch.setattr(admin_routes.rag_relationship_repo, "mirror_feedback_to_quality", broken)
+    response = await admin_routes.admin_ticket_related_feedback(4, 10, _Request({"rating": "up"}))
+    assert json.loads(response.body)["rating"] == "up"
+    assert route_env[0]["rating"] == "up"
 
 
 @pytest.mark.anyio
@@ -213,3 +256,36 @@ async def test_feedback_aggregate_groups_ticket_related_votes(feedback_db):
     assert "battery" not in json.dumps([dict(row) for row in groups], default=str).lower()
     assert by_type["RELATED"]["last_voted_at"].endswith("+00:00")
 
+
+
+@pytest.mark.anyio
+async def test_vote_is_mirrored_into_shared_ai_feedback(feedback_db):
+    relationship = await repo.get_relationship_for_document(10, 1)
+    assert relationship["other_source_id"] == "vpn"
+    await repo.mirror_feedback_to_quality(relationship, ticket_id=4, user_id=8, rating="down", company_id=2)
+    await repo.mirror_feedback_to_quality(relationship, ticket_id=4, user_id=9, rating="up", company_id=2)
+    assert await _shared(feedback_db) == [
+        ("rag_relationships", "ticket", "4", "knowledge_base", "vpn", 2, "model-a", 8, "down", 1),
+        ("rag_relationships", "ticket", "4", "knowledge_base", "vpn", 2, "model-a", 9, "up", 1),
+    ]
+    await repo.mirror_feedback_to_quality(relationship, ticket_id=4, user_id=8, rating=None, company_id=2)
+    assert [row[7] for row in await _shared(feedback_db)] == [9]
+
+
+@pytest.mark.anyio
+async def test_backfill_copies_existing_votes_once(feedback_db):
+    for relationship_id, user_id, rating in ((10, 8, "down"), (11, 9, "up"), (11, 8, "down")):
+        relationship = await repo.get_relationship_for_document(relationship_id, 1)
+        await repo.save_relationship_feedback(relationship=relationship, ticket_id=4, user_id=user_id, rating=rating)
+    await _apply(feedback_db, BACKFILL_MIGRATION)
+    await _apply(feedback_db, BACKFILL_MIGRATION)
+    assert await _shared(feedback_db) == [
+        ("rag_relationships", "ticket", "4", "products", "12", 2, "model-a", 8, "down", 1),
+        ("rag_relationships", "ticket", "4", "products", "12", 2, "model-a", 9, "up", 1),
+        ("rag_relationships", "ticket", "4", "knowledge_base", "vpn", 2, "model-a", 8, "down", 1),
+    ]
+    # The mirror finds the backfilled output rather than creating a second one.
+    relationship = await repo.get_relationship_for_document(10, 1)
+    await repo.mirror_feedback_to_quality(relationship, ticket_id=4, user_id=9, rating="up", company_id=2)
+    cursor = await feedback_db.execute("SELECT COUNT(*) FROM ai_outputs")
+    assert (await cursor.fetchone())[0] == 2

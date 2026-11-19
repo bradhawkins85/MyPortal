@@ -58,6 +58,7 @@ from http import HTTPStatus
 
 from app.api.routes import (
     agent,
+    ai_quality as ai_quality_routes,
     api_keys,
     asset_custom_fields,
     audit_logs,
@@ -1614,6 +1615,7 @@ async def credential_share_page(request: Request):
 app.include_router(auth.router)
 app.include_router(dashboard_api.router)
 app.include_router(agent.router)
+app.include_router(ai_quality_routes.router)
 app.include_router(users.router)
 app.include_router(click_to_call_api.router)
 app.include_router(call_recordings_api.router)
@@ -7953,14 +7955,16 @@ async def admin_ai_quality_page(request: Request):
     if redirect:
         return redirect
     from app.repositories import ai_quality as quality_repo
-    from app.repositories import rag_relationships as rag_relationship_repo
+    from app.services import llm_usage
+
+    feature_groups = [
+        {**group, "label": llm_usage.feature_label(group["feature"])}
+        for group in await quality_repo.aggregate_by_feature()
+    ]
+    overview = await quality_repo.rating_overview(since=datetime.now(timezone.utc) - timedelta(days=30))
     return await _render_template(
         "admin/ai_quality.html", request, current_user,
-        extra={
-            "title": "AI Quality",
-            "quality_groups": await quality_repo.aggregate(),
-            "related_feedback_groups": await rag_relationship_repo.relationship_feedback_aggregate(),
-        },
+        extra={"title": "AI Quality", "feature_groups": feature_groups, "overview": overview},
     )
 
 

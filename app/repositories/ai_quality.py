@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
 
 PIPELINE_VERSION = "agent-rag-v1"
-REASONS = {"incorrect", "uncited", "irrelevant", "incomplete", "unsafe", "other"}
+OUTPUT_PIPELINE_VERSION = "output-v1"
+REASONS = {"incorrect", "uncited", "irrelevant", "unrelated", "incomplete", "unsafe", "other"}
 _MAX_REDACTION_INPUT_CHARS = 5000
 _LOCAL_EMAIL_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-")
 _DOMAIN_EMAIL_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
@@ -120,43 +123,106 @@ async def record_response(*, user_id: int, company_id: int | None, feature: str,
                           query: str, evidence: dict[str, list[dict[str, Any]]],
                           model: str | None, latency_ms: int,
                           confidence_band: str | None, outcome: str) -> int:
+    """Record one AI search answer; every answer is its own rateable output."""
     identifiers, source_types = evidence_ids(evidence)
     provider = model.split(":", 1)[0] if model and ":" in model else None
-    return await db.execute_insert(
-        """INSERT INTO ai_quality_responses
-        (user_id, company_id, feature, query_hash, query_redacted,
+    return await db.execute_returning_lastrowid(
+        """INSERT INTO ai_outputs
+        (user_id, company_id, feature, output_hash, query_hash, query_redacted,
          evidence_identifiers, source_types, primary_source_type, provider, model, pipeline_version,
          latency_ms, confidence_band, outcome)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (user_id, company_id, feature, hashlib.sha256(query.encode()).hexdigest(),
-         redact_query(query), json.dumps(identifiers), json.dumps(source_types),
-         source_types[0] if source_types else None, provider, model, PIPELINE_VERSION,
-         max(0, latency_ms), confidence_band, outcome),
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, company_id, feature, hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+         hashlib.sha256(query.encode()).hexdigest(), redact_query(query), json.dumps(identifiers),
+         json.dumps(source_types), source_types[0] if source_types else None, provider, model,
+         PIPELINE_VERSION, max(0, latency_ms), confidence_band, outcome),
     )
 
 
-async def save_feedback(*, response_id: int, user_id: int, rating: str,
-                        reason: str | None, comment: str | None) -> None:
+def _identity_part(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+
+_FIND_OUTPUT_SQL = """SELECT id FROM ai_outputs
+    WHERE feature = ? AND subject_type = ? AND subject_id = ? AND target_type = ? AND target_id = ?
+      AND output_hash = ?"""
+
+
+async def record_output(*, feature: str, user_id: int | None, company_id: int | None,
+                        subject_type: str | None = None, subject_id: str | int | None = None,
+                        target_type: str | None = None, target_id: str | int | None = None,
+                        output_text: str | None = None, model: str | None = None,
+                        prompt_version: str | None = None, latency_ms: int = 0,
+                        outcome: str = "answered") -> int:
+    """Record one AI output so it can be rated; the same output is recorded once."""
+    from app.services.llm_usage import FEATURES_BY_KEY
+
+    if feature not in FEATURES_BY_KEY:
+        raise ValueError(f"Unknown AI feature: {feature}")
+    identity = (feature, _identity_part(subject_type), _identity_part(subject_id),
+                _identity_part(target_type), _identity_part(target_id),
+                hashlib.sha256((output_text or "").encode()).hexdigest())
+    existing = await db.fetch_one(_FIND_OUTPUT_SQL, identity)
+    if existing:
+        return int(existing["id"])
+    provider = model.split(":", 1)[0] if model and ":" in model else None
+    try:
+        return await db.execute_returning_lastrowid(
+            """INSERT INTO ai_outputs
+            (feature, subject_type, subject_id, target_type, target_id, output_hash, user_id, company_id,
+             output_text, provider, model, pipeline_version, prompt_version, latency_ms, outcome)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            identity + (user_id, company_id, output_text, provider, model, OUTPUT_PIPELINE_VERSION,
+                        prompt_version, max(0, latency_ms), outcome),
+        )
+    except Exception:
+        # Another request recorded the same output between our lookup and
+        # insert; the unique identity key rejected ours, so use theirs.
+        existing = await db.fetch_one(_FIND_OUTPUT_SQL, identity)
+        if existing:
+            return int(existing["id"])
+        raise
+
+
+async def get_response(response_id: int) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        """SELECT id, user_id, company_id, feature, subject_type, subject_id, target_type, target_id,
+        output_text, model, prompt_version, created_at FROM ai_outputs WHERE id = ?""",
+        (response_id,),
+    )
+
+
+async def save_feedback(*, response_id: int, user_id: int, rating: str | None,
+                        reason: str | None, comment: str | None, is_technician: bool = False) -> None:
+    """Save a user's vote on one output; ``rating=None`` clears it."""
+    if rating is None:
+        await db.execute(
+            "DELETE FROM ai_output_feedback WHERE response_id = ? AND user_id = ?",
+            (response_id, user_id),
+        )
+        return
     existing = await db.fetch_one(
-        "SELECT id FROM ai_quality_feedback WHERE response_id = ? AND user_id = ?",
+        "SELECT id FROM ai_output_feedback WHERE response_id = ? AND user_id = ?",
         (response_id, user_id),
     )
-    values = (rating, reason, comment or None)
+    values = (rating, reason, (comment or "").strip() or None, 1 if is_technician else 0)
     if existing:
         await db.execute(
-            "UPDATE ai_quality_feedback SET rating = ?, reason = ?, comment = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE ai_output_feedback SET rating = ?, reason = ?, comment = ?, is_technician = ?, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             values + (int(existing["id"]),),
         )
     else:
         await db.execute(
-            "INSERT INTO ai_quality_feedback (response_id, user_id, rating, reason, comment) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO ai_output_feedback (response_id, user_id, rating, reason, comment, is_technician) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             (response_id, user_id) + values,
         )
 
 
 async def response_owned_by(response_id: int, user_id: int) -> bool:
     return bool(await db.fetch_one(
-        "SELECT id FROM ai_quality_responses WHERE id = ? AND user_id = ?", (response_id, user_id)
+        "SELECT id FROM ai_outputs WHERE id = ? AND user_id = ?", (response_id, user_id)
     ))
 
 
@@ -165,6 +231,82 @@ async def aggregate() -> list[dict[str, Any]]:
         COUNT(*) AS response_count, SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END) AS helpful,
         SUM(CASE WHEN f.rating = 'down' THEN 1 ELSE 0 END) AS unhelpful,
         AVG(r.latency_ms) AS average_latency_ms
-        FROM ai_quality_responses r LEFT JOIN ai_quality_feedback f ON f.response_id = r.id
+        FROM ai_outputs r LEFT JOIN ai_output_feedback f ON f.response_id = r.id
         GROUP BY r.feature, r.primary_source_type, r.provider, r.confidence_band
         ORDER BY response_count DESC""")
+
+
+async def response_counts(response_id: int) -> dict[str, int]:
+    row = await db.fetch_one(
+        """SELECT SUM(CASE WHEN rating = 'up' THEN 1 ELSE 0 END) AS helpful,
+        SUM(CASE WHEN rating = 'down' THEN 1 ELSE 0 END) AS unhelpful
+        FROM ai_output_feedback WHERE response_id = ?""",
+        (response_id,),
+    ) or {}
+    return {"helpful": int(row.get("helpful") or 0), "unhelpful": int(row.get("unhelpful") or 0)}
+
+
+def _utc_iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat()
+    return str(value)
+
+
+async def aggregate_by_feature() -> list[dict[str, Any]]:
+    """Outputs and votes per AI feature, worst-rated first."""
+    rows = await db.fetch_all("""SELECT r.feature, COUNT(DISTINCT r.id) AS outputs,
+        SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END) AS helpful,
+        SUM(CASE WHEN f.rating = 'down' THEN 1 ELSE 0 END) AS unhelpful,
+        SUM(CASE WHEN f.id IS NOT NULL AND f.is_technician = 1 THEN 1 ELSE 0 END) AS technician_votes,
+        SUM(CASE WHEN f.id IS NOT NULL AND f.is_technician = 0 THEN 1 ELSE 0 END) AS customer_votes,
+        MAX(f.updated_at) AS last_rated_at
+        FROM ai_outputs r LEFT JOIN ai_output_feedback f ON f.response_id = r.id
+        GROUP BY r.feature""")
+    reasons = await db.fetch_all("""SELECT r.feature, f.reason, COUNT(*) AS votes
+        FROM ai_output_feedback f JOIN ai_outputs r ON r.id = f.response_id
+        WHERE f.rating = 'down' AND f.reason IS NOT NULL
+        GROUP BY r.feature, f.reason""")
+    top_reason: dict[str, tuple[int, str]] = {}
+    for row in reasons:
+        candidate = (int(row["votes"]), str(row["reason"]))
+        if candidate > top_reason.get(row["feature"], (0, "")):
+            top_reason[row["feature"]] = candidate
+    groups = []
+    for row in rows:
+        feature = str(row["feature"])
+        groups.append({
+            "feature": feature,
+            "outputs": int(row["outputs"] or 0),
+            "helpful": int(row["helpful"] or 0),
+            "unhelpful": int(row["unhelpful"] or 0),
+            "technician_votes": int(row["technician_votes"] or 0),
+            "customer_votes": int(row["customer_votes"] or 0),
+            "top_reason": top_reason[feature][1] if feature in top_reason else None,
+            "last_rated_at": _utc_iso(row["last_rated_at"]),
+        })
+    groups.sort(key=lambda group: (-group["unhelpful"], -group["outputs"], group["feature"]))
+    return groups
+
+
+async def rating_overview(*, since: datetime) -> dict[str, Any]:
+    cutoff = since.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    row = await db.fetch_one("""SELECT COUNT(*) AS ratings,
+        SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END) AS helpful,
+        COUNT(DISTINCT r.feature) AS features
+        FROM ai_output_feedback f JOIN ai_outputs r ON r.id = f.response_id
+        WHERE f.updated_at >= ?""", (cutoff,)) or {}
+    ratings = int(row.get("ratings") or 0)
+    return {
+        "ratings_since": ratings,
+        "helpful_pct": round(100 * int(row.get("helpful") or 0) / ratings) if ratings else None,
+        "features_rated": int(row.get("features") or 0),
+    }

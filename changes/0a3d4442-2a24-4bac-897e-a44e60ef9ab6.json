@@ -1,0 +1,7 @@
+{
+  "guid": "0a3d4442-2a24-4bac-897e-a44e60ef9ab6",
+  "occurred_at": "2026-11-19T05:18Z",
+  "change_type": "Fix",
+  "summary": "The AI Quality admin page now shows technicians' thumbs up and thumbs down votes on ticket Related items, so that feedback is no longer missing from the page.",
+  "content_hash": "74eea94c3dffd0f22c21762f45bf8acc71241b2624ae1dbb0d0b17a339bfaf13"
+}

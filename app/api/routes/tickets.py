@@ -45,6 +45,7 @@ from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_tasks as ticket_tasks_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
+from app.services import ai_quality_access
 from app.repositories import tray as tray_repo
 from app.schemas.tray import TrayTroubleshootResponse, TicketAssetTroubleshootRequest, TicketReplyTroubleshootRequest
 from app.services import ai_consent
@@ -135,19 +136,7 @@ def _audit_ticket_view(ticket: dict | None) -> dict | None:
 
 
 async def _has_helpdesk_permission(current_user: dict) -> bool:
-    if current_user.get("is_super_admin"):
-        return True
-    user_id = current_user.get("id")
-    try:
-        user_id_int = int(user_id)
-    except (TypeError, ValueError):
-        return False
-    try:
-        return await membership_repo.user_has_permission(
-            user_id_int, tickets_service.HELPDESK_PERMISSION_KEY
-        )
-    except RuntimeError:
-        return False
+    return await ai_quality_access.is_technician(current_user)
 
 
 async def _validate_ticket_assignee(assigned_user_id: int | None) -> None:
