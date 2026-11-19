@@ -1673,6 +1673,12 @@
                 </div>
               </div>
             </form>
+            {% if ticket_suggest_reply_available %}
+              {# Outside the reply form (forms can't nest); ticket_detail.js reveals it with the draft's id. #}
+              <div class="ticket-reply-suggestion__rating" data-ticket-suggest-reply-rating hidden>
+                {{ ai_rating("pending", label="Suggested reply", csrf_token=csrf_token) }}
+              </div>
+            {% endif %}
             <dialog class="ticket-page-clock-dialog" data-ticket-page-clock-dialog aria-labelledby="ticket-page-clock-history-title">
               <div class="ticket-page-clock-dialog__header">
                 <h3 id="ticket-page-clock-history-title">Ticket clock history</h3>
