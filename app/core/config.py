@@ -620,6 +620,16 @@ class Settings(BaseSettings):
         le=10000,
         description="Additional size limit for each RAG text chunk before its section label.",
     )
+    rag_chunk_max_tokens: int = Field(
+        default=400,
+        validation_alias="RAG_CHUNK_MAX_TOKENS",
+        ge=32,
+        le=8192,
+        description=(
+            "Estimated token budget for each RAG text chunk. Keep it below the "
+            "embedding server's batch size (llama.cpp defaults to 512)."
+        ),
+    )
     rag_chunk_overlap_words: int = Field(
         default=35, validation_alias="RAG_CHUNK_OVERLAP_WORDS", ge=0, le=500
     )

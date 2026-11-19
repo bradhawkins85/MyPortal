@@ -2,6 +2,9 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
+import pytest
+
 from app.services import rag_index
 
 
@@ -199,3 +202,75 @@ def test_chunk_embeddings_prefer_active_rows_and_skip_empty(monkeypatch):
 
     assert asyncio.run(rag_repo.get_chunk_embeddings(7, "model")) == {"a": "[1]"}
     assert fetch.await_args.args[1] == (7, "model")
+
+
+def _status_error(status, body):
+    request = httpx.Request("POST", "http://embed.test/v1/embeddings")
+    response = httpx.Response(status, json=body, request=request)
+    return httpx.HTTPStatusError(f"HTTP {status}", request=request, response=response)
+
+
+_TOO_LARGE = {"error": {"code": 500, "type": "server_error", "message": (
+    "input (612 tokens) is too large to process. increase the physical batch size"
+)}}
+
+
+def _index_with_embed(monkeypatch, document, embed):
+    monkeypatch.setattr(rag_index, "get_settings", lambda: SimpleNamespace(
+        rag_chunk_words=180, rag_chunk_overlap_words=0, rag_chunk_max_chars=2000,
+        rag_chunk_max_tokens=4000,
+    ))
+    monkeypatch.setattr(rag_index, "embedding_model", lambda: "test-model")
+    monkeypatch.setattr(rag_index.rag_repo, "get_document_by_source", AsyncMock(return_value=None))
+    monkeypatch.setattr(rag_index.rag_repo, "upsert_document", AsyncMock(return_value=71))
+    replace = AsyncMock()
+    monkeypatch.setattr(rag_index.rag_repo, "replace_chunks", replace)
+    monkeypatch.setattr(rag_index, "embed_text", embed)
+    monkeypatch.setattr(rag_index.rag_relationships, "on_document_indexed", AsyncMock())
+    return replace
+
+
+def test_chunk_rejected_as_too_large_is_split_and_retried(monkeypatch):
+    text = " ".join(f"Progress Status PROJECT_{i}.bak({i} / 42) - Verify OK" for i in range(15))
+    document = _ticket(text)
+    calls = []
+
+    async def embed(chunk):
+        calls.append(chunk)
+        if len(calls) == 1:
+            raise _status_error(500, _TOO_LARGE)
+        return [float(len(calls))]
+
+    replace = _index_with_embed(monkeypatch, document, embed)
+
+    assert asyncio.run(rag_index.index_document(document)) == 71
+    chunks = replace.await_args.args[1]
+    assert len(calls) == 3
+    assert [c["chunk_index"] for c in chunks] == [0, 1]
+    assert all(c["chunk_text"].startswith("[Section: Description] ") for c in chunks)
+    assert all(c["chunk_hash"] == rag_index.content_hash(c["chunk_text"]) for c in chunks)
+    rejoined = " ".join(c["chunk_text"].removeprefix("[Section: Description] ") for c in chunks)
+    assert rejoined == text
+
+
+def test_unrelated_provider_error_is_not_split(monkeypatch):
+    document = _ticket("printer error code 17 " * 20)
+    embed = AsyncMock(side_effect=_status_error(500, {"error": {"message": "model failed to load"}}))
+    replace = _index_with_embed(monkeypatch, document, embed)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(rag_index.index_document(document))
+    assert embed.await_count == 1
+    replace.assert_not_awaited()
+
+
+def test_split_retries_are_bounded(monkeypatch):
+    document = _ticket("printer error code 17 " * 200)
+    embed = AsyncMock(side_effect=_status_error(500, _TOO_LARGE))
+    replace = _index_with_embed(monkeypatch, document, embed)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(rag_index.index_document(document))
+    # One original request plus one request per level down the first branch.
+    assert embed.await_count == rag_index._MAX_EMBED_SPLIT_DEPTH + 1
+    replace.assert_not_awaited()

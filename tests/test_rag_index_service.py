@@ -172,3 +172,35 @@ def test_rag_chunk_size_bounds_long_words_without_losing_text(monkeypatch):
     assert all(len(chunk) <= 100 for chunk in chunks)
     assert ''.join(chunks).replace(' ', '') == text.replace(' ', '')
     assert 'ordinary words' in ' '.join(chunks)
+
+
+def test_token_estimate_counts_tracking_urls_and_logs_as_dense():
+    prose = "The office printer keeps jamming when staff print double sided documents."
+    url = "https://urldefense.com/v3/__https:/youtu.be/e9tQseC22bA__;!!MsO6NK0!cn0DZgf1L4DbRvUZIPz52uF"
+    assert rag_index.estimate_tokens(prose) <= len(prose.split()) * 2
+    assert rag_index.estimate_tokens(url) > len(url) / 4
+    assert rag_index.estimate_tokens("PROJECT_21.bak(26 / 42)") >= 10
+    assert rag_index.estimate_tokens("") == 0
+
+
+def test_chunk_text_respects_token_budget_without_losing_text(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(rag_index, 'get_settings', lambda: SimpleNamespace(
+        rag_chunk_words=180, rag_chunk_overlap_words=0, rag_chunk_max_chars=2000,
+        rag_chunk_max_tokens=60,
+    ))
+    text = " ".join(f"Progress Status：PROJECT_{i}.bak({i} / 42) - Verify OK" for i in range(20))
+    chunks = rag_index.chunk_text(text)
+    assert len(chunks) > 1
+    assert all(rag_index.estimate_tokens(chunk) <= 60 for chunk in chunks)
+    assert " ".join(chunks) == text
+
+
+def test_ordinary_prose_stays_in_one_chunk_with_default_budget(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(rag_index, 'get_settings', lambda: SimpleNamespace(
+        rag_chunk_words=180, rag_chunk_overlap_words=0, rag_chunk_max_chars=2000,
+        rag_chunk_max_tokens=400,
+    ))
+    text = "The office printer on level two keeps jamming when staff print. " * 15
+    assert len(rag_index.chunk_text(text)) == 1
