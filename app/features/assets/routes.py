@@ -301,14 +301,44 @@ async def _load_asset_context(
     return user, membership, company, company_id, None
 
 
-async def _tactical_rmm_enabled() -> bool:
+async def _module_enabled(slug: str) -> bool:
     from app.services import modules as modules_service
 
     try:
-        module = await modules_service.get_module("tacticalrmm", redact=True)
+        module = await modules_service.get_module(slug, redact=True)
     except Exception:  # pragma: no cover - defensive
         return False
     return bool(module and module.get("enabled"))
+
+
+async def _tactical_rmm_enabled() -> bool:
+    return await _module_enabled("tacticalrmm")
+
+
+# Asset source records come from these integration modules (source == module slug).
+_INTEGRATION_SOURCE_MODULES = ("syncro", "tacticalrmm")
+
+
+def _tray_status(device: Mapping[str, Any]) -> str:
+    """Online/offline as the tray agent's presence reports it."""
+    from app.services import wol as wol_service
+
+    return "online" if wol_service._device_online(dict(device)) else "offline"
+
+
+def _status_without_tactical(
+    stored_status: Any, tray_device: Mapping[str, Any] | None, *, syncro_enabled: bool
+) -> str | None:
+    """Status to show when Tactical RMM is off.
+
+    Its last synced value (online/offline/overdue) never refreshes, so the tray
+    agent decides; Syncro's value stays only while Syncro is still syncing.
+    """
+    if tray_device:
+        return _tray_status(tray_device)
+    if not syncro_enabled:
+        return None
+    return str(stored_status or "").strip() or None
 
 
 def _tray_last_seen(device: Mapping[str, Any]) -> datetime | None:
@@ -367,6 +397,8 @@ async def assets_page(request: Request):
     can_wake = can_write_assets and await main_module._is_helpdesk_technician(user, request)
 
     rows = await asset_repo.list_company_assets(company_id)
+    # A technician-maintained status is never replaced by a sync or tray value.
+    manual_asset_ids = {row.get("id") for row in rows if row.get("provenance") == "manual"}
     if not can_view_assets:
         rows = [_customer_asset(dict(row)) for row in rows]
     hidden_columns = await _end_user_hidden_columns(user, request)
@@ -517,6 +549,7 @@ async def assets_page(request: Request):
     # Without Tactical RMM nothing refreshes ``last_sync`` or ``last_user``, so
     # the tray agent's last check-in and signed-in user are the latest facts.
     tray_sets_last_sync = not await _tactical_rmm_enabled()
+    syncro_enabled = await _module_enabled("syncro") if tray_sets_last_sync else True
     # Technicians who run RMM scripts can push the RMM agent through the tray app.
     can_push_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
         bool(user.get("is_super_admin"))
@@ -574,6 +607,10 @@ async def assets_page(request: Request):
             tray_device.get("hostname") if tray_device else None
         )
         record["tray_agent_synced"] = bool(record["tray_device_uid"])
+        if tray_sets_last_sync and record.get("id") not in manual_asset_ids:
+            record["status"] = _status_without_tactical(
+                record.get("status"), tray_device, syncro_enabled=syncro_enabled
+            )
         if tray_sets_last_sync and tray_device:
             tray_seen_iso = main_module._to_iso(_tray_last_seen(tray_device))
             if tray_seen_iso:
@@ -2400,12 +2437,33 @@ async def asset_detail_page(
         elif can_read and await main_module._is_helpdesk_technician(user, request):
             # Read Only technicians see the same tags, without changing them.
             tags_context = await tags_routes.asset_tags_context(asset_id, can_edit=False)
+    # Disabled integrations stop refreshing their data, so it is not shown.
+    integration_enabled = {
+        slug: await _module_enabled(slug) for slug in _INTEGRATION_SOURCE_MODULES
+    }
+    tray_sets_status = (
+        not integration_enabled["tacticalrmm"] and record.get("provenance") != "manual"
+    )
+    tray_device: dict[str, Any] = {}
+    if tray_sets_status or not customer_safe:
+        tray_device = (await tray_repo.list_active_devices_by_asset_ids([asset_id])).get(asset_id) or {}
+    asset_view = dict(record)
+    if tray_sets_status:
+        asset_view["status"] = _status_without_tactical(
+            record.get("status"), tray_device or None,
+            syncro_enabled=integration_enabled["syncro"],
+        )
+    asset_sources = [
+        source for source in (
+            await asset_repo.list_asset_sources(company_id, asset_id) if is_staff else []
+        )
+        if integration_enabled.get(str(source.get("source") or ""), True)
+    ]
     # The tray app reports who is signed in now; synced inventory only knows
     # the last user, so it stands in when the device has no tray app.
     logged_on_user = None
     logged_on_user_is_last = False
     if not customer_safe:
-        tray_device = (await tray_repo.list_active_devices_by_asset_ids([asset_id])).get(asset_id) or {}
         console_user = _tray_console_user(tray_device)
         logged_on_user = (
             console_user
@@ -2420,7 +2478,8 @@ async def asset_detail_page(
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
             "title": str(record.get("name") or f"Asset {asset_id}"),
-            "asset": dict(record), "company": company,
+            "asset": asset_view, "company": company,
+            "integration_enabled": integration_enabled,
             "references": references, "custom_fields": custom_fields,
             "tickets": [] if customer_safe else await asset_repo.list_tickets_for_asset(asset_id),
             "required_fields": required_fields, "required_missing": required_missing,
@@ -2442,7 +2501,7 @@ async def asset_detail_page(
             **await _asset_type_picker(company_id),
             "synced_asset_type_groups": asset_types.grouped(),
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
-            "asset_sources": await asset_repo.list_asset_sources(company_id, asset_id) if is_staff else [],
+            "asset_sources": asset_sources,
             "customer_safe": customer_safe,
             "is_asset_staff": is_staff,
             "can_manage_asset": can_manage,

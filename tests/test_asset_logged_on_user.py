@@ -59,6 +59,7 @@ def _patch_detail(monkeypatch, *, record, tray_devices, user=None):
         AsyncMock(return_value={"asset_type_mode": "manual", "asset_type_groups": [], "custom_asset_types": []}),
     )
     monkeypatch.setattr(routes, "_warranty_context", AsyncMock(return_value=None))
+    monkeypatch.setattr("app.repositories.wol.asset_stats", AsyncMock(return_value={}))
     tray_lookup = AsyncMock(return_value=tray_devices)
     monkeypatch.setattr(routes.tray_repo, "list_active_devices_by_asset_ids", tray_lookup)
     monkeypatch.setattr(main_module, "_feature_pack_available", lambda name: False)
@@ -115,6 +116,8 @@ async def test_customer_view_omits_the_logged_on_user(monkeypatch):
         tray_devices={10: {"id": 5, "console_user": "alice"}},
         user={"id": 7},
     )
+    # With Tactical RMM on, the status needs no tray lookup either.
+    monkeypatch.setattr(routes, "_module_enabled", AsyncMock(return_value=True))
 
     await routes.asset_detail_page(_request(), 10, customer_preview=False)
 
