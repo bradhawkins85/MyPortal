@@ -2857,6 +2857,158 @@
     }
   }
 
+  function bindRecurringItemConversion() {
+    const modal = document.getElementById('recurring-item-convert-modal');
+    const form = document.getElementById('recurring-item-convert-form');
+    const companyElement = document.querySelector('[data-company-id]');
+    if (!modal || !form || !companyElement || !companyElement.dataset.companyId) {
+      return;
+    }
+    const companyId = companyElement.dataset.companyId;
+    const idInput = document.getElementById('recurring-item-convert-id');
+    const nextChargeInput = document.getElementById('recurring-item-convert-next-charge');
+    const quantityInput = document.getElementById('recurring-item-convert-quantity');
+    const errorElement = form.querySelector('[data-convert-error]');
+    const statusElement = form.querySelector('[data-convert-status]');
+    const submitButton = form.querySelector('[data-convert-submit]');
+    let activeTrigger = null;
+
+    const setField = (name, value) => {
+      const field = form.querySelector(`[data-convert-field="${name}"]`);
+      if (field) {
+        field.textContent = value;
+      }
+    };
+    const showError = (message) => {
+      if (!errorElement) {
+        return;
+      }
+      errorElement.textContent = message || '';
+      errorElement.hidden = !message;
+    };
+    const formatDate = (iso) => {
+      if (!iso) {
+        return '—';
+      }
+      const parsed = new Date(`${iso}T00:00:00`);
+      return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleDateString();
+    };
+    const baseUrl = (itemId) =>
+      `/api/companies/${encodeURIComponent(companyId)}/recurring-invoice-items/${encodeURIComponent(itemId)}/subscription-conversion`;
+
+    function renderPlan(plan) {
+      setField('product_name', `${plan.product_name} (${plan.product_sku})`);
+      setField('description', plan.description || '—');
+      setField('unit_price', `$${Number(plan.unit_price || 0).toFixed(2)}`);
+      const commitment = plan.commitment === 'monthly' ? 'Monthly commitment' : 'Annual commitment';
+      const payment = plan.payment_frequency === 'monthly' ? 'paid monthly' : 'paid annually';
+      setField('billing', `${commitment}, ${payment}`);
+      setField('term', `${formatDate(plan.term_start_date)} – ${formatDate(plan.term_end_date)}`);
+    }
+
+    async function loadPlan(nextChargeDate) {
+      const itemId = idInput.value;
+      if (!itemId) {
+        return null;
+      }
+      const query = nextChargeDate ? `?next_charge_date=${encodeURIComponent(nextChargeDate)}` : '';
+      if (statusElement) {
+        statusElement.textContent = 'Working out the subscription term…';
+      }
+      try {
+        const plan = await requestJson(baseUrl(itemId) + query, { method: 'GET' });
+        renderPlan(plan);
+        showError('');
+        return plan;
+      } catch (error) {
+        showError(error instanceof Error ? error.message : 'Unable to preview this conversion.');
+        return null;
+      } finally {
+        if (statusElement) {
+          statusElement.textContent = '';
+        }
+      }
+    }
+
+    function closeModal() {
+      modal.hidden = true;
+      modal.setAttribute('aria-hidden', 'true');
+      form.reset();
+      showError('');
+      if (activeTrigger) {
+        activeTrigger.focus();
+      }
+      activeTrigger = null;
+    }
+
+    document.querySelectorAll('[data-recurring-item-convert]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const row = button.closest('tr');
+        if (!row || !row.dataset.recurringItem) {
+          return;
+        }
+        let item;
+        try {
+          item = JSON.parse(row.dataset.recurringItem);
+        } catch (error) {
+          console.error('Failed to parse item data:', error);
+          return;
+        }
+        activeTrigger = button;
+        form.reset();
+        idInput.value = item.id;
+        modal.hidden = false;
+        modal.setAttribute('aria-hidden', 'false');
+        const plan = await loadPlan('');
+        if (plan) {
+          nextChargeInput.value = plan.next_charge_date;
+          quantityInput.value = plan.quantity || '';
+          (plan.quantity ? nextChargeInput : quantityInput).focus();
+        }
+      });
+    });
+
+    nextChargeInput.addEventListener('change', () => {
+      if (nextChargeInput.value) {
+        loadPlan(nextChargeInput.value);
+      }
+    });
+
+    modal.querySelectorAll('[data-modal-close]').forEach((button) => {
+      button.addEventListener('click', closeModal);
+    });
+    modal.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        closeModal();
+      }
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const quantity = parseInt(quantityInput.value, 10);
+      if (!nextChargeInput.value || !Number.isInteger(quantity) || quantity < 1) {
+        showError('Enter the next charge date and a whole-number quantity.');
+        return;
+      }
+      if (submitButton) {
+        submitButton.disabled = true;
+      }
+      try {
+        await requestJson(baseUrl(idInput.value), {
+          method: 'POST',
+          body: JSON.stringify({ next_charge_date: nextChargeInput.value, quantity }),
+        });
+        window.location.reload();
+      } catch (error) {
+        showError(error instanceof Error ? error.message : 'Unable to convert this item.');
+      } finally {
+        if (submitButton) {
+          submitButton.disabled = false;
+        }
+      }
+    });
+  }
+
   function bindCompanyIdLookupButtons() {
     const companyEditPage = document.querySelector('[data-company-id]');
     if (!companyEditPage) {
@@ -3444,6 +3596,7 @@
     bindCompanyAssignForm();
     bindCompanyAssignmentControls();
     bindRecurringInvoiceItems();
+    bindRecurringItemConversion();
     bindCompanyIdLookupButtons();
     bindApiKeyEditModal();
     bindApiKeyCopyButtons();

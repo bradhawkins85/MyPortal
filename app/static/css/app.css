@@ -20918,7 +20918,8 @@ a.shop-product-card {
 }
 
 .asset-edit-page .definition-list,
-.settings-workspace .definition-list {
+.settings-workspace .definition-list,
+.recurring-convert .definition-list {
   display: grid;
   grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
   gap: var(--space-gap-base) var(--space-gap-roomy);
@@ -20926,13 +20927,15 @@ a.shop-product-card {
 }
 
 .asset-edit-page .definition-list dt,
-.settings-workspace .definition-list dt {
+.settings-workspace .definition-list dt,
+.recurring-convert .definition-list dt {
   color: var(--hf-muted);
   font-weight: 600;
 }
 
 .asset-edit-page .definition-list dd,
-.settings-workspace .definition-list dd {
+.settings-workspace .definition-list dd,
+.recurring-convert .definition-list dd {
   margin: 0;
 }
 

@@ -51,7 +51,12 @@ async def sync_subscription_recurring_item(
     billing_plan = shop_service.get_subscription_billing_plan(product)
     values = {
         "product_code": sku,
-        "description_template": str(product.get("invoice_description") or product.get("name") or sku),
+        "description_template": str(
+            subscription.get("external_name")
+            or product.get("invoice_description")
+            or product.get("name")
+            or sku
+        ),
         "qty_expression": str(max(0, int(subscription.get("quantity") or 0))),
         "price_override": float(Decimal(str(subscription.get("unit_price") or 0))),
         "active": not canceled and int(subscription.get("quantity") or 0) > 0,

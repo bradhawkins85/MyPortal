@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -19,6 +20,9 @@ from app.schemas.assets import AssetResponse
 from app.schemas.companies import CompanyCreate, CompanyResponse, CompanyUpdate
 from app.schemas.company_addresses import CompanyAddressInput, CompanyAddressResponse
 from app.schemas.company_recurring_invoice_items import (
+    RecurringItemConversionPreview,
+    RecurringItemConversionRequest,
+    RecurringItemConversionResult,
     RecurringInvoiceItemCreate,
     RecurringInvoiceItemResponse,
     RecurringInvoiceItemUpdate,
@@ -27,6 +31,7 @@ from app.schemas.users import StaffRequesterOption
 from app.services import audit as audit_service
 from app.services import company_id_lookup
 from app.services import m365 as m365_service
+from app.services import recurring_item_conversion
 
 router = APIRouter(prefix="/api/companies", tags=["Companies"])
 EMAIL_ADAPTER = TypeAdapter(EmailStr)
@@ -501,6 +506,73 @@ async def delete_recurring_invoice_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recurring invoice item not found")
     await recurring_items_repo.delete_recurring_invoice_item(item_id)
     return None
+
+
+@router.get(
+    "/{company_id}/recurring-invoice-items/{item_id}/subscription-conversion",
+    response_model=RecurringItemConversionPreview,
+)
+async def preview_recurring_item_subscription_conversion(
+    company_id: int,
+    item_id: int,
+    next_charge_date: date | None = None,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Preview converting a recurring invoice item into a shop subscription."""
+    try:
+        plan = await recurring_item_conversion.preview_conversion(
+            company_id, item_id, next_charge_date=next_charge_date
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except recurring_item_conversion.ConversionError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return plan.as_dict()
+
+
+@router.post(
+    "/{company_id}/recurring-invoice-items/{item_id}/subscription-conversion",
+    response_model=RecurringItemConversionResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def convert_recurring_item_to_subscription(
+    company_id: int,
+    item_id: int,
+    payload: RecurringItemConversionRequest,
+    request: Request,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(require_super_admin),
+):
+    """Convert a recurring invoice item into a subscription for the matching shop product."""
+    try:
+        subscription, item = await recurring_item_conversion.convert_item(
+            company_id,
+            item_id,
+            user_id=int(current_user["id"]),
+            next_charge_date=payload.next_charge_date,
+            quantity=payload.quantity,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except recurring_item_conversion.ConversionError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await audit_service.record(
+        action="company.recurring_item.convert_to_subscription",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="company_recurring_invoice_item",
+        entity_id=item_id,
+        before=None,
+        after={"subscription_id": subscription.get("id"), "item": item},
+        metadata={"company_id": company_id},
+    )
+    return {
+        "subscription_id": str(subscription["id"]),
+        "start_date": subscription["start_date"],
+        "end_date": subscription["end_date"],
+        "next_charge_date": item.get("start_date"),
+    }
 
 
 @router.post("/{company_id}/lookup-tactical-id")

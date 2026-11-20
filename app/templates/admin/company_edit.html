@@ -2067,6 +2067,16 @@
                       </td>
                       <td class="table__actions">
                         <div class="table__action-buttons">
+                          {% if item.subscription_product_name %}
+                            <button
+                              type="button"
+                              class="button button--ghost"
+                              data-recurring-item-convert
+                              aria-haspopup="dialog"
+                              aria-controls="recurring-item-convert-modal"
+                              title="Matches the shop subscription product {{ item.subscription_product_name }}"
+                            >Convert to subscription</button>
+                          {% endif %}
                           <button type="button" class="button button--ghost" data-recurring-item-edit>Edit</button>
                           <button type="button" class="button button--ghost button--danger" data-recurring-item-delete>Delete</button>
                         </div>
@@ -2866,6 +2876,49 @@
               >
                 Delete item
               </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="recurring-item-convert-modal" role="dialog" aria-modal="true" aria-labelledby="recurring-item-convert-title" aria-describedby="recurring-item-convert-subtitle" hidden>
+      <div class="modal__content" role="document">
+        <button type="button" class="modal__close" data-modal-close>
+          <span class="visually-hidden">Close subscription conversion</span>
+        </button>
+        <p class="text-muted">Recurring item → Subscription</p>
+        <h2 class="modal__title" id="recurring-item-convert-title">Convert to subscription</h2>
+        <p class="form-help" id="recurring-item-convert-subtitle" data-convert-subtitle>
+          Move this recurring item onto the matching shop subscription so renewals, reminders and quantity changes are handled for you.
+        </p>
+        <div class="modal__body">
+          <form id="recurring-item-convert-form" class="form recurring-convert" autocomplete="off">
+            <input type="hidden" name="item_id" id="recurring-item-convert-id" />
+            <dl class="definition-list" data-convert-summary>
+              <dt>Shop product</dt><dd data-convert-field="product_name">—</dd>
+              <dt>Description</dt><dd data-convert-field="description">—</dd>
+              <dt>Unit price</dt><dd data-convert-field="unit_price">—</dd>
+              <dt>Billing</dt><dd data-convert-field="billing">—</dd>
+              <dt>Current term</dt><dd data-convert-field="term">—</dd>
+            </dl>
+            <div class="form-field">
+              <label class="form-label" for="recurring-item-convert-next-charge">Next charge date</label>
+              <input class="form-input" id="recurring-item-convert-next-charge" name="next_charge_date" type="date" required data-initial-focus />
+              <p class="form-help">Worked out from when this item was last billed. The subscription renews on this date, and the recurring item will not bill again before it.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="recurring-item-convert-quantity">Quantity</label>
+              <input class="form-input" id="recurring-item-convert-quantity" name="quantity" type="number" min="1" step="1" required />
+              <p class="form-help">Licences on the subscription. Taken from the item when it is a fixed number.</p>
+            </div>
+            <p class="form-error" data-convert-error role="alert" hidden></p>
+            <p class="form-help" data-convert-status role="status" aria-live="polite"></p>
+            <div class="form-actions">
+              <div class="form-actions__group">
+                <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+                <button type="submit" class="button" data-convert-submit>Convert to subscription</button>
+              </div>
             </div>
           </form>
         </div>
