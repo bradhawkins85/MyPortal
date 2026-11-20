@@ -324,6 +324,16 @@ def _tray_last_seen(device: Mapping[str, Any]) -> datetime | None:
     return max(seen) if seen else None
 
 
+def _tray_console_user(device: Mapping[str, Any]) -> str:
+    """Return the person the tray agent reports as signed in (or last signed in)."""
+    console_user = str(device.get("console_user") or "").strip()
+    # Older tray services reported their own SYSTEM identity, which is the
+    # machine account (COMPUTERNAME$), not a person.
+    if console_user.endswith("$") or console_user.upper() in {"SYSTEM", "ROOT"}:
+        return ""
+    return console_user
+
+
 def _as_utc_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
@@ -504,8 +514,8 @@ async def assets_page(request: Request):
         asset_ids
     )
     tray_devices_by_asset = await tray_repo.list_active_devices_by_asset_ids(asset_ids)
-    # Without Tactical RMM nothing refreshes ``last_sync``, so the tray agent's
-    # last check-in is the most recent sign of life for the device.
+    # Without Tactical RMM nothing refreshes ``last_sync`` or ``last_user``, so
+    # the tray agent's last check-in and signed-in user are the latest facts.
     tray_sets_last_sync = not await _tactical_rmm_enabled()
     # Technicians who run RMM scripts can push the RMM agent through the tray app.
     can_push_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
@@ -570,6 +580,10 @@ async def assets_page(request: Request):
                 record["last_sync"] = tray_seen_iso
                 record["last_sync_iso"] = tray_seen_iso
                 record["last_sync_sort"] = tray_seen_iso
+            # Match the asset page's "Logged in user".
+            tray_user = _tray_console_user(tray_device)
+            if tray_user:
+                record["last_user"] = tray_user
         parsed_last_sync = _parse_iso(record.get("last_sync_iso"))
         if parsed_last_sync and parsed_last_sync >= recent_threshold:
             recent_sync += 1
@@ -2392,11 +2406,7 @@ async def asset_detail_page(
     logged_on_user_is_last = False
     if not customer_safe:
         tray_device = (await tray_repo.list_active_devices_by_asset_ids([asset_id])).get(asset_id) or {}
-        console_user = str(tray_device.get("console_user") or "").strip()
-        # Older tray services reported their own SYSTEM identity, which is the
-        # machine account (COMPUTERNAME$), not a person.
-        if console_user.endswith("$") or console_user.upper() in {"SYSTEM", "ROOT"}:
-            console_user = ""
+        console_user = _tray_console_user(tray_device)
         logged_on_user = (
             console_user
             or str(record.get("last_user") or "").strip()
