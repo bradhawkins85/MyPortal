@@ -1,0 +1,7 @@
+{
+  "guid": "6bf078ca-d3f6-426f-95e0-744d41782c44",
+  "occurred_at": "2026-11-20T05:42Z",
+  "change_type": "Fix",
+  "summary": "With Tactical RMM or Syncro turned off, monthly billing still counts devices whose tray or MyPortal RMM agent checked in, new Tray and RMM agent builds keep downloading, saving a company no longer erases its Syncro or Tactical RMM IDs, and tickets, reports, the Assets list, the AI assistant and tray menus use MyPortal's own agents instead of stale Tactical RMM data.",
+  "content_hash": "bb9c389e6372a8db8718226478ae52965df883c1575569830f6b44907f177dcc"
+}
