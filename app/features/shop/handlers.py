@@ -45,6 +45,25 @@ def _form_bool(form: Any, key: str) -> bool:
     return bool(value)
 
 
+DEFAULT_SUBSCRIPTION_SHOP_CATEGORY = "Subscription"
+
+
+async def _default_subscription_shop_category_id() -> int:
+    """Return the store category new subscriptions are listed under.
+
+    The Add subscription form has no store-category picker, so subscriptions
+    are filed under "Subscription" (or an existing "Subscriptions") category,
+    which is created on first use so the product shows in the store.
+    """
+    from app.repositories import shop as shop_repo
+
+    for name in (DEFAULT_SUBSCRIPTION_SHOP_CATEGORY, "Subscriptions"):
+        existing = await shop_repo.get_category_by_name(name)
+        if existing:
+            return int(existing["id"])
+    return await shop_repo.create_category(DEFAULT_SUBSCRIPTION_SHOP_CATEGORY)
+
+
 def _validate_voice_monitor_calls_per_day(
     subscription_category_name: str | None, raw_value: str | None
 ) -> int | None:
@@ -2305,6 +2324,7 @@ async def admin_create_shop_product(
     price_annual_monthly_payment: str | None = Form(default=None),
     price_annual_annual_payment: str | None = Form(default=None),
     voice_monitor_calls_per_day: str | None = Form(default=None),
+    subscription_per_user: bool = Form(default=False),
 ):
     from app.repositories import shop as shop_repo
     from app.repositories import subscription_categories as subscription_categories_repo
@@ -2400,6 +2420,9 @@ async def admin_create_shop_product(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subscription category does not exist")
         subscription_category_name = str(sub_category.get("name") or "").strip()
 
+    if subscription_category_value is not None and category_value is None:
+        category_value = await _default_subscription_shop_category_id()
+
     calls_per_day_value = _validate_voice_monitor_calls_per_day(
         subscription_category_name, voice_monitor_calls_per_day
     )
@@ -2494,6 +2517,9 @@ async def admin_create_shop_product(
             price_annual_monthly_payment=price_annual_monthly,
             price_annual_annual_payment=price_annual_annual,
             voice_monitor_calls_per_day=calls_per_day_value,
+            subscription_per_user=(
+                subscription_per_user is True and subscription_category_value is not None
+            ),
         )
         if feature_payload:
             await shop_repo.replace_product_features(int(product["id"]), feature_payload)
@@ -2558,6 +2584,7 @@ async def admin_update_shop_product(
     price_annual_monthly_payment: str | None = Form(default=None),
     price_annual_annual_payment: str | None = Form(default=None),
     voice_monitor_calls_per_day: str | None = Form(default=None),
+    subscription_per_user: bool = Form(default=False),
     scheduled_price: str | None = Form(default=None),
     scheduled_vip_price: str | None = Form(default=None),
     scheduled_buy_price: str | None = Form(default=None),
@@ -2841,6 +2868,9 @@ async def admin_update_shop_product(
             price_annual_monthly_payment=price_annual_monthly,
             price_annual_annual_payment=price_annual_annual,
             voice_monitor_calls_per_day=calls_per_day_value,
+            subscription_per_user=(
+                subscription_per_user is True and subscription_category_value is not None
+            ),
             scheduled_price=scheduled_price_decimal,
             scheduled_vip_price=scheduled_vip_price_decimal,
             scheduled_buy_price=scheduled_buy_price_decimal,
@@ -2974,6 +3004,7 @@ async def admin_duplicate_shop_product(
     price_annual_monthly_payment: str | None = Form(default=None),
     price_annual_annual_payment: str | None = Form(default=None),
     voice_monitor_calls_per_day: str | None = Form(default=None),
+    subscription_per_user: bool = Form(default=False),
     scheduled_price: str | None = Form(default=None),
     scheduled_vip_price: str | None = Form(default=None),
     scheduled_buy_price: str | None = Form(default=None),
@@ -3084,6 +3115,7 @@ async def admin_duplicate_shop_product(
             price_annual_monthly_payment=price_annual_monthly_payment,
             price_annual_annual_payment=price_annual_annual_payment,
             voice_monitor_calls_per_day=voice_monitor_calls_per_day,
+            subscription_per_user=subscription_per_user,
             scheduled_price=scheduled_price,
             scheduled_vip_price=scheduled_vip_price,
             scheduled_buy_price=scheduled_buy_price,

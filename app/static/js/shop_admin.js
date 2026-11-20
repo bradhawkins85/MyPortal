@@ -1339,6 +1339,10 @@
         if (voiceMonitorCallsPerDay) {
           voiceMonitorCallsPerDay.value = product.voice_monitor_calls_per_day != null ? product.voice_monitor_calls_per_day : '';
         }
+        const subscriptionPerUser = editForm.querySelector('#edit-product-subscription-per-user');
+        if (subscriptionPerUser) {
+          subscriptionPerUser.checked = Boolean(product.subscription_per_user);
+        }
         if (editCrossManager) {
           await editCrossManager.initFromIds(product.cross_sell_product_ids || [], id);
         }
