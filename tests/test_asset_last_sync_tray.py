@@ -28,7 +28,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _wire(monkeypatch, *, trmm_enabled: bool, tray_device: dict | None):
+def _wire(monkeypatch, *, trmm_enabled: bool, tray_device: dict | None, rmm_inventory: dict | None = None):
     user = {"id": 1, "is_super_admin": True}
     membership = {"menu_permissions": {"menu.assets": "write"}}
     captured: dict = {}
@@ -52,6 +52,10 @@ def _wire(monkeypatch, *, trmm_enabled: bool, tray_device: dict | None):
     monkeypatch.setattr(assets_routes.tray_repo, "list_active_devices_by_asset_ids",
                         AsyncMock(return_value={10: dict(tray_device)} if tray_device else {}))
     monkeypatch.setattr(tags_routes, "can_edit_tags", AsyncMock(return_value=False))
+    from app.repositories import rmm_inventory as rmm_inventory_repo
+
+    monkeypatch.setattr(rmm_inventory_repo, "list_for_company_assets",
+                        AsyncMock(return_value={10: dict(rmm_inventory)} if rmm_inventory else {}))
     monkeypatch.setattr(modules_service, "get_module",
                         AsyncMock(return_value={"slug": "tacticalrmm", "enabled": trmm_enabled}))
     return captured

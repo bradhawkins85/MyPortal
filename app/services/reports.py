@@ -816,7 +816,11 @@ _SECTION_BUILDERS = {
 
 async def _build_assets_detail(company_id: int) -> dict[str, Any]:
     """Full list of company assets for the detail page."""
-    rows = await assets_repo.list_company_assets(company_id)
+    rows = [dict(row) for row in await assets_repo.list_company_assets(company_id)]
+    # Without Tactical RMM, status/last seen/last user come from the tray agent.
+    from app.services import asset_presence
+
+    await asset_presence.apply_tray_presence(rows)
     assets: list[dict[str, Any]] = []
     for row in rows:
         last_sync_raw = row.get("last_sync")

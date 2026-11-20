@@ -115,3 +115,37 @@ def test_inventory_ids_are_gated_by_module():
     template = DETAIL_TEMPLATE.read_text(encoding="utf-8")
     assert "{% if integration_enabled.syncro %}<dt>Syncro ID</dt>" in template
     assert "{% if integration_enabled.tacticalrmm %}<dt>Tactical ID</dt>" in template
+
+
+INVENTORY = {"os_name": "Microsoft Windows 11 Pro", "cpu_model": "Intel Core i7-1365U",
+             "ram_bytes": 16 * 1024 ** 3, "disk_total_bytes": 512 * 1024 ** 3,
+             "last_boot_at": "2026-11-18 07:00:00"}
+
+
+async def _listed_inventory(monkeypatch, *, provenance="integration", **modules):
+    monkeypatch.setattr("tests.test_asset_last_sync_tray.ASSET",
+                        {"id": 10, "company_id": 11, "name": "PC-01", "provenance": provenance,
+                         "os_name": "Windows 10", "cpu_name": "Old CPU", "ram_gb": 8, "hdd_size": "256 GB"})
+    captured = _wire(monkeypatch, trmm_enabled=False, tray_device=None, rmm_inventory=INVENTORY)
+    _modules(monkeypatch, **modules)
+    await assets_routes.assets_page(SimpleNamespace(state=SimpleNamespace()))
+    return captured["assets"][0]
+
+
+@pytest.mark.anyio
+async def test_list_inventory_comes_from_rmm_agent_when_trmm_disabled(monkeypatch):
+    asset = await _listed_inventory(monkeypatch)
+
+    assert asset["os_name"] == "Microsoft Windows 11 Pro"
+    assert asset["cpu_name"] == "Intel Core i7-1365U"
+    assert asset["ram_gb"] == "16"
+    assert asset["hdd_size"] == "512 GB"
+    assert asset["boot_time_iso"] == "2026-11-18T07:00:00+00:00"
+
+
+@pytest.mark.anyio
+async def test_list_inventory_keeps_manual_values(monkeypatch):
+    asset = await _listed_inventory(monkeypatch, provenance="manual")
+
+    assert asset["os_name"] == "Windows 10"
+    assert asset["cpu_name"] == "Old CPU"

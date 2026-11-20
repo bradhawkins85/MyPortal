@@ -321,10 +321,10 @@ async def test_count_assets_by_custom_field_checkbox_true():
         call_args = mock_fetch.call_args
         sql = call_args[0][0]
         params = call_args[0][1]
-        assert "d.name = %s" in sql
+        assert "d.name = ?" in sql
         assert "d.field_type = 'checkbox'" in sql
-        assert "v.value_boolean = %s" in sql
-        assert "a.company_id = %s" in sql
+        assert "v.value_boolean = ?" in sql
+        assert "a.company_id = ?" in sql
         assert params == ("bitdefender", True, 42)
 
 

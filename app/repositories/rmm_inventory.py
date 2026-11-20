@@ -48,6 +48,20 @@ async def list_for_agents(agent_ids: Iterable[int]) -> dict[int, dict[str, Any]]
     return {int(row["agent_id"]): _row(row) for row in rows or []}
 
 
+async def list_for_company_assets(company_id: int) -> dict[int, dict[str, Any]]:
+    """Latest inventory summary of each company asset with an active RMM agent, by asset ID."""
+    columns = ", ".join("i." + column for column in SUMMARY_COLUMNS)
+    rows = await db.fetch_all(
+        "SELECT g.asset_id AS linked_asset_id, i.received_at, " + columns + " "  # nosec B608
+        "FROM rmm_device_inventory i JOIN rmm_agents g ON g.id = i.agent_id "
+        "WHERE g.company_id = %s AND g.status = 'active' AND g.asset_id IS NOT NULL "
+        "ORDER BY i.received_at",
+        (int(company_id),),
+    )
+    # Ordered oldest first, so the newest snapshot of an asset wins.
+    return {int(row["linked_asset_id"]): dict(row) for row in rows or []}
+
+
 async def list_software(agent_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         "SELECT name, version, publisher, install_date, source FROM rmm_device_software "

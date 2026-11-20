@@ -1496,6 +1496,12 @@ async def issue_ticket_token(
         )
         body = {}
     mode = "syncro" if str(body.get("mode") or "").lower() == "syncro" else "myportal"
+    if mode == "syncro":
+        from app.services import asset_presence
+
+        # With Syncro off, older tray menus' "Create Syncro Ticket" opens a MyPortal ticket.
+        if not await asset_presence.module_enabled("syncro"):
+            mode = "myportal"
     token, _csrf = _issue_ticket_form_token(device, mode)
     ticket_url = _ticket_form_url(token, request)
     return TrayTicketTokenResponse(
@@ -1896,7 +1902,9 @@ async def create_install_token(
     if payload.company_id is not None:
         company = await companies_repo.get_company_by_id(int(payload.company_id))
         trmm_client_id = str((company or {}).get("tacticalrmm_client_id") or "").strip()
-        if trmm_client_id:
+        from app.services import asset_presence
+
+        if trmm_client_id and await asset_presence.module_enabled("tacticalrmm"):
             try:
                 await tray_service.update_trmm_client_token_field(
                     trmm_client_id=trmm_client_id,

@@ -1375,7 +1375,7 @@ async def _search_asset_sources(
     like = f"%{query}%"
     rows = await db.fetch_all(
         """
-        SELECT a.id, a.company_id, a.name, a.type, a.serial_number, a.status,
+        SELECT a.id, a.company_id, a.name, a.type, a.serial_number, a.status, a.provenance,
                a.os_name, a.last_user, a.warranty_status, a.last_sync,
                a.owner, a.support_contact, a.criticality, a.location,
                a.operational_notes, a.review_status,
@@ -2041,7 +2041,15 @@ async def execute_agent_query(
         except Exception as exc:  # pragma: no cover - defensive guard
             log_error("Agent asset lookup failed", error=str(exc))
             raw_assets = []
-        for asset in raw_assets[:_ASSET_RESULT_LIMIT]:
+        raw_assets = [dict(asset) for asset in raw_assets[:_ASSET_RESULT_LIMIT]]
+        try:
+            # Without Tactical RMM its synced status/last sync are stale.
+            from app.services import asset_presence
+
+            await asset_presence.apply_tray_presence(raw_assets)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error("Agent asset presence lookup failed", error=str(exc))
+        for asset in raw_assets:
             asset_sources.append(
                 {
                     "id": asset.get("id"),

@@ -222,7 +222,7 @@ async def count_assets_by_custom_field(
         company_id: Company ID to filter by (None for all companies)
         field_name: Name of the custom field to filter by
         field_value: Value to match (True for checked, False for unchecked)
-        since: When provided, only count assets that have synced on or after this datetime
+        since: When provided, only count assets synced or seen by an agent on or after this datetime
     
     Returns:
         Count of matching assets
@@ -232,19 +232,21 @@ async def count_assets_by_custom_field(
         FROM asset_custom_field_values v
         JOIN asset_custom_field_definitions d ON v.field_definition_id = d.id
         JOIN assets a ON v.asset_id = a.id
-        WHERE d.name = %s
+        WHERE d.name = ?
           AND d.field_type = 'checkbox'
-          AND v.value_boolean = %s
+          AND v.value_boolean = ?
     """
     params: list[Any] = [field_name, field_value]
     
     if company_id is not None:
-        query += " AND a.company_id = %s"
+        query += " AND a.company_id = ?"
         params.append(company_id)
 
     if since is not None:
-        query += " AND a.last_sync IS NOT NULL AND a.last_sync >= %s"
-        params.append(since.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"))
+        from app.repositories.assets import active_since_clause, active_since_params
+
+        query += " AND " + active_since_clause("a")
+        params.extend(active_since_params(since))
     
     row = await db.fetch_one(query, tuple(params))
     if not row:

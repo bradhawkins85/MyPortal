@@ -753,6 +753,62 @@ async def _filter_rmm_scripts_for_platform(
     return keep(nodes)
 
 
+def _drop_trmm_script_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove Tactical RMM script items (and submenus left empty by it)."""
+
+    kept: list[dict[str, Any]] = []
+    for raw_node in nodes:
+        if not isinstance(raw_node, dict):
+            continue
+        node = dict(raw_node)
+        node_type = str(node.get("type") or "").strip().lower()
+        if node_type == "trmm_script":
+            continue
+        children = node.get("children")
+        if isinstance(children, list):
+            node["children"] = _drop_trmm_script_nodes(children)
+            if node_type == "submenu" and not node["children"]:
+                continue
+        kept.append(node)
+    return kept
+
+
+def _syncro_tickets_to_myportal(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Turn "Create Syncro Ticket" items into MyPortal "Submit Ticket" items."""
+
+    converted: list[dict[str, Any]] = []
+    for raw_node in nodes:
+        if not isinstance(raw_node, dict):
+            continue
+        node = dict(raw_node)
+        if str(node.get("type") or "").strip().lower() == "submit_syncro_ticket":
+            node["type"] = "submit_ticket"
+            if str(node.get("label") or "").strip().lower() in {"", "create syncro ticket"}:
+                node["label"] = "Submit Ticket"
+        children = node.get("children")
+        if isinstance(children, list):
+            node["children"] = _syncro_tickets_to_myportal(children)
+        converted.append(node)
+    return converted
+
+
+async def _replace_disabled_integration_items(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Swap tray items of disabled integrations for MyPortal's own.
+
+    With Tactical RMM off its script items could only fail, so they are hidden
+    (``rmm_script`` items run MyPortal RMM scripts instead). With Syncro off,
+    "Create Syncro Ticket" items open a MyPortal ticket.
+    """
+
+    from app.services import asset_presence
+
+    if not await asset_presence.module_enabled("tacticalrmm"):
+        nodes = _drop_trmm_script_nodes(nodes)
+    if not await asset_presence.module_enabled("syncro"):
+        nodes = _syncro_tickets_to_myportal(nodes)
+    return nodes
+
+
 async def _expand_menu_url_variables(
     nodes: list[dict[str, Any]], company_id: int | None
 ) -> list[dict[str, Any]]:
@@ -1050,6 +1106,7 @@ async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
 
     payload = await _expand_menu_url_variables(payload, company_id)
     payload = await _filter_rmm_scripts_for_platform(payload, device)
+    payload = await _replace_disabled_integration_items(payload)
     payload = _apply_signature_refresh_item(
         payload, await _signature_refresh_available(company_id)
     )

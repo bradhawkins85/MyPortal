@@ -273,3 +273,30 @@ async def test_check_pending_attempts_skips_before_deadline(monkeypatch):
     m.wol_repo.mark_attempt_finished.assert_not_awaited()
 
 
+
+
+@pytest.mark.anyio
+async def test_rmm_agent_check_in_counts_as_awake(monkeypatch):
+    """With Tactical RMM off nothing refreshes last_sync; the MyPortal RMM agent's check-in counts."""
+    _patch_repos(monkeypatch)
+    from app.repositories import rmm as rmm_repo
+
+    created = _now() - timedelta(seconds=60)
+    monkeypatch.setattr(rmm_repo, "get_asset_agent", AsyncMock(
+        return_value={"last_seen_utc": _now().replace(tzinfo=None)}))
+
+    online, via = await wol_service._target_is_online({"asset_id": 42, "created_at": created})
+
+    assert (online, via) == (True, "asset_sync")
+
+
+@pytest.mark.anyio
+async def test_stale_rmm_agent_check_in_is_not_awake(monkeypatch):
+    _patch_repos(monkeypatch)
+    from app.repositories import rmm as rmm_repo
+
+    created = _now() - timedelta(seconds=60)
+    monkeypatch.setattr(rmm_repo, "get_asset_agent", AsyncMock(
+        return_value={"last_seen_utc": (_now() - timedelta(hours=2)).replace(tzinfo=None)}))
+
+    assert await wol_service._target_is_online({"asset_id": 42, "created_at": created}) == (False, "")

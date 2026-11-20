@@ -352,9 +352,15 @@ async def _target_is_online(target: dict[str, Any]) -> tuple[bool, str]:
         asset = await assets_repo.get_asset_by_id(int(asset_id))
         if asset:
             created = tray_service._as_utc(target.get("created_at"))
+            # The MyPortal RMM agent checking in counts too: with Tactical RMM
+            # disabled nothing refreshes the asset's boot time or last sync.
+            from app.repositories import rmm as rmm_repo
+
+            rmm_agent = await rmm_repo.get_asset_agent(int(asset_id)) or {}
             for value in (
                 tray_service._as_utc(asset.get("boot_time")),
                 tray_service._as_utc(asset.get("last_sync")),
+                tray_service._as_utc(rmm_agent.get("last_seen_utc")),
             ):
                 if value is not None and created is not None and value >= created:
                     return True, "asset_sync"

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.repositories import rmm_targeting as targeting
+from app.services import asset_presence
 
 
 class _Database:
@@ -85,6 +88,11 @@ def inventory_db(monkeypatch):
     """)
     adapter = _Database(connection)
     monkeypatch.setattr(targeting, "db", adapter)
+    # Tactical RMM on: synced asset values are used as stored (no tray overlay).
+    async def module_on(_slug):
+        return True
+
+    monkeypatch.setattr(asset_presence, "module_enabled", module_on)
     yield adapter
     connection.close()
 
@@ -365,3 +373,22 @@ async def test_asset_context_keeps_company_boundaries(inventory_db):
     assert other["asset"] is None and other["asset_custom"] is None and other["asset_tags"] is None
     archived_asset = await targeting.context_for_asset(1, 30)
     assert archived_asset["asset"] is None
+
+
+@pytest.mark.asyncio
+async def test_without_tactical_rmm_asset_status_follows_the_tray_agent(inventory_db, monkeypatch):
+    async def only_trmm_off(slug):
+        return slug != "tacticalrmm"
+
+    seen = datetime.now(timezone.utc)
+    monkeypatch.setattr(asset_presence, "module_enabled", only_trmm_off)
+    monkeypatch.setattr(asset_presence.tray_repo, "list_active_devices_by_asset_ids", AsyncMock(
+        return_value={10: {"last_seen_utc": seen, "console_user": "CORP\\alice"}}))
+
+    contexts = await targeting.contexts_for_agents([_agent()])
+    single = await targeting.context_for_asset(1, 10)
+
+    for asset in (contexts[1]["asset"], single["asset"]):
+        assert asset["status"] == "online"
+        assert asset["last_sync"] == seen
+        assert asset["last_user"] == "CORP\\alice"

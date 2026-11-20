@@ -104,3 +104,10 @@ def test_rmm_refresh_failure_is_reported_without_losing_tray_results(monkeypatch
     details = json.loads(record.await_args.kwargs["details"])
     assert details["assets"] == {"myportal-tray.msi": True}
     assert details["errors"] == {"rmm_agent": "RMM download failed"}
+
+
+def test_tray_and_rmm_build_refresh_is_not_owned_by_tactical_rmm():
+    """Disabling Tactical RMM must not stop new Tray and RMM agent builds downloading."""
+    from app.core import module_capabilities
+
+    assert module_capabilities.modules_for_command("update_tray_icon_installer") == frozenset()

@@ -1987,6 +1987,24 @@ async def admin_update_company(company_id: int, request: Request):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Company not found"
         )
+    # A disabled integration's ID field is not on the form; keep the stored
+    # link instead of clearing it, so re-enabling the module finds it intact.
+    def _kept_external_id(form_key: str, column: str, submitted: str) -> str:
+        if form_key in form:
+            return submitted
+        return str(existing.get(column) or "").strip()
+
+    syncro_company_raw = _kept_external_id("syncroCompanyId", "syncro_company_id", syncro_company_raw)
+    tactical_client_raw = _kept_external_id("tacticalClientId", "tacticalrmm_client_id", tactical_client_raw)
+    xero_id_raw = _kept_external_id("xeroId", "xero_id", xero_id_raw)
+    hudu_id_raw = _kept_external_id("huduId", "hudu_id", hudu_id_raw)
+    huntress_organization_id_raw = _kept_external_id(
+        "huntressOrganizationId", "huntress_organization_id", huntress_organization_id_raw
+    )
+    huntress_sat_account_id_raw = _kept_external_id(
+        "huntressSatAccountId", "huntress_sat_account_id", huntress_sat_account_id_raw
+    )
+    trello_board_id_raw = _kept_external_id("trelloBoardId", "trello_board_id", trello_board_id_raw)
     if "onedriveExportSite" not in form:
         onedrive_export_site_id_raw = str(
             existing.get("onedrive_export_site_id") or ""
@@ -3068,7 +3086,10 @@ async def admin_company_tray_create_token(company_id: int, request: Request):
         created_by_user_id=int(current_user["id"]),
     )
     trmm_client_id = str(company.get("tacticalrmm_client_id") or "").strip()
-    if trmm_client_id:
+    from app.services import asset_presence
+
+    # The token is only published to Tactical RMM while that module is on.
+    if trmm_client_id and await asset_presence.module_enabled("tacticalrmm"):
         try:
             await tray_service.update_trmm_client_token_field(
                 trmm_client_id=trmm_client_id,

@@ -1,0 +1,7 @@
+{
+  "guid": "d55e1f70-ea42-4590-a09b-052fb2764076",
+  "occurred_at": "2026-11-20T05:07Z",
+  "change_type": "Fix",
+  "summary": "With Tactical RMM turned off, an asset's status now follows its tray agent (online or offline) instead of going overdue, and asset pages no longer show Tactical RMM or Syncro provenance or IDs when those modules are disabled.",
+  "content_hash": "b0dc9a6f1950ec1ae60c5285ee879e004700b0c96658a744a647879c9d5f5060"
+}

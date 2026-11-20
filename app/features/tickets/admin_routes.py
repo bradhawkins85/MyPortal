@@ -631,6 +631,9 @@ async def admin_ticket_requester_assets(ticket_id: int, request: Request):
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     assets = await assets_repo.list_assets_for_ticket_requester(ticket_id)
+    from app.services import asset_presence
+
+    await asset_presence.apply_tray_presence(assets, fields=("status",))
     return JSONResponse([
         {
             "id": asset.get("id"), "name": asset.get("name"),
