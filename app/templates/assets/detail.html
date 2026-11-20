@@ -403,6 +403,8 @@
       <p class="text-muted">Event log collection is off. Set the <code>EVENT_LOG_DB_*</code> settings in the .env file to turn it on.</p>
       {% elif not elog.database.connected %}
       <p class="text-muted">MyPortal cannot reach the event log database, so no entries are shown.</p>
+      {% elif elog.entries_unavailable %}
+      <p class="text-muted" role="status">This device's event log entries took too long to load, so they are not shown here. <a href="/rmm/event-logs?asset_id={{ asset.id }}">Open in Event logs</a> to try again.</p>
       {% elif elog.entries %}
       <div class="table-wrapper"><table class="table">
         <caption class="visually-hidden">Latest event log entries from this device</caption>

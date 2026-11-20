@@ -104,6 +104,8 @@ class SecondaryDatabase:
         self._sqlite_conn: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
         self._last_attempt = 0.0
+        self._mariadb = False
+        self._indexes_seen: dict[tuple[str, str], tuple[bool, float]] = {}
         self.last_error: str | None = None
 
     @property
@@ -151,6 +153,9 @@ class SecondaryDatabase:
                     self._pool = await self._create_mysql_pool()
                     async with self._pool.acquire() as conn:
                         async with conn.cursor() as cursor:
+                            await cursor.execute("SELECT VERSION()")
+                            version = await cursor.fetchone()
+                            self._mariadb = "mariadb" in str((version or [""])[0]).lower()
                             await cursor.execute(f"SET SESSION lock_wait_timeout = {LOCK_WAIT_SECONDS}")
                             try:
                                 await self._create_missing_tables(cursor)
@@ -424,11 +429,42 @@ class SecondaryDatabase:
             await cursor.executemany(sql, seq)
             return int(cursor.rowcount or 0)
 
-    async def fetch_all(self, sql: str, params: tuple | list = ()) -> list[dict[str, Any]]:
+    async def has_index(self, table: str, name: str) -> bool:
+        """Whether ``table`` has the index ``name``. A missing index is
+        looked up again at most once a minute, as it may still be building."""
+
+        if self.is_sqlite:
+            return True  # SQLite tables are created with every index
+        key = (table, name)
+        seen = self._indexes_seen.get(key)
+        if seen and (seen[0] or time.monotonic() - seen[1] < RETRY_SECONDS):
+            return seen[0]
+        rows = await self.fetch_all(
+            "SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() "
+            "AND TABLE_NAME = %s AND INDEX_NAME = %s LIMIT 1",
+            (table, name),
+        )
+        self._indexes_seen[key] = (bool(rows), time.monotonic())
+        return bool(rows)
+
+    def _time_limited(self, sql: str, seconds: float) -> str:
+        """``sql`` (a SELECT) stopped by the server after ``seconds``."""
+
+        if self._mariadb:
+            return f"SET STATEMENT max_statement_time = {float(seconds):g} FOR {sql}"
+        return re.sub(r"^\s*SELECT\b", f"SELECT /*+ MAX_EXECUTION_TIME({int(seconds * 1000)}) */", sql, count=1)
+
+    async def fetch_all(self, sql: str, params: tuple | list = (), *,
+                        timeout_seconds: float | None = None) -> list[dict[str, Any]]:
+        """Rows of ``sql``. ``timeout_seconds`` makes the server abandon a
+        slow SELECT (MySQL/MariaDB only) instead of holding up the caller."""
+
         async with self._cursor() as cursor:
             if cursor is None:
                 result = await self._sqlite_conn.execute(self._sql(sql), self._sqlite_params(params))  # type: ignore[union-attr]
                 return [dict(row) for row in await result.fetchall()]
+            if timeout_seconds:
+                sql = self._time_limited(sql, timeout_seconds)
             await cursor.execute(sql, params)
             return [dict(row) for row in await cursor.fetchall()]
 

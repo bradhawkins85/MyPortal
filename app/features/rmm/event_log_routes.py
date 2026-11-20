@@ -49,6 +49,8 @@ from .routes import _assets_routes, _context, _serialise, get_current_rmm_agent
 router = APIRouter(tags=["RMM event logs"])
 
 PAGE_PATH = "/rmm/event-logs"
+# The asset page gives up on its event log read after this, so it still loads.
+ASSET_PAGE_TIMEOUT_SECONDS = 5.0
 LEVEL_FILTERS = (("", "Any level"), ("3", "Warning or worse"), ("2", "Error or worse"), ("1", "Critical"))
 
 
@@ -59,7 +61,8 @@ def _entry(row: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _filtered_entries(company_id: int, *, asset_id, log, level, event_id, q, limit, source=None,
-                            date_from: date | None = None, date_to: date | None = None) -> list[dict[str, Any]]:
+                            date_from: date | None = None, date_to: date | None = None,
+                            timeout_seconds: float | None = None) -> list[dict[str, Any]]:
     if not await event_logs.enabled():
         return []
     rows = await event_log_repo.list_entries(
@@ -74,6 +77,7 @@ async def _filtered_entries(company_id: int, *, asset_id, log, level, event_id, 
         since=datetime.combine(date_from, datetime.min.time()) if date_from else None,
         until=datetime.combine(date_to + timedelta(days=1), datetime.min.time()) if date_to else None,
         limit=limit,
+        timeout_seconds=timeout_seconds,
     )
     return [_entry(row) for row in rows]
 
@@ -161,11 +165,15 @@ async def asset_event_log_context(company_id: int, asset_id: int, *, can_edit: b
     database = event_log_db.status()
     filters = filters or asset_filters({})
     filtered = any(value not in (None, "") for value in filters.values())
+    unavailable = False
     try:
-        entries = await _filtered_entries(company_id, asset_id=asset_id, limit=100 if filtered else 25, **filters)
-    except Exception:  # the asset page must not fail with the event log database
-        log_warning("Could not read event log entries for the asset page", asset_id=asset_id)
+        # A slow read must not hold the whole asset page past the gateway timeout.
+        entries = await _filtered_entries(company_id, asset_id=asset_id, limit=100 if filtered else 25,
+                                          timeout_seconds=ASSET_PAGE_TIMEOUT_SECONDS, **filters)
+    except Exception as exc:  # the asset page must not fail with the event log database
+        log_warning("Could not read event log entries for the asset page", asset_id=asset_id, error=str(exc)[:300])
         entries = []
+        unavailable = True
     rules = [
         {**rule_summary(rule), "can_edit": can_edit and event_log_rules.can_edit(
             rule, company_id=company_id, is_super_admin=is_super_admin)}
@@ -178,6 +186,7 @@ async def asset_event_log_context(company_id: int, asset_id: int, *, can_edit: b
     return {
         "database": {**database, "error": None},
         "entries": entries,
+        "entries_unavailable": unavailable,
         "default_logs": event_logs.default_logs(),
         "company_logs": company_logs,
         "extra_logs": extra_logs,

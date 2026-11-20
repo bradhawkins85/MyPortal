@@ -25,6 +25,10 @@ _ENTRY_COLUMNS = (
 # Entries read with their message: from the messages table, or the entry's own
 # text for entries stored before de-duplication.
 _FROM_ENTRIES = f"{ENTRIES_TABLE} e LEFT JOIN {MESSAGES_TABLE} m ON m.id = e.message_id"
+ASSET_TIME_INDEX = "idx_rmm_event_log_company_asset_time"
+_FROM_ASSET_ENTRIES = (
+    f"{ENTRIES_TABLE} e FORCE INDEX ({ASSET_TIME_INDEX}) LEFT JOIN {MESSAGES_TABLE} m ON m.id = e.message_id"
+)
 MESSAGE_SQL = "COALESCE(m.message, e.message)"
 # A message's last_seen_at is refreshed at most this often, so a busy message
 # is not rewritten on every batch.
@@ -283,6 +287,7 @@ async def list_entries(
     since: datetime | None = None,
     until: datetime | None = None,
     limit: int = 200,
+    timeout_seconds: float | None = None,
 ) -> list[dict[str, Any]]:
     """Newest entries first for a company, with optional filters.
 
@@ -292,6 +297,9 @@ async def list_entries(
     ``max_level`` keeps entries at that severity or worse (1 critical, 2 error,
     3 warning, 4 information); 0 is stored for "log always" entries and counts
     as information.
+
+    ``timeout_seconds`` makes the server give up on a slow read (see
+    :meth:`SecondaryDatabase.fetch_all`).
 
     An entry stands for ``repeat_count`` occurrences of the same event, from
     ``time_created`` to ``last_time_created`` (None for a single one).
@@ -327,13 +335,20 @@ async def list_entries(
         clauses.append("e.time_created < %s")
         params.append(until)
     params.append(int(limit))
+    source_sql = _FROM_ENTRIES
+    if asset_id is not None and not event_log_db.is_sqlite and await event_log_db.has_index(
+            ENTRIES_TABLE, ASSET_TIME_INDEX):
+        # Left to itself MariaDB walks the newest-first time index, which for
+        # a device that stopped reporting means the company's whole history.
+        source_sql = _FROM_ASSET_ENTRIES
     # The clauses are fixed strings chosen above; every value is a bound parameter.
     return await event_log_db.fetch_all(  # nosec B608
         "SELECT e.id, e.company_id, e.asset_id, e.agent_id, e.log_name, e.record_id, e.event_id, e.level, "
-        f"e.provider, e.computer, {MESSAGE_SQL} AS message, e.repeat_count, e.time_created, "
-        f"e.last_time_created, e.received_at FROM {_FROM_ENTRIES} WHERE {' AND '.join(clauses)} "  # nosec B608
+        "e.provider, e.computer, " + MESSAGE_SQL + " AS message, e.repeat_count, e.time_created, "
+        "e.last_time_created, e.received_at FROM " + source_sql + " WHERE " + " AND ".join(clauses) + " "
         "ORDER BY e.time_created DESC, e.id DESC LIMIT %s",
         tuple(params),
+        timeout_seconds=timeout_seconds,
     )
 
 
