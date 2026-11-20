@@ -499,6 +499,9 @@ release installers (MSI, pkg, DMG) are built exactly as before.
 * **RMM tools** can use the one-liners shown on the admin page:
   `irm '<link>/install.ps1' | iex` on Windows, or
   `curl -fsSL '<link>/install.sh' | sudo bash` on macOS and Linux.
+  If the tray is already installed, these scripts make no changes and exit
+  successfully with "MyPortal Tray is already installed", so rerunning a
+  deployment policy is safe.
 
 Each link owns its own company install token, and both expire together after
 the period chosen when the link is created: 1, 7, 30 or 90 days, 1 year, or

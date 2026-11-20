@@ -8,6 +8,11 @@
 #
 set -euo pipefail
 
+if [ -e /Library/LaunchDaemons/io.myportal.tray.service.plist ]; then
+  echo "MyPortal Tray is already installed. Nothing to do."
+  exit 0
+fi
+
 : "${MYPORTAL_URL:?MYPORTAL_URL must be set}"
 : "${ENROL_TOKEN:?ENROL_TOKEN must be set}"
 : "${AUTO_UPDATE:=true}"

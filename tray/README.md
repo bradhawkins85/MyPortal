@@ -364,6 +364,9 @@ the enrolment, `--with-rmm` also removes the RMM agent).
 .\installer\windows\install.ps1 -PortalURL 'https://portal.example.com' -EnrolToken 'TOKEN'
 ```
 
+If the tray is already installed the script exits successfully without
+reinstalling.
+
 To exclude the installed Tray binaries and runtime data from Microsoft Defender,
 run the RMM exclusion script as LocalSystem or an administrator. The script is
 idempotent and defaults to `%ProgramFiles%\MyPortalTray` and
@@ -416,6 +419,9 @@ The outcome of each setting is shown in the portal's **Policy** column.
 ```bash
 MYPORTAL_URL='https://portal.example.com' ENROL_TOKEN='TOKEN' bash installer/macos/install.sh
 ```
+
+If the tray is already installed the script exits successfully without
+reinstalling.
 
 ### macOS — Tactical RMM
 
