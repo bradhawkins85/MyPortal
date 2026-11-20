@@ -153,6 +153,10 @@
             <input class="form-input" id="product-voice-monitor-calls-per-day" name="voice_monitor_calls_per_day" type="number" min="1" max="24" step="1" />
             <p class="form-helper">Required for Voice Monitor plans. This controls the monitored number's daily check frequency.</p>
           </div>
+          <div class="form-field" data-field-type="subscription">
+            <label class="form-checkbox" for="product-subscription-per-user"><input type="checkbox" id="product-subscription-per-user" name="subscription_per_user" value="true" aria-describedby="product-subscription-per-user-help" /> Per user</label>
+            <p class="form-helper" id="product-subscription-per-user-help">Prices show as /user/month or /user/year in the store.</p>
+          </div>
 
           <div class="form-actions">
             <button type="submit" class="button">Add product</button>

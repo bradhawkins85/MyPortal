@@ -1,4 +1,4 @@
-"""New subscriptions default to the "Subscription" store category."""
+"""Creating subscriptions: default store category and the Per user tick."""
 from __future__ import annotations
 
 from typing import Any
@@ -37,7 +37,12 @@ def create_product(monkeypatch):
     return mock
 
 
-async def _create(*, category_id: str | None = "", subscription_category_id: str | None = "5"):
+async def _create(
+    *,
+    category_id: str | None = "",
+    subscription_category_id: str | None = "5",
+    subscription_per_user: bool = False,
+):
     request = Request(
         {"type": "http", "method": "POST", "path": "/shop/admin/product", "headers": []},
         _receive,
@@ -66,6 +71,7 @@ async def _create(*, category_id: str | None = "", subscription_category_id: str
         price_annual_monthly_payment=None,
         price_annual_annual_payment=None,
         voice_monitor_calls_per_day=None,
+        subscription_per_user=subscription_per_user,
     )
 
 
@@ -137,3 +143,21 @@ async def test_regular_product_without_category_is_unchanged(monkeypatch, create
 
     assert create_product.await_args.kwargs["category_id"] is None
     lookup.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_per_user_tick_is_saved_for_subscriptions(monkeypatch, create_product):
+    monkeypatch.setattr(
+        shop_repo, "get_category_by_name", AsyncMock(return_value={"id": 77, "name": "Subscription"})
+    )
+
+    await _create(subscription_per_user=True)
+
+    assert create_product.await_args.kwargs["subscription_per_user"] is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_per_user_tick_is_ignored_for_regular_products(monkeypatch, create_product):
+    await _create(subscription_category_id=None, subscription_per_user=True)
+
+    assert create_product.await_args.kwargs["subscription_per_user"] is False

@@ -406,6 +406,7 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
         "    p.price_monthly_commitment,",
         "    p.price_annual_monthly_payment,",
         "    p.price_annual_annual_payment,",
+        "    p.subscription_per_user,",
         "    c.name AS category_name,",
         "    sf.duplicate_sku_import,",
         "    sf.duplicate_sku_count",
@@ -1437,6 +1438,7 @@ async def create_product(
     price_annual_annual_payment: Decimal | None = None,
     voice_monitor_calls_per_day: int | None = None,
     product_link: str | None = None,
+    subscription_per_user: bool = False,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -1446,8 +1448,8 @@ async def create_product(
                     (name, sku, vendor_sku, microsoft_sku, description, invoice_description, image_url, price, vip_price, stock,
                      category_id, subscription_category_id, commitment_type, payment_frequency,
                      price_monthly_commitment, price_annual_monthly_payment, price_annual_annual_payment,
-                     product_link, voice_monitor_calls_per_day)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     product_link, voice_monitor_calls_per_day, subscription_per_user)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     name,
@@ -1469,6 +1471,7 @@ async def create_product(
                     price_annual_annual_payment,
                     product_link,
                     voice_monitor_calls_per_day,
+                    1 if subscription_per_user else 0,
                 ),
             )
             product_id = int(cursor.lastrowid)
@@ -1879,6 +1882,7 @@ async def update_product(
     price_annual_monthly_payment: Decimal | None = None,
     price_annual_annual_payment: Decimal | None = None,
     voice_monitor_calls_per_day: int | None = None,
+    subscription_per_user: bool = False,
     scheduled_price: Decimal | None = None,
     scheduled_vip_price: Decimal | None = None,
     scheduled_buy_price: Decimal | None = None,
@@ -1922,6 +1926,7 @@ async def update_product(
                     price_annual_monthly_payment = %s,
                     price_annual_annual_payment = %s,
                     voice_monitor_calls_per_day = %s,
+                    subscription_per_user = %s,
                     scheduled_price = %s,
                     scheduled_vip_price = %s,
                     scheduled_buy_price = %s,
@@ -1954,6 +1959,7 @@ async def update_product(
                     price_annual_monthly_payment,
                     price_annual_annual_payment,
                     voice_monitor_calls_per_day,
+                    1 if subscription_per_user else 0,
                     scheduled_price,
                     scheduled_vip_price,
                     scheduled_buy_price,
@@ -2667,6 +2673,9 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised["voice_monitor_calls_per_day"] = _coerce_optional_int(
         row.get("voice_monitor_calls_per_day")
     )
+    normalised["subscription_per_user"] = bool(
+        _coerce_int(row.get("subscription_per_user"), default=0)
+    )
     normalised["price"] = _coerce_decimal(row.get("price"), default=0.0)
     normalised["vip_price"] = _coerce_optional_decimal(row.get("vip_price"))
     normalised["price_monthly_commitment"] = _coerce_optional_decimal(
@@ -2731,6 +2740,9 @@ def _normalise_product_summary(row: dict[str, Any]) -> dict[str, Any]:
         ),
         "price_annual_annual_payment": _coerce_optional_decimal(
             row.get("price_annual_annual_payment")
+        ),
+        "subscription_per_user": bool(
+            _coerce_int(row.get("subscription_per_user"), default=0)
         ),
         "duplicate_sku_import": bool(
             _coerce_int(row.get("duplicate_sku_import"), default=0)

@@ -11,11 +11,12 @@ def get_subscription_price_options(product: Mapping[str, Any]) -> list[dict[str,
     """Return the positive, customer-facing prices configured for a subscription."""
     options: list[dict[str, Any]] = []
     fields = (
-        ("price_monthly_commitment", "Monthly commitment · monthly payment", "/month"),
-        ("price_annual_monthly_payment", "Annual commitment · monthly payment", "/month"),
-        ("price_annual_annual_payment", "Annual commitment · annual payment", "/year"),
+        ("price_monthly_commitment", "Monthly commitment · monthly payment", "month"),
+        ("price_annual_monthly_payment", "Annual commitment · monthly payment", "month"),
+        ("price_annual_annual_payment", "Annual commitment · annual payment", "year"),
     )
-    for field, label, suffix in fields:
+    unit = "/user" if product.get("subscription_per_user") else ""
+    for field, label, period in fields:
         raw_price = product.get(field)
         if raw_price is None:
             continue
@@ -24,7 +25,9 @@ def get_subscription_price_options(product: Mapping[str, Any]) -> list[dict[str,
         except (InvalidOperation, TypeError, ValueError):
             continue
         if price > 0:
-            options.append({"label": label, "price": price, "suffix": suffix})
+            options.append(
+                {"label": label, "price": price, "period": period, "suffix": f"{unit}/{period}"}
+            )
     return options
 
 
@@ -90,7 +93,7 @@ def get_product_price(product: Mapping[str, Any], *, is_vip: bool = False) -> De
     # charge amount (in particular, an annual price must not be divided by 12).
     if product.get("subscription_category_id") is not None:
         options = [
-            option["price"] / (12 if option["suffix"] == "/year" else 1)
+            option["price"] / (12 if option["period"] == "year" else 1)
             for option in get_subscription_price_options(product)
         ]
         if options:

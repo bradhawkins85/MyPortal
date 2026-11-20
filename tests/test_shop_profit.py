@@ -16,8 +16,38 @@ def test_subscription_price_options_ignore_product_price_and_zero_options():
     assert options == [{
         "label": "Monthly commitment · monthly payment",
         "price": Decimal("19.95"),
+        "period": "month",
         "suffix": "/month",
     }]
+
+
+def test_per_user_subscription_price_options_show_per_user_suffix():
+    options = get_subscription_price_options({
+        "subscription_category_id": 3,
+        "subscription_per_user": True,
+        "price_monthly_commitment": "10.00",
+        "price_annual_monthly_payment": "9.00",
+        "price_annual_annual_payment": "100.00",
+    })
+
+    assert [option["suffix"] for option in options] == [
+        "/user/month",
+        "/user/month",
+        "/user/year",
+    ]
+
+
+def test_per_user_annual_price_still_counts_as_yearly():
+    from app.services.shop import get_product_price
+
+    price = get_product_price({
+        "subscription_category_id": 3,
+        "subscription_per_user": True,
+        "price_monthly_commitment": "10.00",
+        "price_annual_annual_payment": "96.00",
+    })
+
+    assert price == Decimal("8.00")
 
 
 # ---------------------------------------------------------------------------

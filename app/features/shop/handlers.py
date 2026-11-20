@@ -2324,6 +2324,7 @@ async def admin_create_shop_product(
     price_annual_monthly_payment: str | None = Form(default=None),
     price_annual_annual_payment: str | None = Form(default=None),
     voice_monitor_calls_per_day: str | None = Form(default=None),
+    subscription_per_user: bool = Form(default=False),
 ):
     from app.repositories import shop as shop_repo
     from app.repositories import subscription_categories as subscription_categories_repo
@@ -2516,6 +2517,9 @@ async def admin_create_shop_product(
             price_annual_monthly_payment=price_annual_monthly,
             price_annual_annual_payment=price_annual_annual,
             voice_monitor_calls_per_day=calls_per_day_value,
+            subscription_per_user=(
+                subscription_per_user is True and subscription_category_value is not None
+            ),
         )
         if feature_payload:
             await shop_repo.replace_product_features(int(product["id"]), feature_payload)
@@ -2580,6 +2584,7 @@ async def admin_update_shop_product(
     price_annual_monthly_payment: str | None = Form(default=None),
     price_annual_annual_payment: str | None = Form(default=None),
     voice_monitor_calls_per_day: str | None = Form(default=None),
+    subscription_per_user: bool = Form(default=False),
     scheduled_price: str | None = Form(default=None),
     scheduled_vip_price: str | None = Form(default=None),
     scheduled_buy_price: str | None = Form(default=None),
@@ -2863,6 +2868,9 @@ async def admin_update_shop_product(
             price_annual_monthly_payment=price_annual_monthly,
             price_annual_annual_payment=price_annual_annual,
             voice_monitor_calls_per_day=calls_per_day_value,
+            subscription_per_user=(
+                subscription_per_user is True and subscription_category_value is not None
+            ),
             scheduled_price=scheduled_price_decimal,
             scheduled_vip_price=scheduled_vip_price_decimal,
             scheduled_buy_price=scheduled_buy_price_decimal,
@@ -2996,6 +3004,7 @@ async def admin_duplicate_shop_product(
     price_annual_monthly_payment: str | None = Form(default=None),
     price_annual_annual_payment: str | None = Form(default=None),
     voice_monitor_calls_per_day: str | None = Form(default=None),
+    subscription_per_user: bool = Form(default=False),
     scheduled_price: str | None = Form(default=None),
     scheduled_vip_price: str | None = Form(default=None),
     scheduled_buy_price: str | None = Form(default=None),
@@ -3106,6 +3115,7 @@ async def admin_duplicate_shop_product(
             price_annual_monthly_payment=price_annual_monthly_payment,
             price_annual_annual_payment=price_annual_annual_payment,
             voice_monitor_calls_per_day=voice_monitor_calls_per_day,
+            subscription_per_user=subscription_per_user,
             scheduled_price=scheduled_price,
             scheduled_vip_price=scheduled_vip_price,
             scheduled_buy_price=scheduled_buy_price,
