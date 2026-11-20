@@ -36,6 +36,34 @@
 {% endblock %}
 
 {% block content %}
+{% set category_nav = subscription_category_nav | default([]) %}
+{% set active_category = active_subscription_category | default(none) %}
+<div class="settings-workspace subscriptions-workspace ce-workspace" data-ae-workspace data-ae-link-nav>
+  <div class="ce-layout">
+    <nav class="ce-nav" aria-label="Subscription categories" data-ae-nav>
+      <div class="ce-nav__search">
+        <label class="visually-hidden" for="subscription-category-search">Find a subscription category</label>
+        <input type="search" id="subscription-category-search" class="form-input" placeholder="Find a category…" autocomplete="off" data-ae-search>
+      </div>
+      <div class="ce-nav__group" data-ae-nav-group>
+        <p class="ce-nav__group-title" id="subscription-nav-overview">Overview</p>
+        <ul class="ce-nav__list" aria-labelledby="subscription-nav-overview">
+          <li><a class="ce-nav__link" href="/subscriptions"{% if not active_category %} aria-current="page"{% endif %}><span class="ce-nav__label">All subscriptions</span><span class="ce-nav__count">{{ total_subscription_count | default(subscriptions | length) }}</span></a></li>
+        </ul>
+      </div>
+      {% if category_nav %}
+      <div class="ce-nav__group" data-ae-nav-group>
+        <p class="ce-nav__group-title" id="subscription-nav-categories">Categories</p>
+        <ul class="ce-nav__list" aria-labelledby="subscription-nav-categories">
+          {% for item in category_nav %}
+          <li><a class="ce-nav__link" href="/subscriptions?category={{ item.key | urlencode }}"{% if active_category and active_category.key == item.key %} aria-current="page"{% endif %}><span class="ce-nav__label">{{ item.name }}</span><span class="ce-nav__count">{{ item.count }}</span></a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+      <p class="ce-nav__empty" data-ae-search-empty hidden>No categories match your search.</p>
+    </nav>
+    <div class="ce-panels">
 <section aria-labelledby="renewal-forecast-heading">
   <h2 id="renewal-forecast-heading" class="visually-hidden">Renewal forecast</h2>
   {{ counter_strip([
@@ -65,7 +93,7 @@
 <section class="panel">
   <header class="panel__header">
     <div class="panel__meta">
-      <span class="text-muted">Active subscriptions</span>
+      <span class="text-muted">{% if active_category %}{{ active_category.name }} subscriptions{% else %}All subscriptions{% endif %}</span>
     </div>
   </header>
   <div class="panel__body">
@@ -145,7 +173,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="{% if can_request_changes %}10{% else %}9{% endif %}" class="text-center">No active subscriptions found.</td>
+            <td colspan="{% if can_request_changes %}10{% else %}9{% endif %}" class="text-center">{% if active_category %}No subscriptions in {{ active_category.name }}.{% else %}No active subscriptions found.{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -153,6 +181,10 @@
     </div>
   </div>
 </section>
+    </div>
+  </div>
+</div>
+<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script>
 
 <dialog id="change-dialog" class="dialog">
   <form method="dialog" class="dialog__container" id="change-form">

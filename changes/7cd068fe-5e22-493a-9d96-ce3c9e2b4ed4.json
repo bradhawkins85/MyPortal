@@ -1,0 +1,7 @@
+{
+  "guid": "7cd068fe-5e22-493a-9d96-ce3c9e2b4ed4",
+  "occurred_at": "2026-11-20T06:32Z",
+  "change_type": "Feature",
+  "summary": "The Subscriptions page is now split into subpages for each subscription category set on the product, alongside an All subscriptions view and an Uncategorised subpage.",
+  "content_hash": "1e7de52b66ff24b344a0235b74cf405878e0bb90244f96657fb2086ec9d93651"
+}
