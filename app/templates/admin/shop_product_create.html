@@ -133,6 +133,16 @@
             </select>
             <p class="form-helper">Products in the same subscription category can co-term together.</p>
           </div>
+          <div class="form-field" data-field-type="standard-price">
+            <label class="form-label" for="product-display-subscription-category">Show with subscriptions in <span class="field-optional">(optional)</span></label>
+            <select class="form-input" id="product-display-subscription-category" name="display_subscription_category_id" aria-describedby="product-display-subscription-category-help">
+              <option value="">Don't show with subscriptions</option>
+              {% for sub_category in subscription_categories %}
+                <option value="{{ sub_category.id }}">{{ sub_category.name }}</option>
+              {% endfor %}
+            </select>
+            <p class="form-helper" id="product-display-subscription-category-help">For one-time or on-demand purchases, such as capacity packs. The item appears alongside that category's subscriptions in the shop but is still bought once and never renews.</p>
+          </div>
           <div class="form-field" data-field-type="subscription">
             <label class="form-label" for="product-price-monthly-commitment">Price - Monthly commitment</label>
             <input class="form-input" id="product-price-monthly-commitment" name="price_monthly_commitment" type="number" step="0.01" />

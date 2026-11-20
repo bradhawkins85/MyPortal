@@ -19656,6 +19656,7 @@ a.shop-product-card {
 }
 
 .shop-product-card__sku,
+.shop-product-card__purchase-type,
 .shop-product-card .package-meta {
   margin: 0;
 }

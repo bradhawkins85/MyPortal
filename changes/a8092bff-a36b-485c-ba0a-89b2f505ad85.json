@@ -1,0 +1,7 @@
+{
+  "guid": "a8092bff-a36b-485c-ba0a-89b2f505ad85",
+  "occurred_at": "2026-11-20T06:50Z",
+  "change_type": "Feature",
+  "summary": "One-time purchase products can now be shown with a subscription category's subscriptions in the shop, so on-demand items such as capacity packs appear next to the vendor's plans while still being bought once.",
+  "content_hash": "2e8f14e05eee128c551093da804c048f55fae40e44750a82c9ce75292201c8fd"
+}

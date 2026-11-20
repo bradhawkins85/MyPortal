@@ -227,6 +227,9 @@
             <div class="shop-product-card__body">
               <h3 class="shop-product-card__title" title="{{ product.name }}" data-shop-safe-title data-min-visible-chars="{{ shop_product_name_min_visible_chars }}">{{ product.name }}</h3>
               <p class="shop-product-card__sku">{{ product.sku }}</p>
+              {% if show_subscriptions and not is_subscription and not product.is_package %}
+                <p class="shop-product-card__purchase-type"><span class="tag tag--secondary">One-time purchase</span></p>
+              {% endif %}
               {% if product.is_package %}
                 {% set item_count = product.get('items', []) | sum(attribute='quantity') %}
                 {% if item_count == 0 %}{% set item_count = product.product_count %}{% endif %}

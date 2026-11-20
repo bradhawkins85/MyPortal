@@ -64,6 +64,37 @@ async def _default_subscription_shop_category_id() -> int:
     return await shop_repo.create_category(DEFAULT_SUBSCRIPTION_SHOP_CATEGORY)
 
 
+async def _resolve_display_subscription_category(
+    raw_value: str | None,
+    subscription_category_value: int | None,
+) -> int | None:
+    """Validate the display-only subscription category of a one-time product.
+
+    A subscription is grouped by its own subscription category, so the
+    display category only applies when ``subscription_category_value`` is unset.
+    """
+    from app.repositories import subscription_categories as subscription_categories_repo
+
+    if subscription_category_value is not None or not isinstance(raw_value, str):
+        return None
+    cleaned = raw_value.strip()
+    if not cleaned:
+        return None
+    try:
+        category_value = int(cleaned)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid subscription category selection",
+        )
+    if not await subscription_categories_repo.get_category(category_value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected subscription category does not exist",
+        )
+    return category_value
+
+
 def _validate_voice_monitor_calls_per_day(
     subscription_category_name: str | None, raw_value: str | None
 ) -> int | None:
@@ -266,6 +297,22 @@ def _normalise_related_product_inputs(raw: Any) -> list[int | str]:
         return list(raw)
 
     return [raw]
+
+
+def _subscription_group_id(product: Mapping[str, Any]) -> int | None:
+    """Return the subscription category a product is listed under.
+
+    Subscriptions use their own category; one-time products can be listed
+    alongside them through ``display_subscription_category_id``.
+    """
+    for key in ("subscription_category_id", "display_subscription_category_id"):
+        value = product.get(key)
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+    return None
 
 
 def _strip_internal_shop_product_fields(products: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -500,8 +547,8 @@ async def shop_page(
             if show_subscriptions:
                 products = [
                     product for product in products
-                    if product.get("subscription_category_id") is not None
-                    and (subscription_type is None or int(product["subscription_category_id"]) == subscription_type)
+                    if (group_id := _subscription_group_id(product)) is not None
+                    and (subscription_type is None or group_id == subscription_type)
                 ]
 
         total_count = len(products)
@@ -1516,7 +1563,7 @@ async def admin_shop_page(
         }
         products = [product for product in products if product.get("category_id") in category_ids]
     if current_category == "subscriptions":
-        products = [product for product in products if product.get("subscription_category_id") is not None]
+        products = [product for product in products if _subscription_group_id(product) is not None]
     elif current_category == "featured":
         featured_ids = await shop_repo.list_featured_product_ids()
         products = [product for product in products if int(product.get("id") or 0) in featured_ids]
@@ -2325,6 +2372,7 @@ async def admin_create_shop_product(
     price_annual_annual_payment: str | None = Form(default=None),
     voice_monitor_calls_per_day: str | None = Form(default=None),
     subscription_per_user: bool = Form(default=False),
+    display_subscription_category_id: str | None = Form(default=None),
 ):
     from app.repositories import shop as shop_repo
     from app.repositories import subscription_categories as subscription_categories_repo
@@ -2426,6 +2474,9 @@ async def admin_create_shop_product(
     calls_per_day_value = _validate_voice_monitor_calls_per_day(
         subscription_category_name, voice_monitor_calls_per_day
     )
+    display_subscription_category_value = await _resolve_display_subscription_category(
+        display_subscription_category_id, subscription_category_value
+    )
     microsoft_sku_value = (
         microsoft_sku.strip().upper()
         if subscription_category_value and microsoft_sku and microsoft_sku.strip()
@@ -2520,6 +2571,7 @@ async def admin_create_shop_product(
             subscription_per_user=(
                 subscription_per_user is True and subscription_category_value is not None
             ),
+            display_subscription_category_id=display_subscription_category_value,
         )
         if feature_payload:
             await shop_repo.replace_product_features(int(product["id"]), feature_payload)
@@ -2585,6 +2637,7 @@ async def admin_update_shop_product(
     price_annual_annual_payment: str | None = Form(default=None),
     voice_monitor_calls_per_day: str | None = Form(default=None),
     subscription_per_user: bool = Form(default=False),
+    display_subscription_category_id: str | None = Form(default=None),
     scheduled_price: str | None = Form(default=None),
     scheduled_vip_price: str | None = Form(default=None),
     scheduled_buy_price: str | None = Form(default=None),
@@ -2713,6 +2766,9 @@ async def admin_update_shop_product(
 
     calls_per_day_value = _validate_voice_monitor_calls_per_day(
         subscription_category_name, voice_monitor_calls_per_day
+    )
+    display_subscription_category_value = await _resolve_display_subscription_category(
+        display_subscription_category_id, subscription_category_value
     )
     microsoft_sku_value = (
         microsoft_sku.strip().upper()
@@ -2876,6 +2932,12 @@ async def admin_update_shop_product(
             scheduled_buy_price=scheduled_buy_price_decimal,
             price_change_date=price_change_date_value,
             freight=freight_payload,
+            # Forms that do not show the field leave the stored value alone.
+            display_subscription_category_id=(
+                display_subscription_category_value
+                if isinstance(display_subscription_category_id, str)
+                else shop_repo.UNSET
+            ),
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:
@@ -3005,6 +3067,7 @@ async def admin_duplicate_shop_product(
     price_annual_annual_payment: str | None = Form(default=None),
     voice_monitor_calls_per_day: str | None = Form(default=None),
     subscription_per_user: bool = Form(default=False),
+    display_subscription_category_id: str | None = Form(default=None),
     scheduled_price: str | None = Form(default=None),
     scheduled_vip_price: str | None = Form(default=None),
     scheduled_buy_price: str | None = Form(default=None),
@@ -3116,6 +3179,7 @@ async def admin_duplicate_shop_product(
             price_annual_annual_payment=price_annual_annual_payment,
             voice_monitor_calls_per_day=voice_monitor_calls_per_day,
             subscription_per_user=subscription_per_user,
+            display_subscription_category_id=display_subscription_category_id,
             scheduled_price=scheduled_price,
             scheduled_vip_price=scheduled_vip_price,
             scheduled_buy_price=scheduled_buy_price,

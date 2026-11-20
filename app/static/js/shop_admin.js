@@ -1309,6 +1309,10 @@
         if (categorySelect) {
           categorySelect.value = product.category_id || '';
         }
+        const displaySubscriptionCategorySelect = editForm.querySelector('#edit-product-display-subscription-category');
+        if (displaySubscriptionCategorySelect) {
+          displaySubscriptionCategorySelect.value = product.display_subscription_category_id || '';
+        }
         const subscriptionCategorySelect = editForm.querySelector('#edit-product-subscription-category');
         if (subscriptionCategorySelect) {
           subscriptionCategorySelect.value = product.subscription_category_id || '';
