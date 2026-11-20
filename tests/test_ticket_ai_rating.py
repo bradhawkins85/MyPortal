@@ -26,6 +26,7 @@ def recorded(monkeypatch):
 
     monkeypatch.setattr(ai_text_outputs.quality_repo, "record_output", record_output)
     monkeypatch.setattr(ai_text_outputs.quality_repo, "user_rating", user_rating)
+    monkeypatch.setattr(ai_text_outputs.ai_consent, "is_ai_allowed_for_ticket", AsyncMock(return_value=True))
     return calls
 
 
@@ -83,3 +84,11 @@ def test_portal_ticket_page_shows_rating_for_ai_steps():
 def test_both_ticket_pages_pass_rating_ids():
     source = Path("app/main.py").read_text(encoding="utf-8")
     assert source.count('"ai_rating_ids": await ai_text_outputs.ticket_rating_ids(') == 2
+
+
+@pytest.mark.anyio
+async def test_opted_out_tickets_are_not_recorded(recorded, monkeypatch):
+    monkeypatch.setattr(ai_text_outputs.ai_consent, "is_ai_allowed_for_ticket", AsyncMock(return_value=False))
+    ids = await ai_text_outputs.ticket_rating_ids(SUMMARY, viewer_id=5)
+    assert ids["summary"] is None and ids["resolution_steps"] is None
+    assert recorded == []

@@ -146,3 +146,59 @@ async def test_prune_orphan_ticket_outputs(text_db):
     assert await repo.get_response(kept) is not None
     cursor = await text_db.execute("SELECT COUNT(*) FROM ai_output_feedback")
     assert (await cursor.fetchone())[0] == 0
+
+
+@pytest.mark.anyio
+async def test_examples_follow_the_tickets_current_company(text_db):
+    # Recorded while ticket 7 was in company 2; the ticket then moved to company 3.
+    await _vote(await _summary(7, 2, "Moved ticket summary"), 5, "up")
+    await text_db.execute("UPDATE tickets SET company_id = 3 WHERE id = 7")
+    await text_db.commit()
+    assert await _examples(2) == []
+    assert await _examples(3) == ["Moved ticket summary"]
+    rows = await repo.rated_examples("ticket_ai_summary", 3, exclude_subject_id=None, rating="up", limit=5,
+                                     since=LONG_AGO)
+    assert rows[0]["subject_id"] == "7"
+
+
+@pytest.mark.anyio
+async def test_prune_keeps_link_learning_votes(text_db):
+    link = await repo.record_output(feature="rag_relationships", user_id=None, company_id=2, subject_type="ticket",
+                                    subject_id=10, target_type="knowledge_base", target_id="vpn")
+    await _vote(link, 5, "down")
+    await text_db.execute("DELETE FROM tickets WHERE id = 10")
+    await text_db.commit()
+    assert await repo.prune_orphan_ticket_outputs() == 0
+    assert await repo.get_response(link) is not None
+
+
+@pytest.mark.anyio
+async def test_unrated_text_outputs_expire(text_db):
+    old_unrated = await _summary(7, 2, "Old unrated")
+    new_unrated = await _summary(8, 2, "New unrated")
+    rated = await _summary(10, 2, "Rated")
+    await _vote(rated, 5, "up")
+    link = await repo.record_output(feature="rag_relationships", user_id=None, company_id=2, subject_type="ticket",
+                                    subject_id=7, target_type="knowledge_base", target_id="vpn")
+    await text_db.execute("UPDATE ai_outputs SET created_at = '2020-01-01 00:00:00' WHERE id IN (?, ?, ?)",
+                          (old_unrated, rated, link))
+    await text_db.commit()
+    assert await repo.prune_unrated_text_outputs(datetime(2025, 1, 1, tzinfo=timezone.utc)) == 1
+    assert await repo.get_response(old_unrated) is None
+    for kept in (new_unrated, rated, link):
+        assert await repo.get_response(kept) is not None
+
+
+@pytest.mark.anyio
+async def test_text_of_old_rated_outputs_is_cleared_but_votes_kept(text_db):
+    old = await _summary(7, 2, "Old rated")
+    recent = await _summary(8, 2, "Recent rated")
+    await _vote(old, 5, "up")
+    await _vote(recent, 5, "up")
+    await text_db.execute("UPDATE ai_output_feedback SET updated_at = '2020-01-01 00:00:00' WHERE response_id = ?",
+                          (old,))
+    await text_db.commit()
+    assert await repo.clear_old_output_text(datetime(2025, 1, 1, tzinfo=timezone.utc)) == 1
+    assert (await repo.get_response(old))["output_text"] is None
+    assert (await repo.get_response(recent))["output_text"] == "Recent rated"
+    assert await repo.response_counts(old) == {"helpful": 1, "unhelpful": 0}

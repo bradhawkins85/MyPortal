@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.logging import logger
 from app.repositories import ai_quality as quality_repo
+from app.services import ai_consent
 from app.services.ai_prompt_security import UntrustedRecord
 
 POSITIVE_EXAMPLES = 2
@@ -26,8 +27,13 @@ EXAMPLE_WINDOW_DAYS = 180
 LESSON_WINDOW_DAYS = 90
 LESSON_MIN_VOTES = 3
 LESSON_MIN_SHARE = 0.2
-# Same shape as ai_prompt_security's citation check: copied citations from an
-# old output would make a new draft cite records it was never given.
+# Stored AI text nobody rated is deleted after this many days.
+UNRATED_OUTPUT_DAYS = 30
+# Fetch extra candidates so examples from opted-out requesters can be skipped.
+_CANDIDATE_FACTOR = 4
+# Same shape as ai_prompt_security's citation check. Citations are removed
+# outright: copied ones would make a new draft cite records it was never
+# given, and a placeholder would be copied into customer-facing drafts.
 _CITATION_RE = re.compile(r"\[[A-Za-z][A-Za-z0-9 _-]*:[^\]\n]+\]")
 EXAMPLE_ALLOWED_USE = (
     "Use only as a style and completeness reference; never copy facts, names, numbers or details from it"
@@ -78,7 +84,7 @@ def _example_record(feature: str, row: dict) -> UntrustedRecord:
     content = {"rating": "helpful" if helpful else "not helpful"}
     if not helpful:
         content["reason"] = row.get("reason")
-    text = _CITATION_RE.sub("[citation]", str(row.get("output_text") or ""))
+    text = re.sub(r"[ \t]{2,}", " ", _CITATION_RE.sub("", str(row.get("output_text") or ""))).strip()
     content["text"] = text[:EXAMPLE_MAX_CHARS]
     return UntrustedRecord(
         f"rated-example:{row['output_id']}",
@@ -102,8 +108,17 @@ async def context_for(feature: str, company_id: int | None, *, subject_id: str |
             exclude = str(subject_id) if subject_id is not None else None
             for rating, limit in (("up", POSITIVE_EXAMPLES), ("down", NEGATIVE_EXAMPLES)):
                 rows = await quality_repo.rated_examples(feature, int(company_id), exclude_subject_id=exclude,
-                                                         rating=rating, limit=limit, since=since)
-                records.extend(_example_record(feature, row) for row in rows)
+                                                         rating=rating, limit=limit * _CANDIDATE_FACTOR,
+                                                         since=since)
+                chosen = 0
+                for row in rows:
+                    if chosen >= limit:
+                        break
+                    # Never send a person's content to the model after they opted out of AI.
+                    if not await ai_consent.is_ai_allowed_for_ticket_id(row.get("subject_id")):
+                        continue
+                    records.append(_example_record(feature, row))
+                    chosen += 1
         return TextLearning(guidance=guidance, records=tuple(records))
     except Exception as exc:
         logger.warning("Could not load AI text learning for {}; using the plain prompt: {}", feature, exc)
@@ -117,6 +132,8 @@ async def refresh_lessons(*, now: datetime | None = None) -> int:
     for row in await quality_repo.downvote_reason_counts(now - timedelta(days=LESSON_WINDOW_DAYS)):
         votes, total = int(row["votes"]), int(row["feature_total"])
         share = votes / total if total else 0.0
+        if row["feature"] not in quality_repo.TEXT_LEARNING_FEATURES:
+            continue  # only features whose prompts use lessons
         if votes < LESSON_MIN_VOTES or share < LESSON_MIN_SHARE:
             continue
         if not REASON_GUIDANCE.get(str(row["reason"])):
@@ -125,4 +142,6 @@ async def refresh_lessons(*, now: datetime | None = None) -> int:
                         "share": round(share, 4), "active": True})
     await quality_repo.replace_lessons(lessons)
     await quality_repo.prune_orphan_ticket_outputs()
+    await quality_repo.prune_unrated_text_outputs(now - timedelta(days=UNRATED_OUTPUT_DAYS))
+    await quality_repo.clear_old_output_text(now - timedelta(days=EXAMPLE_WINDOW_DAYS))
     return len(lessons)

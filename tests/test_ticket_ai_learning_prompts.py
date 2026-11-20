@@ -74,14 +74,16 @@ async def test_example_citations_are_neutralised(monkeypatch):
     async def rated_examples(feature, company_id, *, exclude_subject_id, rating, limit, since):
         if rating != "up":
             return []
-        return [{"output_id": 1, "output_text": "Restart it as in [kb:12] and [tickets:7].", "rating": "up",
-                 "reason": None}]
+        return [{"output_id": 1, "subject_id": "8", "output_text": "Restart it as in [kb:12] and [tickets:7].",
+                 "rating": "up", "reason": None}]
 
     monkeypatch.setattr(ai_text_learning.quality_repo, "rated_examples", rated_examples)
     monkeypatch.setattr(ai_text_learning.quality_repo, "active_lessons", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ai_text_learning.ai_consent, "is_ai_allowed_for_ticket_id", AsyncMock(return_value=True))
     learning = await ai_text_learning.context_for("ticket_reply_suggestions", 2, subject_id=5)
     text = learning.records[0].content["text"]
     assert "[kb:12]" not in text and "[tickets:7]" not in text
+    assert "[citation]" not in text  # a placeholder would be copied into customer-facing drafts
     validate_references(text, set())  # nothing left that a draft could copy as a citation
 
 

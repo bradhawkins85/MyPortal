@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 from app.core.logging import log_warning
 from app.repositories import ai_quality as quality_repo
+from app.services import ai_consent
 
 
 def _has_text(value: Any) -> bool:
@@ -20,6 +21,9 @@ async def ticket_rating_ids(ticket: Mapping[str, Any], *, viewer_id: int | None)
     ids: dict[str, Any] = {"summary": None, "summary_rating": None,
                            "resolution_steps": None, "resolution_steps_rating": None}
     try:
+        # Opted-out requesters' content must never be stored for, or reused by, AI learning.
+        if not await ai_consent.is_ai_allowed_for_ticket(ticket):
+            return ids
         common = {"user_id": None, "company_id": ticket.get("company_id"), "subject_type": "ticket",
                   "subject_id": ticket.get("id")}
         if ticket.get("ai_summary_status") == "succeeded" and _has_text(ticket.get("ai_summary")):

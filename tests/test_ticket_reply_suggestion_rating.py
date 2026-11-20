@@ -71,3 +71,12 @@ def test_script_reveals_the_rating_with_the_returned_id():
     assert "[data-ticket-suggest-reply-rating]" in script
     assert "payload.quality_response_id" in script
     assert "window.MyPortalAiRating" in script
+
+
+def test_a_new_draft_resets_the_whole_feedback_form():
+    script = Path("app/static/js/ticket_detail.js").read_text(encoding="utf-8")
+    start = script.index("function showSuggestionRating")
+    body = script[start:script.index("\n    }\n", start)]
+    assert "[data-ai-rating-why]" in body and ".open = false" in body
+    assert "[data-ai-rating-reason]" in body and ".checked = false" in body
+    assert "[data-ai-rating-comment]" in body and ".value = ''" in body

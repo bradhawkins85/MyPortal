@@ -4002,6 +4002,16 @@
       }
       idInput.value = String(responseId);
       form.querySelectorAll('[data-ai-rating-vote]').forEach((vote) => vote.setAttribute('aria-pressed', 'false'));
+      // A new draft starts a new rating: no reason or comment carries over from the last one.
+      const why = form.querySelector('[data-ai-rating-why]');
+      if (why) {
+        why.open = false;
+      }
+      form.querySelectorAll('[data-ai-rating-reason]').forEach((reason) => { reason.checked = false; });
+      const comment = form.querySelector('[data-ai-rating-comment]');
+      if (comment) {
+        comment.value = '';
+      }
       const status = form.querySelector('[data-ai-rating-status]');
       if (status) {
         status.textContent = '';
