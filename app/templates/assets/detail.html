@@ -579,7 +579,7 @@
       <dt>WAN IPv4</dt><dd>{{ asset.wan_ipv4 or '—' }}</dd><dt>WAN IPv6</dt><dd>{{ asset.wan_ipv6 or '—' }}</dd>
       {% set wan_location = [asset.wan_city, asset.wan_region_code, asset.wan_country] | select | join(', ') %}<dt>WAN location</dt><dd>{{ wan_location or '—' }}{% if asset.wan_ip_updated_at %} <span class="text-muted">(reported by the tray agent <span data-utc="{{ asset.wan_ip_updated_at }}">{{ asset.wan_ip_updated_at }}</span>)</span>{% endif %}</dd>
       <dt>Serial number</dt><dd>{{ asset.serial_number or '—' }}</dd><dt>Warranty</dt><dd>{{ asset.warranty_status or '—' }}{% if asset.warranty_end_date %} (ends {{ asset.warranty_end_date }}){% endif %}</dd>
-      {% if not customer_safe %}<dt>Syncro ID</dt><dd>{{ asset.syncro_asset_id or '—' }}</dd><dt>Tactical ID</dt><dd>{{ asset.tactical_asset_id or '—' }}</dd>{% endif %}
+      {% if not customer_safe %}{% if integration_enabled.syncro %}<dt>Syncro ID</dt><dd>{{ asset.syncro_asset_id or '—' }}</dd>{% endif %}{% if integration_enabled.tacticalrmm %}<dt>Tactical ID</dt><dd>{{ asset.tactical_asset_id or '—' }}</dd>{% endif %}{% endif %}
       <dt>Provenance</dt><dd>{{ 'Manual' if asset.provenance == 'manual' else 'Integration' }}</dd>
       <dt>Last sync</dt><dd>{{ asset.last_sync or ('Not applicable' if asset.provenance == 'manual' else 'Never') }}</dd>
     </dl><p class="text-muted">{{ 'Inventory and documentation are technician-maintained.' if asset.provenance == 'manual' else 'Inventory fields above are sync-owned; operational documentation is manual-owned.' }}</p>
