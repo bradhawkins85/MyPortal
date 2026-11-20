@@ -116,12 +116,17 @@
           <p class="form-help" id="menu-node-error" role="alert" hidden></p>
           <details>
             <summary>About menu item types</summary>
-            {% if trmm_scripts_error %}
+            {% if trmm_enabled is defined and not trmm_enabled %}
+              <p class="form-help">Tactical RMM is turned off, so <code>TRMM_Script</code> items are hidden from computers. Use <code>rmm_script</code> items to run MyPortal RMM scripts instead.</p>
+            {% elif trmm_scripts_error %}
               <p class="form-help">Tactical RMM scripts could not be loaded: {{ trmm_scripts_error }}</p>
             {% elif trmm_scripts %}
               <p class="form-help">Tactical RMM scripts are loaded from the configured TRMM API and can be selected with the <code>TRMM_Script</code> node type.</p>
             {% else %}
               <p class="form-help">No Tactical RMM scripts were returned by the configured TRMM API.</p>
+            {% endif %}
+            {% if syncro_enabled is defined and not syncro_enabled %}
+              <p class="form-help">Syncro is turned off, so <code>submit_syncro_ticket</code> items open a MyPortal ticket on computers, the same as <code>submit_ticket</code>.</p>
             {% endif %}
             {% if rmm_scripts %}
               <p class="form-help">Use the <code>rmm_script</code> node type to let the person at the computer run a MyPortal RMM script from Gitea on that computer. Set the script's values here; they can use MyPortal variables such as <code>{% raw %}{{asset.name}}{% endraw %}</code> or <code>{% raw %}{{company.variables.Name}}{% endraw %}</code>, stay on the server and are never sent to the tray. Runs show in RMM run history as started from the tray menu. A company's own scripts only run on that company's computers, so pair them with <strong>Show only for companies</strong>.</p>
@@ -300,8 +305,13 @@
         'env_var',
         'open_chat',
         'submit_ticket',
+{%- set tray_payload_types = (config.payload_json or '') | lower %}
+        {%- if syncro_enabled is not defined or syncro_enabled or 'submit_syncro_ticket' in tray_payload_types %}
         'submit_syncro_ticket',
+        {%- endif %}
+        {%- if trmm_enabled is not defined or trmm_enabled or 'trmm_script' in tray_payload_types %}
         'TRMM_Script',
+        {%- endif %}
         'rmm_script',
         'scan_network',
         'refresh_config',

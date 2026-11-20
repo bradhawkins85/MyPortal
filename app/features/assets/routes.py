@@ -33,6 +33,7 @@ from app.repositories import tray as tray_repo
 from app.repositories import bcp as bcp_repo
 from app.repositories import customer_content_audience as audience_repo
 from app.repositories import roles as role_repo
+from app.services import asset_presence
 from app.services import tray as tray_service
 from app.services import hudu as hudu_service
 from app.services import audit as audit_service
@@ -302,13 +303,7 @@ async def _load_asset_context(
 
 
 async def _module_enabled(slug: str) -> bool:
-    from app.services import modules as modules_service
-
-    try:
-        module = await modules_service.get_module(slug, redact=True)
-    except Exception:  # pragma: no cover - defensive
-        return False
-    return bool(module and module.get("enabled"))
+    return await asset_presence.module_enabled(slug)
 
 
 async def _tactical_rmm_enabled() -> bool:
@@ -318,64 +313,11 @@ async def _tactical_rmm_enabled() -> bool:
 # Asset source records come from these integration modules (source == module slug).
 _INTEGRATION_SOURCE_MODULES = ("syncro", "tacticalrmm")
 
-
-def _tray_status(device: Mapping[str, Any]) -> str:
-    """Online/offline as the tray agent's presence reports it."""
-    from app.services import wol as wol_service
-
-    return "online" if wol_service._device_online(dict(device)) else "offline"
-
-
-def _status_without_tactical(
-    stored_status: Any, tray_device: Mapping[str, Any] | None, *, syncro_enabled: bool
-) -> str | None:
-    """Status to show when Tactical RMM is off.
-
-    Its last synced value (online/offline/overdue) never refreshes, so the tray
-    agent decides; Syncro's value stays only while Syncro is still syncing.
-    """
-    if tray_device:
-        return _tray_status(tray_device)
-    if not syncro_enabled:
-        return None
-    return str(stored_status or "").strip() or None
-
-
-def _tray_last_seen(device: Mapping[str, Any]) -> datetime | None:
-    """Return the latest time the tray agent was seen online."""
-    seen = [
-        parsed
-        for parsed in (
-            _as_utc_datetime(device.get("last_seen_utc")),
-            _as_utc_datetime(device.get("ws_last_seen_utc")),
-        )
-        if parsed
-    ]
-    return max(seen) if seen else None
-
-
-def _tray_console_user(device: Mapping[str, Any]) -> str:
-    """Return the person the tray agent reports as signed in (or last signed in)."""
-    console_user = str(device.get("console_user") or "").strip()
-    # Older tray services reported their own SYSTEM identity, which is the
-    # machine account (COMPUTERNAME$), not a person.
-    if console_user.endswith("$") or console_user.upper() in {"SYSTEM", "ROOT"}:
-        return ""
-    return console_user
-
-
-def _as_utc_datetime(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
-    if isinstance(value, str) and value.strip():
-        text = value.strip().replace(" ", "T", 1)
-        if text.endswith("Z"):
-            text = text[:-1] + "+00:00"
-        try:
-            return _as_utc_datetime(datetime.fromisoformat(text))
-        except ValueError:
-            return None
-    return None
+_tray_status = asset_presence.tray_status
+_status_without_tactical = asset_presence.status_without_tactical
+_tray_last_seen = asset_presence.tray_last_seen
+_tray_console_user = asset_presence.tray_console_user
+_as_utc_datetime = asset_presence.as_utc
 
 
 @router.get("/assets", response_class=HTMLResponse)
@@ -550,6 +492,17 @@ async def assets_page(request: Request):
     # the tray agent's last check-in and signed-in user are the latest facts.
     tray_sets_last_sync = not await _tactical_rmm_enabled()
     syncro_enabled = await _module_enabled("syncro") if tray_sets_last_sync else True
+    # Tactical RMM's hardware columns stop refreshing too; MyPortal RMM agents
+    # report the same facts in their inventory.
+    rmm_inventory_by_asset: dict[int, dict[str, Any]] = {}
+    if tray_sets_last_sync:
+        from app.repositories import rmm_inventory as rmm_inventory_repo
+
+        rmm_inventory_by_asset = await rmm_inventory_repo.list_for_company_assets(company_id)
+    # Customers only see these inventory columns.
+    rmm_inventory_keys = (
+        {"os_name", "cpu_name", "ram_gb", "hdd_size", "boot_time"} if can_view_assets else {"os_name"}
+    )
     # Technicians who run RMM scripts can push the RMM agent through the tray app.
     can_push_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
         bool(user.get("is_super_admin"))
@@ -621,6 +574,22 @@ async def assets_page(request: Request):
             tray_user = _tray_console_user(tray_device)
             if tray_user:
                 record["last_user"] = tray_user
+        inventory = (
+            rmm_inventory_by_asset.get(int(record["id"]))
+            if record.get("id") and record.get("id") not in manual_asset_ids else None
+        )
+        if inventory:
+            for key, value in asset_presence.rmm_inventory_fields(inventory).items():
+                if key not in rmm_inventory_keys:
+                    continue
+                if key == "ram_gb":
+                    record["ram_gb"], record["ram_gb_sort"] = _format_number(value)
+                elif key == "boot_time":
+                    boot_iso = main_module._to_iso(value)
+                    record["boot_time"] = record["boot_time_iso"] = boot_iso
+                    record["boot_time_sort"] = boot_iso or ""
+                else:
+                    record[key] = value
         parsed_last_sync = _parse_iso(record.get("last_sync_iso"))
         if parsed_last_sync and parsed_last_sync >= recent_threshold:
             recent_sync += 1
@@ -2453,6 +2422,12 @@ async def asset_detail_page(
             record.get("status"), tray_device or None,
             syncro_enabled=integration_enabled["syncro"],
         )
+    if not integration_enabled["tacticalrmm"] and tray_device:
+        # Nothing refreshes the synced "Last sync" without Tactical RMM.
+        tray_seen = _tray_last_seen(tray_device)
+        if tray_seen:
+            asset_view["last_sync"] = tray_seen
+    asset_view["last_sync_iso"] = main_module._to_iso(asset_view.get("last_sync"))
     asset_sources = [
         source for source in (
             await asset_repo.list_asset_sources(company_id, asset_id) if is_staff else []

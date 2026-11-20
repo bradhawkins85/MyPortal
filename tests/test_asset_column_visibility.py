@@ -15,6 +15,15 @@ from app.features.rmm import routes as rmm_routes
 from app.features.tags import routes as tags_routes
 from app.services import rmm_agent_deploy
 
+
+@pytest.fixture(autouse=True)
+def no_rmm_inventory(monkeypatch):
+    """No MyPortal RMM inventory is stored unless a test says so."""
+    from app.repositories import rmm_inventory as rmm_inventory_repo
+
+    monkeypatch.setattr(rmm_inventory_repo, "list_for_company_assets", AsyncMock(return_value={}))
+
+
 ROOT = Path(__file__).resolve().parents[1]
 
 DEFINITIONS = [

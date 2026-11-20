@@ -67,6 +67,7 @@ sudo "$DIR/myportal-tray/install.sh" --url "$URL" --token "$TOKEN"</code></pre>
       </form>
     </div>
 
+    {% if t.trmm_enabled %}
     <div class="ce-subsection" aria-labelledby="tray-token-trmm-title">
       <h3 id="tray-token-trmm-title">Bulk Tactical RMM sync</h3>
       <p class="form-help">Generate missing company tray install tokens and publish the new values to the Tactical RMM client custom field <code>{{ t.trmm_token_field_name }}</code>. Companies without a Tactical RMM client ID are skipped. Existing tokens are not re-sent because MyPortal only stores their hashes.</p>
@@ -75,6 +76,7 @@ sudo "$DIR/myportal-tray/install.sh" --url "$URL" --token "$TOKEN"</code></pre>
         <button type="submit" disabled class="button button--secondary">Generate missing tokens and sync to Tactical RMM</button>
       </form>
     </div>
+    {% endif %}
 
     <div class="ce-subsection" aria-labelledby="tray-token-list-title">
       <div class="ce-section__header">

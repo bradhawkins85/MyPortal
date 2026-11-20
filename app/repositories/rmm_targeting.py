@@ -35,6 +35,18 @@ _AGENT_FIELDS = (
 _CAPACITY = re.compile(r"\s*(\d+(?:\.\d+)?)\s*(GB|GiB|TB|TiB)?\s*", re.I)
 
 
+async def _apply_tray_presence(pairs: list[tuple[Mapping[str, Any], dict[str, Any]]]) -> None:
+    """Overlay the tray agent's status/check-in/user on each asset when Tactical RMM is off."""
+    from app.services import asset_presence
+
+    fields = ("status", "last_sync", "last_user")
+    views = [{"id": row.get("id"), "provenance": row.get("provenance"),
+              **{key: asset.get(key) for key in fields}} for row, asset in pairs]
+    await asset_presence.apply_tray_presence(views, fields=fields)
+    for view, (_row, asset) in zip(views, pairs):
+        asset.update({key: view.get(key) for key in fields})
+
+
 def _identifier(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
@@ -284,6 +296,7 @@ async def contexts_for_agents(agents: list[dict[str, Any]]) -> dict[int, dict[st
             requested_assets.setdefault(asset_id, set()).add(agent["company_id"])
     assets: dict[int, dict[str, Any]] = {}
     asset_companies: dict[int, int] = {}
+    presence_pairs: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
     linked_agents = (agent_id for agent_id, agent in candidates.items() if _identifier(agent.get("asset_id")))
     for batch in _batches(linked_agents):
         rows = await db.fetch_all(
@@ -302,6 +315,8 @@ async def contexts_for_agents(agents: list[dict[str, Any]]) -> dict[int, dict[st
             asset["disk_gb"] = _capacity_gb(row.get("hdd_size"))
             asset["ip_address"] = []
             assets[asset_id], asset_companies[asset_id] = asset, company_id
+            presence_pairs.append((row, asset))
+    await _apply_tray_presence(presence_pairs)
 
     asset_custom: dict[int, dict[str, Any]] = {key: {} for key in assets}
     asset_direct_tags: dict[int, set[str]] = {key: set() for key in assets}
@@ -481,6 +496,7 @@ async def context_for_asset(
             asset["catalogue_type"] = asset_types.effective(row)
             asset["manufacturer"] = row.get("motherboard_manufacturer")
             asset["disk_gb"] = _capacity_gb(row.get("hdd_size"))
+            await _apply_tray_presence([(row, asset)])
             addresses: list[str] = []
             for ip in await db.fetch_all(
                 "SELECT ip.address, ip.company_id FROM ip_addresses ip WHERE ip.asset_id = %s "

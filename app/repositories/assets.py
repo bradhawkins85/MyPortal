@@ -81,8 +81,13 @@ async def list_assets_for_ticket_requester(ticket_id: int) -> list[dict[str, Any
         if _normalise_username(value)
     }
 
+    company_assets = await list_company_assets(int(requester["company_id"]))
+    # Match on the tray agent's signed-in user when Tactical RMM no longer syncs it.
+    from app.services import asset_presence
+
+    await asset_presence.apply_tray_presence(company_assets, fields=("last_user",))
     matches = []
-    for asset in await list_company_assets(int(requester["company_id"])):
+    for asset in company_assets:
         asset_id = int(asset["id"])
         last_user_match = _normalise_username(asset.get("last_user")) in candidates
         if asset_id in linked_ids or last_user_match:
@@ -1070,8 +1075,34 @@ async def finish_sync_run(
     )
 
 
+def active_since_clause(alias: str) -> str:
+    """SQL condition: the asset was seen on or after a cut-off (four ``?`` params).
+
+    A device is active when an integration synced it (``last_sync``) or the tray
+    or MyPortal RMM agent on it checked in, so counts keep working when Tactical
+    RMM and Syncro are disabled. ``alias`` must be the static name or alias of
+    the ``assets`` table in the query; bind the cut-off with
+    :func:`active_since_params`.
+    """
+    return (
+        "((" + alias + ".last_sync IS NOT NULL AND " + alias + ".last_sync >= ?)"
+        " OR EXISTS (SELECT 1 FROM tray_devices active_td"
+        " WHERE active_td.asset_id = " + alias + ".id AND active_td.status = 'active'"
+        " AND (active_td.last_seen_utc >= ? OR active_td.ws_last_seen_utc >= ?))"
+        " OR EXISTS (SELECT 1 FROM rmm_agents active_ra"
+        " WHERE active_ra.asset_id = " + alias + ".id AND active_ra.status = 'active'"
+        " AND active_ra.last_seen_utc >= ?))"
+    )
+
+
+def active_since_params(since: datetime) -> tuple[str, str, str, str]:
+    """The four bound cut-off values for :func:`active_since_clause`."""
+    value = since.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    return (value, value, value, value)
+
+
 async def count_active_assets(*, company_id: Any = None, since: Any = None) -> int:
-    """Return the number of assets that have synced since the provided date."""
+    """Return the number of assets synced or seen by an agent since the provided date."""
 
     filters: list[str] = ["1 = 1"]
     params: list[Any] = []
@@ -1087,14 +1118,13 @@ async def count_active_assets(*, company_id: Any = None, since: Any = None) -> i
 
     company_value = _coerce_company_id(company_id)
     if company_value is not None:
-        filters.append("company_id = %s")
+        filters.append("company_id = ?")
         params.append(company_value)
 
     since_dt = _ensure_datetime(since)
     if since_dt:
-        filters.append("last_sync IS NOT NULL")
-        filters.append("last_sync >= %s")
-        params.append(since_dt.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"))
+        filters.append(active_since_clause("assets"))
+        params.extend(active_since_params(since_dt))
 
     sql = "SELECT COUNT(*) AS total FROM assets WHERE " + " AND ".join(filters)  # nosec B608
     row = await db.fetch_one(sql, tuple(params) if params else None)
@@ -1112,7 +1142,7 @@ async def count_active_assets_by_type(
     since: Any = None,
     device_type: str | None = None,
 ) -> int:
-    """Return the number of assets of a specific type that have synced since the provided date.
+    """Return the number of assets of a type synced or seen by an agent since the provided date.
 
     Args:
         company_id: Company ID to filter by
@@ -1136,17 +1166,16 @@ async def count_active_assets_by_type(
 
     company_value = _coerce_company_id(company_id)
     if company_value is not None:
-        filters.append("company_id = %s")
+        filters.append("company_id = ?")
         params.append(company_value)
 
     since_dt = _ensure_datetime(since)
     if since_dt:
-        filters.append("last_sync IS NOT NULL")
-        filters.append("last_sync >= %s")
-        params.append(since_dt.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"))
+        filters.append(active_since_clause("assets"))
+        params.extend(active_since_params(since_dt))
 
     if device_type:
-        filters.append("LOWER(type) = LOWER(%s)")
+        filters.append("LOWER(type) = LOWER(?)")
         params.append(device_type)
 
     sql = "SELECT COUNT(*) AS total FROM assets WHERE " + " AND ".join(filters)  # nosec B608

@@ -1167,6 +1167,7 @@ async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
             a.name,
             a.serial_number,
             a.status,
+            a.provenance,
             a.type,
             a.os_name,
             a.last_user,
@@ -1227,7 +1228,7 @@ async def list_ticket_suggested_assets(ticket_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
         SELECT tsa.asset_id, tsa.matched_username, tsa.created_at, a.name,
-               a.status, a.tactical_asset_id
+               a.status, a.provenance, a.tactical_asset_id
         FROM ticket_suggested_assets tsa
         INNER JOIN assets a ON a.id = tsa.asset_id
         LEFT JOIN ticket_assets ta

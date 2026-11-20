@@ -159,6 +159,7 @@ from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
+from app.services import asset_presence
 from app.services import knowledge_base as knowledge_base_service
 from app.services import system_update_history
 from app.services import system_updates as system_updates_service
@@ -9482,6 +9483,7 @@ async def _tray_install_tokens_context(
         "now_iso": datetime.now(timezone.utc).isoformat(),
         "portal_url": portal_url,
         "trmm_token_field_name": tray_service.trmm_client_token_field_name(),
+        "trmm_enabled": await asset_presence.module_enabled("tacticalrmm"),
     }
 
 
@@ -9753,6 +9755,10 @@ async def admin_tray_configurations_page(request: Request):
 async def _get_tray_trmm_scripts_for_form() -> tuple[list[dict], str | None]:
     from app.services import tacticalrmm as tacticalrmm_service
 
+    # With Tactical RMM off there is nothing to load (and TRMM_Script items are
+    # hidden from devices); MyPortal RMM's rmm_script items replace them.
+    if not await asset_presence.module_enabled("tacticalrmm"):
+        return [], None
     try:
         return await tacticalrmm_service.fetch_scripts(), None
     except Exception as exc:  # pragma: no cover - external integration availability
@@ -9826,6 +9832,8 @@ async def admin_tray_new_configuration_page(request: Request):
         "targeting_fields": _tray_targeting_fields(),
         "trmm_scripts": trmm_scripts,
         "trmm_scripts_error": trmm_scripts_error,
+        "trmm_enabled": await asset_presence.module_enabled("tacticalrmm"),
+        "syncro_enabled": await asset_presence.module_enabled("syncro"),
         "rmm_scripts": rmm_scripts_for_form,
         "companies": companies,
     }
@@ -9867,6 +9875,8 @@ async def admin_tray_edit_configuration_page(config_id: int, request: Request):
         "targeting_fields": _tray_targeting_fields(),
         "trmm_scripts": trmm_scripts,
         "trmm_scripts_error": trmm_scripts_error,
+        "trmm_enabled": await asset_presence.module_enabled("tacticalrmm"),
+        "syncro_enabled": await asset_presence.module_enabled("syncro"),
         "rmm_scripts": rmm_scripts_for_form,
         "companies": companies,
     }
@@ -11538,6 +11548,7 @@ async def _render_portal_ticket_detail(
 
     # Get linked assets
     ticket_assets = await tickets_repo.list_ticket_assets(ticket_id)
+    await asset_presence.apply_tray_presence(ticket_assets, id_key="asset_id", fields=("status", "last_user"))
     
     # Find relevant service statuses based on AI tag matching
     from app.services import service_status as service_status_service
@@ -12469,6 +12480,8 @@ async def _render_ticket_detail(
         priority_options.append(option_str)
 
     ticket_assets = await tickets_repo.list_ticket_assets(ticket_id)
+    # Without Tactical RMM its synced status (e.g. "overdue") never refreshes.
+    await asset_presence.apply_tray_presence(ticket_assets, id_key="asset_id", fields=("status", "last_user"))
     ticket_suggested_assets = await tickets_repo.list_ticket_suggested_assets(ticket_id)
     asset_selection: list[int] = []
     for linked in ticket_assets:
@@ -12511,6 +12524,7 @@ async def _render_ticket_detail(
     asset_options: list[dict[str, Any]] = []
     if ticket_company_id is not None:
         company_assets = await assets_repo.list_company_assets(ticket_company_id)
+        await asset_presence.apply_tray_presence(company_assets, fields=("status", "last_user"))
         company_asset_ids: list[int] = []
         for asset_row in company_assets:
             try:

@@ -38,7 +38,7 @@ MODULE_CAPABILITIES: dict[str, ModuleCapabilities] = {
     "receive-sms": _c(pack="receive_sms", routes=("webhooks.receive_sms",), services=("receive_sms.admin",), ui=("receive_sms",)),
     "calls": _c(pack="calls", routes=("webhooks.calls",), services=("calls.admin",), ui=("calls",)),
     "m365-mail": _c(pack="m365_mail", commands=("sync_m365_mailboxes", "m365_mail_sync:*"), services=("m365_mail.graph",), ui=("mail.m365",)),
-    "tacticalrmm": _c(pack="tacticalrmm", commands=("sync_tactical_assets", "push_tactical_companies", "pull_tactical_companies", "refresh_company_ids", "update_tray_icon_installer"), routes=("tacticalrmm.actions",), services=("tacticalrmm.api", "tacticalrmm.company_sync", "tacticalrmm.tray"), ui=("tacticalrmm",)),
+    "tacticalrmm": _c(pack="tacticalrmm", commands=("sync_tactical_assets", "push_tactical_companies", "pull_tactical_companies", "refresh_company_ids"), routes=("tacticalrmm.actions",), services=("tacticalrmm.api", "tacticalrmm.company_sync", "tacticalrmm.tray"), ui=("tacticalrmm",)),
     "ntfy": _c(pack="ntfy", services=("ntfy.delivery",), ui=("modules.ntfy",)),
     "uptimekuma": _c(pack="uptimekuma", routes=("webhooks.uptimekuma",), services=("uptimekuma.api",), ui=("uptimekuma",)),
     "chatgpt-mcp": _c(pack="chatgpt_mcp", routes=("mcp.chatgpt",), services=("chatgpt.mcp",), ui=("ai.chatgpt_mcp",)),

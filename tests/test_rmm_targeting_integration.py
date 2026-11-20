@@ -57,6 +57,13 @@ async def target_db(sqlite_db, monkeypatch):
     sqlite_db.execute_many = execute_many
     monkeypatch.setattr(targeting_repo, "db", sqlite_db)
     monkeypatch.setattr(inventory_repo, "db", sqlite_db)
+    # Tactical RMM on: synced asset values are used as stored (no tray overlay).
+    from app.services import asset_presence
+
+    async def module_on(_slug):
+        return True
+
+    monkeypatch.setattr(asset_presence, "module_enabled", module_on)
 
     async def stats_unavailable():
         return False

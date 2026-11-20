@@ -18,9 +18,10 @@ def test_count_active_assets_builds_expected_query(monkeypatch):
     result = asyncio.run(assets_repo.count_active_assets(company_id="5", since=since))
 
     assert result == 7
-    assert "company_id = %s" in captured["sql"]
-    assert "last_sync >= %s" in captured["sql"]
-    assert captured["params"] == (5, "2024-04-20 15:30:00")
+    assert "company_id = ?" in captured["sql"]
+    assert "last_sync >= ?" in captured["sql"]
+    assert "tray_devices" in captured["sql"] and "rmm_agents" in captured["sql"]
+    assert captured["params"] == (5,) + ("2024-04-20 15:30:00",) * 4
 
 
 def test_count_active_assets_handles_empty_results(monkeypatch):

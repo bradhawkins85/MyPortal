@@ -21,8 +21,8 @@ def test_count_active_assets_by_type_filters_workstations(monkeypatch):
     )
 
     assert result == 5
-    assert "company_id = %s" in captured["sql"]
-    assert "LOWER(type) = LOWER(%s)" in captured["sql"]
+    assert "company_id = ?" in captured["sql"]
+    assert "LOWER(type) = LOWER(?)" in captured["sql"]
     assert captured["params"] == (10, "Workstation")
 
 
@@ -44,7 +44,7 @@ def test_count_active_assets_by_type_filters_servers(monkeypatch):
     )
 
     assert result == 3
-    assert "LOWER(type) = LOWER(%s)" in captured["sql"]
+    assert "LOWER(type) = LOWER(?)" in captured["sql"]
     assert captured["params"] == (10, "Server")
 
 
@@ -66,7 +66,7 @@ def test_count_active_assets_by_type_filters_users(monkeypatch):
     )
 
     assert result == 15
-    assert "LOWER(type) = LOWER(%s)" in captured["sql"]
+    assert "LOWER(type) = LOWER(?)" in captured["sql"]
     assert captured["params"] == (10, "User")
 
 
@@ -89,4 +89,4 @@ def test_count_active_assets_by_type_case_insensitive(monkeypatch):
     )
 
     assert result == 7
-    assert "LOWER(type) = LOWER(%s)" in captured["sql"]
+    assert "LOWER(type) = LOWER(?)" in captured["sql"]

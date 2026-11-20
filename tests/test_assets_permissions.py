@@ -15,6 +15,14 @@ def no_hidden_asset_columns(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def no_rmm_inventory(monkeypatch):
+    """No MyPortal RMM inventory is stored unless a test says so."""
+    from app.repositories import rmm_inventory as rmm_inventory_repo
+
+    monkeypatch.setattr(rmm_inventory_repo, "list_for_company_assets", AsyncMock(return_value={}))
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
