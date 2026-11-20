@@ -60,6 +60,21 @@ async def test_keeps_syncro_status_without_tray(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_failed_tray_lookup_leaves_assets_unchanged(monkeypatch):
+    _modules(monkeypatch)
+    monkeypatch.setattr(
+        asset_presence.tray_repo,
+        "list_active_devices_by_asset_ids",
+        AsyncMock(side_effect=RuntimeError("Database pool not initialised")),
+    )
+    assets = [{"id": 1, "status": "Active", "last_user": "bob"}]
+
+    await asset_presence.apply_tray_presence(assets)
+
+    assert assets == [{"id": 1, "status": "Active", "last_user": "bob"}]
+
+
+@pytest.mark.anyio
 async def test_does_nothing_while_tactical_rmm_is_on(monkeypatch):
     _modules(monkeypatch, tacticalrmm=True)
     lookup = _tray(monkeypatch, {1: {"last_seen_utc": datetime.now(timezone.utc)}})

@@ -1,0 +1,7 @@
+{
+  "guid": "56701299-5e3d-4a0e-b836-49e959cdd6f8",
+  "occurred_at": "2026-11-20T07:44Z",
+  "change_type": "Fix",
+  "summary": "Asset status, ticket pages and RMM patch targeting no longer fail when the tray agent lookup errors while Tactical RMM is off; stored values are kept instead.",
+  "content_hash": "a2e4e6486eb35ae88eee58dce1c982b05292ad7fb48d4bf0049045a30ea63952"
+}
