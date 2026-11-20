@@ -60,36 +60,39 @@ async def list_subscriptions(
     params: list[Any] = []
     
     if customer_id is not None:
-        conditions.append("customer_id = %s")
+        conditions.append("s.customer_id = %s")
         params.append(customer_id)
     
     if product_id is not None:
-        conditions.append("product_id = %s")
+        conditions.append("s.product_id = %s")
         params.append(product_id)
     
     if category_id is not None:
-        conditions.append("subscription_category_id = %s")
+        conditions.append("s.subscription_category_id = %s")
         params.append(category_id)
     
     if status is not None:
-        conditions.append("status = %s")
+        conditions.append("s.status = %s")
         params.append(status)
     
     if end_before is not None:
-        conditions.append("end_date < %s")
+        conditions.append("s.end_date < %s")
         params.append(end_before)
     
     if end_after is not None:
-        conditions.append("end_date > %s")
+        conditions.append("s.end_date > %s")
         params.append(end_after)
     
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     
     query = """
-        SELECT s.*, p.name as product_name, p.sku as product_sku, c.name as category_name
+        SELECT s.*, p.name as product_name, p.sku as product_sku, c.name as category_name,
+               p.subscription_category_id as product_category_id,
+               pc.name as product_category_name
         FROM subscriptions s
         LEFT JOIN shop_products p ON s.product_id = p.id
         LEFT JOIN subscription_categories c ON s.subscription_category_id = c.id
+        LEFT JOIN subscription_categories pc ON p.subscription_category_id = pc.id
         """ + where_clause + " ORDER BY s.end_date DESC, s.created_at DESC"  # nosec B608
     
     if limit is not None:
@@ -107,6 +110,12 @@ async def list_subscriptions(
         sub = _normalize_subscription(row)
         sub["product_name"] = row.get("product_name")
         sub["category_name"] = row.get("category_name")
+        sub["product_category_id"] = (
+            int(row["product_category_id"])
+            if row.get("product_category_id") is not None
+            else None
+        )
+        sub["product_category_name"] = row.get("product_category_name")
         result.append(sub)
     
     return result

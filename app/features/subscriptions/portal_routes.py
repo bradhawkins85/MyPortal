@@ -2,7 +2,9 @@
 
 Owns the portal subscription pages:
 
-* ``GET  /subscriptions``                              — portal subscription list.
+* ``GET  /subscriptions``                              — portal subscription list,
+  with one subpage per subscription category (``?category=<id>`` or
+  ``?category=uncategorised``).
 * ``POST /subscriptions/{subscription_id}/request-change`` — request a change.
 * ``PATCH /subscriptions/{subscription_id}/quantity`` — directly adjust an
   externally billed, reminder-only subscription.
@@ -106,19 +108,95 @@ async def _load_subscription_context(request: Request):
     return user, membership, company, company_id, None
 
 
+UNCATEGORISED_KEY = "uncategorised"
+
+
+def _effective_category(sub: dict[str, Any]) -> tuple[int | None, str | None]:
+    """Return the subscription category used to group *sub*.
+
+    The category assigned to the product in its subscription settings wins;
+    the category stored on the subscription is the fallback (external
+    subscriptions and products whose category was later cleared).
+    """
+    product_category_id = sub.get("product_category_id")
+    if product_category_id is not None:
+        return int(product_category_id), sub.get("product_category_name")
+    category_id = sub.get("subscription_category_id")
+    if category_id is not None:
+        return int(category_id), sub.get("category_name")
+    return None, None
+
+
+def _build_category_nav(
+    subscriptions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return one subpage entry per category present in *subscriptions*.
+
+    Categories are sorted by name; an "Uncategorised" entry is appended last
+    when any subscription has no category.
+    """
+    counts: dict[int, dict[str, Any]] = {}
+    uncategorised = 0
+    for sub in subscriptions:
+        category_id, category_name = _effective_category(sub)
+        if category_id is None:
+            uncategorised += 1
+            continue
+        entry = counts.setdefault(
+            category_id,
+            {
+                "key": str(category_id),
+                "name": category_name or f"Category {category_id}",
+                "count": 0,
+            },
+        )
+        entry["count"] += 1
+    nav = sorted(counts.values(), key=lambda item: str(item["name"]).casefold())
+    if uncategorised:
+        nav.append(
+            {"key": UNCATEGORISED_KEY, "name": "Uncategorised", "count": uncategorised}
+        )
+    return nav
+
+
+def _matches_category(sub: dict[str, Any], category_key: str) -> bool:
+    category_id, _ = _effective_category(sub)
+    if category_key == UNCATEGORISED_KEY:
+        return category_id is None
+    return category_id is not None and str(category_id) == category_key
+
+
 @router.get("/subscriptions", response_class=HTMLResponse)
-async def subscriptions_page(request: Request):
-    """Display active subscriptions for the current company."""
+async def subscriptions_page(request: Request, category: str | None = None):
+    """Display subscriptions for the current company.
+
+    ``category`` selects a subpage: a subscription category ID, or
+    ``uncategorised``. Without it, every subscription is listed.
+    """
     user, membership, company, company_id, redirect = await _load_subscription_context(
         request
     )
     if redirect:
         return redirect
 
-    subs = await subscriptions_repo.list_subscriptions(
+    all_subs = await subscriptions_repo.list_subscriptions(
         customer_id=company_id,
         limit=500,
     )
+    category_nav = _build_category_nav(all_subs)
+    active_category: dict[str, Any] | None = None
+    category_key = (category or "").strip().lower()
+    if category_key:
+        active_category = next(
+            (item for item in category_nav if item["key"] == category_key), None
+        )
+        if active_category is None:
+            return RedirectResponse(
+                url="/subscriptions", status_code=status.HTTP_303_SEE_OTHER
+            )
+        subs = [sub for sub in all_subs if _matches_category(sub, category_key)]
+    else:
+        subs = all_subs
 
     formatted: list[dict[str, Any]] = []
     lifecycle_subscriptions: list[dict[str, Any]] = []
@@ -131,6 +209,7 @@ async def subscriptions_page(request: Request):
         if end_date_value is not None:
             formatted_sub["end_date"] = end_date_value.strftime("%Y-%m-%d")
 
+        _, formatted_sub["category_name"] = _effective_category(sub)
         formatted_sub["contract_term"] = ""
         if is_voice_monitor_subscription(formatted_sub):
             formatted_sub["voice_monitor_contract"] = contract_display(formatted_sub)
@@ -207,8 +286,15 @@ async def subscriptions_page(request: Request):
     )
 
     extra: dict[str, Any] = {
-        "title": "Subscriptions",
+        "title": (
+            f"Subscriptions – {active_category['name']}"
+            if active_category
+            else "Subscriptions"
+        ),
         "subscriptions": formatted,
+        "subscription_category_nav": category_nav,
+        "active_subscription_category": active_category,
+        "total_subscription_count": len(all_subs),
         "company": company,
         "can_request_changes": can_request_changes,
         "is_super_admin": is_super_admin,

@@ -266,7 +266,7 @@ def test_subscriptions_page_requires_both_permissions(authorized_user_context):
 
     assert response.status_code == 200
     html = response.text
-    assert "Active subscriptions" in html
+    assert "All subscriptions" in html
     assert "Product A" in html
     # Check for the new button text (we changed from "Request change" to "Add licenses" and "Request decrease")
     assert ("Add licenses" in html or "Request decrease" in html)
@@ -363,3 +363,115 @@ def test_subscriptions_page_shows_forecast_and_risk_summary(authorized_user_cont
     assert 'class="stat-cards"' not in html
     assert "Risk: High" in html
     assert "Pending decrease requests indicate a planned contraction." in html
+
+
+def _categorised_subscription(sub_id, name, **overrides):
+    base = {
+        "id": sub_id,
+        "customer_id": 10,
+        "product_id": 1,
+        "product_name": name,
+        "subscription_category_id": None,
+        "category_name": None,
+        "product_category_id": None,
+        "product_category_name": None,
+        "start_date": date(2025, 1, 1),
+        "end_date": date.today() + timedelta(days=200),
+        "quantity": 1,
+        "unit_price": "10.00",
+        "prorated_price": None,
+        "status": "active",
+        "auto_renew": True,
+        "created_at": None,
+        "updated_at": None,
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.fixture
+def categorised_subscriptions(authorized_user_context, monkeypatch):
+    from app.repositories import subscriptions as subscriptions_repo
+
+    subs = [
+        _categorised_subscription(
+            "sub-m365", "Microsoft 365 Business",
+            product_category_id=2, product_category_name="Microsoft 365",
+            subscription_category_id=2, category_name="Microsoft 365",
+        ),
+        # Product now sits in Security; the stale category on the
+        # subscription row must not decide where it is listed.
+        _categorised_subscription(
+            "sub-edr", "Endpoint Protection",
+            product_category_id=3, product_category_name="Security",
+            subscription_category_id=2, category_name="Microsoft 365",
+        ),
+        _categorised_subscription(
+            "sub-ext", "External Backup",
+            subscription_category_id=3, category_name="Security",
+        ),
+        _categorised_subscription("sub-none", "Loose Licence"),
+    ]
+
+    async def fake_list_subscriptions(**kwargs):
+        return [dict(sub) for sub in subs]
+
+    async def fake_pending_changes(subscription_ids):
+        return {}
+
+    from app.repositories import subscription_change_requests as change_requests_repo
+
+    monkeypatch.setattr(subscriptions_repo, "list_subscriptions", fake_list_subscriptions)
+    monkeypatch.setattr(
+        change_requests_repo, "list_pending_changes_for_subscriptions", fake_pending_changes
+    )
+    yield
+
+
+def test_subscriptions_page_lists_category_subpages(categorised_subscriptions):
+    with TestClient(app) as client:
+        response = client.get("/subscriptions")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'aria-label="Subscription categories"' in html
+    assert 'href="/subscriptions?category=2"' in html
+    assert 'href="/subscriptions?category=3"' in html
+    assert 'href="/subscriptions?category=uncategorised"' in html
+    # All subscriptions are shown on the overview page.
+    for name in ("Microsoft 365 Business", "Endpoint Protection", "External Backup", "Loose Licence"):
+        assert name in html
+    # Categories sort by name, with Uncategorised last.
+    assert html.index(">Microsoft 365</span>") < html.index(">Security</span>") < html.index(">Uncategorised</span>")
+
+
+def test_subscriptions_category_subpage_uses_product_category(categorised_subscriptions):
+    with TestClient(app) as client:
+        response = client.get("/subscriptions?category=3")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "Endpoint Protection" in html
+    assert "External Backup" in html
+    assert "Microsoft 365 Business" not in html
+    assert "Loose Licence" not in html
+    assert "Security subscriptions" in html
+    assert 'href="/subscriptions?category=3" aria-current="page"' in html
+
+
+def test_subscriptions_uncategorised_subpage(categorised_subscriptions):
+    with TestClient(app) as client:
+        response = client.get("/subscriptions?category=uncategorised")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "Loose Licence" in html
+    assert "Endpoint Protection" not in html
+
+
+def test_subscriptions_unknown_category_redirects_to_all(categorised_subscriptions):
+    with TestClient(app) as client:
+        response = client.get("/subscriptions?category=999", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/subscriptions"

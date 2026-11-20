@@ -23310,12 +23310,14 @@ a.sch-item__company:focus-visible {
   }
 }
 
-/* Shop admin workspace: wide catalogue tables scroll inside their panel. */
+/* Shop admin and subscriptions workspaces: wide tables scroll inside their panel. */
 .shop-admin-workspace .ce-panels > *,
-.shop-admin-workspace .card {
+.shop-admin-workspace .card,
+.subscriptions-workspace .ce-panels > * {
   min-width: 0;
 }
 
+.subscriptions-workspace .table-responsive,
 .shop-admin-workspace .table-wrapper {
   max-width: 100%;
   overflow-x: auto;
