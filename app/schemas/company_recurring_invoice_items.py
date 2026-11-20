@@ -86,3 +86,34 @@ class RecurringInvoiceItemResponse(RecurringInvoiceItemBase):
 
     class Config:
         from_attributes = True
+
+
+class RecurringItemConversionRequest(BaseModel):
+    next_charge_date: Optional[date] = Field(
+        None, description="UTC date of the next charge; defaults to the item's next billing date"
+    )
+    quantity: Optional[int] = Field(
+        None, ge=1, description="Licence quantity; required when the item's quantity is a variable"
+    )
+
+
+class RecurringItemConversionPreview(BaseModel):
+    item_id: int
+    product_id: int
+    product_name: str
+    product_sku: str
+    description: str
+    quantity: Optional[int] = None
+    unit_price: float
+    commitment: str
+    payment_frequency: str
+    next_charge_date: date
+    term_start_date: date
+    term_end_date: date
+
+
+class RecurringItemConversionResult(BaseModel):
+    subscription_id: str
+    start_date: date
+    end_date: date
+    next_charge_date: Optional[date] = None

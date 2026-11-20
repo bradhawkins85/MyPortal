@@ -966,8 +966,23 @@ async def _render_company_edit_page(
                 items = []
             else:
                 raise
+        try:
+            from app.services import recurring_item_conversion
+
+            convertible = await recurring_item_conversion.list_convertible_items(
+                company_id, items
+            )
+        except Exception as exc:  # pragma: no cover - conversion is optional UI
+            from app.core.logging import log_error
+
+            log_error("Failed to check recurring items for subscription conversion", error=str(exc))
+            convertible = {}
         for item in items:
-            recurring_invoice_items.append(_main()._serialise_mapping(item))
+            serialised = _main()._serialise_mapping(item)
+            match = convertible.get(int(item["id"])) if item.get("id") is not None else None
+            if match:
+                serialised["subscription_product_name"] = match["product_name"]
+            recurring_invoice_items.append(serialised)
 
     # Fetch billing contacts for the company
     billing_contacts = []
