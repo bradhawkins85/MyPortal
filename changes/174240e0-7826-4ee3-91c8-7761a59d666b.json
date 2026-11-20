@@ -1,0 +1,7 @@
+{
+  "guid": "174240e0-7826-4ee3-91c8-7761a59d666b",
+  "occurred_at": "2026-11-20T00:41Z",
+  "change_type": "Fix",
+  "summary": "When Tactical RMM is turned off, the Assets list's Last user now shows the same person as the asset's Logged in user, as reported by the tray app.",
+  "content_hash": "a8c07ce149785e57abb40402ec86da15c244c43f06d822f0ae552fc5f04344a8"
+}
