@@ -45,6 +45,25 @@ def _form_bool(form: Any, key: str) -> bool:
     return bool(value)
 
 
+DEFAULT_SUBSCRIPTION_SHOP_CATEGORY = "Subscription"
+
+
+async def _default_subscription_shop_category_id() -> int:
+    """Return the store category new subscriptions are listed under.
+
+    The Add subscription form has no store-category picker, so subscriptions
+    are filed under "Subscription" (or an existing "Subscriptions") category,
+    which is created on first use so the product shows in the store.
+    """
+    from app.repositories import shop as shop_repo
+
+    for name in (DEFAULT_SUBSCRIPTION_SHOP_CATEGORY, "Subscriptions"):
+        existing = await shop_repo.get_category_by_name(name)
+        if existing:
+            return int(existing["id"])
+    return await shop_repo.create_category(DEFAULT_SUBSCRIPTION_SHOP_CATEGORY)
+
+
 def _validate_voice_monitor_calls_per_day(
     subscription_category_name: str | None, raw_value: str | None
 ) -> int | None:
@@ -2399,6 +2418,9 @@ async def admin_create_shop_product(
         if not sub_category:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subscription category does not exist")
         subscription_category_name = str(sub_category.get("name") or "").strip()
+
+    if subscription_category_value is not None and category_value is None:
+        category_value = await _default_subscription_shop_category_id()
 
     calls_per_day_value = _validate_voice_monitor_calls_per_day(
         subscription_category_name, voice_monitor_calls_per_day
