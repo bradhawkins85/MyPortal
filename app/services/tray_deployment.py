@@ -380,6 +380,12 @@ def macos_launcher() -> str:
     )
 
 
+# Files every tray install leaves behind; the deployment scripts exit early,
+# successfully, when one exists so an RMM rerun does not reinstall the tray.
+_MACOS_INSTALLED_MARKER = "/Library/LaunchDaemons/io.myportal.tray.service.plist"
+_LINUX_INSTALLED_MARKER = "/opt/myportal-tray/myportal-tray-service"
+
+
 def windows_script(portal_url: str, token: str) -> str:
     _check_script_values(portal_url, token)
     return "\n".join(
@@ -390,6 +396,10 @@ def windows_script(portal_url: str, token: str) -> str:
             "$ErrorActionPreference = 'Stop'",
             "$PortalURL = '" + portal_url + "'",
             "$EnrolToken = '" + token + "'",
+            "if (Get-Service -Name 'MyPortalTrayService' -ErrorAction SilentlyContinue) {",
+            "    Write-Host 'MyPortal Tray is already installed. Nothing to do.'",
+            "    exit 0",
+            "}",
             # A new, randomly named folder only SYSTEM and Administrators can
             # change: a fixed name in C:\Windows\Temp could be planted or
             # swapped by another local user before msiexec runs it.
@@ -431,6 +441,14 @@ def shell_script(portal_url: str, token: str) -> str:
             "set -euo pipefail",
             "PORTAL_URL='" + portal_url + "'",
             "ENROL_TOKEN='" + token + "'",
+            "case \"$(uname -s)\" in",
+            "Darwin) INSTALLED_MARKER=" + _MACOS_INSTALLED_MARKER + " ;;",
+            "*) INSTALLED_MARKER=" + _LINUX_INSTALLED_MARKER + " ;;",
+            "esac",
+            "if [ -e \"$INSTALLED_MARKER\" ]; then",
+            "    echo 'MyPortal Tray is already installed. Nothing to do.'",
+            "    exit 0",
+            "fi",
             "umask 077",
             "WORK_DIR=\"$(mktemp -d)\"",
             "trap 'rm -rf \"$WORK_DIR\"' EXIT",

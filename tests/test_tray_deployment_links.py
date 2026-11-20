@@ -590,3 +590,44 @@ def test_windows_script_downloads_into_a_private_random_folder():
     assert "[guid]::NewGuid()" in script
     assert "/inheritance:r" in script
     assert "Join-Path $env:TEMP 'myportal-tray.msi'" not in script
+
+
+def test_windows_script_exits_successfully_when_tray_already_installed():
+    script = tray_deployment.windows_script(PORTAL, TOKEN)
+    check = script.index("Get-Service -Name 'MyPortalTrayService'")
+    assert check < script.index("Invoke-WebRequest")
+    assert "already installed" in script[check:script.index("Invoke-WebRequest")]
+    assert "exit 0" in script[check:script.index("Invoke-WebRequest")]
+
+
+def test_shell_script_exits_successfully_when_tray_already_installed():
+    script = tray_deployment.shell_script(PORTAL, TOKEN)
+    check = script.index('if [ -e "$INSTALLED_MARKER" ]; then')
+    assert check < script.index("mktemp")
+    assert "Darwin) INSTALLED_MARKER=/Library/LaunchDaemons/io.myportal.tray.service.plist" in script
+    assert "*) INSTALLED_MARKER=/opt/myportal-tray/myportal-tray-service" in script
+    assert "exit 0" in script[check:script.index("mktemp")]
+
+
+def test_shell_script_skip_check_runs_cleanly_when_not_installed(tmp_path):
+    import shutil
+    import subprocess
+
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is not installed")
+    script = tray_deployment.shell_script(PORTAL, TOKEN)
+    marker = tmp_path / "marker"
+    marker.write_text("")
+    # Point the check at a temp file and stop right after it.
+    head = script[: script.index("umask 077")]
+    head = head.replace("/opt/myportal-tray/myportal-tray-service", str(marker))
+    head = head.replace("/Library/LaunchDaemons/io.myportal.tray.service.plist", str(marker))
+    result = subprocess.run([bash], input=head + "echo NOT-SKIPPED\n", text=True, capture_output=True)
+    assert result.returncode == 0
+    assert "already installed" in result.stdout
+    assert "NOT-SKIPPED" not in result.stdout
+    marker.unlink()
+    result = subprocess.run([bash], input=head + "echo NOT-SKIPPED\n", text=True, capture_output=True)
+    assert result.returncode == 0
+    assert "NOT-SKIPPED" in result.stdout

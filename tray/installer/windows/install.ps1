@@ -16,6 +16,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if (Get-Service -Name 'MyPortalTrayService' -ErrorAction SilentlyContinue) {
+    Write-Host 'MyPortal Tray is already installed. Nothing to do.'
+    exit 0
+}
+
 foreach ($url in @($PortalURL, $MsiURL)) {
     if (-not $AllowHttp -and -not $url.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
         throw "$url must start with https:// (pass -AllowHttp to override)"
