@@ -1075,24 +1075,39 @@ async def finish_sync_run(
     )
 
 
+# Static SQL for "seen on or after a cut-off" per table alias (four ``?`` params).
+_ACTIVE_SINCE_CLAUSES = {
+    "assets": (
+        "((assets.last_sync IS NOT NULL AND assets.last_sync >= ?)"
+        " OR EXISTS (SELECT 1 FROM tray_devices active_td"
+        " WHERE active_td.asset_id = assets.id AND active_td.status = 'active'"
+        " AND (active_td.last_seen_utc >= ? OR active_td.ws_last_seen_utc >= ?))"
+        " OR EXISTS (SELECT 1 FROM rmm_agents active_ra"
+        " WHERE active_ra.asset_id = assets.id AND active_ra.status = 'active'"
+        " AND active_ra.last_seen_utc >= ?))"
+    ),
+    "a": (
+        "((a.last_sync IS NOT NULL AND a.last_sync >= ?)"
+        " OR EXISTS (SELECT 1 FROM tray_devices active_td"
+        " WHERE active_td.asset_id = a.id AND active_td.status = 'active'"
+        " AND (active_td.last_seen_utc >= ? OR active_td.ws_last_seen_utc >= ?))"
+        " OR EXISTS (SELECT 1 FROM rmm_agents active_ra"
+        " WHERE active_ra.asset_id = a.id AND active_ra.status = 'active'"
+        " AND active_ra.last_seen_utc >= ?))"
+    ),
+}
+
+
 def active_since_clause(alias: str) -> str:
     """SQL condition: the asset was seen on or after a cut-off (four ``?`` params).
 
     A device is active when an integration synced it (``last_sync``) or the tray
     or MyPortal RMM agent on it checked in, so counts keep working when Tactical
-    RMM and Syncro are disabled. ``alias`` must be the static name or alias of
-    the ``assets`` table in the query; bind the cut-off with
-    :func:`active_since_params`.
+    RMM and Syncro are disabled. ``alias`` names the ``assets`` table in the
+    query (``"assets"`` or ``"a"``); the returned SQL is a fixed literal. Bind
+    the cut-off with :func:`active_since_params`.
     """
-    return (
-        "((" + alias + ".last_sync IS NOT NULL AND " + alias + ".last_sync >= ?)"
-        " OR EXISTS (SELECT 1 FROM tray_devices active_td"
-        " WHERE active_td.asset_id = " + alias + ".id AND active_td.status = 'active'"
-        " AND (active_td.last_seen_utc >= ? OR active_td.ws_last_seen_utc >= ?))"
-        " OR EXISTS (SELECT 1 FROM rmm_agents active_ra"
-        " WHERE active_ra.asset_id = " + alias + ".id AND active_ra.status = 'active'"
-        " AND active_ra.last_seen_utc >= ?))"
-    )
+    return _ACTIVE_SINCE_CLAUSES[alias]
 
 
 def active_since_params(since: datetime) -> tuple[str, str, str, str]:
