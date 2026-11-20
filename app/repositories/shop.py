@@ -11,6 +11,9 @@ import aiomysql
 
 from app.core.database import db
 
+#: Marks an optional update argument the caller did not supply.
+UNSET: Any = object()
+
 _FULLTEXT_MIN_SEARCH_LENGTH = 3
 
 
@@ -403,6 +406,7 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
         "    p.archived,",
         "    p.category_id,",
         "    p.subscription_category_id,",
+        "    p.display_subscription_category_id,",
         "    p.price_monthly_commitment,",
         "    p.price_annual_monthly_payment,",
         "    p.price_annual_annual_payment,",
@@ -1439,6 +1443,7 @@ async def create_product(
     voice_monitor_calls_per_day: int | None = None,
     product_link: str | None = None,
     subscription_per_user: bool = False,
+    display_subscription_category_id: int | None = None,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -1448,8 +1453,9 @@ async def create_product(
                     (name, sku, vendor_sku, microsoft_sku, description, invoice_description, image_url, price, vip_price, stock,
                      category_id, subscription_category_id, commitment_type, payment_frequency,
                      price_monthly_commitment, price_annual_monthly_payment, price_annual_annual_payment,
-                     product_link, voice_monitor_calls_per_day, subscription_per_user)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     product_link, voice_monitor_calls_per_day, subscription_per_user,
+                     display_subscription_category_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     name,
@@ -1472,6 +1478,11 @@ async def create_product(
                     product_link,
                     voice_monitor_calls_per_day,
                     1 if subscription_per_user else 0,
+                    (
+                        None
+                        if subscription_category_id is not None
+                        else display_subscription_category_id
+                    ),
                 ),
             )
             product_id = int(cursor.lastrowid)
@@ -1889,6 +1900,7 @@ async def update_product(
     price_change_date: Any | None = None,
     product_link: str | None = None,
     freight: Mapping[str, Any] | None = None,
+    display_subscription_category_id: int | None | object = UNSET,
 ) -> dict[str, Any] | None:
     # Freight fields (item size, weight and dimensions) are only written when
     # supplied so callers that do not edit them leave stock-feed values intact.
@@ -1898,6 +1910,13 @@ async def update_product(
         for column in _PRODUCT_FREIGHT_COLUMNS:
             freight_assignments += f"{column} = %s,\n"
             freight_params.append(freight.get(column))
+    # A subscription is grouped by its own category, so the display-only
+    # category is cleared; otherwise it is written only when supplied.
+    if subscription_category_id is not None:
+        display_subscription_category_id = None
+    if display_subscription_category_id is not UNSET:
+        freight_assignments += "display_subscription_category_id = %s,\n"
+        freight_params.append(display_subscription_category_id)
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await cursor.execute(
@@ -2668,6 +2687,9 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised["subscription_category_id"] = _coerce_optional_int(
         row.get("subscription_category_id")
     )
+    normalised["display_subscription_category_id"] = _coerce_optional_int(
+        row.get("display_subscription_category_id")
+    )
     normalised["commitment_type"] = row.get("commitment_type")
     normalised["payment_frequency"] = row.get("payment_frequency")
     normalised["voice_monitor_calls_per_day"] = _coerce_optional_int(
@@ -2731,6 +2753,9 @@ def _normalise_product_summary(row: dict[str, Any]) -> dict[str, Any]:
         "category_name": row.get("category_name") or None,
         "subscription_category_id": _coerce_optional_int(
             row.get("subscription_category_id")
+        ),
+        "display_subscription_category_id": _coerce_optional_int(
+            row.get("display_subscription_category_id")
         ),
         "price_monthly_commitment": _coerce_optional_decimal(
             row.get("price_monthly_commitment")

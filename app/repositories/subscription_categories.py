@@ -115,6 +115,13 @@ async def update_category(
 
 async def delete_category(category_id: int) -> None:
     """Delete a subscription category."""
+    # One-time products only reference the category for display (no foreign
+    # key), so detach them before the category goes.
+    await db.execute(
+        "UPDATE shop_products SET display_subscription_category_id = NULL "
+        "WHERE display_subscription_category_id = %s",
+        (category_id,),
+    )
     await db.execute(
         "DELETE FROM subscription_categories WHERE id = %s",
         (category_id,),
