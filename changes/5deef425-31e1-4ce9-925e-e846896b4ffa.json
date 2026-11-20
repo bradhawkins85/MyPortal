@@ -1,0 +1,7 @@
+{
+  "guid": "5deef425-31e1-4ce9-925e-e846896b4ffa",
+  "occurred_at": "2026-11-19T23:42Z",
+  "change_type": "Feature",
+  "summary": "Technicians can now rate AI ticket summaries, resolution steps and reply suggestions, and MyPortal uses those ratings to improve what it writes next time; admins can see and undo the lessons it learns.",
+  "content_hash": "f680fc7529b4f16a9d8dfbb1a1a6b320c9e0d682c750081318567d101b89ce86"
+}

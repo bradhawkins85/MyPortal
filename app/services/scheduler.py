@@ -670,6 +670,17 @@ class SchedulerService:
         # Prune DMARC aggregate (RUA) and forensic (RUF) report rows older than
         # DMARC_RETENTION_DAYS. Runs daily at 04:15 store-local time. No-op when
         # DMARC_RETENTION_DAYS<=0. Mirrors the audit-log prune job above.
+        # Rebuild AI text lessons from technicians' 👎 reasons and prune stored
+        # AI output for deleted tickets. Daily at 03:20 store-local time.
+        if not self._scheduler.get_job("ai-feedback-lessons"):
+            self._scheduler.add_job(
+                self._run_ai_feedback_lessons,
+                CronTrigger(hour=3, minute=20, timezone=self._scheduler.timezone),
+                id="ai-feedback-lessons",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         if not self._scheduler.get_job("dmarc-report-prune"):
             self._scheduler.add_job(
                 self._run_dmarc_report_prune,
@@ -734,6 +745,20 @@ class SchedulerService:
                     )
             except Exception as exc:
                 log_error("Audit log prune failed", error=str(exc))
+
+    async def _run_ai_feedback_lessons(self) -> None:
+        """Rebuild AI text lessons on one worker at a time."""
+        from app.services import ai_text_learning
+
+        async with db.acquire_lock("ai_feedback_lessons", timeout=1) as lock_acquired:
+            if not lock_acquired:
+                log_info("AI feedback lessons already running on another worker, skipping")
+                return
+            try:
+                count = await ai_text_learning.refresh_lessons()
+                log_info("AI feedback lessons rebuilt", active_lessons=count)
+            except Exception as exc:  # pragma: no cover - defensive
+                log_error("AI feedback lessons rebuild failed", error=str(exc))
 
     async def _run_dmarc_report_prune(self) -> None:
         """Prune expired DMARC report rows with a distributed lock.

@@ -25,7 +25,13 @@ LINKS = [
 ]
 
 
-def _get(monkeypatch, rows, overview, links=()):
+LESSONS = [
+    {"feature": "ticket_ai_summary", "reason": "incomplete", "votes": 4, "share": 0.5, "ignored": False},
+    {"feature": "ticket_resolution_steps", "reason": "incorrect", "votes": 3, "share": 0.25, "ignored": True},
+]
+
+
+def _get(monkeypatch, rows, overview, links=(), lessons=()):
     async def fake_require_super_admin_page(request):
         return {"id": 1, "email": "admin@example.com", "is_super_admin": True}, None
 
@@ -41,10 +47,14 @@ def _get(monkeypatch, rows, overview, links=()):
     async def fake_learned_links():
         return list(links)
 
+    async def fake_list_lessons():
+        return list(lessons)
+
     monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin_page)
     monkeypatch.setattr(quality_repo, "aggregate_by_feature", fake_aggregate)
     monkeypatch.setattr(quality_repo, "rating_overview", fake_overview)
     monkeypatch.setattr(quality_repo, "learned_links", fake_learned_links)
+    monkeypatch.setattr(quality_repo, "list_lessons", fake_list_lessons)
     monkeypatch.setattr(main_module.session_manager, "load_session", fake_load_session)
     # No context manager: skip startup/shutdown hooks that need a live database.
     return TestClient(main_module.app).get("/admin/ai-quality")
@@ -178,3 +188,88 @@ async def test_undo_still_works_when_rechecking_links_fails(link_routes, monkeyp
         _FormRequest({"target_type": "knowledge_base", "target_id": "11"}))
     assert response.status_code == 303
     assert link_routes["ignored"] == [("knowledge_base", "11", True)]
+
+
+def test_page_lists_learned_lessons_with_undo_and_restore(monkeypatch):
+    from app.services import ai_text_learning
+
+    html = _get(monkeypatch, ROWS, {"ratings_since": 5, "helpful_pct": 20, "features_rated": 1}, (), LESSONS).text
+    assert 'id="ai-quality-learned-lessons"' in html
+    assert "Ticket AI summary" in html
+    assert ai_text_learning.guidance_for("ticket_ai_summary", "incomplete") in html
+    assert "4 👎 with this reason" in html and "50% of 👎" in html
+    assert 'action="/admin/ai-quality/lessons/ignore"' in html
+    assert 'action="/admin/ai-quality/lessons/restore"' in html
+    assert 'name="feature" value="ticket_ai_summary"' in html and 'name="reason" value="incomplete"' in html
+
+
+def test_learned_lessons_empty_state(monkeypatch):
+    html = _get(monkeypatch, [], {"ratings_since": 0, "helpful_pct": None, "features_rated": 0}).text
+    assert "No lessons yet. Lessons appear when technicians give the same reason for 👎 at least three times." in html
+
+
+@pytest.fixture
+def lesson_routes(monkeypatch):
+    calls = {"ignored": [], "audit": []}
+
+    async def admin(request):
+        return {"id": 1, "is_super_admin": True}, None
+
+    async def set_ignored(feature, reason, *, ignored):
+        calls["ignored"].append((feature, reason, ignored))
+        return 1
+
+    async def audit(**kwargs):
+        calls["audit"].append(kwargs)
+
+    real_flash_redirect = main_module.flash_redirect
+
+    def flash(url, message, variant="info", **kwargs):
+        calls["flash"] = (message, variant)
+        return real_flash_redirect(url, message, variant, **kwargs)
+
+    monkeypatch.setattr(main_module, "_require_super_admin_page", admin)
+    monkeypatch.setattr(quality_repo, "set_lesson_ignored", set_ignored)
+    monkeypatch.setattr(main_module.audit_service, "record", audit)
+    monkeypatch.setattr(main_module, "flash_redirect", flash)
+    return calls
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("route,ignored,action,message", [
+    ("admin_ai_quality_ignore_lesson", True, "ai_quality.lesson.ignore", "MyPortal will stop using this lesson."),
+    ("admin_ai_quality_restore_lesson", False, "ai_quality.lesson.restore", "MyPortal will use this lesson again."),
+])
+async def test_lesson_undo_and_restore_routes(lesson_routes, route, ignored, action, message):
+    response = await getattr(main_module, route)(_FormRequest({"feature": "ticket_ai_summary",
+                                                               "reason": "incomplete"}))
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/ai-quality#ai-quality-learned-lessons"
+    assert lesson_routes["ignored"] == [("ticket_ai_summary", "incomplete", ignored)]
+    assert lesson_routes["audit"][0]["action"] == action
+    assert lesson_routes["audit"][0]["metadata"] == {"feature": "ticket_ai_summary", "reason": "incomplete"}
+    assert lesson_routes["flash"] == (message, "success")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("form", [{"feature": "ticket_ai_summary", "reason": "made-up"},
+                                  {"feature": "", "reason": "incomplete"},
+                                  {"feature": "x" * 41, "reason": "incomplete"}])
+async def test_lesson_routes_reject_bad_input(lesson_routes, form):
+    await main_module.admin_ai_quality_ignore_lesson(_FormRequest(form))
+    assert lesson_routes["ignored"] == []
+    assert lesson_routes["flash"][1] == "error"
+
+
+@pytest.mark.anyio
+async def test_lesson_routes_require_super_admin(lesson_routes, monkeypatch):
+    from fastapi.responses import RedirectResponse
+
+    async def not_admin(request):
+        return None, RedirectResponse("/login", status_code=303)
+
+    monkeypatch.setattr(main_module, "_require_super_admin_page", not_admin)
+    response = await main_module.admin_ai_quality_ignore_lesson(
+        _FormRequest({"feature": "ticket_ai_summary", "reason": "incomplete"}))
+    assert response.headers["location"] == "/login"
+    assert lesson_routes["ignored"] == []

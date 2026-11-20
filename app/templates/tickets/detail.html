@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/mobile.html" import mobile_collapsible %}
+{% from "macros/ai_rating.html" import ai_rating %}
 
 {% block header_title %}
   <div class="page-header-bar page-header-bar--record">
@@ -362,6 +363,9 @@
                   <button class="button button--secondary" type="submit" formaction="/admin/tickets/{{ ticket.id }}/resolution-steps/reprocess" data-resolution-reprocess>Regenerate with AI</button>
                 </div>
               </form>
+              {% if ai_rating_ids is defined %}
+                {{ ai_rating(ai_rating_ids.resolution_steps, ai_rating_ids.resolution_steps_rating, return_to="/tickets/" ~ ticket.id, csrf_token=csrf_token, label="AI resolution steps") }}
+              {% endif %}
             </div>
           </details>
           {% endif %}

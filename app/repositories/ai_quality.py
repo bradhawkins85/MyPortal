@@ -386,3 +386,132 @@ async def learned_links() -> list[dict[str, Any]]:
     } for row in rows]
     links.sort(key=lambda link: (-link["unhelpful"], -link["helpful"], link["target_type"], link["target_id"]))
     return links
+
+
+_NO_SUBJECT = "\x00none"
+# AI text features that learn from rated examples and lessons. Their outputs
+# (and only theirs) are pruned/expired; link-learning votes are kept.
+TEXT_LEARNING_FEATURES = ("ticket_ai_summary", "ticket_resolution_steps", "ticket_reply_suggestions")
+
+
+async def rated_examples(feature: str, company_id: int, *, exclude_subject_id: str | None, rating: str,
+                         limit: int, since: datetime) -> list[dict[str, Any]]:
+    """A company's own technician-rated outputs, newest first (latest technician vote per output)."""
+    # Scoped by the ticket's *current* company: a ticket moved to another
+    # company must never feed its old company's prompts.
+    rows = await db.fetch_all("""SELECT o.id AS output_id, o.subject_id, o.output_text, f.rating, f.reason
+        FROM ai_outputs o JOIN ai_output_feedback f ON f.response_id = o.id
+        JOIN tickets t ON t.id = o.subject_id
+        WHERE o.feature = ? AND o.subject_type = 'ticket' AND t.company_id = ? AND o.subject_id <> ? AND f.rating = ?
+          AND o.output_text IS NOT NULL AND o.output_text <> '' AND f.updated_at >= ?
+          AND f.id = (SELECT MAX(latest.id) FROM ai_output_feedback latest
+                      WHERE latest.response_id = o.id AND latest.is_technician = 1
+                        AND latest.learning_ignored_at IS NULL)
+        ORDER BY f.updated_at DESC, f.id DESC
+        LIMIT ?""", (feature, company_id, str(exclude_subject_id) if exclude_subject_id is not None else _NO_SUBJECT,
+                     rating, since.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), int(limit)))
+    return [dict(row) for row in rows]
+
+
+async def downvote_reason_counts(since: datetime) -> list[dict[str, Any]]:
+    """Technician 👎 per feature and reason (counts only, never text)."""
+    cutoff = since.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    totals = {row["feature"]: int(row["votes"] or 0) for row in await db.fetch_all("""SELECT o.feature,
+        COUNT(*) AS votes FROM ai_outputs o JOIN ai_output_feedback f ON f.response_id = o.id
+        WHERE f.rating = 'down' AND f.is_technician = 1 AND f.learning_ignored_at IS NULL AND f.updated_at >= ?
+        GROUP BY o.feature""", (cutoff,))}
+    rows = await db.fetch_all("""SELECT o.feature, f.reason, COUNT(*) AS votes
+        FROM ai_outputs o JOIN ai_output_feedback f ON f.response_id = o.id
+        WHERE f.rating = 'down' AND f.is_technician = 1 AND f.learning_ignored_at IS NULL AND f.updated_at >= ?
+          AND f.reason IS NOT NULL AND f.reason <> ''
+        GROUP BY o.feature, f.reason""", (cutoff,))
+    return [{"feature": row["feature"], "reason": row["reason"], "votes": int(row["votes"] or 0),
+             "feature_total": totals.get(row["feature"], 0)} for row in rows]
+
+
+async def replace_lessons(rows: list[dict[str, Any]]) -> None:
+    """Store the current lessons; others become inactive. Admin Undo (ignored_at) is kept."""
+    wanted = {(str(row["feature"]), str(row["reason"])): row for row in rows}
+    existing = {(str(row["feature"]), str(row["reason"])): int(row["id"]) for row in await db.fetch_all(
+        "SELECT id, feature, reason FROM ai_feedback_lessons")}
+    for key, row in wanted.items():
+        values = (int(row["votes"]), round(float(row["share"]), 4), 1 if row.get("active", True) else 0)
+        if key in existing:
+            await db.execute("UPDATE ai_feedback_lessons SET votes = ?, share = ?, active = ? WHERE id = ?",
+                             values + (existing[key],))
+        else:
+            await db.execute("INSERT INTO ai_feedback_lessons (feature, reason, votes, share, active) "
+                             "VALUES (?, ?, ?, ?, ?)", key + values)
+    for key, lesson_id in existing.items():
+        if key not in wanted:
+            await db.execute("UPDATE ai_feedback_lessons SET active = 0 WHERE id = ?", (lesson_id,))
+
+
+async def active_lessons(feature: str) -> list[dict[str, Any]]:
+    rows = await db.fetch_all("""SELECT reason, votes, share FROM ai_feedback_lessons
+        WHERE feature = ? AND active = 1 AND ignored_at IS NULL ORDER BY votes DESC, reason""", (feature,))
+    return [dict(row) for row in rows]
+
+
+async def list_lessons() -> list[dict[str, Any]]:
+    rows = await db.fetch_all("""SELECT feature, reason, votes, share, ignored_at FROM ai_feedback_lessons
+        WHERE active = 1 ORDER BY feature, votes DESC, reason""")
+    return [{"feature": row["feature"], "reason": row["reason"], "votes": int(row["votes"] or 0),
+             "share": float(row["share"] or 0), "ignored": row["ignored_at"] is not None} for row in rows]
+
+
+async def set_lesson_ignored(feature: str, reason: str, *, ignored: bool) -> int:
+    if ignored:
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        return await db.execute_rowcount(
+            "UPDATE ai_feedback_lessons SET ignored_at = ? WHERE feature = ? AND reason = ? AND ignored_at IS NULL",
+            (stamp, feature, reason),
+        )
+    return await db.execute_rowcount(
+        "UPDATE ai_feedback_lessons SET ignored_at = NULL WHERE feature = ? AND reason = ? AND ignored_at IS NOT NULL",
+        (feature, reason),
+    )
+
+
+async def prune_orphan_ticket_outputs() -> int:
+    """Delete stored AI text (and its votes) for tickets that no longer exist.
+
+    Only text-learning outputs: link-learning votes on Related items are kept.
+    """
+    removed = 0
+    for feature in TEXT_LEARNING_FEATURES:
+        removed += await db.execute_rowcount("""DELETE FROM ai_outputs WHERE feature = ? AND subject_type = 'ticket'
+            AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.id = ai_outputs.subject_id)""", (feature,))
+    return removed
+
+
+async def prune_unrated_text_outputs(older_than: datetime) -> int:
+    """Delete stored AI text nobody rated once it is older than the cutoff."""
+    cutoff = older_than.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    removed = 0
+    for feature in TEXT_LEARNING_FEATURES:
+        removed += await db.execute_rowcount("""DELETE FROM ai_outputs WHERE feature = ? AND created_at < ?
+            AND NOT EXISTS (SELECT 1 FROM ai_output_feedback f WHERE f.response_id = ai_outputs.id)""",
+                                             (feature, cutoff))
+    return removed
+
+
+async def clear_old_output_text(older_than: datetime) -> int:
+    """Forget the text of rated outputs whose votes are all older than the cutoff; votes stay for reporting."""
+    cutoff = older_than.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    cleared = 0
+    for feature in TEXT_LEARNING_FEATURES:
+        cleared += await db.execute_rowcount("""UPDATE ai_outputs SET output_text = NULL
+            WHERE feature = ? AND output_text IS NOT NULL
+              AND EXISTS (SELECT 1 FROM ai_output_feedback f WHERE f.response_id = ai_outputs.id)
+              AND NOT EXISTS (SELECT 1 FROM ai_output_feedback f WHERE f.response_id = ai_outputs.id
+                              AND f.updated_at >= ?)""", (feature, cutoff))
+    return cleared
+
+
+
+async def user_rating(response_id: int, user_id: int) -> str | None:
+    row = await db.fetch_one(
+        "SELECT rating FROM ai_output_feedback WHERE response_id = ? AND user_id = ?", (response_id, user_id)
+    )
+    return str(row["rating"]) if row else None

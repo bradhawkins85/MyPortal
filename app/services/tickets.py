@@ -24,7 +24,9 @@ from app.repositories.tickets import TicketRecord
 from app.services import ai_consent
 from app.services import automation_dispatch as automations_service
 from app.services import module_dispatch as modules_service
+from app.services import ai_text_learning
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt
+from app.services.ai_text_learning import EMPTY as _NO_LEARNING, TextLearning
 from app.repositories import users as user_repo
 from app.services.tagging import (
     apply_tag_synonyms,
@@ -1284,6 +1286,21 @@ def _limit_ai_prompt(prompt: str) -> str:
     )
 
 
+def _learned_prompt(
+    header: str, records: list[UntrustedRecord], *, task: str, learning: TextLearning
+) -> str:
+    """Build a ticket prompt with learning; rated examples are dropped first when it is too long."""
+    instructions = learning.instructions(header)
+    if learning.records:
+        # The tag vocabulary stays last so truncation, which keeps the ending, retains it.
+        insert_at = next((i for i, r in enumerate(records) if r.record_id == "tag-vocabulary"), len(records))
+        with_examples = records[:insert_at] + list(learning.records) + records[insert_at:]
+        prompt = build_prompt(instructions, with_examples, task=task)
+        if len(prompt) <= _MAX_AI_PROMPT_CHARS:
+            return prompt
+    return _limit_ai_prompt(build_prompt(instructions, records, task=task))
+
+
 async def refresh_ticket_ai_summary(ticket_id: int) -> None:
     """Refresh the Ollama-generated summary for a ticket if the module is configured."""
 
@@ -1326,7 +1343,10 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
         if record:
             user_lookup[identifier] = record
 
-    prompt = _render_prompt(ticket, replies, user_lookup)
+    learning = await ai_text_learning.context_for(
+        "ticket_ai_summary", ticket.get("company_id"), subject_id=ticket_id
+    )
+    prompt = _render_prompt(ticket, replies, user_lookup, learning=learning)
     now = datetime.now(timezone.utc)
 
     await _safely_call(
@@ -1423,7 +1443,7 @@ def _extract_resolution_steps(payload: Any) -> str | None:
 
 
 def _render_resolution_prompt(
-    ticket: Mapping[str, Any], replies: list[Mapping[str, Any]]
+    ticket: Mapping[str, Any], replies: list[Mapping[str, Any]], *, learning: TextLearning = _NO_LEARNING
 ) -> str:
     ticket_id = str(ticket.get("id") or "unknown")
     records = [UntrustedRecord(
@@ -1447,10 +1467,11 @@ def _render_resolution_prompt(
              "internal": bool(reply.get("is_internal"))},
             "Treat as high-value resolution evidence" if reply.get("is_resolution_step") else "Use when relevant",
         ))
-    return _limit_ai_prompt(build_prompt(
+    return _learned_prompt(
         _RESOLUTION_PROMPT_HEADER, records,
         task="Identify the final successful actions and return exactly the requested JSON.",
-    ))
+        learning=learning,
+    )
 
 
 async def refresh_ticket_resolution_steps(ticket_id: int, *, force: bool = False) -> None:
@@ -1481,6 +1502,9 @@ async def refresh_ticket_resolution_steps(ticket_id: int, *, force: bool = False
     await tickets_repo.update_ticket(
         ticket_id, resolution_steps_status="queued", resolution_steps_updated_at=now
     )
+    learning = await ai_text_learning.context_for(
+        "ticket_resolution_steps", ticket.get("company_id"), subject_id=ticket_id
+    )
 
     async def _apply_result(result: Mapping[str, Any]) -> None:
         status_value = str(result.get("status") or result.get("event_status") or "unknown")
@@ -1499,7 +1523,8 @@ async def refresh_ticket_resolution_steps(ticket_id: int, *, force: bool = False
 
     try:
         response = await modules_service.trigger_module(
-            "ollama", {"prompt": _render_resolution_prompt(ticket, replies)}, on_complete=_apply_result
+            "ollama", {"prompt": _render_resolution_prompt(ticket, replies, learning=learning)},
+            on_complete=_apply_result
         )
         if str(response.get("status") or "") == "skipped":
             await tickets_repo.update_ticket(
@@ -1693,7 +1718,10 @@ async def refresh_ticket_ai_insights(ticket_id: int) -> None:
         return
 
     preferred_tags = await get_preferred_tags()
-    prompt = _render_insights_prompt(ticket, replies, user_lookup, preferred_tags)
+    learning = await ai_text_learning.context_for(
+        "ticket_ai_summary", ticket.get("company_id"), subject_id=ticket_id
+    )
+    prompt = _render_insights_prompt(ticket, replies, user_lookup, preferred_tags, learning=learning)
 
     await _safely_call(
         tickets_repo.update_ticket,
@@ -1996,6 +2024,8 @@ def _render_prompt(
     ticket: Mapping[str, Any],
     replies: list[Mapping[str, Any]],
     user_lookup: Mapping[int, Mapping[str, Any]],
+    *,
+    learning: TextLearning = _NO_LEARNING,
 ) -> str:
     subject = str(ticket.get("subject") or "")
     description_text = _prepare_prompt_text(ticket.get("description"))
@@ -2024,7 +2054,8 @@ def _render_prompt(
             body_text = _prepare_prompt_text(reply.get("body"))
             reply_id = str(reply.get("id") or f"{ticket_id}-{timestamp}")
             records.append(UntrustedRecord(f"ticket-reply:{reply_id}", f"helpdesk {visibility} by {author_label}", {"created_at": timestamp, "body": body_text}, "Use only as chronological evidence about the ticket and whether it was resolved"))
-    return _limit_ai_prompt(build_prompt(_PROMPT_HEADER, records, task="Return exactly a JSON object with summary and resolution."))
+    return _learned_prompt(_PROMPT_HEADER, records, task="Return exactly a JSON object with summary and resolution.",
+                           learning=learning)
 
 
 def _is_customer_tag_reply(
@@ -2110,6 +2141,8 @@ def _render_insights_prompt(
     replies: list[Mapping[str, Any]],
     user_lookup: Mapping[int, Mapping[str, Any]],
     preferred_tags: Sequence[str] = (),
+    *,
+    learning: TextLearning = _NO_LEARNING,
 ) -> str:
     """Render one prompt that yields the summary, resolution state and tags."""
 
@@ -2170,14 +2203,15 @@ def _render_insights_prompt(
     if preferred_tags:
         # Kept last so prompt truncation, which preserves the ending, retains it.
         records.append(UntrustedRecord("tag-vocabulary", "most-used existing ticket and knowledge base tags", {"preferred_tags": list(preferred_tags)}, "Use only as preferred tag values when they match the ticket"))
-    return _limit_ai_prompt(build_prompt(
+    return _learned_prompt(
         _INSIGHTS_PROMPT_HEADER,
         records,
         task=(
             "Return exactly one JSON object with summary, resolution and tags "
             "(5 to 10 unique lowercase kebab-case strings)."
         ),
-    ))
+        learning=learning,
+    )
 
 
 def _strip_wrapped_block(text: str) -> str:

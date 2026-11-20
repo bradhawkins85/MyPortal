@@ -22,6 +22,8 @@ from app.repositories import tickets as tickets_repo
 from app.services import ai_consent
 from app.services import modules as modules_service
 from app.services import rag_index as rag_index_service
+from app.services import ai_text_learning
+from app.services.ai_text_learning import EMPTY as _NO_LEARNING, TextLearning
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt, validate_references
 from app.services.rag_permissions import can_access_candidate
 from app.services.rag_urls import canonical_source_url
@@ -173,7 +175,9 @@ async def collect_reply_sources(
     return sources
 
 
-def build_reply_prompt(ticket: Mapping[str, Any], sources: Sequence[ReplySource]) -> str:
+def build_reply_prompt(
+    ticket: Mapping[str, Any], sources: Sequence[ReplySource], *, learning: TextLearning = _NO_LEARNING
+) -> str:
     records = [
         UntrustedRecord(
             "current-ticket",
@@ -200,7 +204,7 @@ def build_reply_prompt(ticket: Mapping[str, Any], sources: Sequence[ReplySource]
                 "Use as resolution evidence and cite by record_id",
             )
         )
-    return build_prompt(_INSTRUCTIONS, records, task=_TASK)
+    return build_prompt(learning.instructions(_INSTRUCTIONS), [*records, *learning.records], task=_TASK)
 
 
 def _response_text(result: Mapping[str, Any]) -> str:
@@ -231,7 +235,10 @@ async def suggest_reply(
         raise ReplySuggestionError(
             "No direct matches or known issues with resolution steps are linked to this ticket yet."
         )
-    prompt = build_reply_prompt(ticket, sources)
+    learning = await ai_text_learning.context_for(
+        "ticket_reply_suggestions", ticket.get("company_id"), subject_id=ticket_id
+    )
+    prompt = build_reply_prompt(ticket, sources, learning=learning)
     try:
         result = await modules_service.trigger_module(
             "ollama",

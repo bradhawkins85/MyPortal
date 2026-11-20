@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_overflow %}
+{% from "macros/ai_rating.html" import ai_rating %}
 {% import "rmm/_macros.html" as rmm_ui %}
 
 
@@ -902,6 +903,9 @@
                   {% else %}
                     <p class="card__empty">AI summary is not currently available.</p>
                   {% endif %}
+                  {% if ai_rating_ids is defined %}
+                    {{ ai_rating(ai_rating_ids.summary, ai_rating_ids.summary_rating, return_to="/admin/tickets/" ~ ticket.id, csrf_token=csrf_token, label="AI summary") }}
+                  {% endif %}
 
                 </div>
               </div>
@@ -953,6 +957,9 @@
                   <button class="button button--secondary" type="submit" formaction="/admin/tickets/{{ ticket.id }}/resolution-steps/reprocess" data-resolution-reprocess>Regenerate with AI</button>
                 </div>
               </form>
+              {% if ai_rating_ids is defined %}
+                {{ ai_rating(ai_rating_ids.resolution_steps, ai_rating_ids.resolution_steps_rating, return_to="/admin/tickets/" ~ ticket.id, csrf_token=csrf_token, label="AI resolution steps") }}
+              {% endif %}
             </div>
           </details>
           {% endif %}
@@ -1666,6 +1673,12 @@
                 </div>
               </div>
             </form>
+            {% if ticket_suggest_reply_available %}
+              {# Outside the reply form (forms can't nest); ticket_detail.js reveals it with the draft's id. #}
+              <div class="ticket-reply-suggestion__rating" data-ticket-suggest-reply-rating hidden>
+                {{ ai_rating("pending", label="Suggested reply", csrf_token=csrf_token) }}
+              </div>
+            {% endif %}
             <dialog class="ticket-page-clock-dialog" data-ticket-page-clock-dialog aria-labelledby="ticket-page-clock-history-title">
               <div class="ticket-page-clock-dialog__header">
                 <h3 id="ticket-page-clock-history-title">Ticket clock history</h3>

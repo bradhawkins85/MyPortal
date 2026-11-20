@@ -3988,6 +3988,39 @@
     const statusEl = panel.querySelector('[data-ticket-suggest-reply-status]');
     const sourcesEl = panel.querySelector('[data-ticket-suggest-reply-sources]');
     const sourceList = panel.querySelector('[data-ticket-suggest-reply-source-list]');
+    const ratingEl = document.querySelector('[data-ticket-suggest-reply-rating]');
+
+    function showSuggestionRating(responseId) {
+      if (!(ratingEl instanceof HTMLElement)) {
+        return;
+      }
+      const form = ratingEl.querySelector('form[data-ai-rating]');
+      const idInput = form ? form.querySelector('input[name="response_id"]') : null;
+      if (!form || !idInput || !responseId) {
+        ratingEl.hidden = true;
+        return;
+      }
+      idInput.value = String(responseId);
+      form.querySelectorAll('[data-ai-rating-vote]').forEach((vote) => vote.setAttribute('aria-pressed', 'false'));
+      // A new draft starts a new rating: no reason or comment carries over from the last one.
+      const why = form.querySelector('[data-ai-rating-why]');
+      if (why) {
+        why.open = false;
+      }
+      form.querySelectorAll('[data-ai-rating-reason]').forEach((reason) => { reason.checked = false; });
+      const comment = form.querySelector('[data-ai-rating-comment]');
+      if (comment) {
+        comment.value = '';
+      }
+      const status = form.querySelector('[data-ai-rating-status]');
+      if (status) {
+        status.textContent = '';
+      }
+      ratingEl.hidden = false;
+      if (window.MyPortalAiRating) {
+        window.MyPortalAiRating.init(ratingEl);
+      }
+    }
     const editor = document.querySelector('#ticket-reply-form [data-rich-text-content]');
     const fallback = document.querySelector('#ticket-reply-form [data-rich-text-value]');
 
@@ -4075,6 +4108,7 @@
         insertDraft(String(payload.draft || ''));
         setStatus('');
         renderSources(Array.isArray(payload.sources) ? payload.sources : []);
+        showSuggestionRating(payload.quality_response_id);
       } catch (error) {
         setStatus(error instanceof Error ? error.message : 'Unable to draft a reply.');
       } finally {

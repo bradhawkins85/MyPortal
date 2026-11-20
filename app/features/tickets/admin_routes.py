@@ -54,6 +54,7 @@ from app.repositories import email_blocklist as email_blocklist_repo
 from app.repositories import attachment_blocklist as attachment_blocklist_repo
 from app.repositories import approval_matrix as approval_matrix_repo
 from app.repositories import rag_index as rag_index_repo
+from app.repositories import ai_quality as quality_repo
 from app.repositories import rag_relationships as rag_relationship_repo
 from app.services import ai_learning
 from app.repositories import users as user_repo
@@ -789,7 +790,20 @@ async def admin_suggest_ticket_reply(ticket_id: int, request: Request):
             {"detail": "Could not generate a reply suggestion for this ticket."},
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
-    return JSONResponse(result)
+    try:
+        quality_response_id = await quality_repo.record_output(
+            feature="ticket_reply_suggestions",
+            user_id=int(current_user["id"]),
+            company_id=ticket.get("company_id"),
+            subject_type="ticket",
+            subject_id=ticket_id,
+            output_text=str(result.get("draft") or ""),
+            model=result.get("model"),
+        )
+    except Exception as exc:  # the draft still goes back; it just can't be rated
+        log_error("Failed to record reply suggestion for rating", ticket_id=ticket_id, error=str(exc))
+        quality_response_id = None
+    return JSONResponse({**result, "quality_response_id": quality_response_id})
 
 
 async def _ticket_rag_document_id(ticket_id: int) -> int | None:

@@ -219,6 +219,9 @@ async def test_render_ticket_detail_with_tactical_module_and_ai_tags(monkeypatch
     ]
     assert captured["extra"]["ticket_requester_phone_display"] == "0412 345 678"
     assert captured["extra"]["ticket_company_phone_display"] == "02 9876 5432"
+    # No AI summary or AI steps on this ticket, so nothing to rate.
+    assert captured["extra"]["ai_rating_ids"]["summary"] is None
+    assert captured["extra"]["ai_rating_ids"]["resolution_steps"] is None
 
 
 @pytest.mark.anyio("asyncio")
