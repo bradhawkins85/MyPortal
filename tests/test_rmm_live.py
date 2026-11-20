@@ -261,3 +261,25 @@ async def test_process_list_escapes_device_supplied_fields():
     assert "' + (p.threads || '') + '" not in js
     assert "escapeHtml(String(p.pid ?? ''))" in js
     assert "escapeHtml(String(p.threads || ''))" in js
+
+
+@pytest.mark.anyio
+async def test_asset_live_tools_action_opens_in_a_new_tab():
+    """Live tools run beside the asset page, so the header link opens a new tab."""
+
+    from jinja2 import Environment, FileSystemLoader
+
+    root = ROOT / "app/templates"
+    source = (root / "assets/detail.html").read_text()
+    fragment = source.split("{% block header_actions %}", 1)[1].split("{% endblock %}", 1)[0]
+    env = Environment(loader=FileSystemLoader(root))
+    template = env.from_string('{% from "macros/header.html" import page_header_actions with context %}' + fragment)
+    html = template.render(
+        asset={"id": 10, "company_id": 1},
+        rmm={"can_run": True, "agent": {"os": "windows"}, "live_tools": True},
+        can_edit=False,
+        customer_safe=False,
+    )
+    link = html[: html.index("Live tools")].rsplit("<a", 1)[1]
+    assert 'href="/rmm/assets/10/live"' in link
+    assert 'target="_blank"' in link and 'rel="noopener"' in link
