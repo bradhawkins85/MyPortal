@@ -12,6 +12,7 @@ from collections.abc import Iterable, Mapping, MutableMapping
 from datetime import datetime, timezone
 from typing import Any
 
+from app.core.logging import log_warning
 from app.repositories import tray as tray_repo
 
 
@@ -129,13 +130,20 @@ async def apply_tray_presence(
     ``last_sync`` becomes the tray agent's last check-in and ``last_user`` its
     signed-in user, when the device has a tray agent. Assets whose
     ``provenance`` is ``manual`` keep their technician-entered status. Does
-    nothing while Tactical RMM is enabled.
+    nothing while Tactical RMM is enabled, and leaves ``assets`` untouched if
+    the tray agent lookup fails.
     """
     records = [asset for asset in assets if asset.get(id_key)]
     if not records or await module_enabled("tacticalrmm"):
         return
     syncro_enabled = await module_enabled("syncro") if "status" in fields else True
-    devices = await tray_repo.list_active_devices_by_asset_ids([int(a[id_key]) for a in records])
+    try:
+        devices = await tray_repo.list_active_devices_by_asset_ids(
+            [int(a[id_key]) for a in records]
+        )
+    except Exception as exc:  # noqa: BLE001 - presence is a best-effort overlay
+        log_warning("Tray presence lookup failed; keeping stored asset values", error=str(exc))
+        return
     for asset in records:
         device = devices.get(int(asset[id_key]))
         if "status" in fields and asset.get("provenance") != "manual":
