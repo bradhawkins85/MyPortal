@@ -457,3 +457,14 @@ async def test_purge_discovered_devices_uses_company_scope(monkeypatch):
     purge.assert_awaited_once_with(42)
     assert response.status_code == 303
     assert b"Purged 2 out-of-scope discovered devices" in response.body
+
+
+def test_discovered_devices_offer_port_check():
+    assert 'id="port-check-modal" hidden' in TEMPLATE
+    assert 'role="dialog" aria-modal="true" aria-labelledby="port-check-title"' in TEMPLATE
+    assert 'data-port-check-open="{{ device.id }}"' in TEMPLATE
+    assert 'aria-haspopup="dialog" aria-controls="port-check-modal"' in TEMPLATE
+    assert 'action="/devices/discovered/{{ device.id }}/port-check"' in TEMPLATE
+    assert 'data-port-check-chip="{{ device.id }}"' in TEMPLATE
+    assert 'role="status" aria-live="polite" data-port-check-results' in TEMPLATE
+    assert "Up to 1,024 ports" in TEMPLATE
