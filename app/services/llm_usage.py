@@ -42,6 +42,7 @@ class LLMFeature:
 # Only historical rows may use this key. New requests always keep a caller.
 UNATTRIBUTED_FEATURE = "other"
 DIRECT_LLM_FEATURE = "app.services.modules._invoke_ollama"
+SPEECH_TRANSCRIPTION_FEATURE = "speech_transcription"
 
 # Every MyPortal function that sends requests to the LLM. ``callers`` are the
 # (module, function) frames that identify the feature on the call stack;
@@ -161,6 +162,10 @@ FEATURES: tuple[LLMFeature, ...] = (
         "call_summaries", "Call recording summaries",
         "Summarises call recording transcriptions.",
         callers=(("app.services.call_recordings", "summarize_transcription"),),
+    ),
+    LLMFeature(
+        SPEECH_TRANSCRIPTION_FEATURE, "Speech transcription",
+        "Transcribes call recordings, ticket voicemail attachments and voice monitor calls.",
     ),
     LLMFeature(
         "shipment_tracking", "Shipment tracking extraction",
