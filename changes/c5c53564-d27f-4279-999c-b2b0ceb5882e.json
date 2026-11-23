@@ -1,0 +1,7 @@
+{
+  "guid": "c5c53564-d27f-4279-999c-b2b0ceb5882e",
+  "occurred_at": "2026-11-23T02:01Z",
+  "change_type": "Fix",
+  "summary": "Pressing Scan Now on a subnet scanner now starts a network scan straight away instead of waiting for the next scheduled scan (requires the updated tray agent).",
+  "content_hash": "2942d8b5e07fe7a88508bf53f55b30d606be8d6d0f4056727ebfa0dba1ae3460"
+}

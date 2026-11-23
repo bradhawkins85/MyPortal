@@ -427,13 +427,6 @@ async def _auto_assign_device_type(device_id: int) -> None:
     )
 
 
-_PORT_CHECK_COLUMNS = (
-    "id, company_id, network_device_id, scanner_tray_device_id, command_id, "
-    "ip_address, ports, status, open_ports, checked_count, error, "
-    "requested_by_user_id, requested_at, completed_at"
-)
-
-
 async def get_device_for_port_check(
     company_id: int, device_id: int
 ) -> dict[str, Any] | None:
@@ -493,7 +486,9 @@ async def get_latest_port_check(
     company_id: int, network_device_id: int
 ) -> dict[str, Any] | None:
     return await db.fetch_one(
-        "SELECT " + _PORT_CHECK_COLUMNS + " FROM network_device_port_checks "
+        "SELECT id, company_id, network_device_id, scanner_tray_device_id, command_id, "
+        "ip_address, ports, status, open_ports, checked_count, error, "
+        "requested_by_user_id, requested_at, completed_at FROM network_device_port_checks "
         "WHERE company_id=%s AND network_device_id=%s ORDER BY id DESC LIMIT 1",
         (company_id, network_device_id),
     )
@@ -501,7 +496,9 @@ async def get_latest_port_check(
 
 async def latest_port_checks_by_device(company_id: int) -> dict[int, dict[str, Any]]:
     rows = await db.fetch_all(
-        "SELECT " + _PORT_CHECK_COLUMNS + " FROM network_device_port_checks "
+        "SELECT id, company_id, network_device_id, scanner_tray_device_id, command_id, "
+        "ip_address, ports, status, open_ports, checked_count, error, "
+        "requested_by_user_id, requested_at, completed_at FROM network_device_port_checks "
         "WHERE company_id=%s ORDER BY id",
         (company_id,),
     )
@@ -512,7 +509,9 @@ async def get_port_check_for_scanner(
     check_id: int, scanner_tray_device_id: int
 ) -> dict[str, Any] | None:
     return await db.fetch_one(
-        "SELECT " + _PORT_CHECK_COLUMNS + " FROM network_device_port_checks "
+        "SELECT id, company_id, network_device_id, scanner_tray_device_id, command_id, "
+        "ip_address, ports, status, open_ports, checked_count, error, "
+        "requested_by_user_id, requested_at, completed_at FROM network_device_port_checks "
         "WHERE id=%s AND scanner_tray_device_id=%s",
         (check_id, scanner_tray_device_id),
     )
