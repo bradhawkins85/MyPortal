@@ -2034,6 +2034,15 @@ cmd_web_upgrades() {
   esac
 }
 
+timestamp_lines() {
+  # Prefix each line with the UTC time it was produced, so the System updates
+  # page shows how long each step took and whether one is stuck.
+  local TZ=UTC line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '[%(%Y-%m-%dT%H:%M:%SZ)T] %s\n' -1 "$line"
+  done
+}
+
 report_update() {
   # report_update FILE UPDATE_ID STATUS [--error MESSAGE]
   # Record progress in the portal's update history, with FILE as the output.
@@ -2072,7 +2081,7 @@ cmd_process_requests() {
   log=$(mktemp)
   before=$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)
   info "Upgrade ${update_id} requested from the portal."
-  printf 'Picked up by the Docker host at %s. Installed release: %s.\n' "$(date -u +%FT%TZ)" "$before" >"$log"
+  printf 'Picked up by the Docker host. Installed release: %s.\n' "$before" | timestamp_lines >"$log"
   report_update "$log" "$update_id" running
   (
     # Finish an in-flight report before exiting so it cannot land after the
@@ -2087,7 +2096,9 @@ cmd_process_requests() {
 
   script="$INSTALLED_SCRIPT"
   [[ -x "$script" ]] || script=$(readlink -f "$0")
-  MYPORTAL_DIR="$MYPORTAL_DIR" "$script" upgrade --yes >>"$log" 2>&1 || status=$?
+  # PIPESTATUS is read in the same "||" list, before "set -e" can act on it.
+  MYPORTAL_DIR="$MYPORTAL_DIR" "$script" upgrade --yes 2>&1 | timestamp_lines >>"$log" \
+    || status=${PIPESTATUS[0]}
   kill "$progress_pid" 2>/dev/null || true
   wait "$progress_pid" 2>/dev/null || true
   cat "$log"
