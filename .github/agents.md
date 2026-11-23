@@ -353,30 +353,6 @@ Follow these principles:
   in `main.js` localises them. Never use `strftime` in templates for
   user-facing dates.
 
-## Change Log Management
-
-### Creating Change Log Entries
-
-- Maintain a change log for each new feature or fix
-- Store change logs in the `changes/` folder
-- Each change should generate a new file with a GUID as the filename
-- Import change log files to the `change_log` database table
-- Migrate historical entries from `changes.md` to the database
-
-### Change Log Format
-
-Change log files must use this JSON format:
-
-```json
-{
-  "guid": "",
-  "occurred_at": "",
-  "change_type": "",
-  "summary": "",
-  "content_hash": ""
-}
-```
-
 ## Integration Guidelines
 
 ### External APIs
