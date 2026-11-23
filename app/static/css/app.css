@@ -24251,3 +24251,20 @@ a.sch-item__company:focus-visible {
 .aql-item__meta {
   margin: 0;
 }
+
+/* Automations list: import modal summary */
+.automation-import__summary {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-gap-tight) var(--space-gap-base);
+  margin: 0;
+}
+
+.automation-import__summary dt {
+  color: var(--color-text-muted);
+}
+
+.automation-import__summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

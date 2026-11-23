@@ -13,6 +13,7 @@ from app.schemas.automations import (
     AutomationUpdate,
 )
 from app.services import audit as audit_service
+from app.services import automation_transfer
 from app.services import automations as automation_service
 from app.services.component_availability import get_component_availability
 
@@ -119,6 +120,52 @@ async def create_automation(
         after=record,
     )
     return AutomationResponse(**record)
+
+
+@router.post(
+    "/import",
+    response_model=AutomationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Import an exported event automation",
+)
+async def import_automation(
+    request: Request,
+    document: dict = Body(..., description="A document produced by the export endpoint."),
+    current_user: dict = Depends(require_super_admin),
+) -> AutomationResponse:
+    try:
+        record = await automation_transfer.import_automation(document)
+    except automation_transfer.AutomationImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    await audit_service.record(
+        action="automation.import",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="automation",
+        entity_id=int(record["id"]) if record.get("id") is not None else None,
+        before=None,
+        after=record,
+    )
+    return AutomationResponse(**record)
+
+
+@router.get(
+    "/{automation_id}/export",
+    response_model=dict[str, object],
+    summary="Export an event automation as a portable JSON document",
+)
+async def export_automation(
+    automation_id: int, current_user: dict = Depends(require_super_admin)
+) -> dict[str, object]:
+    record = await automation_repo.get_automation(automation_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+    try:
+        return automation_transfer.build_export(record)
+    except automation_transfer.AutomationImportError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/{automation_id}", response_model=AutomationResponse)

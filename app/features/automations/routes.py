@@ -21,6 +21,12 @@ router.add_api_route(
     methods=["POST"],
 )
 router.add_api_route(
+    "/admin/automations/import",
+    handlers.admin_import_automation,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
     "/admin/automations/create/scheduled",
     handlers.admin_create_scheduled_automation_page,
     methods=["GET"],
@@ -95,6 +101,11 @@ router.add_api_route(
     handlers.admin_clone_automation,
     methods=["POST"],
     response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/admin/automations/{automation_id}/export",
+    handlers.admin_export_automation,
+    methods=["GET"],
 )
 router.add_api_route(
     "/admin/automations/{automation_id}/delete",

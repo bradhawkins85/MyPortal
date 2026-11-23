@@ -2440,3 +2440,94 @@
   });
 
 }());
+
+(function () {
+  'use strict';
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const modal = document.getElementById('automation-import-modal');
+    if (!modal) return;
+    const form = modal.querySelector('[data-automation-import-form]');
+    const fileInput = modal.querySelector('[data-automation-import-file]');
+    const preview = modal.querySelector('[data-automation-import-preview]');
+    const errorEl = modal.querySelector('[data-automation-import-error]');
+    const submit = modal.querySelector('[data-automation-import-submit]');
+    let opener = null;
+
+    function setText(selector, value) {
+      const el = modal.querySelector(selector);
+      if (el) el.textContent = value;
+    }
+
+    function showError(message) {
+      if (!errorEl) return;
+      errorEl.textContent = message || '';
+      errorEl.hidden = !message;
+    }
+
+    function reset() {
+      if (form) form.reset();
+      if (preview) preview.hidden = true;
+      showError('');
+      if (submit) submit.disabled = false;
+    }
+
+    function open(trigger) {
+      opener = trigger || document.activeElement;
+      reset();
+      modal.hidden = false;
+      if (fileInput) fileInput.focus();
+    }
+
+    function close() {
+      modal.hidden = true;
+      if (opener && typeof opener.focus === 'function') opener.focus();
+    }
+
+    document.querySelectorAll('[data-automation-import-open]').forEach(function (button) {
+      button.addEventListener('click', function () { open(button); });
+    });
+    modal.querySelectorAll('[data-automation-import-close]').forEach(function (button) {
+      button.addEventListener('click', close);
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !modal.hidden) close();
+    });
+
+    if (!fileInput || typeof FileReader === 'undefined') return;
+    fileInput.addEventListener('change', function () {
+      showError('');
+      if (preview) preview.hidden = true;
+      if (submit) submit.disabled = false;
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function () {
+        let documentData = null;
+        try {
+          documentData = JSON.parse(String(reader.result || '').replace(/^﻿/, ''));
+        } catch (error) {
+          documentData = null;
+        }
+        const automation = documentData && documentData.format === 'myportal.automation'
+          ? documentData.automation
+          : null;
+        if (!automation || typeof automation !== 'object') {
+          showError('This file is not a MyPortal automation export.');
+          if (submit) submit.disabled = true;
+          return;
+        }
+        const payload = automation.action_payload || {};
+        const actions = Array.isArray(payload.actions) ? payload.actions.length : (automation.action_module ? 1 : 0);
+        setText('[data-automation-import-name]', automation.name || 'Untitled automation');
+        setText('[data-automation-import-trigger]', automation.trigger_event || '—');
+        setText('[data-automation-import-actions]', actions === 1 ? '1 action' : actions + ' actions');
+        if (preview) preview.hidden = false;
+      };
+      reader.onerror = function () {
+        showError('The file could not be read.');
+      };
+      reader.readAsText(file);
+    });
+  });
+})();
