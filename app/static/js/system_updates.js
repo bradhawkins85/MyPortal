@@ -65,6 +65,26 @@
     });
   }
 
+  // The coordinator stamps each output line in UTC; show those in local time.
+  const LINE_TIME_RE = /^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\]/gm;
+
+  function localiseOutput(text) {
+    return text.replace(LINE_TIME_RE, (match, iso) => {
+      const date = new Date(iso);
+      return Number.isNaN(date.getTime()) ? match : `[${date.toLocaleString()}]`;
+    });
+  }
+
+  function setOutput(output, text) {
+    output.dataset.rawOutput = text;
+    output.textContent = localiseOutput(text);
+  }
+
+  function renderOutputTimes() {
+    const output = document.querySelector('[data-system-update-output]');
+    if (output) setOutput(output, output.textContent);
+  }
+
   function tagClass(status) {
     if (status === 'succeeded') return 'tag--success';
     if (status === 'failed') return 'tag--danger';
@@ -82,11 +102,11 @@
 
     const output = root.querySelector('[data-system-update-output]');
     const scroller = root.querySelector('[data-system-update-output-scroll]');
-    if (output && update.output && output.textContent !== update.output) {
+    if (output && update.output && output.dataset.rawOutput !== update.output) {
       // Keep following the log unless the administrator scrolled up to read.
       const following = !scroller
         || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
-      output.textContent = update.output;
+      setOutput(output, update.output);
       if (scroller && following) scroller.scrollTop = scroller.scrollHeight;
     }
 
@@ -144,6 +164,7 @@
 
   function init() {
     renderUtcTimes();
+    renderOutputTimes();
     bindHistoryFilters();
     pollProgress();
   }

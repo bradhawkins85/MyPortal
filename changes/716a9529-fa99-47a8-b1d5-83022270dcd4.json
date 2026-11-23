@@ -1,0 +1,7 @@
+{
+  "guid": "716a9529-fa99-47a8-b1d5-83022270dcd4",
+  "occurred_at": "2026-11-23T02:48Z",
+  "change_type": "Improvement",
+  "summary": "Every line of a system update's coordinator output now shows the time it was reported, so you can see how long each step took and spot an update that has stalled.",
+  "content_hash": "69ae726a37d32d48690f33b7d18588f4d8520bf4af17659ceb7bcf102a93a4af"
+}

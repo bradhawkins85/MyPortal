@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -652,10 +653,14 @@ def test_baremetal_coordinator_reports_progress_while_upgrading(tmp_path):
     assert oct((tmp_path / "updater").stat().st_mode & 0o777) == "0o700"
     assert not list((tmp_path / "updater").glob("system-update-output.*"))
     reports = log.read_text().splitlines()
-    assert reports[0] == f"{update_id} running|"
-    assert any(line.startswith(f"{update_id} running|step-one") for line in reports[1:-1])
-    assert reports[-1].startswith(f"{update_id} succeeded|step-one")
-    assert "step-two" in reports[-1]
+    stamp = r"\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] "
+    # Every output line carries the UTC time it was produced.
+    assert re.fullmatch(
+        re.escape(f"{update_id} running|") + stamp + r"Picked up by the update coordinator\..*", reports[0]
+    )
+    assert any(re.search(stamp + "step-one", line) for line in reports[1:-1] if line.startswith(f"{update_id} running|"))
+    assert reports[-1].startswith(f"{update_id} succeeded|")
+    assert re.search(stamp + r"step-one\\n" + stamp + "step-two", reports[-1])
     assert not flag.exists()
 
 

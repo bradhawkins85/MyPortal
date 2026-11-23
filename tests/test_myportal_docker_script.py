@@ -8,6 +8,7 @@ logic that decides what to install.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -1123,3 +1124,21 @@ def test_gitea_backup_skipped_without_gitea_container(tmp_path):
     result = _run(harness + "backup_gitea v1")
     assert result.returncode == 0, result.stderr
     assert result.stdout == "" and not (tmp_path / "calls").exists()
+
+
+def test_timestamp_lines_prefixes_every_line_in_utc():
+    # A partial last line without a newline is still stamped.
+    result = _run("printf 'first\\n\\nlast' | timestamp_lines", env={"TZ": "Australia/Sydney"})
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert len(lines) == 3
+    pattern = r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] "
+    assert all(re.match(pattern, line) for line in lines)
+    assert [re.sub(pattern, "", line) for line in lines] == ["first", "", "last"]
+
+
+def test_process_requests_timestamps_upgrade_output():
+    contents = SCRIPT.read_text()
+    assert '| timestamp_lines >"$log"' in contents
+    assert 'upgrade --yes 2>&1 | timestamp_lines >>"$log"' in contents
+    assert "status=${PIPESTATUS[0]}" in contents

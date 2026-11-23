@@ -91,6 +91,15 @@ snapshot_flag_file() {
   fi
 }
 
+# Prefix each captured line with the UTC time it was produced, so the System
+# updates page shows how long each step took and whether one is stuck.
+timestamp_lines() {
+  local TZ=UTC line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '[%(%Y-%m-%dT%H:%M:%SZ)T] %s\n' -1 "$line"
+  done
+}
+
 # Run the history report helper as the unprivileged service account, like the
 # Docker coordinator does inside its container. Records live in the
 # service-writable state tree, so root must never create, chmod or chown them.
@@ -218,9 +227,11 @@ ensure_private_dir
   output_file=$(mktemp "${PRIVATE_DIR}/system-update-output.XXXXXX")
   chmod 600 "$output_file"
   trap 'rm -f "$output_file"' EXIT
+  echo "Picked up by the update coordinator. Running the upgrade helper in ${upgrade_mode} mode." \
+    | timestamp_lines >>"$output_file"
   progress_pid=""
   if [[ -n "$update_id" ]]; then
-    report_update "$update_id" running </dev/null || echo "Warning: could not record that update ${update_id} is running." >&2
+    report_update "$update_id" running --output-file - <"$output_file" || echo "Warning: could not record that update ${update_id} is running." >&2
     # Publish the output so far while the upgrade runs, so administrators can
     # follow it live from the System updates page.
     (
@@ -243,7 +254,13 @@ ensure_private_dir
     fi
   }
   echo "Update flag found at $UPDATE_FLAG_FILE. Running upgrade helper in ${upgrade_mode} mode." >&2
-  if bash -lc "$(build_upgrade_command "$upgrade_mode")" > >(tee -a "$output_file") 2> >(tee -a "$output_file" >&2); then
+  # One pipeline keeps stdout and stderr in order and finishes writing every
+  # line before the result is reported.
+  set +e
+  bash -lc "$(build_upgrade_command "$upgrade_mode")" 2>&1 | timestamp_lines | tee -a "$output_file"
+  status=${PIPESTATUS[0]}
+  set -e
+  if ((status == 0)); then
     stop_progress_reports
     rm -f "$UPDATE_FLAG_FILE"
     if [[ -n "$update_id" ]]; then
@@ -251,7 +268,6 @@ ensure_private_dir
     fi
     echo "Upgrade helper completed successfully; cleared $UPDATE_FLAG_FILE" >&2
   else
-    status=$?
     stop_progress_reports
     # A future schedule may retry, but this request is terminal. Removing the
     # flag prevents an interrupted/failed update from looping forever.
