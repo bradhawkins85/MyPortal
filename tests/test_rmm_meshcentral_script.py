@@ -215,3 +215,35 @@ def test_unix_activation_reports_the_agents_node_id(tmp_path, script_name, agent
     else:
         assert '##myportal[session.node_id]' not in result.stdout
         assert 'find the device by its host name' in result.stdout
+
+
+def test_macos_activation_sees_a_running_service_with_long_launchctl_output(tmp_path):
+    """`launchctl print` lists far more than the state line. Under pipefail a
+    `grep -q` that stops reading early made launchctl die of SIGPIPE, so a
+    running service intermittently read as "did not finish installing"."""
+    installer = tmp_path / 'installer'
+    installer.write_text('#!/bin/bash\nexit 0\n')
+    Path(str(installer) + '.msh').write_text('MeshID=company-group\n')
+    commands = tmp_path / 'bin'
+    commands.mkdir()
+    stubs = {
+        # More than a pipe buffer after the match, so an early reader always
+        # leaves launchctl writing into a closed pipe.
+        'launchctl': 'printf "state = running\\n"\nhead -c 200000 /dev/zero | tr "\\0" "x"\necho',
+        'sleep': 'exit 0',
+        'id': 'echo 0',
+    }
+    for name, body in stubs.items():
+        command = commands / name
+        command.write_text('#!/bin/bash\n' + body + '\n')
+        command.chmod(0o700)
+
+    result = subprocess.run(
+        ['bash', str(ROOT / 'app/services/rmm_builtin/meshcentral_activate_macos.sh')],
+        env={**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'],
+             'MESH_INSTALLER_PATH': str(installer), 'MESH_GROUP_ID': 'company-group'},
+        capture_output=True, text=True, timeout=30,
+    )
+
+    assert 'did not finish installing' not in result.stderr
+    assert 'The MeshCentral agent is installed and running.' in result.stdout

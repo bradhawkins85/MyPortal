@@ -1,19 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-import sys
-from types import SimpleNamespace
 
 import pytest
 from starlette.requests import Request
-
-sys.modules.setdefault(
-    "magic",
-    SimpleNamespace(
-        Magic=lambda *args, **kwargs: None,
-        from_buffer=lambda *args, **kwargs: "application/octet-stream",
-    ),
-)
 
 from app.repositories import auth as auth_repo
 from app.security.session import SessionManager

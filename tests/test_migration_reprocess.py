@@ -64,6 +64,9 @@ class FakeConnection:
 
 def _build_database(monkeypatch, tmp_path) -> tuple[Database, FakeConnection]:
     database = Database()
+    # FakeConnection speaks the MySQL cursor API; don't let the cached
+    # settings decide the backend.
+    database._use_sqlite = False
     monkeypatch.setattr(database, "connect", AsyncMock())
     fake_conn = FakeConnection()
 

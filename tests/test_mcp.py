@@ -7,31 +7,47 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import FastAPI, WebSocket
+from fastapi.testclient import TestClient
+
+from app import mcp_server
+from app.core import config
 
 
 # Test configuration
 TEST_MCP_TOKEN = "test-mcp-token-12345"
 
 
-# Set up MCP environment before importing app
-os.environ["MCP_ENABLED"] = "true"
-os.environ["MCP_TOKEN"] = TEST_MCP_TOKEN
-os.environ["MCP_ALLOWED_MODELS"] = "users,tickets,change_log"
-os.environ["MCP_READONLY"] = "true"
-os.environ["MCP_RATE_LIMIT"] = "60"
+@pytest.fixture(autouse=True)
+def mcp_settings(monkeypatch):
+    """Enable MCP for these tests only.
 
-# Clear settings cache before import
-from app.core import config
-config.get_settings.cache_clear()
-
-# Now import app after MCP is enabled
-from fastapi.testclient import TestClient
-from app.main import app
+    ``app.main`` mounts ``/mcp/ws`` only when MCP is enabled at import time,
+    and ``app.mcp_server`` reads its settings at import, so setting the
+    environment here would depend on which test file imported the app first.
+    """
+    settings = config.get_settings().model_copy(
+        update={
+            "mcp_enabled": True,
+            "mcp_token": TEST_MCP_TOKEN,
+            "mcp_allowed_models": "users,tickets,change_log",
+            "mcp_readonly": True,
+            "mcp_rate_limit": 60,
+        }
+    )
+    monkeypatch.setattr(mcp_server, "settings", settings)
+    return settings
 
 
 @pytest.fixture
 def client():
-    """Create a test client."""
+    """A client for an app serving only the MCP endpoint."""
+    app = FastAPI()
+
+    @app.websocket("/mcp/ws")
+    async def mcp_websocket_endpoint(websocket: WebSocket) -> None:
+        await mcp_server.handle_mcp_connection(websocket)
+
     return TestClient(app)
 
 
@@ -356,16 +372,12 @@ def test_mcp_query_action_works_like_list(mock_fetch_all, client):
 def test_mcp_disabled_by_default():
     """Test that MCP server is disabled by default in settings."""
     # Clear env to get defaults
-    with patch.dict(os.environ, {}, clear=True):
-        # Set required settings
-        os.environ["SESSION_SECRET"] = "test"
-        os.environ["TOTP_ENCRYPTION_KEY"] = "A" * 64
-        os.environ["ENVIRONMENT"] = "test"
-        
-        from app.core import config
-        config.get_settings.cache_clear()
-        settings = config.get_settings()
-        
+    # Build settings directly: clearing the cached settings here would leave
+    # every later test with this stripped-down environment.
+    env = {"SESSION_SECRET": "test", "TOTP_ENCRYPTION_KEY": "A" * 64, "ENVIRONMENT": "test"}
+    with patch.dict(os.environ, env, clear=True):
+        settings = config.Settings(_env_file=None)
+
         assert settings.mcp_enabled is False
         assert settings.mcp_token is None
         assert settings.mcp_readonly is True

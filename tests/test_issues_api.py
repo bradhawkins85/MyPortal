@@ -6,13 +6,10 @@ from fastapi.testclient import TestClient
 from app.api.dependencies import auth as auth_dependencies
 from app.api.dependencies import database as database_dependencies
 from app.core.database import db
-from app.main import (
-    app,
-    company_repo,
-    issues_repo,
-    issues_service,
-    scheduler_service,
-)
+from app.main import app, scheduler_service
+from app.repositories import companies as company_repo
+from app.repositories import issues as issues_repo
+from app.services import issues as issues_service
 from app.security.session import SessionData, session_manager
 
 

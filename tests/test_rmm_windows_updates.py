@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
@@ -582,6 +583,22 @@ function shutdown.exe { $global:LASTEXITCODE = 0; ($args -join ' ') | Set-Conten
 '''
 
 
+def _patch_script_copy(tmp_path) -> Path:
+    """patch.ps1 with a mutex name of its own.
+
+    The real script holds a machine-wide mutex so two patch runs never overlap;
+    tests running in parallel on one machine would otherwise refuse each other.
+    """
+    script = tmp_path / "patch.ps1"
+    content = rmm_patching.script_content()
+    assert "Global\\MyPortalPatchManagement" in content
+    script.write_text(
+        content.replace("Global\\MyPortalPatchManagement", "Global\\MyPortalPatchTest-" + uuid.uuid4().hex),
+        encoding="utf-8",
+    )
+    return script
+
+
 def _run_powershell(tmp_path, script: str, env: dict[str, str]):
     harness = tmp_path / "harness.ps1"
     harness.write_text(COM_MOCKS + script, encoding="utf-8")
@@ -613,8 +630,7 @@ def test_scan_script_reports_status_the_portal_can_read(tmp_path, search_fails):
 @pytest.mark.skipif(not POWERSHELL, reason="Requires PowerShell; Windows Update is mocked")
 @pytest.mark.parametrize("reboot_mode", ["never", "always"])
 def test_patch_script_installs_only_the_chosen_updates(tmp_path, reboot_mode):
-    script = tmp_path / "patch.ps1"
-    script.write_text(rmm_patching.script_content(), encoding="utf-8")
+    script = _patch_script_copy(tmp_path)
     plan = {"manual_windows": {"update_ids": [CU.upper(), EDGE]}, "windows": None, "apps": [], "policies": [],
             "reboot": {"reboot_mode": reboot_mode, "reboot_delay_minutes": 10, "immediate": True,
                        "active_start": 0, "active_end": 0}}
@@ -640,8 +656,7 @@ def test_patch_script_installs_only_the_chosen_updates(tmp_path, reboot_mode):
 def test_patch_script_restarts_only_once_windows_update_is_idle(tmp_path, busy):
     """Install() can return while Windows Update is still installing; restarting then
     interrupts the installation, so the restart waits until Windows Update is idle."""
-    script = tmp_path / "patch.ps1"
-    script.write_text(rmm_patching.script_content(), encoding="utf-8")
+    script = _patch_script_copy(tmp_path)
     plan = {"manual_windows": {"update_ids": [CU]}, "windows": None, "apps": [], "policies": [],
             "reboot": {"reboot_mode": "always", "reboot_delay_minutes": 10, "immediate": True,
                        "active_start": 0, "active_end": 0}}
@@ -661,8 +676,7 @@ def test_patch_script_restarts_only_once_windows_update_is_idle(tmp_path, busy):
 @pytest.mark.skipif(not POWERSHELL, reason="Requires PowerShell; Windows Update is mocked")
 def test_chosen_updates_install_despite_a_pending_restart(tmp_path):
     """A technician's install must not restart the device without installing anything."""
-    script = tmp_path / "patch.ps1"
-    script.write_text(rmm_patching.script_content(), encoding="utf-8")
+    script = _patch_script_copy(tmp_path)
     plan = {"manual_windows": {"update_ids": [CU]}, "windows": None, "apps": [], "policies": [],
             "reboot": {"reboot_mode": "always", "reboot_delay_minutes": 10, "immediate": True,
                        "active_start": 0, "active_end": 0}}
@@ -677,8 +691,7 @@ def test_chosen_updates_install_despite_a_pending_restart(tmp_path):
 
 @pytest.mark.skipif(not POWERSHELL, reason="Requires PowerShell; Windows Update is mocked")
 def test_patch_policy_still_installs_by_category_and_reports_status(tmp_path):
-    script = tmp_path / "patch.ps1"
-    script.write_text(rmm_patching.script_content(), encoding="utf-8")
+    script = _patch_script_copy(tmp_path)
     plan = {"windows": {"categories": ["Security Updates"], "deferral_days": 0}, "apps": [], "policies": [],
             "reboot": {"reboot_mode": "never"}}
     result = _run_powershell(tmp_path, f"& '{script}'\n'INSTALLED=' + ($global:Installed -join ',')\n", {
@@ -710,8 +723,7 @@ def test_scan_script_hides_blocked_updates_and_shows_released_ones(tmp_path):
 @pytest.mark.skipif(not POWERSHELL, reason="Requires PowerShell; Windows Update is mocked")
 @pytest.mark.parametrize("kind", ["manual", "policy"])
 def test_patch_jobs_never_install_blocked_updates(tmp_path, kind):
-    script = tmp_path / "patch.ps1"
-    script.write_text(rmm_patching.script_content(), encoding="utf-8")
+    script = _patch_script_copy(tmp_path)
     plan = ({"manual_windows": {"update_ids": [CU, OLD]}, "windows": None} if kind == "manual"
             else {"windows": {"categories": ["Security Updates"], "deferral_days": 0}})
     plan.update({"apps": [], "policies": [], "reboot": {"reboot_mode": "never"}})

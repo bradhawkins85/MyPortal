@@ -1,0 +1,7 @@
+{
+  "guid": "85dc5ef6-66c8-47c3-8b2a-34739b99713f",
+  "occurred_at": "2026-11-23T10:06Z",
+  "change_type": "Fix",
+  "summary": "Switching on MeshCentral remote control for a Mac no longer fails now and then with \"The MeshCentral agent did not finish installing\" when the agent is in fact installed and running.",
+  "content_hash": "20b52329482678cd47c8ba47a2cf456c787ed3cc89bd30da93ccf884f0d2da17"
+}

@@ -44,7 +44,10 @@ def tq_db(tq_event_loop):
 
     tq_event_loop.run_until_complete(db.connect())
 
+    from tests._tray_schema import TRAY_SQLITE_DDL
+
     ddl = [
+        *TRAY_SQLITE_DDL,
         """CREATE TABLE IF NOT EXISTS tray_ticket_questions (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
                scope TEXT NOT NULL DEFAULT 'global',
@@ -492,34 +495,18 @@ async def test_delete_question_uses_bound_id_param(
 
 @pytest.fixture(scope="module")
 def tq_http_client(tq_db):
-    """FastAPI TestClient sharing the same test SQLite singleton."""
+    """FastAPI TestClient sharing the same test SQLite singleton.
+
+    Built without a ``with`` block so the app's startup and shutdown hooks
+    never run: they would reconnect the shared ``db`` and start background
+    workers that outlive this module.
+    """
     from fastapi.testclient import TestClient
-    from app.core.database import db
     from app.main import app
-    from app.services.scheduler import scheduler_service
 
-    async def _noop():  # pragma: no cover
-        return None
-
-    original_connect = db.connect
-    original_disconnect = db.disconnect
-    original_run_migrations = db.run_migrations
-    db.connect = _noop  # type: ignore[assignment]
-    db.disconnect = _noop  # type: ignore[assignment]
-    db.run_migrations = _noop  # type: ignore[assignment]
-    original_start = scheduler_service.start
-    original_stop = scheduler_service.stop
-    scheduler_service.start = _noop  # type: ignore[assignment]
-    scheduler_service.stop = _noop  # type: ignore[assignment]
-
-    with TestClient(app, follow_redirects=False, headers={"Accept": "application/json"}) as client:
-        yield client
-
-    db.connect = original_connect  # type: ignore[assignment]
-    db.disconnect = original_disconnect  # type: ignore[assignment]
-    db.run_migrations = original_run_migrations  # type: ignore[assignment]
-    scheduler_service.start = original_start  # type: ignore[assignment]
-    scheduler_service.stop = original_stop  # type: ignore[assignment]
+    client = TestClient(app, follow_redirects=False, headers={"Accept": "application/json"})
+    yield client
+    client.close()
 
 
 @pytest.fixture

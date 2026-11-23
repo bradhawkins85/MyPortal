@@ -1,4 +1,4 @@
-from app.main import _parse_staff_custom_field_condition
+from app.features.companies.handlers import _parse_staff_custom_field_condition
 
 
 def test_select_map_json_condition_is_normalized():

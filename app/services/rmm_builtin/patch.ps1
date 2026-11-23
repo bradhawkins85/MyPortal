@@ -15,13 +15,15 @@ function Pending-Reboot {
 function Wait-WindowsUpdateIdle([datetime]$deadline) {
     # Install() can return while Windows Update, for this job or its own automatic
     # updates, is still installing. A restart then interrupts the installation.
+    # Messages go straight to stdout: Write-Output here would become part of the
+    # return value, and @(message, $false) is truthy, so the restart went ahead.
     $waiting = $false
     while ($true) {
         try { $busy = [bool](New-Object -ComObject Microsoft.Update.Installer).IsBusy }
-        catch { Write-Output "Could not check whether Windows Update is installing: $_"; return $false }
+        catch { [Console]::Out.WriteLine("Could not check whether Windows Update is installing: $_"); return $false }
         if (-not $busy) { return $true }
         if ((Get-Date) -ge $deadline) { return $false }
-        if (-not $waiting) { Write-Output 'Waiting for Windows Update to finish installing before restarting.'; $waiting = $true }
+        if (-not $waiting) { [Console]::Out.WriteLine('Waiting for Windows Update to finish installing before restarting.'); $waiting = $true }
         Start-Sleep -Seconds 15
     }
 }

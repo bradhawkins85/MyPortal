@@ -1,18 +1,6 @@
 from decimal import Decimal
-import sys
-import types
 
 from starlette.requests import Request
-
-# The application package imports the ticket attachment service during package
-# initialisation, which imports python-magic. Stub it here so this focused
-# quote PDF HTML test does not require libmagic native libraries.
-sys.modules.setdefault(
-    "magic",
-    types.SimpleNamespace(
-        from_buffer=lambda *args, **kwargs: "application/octet-stream"
-    ),
-)
 
 from app.features.quotes.routes import _build_quote_pdf_html
 

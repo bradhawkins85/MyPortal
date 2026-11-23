@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+import copy
 import importlib
 import importlib.metadata
 import importlib.util
@@ -323,7 +324,7 @@ class FeatureRegistry:
         flattened: list[Any] = []
         for route in routes:
             if getattr(route, "path", None) is not None:
-                flattened.append(route)
+                flattened.append(FeatureRegistry._detached_route(route))
                 continue
             original_router = getattr(route, "original_router", None)
             child_routes = getattr(original_router, "routes", None)
@@ -332,6 +333,24 @@ class FeatureRegistry:
                 continue
             flattened.append(route)
         return flattened
+
+    @staticmethod
+    def _detached_route(route: Any) -> Any:
+        """Copy ``route`` so in-flight wrapping never edits the pack's router.
+
+        The wrapper replaces ``endpoint``, ``dependant.call`` and ``app``; the
+        pack module keeps its router, so wrapping the original objects would
+        stack another wrapper every time that module is mounted again.
+        """
+
+        from fastapi.routing import APIRoute
+
+        if not isinstance(route, APIRoute):
+            return route
+        clone = copy.copy(route)
+        if route.dependant is not None:
+            clone.dependant = copy.copy(route.dependant)
+        return clone
 
     @staticmethod
     def _wrap_routes_with_state(
@@ -469,7 +488,12 @@ class FeatureRegistry:
         # ``self._app.router.routes``, so we cannot rely on object
         # identity with ``parent.routes``.
         before = len(self._app.router.routes)
+        # Packs run their own startup/shutdown hooks, so keep the app's
+        # lifespan: FastAPI would otherwise wrap it in another merged
+        # lifespan on every load, nesting deeper with each reload.
+        lifespan = self._app.router.lifespan_context
         self._app.include_router(parent)
+        self._app.router.lifespan_context = lifespan
         new_routes = self._app.router.routes[before:]
         if any(
             getattr(route, "path", None) is None and hasattr(route, "original_router")

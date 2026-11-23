@@ -1,0 +1,7 @@
+{
+  "guid": "aa02d1f6-4ab7-44e8-bcc3-8764944f599b",
+  "occurred_at": "2026-11-23T10:28Z",
+  "change_type": "Fix",
+  "summary": "Windows patching no longer restarts a device when it cannot check whether Windows Update is still installing, and shows the \"Waiting for Windows Update to finish installing\" message again while it waits.",
+  "content_hash": "2ad574eb1aab688a280cceef4e37fd2c75fae963f10f98a7fa7b057773ebcae1"
+}

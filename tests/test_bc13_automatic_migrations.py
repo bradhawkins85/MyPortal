@@ -24,6 +24,19 @@ def anyio_backend():
     return "asyncio"
 
 
+def _sqlite_database(db_path: Path) -> Database:
+    """A fresh SQLite-backed ``Database`` writing to ``db_path``.
+
+    Built directly rather than by reloading ``app.core.config`` or
+    ``app.core.database``: a reload swaps the module-level ``db`` and
+    exception classes, which every later test then sees.
+    """
+    test_db = Database()
+    test_db._use_sqlite = True
+    test_db._get_sqlite_path = lambda: db_path
+    return test_db
+
+
 @pytest.mark.anyio
 async def test_sqlite_fallback_mode():
     """Test that database uses SQLite when MySQL config is missing."""
@@ -137,7 +150,8 @@ async def test_migrations_run_with_sqlite():
         for table in tables_to_check:
             # SQLite uses sqlite_master to check for tables
             result = await test_db.fetch_one(
-                f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+                (table,),
             )
             assert result is not None, f"Table '{table}' should exist after migrations"
         
@@ -148,52 +162,19 @@ async def test_migrations_run_with_sqlite():
 async def test_migrations_are_idempotent():
     """Test that running migrations multiple times is safe."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test.db"
-        
-        # Clear MySQL config
-        original_env = {}
-        for key in ["DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"]:
-            original_env[key] = os.environ.get(key)
-            if key in os.environ:
-                del os.environ[key]
-        
-        try:
-            from importlib import reload
-            import app.core.config as config_module
-            reload(config_module)
-            
-            test_db = Database()
-            test_db._get_sqlite_path = lambda: db_path
-            
-            # Run migrations first time
-            await test_db.run_migrations()
-            await test_db.connect()
-            
-            first_run_migrations = await test_db.fetch_all("SELECT name FROM migrations")
-            first_run_count = len(first_run_migrations)
-            
-            await test_db.disconnect()
-            
-            # Run migrations second time
-            await test_db.run_migrations()
-            await test_db.connect()
-            
-            second_run_migrations = await test_db.fetch_all("SELECT name FROM migrations")
-            second_run_count = len(second_run_migrations)
-            
-            await test_db.disconnect()
-            
-            # Should have same number of migrations (no duplicates)
-            assert first_run_count == second_run_count, "Running migrations twice should not create duplicates"
-            
-        finally:
-            for key, value in original_env.items():
-                if value is not None:
-                    os.environ[key] = value
-            
-            import app.core.config as config_module
-            from importlib import reload
-            reload(config_module)
+        test_db = _sqlite_database(Path(tmpdir) / "test.db")
+
+        await test_db.run_migrations()
+        await test_db.connect()
+        first_run_count = len(await test_db.fetch_all("SELECT name FROM migrations"))
+        await test_db.disconnect()
+
+        await test_db.run_migrations()
+        await test_db.connect()
+        second_run_count = len(await test_db.fetch_all("SELECT name FROM migrations"))
+        await test_db.disconnect()
+
+        assert first_run_count == second_run_count, "Running migrations twice should not create duplicates"
 
 
 @pytest.mark.anyio
@@ -231,106 +212,43 @@ async def test_sql_adaptation_for_sqlite():
 
 @pytest.mark.anyio
 async def test_app_startup_with_empty_database():
-    """Test that the FastAPI app can start with an empty database.
-    
-    This is the main BC13 requirement: ensure the app boots and migrations run automatically.
-    """
+    """Migrations bring an empty SQLite database up to a bootable schema."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "myportal.db"
-        
-        # Clear MySQL config to use SQLite
-        original_env = {}
-        for key in ["DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"]:
-            original_env[key] = os.environ.get(key)
-            if key in os.environ:
-                del os.environ[key]
-        
+        test_db = _sqlite_database(db_path)
+
+        await test_db.run_migrations()
+        assert db_path.exists(), "Database should be created during startup"
+
+        await test_db.connect()
         try:
-            # Force reload of app modules
-            from importlib import reload
-            import app.core.config as config_module
-            import app.core.database as database_module
-            
-            reload(config_module)
-            reload(database_module)
-            
-            # Patch the database path
-            from app.core import database as db_module
-            original_get_path = db_module.db._get_sqlite_path
-            db_module.db._get_sqlite_path = lambda: db_path
-            
-            # Simulate app startup by running migrations
-            await db_module.db.run_migrations()
-            
-            # Verify database was created and has tables
-            assert db_path.exists(), "Database should be created during startup"
-            
-            await db_module.db.connect()
-            
-            # Check migrations table
-            migrations = await db_module.db.fetch_all("SELECT name FROM migrations")
+            migrations = await test_db.fetch_all("SELECT name FROM migrations")
             assert len(migrations) > 0, "Migrations should have been applied"
-            
-            # Verify BC11 vendors table exists (one of the newer tables)
-            tables = await db_module.db.fetch_all(
+
+            tables = await test_db.fetch_all(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
             table_names = {table["name"] for table in tables}
-            
-            # Check for a few key tables from different migration eras
-            expected_tables = ["migrations", "users", "companies", "bc_vendor"]
-            for table in expected_tables:
+            for table in ["migrations", "users", "companies", "bc_vendor"]:
                 assert table in table_names, f"Table '{table}' should exist after migrations"
-            
-            await db_module.db.disconnect()
-            
-            # Restore original get_path
-            db_module.db._get_sqlite_path = original_get_path
-            
         finally:
-            # Restore environment
-            for key, value in original_env.items():
-                if value is not None:
-                    os.environ[key] = value
-            
-            # Reload config
-            from importlib import reload
-            import app.core.config as config_module
-            import app.core.database as database_module
-            
-            reload(config_module)
-            reload(database_module)
+            await test_db.disconnect()
 
 
 @pytest.mark.anyio
 async def test_new_bc_tables_created():
-    """Test that BC (Business Continuity) tables are created by migrations.
-    
-    This verifies that newer BC3/BC11 tables are properly created.
-    """
+    """BC3/BC11 business continuity tables are created by migrations."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test.db"
-        
-        # Clear MySQL config
-        original_env = {}
-        for key in ["DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"]:
-            original_env[key] = os.environ.get(key)
-            if key in os.environ:
-                del os.environ[key]
-        
+        test_db = _sqlite_database(Path(tmpdir) / "test.db")
+
+        await test_db.run_migrations()
+        await test_db.connect()
         try:
-            from importlib import reload
-            import app.core.config as config_module
-            reload(config_module)
-            
-            test_db = Database()
-            test_db._get_sqlite_path = lambda: db_path
-            
-            await test_db.run_migrations()
-            await test_db.connect()
-            
-            # Check for BC tables (from migrations 124 and 125)
-            bc_tables = [
+            tables = await test_db.fetch_all(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+            table_names = {table["name"] for table in tables}
+            for bc_table in [
                 "bc_template",
                 "bc_section_definition",
                 "bc_plan",
@@ -340,23 +258,7 @@ async def test_new_bc_tables_created():
                 "bc_process",
                 "bc_risk",
                 "bc_attachment",
-            ]
-            
-            tables = await test_db.fetch_all(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-            table_names = {table["name"] for table in tables}
-            
-            for bc_table in bc_tables:
+            ]:
                 assert bc_table in table_names, f"BC table '{bc_table}' should exist"
-            
-            await test_db.disconnect()
-            
         finally:
-            for key, value in original_env.items():
-                if value is not None:
-                    os.environ[key] = value
-            
-            import app.core.config as config_module
-            from importlib import reload
-            reload(config_module)
+            await test_db.disconnect()

@@ -188,13 +188,6 @@ def no_companies_context(monkeypatch):
 
 def test_company_switcher_hidden_with_single_company(single_company_context):
     """Company switcher should be hidden when user has only one company."""
-    # Force complete template reload by recreating the Jinja2Templates object
-    from starlette.templating import Jinja2Templates
-    from pathlib import Path
-    template_path = Path(__file__).resolve().parent.parent / "app" / "templates"
-    main_module.templates = Jinja2Templates(directory=str(template_path))
-    main_module.templates.env.globals["static_url"] = main_module._static_url
-    
     with TestClient(app) as client:
         response = client.get("/")
 

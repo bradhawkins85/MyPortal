@@ -467,37 +467,6 @@ def _build_xero_redirect_uri() -> str:
     return _xero_uri()
 
 
-async def _store_pkce_verifier(code_verifier: str) -> str:
-    """Store a PKCE code_verifier server-side and return an opaque handle."""
-
-    now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(seconds=_PKCE_VERIFIER_TTL_SECONDS)
-    handle = secrets.token_urlsafe(32)
-    async with _pkce_verifier_store_lock:
-        # Opportunistically purge expired entries.
-        expired_handles = [
-            key for key, (_, expiry) in _pkce_verifier_store.items() if expiry <= now
-        ]
-        for key in expired_handles:
-            _pkce_verifier_store.pop(key, None)
-        _pkce_verifier_store[handle] = (code_verifier, expires_at)
-    return handle
-
-
-async def _pop_pkce_verifier(handle: str) -> str | None:
-    """Consume a stored PKCE verifier handle and return the verifier once."""
-
-    now = datetime.now(timezone.utc)
-    async with _pkce_verifier_store_lock:
-        value = _pkce_verifier_store.pop(handle, None)
-    if not value:
-        return None
-    verifier, expires_at = value
-    if expires_at <= now:
-        return None
-    return verifier
-
-
 def _serialise_for_json(value: Any) -> Any:
     """Convert mappings and sequences to JSON-safe primitives for templates."""
 

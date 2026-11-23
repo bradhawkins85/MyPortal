@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
@@ -53,3 +54,39 @@ async def test_run_once_records_partial_completion(monkeypatch):
     m365_jobs.register("test-partial", handler)
     assert await m365_jobs.run_once() is True
     assert execute.await_args.args[1][0] == "partial"
+
+
+@pytest.mark.anyio
+async def test_worker_keeps_polling_after_a_database_error(monkeypatch):
+    calls = []
+    polled_again = asyncio.Event()
+
+    async def flaky_run_once():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("Database pool not initialised")
+        polled_again.set()
+        return False
+
+    monkeypatch.setattr(m365_jobs, "run_once", flaky_run_once)
+    monkeypatch.setattr(m365_jobs, "POLL_SECONDS", 0.01)
+
+    m365_jobs.start_worker()
+    try:
+        await asyncio.wait_for(polled_again.wait(), 2)
+    finally:
+        await m365_jobs.stop_worker()
+
+    assert len(calls) >= 2
+
+
+@pytest.mark.anyio
+async def test_stop_worker_clears_state_so_the_next_start_runs_a_fresh_worker(monkeypatch):
+    monkeypatch.setattr(m365_jobs, "run_once", AsyncMock(return_value=False))
+    monkeypatch.setattr(m365_jobs, "POLL_SECONDS", 0.01)
+
+    m365_jobs.start_worker()
+    await m365_jobs.stop_worker()
+
+    assert m365_jobs._worker is None
+    assert m365_jobs._stop is None
