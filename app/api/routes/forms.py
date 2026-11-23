@@ -500,7 +500,8 @@ async def _submit_form_request(form, request, user, *, public=False, submit_acti
 
             response = await _render_template(
                 "forms/submit.html", request, user,
-                extra={"title": form["name"], "form": form, "fields": fields, "errors": exc.errors, "submitted_values": values},
+                extra={"title": form["name"], "form": form, "fields": fields, "errors": exc.errors, "submitted_values": values,
+                       "max_file_attachments": custom_forms.MAX_FILE_ATTACHMENTS},
             )
             response.status_code = 400
             return response
@@ -678,7 +679,8 @@ def _render_public_form(request, form, fields, submit_action, *, status_code=200
     from app.main import templates
     return templates.TemplateResponse(request, "forms/submit.html", {
         "request": request, "title": form["name"], "form": form, "fields": fields,
-        "public_share": True, "submit_action": submit_action, **extra,
+        "public_share": True, "submit_action": submit_action,
+        "max_file_attachments": custom_forms.MAX_FILE_ATTACHMENTS, **extra,
     }, status_code=status_code, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow"})
 
 

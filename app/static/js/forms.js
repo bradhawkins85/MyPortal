@@ -123,7 +123,9 @@
     const status = wrap.querySelector('[data-cf-capture-status]');
     const photo = wrap.querySelector('[data-cf-photo-input]');
     const video = wrap.querySelector('[data-cf-video-input]');
-    let file = null, url = null;
+    const maxFiles = Number(input.dataset.maxFiles) || 10;
+    const maxBytes = 50 * 1024 * 1024;
+    let attachments = [];
     input.required = false;
     controls.hidden = false;
     const say = (message, error = false) => {
@@ -132,41 +134,66 @@
     };
     const update = () => {
       const submitting = form.getAttribute('aria-busy') === 'true';
-      [input, ...controls.querySelectorAll('input, button'), ...preview.querySelectorAll('button')].forEach((control) => { control.disabled = submitting; });
+      const full = attachments.length >= maxFiles;
+      [input, ...controls.querySelectorAll('button')].forEach((control) => { control.disabled = submitting || full; });
+      preview.querySelectorAll('button').forEach((control) => { control.disabled = submitting; });
+    };
+    const summary = () => `${attachments.length} of ${maxFiles} attachments added.`;
+    const render = () => {
+      preview.replaceChildren();
+      attachments.forEach((attachment) => {
+        const { file, url } = attachment;
+        const item = document.createElement('li'); item.className = 'cf-capture-item';
+        const name = document.createElement('p'); name.textContent = file.name; item.append(name);
+        if (url) {
+          const image = file.type.startsWith('image/');
+          const media = document.createElement(image ? 'img' : 'video');
+          if (image) media.alt = `Preview of ${file.name}`;
+          else { media.controls = true; media.preload = 'metadata'; media.playsInline = true; media.setAttribute('aria-label', `Preview of ${file.name}`); }
+          media.src = url; item.append(media);
+        }
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button button--ghost'; remove.textContent = 'Remove attachment';
+        remove.setAttribute('aria-label', `Remove ${file.name}`);
+        remove.addEventListener('click', () => {
+          const index = attachments.indexOf(attachment);
+          if (index < 0) return;
+          if (attachment.url) URL.revokeObjectURL(attachment.url);
+          attachments.splice(index, 1); render();
+          say(attachments.length ? `Removed ${file.name}. ${summary()}` : `Removed ${file.name}.`);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          const buttons = preview.querySelectorAll('button');
+          (buttons[Math.min(index, buttons.length - 1)] || input).focus();
+        });
+        item.append(remove); preview.append(item);
+      });
+      update();
     };
     const clear = () => {
-      if (url) URL.revokeObjectURL(url);
-      url = null; file = null; preview.replaceChildren();
+      attachments.forEach((attachment) => { if (attachment.url) URL.revokeObjectURL(attachment.url); });
+      attachments = [];
       [input, photo, video].forEach((control) => { control.value = ''; });
-      say('');
+      render(); say('');
     };
     controls.querySelector('[data-cf-capture-photo]').addEventListener('click', () => photo.click());
     controls.querySelector('[data-cf-capture-video]').addEventListener('click', () => video.click());
     [input, photo, video].forEach((control) => control.addEventListener('change', () => {
-      const selected = control.files[0];
+      const selected = Array.from(control.files);
       control.value = '';
-      // Cancelling the camera or file picker keeps the previous attachment.
-      if (!selected) return;
-      if (selected.size > 50 * 1024 * 1024) { say('The attachment must be 50 MB or smaller. Take a smaller photo, record a shorter video, or choose a smaller file.', true); return; }
-      clear(); file = selected;
-      const name = document.createElement('p'); name.textContent = file.name; preview.append(name);
-      // HEIC/HEIF can be attached even when the browser cannot display them.
-      const image = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type);
-      if (image || file.type.startsWith('video/')) {
-        url = URL.createObjectURL(file);
-        const media = document.createElement(image ? 'img' : 'video');
-        if (image) media.alt = `Preview of ${file.name}`;
-        else { media.controls = true; media.preload = 'metadata'; media.playsInline = true; media.setAttribute('aria-label', `Preview of ${file.name}`); }
-        media.src = url; preview.append(media);
-      }
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button button--ghost'; remove.textContent = 'Remove attachment';
-      remove.addEventListener('click', () => { clear(); input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); });
-      preview.append(remove); say('Attachment ready.'); update();
+      // Cancelling the camera or file picker keeps the existing attachments.
+      if (!selected.length) return;
+      if (attachments.length + selected.length > maxFiles) { say(`You can add up to ${maxFiles} attachments. Remove one before adding more.`, true); return; }
+      if (selected.some((file) => file.size > maxBytes)) { say('Each attachment must be 50 MB or smaller. Take a smaller photo, record a shorter video, or choose a smaller file.', true); return; }
+      selected.forEach((file) => {
+        // HEIC/HEIF can be attached even when the browser cannot display them.
+        const previewable = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type) || file.type.startsWith('video/');
+        attachments.push({ file, url: previewable ? URL.createObjectURL(file) : null });
+      });
+      render(); say(summary());
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }));
     form.addEventListener('reset', clear);
     window.addEventListener('pagehide', clear);
-    return { input, files: () => file ? [file] : [], update };
+    return { input, files: () => attachments.map((attachment) => attachment.file), update };
   }
   function initAudioField(input, form, canRecord) {
     const wrap = input.closest('[data-cf-pub-field]');

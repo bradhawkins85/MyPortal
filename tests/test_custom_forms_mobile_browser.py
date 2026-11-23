@@ -123,3 +123,20 @@ def test_matrix_keeps_table_on_wide_screens(mount):
     risk = page.locator('[data-field-id="3"]')
     assert risk.locator("thead").is_visible()
     assert not risk.locator(".cf-matrix__column").first.is_visible()
+
+
+def test_file_question_accepts_several_attachments_and_removes_them(mount):
+    page = mount(width=390, public_share=True)
+    evidence = page.locator('[data-field-id="8"]')
+    picker = evidence.locator("[data-cf-file]")
+    assert picker.get_attribute("multiple") is not None
+    picker.set_input_files([
+        {"name": "one.txt", "mimeType": "text/plain", "buffer": b"1"},
+        {"name": "two.txt", "mimeType": "text/plain", "buffer": b"2"},
+    ])
+    picker.set_input_files([{"name": "three.txt", "mimeType": "text/plain", "buffer": b"3"}])
+    items = evidence.locator(".cf-capture-item")
+    assert [item.locator("p").inner_text() for item in items.all()] == ["one.txt", "two.txt", "three.txt"]
+    evidence.get_by_role("button", name="Remove two.txt").click()
+    assert [item.locator("p").inner_text() for item in items.all()] == ["one.txt", "three.txt"]
+    assert "Removed two.txt" in evidence.locator("[data-cf-capture-status]").inner_text()

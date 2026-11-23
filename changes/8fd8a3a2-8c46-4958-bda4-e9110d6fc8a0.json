@@ -1,0 +1,7 @@
+{
+  "guid": "8fd8a3a2-8c46-4958-bda4-e9110d6fc8a0",
+  "occurred_at": "2026-11-23T05:59Z",
+  "change_type": "Improvement",
+  "summary": "File upload questions on custom forms now accept up to 10 attachments, and any attachment can be removed before the form is submitted.",
+  "content_hash": "dc9d73ea7cb2b3cb5216980b83aef2213ef2bff348c13c2f4a72be415a98b9bd"
+}
