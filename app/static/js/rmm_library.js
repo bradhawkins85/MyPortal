@@ -372,7 +372,7 @@
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || 'Could not load Private-Files files.');
         available = data.available;
-        // Retry next time while Gitea could not create the Private-Files folders.
+        // Retry next time while no Private-Files list has been synced.
         loaded = !data.warning;
         if (data.warning) throw new Error(data.warning);
       } catch (error) {

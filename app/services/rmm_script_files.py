@@ -89,9 +89,24 @@ def validate_associations(files: list[Mapping[str, Any]]) -> list[dict[str, str]
     return result
 
 
-def _allowed(
+def _usable(
     settings: gitea.GiteaSettings, files: list[gitea.GiteaFile], layout: layouts.RepositoryLayout,
-    script: Mapping[str, Any], company_ids: set[int] | None = None,
+) -> list[tuple[gitea.GiteaFile, int | None]]:
+    """Files under Common (``None``) or a company folder (its id), skipping folder markers."""
+    usable: list[tuple[gitea.GiteaFile, int | None]] = []
+    for item in files:
+        relative = layouts._relative(item.path, settings.path)
+        if relative is None or relative.rsplit("/", 1)[-1] == layouts.COMPANY_MARKER:
+            continue
+        ok, company_id, _reason = layouts.script_scope(relative, layout)
+        if ok:
+            usable.append((item, company_id))
+    return usable
+
+
+def _allowed_from(
+    root: str, files: list[tuple[gitea.GiteaFile, int | None]], script: Mapping[str, Any],
+    company_ids: set[int] | None = None,
 ) -> dict[str, gitea.GiteaFile]:
     """Files ``script`` may use, keyed by association path.
 
@@ -100,23 +115,26 @@ def _allowed(
     resolves to the company it runs for; ``company_ids`` limits those to the
     given companies (``None`` means any company).
     """
-    root = settings.path
     owner = script.get("company_id")
     allowed: dict[str, gitea.GiteaFile] = {}
-    for item in files:
-        relative = layouts._relative(item.path, root)
-        if relative is None or relative.rsplit("/", 1)[-1] == layouts.COMPANY_MARKER:
-            continue
-        usable, company_id, _reason = layouts.script_scope(relative, layout)
-        if not usable:
-            continue
+    for item, company_id in files:
         if company_id is None or (owner is not None and company_id == int(owner)):
             allowed[item.path] = item
         elif owner is None and (company_ids is None or company_id in company_ids):
+            relative = layouts._relative(item.path, root)
+            if relative is None:
+                continue
             parts = relative.split("/")
             parts[1] = COMPANY_TOKEN
             allowed.setdefault(layouts._repo_path("/".join(parts), root), item)
     return allowed
+
+
+def _allowed(
+    settings: gitea.GiteaSettings, files: list[gitea.GiteaFile], layout: layouts.RepositoryLayout,
+    script: Mapping[str, Any], company_ids: set[int] | None = None,
+) -> dict[str, gitea.GiteaFile]:
+    return _allowed_from(settings.path, _usable(settings, files, layout), script, company_ids)
 
 
 async def _settings() -> gitea.GiteaSettings:
@@ -137,19 +155,46 @@ async def available_files(
     return _allowed(settings, files, layout, script, company_ids)
 
 
+async def sync_file_list(settings: gitea.GiteaSettings) -> tuple[int, int, str | None]:
+    """Refresh the stored Private-Files list from Gitea for the Add file editor,
+    creating any missing Private-Files folders. ``settings`` is the scripts
+    repository. Returns the files stored, the folders created and a warning
+    when the folders could not be created. Raises :class:`gitea.GiteaError`,
+    keeping the previous list, when Private-Files cannot be listed."""
+    private = gitea.private_files_settings(settings)
+    files, layout = await _files_layout(private)
+    created, warning = 0, None
+    try:
+        created = await layouts._create_missing(private, layout)
+    except gitea.GiteaError as exc:
+        warning = f"The Private-Files folders could not be created in Gitea. {exc}"
+    usable = _usable(private, files, layout)
+    await rmm_repo.replace_private_files((item.path, item.sha, item.size, company_id) for item, company_id in usable)
+    return len(usable), created, warning
+
+
+async def _stored_files() -> list[tuple[gitea.GiteaFile, int | None]]:
+    stored: dict[str, tuple[gitea.GiteaFile, int | None]] = {}
+    for row in await rmm_repo.list_private_files():
+        company_id = int(row["company_id"]) if row.get("company_id") is not None else None
+        item = gitea.GiteaFile(path=str(row["path"]), sha=str(row["sha"]), size=int(row["size"] or 0))
+        stored[item.path] = (item, company_id)
+    return list(stored.values())
+
+
 async def file_choices(script: Mapping[str, Any], company_id: int) -> tuple[list[str], str | None]:
-    """Files the editor can pick for ``script`` while viewing ``company_id``, and
-    a warning when the missing Private-Files folders could not be created first."""
+    """Files the editor can pick for ``script`` while viewing ``company_id``,
+    from the list stored by the latest Sync from Gitea, and a warning when no
+    list has been stored yet."""
     settings = await _settings()
-    files, layout = await _files_layout(settings)
-    warning = None
-    if layout.missing:
-        try:
-            await layouts._create_missing(settings, layout)
-        except gitea.GiteaError as exc:
-            warning = f"The Private-Files folders could not be created in Gitea. {exc}"
-    choices = sorted(_allowed(settings, files, layout, script, {int(company_id)}), key=str.casefold)
-    return choices, warning
+    stored = await _stored_files()
+    if not stored:
+        return [], (
+            "No Private-Files files are loaded. Add files to Private-Files in Gitea, then use "
+            "Sync from Gitea to load the list."
+        )
+    choices = sorted(_allowed_from(settings.path, stored, script, {int(company_id)}), key=str.casefold)
+    return choices, None
 
 
 async def validate_sources(
@@ -163,8 +208,10 @@ async def validate_sources(
     checked = [item for item in result if changed is None or item["source_path"] in changed]
     if not checked:
         return result
+    # The stored list keeps saving quick on large repositories; queueing a run
+    # checks the file in Gitea again.
     settings = await _settings()
-    allowed = await available_files(settings, script)
+    allowed = _allowed_from(settings.path, await _stored_files(), script)
     for item in checked:
         source = allowed.get(item["source_path"])
         if source is None:

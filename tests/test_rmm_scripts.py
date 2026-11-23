@@ -375,7 +375,7 @@ async def sqlite_db(monkeypatch):
                  "522_rmm_event_log_min_level.sql", "530_rmm_script_default_run_as.sql",
                  "531_rmm_meshcentral_nodes.sql", "544_rmm_live_sessions.sql", "547_rmm_ordered_actions.sql",
                  "548_rmm_script_run_scheduled_for.sql", "551_rmm_agent_key.sql",
-                 "559_rmm_schedule_run_once.sql"):
+                 "559_rmm_schedule_run_once.sql", "571_rmm_private_files.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -1050,7 +1050,9 @@ async def test_company_scripts_run_only_at_their_company(sqlite_db, monkeypatch)
              "rmm/stray.ps1": "Write-Output 3\n"}
     summary, _fetched = await _sync(monkeypatch, files, created=created)
     assert summary.added == 2 and summary.folders_created == len(created)
-    assert set(created) == {"rmm/Companies/Contoso/.myportal-company", "rmm/Companies/Other/.myportal-company"}
+    # Sync also creates the Private-Files folders while refreshing its file list.
+    assert {path for path in created if path.startswith("rmm/")} == {
+        "rmm/Companies/Contoso/.myportal-company", "rmm/Companies/Other/.myportal-company"}
     assert [item["path"] for item in summary.skipped] == ["rmm/stray.ps1"]
 
     assert {s["name"] for s in await rmm_repo.list_scripts(company_id=1)} == {"a", "only"}
@@ -2197,3 +2199,33 @@ def test_asset_scripts_table_has_column_filters_and_pagination():
     assert 'data-filter-options="multiple" data-filter-values="{{ rmm_ui.RUN_STATUS_LABELS | tojson | forceescape }}"' in template
     assert 'data-pagination="asset-script-runs-table"' in template
     assert "/static/js/tables.js" in template
+
+
+@pytest.mark.anyio
+async def test_sync_stores_private_files_for_the_add_file_editor(sqlite_db, monkeypatch):
+    from app.services import rmm_script_files
+
+    private = {"Common/tool.exe": "x", "Companies/Contoso/setup.msi": "y", "stray.exe": "z"}
+    summary, _fetched = await _sync(monkeypatch, {"rmm/Common/a.ps1": "Write-Output 1\n"}, private=private)
+    assert summary.private_files == 2 and "2 Private-Files files listed" in summary.message()
+
+    async def no_gitea(_settings):
+        raise AssertionError("Add file must use the stored list")
+
+    monkeypatch.setattr(gitea, "list_files", no_gitea)
+    choices, warning = await rmm_script_files.file_choices({"company_id": None}, 1)
+    assert warning is None and choices == ["Common/tool.exe", "Companies/{company}/setup.msi"]
+    assert (await rmm_script_files.file_choices({"company_id": None}, 2))[0] == ["Common/tool.exe"]
+
+    # A Private-Files outage keeps the previous list and explains why.
+    async def private_down(_settings):
+        if _settings.repo == "Private-Files":
+            raise gitea.GiteaError("Could not reach Gitea: ConnectError")
+        return [gitea.GiteaFile("rmm/Common/a.ps1", "sha-rmm/Common/a.ps1", 15)]
+
+    monkeypatch.setattr(gitea, "list_files", private_down)
+    summary = await rmm_scripts.sync_from_gitea()
+    assert "Private-Files list was not refreshed" in summary.message()
+    monkeypatch.setattr(gitea, "list_files", no_gitea)
+    assert (await rmm_script_files.file_choices({"company_id": 1}, 1))[0] == [
+        "Common/tool.exe", "Companies/Contoso/setup.msi"]

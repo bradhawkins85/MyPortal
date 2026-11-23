@@ -1,0 +1,7 @@
+{
+  "guid": "27a78f5c-6187-41ea-968a-15e4e8e6738f",
+  "occurred_at": "2026-11-23T06:29Z",
+  "change_type": "Improvement",
+  "summary": "The script Add file editor opens quickly on large Private-Files repositories, using the file list loaded by Sync from Gitea.",
+  "content_hash": "452574302a68d64c456539cadbdf609f6069db83443b71e7f4b4738e13e11c02"
+}

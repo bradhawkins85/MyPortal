@@ -153,6 +153,7 @@ class SyncSummary:
     unchanged: int = 0
     removed: int = 0
     folders_created: int = 0
+    private_files: int = 0
     skipped: list[dict[str, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -163,6 +164,7 @@ class SyncSummary:
             "unchanged": self.unchanged,
             "removed": self.removed,
             "folders_created": self.folders_created,
+            "private_files": self.private_files,
             "skipped": self.skipped,
             "warnings": self.warnings,
         }
@@ -175,6 +177,8 @@ class SyncSummary:
             parts.append(f"{len(self.skipped)} skipped")
         if self.folders_created:
             parts.append(f"{self.folders_created} folder{'' if self.folders_created == 1 else 's'} created")
+        if self.private_files:
+            parts.append(f"{self.private_files} Private-Files file{'' if self.private_files == 1 else 's'} listed")
         text = "Scripts synced from Gitea: " + ", ".join(parts) + "."
         return " ".join([text, *self.warnings])
 
@@ -316,8 +320,25 @@ async def sync_from_gitea() -> SyncSummary:
     removed = [path for path, row in existing.items() if path not in seen and row.get("is_active")]
     await rmm_repo.deactivate_scripts(removed)
     summary.removed = len(removed)
+    await _sync_private_files(settings, summary)
     log_info("RMM scripts synced from Gitea", **summary.to_dict())
     return summary
+
+
+async def _sync_private_files(settings: gitea.GiteaSettings, summary: SyncSummary) -> None:
+    """Store the Private-Files list so the Add file editor does not list the
+    repository from Gitea each time it opens."""
+
+    from app.services import rmm_script_files
+
+    try:
+        summary.private_files, created, warning = await rmm_script_files.sync_file_list(settings)
+    except gitea.GiteaError as exc:
+        summary.warnings.append(f"The Private-Files list was not refreshed. {exc}")
+        return
+    summary.folders_created += created
+    if warning:
+        summary.warnings.append(warning)
 
 
 async def script_source_url(script: Mapping[str, Any]) -> str | None:
