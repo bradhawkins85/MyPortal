@@ -40,6 +40,12 @@ usage, tokens are estimated at roughly four characters per token and the page
 says how many requests were estimated. Failed requests are recorded with zero
 tokens.
 
+Speech transcription (WhisperX or whisper.cpp) is listed as **Speech
+transcription**. One row is written per transcribed call recording, ticket
+voicemail transcription run and voice monitor call, with the engine as the
+provider and model. Speech services do not report tokens, so input tokens are 0
+and output tokens are estimated from the transcript text.
+
 Usage is recorded from the time this feature is installed; earlier requests are
 not backfilled.
 
