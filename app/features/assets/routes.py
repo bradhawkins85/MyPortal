@@ -416,6 +416,11 @@ async def assets_page(request: Request):
             "os_name": _clean_text(row.get("os_name")),
             "cpu_name": _clean_text(row.get("cpu_name")),
             "hdd_size": _clean_text(row.get("hdd_size")),
+            "wan_ipv4": _clean_text(row.get("wan_ipv4")),
+            "wan_ipv6": _clean_text(row.get("wan_ipv6")),
+            "wan_city": _clean_text(row.get("wan_city")),
+            "wan_region_code": _clean_text(row.get("wan_region_code")),
+            "wan_country": _clean_text(row.get("wan_country")),
             "motherboard_manufacturer": _clean_text(
                 row.get("motherboard_manufacturer")
             ),

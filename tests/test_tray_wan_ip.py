@@ -175,3 +175,27 @@ def test_asset_table_offers_wan_columns():
 
     keys = [column["key"] for column in asset_routes._ASSET_TABLE_COLUMNS]
     assert {"wan_ipv4", "wan_ipv6", "wan_city", "wan_region_code", "wan_country"} <= set(keys)
+
+
+@pytest.mark.anyio
+async def test_assets_list_shows_wan_details(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.features.assets import routes as assets_routes
+    from tests.test_asset_last_sync_tray import _wire
+
+    monkeypatch.setattr(
+        "tests.test_asset_last_sync_tray.ASSET",
+        {"id": 10, "company_id": 11, "name": "PC-01", "wan_ipv4": "203.0.113.7",
+         "wan_ipv6": "2001:db8::7", "wan_city": "Brisbane", "wan_region_code": "QLD",
+         "wan_country": "AU"},
+    )
+    captured = _wire(monkeypatch, trmm_enabled=True, tray_device=None)
+    await assets_routes.assets_page(SimpleNamespace(state=SimpleNamespace()))
+
+    asset = captured["assets"][0]
+    assert asset["wan_ipv4"] == "203.0.113.7"
+    assert asset["wan_ipv6"] == "2001:db8::7"
+    assert asset["wan_city"] == "Brisbane"
+    assert asset["wan_region_code"] == "QLD"
+    assert asset["wan_country"] == "AU"
