@@ -105,7 +105,10 @@
 .cf-capture-controls { display: flex; flex-wrap: wrap; gap: var(--space-gap-base); margin-top: var(--space-gap-roomy); }
 .cf-capture-controls[hidden] { display: none; }
 .cf-capture-controls .button, .cf-capture-preview .button { min-height: 2.75rem; }
-.cf-capture-preview { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-gap-base); margin-top: var(--space-gap-roomy); min-width: 0; }
+.cf-capture-preview { display: flex; flex-direction: column; gap: var(--space-gap-base); margin: var(--space-gap-roomy) 0 0; padding: 0; list-style: none; min-width: 0; }
+.cf-capture-preview:empty { display: none; }
+.cf-capture-item { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-gap-base); min-width: 0; }
+.cf-capture-item + .cf-capture-item { padding-top: var(--space-gap-base); border-top: 1px solid var(--color-border); }
 .cf-capture-preview p { margin: 0; overflow-wrap: anywhere; }
 .cf-capture-preview img, .cf-capture-preview video { max-width: 100%; max-height: 20rem; }
 @media (max-width: 1024px) {

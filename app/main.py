@@ -7129,7 +7129,12 @@ async def forms_view_page(request: Request, slug: str):
         "forms/submit.html",
         request,
         user,
-        extra={"title": form.get("name") or "Form", "form": form, "fields": fields},
+        extra={
+            "title": form.get("name") or "Form",
+            "form": form,
+            "fields": fields,
+            "max_file_attachments": custom_forms.MAX_FILE_ATTACHMENTS,
+        },
     )
 
 

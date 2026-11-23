@@ -431,6 +431,20 @@ def test_validate_submission_audio_multi_clip():
     assert "'Clips' is required." in errors
 
 
+def test_validate_submission_file_accepts_multiple_attachments():
+    fields = [_field(1, "file", label="Evidence")]
+    limit = custom_forms.MAX_FILE_ATTACHMENTS
+    clean, errors = custom_forms.validate_submission(
+        fields, {}, {1: [SimpleNamespace(filename=f"f{i}.png") for i in range(limit)]}
+    )
+    assert errors == []
+    assert clean[1] == [f"f{i}.png" for i in range(limit)]
+    _, errors = custom_forms.validate_submission(
+        fields, {}, {1: [SimpleNamespace(filename=f"f{i}.png") for i in range(limit + 1)]}
+    )
+    assert f"'Evidence' allows at most {limit} attachments." in errors
+
+
 # ---------------------------------------------------------------------------
 # Ticket description building
 # ---------------------------------------------------------------------------

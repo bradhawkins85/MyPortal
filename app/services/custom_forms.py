@@ -54,6 +54,7 @@ SIGNATURE_TYPES: frozenset[str] = frozenset({"signature"})
 MAX_OPTIONS = 100
 MAX_OPTION_LENGTH = 255
 MAX_AUDIO_CLIPS = 5
+MAX_FILE_ATTACHMENTS = 10
 MAX_RATING = 10
 MAX_MATRIX_ROWS = 50
 MAX_MATRIX_COLS = 25
@@ -492,6 +493,8 @@ def validate_submission(
                 max_clips = int(config.get("max_clips", MAX_AUDIO_CLIPS))
                 if len(uploaded) > max_clips:
                     errors.append(f"'{label}' allows at most {max_clips} clips.")
+            elif len(uploaded) > MAX_FILE_ATTACHMENTS:
+                errors.append(f"'{label}' allows at most {MAX_FILE_ATTACHMENTS} attachments.")
             clean[field_id] = [getattr(item, "filename", None) or str(item) for item in uploaded]
             continue
 

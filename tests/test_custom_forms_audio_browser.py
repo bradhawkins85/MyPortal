@@ -299,23 +299,35 @@ def test_camera_picker_preview_and_submit(mount, width, kind, label, mime, filen
     assert wrap.locator('[data-cf-capture-preview]').inner_text() == ''
 
 
-def test_capture_replaces_upload_cancel_preserves_and_remove_validates(mount):
+def test_capture_adds_attachments_cancel_preserves_and_remove_validates(mount):
     page, submitted = mount(file_required=True)
     record_clip(page)
     wrap = page.locator('[data-field-id="13"]')
+    preview = wrap.locator('[data-cf-capture-preview]')
     wrap.locator('[data-cf-file]').set_input_files({'name': 'existing.pdf', 'mimeType': 'application/pdf', 'buffer': b'document'})
     wrap.locator('[data-cf-photo-input]').set_input_files({'name': 'new.jpg', 'mimeType': 'image/jpeg', 'buffer': b'photo'})
-    assert 'existing.pdf' not in wrap.inner_text()
+    assert 'existing.pdf' in preview.inner_text()
+    assert 'new.jpg' in preview.inner_text()
     wrap.locator('[data-cf-video-input]').set_input_files([])
-    assert 'new.jpg' in wrap.locator('[data-cf-capture-preview]').inner_text()
-    wrap.get_by_role('button', name='Remove attachment').click()
+    assert wrap.locator('.cf-capture-item').count() == 2
+    wrap.get_by_role('button', name='Remove existing.pdf').click()
+    assert 'existing.pdf' not in preview.inner_text()
+    wrap.get_by_role('button', name='Remove new.jpg').click()
     page.get_by_role('button', name='Submit request').click()
     assert not submitted
     assert wrap.locator('[data-cf-field-error]').is_visible()
+    wrap.locator('[data-cf-file]').set_input_files([
+        {'name': 'a.pdf', 'mimeType': 'application/pdf', 'buffer': b'a'},
+        {'name': 'b.pdf', 'mimeType': 'application/pdf', 'buffer': b'b'},
+    ])
     wrap.locator('[data-cf-video-input]').set_input_files({'name': 'new.mov', 'mimeType': 'video/quicktime', 'buffer': b'video'})
+    wrap.get_by_role('button', name='Remove b.pdf').click()
     page.get_by_role('button', name='Submit request').click()
     page.get_by_role('link', name='View ticket #42').wait_for()
+    assert submitted[0].count(b'name="file_13"') == 2
+    assert b'filename="a.pdf"' in submitted[0]
     assert b'filename="new.mov"' in submitted[0]
+    assert b'filename="b.pdf"' not in submitted[0]
     assert b'filename="existing.pdf"' not in submitted[0]
     assert b'filename="new.jpg"' not in submitted[0]
 

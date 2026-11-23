@@ -97,8 +97,11 @@ File fields offer **Take photo** and **Record video** controls using native mobi
 camera capture (`capture="environment"` with image/video file inputs). Devices
 that support capture open their camera; other browsers may show a file picker.
 Captured media uses the same `file_{field_id}` attachment flow and 50 MB limit.
-Users can review or remove the attachment, and choosing another file or capture
-replaces it. Cancelling capture keeps the existing attachment. Normal file uploads
+Each file question accepts up to 10 attachments (send each one as a separate
+`file_{field_id}` part); more are rejected with a validation error. Users can
+review each attachment and remove any of them before submitting, and choosing
+another file or capture adds to the list. Cancelling capture keeps the existing
+attachments. Normal file uploads
 remain available, including without JavaScript. HEIC/HEIF photos and MP4/QuickTime
 videos are accepted; HEIC/HEIF photos are downloadable even when a browser cannot
 preview them. Native camera capture does not require enabling in-page camera
