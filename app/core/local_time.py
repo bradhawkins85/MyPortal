@@ -80,7 +80,7 @@ def local_time(value: Any, fmt: str = "datetime", empty: str = "—") -> Markup:
     mode = fmt if fmt in _FORMATS else "datetime"
     parsed = _as_utc_datetime(value)
     if parsed is None:
-        return Markup(escape(empty))
+        return escape(empty)
     iso = utc_iso(parsed)
     return Markup(
         '<span data-utc="{iso}" data-utc-format="{mode}">{text}</span>'
