@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from app.core.local_time import register as register_local_time_helpers
 from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader, select_autoescape
 
 from app.services import m365 as m365_service
@@ -302,6 +303,7 @@ def test_reported_emails_template_renders_alert_rows():
         loader=ChoiceLoader([DictLoader({"base.html": stub_base}), FileSystemLoader(TEMPLATES_DIR)]),
         autoescape=select_autoescape(("html",)),
     )
+    register_local_time_helpers(env)
     template = env.get_template("m365/reported_emails.html")
     alert = service.summarise_alert(_alert())
     alert["search"] = None
@@ -476,6 +478,7 @@ def test_reported_emails_template_shows_source_warnings():
         loader=ChoiceLoader([DictLoader({"base.html": stub_base}), FileSystemLoader(TEMPLATES_DIR)]),
         autoescape=select_autoescape(("html",)),
     )
+    register_local_time_helpers(env)
     row = service.summarise_submission(_submission())
     row["search"] = None
     body = env.get_template("m365/reported_emails.html").render(
@@ -604,6 +607,7 @@ def test_reported_emails_template_collapses_warnings_when_rows_exist():
         loader=ChoiceLoader([DictLoader({"base.html": stub_base}), FileSystemLoader(TEMPLATES_DIR)]),
         autoescape=select_autoescape(("html",)),
     )
+    register_local_time_helpers(env)
     row = service.summarise_audit_record(_audit_record())
     row["search"] = None
     body = env.get_template("m365/reported_emails.html").render(
@@ -661,6 +665,7 @@ def _render_reported(**context):
         loader=ChoiceLoader([DictLoader({"base.html": stub_base}), FileSystemLoader(TEMPLATES_DIR)]),
         autoescape=select_autoescape(("html",)),
     )
+    register_local_time_helpers(env)
     values = {"load_error": None, "kind": "all", "days": 30, "csrf_token": "tok"}
     values.update(context)
     return env.get_template("m365/reported_emails.html").render(**values)
