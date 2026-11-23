@@ -93,6 +93,11 @@ type windowsReport struct {
 		Bus    text   `json:"bus"`
 		Serial text   `json:"serial"`
 	} `json:"drives"`
+	Activation *struct {
+		Status       *number `json:"status"`
+		Channel      text    `json:"channel"`
+		GraceMinutes number  `json:"grace_minutes"`
+	} `json:"activation"`
 	GPUs    []text `json:"gpus"`
 	Network []*struct {
 		Name      text   `json:"name"`
@@ -193,12 +198,31 @@ func applyWindows(s *Snapshot, output []byte) error {
 		s.Software = append(s.Software, Program{Name: string(p.Name), Version: string(p.Version),
 			Publisher: string(p.Publisher), InstallDate: installDate(string(p.InstallDate)), Source: string(p.Scope)})
 	}
+	if a := r.Activation; a != nil && a.Status != nil {
+		s.Activation = &WindowsActivation{Status: activationStatus(int(*a.Status)), Channel: trim(string(a.Channel)),
+			GraceMinutes: int(a.GraceMinutes.uint64())}
+	}
 	for _, e := range r.Errors {
 		if e != "" {
 			s.Errors = append(s.Errors, string(e))
 		}
 	}
 	return nil
+}
+
+// activationStatus names SoftwareLicensingProduct.LicenseStatus.
+func activationStatus(code int) string {
+	switch code {
+	case 1:
+		return "licensed"
+	case 2, 3, 6: // out-of-box, out-of-tolerance and extended grace
+		return "grace"
+	case 4:
+		return "non_genuine"
+	case 5:
+		return "notification"
+	}
+	return "unlicensed"
 }
 
 // installDate turns the registry's yyyymmdd into yyyy-mm-dd; anything else is dropped.

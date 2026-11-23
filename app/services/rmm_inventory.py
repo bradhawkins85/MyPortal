@@ -151,6 +151,52 @@ def _install_date(value: Any) -> str | None:
         return None
 
 
+# Windows licence states the agent reports, with the badge each one shows.
+WINDOWS_ACTIVATION: dict[str, dict[str, str]] = {
+    "licensed": {"label": "Windows activated", "variant": "success"},
+    "grace": {"label": "Activation grace period", "variant": "warning"},
+    "notification": {"label": "Windows not activated", "variant": "danger"},
+    "unlicensed": {"label": "Windows not activated", "variant": "danger"},
+    "non_genuine": {"label": "Windows not genuine", "variant": "danger"},
+}
+
+
+def _windows_activation(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    status = str(value.get("status") or "").strip().lower()
+    if status not in WINDOWS_ACTIVATION:
+        return None
+    return {
+        "status": status,
+        "channel": _text(value.get("channel"), 64),
+        "grace_minutes": _int(value.get("grace_minutes"), 10 ** 7),
+    }
+
+
+def windows_activation_badge(status: Any, details: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    """The badge for an inventory's Windows activation, or None when not reported.
+
+    ``rank`` orders the assets list so machines needing activation sort together.
+    """
+
+    state = WINDOWS_ACTIVATION.get(str(status or ""))
+    if not state:
+        return None
+    badge = {"status": str(status), **state, "rank": {"success": 3, "warning": 2}.get(state["variant"], 1)}
+    activation = (details or {}).get("windows_activation") if isinstance(details, Mapping) else None
+    title = [state["label"]]
+    if isinstance(activation, Mapping):
+        if activation.get("channel"):
+            title.append(f"{activation['channel']} licence")
+        minutes = activation.get("grace_minutes")
+        if status != "licensed" and isinstance(minutes, int) and minutes > 0:
+            days = max(1, round(minutes / 1440))
+            title.append(f"{days} day{'s' if days != 1 else ''} left to activate")
+    badge["title"] = " · ".join(title)
+    return badge
+
+
 def normalise(payload: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     """Split an agent's snapshot into summary columns, details and software rows."""
 
@@ -185,6 +231,8 @@ def normalise(payload: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any
         "system_disk_free_bytes": system_disk["free_bytes"] if system_disk else None,
         "last_boot_at": _as_datetime(payload.get("last_boot_at")),
     }
+    activation = _windows_activation(payload.get("windows_activation"))
+    summary["windows_activation"] = activation["status"] if activation else None
     details = {
         "disks": disks,
         "physical_disks": [
@@ -206,6 +254,8 @@ def normalise(payload: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any
         ],
         "errors": [str(error)[:500] for error in payload.get("errors") or []][:20],
     }
+    if activation:
+        details["windows_activation"] = activation
     proxmox = rmm_proxmox.normalise(payload.get("proxmox"))
     if proxmox is not None:
         details["proxmox"] = proxmox
@@ -302,8 +352,13 @@ async def asset_inventory_context(agent: Mapping[str, Any] | None, *, can_refres
         if key not in apps:
             apps[key] = {**row, "installed": False, "history": []}
         apps[key]["history"].append(row)
+    activation = (
+        windows_activation_badge(inventory.get("windows_activation"), inventory.get("details"))
+        if inventory and received else None
+    )
     return {
         "inventory": inventory if received else None,
+        "windows_activation": activation,
         "software": software,
         "software_apps": sorted(apps.values(), key=lambda item: item["name"].casefold()),
         "refresh_pending": requested is not None and (received is None or requested > received),

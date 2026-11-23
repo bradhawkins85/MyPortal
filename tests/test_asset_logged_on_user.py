@@ -177,3 +177,11 @@ async def test_signed_in_user_is_not_flagged_as_last(monkeypatch):
 def test_detail_template_shows_last_user_in_italics():
     template = DETAIL_TEMPLATE.read_text(encoding="utf-8")
     assert "Last logged on: <em>{{ logged_on_user }}</em>" in template
+
+
+def test_windows_activation_chip_follows_the_visibility_chip():
+    template = DETAIL_TEMPLATE.read_text()
+    visibility = template.index("'Customer portal' if asset.customer_visible else 'Internal asset'")
+    chip = template.index('data-windows-activation="{{ activation.status }}"')
+    technician_block = template.index("{% if not customer_safe %}", template.index('aria-label="Asset summary"'))
+    assert technician_block < visibility < chip < template.index("{% endif %}\n        </ul>", technician_block)

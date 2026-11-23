@@ -360,7 +360,8 @@ async def sqlite_db(monkeypatch):
                  "493_rmm_script_parallel.sql", "494_rmm_chocolatey_sources.sql", "495_rmm_script_run_anyway.sql",
                  "496_rmm_chocolatey_catalog.sql", "498_rmm_windows_updates.sql",
                  "499_rmm_windows_update_blocks.sql", "500_rmm_check_auto_close.sql",
-                 "504_chocolatey_software_matches.sql", "505_chocolatey_catalog_lookups.sql", "510_rmm_script_policy.sql", "511_rmm_offline_wait_timeout.sql"):
+                 "504_chocolatey_software_matches.sql", "505_chocolatey_catalog_lookups.sql", "510_rmm_script_policy.sql", "511_rmm_offline_wait_timeout.sql",
+                 "572_rmm_windows_activation.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     # Mirrors migration 506 (Chocolatey onboarding steps), whose MODIFY SQLite cannot run.
     cursor = await conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'rmm_onboarding_steps'")

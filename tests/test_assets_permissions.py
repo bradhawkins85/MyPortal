@@ -202,3 +202,46 @@ async def test_read_only_assets_cannot_update_documentation(monkeypatch):
 
     assert excinfo.value.status_code == 403
     update.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_assets_page_shows_windows_activation_to_rmm_technicians(monkeypatch):
+    from app.features.rmm import routes as rmm_routes
+    from app.repositories import rmm_inventory as rmm_inventory_repo
+    from app.services import rmm_agent_deploy, rmm_remote_control
+
+    user = {"id": 1, "company_id": 42, "is_super_admin": True}
+    assets = [
+        {"id": 100, "company_id": 42, "name": "PC-100", "type": "workstation", "status": "active"},
+        {"id": 200, "company_id": 42, "name": "PC-200", "type": "workstation", "status": "active"},
+    ]
+    monkeypatch.setattr(main_module, "_require_authenticated_user", AsyncMock(return_value=(user, None)))
+    monkeypatch.setattr(main_module, "_get_effective_company_membership", AsyncMock(return_value={"company_id": 42}))
+    monkeypatch.setattr(main_module, "_feature_pack_available", lambda slug: slug == "rmm")
+    monkeypatch.setattr(assets_routes, "_tactical_rmm_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(assets_routes.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 42}))
+    monkeypatch.setattr(assets_routes.asset_repo, "list_company_assets", AsyncMock(return_value=assets))
+    monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", AsyncMock(return_value={}))
+    monkeypatch.setattr(assets_routes.tray_repo, "list_active_devices_by_asset_ids", AsyncMock(return_value={}))
+    monkeypatch.setattr(rmm_routes, "company_agent_details", AsyncMock(return_value={100: {"state": "connected"}}))
+    monkeypatch.setattr(rmm_agent_deploy, "company_latest_attempts", AsyncMock(return_value={}))
+    monkeypatch.setattr(rmm_remote_control, "enabled_providers", AsyncMock(return_value=[]))
+    # Tactical RMM is on, so the inventory is read only for the activation column.
+    inventory = AsyncMock(return_value={100: {"windows_activation": "unlicensed", "os_name": "Windows 11 Pro"}})
+    monkeypatch.setattr(rmm_inventory_repo, "list_for_company_assets", inventory)
+    renderer = AsyncMock(return_value=HTMLResponse("assets page"))
+    monkeypatch.setattr(main_module, "_render_template", renderer)
+
+    await assets_routes.assets_page(_request())
+
+    inventory.assert_awaited_once_with(42)
+    extra = renderer.await_args.kwargs["extra"]
+    keys = [column["key"] for column in extra["columns"]]
+    assert keys.index("windows_activation") == keys.index("rmm_agent_version") + 1
+    by_id = {asset["id"]: asset for asset in extra["assets"]}
+    assert by_id[100]["windows_activation"]["label"] == "Windows not activated"
+    assert by_id[100]["windows_activation_sort"] == 1
+    # The Tactical RMM values are not replaced by the inventory.
+    assert by_id[100].get("os_name") != "Windows 11 Pro"
+    assert by_id[200]["windows_activation"] is None and by_id[200]["windows_activation_sort"] == ""

@@ -74,6 +74,50 @@ def test_normalise_splits_and_cleans_the_snapshot():
     assert details["physical_disks"][0]["media_type"] == "SSD" and details["errors"] == ["gpus: Access denied"]
 
 
+def test_normalise_keeps_only_known_windows_activation_states():
+    summary, details, _software = inventory.normalise(_snapshot(
+        windows_activation={"status": "grace", "channel": "Retail", "grace_minutes": 4320},
+    ))
+    assert summary["windows_activation"] == "grace"
+    assert details["windows_activation"] == {"status": "grace", "channel": "Retail", "grace_minutes": 4320}
+    for value in (None, "licensed", {"status": "hacked"}, {}):
+        summary, details, _software = inventory.normalise(_snapshot(windows_activation=value))
+        assert summary["windows_activation"] is None and "windows_activation" not in details
+
+
+def test_windows_activation_badge():
+    assert inventory.windows_activation_badge(None) is None
+    assert inventory.windows_activation_badge("unknown") is None
+    licensed = inventory.windows_activation_badge("licensed", {"windows_activation": {"channel": "OEM:DM"}})
+    assert licensed["variant"] == "success" and licensed["label"] == "Windows activated"
+    assert licensed["title"] == "Windows activated · OEM:DM licence"
+    grace = inventory.windows_activation_badge("grace", {"windows_activation": {"grace_minutes": 4320}})
+    assert grace["variant"] == "warning" and grace["title"].endswith("3 days left to activate")
+    missing = inventory.windows_activation_badge("unlicensed")
+    assert missing["variant"] == "danger" and missing["label"] == "Windows not activated"
+    # Machines needing activation sort first.
+    assert missing["rank"] < grace["rank"] < licensed["rank"]
+
+
+@pytest.mark.anyio
+async def test_windows_activation_is_stored_and_shown(inventory_db):
+    from app.features.rmm import inventory_routes as routes
+
+    _result, agent = await _enrol(inventory_db)
+    await inventory.ingest(agent, _snapshot(windows_activation={"status": "unlicensed"}))
+    assert (await inventory_repo.list_for_company_assets(1))[10]["windows_activation"] == "unlicensed"
+    context = await routes.asset_inventory_context(1, 10, can_refresh=True)
+    assert context["windows_activation"]["label"] == "Windows not activated"
+    html = _environment().get_template("rmm/_asset_inventory.html").render(
+        rmm={"inventory": context}, asset={"id": 10}, csrf_token="t",
+    )
+    assert "Windows activation" in html and "status--danger" in html
+    # An agent that does not report activation clears the old state.
+    await inventory.ingest(agent, _snapshot())
+    context = await routes.asset_inventory_context(1, 10, can_refresh=True)
+    assert context["windows_activation"] is None
+
+
 @pytest.mark.anyio
 async def test_inventory_populates_interfaces_and_refreshes_without_duplicates(inventory_db):
     _result, agent = await _enrol(inventory_db)

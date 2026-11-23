@@ -66,6 +66,19 @@ $result.network = @(Part 'network' {
     }
 })
 
+# Windows activation: the licensed product wins over leftover keys. A device
+# with no product key installed reports 0 (unlicensed).
+$result.activation = Part 'activation' {
+    $products = @(Get-CimInstance SoftwareLicensingProduct -Filter "ApplicationID = '55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL")
+    $product = $products | Sort-Object @{ Expression = { $_.LicenseStatus -eq 1 }; Descending = $true } | Select-Object -First 1
+    if ($product) {
+        [ordered]@{ status = $product.LicenseStatus; channel = [string]$product.ProductKeyChannel
+                    grace_minutes = $product.GracePeriodRemaining }
+    } else {
+        [ordered]@{ status = 0; channel = $null; grace_minutes = $null }
+    }
+}
+
 $result.software = @(Part 'software' {
     $keys = @(
         @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'; Scope = 'machine' },

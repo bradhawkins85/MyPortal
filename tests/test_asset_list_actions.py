@@ -131,3 +131,19 @@ def test_health_check_score_links_to_the_latest_report(page):
     assert 'class="status status--warning" href="/health-checks/5"' in cell and "72/100" in cell
     unscored = html.split('id="asset-11"', 1)[1].split("</tr>", 1)[0]
     assert "/100" not in unscored and "—" in unscored.split('data-column="health_score"', 1)[1].split("</td>", 1)[0]
+
+
+def test_windows_activation_column_flags_machines_to_activate(page):
+    columns = [{"key": "name", "label": "Name", "sort": "string"},
+               {"key": "windows_activation", "label": "Windows activation", "sort": "number"}]
+    html = _render(page,
+                   {"id": 10, "name": "PC", "windows_activation_sort": 1, "windows_activation": {
+                       "status": "unlicensed", "label": "Windows not activated", "variant": "danger",
+                       "title": "Windows not activated", "rank": 1}},
+                   {"id": 11, "name": "Mac", "windows_activation": None, "windows_activation_sort": ""},
+                   columns=columns)
+    assert "Windows activation" in html.split("</thead>", 1)[0]
+    cell = html.split('id="asset-10"', 1)[1].split('data-column="windows_activation"', 1)[1].split("</td>", 1)[0]
+    assert 'data-value="1"' in cell and 'class="status status--danger"' in cell and "Windows not activated" in cell
+    other = html.split('id="asset-11"', 1)[1].split('data-column="windows_activation"', 1)[1].split("</td>", 1)[0]
+    assert "—" in other and "status--" not in other
