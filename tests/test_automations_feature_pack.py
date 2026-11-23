@@ -26,6 +26,9 @@ EXPECTED = {
     ("GET", "/admin/automations/{automation_id}/history"),
     ("POST", "/admin/automations/{automation_id}/execute"),
     ("POST", "/admin/automations/{automation_id}/clone"),
+    ("POST", "/admin/automations/{automation_id}/test"),
+    ("GET", "/admin/automations/{automation_id}/export"),
+    ("POST", "/admin/automations/import"),
     ("POST", "/admin/automations/{automation_id}/delete"),
 }
 
@@ -70,29 +73,27 @@ def test_app_main_no_longer_owns_automations_routes():
 
 
 def test_automations_pack_owns_handlers():
-    assert automation_routes.router.routes[0].endpoint == automation_handlers.admin_automations_page
-    assert (
-        automation_routes.router.routes[1].endpoint
-        == automation_handlers.admin_create_scheduled_automation_page
-    )
-    assert (
-        automation_routes.router.routes[2].endpoint
-        == automation_handlers.admin_create_event_automation_page
-    )
-    assert automation_routes.router.routes[3].endpoint == automation_handlers.admin_create_automation
-    assert automation_routes.router.routes[4].endpoint == automation_handlers.admin_preview_automation
-    assert automation_routes.router.routes[5].endpoint == automation_handlers.admin_simulate_automation
-    assert automation_routes.router.routes[6].endpoint == automation_handlers.admin_process_simulated_automation
-    assert automation_routes.router.routes[7].endpoint == automation_handlers.admin_edit_automation_page
-    assert automation_routes.router.routes[8].endpoint == automation_handlers.admin_update_automation
-    assert (
-        automation_routes.router.routes[9].endpoint
-        == automation_handlers.admin_update_automation_status
-    )
-    assert automation_routes.router.routes[10].endpoint == automation_handlers.admin_automation_history
-    assert automation_routes.router.routes[11].endpoint == automation_handlers.admin_execute_automation
-    assert automation_routes.router.routes[12].endpoint == automation_handlers.admin_clone_automation
-    assert automation_routes.router.routes[13].endpoint == automation_handlers.admin_delete_automation
+    endpoints = {
+        (method, route.path): route.endpoint
+        for route in automation_routes.router.routes
+        for method in route.methods or set()
+    }
+    h = automation_handlers
+    assert endpoints[("GET", "/admin/automations")] == h.admin_automations_page
+    assert endpoints[("GET", "/admin/automations/create/scheduled")] == h.admin_create_scheduled_automation_page
+    assert endpoints[("GET", "/admin/automations/create/event")] == h.admin_create_event_automation_page
+    assert endpoints[("POST", "/admin/automations")] == h.admin_create_automation
+    assert endpoints[("GET", "/admin/automations/{automation_id}/edit")] == h.admin_edit_automation_page
+    assert endpoints[("POST", "/admin/automations/{automation_id}")] == h.admin_update_automation
+    assert endpoints[("POST", "/admin/automations/{automation_id}/clone")] == h.admin_clone_automation
+    assert endpoints[("POST", "/admin/automations/{automation_id}/delete")] == h.admin_delete_automation
+    assert endpoints[("GET", "/admin/automations/{automation_id}/export")] == h.admin_export_automation
+    assert endpoints[("POST", "/admin/automations/import")] == h.admin_import_automation
+
+
+def test_import_route_is_matched_before_automation_id_routes():
+    paths = [route.path for route in automation_routes.router.routes]
+    assert paths.index("/admin/automations/import") < paths.index("/admin/automations/{automation_id}")
 
 
 def test_automations_pack_loads_and_reloads_cleanly():

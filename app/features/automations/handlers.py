@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.datastructures import FormData
 
 from app.security.flash import flash_redirect
@@ -876,6 +876,90 @@ async def admin_clone_automation(automation_id: int, request: Request):
     )
     message = f"Automation {cloned.get('name') or cloned.get('id')} cloned."
     return flash_redirect("/admin/automations", message, "success")
+
+
+async def admin_export_automation(automation_id: int, request: Request):
+    from app.repositories import automations as automation_repo
+    from app.services import automation_transfer
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found"
+        )
+    try:
+        document = automation_transfer.build_export(automation)
+    except automation_transfer.AutomationImportError as exc:
+        return flash_redirect("/admin/automations", str(exc), "error")
+
+    filename = automation_transfer.export_filename(automation)
+    body = json.dumps(_main()._serialise_for_json(document), indent=2)
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+async def admin_import_automation(request: Request):
+    from starlette.datastructures import UploadFile as StarletteUploadFile
+
+    from app.core.logging import log_info
+    from app.services import audit as audit_service
+    from app.services import automation_transfer
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    upload = form.get("automation_file")
+    if not isinstance(upload, StarletteUploadFile) or not upload.filename:
+        return flash_redirect(
+            "/admin/automations", "Choose an exported automation JSON file.", "error"
+        )
+    raw_bytes = await upload.read(automation_transfer.MAX_IMPORT_BYTES + 1)
+    if len(raw_bytes) > automation_transfer.MAX_IMPORT_BYTES:
+        return flash_redirect(
+            "/admin/automations", "The automation file is too large.", "error"
+        )
+    try:
+        document = json.loads(raw_bytes.decode("utf-8-sig"))
+    except UnicodeDecodeError:
+        return flash_redirect(
+            "/admin/automations", "The file must be UTF-8 encoded JSON.", "error"
+        )
+    except json.JSONDecodeError:
+        return flash_redirect(
+            "/admin/automations", "The file is not valid JSON.", "error"
+        )
+    try:
+        record = await automation_transfer.import_automation(document)
+    except automation_transfer.AutomationImportError as exc:
+        return flash_redirect("/admin/automations", str(exc), "error")
+
+    user_id = current_user.get("id") if isinstance(current_user, Mapping) else None
+    await audit_service.record(
+        action="automation.import",
+        request=request,
+        user_id=int(user_id) if user_id is not None else None,
+        entity_type="automation",
+        entity_id=int(record["id"]) if record.get("id") is not None else None,
+        before=None,
+        after=record,
+    )
+    log_info("Automation imported", automation_id=record.get("id"), imported_by=user_id)
+    message = (
+        f"Automation {record.get('name')} imported as inactive. "
+        "Review it, then activate it."
+    )
+    return flash_redirect(
+        f"/admin/automations/{record.get('id')}/edit", message, "success"
+    )
 
 
 async def admin_delete_automation(automation_id: int, request: Request):

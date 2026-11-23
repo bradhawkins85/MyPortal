@@ -11,6 +11,8 @@ Owns the admin automations page routes:
 * ``POST /admin/automations/{automation_id}/status``
 * ``POST /admin/automations/{automation_id}/execute``
 * ``POST /admin/automations/{automation_id}/clone``
+* ``GET /admin/automations/{automation_id}/export``
+* ``POST /admin/automations/import``
 * ``POST /admin/automations/{automation_id}/delete``
 """
 
@@ -23,7 +25,7 @@ from .routes import router as automations_router
 
 PACK = FeaturePack(
     slug="automations",
-    version="1.2.0",
+    version="1.3.0",
     routers=(automations_router,),
 )
 
