@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
@@ -423,4 +424,112 @@ async def _auto_assign_device_type(device_id: int) -> None:
                WHERE LOWER(dtv.mac_vendor)=LOWER(COALESCE(mv.vendor, nd.vendor))
              )""",
         (device_id,),
+    )
+
+
+_PORT_CHECK_COLUMNS = (
+    "id, company_id, network_device_id, scanner_tray_device_id, command_id, "
+    "ip_address, ports, status, open_ports, checked_count, error, "
+    "requested_by_user_id, requested_at, completed_at"
+)
+
+
+async def get_device_for_port_check(
+    company_id: int, device_id: int
+) -> dict[str, Any] | None:
+    """Return a company-owned device with the scanner that discovered it."""
+    return await db.fetch_one(
+        """SELECT nd.id, nd.ip_address, nd.hostname, nd.scanner_tray_device_id,
+                  td.device_uid AS scanner_device_uid,
+                  td.network_scanner_enabled AS scanner_enabled,
+                  COALESCE(a.name, td.hostname) AS scanner_name
+           FROM network_devices nd
+           JOIN tray_devices td ON td.id = nd.scanner_tray_device_id
+             AND td.company_id = nd.company_id AND td.status = 'active'
+           LEFT JOIN assets a ON a.id = td.asset_id
+           WHERE nd.id=%s AND nd.company_id=%s""",
+        (device_id, company_id),
+    )
+
+
+async def create_port_check(
+    *,
+    company_id: int,
+    network_device_id: int,
+    scanner_tray_device_id: int,
+    ip_address: str,
+    ports: str,
+    requested_by_user_id: int | None,
+) -> int:
+    """Start a check, replacing the device's earlier ones."""
+    await db.execute(
+        "DELETE FROM network_device_port_checks WHERE company_id=%s AND network_device_id=%s",
+        (company_id, network_device_id),
+    )
+    check_id = await db.execute_returning_lastrowid(
+        "INSERT INTO network_device_port_checks (company_id, network_device_id, "
+        "scanner_tray_device_id, ip_address, ports, requested_by_user_id, status) "
+        "VALUES (%s, %s, %s, %s, %s, %s, 'queued')",
+        (
+            company_id,
+            network_device_id,
+            scanner_tray_device_id,
+            ip_address,
+            ports,
+            requested_by_user_id,
+        ),
+    )
+    return int(check_id or 0)
+
+
+async def set_port_check_command(check_id: int, command_id: int, status: str) -> None:
+    await db.execute(
+        "UPDATE network_device_port_checks SET command_id=%s, status=%s WHERE id=%s",
+        (command_id, status, check_id),
+    )
+
+
+async def get_latest_port_check(
+    company_id: int, network_device_id: int
+) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT " + _PORT_CHECK_COLUMNS + " FROM network_device_port_checks "
+        "WHERE company_id=%s AND network_device_id=%s ORDER BY id DESC LIMIT 1",
+        (company_id, network_device_id),
+    )
+
+
+async def latest_port_checks_by_device(company_id: int) -> dict[int, dict[str, Any]]:
+    rows = await db.fetch_all(
+        "SELECT " + _PORT_CHECK_COLUMNS + " FROM network_device_port_checks "
+        "WHERE company_id=%s ORDER BY id",
+        (company_id,),
+    )
+    return {int(row["network_device_id"]): dict(row) for row in rows or []}
+
+
+async def get_port_check_for_scanner(
+    check_id: int, scanner_tray_device_id: int
+) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT " + _PORT_CHECK_COLUMNS + " FROM network_device_port_checks "
+        "WHERE id=%s AND scanner_tray_device_id=%s",
+        (check_id, scanner_tray_device_id),
+    )
+
+
+async def complete_port_check(
+    check_id: int, *, open_ports: str, checked_count: int, error: str | None
+) -> None:
+    await db.execute(
+        "UPDATE network_device_port_checks SET status=%s, open_ports=%s, "
+        "checked_count=%s, error=%s, completed_at=%s WHERE id=%s",
+        (
+            "failed" if error else "completed",
+            open_ports,
+            checked_count,
+            error,
+            datetime.now(timezone.utc).replace(tzinfo=None),
+            check_id,
+        ),
     )
