@@ -672,6 +672,65 @@ func (d *daemon) runNetworkScan(source string, cfg *api.ConfigResponse) {
 	logger.Info("Network scan (%s) uploaded (%d hosts)", source, len(hosts))
 }
 
+// portCheckTargets is replaced in tests: real targets depend on this host's
+// network interfaces.
+var portCheckTargets = scanner.AllowedTargets
+
+// handleCheckPorts runs a one-off TCP port check that a technician asked for
+// on one discovered device, limited to the same networks as routine scans.
+func (d *daemon) handleCheckPorts(msg map[string]json.RawMessage) {
+	var (
+		commandID, checkID int
+		ip                 string
+		ports              []int
+	)
+	_ = json.Unmarshal(msg["command_id"], &commandID)
+	_ = json.Unmarshal(msg["check_id"], &checkID)
+	_ = json.Unmarshal(msg["ip_address"], &ip)
+	_ = json.Unmarshal(msg["ports"], &ports)
+	if commandID <= 0 || checkID <= 0 {
+		logger.Warn("check_ports: ignoring command with missing ids (check %d, command %d)", checkID, commandID)
+		return
+	}
+	report := func(open []int, checked int, errMsg string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := d.client.PostPortCheckResult(ctx, checkID, commandID, open, checked, errMsg); err != nil {
+			logger.Warn("check_ports: reporting result failed: %v", err)
+		}
+	}
+	if len(ports) == 0 || len(ports) > scanner.MaxPortCheckPorts {
+		report(nil, 0, fmt.Sprintf("The scanner checks between 1 and %d ports at a time.", scanner.MaxPortCheckPorts))
+		return
+	}
+	for _, port := range ports {
+		if port < 1 || port > 65535 {
+			report(nil, 0, fmt.Sprintf("Port %d is outside 1-65535.", port))
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	cfg, err := d.client.GetConfig(ctx)
+	cancel()
+	if err != nil {
+		report(nil, 0, "The scanner could not load its settings from MyPortal.")
+		return
+	}
+	if !cfg.NetworkScannerEnabled {
+		report(nil, 0, "Network scanning is turned off for this scanner.")
+		return
+	}
+	if !scanner.IPInTargets(ip, portCheckTargets(cfg.NetworkScanLocalCIDRs)) {
+		report(nil, 0, fmt.Sprintf("%s is outside the local networks this scanner may check.", ip))
+		return
+	}
+	logger.Info("check_ports: checking %d port(s) on %s", len(ports), ip)
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
+	open := scanner.CheckPorts(ctx, ip, ports, 2*time.Second, 64)
+	cancel()
+	report(open, len(ports), "")
+}
+
 // retryEnrolment waits through temporary failures and stops with the service.
 func retryEnrolment(stopCh chan struct{}, enrol func() error, delay func(int) time.Duration) bool {
 	for attempt := 0; ; attempt++ {
@@ -981,6 +1040,9 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 	case "scan_network":
 		logger.Info("Manual network scan request received from portal")
 		go d.manualNetworkScan()
+	case "check_ports":
+		logger.Info("check_ports command received")
+		go d.handleCheckPorts(msg)
 	}
 }
 
