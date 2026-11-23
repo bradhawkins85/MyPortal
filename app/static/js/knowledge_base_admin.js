@@ -1543,7 +1543,7 @@
     versionList.hidden = false;
     versionList.textContent = '';
     versions.forEach((item) => {
-      const when = item.created_at ? new Date(item.created_at) : null;
+      const when = item.created_at ? window.MyPortalTime.toDate(item.created_at) : null;
       const label = when && !Number.isNaN(when.getTime()) ? when.toLocaleString() : (item.created_at || '');
       const button = document.createElement('button');
       button.type = 'button';
@@ -1662,7 +1662,7 @@
     if (!value) {
       return 'just now';
     }
-    const date = new Date(value);
+    const date = window.MyPortalTime.toDate(value);
     if (Number.isNaN(date.getTime())) {
       return 'recently';
     }

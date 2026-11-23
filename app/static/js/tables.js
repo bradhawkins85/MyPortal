@@ -1015,7 +1015,7 @@
       if (!iso) {
         return;
       }
-      const date = new Date(iso);
+      const date = window.MyPortalTime.toDate(iso);
       if (Number.isNaN(date.getTime())) {
         return;
       }

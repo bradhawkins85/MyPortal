@@ -101,7 +101,7 @@
             </td>
             <td style="white-space:nowrap">
               {% if check.run_at %}
-              <small class="text-muted">{{ check.run_at.strftime('%d %b %Y %H:%M') if check.run_at else '' }}</small>
+              <small class="text-muted">{{ local_time(check.run_at, empty='') }}</small>
               {% endif %}
             </td>
             {% if is_super_admin %}

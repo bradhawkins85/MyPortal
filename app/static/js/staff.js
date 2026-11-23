@@ -552,7 +552,7 @@
             ticketCell(row, 'Assigned', ticket.assigned);
             const updatedCell = ticketCell(row, 'Updated', '—');
             if (ticket.updatedAt) {
-              updatedCell.textContent = new Date(ticket.updatedAt).toLocaleString();
+              updatedCell.textContent = window.MyPortalTime.toDate(ticket.updatedAt).toLocaleString();
               updatedCell.dataset.value = ticket.updatedAt;
             }
             ticketsBody.appendChild(row);
@@ -1053,7 +1053,7 @@
       if (editFields.account_action) {
         editFields.account_action.value = member.account_action || 'Onboard Requested';
       }
-      setValue(editFields.m365_last_sign_in, member.m365_last_sign_in ? member.m365_last_sign_in.replace('T', ' ').slice(0, 16) : '');
+      setValue(editFields.m365_last_sign_in, member.m365_last_sign_in ? (window.MyPortalTime.format(member.m365_last_sign_in) || member.m365_last_sign_in) : '');
       const existingCustom = member.custom_fields || {};
       editCustomFieldInputs.forEach((entry, name) => {
         if (!entry || !entry.input) {

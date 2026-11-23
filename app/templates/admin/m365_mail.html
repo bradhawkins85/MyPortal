@@ -207,7 +207,7 @@
                           <div class="table__meta">Graph: <code>{{ action.message_id or '—' }}</code></div>
                           <div class="table__meta">Internet: <code>{{ action.internet_message_id or '—' }}</code></div>
                           {% if action.received_at %}
-                            <div class="table__meta">Received: {{ action.received_at }}</div>
+                            <div class="table__meta">Received: {{ local_time(action.received_at) }}</div>
                           {% endif %}
                         </td>
                         <td data-column-key="sender">
@@ -411,7 +411,7 @@
                     <tr>
                       <td data-column-key="completed">
                         {% if run.completed_at %}
-                          <time datetime="{{ run.completed_at.isoformat() }}" data-m365-history-completed>{{ run.completed_at.isoformat() }}</time>
+                          <time datetime="{{ utc_iso(run.completed_at) }}" data-m365-history-completed>{{ run.completed_at.isoformat() }}</time>
                         {% else %}
                           —
                         {% endif %}
@@ -452,7 +452,7 @@
                                 <tbody>
                                   {% for action in run_actions %}
                                     <tr>
-                                      <td>{{ action.received_at or '—' }}</td>
+                                      <td>{{ local_time(action.received_at) }}</td>
                                       <td>{{ (action.outcome or 'unknown')|replace('_', ' ')|title }}</td>
                                       <td>
                                         <strong>{{ action.subject or 'No subject' }}</strong>
@@ -544,7 +544,7 @@
                 <tbody>
                   {% for action in sync_actions %}
                     <tr>
-                      <td>{{ action.received_at or '—' }}</td>
+                      <td>{{ local_time(action.received_at) }}</td>
                       <td>{{ action.subject or '(no subject)' }}</td>
                       <td>{{ action.from_address or '—' }}</td>
                       <td>

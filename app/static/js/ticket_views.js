@@ -570,7 +570,7 @@
             greater_equal: actual >= expected, less: actual < expected, less_equal: actual <= expected }[filter.operator] ?? true;
         }
         if (filter.type === 'date') {
-          const actual = new Date(raw.replace(' ', 'T'));
+          const actual = window.MyPortalTime.toDate(raw);
           if (Number.isNaN(actual.getTime())) return false;
           if (filter.operator === 'relative') return actual >= new Date(Date.now() - (30 * 86400000)) && actual <= new Date();
           const expected = filter.value === 'today' ? new Date() : new Date(`${filter.value}T00:00:00`);

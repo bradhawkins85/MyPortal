@@ -304,7 +304,7 @@
     if (!iso) {
       return { text: '—', value: '' };
     }
-    const date = new Date(iso);
+    const date = window.MyPortalTime.toDate(iso);
     if (Number.isNaN(date.getTime())) {
       return { text: '—', value: '' };
     }

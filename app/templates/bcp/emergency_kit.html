@@ -88,7 +88,7 @@
               <td>{{ item.notes or '—' }}</td>
               <td>
                 {% if item.last_checked_at %}
-                  <span class="status-badge status-success">{{ item.last_checked_at.strftime('%Y-%m-%d') }}</span>
+                  <span class="status-badge status-success">{{ local_time(item.last_checked_at, 'date') }}</span>
                 {% else %}
                   <span class="status-badge status-warning">Not checked</span>
                 {% endif %}
@@ -159,7 +159,7 @@
               <td>{{ item.notes or '—' }}</td>
               <td>
                 {% if item.last_checked_at %}
-                  <span class="status-badge status-success">{{ item.last_checked_at.strftime('%Y-%m-%d') }}</span>
+                  <span class="status-badge status-success">{{ local_time(item.last_checked_at, 'date') }}</span>
                 {% else %}
                   <span class="status-badge status-warning">Not checked</span>
                 {% endif %}

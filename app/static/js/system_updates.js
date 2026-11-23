@@ -60,7 +60,7 @@
     document.querySelectorAll('[data-utc]').forEach((element) => {
       const iso = element.getAttribute('data-utc');
       if (!iso) return;
-      const date = new Date(iso);
+      const date = window.MyPortalTime.toDate(iso);
       if (!Number.isNaN(date.getTime())) element.textContent = date.toLocaleString();
     });
   }
@@ -119,7 +119,7 @@
 
     const completed = root.querySelector('[data-system-update-completed]');
     if (completed && update.completed_at) {
-      completed.textContent = new Date(update.completed_at).toLocaleString();
+      completed.textContent = window.MyPortalTime.toDate(update.completed_at).toLocaleString();
     }
 
     const active = ACTIVE_STATUSES.has(update.status);

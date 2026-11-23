@@ -802,7 +802,7 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('time[data-mt-date]').forEach((node) => {
-      const date = new Date(node.getAttribute('datetime'));
+      const date = window.MyPortalTime.toDate(node.getAttribute('datetime'));
       if (!Number.isNaN(date.getTime())) {
         node.textContent = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
         node.title = date.toLocaleString();

@@ -370,7 +370,7 @@
                                 <div>
                                   <strong>{{ display_text }}</strong>
                                   {% if watcher.created_at %}
-                                    <div class="list__meta">Watching since {{ watcher.created_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</div>
+                                    <div class="list__meta">Watching since {{ local_time(watcher.created_at) }}</div>
                                   {% endif %}
                                 </div>
                                 <button
@@ -484,10 +484,10 @@
                       Provider:
                       <strong data-shipment-watch-provider>{{ ticket_shipment_watch.provider|title if ticket_shipment_watch and ticket_shipment_watch.provider else 'Not detected' }}</strong>
                       {% if ticket_shipment_watch and ticket_shipment_watch.last_checked_at %}
-                        · Last checked {{ ticket_shipment_watch.last_checked_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
+                        · Last checked {{ local_time(ticket_shipment_watch.last_checked_at) }}
                       {% endif %}
                       {% if ticket_shipment_watch and ticket_shipment_watch.last_posted_update_at %}
-                        · Last posted {{ ticket_shipment_watch.last_posted_update_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
+                        · Last posted {{ local_time(ticket_shipment_watch.last_posted_update_at) }}
                       {% endif %}
                     </div>
                   </dd>
@@ -596,11 +596,11 @@
                 </div>
                 <div class="definition-list__item">
                   <dt>Created</dt>
-                  <dd>{{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}</dd>
+                  <dd>{{ local_time(ticket.created_at) }}</dd>
                 </div>
                 <div class="definition-list__item">
                   <dt>Updated</dt>
-                  <dd>{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</dd>
+                  <dd>{{ local_time(ticket.updated_at) }}</dd>
                 </div>
               </dl>
             </div>
@@ -735,7 +735,7 @@
                   {% if ticket.billed_at %}
                   <div class="definition-list__item">
                     <dt>Billed At</dt>
-                    <dd>{{ ticket.billed_at.strftime('%Y-%m-%d %H:%M') if ticket.billed_at }}</dd>
+                    <dd>{{ local_time(ticket.billed_at) if ticket.billed_at }}</dd>
                   </div>
                   {% endif %}
                 </dl>
@@ -834,7 +834,7 @@
                 <div class="ticket-ai-summary__heading">
                   <h2 class="card__title">AI Summary</h2>
                   {% if ticket.ai_summary_updated_at %}
-                    <span class="card__subtitle" style="margin: 0; color: {{ ai_date_color_map.get(ai_status_lower, 'rgba(226, 232, 240, 0.75)') }}">Updated {{ ticket.ai_summary_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
+                    <span class="card__subtitle" style="margin: 0; color: {{ ai_date_color_map.get(ai_status_lower, 'rgba(226, 232, 240, 0.75)') }}">Updated {{ local_time(ticket.ai_summary_updated_at) }}</span>
                   {% endif %}
                 </div>
                 <div class="card__collapsible-meta">
@@ -1737,7 +1737,7 @@
                         <header class="timeline__header">
                           <div class="timeline__header-main">
                             <span class="timeline__timestamp">
-                              {{ recording.call_date.astimezone().strftime('%Y-%m-%d %H:%M') if recording.call_date else '—' }}
+                              {{ local_time(recording.call_date) }}
                             </span>
                             <span class="timeline__action">
                               <strong>📞 Call Recording:</strong> {{ recording.caller_name or 'Unknown' }} → {{ recording.callee_name or 'Unknown' }}
@@ -1833,7 +1833,7 @@
                               </label>
                             {% endif %}
                             <span class="timeline__timestamp">
-                              {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
+                              {{ local_time(reply.created_at) }}
                             </span>
                             <span class="timeline__action">
                               {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
@@ -1855,23 +1855,23 @@
                                 {% set _reply_recipient_count = reply.recipient_count|default(0) %}
                                 {% set _is_multi_recipient = _reply_recipient_count and _reply_recipient_count > 1 %}
                                 {% if reply.is_email_bounced %}
-                                  {% set bounce_time = reply.email_bounced_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_bounced_at else 'unknown' %}
-                                  {% set _badge_html %}<span class="badge badge--danger" title="Email bounced on {{ bounce_time }}">✗ Bounced</span>{% endset %}
+                                  {% set bounce_time = utc_text(reply.email_bounced_at) or 'unknown' %}
+                                  {% set _badge_html %}<span class="badge badge--danger" title="Email bounced on {{ bounce_time }}" data-utc-title="{{ utc_iso(reply.email_bounced_at) }}">✗ Bounced</span>{% endset %}
                                 {% elif reply.is_email_opened %}
                                   {% set open_count_text = reply.email_open_count ~ (' time' if reply.email_open_count == 1 else ' times') %}
-                                  {% set first_open = reply.email_opened_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_opened_at else '' %}
+                                  {% set first_open = utc_text(reply.email_opened_at) %}
                                   {% set tooltip = 'Email opened ' ~ open_count_text %}
                                   {% if first_open %}
                                     {% set tooltip = tooltip ~ ' · First opened: ' ~ first_open %}
                                   {% endif %}
-                                  {% set _badge_html %}<span class="badge badge--success" title="{{ tooltip }}">✓ Read</span>{% endset %}
+                                  {% set _badge_html %}<span class="badge badge--success" title="{{ tooltip }}" data-utc-title="{{ utc_iso(reply.email_opened_at) }}">✓ Read</span>{% endset %}
                                 {% elif reply.is_email_delivered %}
-                                  {% set delivery_time = reply.email_delivered_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_delivered_at else 'unknown' %}
-                                  {% set _badge_html %}<span class="badge badge--info" title="Email delivered on {{ delivery_time }}">✓ Delivered</span>{% endset %}
+                                  {% set delivery_time = utc_text(reply.email_delivered_at) or 'unknown' %}
+                                  {% set _badge_html %}<span class="badge badge--info" title="Email delivered on {{ delivery_time }}" data-utc-title="{{ utc_iso(reply.email_delivered_at) }}">✓ Delivered</span>{% endset %}
                                 {% else %}
-                                  {% set sent_time = reply.email_sent_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_sent_at else '' %}
+                                  {% set sent_time = utc_text(reply.email_sent_at) %}
                                   {% set tooltip = 'Email sent' ~ (' on ' ~ sent_time if sent_time else '') ~ ', not yet delivered' %}
-                                  {% set _badge_html %}<span class="badge badge--muted" title="{{ tooltip }}">📧 Sent</span>{% endset %}
+                                  {% set _badge_html %}<span class="badge badge--muted" title="{{ tooltip }}" data-utc-title="{{ utc_iso(reply.email_sent_at) }}">📧 Sent</span>{% endset %}
                                 {% endif %}
                                 {% if _is_multi_recipient %}
                                   <button

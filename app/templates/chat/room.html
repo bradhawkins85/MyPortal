@@ -377,7 +377,7 @@
     const meta = document.createElement('div');
     meta.className = 'chat-message__meta';
     const sender = msg.sender_display_name || msg.sender_matrix_id || 'Unknown';
-    const time = msg.sent_at ? new Date(msg.sent_at + 'Z').toLocaleTimeString() : '';
+    const time = msg.sent_at ? window.MyPortalTime.toDate(msg.sent_at).toLocaleTimeString() : '';
     meta.textContent = sender + ' \u2022 ' + time;
 
     const body = document.createElement('div');

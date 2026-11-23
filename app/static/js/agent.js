@@ -324,7 +324,7 @@
     }
     if (result.model) parts.push(`Model: ${result.model}`);
     if (result.generated_at) {
-      const generatedDate = new Date(result.generated_at);
+      const generatedDate = window.MyPortalTime.toDate(result.generated_at);
       if (!Number.isNaN(generatedDate.getTime())) parts.push(`Generated at ${generatedDate.toLocaleString()}`);
     }
     if (result.message) parts.push(result.message);

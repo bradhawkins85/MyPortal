@@ -133,7 +133,7 @@
     <div class="card-header">
       <h2 class="card-title">Immediate Response Checklist</h2>
       {% if active_incident %}
-      <p class="text-sm text-muted">Incident started: {{ active_incident.started_at.strftime('%Y-%m-%d %H:%M UTC') if active_incident.started_at else 'Unknown' }}</p>
+      <p class="text-sm text-muted">Incident started: {{ local_time(active_incident.started_at, empty='Unknown') }}</p>
       {% endif %}
     </div>
     <div class="card-body">
@@ -168,7 +168,7 @@
             <span class="checklist-label">{{ item.label }}</span>
             {% if item.tick and item.tick.is_done and item.tick.done_at %}
             <span class="checklist-meta">
-              Completed {{ item.tick.done_at.strftime('%Y-%m-%d %H:%M UTC') }}
+              Completed {{ local_time(item.tick.done_at) }}
             </span>
             {% endif %}
           </div>
@@ -411,7 +411,7 @@
           {% for entry in event_log %}
           <div class="event-entry">
             <div class="event-timestamp">
-              {{ entry.happened_at.strftime('%Y-%m-%d %H:%M UTC') if entry.happened_at else 'Unknown' }}
+              {{ local_time(entry.happened_at, empty='Unknown') }}
             </div>
             <div class="event-content">
               <span class="event-initials">{{ entry.initials or 'N/A' }}</span>
@@ -444,11 +444,11 @@
           <div class="grid grid-cols-2 gap-4">
             <div>
               <strong>Incident #{{ incident.id }}</strong>
-              <div class="text-muted">{{ incident.started_at.strftime('%Y-%m-%d %H:%M UTC') if incident.started_at else '-' }}</div>
+              <div class="text-muted">{{ local_time(incident.started_at, empty='-') }}</div>
             </div>
             <div>
               <strong>Status:</strong> {{ incident.status }}
-              <div class="text-muted">Closed {{ incident.closed_at.strftime('%Y-%m-%d %H:%M UTC') if incident.closed_at else '—' }}</div>
+              <div class="text-muted">Closed {{ local_time(incident.closed_at) }}</div>
             </div>
           </div>
           {% if can_edit %}
@@ -468,7 +468,7 @@
           <p><strong>Improvement actions:</strong> {{ incident.after_action_improvements or 'Not documented yet.' }}</p>
           {% endif %}
           {% if incident.after_action_reviewed_at %}
-          <p class="text-muted text-sm">Reviewed {{ incident.after_action_reviewed_at.strftime('%Y-%m-%d %H:%M UTC') }}</p>
+          <p class="text-muted text-sm">Reviewed {{ local_time(incident.after_action_reviewed_at) }}</p>
           {% endif %}
         </div>
       </div>

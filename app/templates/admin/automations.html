@@ -115,8 +115,8 @@
                       {% endif %}
                     </td>
                     <td data-label="Status" data-column-key="status">{{ automation.status }}</td>
-                    <td data-label="Next run" data-column-key="next_run">{{ automation.next_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.next_run_at else '—' }}</td>
-                    <td data-label="Last run" data-column-key="last_run">{{ automation.last_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.last_run_at else '—' }}</td>
+                    <td data-label="Next run" data-column-key="next_run">{{ local_time(automation.next_run_at) }}</td>
+                    <td data-label="Last run" data-column-key="last_run">{{ local_time(automation.last_run_at) }}</td>
                     <td class="table__actions" data-column-key="actions">
                       <details class="header-title-menu__dropdown" data-header-menu>
                         <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">

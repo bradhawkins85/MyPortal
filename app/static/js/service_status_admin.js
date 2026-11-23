@@ -56,7 +56,7 @@
     if (!iso) {
       return '';
     }
-    const date = new Date(iso);
+    const date = window.MyPortalTime.toDate(iso);
     return Number.isNaN(date.getTime()) ? String(iso) : date.toLocaleString();
   }
 

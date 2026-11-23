@@ -163,7 +163,7 @@
     if (!isoValue) {
       return '';
     }
-    const date = new Date(isoValue);
+    const date = window.MyPortalTime.toDate(isoValue);
     if (Number.isNaN(date.getTime())) {
       return isoValue;
     }

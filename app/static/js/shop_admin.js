@@ -1529,7 +1529,7 @@
             const dateTd = document.createElement('td');
             const dbpTd = document.createElement('td');
             dateTd.textContent = entry.recorded_at
-              ? new Date(entry.recorded_at).toLocaleString()
+              ? window.MyPortalTime.toDate(entry.recorded_at).toLocaleString()
               : '—';
             dbpTd.textContent = entry.dbp !== null && entry.dbp !== undefined
               ? `$${parseFloat(entry.dbp).toFixed(2)}`

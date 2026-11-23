@@ -64,7 +64,7 @@
           {% endif %}
           <footer class="service-card__footer">
             {% if service.updated_at %}
-              <span>Last Change {{ service.updated_at.strftime('%d %b %Y %H:%M') if service.updated_at.__class__.__name__ == 'datetime' else service.updated_at }}</span>
+              <span>Last Change {{ local_time(service.updated_at) }}</span>
             {% else %}
               <span>Last Change not recorded</span>
             {% endif %}

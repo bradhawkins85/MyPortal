@@ -1176,7 +1176,7 @@
       if (!value) {
         return '—';
       }
-      const date = new Date(value);
+      const date = window.MyPortalTime.toDate(value);
       if (Number.isNaN(date.getTime())) {
         return '—';
       }
@@ -1739,7 +1739,7 @@
       if (!iso) {
         return fallbackText;
       }
-      const date = new Date(iso);
+      const date = window.MyPortalTime.toDate(iso);
       if (Number.isNaN(date.getTime())) {
         return fallbackText;
       }

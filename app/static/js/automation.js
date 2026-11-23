@@ -1090,7 +1090,7 @@
     if (!iso) {
       return { text: '—', value: '' };
     }
-    const date = new Date(iso);
+    const date = window.MyPortalTime.toDate(iso);
     if (Number.isNaN(date.getTime())) {
       return { text: '—', value: '' };
     }
@@ -2328,7 +2328,7 @@
 
   function formatDate(value) {
     if (!value) return '—';
-    const date = new Date(value);
+    const date = window.MyPortalTime.toDate(value);
     if (Number.isNaN(date.getTime())) return escapeHtml(value);
     return date.toLocaleString();
   }

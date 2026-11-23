@@ -59,13 +59,13 @@
                   <div class="description-list__row">
                     <dt>Created</dt>
                     <dd>
-                      {{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}
+                      {{ local_time(ticket.created_at) }}
                     </dd>
                   </div>
                   <div class="description-list__row">
                     <dt>Updated</dt>
                     <dd>
-                      {{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}
+                      {{ local_time(ticket.updated_at) }}
                     </dd>
                   </div>
                   {% if ticket.xero_invoice_number %}
@@ -78,7 +78,7 @@
                     <div class="description-list__row">
                       <dt>Billed At</dt>
                       <dd>
-                        {{ ticket.billed_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
+                        {{ local_time(ticket.billed_at) }}
                       </dd>
                     </div>
                   {% endif %}

@@ -294,7 +294,7 @@
                 {% endif %}
                 {% if member.workflow_next_run_at %}
                   <div class="text-muted text-small">
-                    Next run: {{ member.workflow_next_run_at }}
+                    Next run: {{ local_time(member.workflow_next_run_at) }}
                     {% if member.workflow_requested_timezone %}
                       ({{ member.workflow_requested_timezone }})
                     {% endif %}
@@ -306,7 +306,7 @@
                 {% if member.account_action == 'Offboard Requested' %}
                   <span class="status-pill status-pill--pending">Offboarding Pending</span>
                   {% if member.requested_at %}
-                    <div class="text-muted text-small">Requested for {{ member.requested_at }}</div>
+                    <div class="text-muted text-small">Requested for {{ local_time(member.requested_at) }}</div>
                   {% endif %}
                 {% endif %}
                 {% if member.onboarding_pending_details %}
@@ -326,7 +326,7 @@
                         <li>
                           <strong>{{ event.event|replace('_', ' ')|title }}</strong>
                           {% if event.actor %}<span class="text-muted"> · {{ event.actor }}</span>{% endif %}
-                          {% if event.timestamp %}<span class="text-muted"> · {{ event.timestamp }}</span>{% endif %}
+                          {% if event.timestamp %}<span class="text-muted"> · {{ local_time(event.timestamp) }}</span>{% endif %}
                           {% if event.details %}
                             <div class="text-muted">{{ event.details }}</div>
                           {% endif %}

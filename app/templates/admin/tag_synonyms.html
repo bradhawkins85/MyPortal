@@ -130,7 +130,7 @@
         synonymsTable.innerHTML = synonyms.map(item => {
           const variant = escapeHtml(item.variant_slug);
           const canonical = escapeHtml(item.canonical_slug);
-          const createdAt = item.created_at ? new Date(item.created_at).toLocaleString() : '—';
+          const createdAt = item.created_at ? (window.MyPortalTime.format(item.created_at) || item.created_at) : '—';
           return `
           <tr data-variant-slug="${variant}">
             <td data-label="Variant">${variant}</td>
