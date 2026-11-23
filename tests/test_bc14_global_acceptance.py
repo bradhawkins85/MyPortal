@@ -9,9 +9,14 @@ This test suite verifies:
 5. Seed data present for new plan
 6. Empty-state guidance across pages
 """
+from pathlib import Path
+
 import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch, call
 from fastapi import HTTPException
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 pytestmark = pytest.mark.anyio
 
@@ -195,14 +200,14 @@ class TestRiskHeatmapUpdates:
     
     async def test_htmx_included_in_base_template(self):
         """Verify HTMX is loaded in base template."""
-        with open('/home/runner/work/MyPortal/MyPortal/app/templates/base.html', 'r') as f:
+        with open(str(PROJECT_ROOT / 'app/templates/base.html'), 'r') as f:
             content = f.read()
             assert 'htmx' in content.lower()
     
     async def test_heatmap_partial_template_exists(self):
         """Verify heatmap partial template exists."""
         import os
-        partial_path = '/home/runner/work/MyPortal/MyPortal/app/templates/bcp/heatmap_partial.html'
+        partial_path = str(PROJECT_ROOT / 'app/templates/bcp/heatmap_partial.html')
         assert os.path.exists(partial_path)
 
 
@@ -376,20 +381,20 @@ class TestEmptyStateGuidance:
     
     def test_risks_page_has_empty_state(self):
         """Verify risks page has empty state."""
-        with open('/home/runner/work/MyPortal/MyPortal/app/templates/bcp/risks.html', 'r') as f:
+        with open(str(PROJECT_ROOT / 'app/templates/bcp/risks.html'), 'r') as f:
             content = f.read()
             assert 'empty-state' in content
             assert 'No risks found' in content or 'Add your first risk' in content
     
     def test_recovery_checklist_has_empty_state(self):
         """Verify recovery checklist page has empty state."""
-        with open('/home/runner/work/MyPortal/MyPortal/app/templates/bcp/recovery_checklist.html', 'r') as f:
+        with open(str(PROJECT_ROOT / 'app/templates/bcp/recovery_checklist.html'), 'r') as f:
             content = f.read()
             assert 'empty-state' in content
     
     def test_insurance_claims_has_empty_state(self):
         """Verify insurance claims page has empty state."""
-        with open('/home/runner/work/MyPortal/MyPortal/app/templates/bcp/insurance_claims.html', 'r') as f:
+        with open(str(PROJECT_ROOT / 'app/templates/bcp/insurance_claims.html'), 'r') as f:
             content = f.read()
             assert 'empty-state' in content
     
@@ -399,7 +404,7 @@ class TestEmptyStateGuidance:
         import glob
         import re
         
-        bcp_template_dir = '/home/runner/work/MyPortal/MyPortal/app/templates/bcp'
+        bcp_template_dir = str(PROJECT_ROOT / 'app/templates/bcp')
         templates = glob.glob(os.path.join(bcp_template_dir, '*.html'))
         
         # Check that we have templates

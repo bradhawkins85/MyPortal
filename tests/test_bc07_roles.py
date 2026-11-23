@@ -1,8 +1,13 @@
 """
 Tests for BCP Roles and Responsibilities (BC07).
 """
+from pathlib import Path
+
 import pytest
+
 from app.repositories import bcp as bcp_repo
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_roles_module_imports():
@@ -33,7 +38,7 @@ def test_roles_routes_exist():
 def test_roles_template_exists():
     """Test that roles template exists."""
     import os
-    template_path = '/home/runner/work/MyPortal/MyPortal/app/templates/bcp/roles.html'
+    template_path = str(PROJECT_ROOT / 'app/templates/bcp/roles.html')
     assert os.path.exists(template_path), "roles.html template should exist"
 
 
@@ -60,7 +65,7 @@ def test_seed_team_leader_responsibilities():
 def test_roles_database_tables_documented():
     """Test that role database tables are documented in migration."""
     import os
-    migration_path = '/home/runner/work/MyPortal/MyPortal/migrations/126_bc02_bcp_data_model.sql'
+    migration_path = str(PROJECT_ROOT / 'migrations/126_bc02_bcp_data_model.sql')
     assert os.path.exists(migration_path), "Migration file should exist"
     
     with open(migration_path, 'r') as f:

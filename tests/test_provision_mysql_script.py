@@ -44,9 +44,16 @@ def _run(
         _executable(bin_dir / client, 'cat > "$SQL_OUTPUT"; echo mysql >> "$CALLS"')
     if existing_server:
         _executable(bin_dir / "mysqld", f'echo "{existing_server}"')
-    # Keep Python and core shell utilities available while prioritising mocks.
+    # Keep Python and core shell utilities available while prioritising mocks,
+    # but hide a database server the host itself has installed: the script
+    # must only see the server this test simulates.
+    host_path = os.pathsep.join(
+        entry
+        for entry in os.environ["PATH"].split(os.pathsep)
+        if not any((Path(entry) / name).exists() for name in ("mysqld", "mariadbd"))
+    )
     environment = os.environ | {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "PATH": f"{bin_dir}:{host_path}",
         "CALLS": str(calls),
         "SQL_OUTPUT": str(sql),
         "BIN_DIR": str(bin_dir),

@@ -773,7 +773,11 @@ def test_deleted_migration_is_not_treated_as_additive_release(tmp_path):
 def test_migration_environment_preserves_special_characters(tmp_path):
     release = tmp_path / "release"
     (release / ".venv" / "bin").mkdir(parents=True)
-    (release / ".venv" / "bin" / "python").symlink_to(Path(os.sys.executable))
+    # A wrapper rather than a symlink: a symlinked venv interpreter outside its
+    # venv loses that venv's packages (python-dotenv among them).
+    release_python = release / ".venv" / "bin" / "python"
+    release_python.write_text(f'#!/bin/sh\nexec "{os.sys.executable}" "$@"\n')
+    release_python.chmod(0o755)
     (release / "manage.py").write_text(
         "import json, os\n"
         "print(json.dumps({key: os.environ.get(key) for key in "
