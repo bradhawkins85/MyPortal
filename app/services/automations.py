@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import html
 import json
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta, timezone
 from importlib import import_module
@@ -1973,6 +1974,11 @@ async def _execute_scheduled_ticket_automation(
     }
 
 
+@asynccontextmanager
+async def _event_run_lock() -> AsyncIterator[bool]:
+    yield True
+
+
 async def _execute_automation(
     automation: Mapping[str, Any],
     *,
@@ -1992,10 +1998,17 @@ async def _execute_automation_inner(
 ) -> dict[str, Any]:
     automation_id = int(automation.get("id"))
 
-    # Use a distributed lock to ensure only one worker executes this automation
-    lock_name = f"automation_exec_{automation_id}"
+    # Scheduled runs are picked up by every worker, so a distributed lock keeps
+    # one worker per due run. Event runs carry their own context and are
+    # dispatched once per event, so locking them would silently drop a second
+    # event (e.g. a second ticket created while a slow action is still running).
+    lock = (
+        db.acquire_lock(f"automation_exec_{automation_id}", timeout=1)
+        if context is None
+        else _event_run_lock()
+    )
 
-    async with db.acquire_lock(lock_name, timeout=1) as lock_acquired:
+    async with lock as lock_acquired:
         if not lock_acquired:
             # Another worker is already executing this automation, skip silently
             logger.info(
