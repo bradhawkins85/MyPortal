@@ -1,0 +1,7 @@
+{
+  "guid": "d90e7abd-6419-4eed-b48c-05f92ebc67d3",
+  "occurred_at": "2026-11-23T07:29Z",
+  "change_type": "Fix",
+  "summary": "Update Ticket automations no longer fail with a missing shipment tracking URL error when shipment monitoring is left switched off.",
+  "content_hash": "9cf1ffb891baebf477791967395434c101d37a190f1271165ce26322185a094e"
+}
