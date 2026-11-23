@@ -978,6 +978,9 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 	case "wol":
 		logger.Info("wol command received")
 		go d.handleWOL(msg)
+	case "scan_network":
+		logger.Info("Manual network scan request received from portal")
+		go d.manualNetworkScan()
 	}
 }
 

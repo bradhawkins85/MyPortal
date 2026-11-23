@@ -120,3 +120,24 @@ func TestDefenderCommandsWakeImmediatelyWithoutRoutineTimer(t *testing.T) {
 		t.Fatal("command wakeup lost")
 	}
 }
+
+func TestPortalScanNetworkCommandStartsManualScan(t *testing.T) {
+	configFetched := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/tray/config" {
+			select {
+			case configFetched <- struct{}{}:
+			default:
+			}
+		}
+		_ = json.NewEncoder(w).Encode(api.ConfigResponse{NetworkScannerEnabled: false})
+	}))
+	defer server.Close()
+	d := newDaemon(&config.Config{PortalURL: server.URL})
+	d.dispatchWSMessage("scan_network", nil)
+	select {
+	case <-configFetched:
+	case <-time.After(5 * time.Second):
+		t.Fatal("scan_network from the portal did not start a manual scan")
+	}
+}
