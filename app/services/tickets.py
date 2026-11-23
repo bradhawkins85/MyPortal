@@ -254,6 +254,35 @@ async def get_public_status_map() -> dict[str, str]:
     return {definition.tech_status: definition.public_status for definition in await list_status_definitions()}
 
 
+USER_RESOLVED_STATUS_FALLBACK = "resolved"
+
+
+async def resolve_user_resolved_status(
+    status_definitions: Sequence[TicketStatusDefinition] | None = None,
+) -> str:
+    """Return the status applied when an end user marks their ticket resolved.
+
+    Uses ``TICKET_USER_RESOLVED_STATUS`` when it names a configured ticket
+    status, otherwise ``resolved``.
+    """
+
+    configured = ticket_status_repo.slugify_status_label(
+        str(get_settings().ticket_user_resolved_status or "")
+    )
+    if not configured:
+        return USER_RESOLVED_STATUS_FALLBACK
+    if status_definitions is None:
+        status_definitions = await list_status_definitions()
+    if any(definition.tech_status == configured for definition in status_definitions):
+        return configured
+    log_warning(
+        "TICKET_USER_RESOLVED_STATUS is not a configured ticket status; using fallback",
+        configured_status=configured,
+        fallback=USER_RESOLVED_STATUS_FALLBACK,
+    )
+    return USER_RESOLVED_STATUS_FALLBACK
+
+
 async def replace_ticket_statuses(status_inputs: Sequence[Mapping[str, Any]]) -> list[TicketStatusDefinition]:
     if not status_inputs:
         raise ValueError("At least one ticket status must be provided.")
