@@ -73,7 +73,7 @@
           <td data-column-key="description">{{ device.description or '—' }}</td>
           <td data-column-key="discovered-by">{% if device.scanner_asset_id %}<a href="/assets/{{ device.scanner_asset_id }}">{{ device.scanner_asset_name or device.scanner_hostname }}</a>{% else %}{{ device.scanner_hostname or '—' }}{% endif %}</td>
           <td data-column-key="wan-ip"><code>{{ device.wan_ip or '—' }}</code></td><td data-column-key="local-ip">{{ device.ip_address }}</td><td data-column-key="mac-address"><code>{{ device.mac_address or '—' }}</code></td>
-          <td data-column-key="mac-vendor-os">{{ device.mac_vendor or '—' }}{% if device.os_details %}<br><small>{{ device.os_details }}</small>{% endif %}</td><td data-column-key="open-ports">{{ device.open_ports or '—' }}</td>
+          <td data-column-key="mac-vendor-os">{{ device.mac_vendor or '—' }}{% if device.os_details %}<br><small>{{ device.os_details }}</small>{% endif %}</td><td data-column-key="open-ports">{{ device.open_ports or '—' }}{% if can_configure %}{% set port_check = port_checks.get(device.id) %}<span class="port-check-chip" data-port-check-chip="{{ device.id }}">{% if port_check %}{% set open_count = (port_check.open_ports or '').split(',') | select | list | length %}<span class="status {% if port_check.status == 'failed' %}status--danger{% elif port_check.status == 'completed' and open_count %}status--success{% elif port_check.status == 'completed' %}status--neutral{% else %}status--warning{% endif %}">{% if port_check.status == 'completed' %}Port check: {{ open_count }} of {{ port_check.checked_count }} open{% elif port_check.status == 'failed' %}Port check failed{% else %}Port check waiting{% endif %}</span> <small><span data-utc="{{ port_check.completed_at or port_check.requested_at }}">{{ port_check.completed_at or port_check.requested_at }}</span></small>{% endif %}</span>{% endif %}</td>
           <td data-column-key="first-seen" data-value="{{ device.first_seen_at or '' }}">{{ device.first_seen_at.strftime('%Y-%m-%d %H:%M') if device.first_seen_at else '—' }}</td>
           <td data-column-key="last-seen" data-value="{{ device.last_seen_at or '' }}">{{ device.last_seen_at.strftime('%Y-%m-%d %H:%M') if device.last_seen_at else '—' }}</td>
           <td data-column-key="myportal-asset">{% if device.matched_asset_id %}<a href="/assets/{{ device.matched_asset_id }}"><span class="tag">{{ device.matched_asset_name }}</span></a>{% elif device.agent_not_required %}<span class="tag">Agent not required</span>{% else %}<span class="tag tag--warning">Agent may be required</span>{% endif %}</td>
@@ -88,6 +88,12 @@
                   <label class="checkbox"><input type="checkbox" name="agent_not_required" value="1" {% if device.agent_not_required %}checked{% endif %}> <span>Agent not required</span></label>
                   <button class="button button--primary" type="submit">Save device</button>
                 </form>
+                <button class="button button--secondary" type="button" hidden data-port-check-open="{{ device.id }}" data-port-check-device="{{ device.hostname or device.ip_address }} ({{ device.ip_address }})" data-port-check-scanner="{{ device.scanner_asset_name or device.scanner_hostname or 'its subnet scanner' }}" aria-haspopup="dialog" aria-controls="port-check-modal">Check ports…</button>
+                <noscript><form method="post" action="/devices/discovered/{{ device.id }}/port-check" class="discovered-device-form">
+                  {% include "partials/csrf.html" %}
+                  <label class="discovered-device-form__description">Check ports<input class="input" name="ports" maxlength="2000" placeholder="443, 8000-8100" required></label>
+                  <button class="button button--secondary" type="submit">Check ports</button>
+                </form></noscript>
                 {% if can_sync_hudu %}<form method="post" action="/devices/discovered/{{ device.id }}/hudu-sync">
                   {% include "partials/csrf.html" %}
                   <button class="button button--secondary" type="submit" {% if not device.device_type_id or not device.mac_address %}disabled title="Set a device type and MAC address before sending to Hudu"{% endif %}>Send / sync with Hudu</button>
@@ -122,6 +128,34 @@
 </div>
 {% endif %}
 
+
+{% if can_configure %}
+<div class="modal" id="port-check-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="port-check-title" aria-describedby="port-check-subtitle">
+  <div class="modal__backdrop" data-port-check-close></div>
+  <section class="modal__dialog modal__dialog--wide port-check">
+    <header class="modal__header">
+      <div><p class="port-check__eyebrow" data-port-check-device></p><h2 id="port-check-title">Check ports</h2><p class="card__lede" id="port-check-subtitle">Checked from <span data-port-check-scanner></span>. Shows whether each port accepts a connection right now.</p></div>
+      <button type="button" class="modal__close" data-port-check-close aria-label="Close port check">&times;</button>
+    </header>
+    <form method="post" data-port-check-form novalidate>
+      <div class="modal__body port-check__body">
+        {% include "partials/csrf.html" %}
+        <div class="port-check__main form-stack">
+          <label for="port-check-ports">Ports to check</label>
+          <input class="input" id="port-check-ports" name="ports" maxlength="2000" autocomplete="off" placeholder="443, 8000-8100" required aria-describedby="port-check-help port-check-error" data-port-check-input>
+          <p class="form-help" id="port-check-help">One port, a range like 8000-8100, or a mix separated by commas. Up to 1,024 ports. Routine scans are not changed.</p>
+          <p class="form-error" id="port-check-error" data-port-check-error hidden></p>
+        </div>
+        <aside class="port-check__aside" aria-label="Summary">
+          <p class="port-check__summary" data-port-check-summary>Enter the ports you want to check.</p>
+          <div class="port-check__results" role="status" aria-live="polite" data-port-check-results></div>
+        </aside>
+      </div>
+      <footer class="modal__footer"><button type="button" class="button button--ghost" data-port-check-close>Close</button><button class="button button--primary" type="submit" data-port-check-submit>Check ports</button></footer>
+    </form>
+  </section>
+</div>
+{% endif %}
 
 {% if can_import_ipam %}
 <div class="modal" id="device-ipam-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="device-ipam-title">

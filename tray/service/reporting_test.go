@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -139,5 +140,106 @@ func TestPortalScanNetworkCommandStartsManualScan(t *testing.T) {
 	case <-configFetched:
 	case <-time.After(5 * time.Second):
 		t.Fatal("scan_network from the portal did not start a manual scan")
+	}
+}
+
+type portCheckReport struct {
+	CommandID    int    `json:"command_id"`
+	OpenPorts    []int  `json:"open_ports"`
+	CheckedCount int    `json:"checked_count"`
+	Error        string `json:"error"`
+}
+
+func runPortCheck(t *testing.T, cfg api.ConfigResponse, targets []string, msg map[string]json.RawMessage) portCheckReport {
+	t.Helper()
+	previous := portCheckTargets
+	portCheckTargets = func([]string) []string { return targets }
+	t.Cleanup(func() { portCheckTargets = previous })
+	reports := make(chan portCheckReport, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tray/config":
+			_ = json.NewEncoder(w).Encode(cfg)
+		case "/api/tray/network-scan/port-checks/55":
+			var report portCheckReport
+			_ = json.NewDecoder(r.Body).Decode(&report)
+			reports <- report
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	d := newDaemon(&config.Config{PortalURL: server.URL})
+	d.handleCheckPorts(msg)
+	select {
+	case report := <-reports:
+		return report
+	case <-time.After(5 * time.Second):
+		t.Fatal("no port check result was reported")
+		return portCheckReport{}
+	}
+}
+
+func portCheckMessage(ip string, ports ...int) map[string]json.RawMessage {
+	raw := func(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
+	return map[string]json.RawMessage{
+		"command_id": raw(77), "check_id": raw(55), "ip_address": raw(ip), "ports": raw(ports),
+	}
+}
+
+func TestPortCheckReportsOpenPorts(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	open := ln.Addr().(*net.TCPAddr).Port
+
+	report := runPortCheck(t, api.ConfigResponse{NetworkScannerEnabled: true}, []string{"127.0.0.0/8"},
+		portCheckMessage("127.0.0.1", open))
+
+	if report.CommandID != 77 || report.Error != "" || report.CheckedCount != 1 ||
+		len(report.OpenPorts) != 1 || report.OpenPorts[0] != open {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestPortCheckRefusedWhenScanningDisabled(t *testing.T) {
+	report := runPortCheck(t, api.ConfigResponse{NetworkScannerEnabled: false}, []string{"127.0.0.0/8"},
+		portCheckMessage("127.0.0.1", 22))
+	if report.Error == "" || len(report.OpenPorts) != 0 {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestPortCheckRefusedOutsideLocalRanges(t *testing.T) {
+	report := runPortCheck(t, api.ConfigResponse{NetworkScannerEnabled: true}, []string{"192.168.1.0/24"},
+		portCheckMessage("127.0.0.1", 22))
+	if report.Error == "" || len(report.OpenPorts) != 0 {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestPortCheckRefusesTooManyOrInvalidPorts(t *testing.T) {
+	many := make([]int, 1025)
+	for i := range many {
+		many[i] = i + 1
+	}
+	for name, ports := range map[string][]int{"too many": many, "out of range": {0, 70000}} {
+		report := runPortCheck(t, api.ConfigResponse{NetworkScannerEnabled: true}, []string{"127.0.0.0/8"},
+			portCheckMessage("127.0.0.1", ports...))
+		if report.Error == "" {
+			t.Fatalf("%s: report = %+v", name, report)
+		}
 	}
 }

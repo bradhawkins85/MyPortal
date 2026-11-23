@@ -115,9 +115,15 @@ async def test_devices_page_separates_enabled_and_available_scanners(monkeypatch
         "list_device_types",
         AsyncMock(return_value=[]),
     )
+    monkeypatch.setattr(
+        assets_routes.network_devices_repo,
+        "latest_port_checks_by_device",
+        AsyncMock(return_value={9: {"id": 55}}),
+    )
 
     async def render(template, request, user, *, extra=None):
         assert template == "devices/index.html"
+        assert extra["port_checks"] == {9: {"id": 55}}
         assert extra["scanners"] == [scanner_assets[0]]
         assert extra["available_scanners"] == [scanner_assets[1]]
         return HTMLResponse("devices")
@@ -141,9 +147,12 @@ async def test_read_only_devices_page_excludes_subnet_scanners(monkeypatch):
     monkeypatch.setattr(assets_routes.network_devices_repo, "list_scanners", list_scanners)
     monkeypatch.setattr(assets_routes.network_devices_repo, "list_for_company", AsyncMock(return_value=[]))
     monkeypatch.setattr(assets_routes.network_devices_repo, "list_device_types", AsyncMock(return_value=[]))
+    latest_checks = AsyncMock(return_value={})
+    monkeypatch.setattr(assets_routes.network_devices_repo, "latest_port_checks_by_device", latest_checks)
 
     async def render(template, request, user, *, extra=None):
         assert extra["can_configure"] is False
+        assert extra["port_checks"] == {}
         assert extra["scanners"] == []
         assert extra["available_scanners"] == []
         return HTMLResponse("devices")
@@ -153,6 +162,7 @@ async def test_read_only_devices_page_excludes_subnet_scanners(monkeypatch):
 
     assert response.status_code == 200
     list_scanners.assert_not_awaited()
+    latest_checks.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -447,3 +457,14 @@ async def test_purge_discovered_devices_uses_company_scope(monkeypatch):
     purge.assert_awaited_once_with(42)
     assert response.status_code == 303
     assert b"Purged 2 out-of-scope discovered devices" in response.body
+
+
+def test_discovered_devices_offer_port_check():
+    assert 'id="port-check-modal" hidden' in TEMPLATE
+    assert 'role="dialog" aria-modal="true" aria-labelledby="port-check-title"' in TEMPLATE
+    assert 'data-port-check-open="{{ device.id }}"' in TEMPLATE
+    assert 'aria-haspopup="dialog" aria-controls="port-check-modal"' in TEMPLATE
+    assert 'action="/devices/discovered/{{ device.id }}/port-check"' in TEMPLATE
+    assert 'data-port-check-chip="{{ device.id }}"' in TEMPLATE
+    assert 'role="status" aria-live="polite" data-port-check-results' in TEMPLATE
+    assert "Up to 1,024 ports" in TEMPLATE

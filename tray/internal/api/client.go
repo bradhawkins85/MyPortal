@@ -1246,3 +1246,31 @@ func (c *Client) setAuthHeader(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 }
+
+// PostPortCheckResult reports which ports answered for a check_ports command.
+func (c *Client) PostPortCheckResult(ctx context.Context, checkID, commandID int, openPorts []int, checked int, errMsg string) error {
+	if openPorts == nil {
+		openPorts = []int{}
+	}
+	payload := map[string]interface{}{
+		"command_id":    commandID,
+		"open_ports":    openPorts,
+		"checked_count": checked,
+	}
+	if errMsg != "" {
+		payload["error"] = errMsg
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, fmt.Sprintf("/api/tray/network-scan/port-checks/%d", checkID), body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("port check result: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}

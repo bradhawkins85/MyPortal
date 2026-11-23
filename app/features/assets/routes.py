@@ -42,6 +42,7 @@ from app.services import automations as automations_service
 from app.services import asset_photos as asset_photo_service
 from app.services import rack_item_images as rack_image_service
 from app.services import asset_types
+from app.services import port_checks as port_checks_service
 from app.services import rack_dashboard
 from app.services import rack_item_types
 
@@ -1293,6 +1294,11 @@ async def network_devices_page(request: Request):
             "title": "Network Devices",
             "company": company,
             "devices": await network_devices_repo.list_for_company(company_id),
+            "port_checks": (
+                await network_devices_repo.latest_port_checks_by_device(company_id)
+                if can_configure
+                else {}
+            ),
             "device_types": await network_devices_repo.list_device_types(),
             "scanners": enabled_scanners,
             "available_scanners": available_scanners,
@@ -2179,6 +2185,130 @@ async def scan_network_now(request: Request, device_id: int):
         else "Scan request queued until the agent reconnects."
     )
     return main_module.flash_redirect("/devices", message, "success")
+
+
+def _utc_iso(value: Any) -> str | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value.isoformat(timespec="seconds") + "Z"
+    return str(value)
+
+
+def _serialise_port_check(check: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not check:
+        return None
+    return {
+        "id": int(check["id"]),
+        "status": check.get("status") or "queued",
+        "ports": port_checks_service.parse_port_spec(check.get("ports") or ""),
+        "open_ports": [
+            int(port) for port in str(check.get("open_ports") or "").split(",") if port
+        ],
+        "checked_count": int(check.get("checked_count") or 0),
+        "error": check.get("error"),
+        "requested_at": _utc_iso(check.get("requested_at")),
+        "completed_at": _utc_iso(check.get("completed_at")),
+    }
+
+
+@router.post(
+    "/devices/discovered/{device_id}/port-check",
+    summary="Check chosen TCP ports on a discovered device",
+)
+async def start_discovered_device_port_check(request: Request, device_id: int):
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(
+        request, "menu.network_devices"
+    )
+    if redirect:
+        return redirect
+    if not (
+        user.get("is_super_admin")
+        or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
+    ):
+        raise HTTPException(status_code=403, detail="Network Devices write access required")
+
+    wants_json = main_module._request_prefers_json(request)
+    form = await request.form()
+    try:
+        ports = port_checks_service.parse_port_spec(str(form.get("ports") or ""))
+    except ValueError as exc:
+        if wants_json:
+            return JSONResponse({"detail": str(exc)}, status_code=422)
+        return main_module.flash_redirect(
+            f"/devices#discovered-device-{device_id}", str(exc), "error"
+        )
+
+    device = await network_devices_repo.get_device_for_port_check(company_id, device_id)
+    if not device or not device.get("scanner_enabled"):
+        raise HTTPException(
+            status_code=404, detail="Device or its enabled subnet scanner not found"
+        )
+
+    scanner_id = int(device["scanner_tray_device_id"])
+    check_id = await network_devices_repo.create_port_check(
+        company_id=company_id,
+        network_device_id=device_id,
+        scanner_tray_device_id=scanner_id,
+        ip_address=str(device["ip_address"]),
+        ports=port_checks_service.format_port_spec(ports),
+        requested_by_user_id=int(user["id"]),
+    )
+    payload: dict[str, Any] = {
+        "type": "check_ports",
+        "check_id": check_id,
+        "ip_address": str(device["ip_address"]),
+        "ports": ports,
+    }
+    # Logged as queued first: the reconnect drain resends it (adding
+    # command_id) if the live send below misses the scanner.
+    command_id = await tray_repo.log_command(
+        device_id=scanner_id,
+        command="check_ports",
+        payload_json=json.dumps(payload),
+        initiated_by_user_id=int(user["id"]),
+        status="queued",
+    )
+    payload["command_id"] = command_id
+    delivered = await tray_service.send_to_device(
+        str(device.get("scanner_device_uid") or ""), payload
+    )
+    if delivered:
+        await tray_repo.mark_command_delivered(command_id)
+    await network_devices_repo.set_port_check_command(
+        check_id, command_id, "sent" if delivered else "queued"
+    )
+
+    if wants_json:
+        check = await network_devices_repo.get_latest_port_check(company_id, device_id)
+        return JSONResponse(
+            {"check": _serialise_port_check(check), "delivered": delivered}
+        )
+    message = (
+        f"Checking {len(ports)} port(s) from {device.get('scanner_name') or 'the scanner'}."
+        if delivered
+        else "The scanner is offline. The port check will run when it reconnects."
+    )
+    return main_module.flash_redirect(
+        f"/devices#discovered-device-{device_id}", message, "success"
+    )
+
+
+@router.get(
+    "/devices/discovered/{device_id}/port-check",
+    summary="Latest port check on a discovered device",
+)
+async def get_discovered_device_port_check(request: Request, device_id: int):
+    user, _membership, _company, company_id, redirect = await _load_asset_context(
+        request, "menu.network_devices"
+    )
+    if redirect:
+        return redirect
+    check = await network_devices_repo.get_latest_port_check(company_id, device_id)
+    return JSONResponse({"check": _serialise_port_check(check)})
 
 
 def _parse_external_references(raw: str) -> list[dict[str, str]]:
