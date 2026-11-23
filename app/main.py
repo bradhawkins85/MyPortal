@@ -199,6 +199,7 @@ from app.security.rate_limiter import (
 )
 from app.security.session import ensure_datetime
 from app.security.request_logger import RequestLoggingMiddleware
+from app.security.addin_cors import OutlookAddinCORSMiddleware
 from app.security.security_headers import SecurityHeadersMiddleware
 from app.security.session import session_manager
 from app.services.scheduler import scheduler_service, COMMANDS_BY_MODULE
@@ -711,6 +712,8 @@ app.add_middleware(
     ],
     expose_headers=["X-Request-ID"],
 )
+# Outlook calls the signature add-in API from outside the portal's origin.
+app.add_middleware(OutlookAddinCORSMiddleware)
 
 # Add IP whitelisting middleware for sensitive endpoints
 # This provides an additional layer of security by restricting access based on IP address

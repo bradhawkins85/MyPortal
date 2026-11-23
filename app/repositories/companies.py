@@ -105,6 +105,17 @@ async def get_company_by_outlook_addin_id(addin_id: str) -> dict[str, Any] | Non
     return dict(row) if row else None
 
 
+async def list_outlook_addin_ids() -> list[str]:
+    """Add-in ids of companies that deliver signatures through the Outlook add-in."""
+    rows = await db.fetch_all(
+        "SELECT outlook_addin_id FROM companies "
+        "WHERE signature_delivery_mode = %s AND outlook_addin_id IS NOT NULL "
+        "ORDER BY id",
+        ("addin",),
+    )
+    return [str(row["outlook_addin_id"]) for row in rows if row.get("outlook_addin_id")]
+
+
 async def get_company_csp_tenant_id(company_id: int) -> str | None:
     row = await db.fetch_one(
         "SELECT csp_tenant_id FROM companies WHERE id = %s",

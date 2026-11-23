@@ -290,6 +290,10 @@ def _addin_base(base_url: str, addin_id: str) -> str:
     return f"{base_url}/outlook-addin/{addin_id}"
 
 
+def launch_script_url(base_url: str, addin_id: str) -> str:
+    return f"{_addin_base(base_url, addin_id)}/launch.js"
+
+
 def build_manifest(
     *, addin_id: str, client_id: str, base_url: str, company_name: str
 ) -> str:
@@ -300,7 +304,7 @@ def build_manifest(
         "provider": escape(company_name or "MyPortal"),
         "base": escape(base_url),
         "html": escape(f"{addin_base}/launch.html"),
-        "js": escape(f"{addin_base}/launch.js"),
+        "js": escape(launch_script_url(base_url, addin_id)),
         "client_id": escape(client_id),
         "resource": escape(identifier_uri(base_url, client_id)),
         **{f"icon{size}": escape(f"{base_url}/outlook-addin/icon-{size}.png") for size in ICON_SIZES},
@@ -397,7 +401,7 @@ def build_manifest(
 
 def build_launch_html(*, addin_id: str, base_url: str) -> str:
     """Page Outlook loads for the add-in's browser runtime."""
-    script = escape(f"{_addin_base(base_url, addin_id)}/launch.js")
+    script = escape(launch_script_url(base_url, addin_id))
     return (
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
         "<title>MyPortal signatures</title>\n"
@@ -560,6 +564,7 @@ __all__ = [
     "ensure_addin_id",
     "get_delivery_mode",
     "get_registration_status",
+    "launch_script_url",
     "portal_base_url",
     "prepare_app_registration",
     "registration_changes",

@@ -1,0 +1,7 @@
+{
+  "guid": "e1fe60ee-b8b1-462a-9bad-c69106b4c6a2",
+  "occurred_at": "2026-11-23T22:38Z",
+  "change_type": "Fix",
+  "summary": "The MyPortal signatures Outlook add-in can now sign in and fetch each person's signature in classic Outlook on Windows, and the setup steps explain that it runs without a ribbon button.",
+  "content_hash": "efc4bdd64daa75d24f4eb5b3f5a08e5afe4df286a32995f999b93b278360fcb5"
+}
