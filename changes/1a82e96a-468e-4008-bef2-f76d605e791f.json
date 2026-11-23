@@ -1,0 +1,7 @@
+{
+  "guid": "1a82e96a-468e-4008-bef2-f76d605e791f",
+  "occurred_at": "2026-11-23T05:54Z",
+  "change_type": "Fix",
+  "summary": "Event automations such as Ticket created now run for every matching ticket, instead of being skipped while an earlier run of the same automation (for example a voicemail transcription) is still in progress.",
+  "content_hash": "d85919e8db0a35b674c7ae2476a3908b27c42eb28f18be8b923d417d3beb0f75"
+}

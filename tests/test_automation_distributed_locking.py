@@ -135,3 +135,38 @@ async def test_scheduled_task_already_has_distributed_lock():
             
             # Verify task execution was NOT recorded (because we didn't get the lock)
             mock_record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_event_execution_does_not_take_automation_lock():
+    """Event runs are dispatched once per event, so a slow earlier run of the
+    same automation must not cause a later event to be silently skipped."""
+
+    automation = {
+        "id": 321,
+        "name": "Transcribe voicemail",
+        "kind": "event",
+        "action_payload": {"actions": [{"module": "whisperx", "payload": {}}]},
+    }
+
+    with patch('app.services.automations.db.acquire_lock') as mock_lock:
+        mock_lock.return_value.__aenter__.return_value = False
+
+        with patch('app.services.automations.automation_repo.mark_started', new_callable=AsyncMock):
+            with patch('app.services.automations.automation_repo.record_run', new_callable=AsyncMock):
+                with patch('app.services.automations.automation_repo.record_history', new_callable=AsyncMock):
+                    with patch('app.services.automations.automation_repo.set_last_error', new_callable=AsyncMock):
+                        with patch('app.services.automations.automation_repo.set_next_run', new_callable=AsyncMock):
+                            with patch('app.services.automations.module_dispatch.trigger_module', new_callable=AsyncMock) as mock_trigger:
+                                mock_trigger.return_value = {"status": "succeeded"}
+
+                                from app.services.automations import _execute_automation
+
+                                result = await _execute_automation(
+                                    automation,
+                                    context={"ticket": {"id": 9, "attachment_extensions": ["m4a"]}},
+                                )
+
+                                mock_lock.assert_not_called()
+                                mock_trigger.assert_awaited_once()
+                                assert result["status"] == "succeeded"
