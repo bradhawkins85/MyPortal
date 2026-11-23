@@ -1,0 +1,63 @@
+# Runs the pytest suite on every push to main and every pull request.
+#
+# Tests listed in tests/known_failures.txt were already failing when this job
+# was introduced. They still run as strict xfails: the job fails on any new
+# failure, and also when a listed test starts passing so its line gets
+# deleted. See the "Known-failure baseline" section of tests/conftest.py.
+
+name: Tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.lock
+            pyproject.toml
+
+      - name: Install system libraries
+        # libmagic backs python-magic (upload type checks); pango backs
+        # weasyprint (PDF exports).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libmagic1 libpango-1.0-0 libpangoft2-1.0-0
+
+      - name: Install dependencies
+        # Same pinned runtime set as scripts/install_environment.sh.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --requirement requirements.lock --editable '.[dev]'
+
+      - name: Run tests
+        run: >-
+          pytest
+          -m "not browser_gate"
+          -n auto
+          --timeout 300
+          -p no:cacheprovider
+          -q
+          -rfE

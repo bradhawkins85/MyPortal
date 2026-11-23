@@ -1,65 +1,15 @@
 """Tests for the Matrix chat integration."""
 from __future__ import annotations
 
-import importlib.util
 import json
 import pathlib
-import sys
-import types
 from unittest.mock import AsyncMock
 
 import pytest
 import respx
 import httpx
 
-
-def _load_module_from_file(name: str, path: str):
-    """Load a Python module directly from file path, bypassing package __init__."""
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _bootstrap_matrix_module():
-    """
-    Load app.services.matrix without triggering app/__init__.py (which would
-    attempt to import app.main and all its heavy transitive dependencies).
-    """
-    root = pathlib.Path(__file__).resolve().parent.parent
-
-    # Ensure 'app' package stub exists (prevents __init__ execution)
-    if "app" not in sys.modules:
-        app_pkg = types.ModuleType("app")
-        app_pkg.__path__ = [str(root / "app")]
-        app_pkg.__package__ = "app"
-        sys.modules["app"] = app_pkg
-    else:
-        # If already loaded (e.g. by conftest), just use it
-        pass
-
-    # app.core
-    for sub in ("app.core", "app.services"):
-        if sub not in sys.modules:
-            pkg = types.ModuleType(sub)
-            pkg.__path__ = [str(root / sub.replace(".", "/"))]
-            pkg.__package__ = sub
-            sys.modules[sub] = pkg
-
-    # Load app.core.config properly
-    if "app.core.config" not in sys.modules:
-        _load_module_from_file("app.core.config", str(root / "app/core/config.py"))
-
-    # Load app.core.logging properly
-    if "app.core.logging" not in sys.modules:
-        _load_module_from_file("app.core.logging", str(root / "app/core/logging.py"))
-
-    # Now load the matrix service
-    return _load_module_from_file("app.services.matrix", str(root / "app/services/matrix.py"))
-
-
-_matrix = _bootstrap_matrix_module()
+from app.services import matrix as _matrix
 
 MatrixError = _matrix.MatrixError
 MatrixConfigError = _matrix.MatrixConfigError

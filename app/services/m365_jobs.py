@@ -140,12 +140,16 @@ async def run_once() -> bool:
     return True
 
 
-async def _loop() -> None:
-    assert _stop is not None
-    while not _stop.is_set():
-        if not await run_once():
+async def _loop(stop: asyncio.Event) -> None:
+    while not stop.is_set():
+        try:
+            worked = await run_once()
+        except Exception as exc:  # noqa: BLE001 - a database blip must not end the worker
+            log_error("Durable M365 job worker poll failed", error=str(exc))
+            worked = False
+        if not worked:
             try:
-                await asyncio.wait_for(_stop.wait(), POLL_SECONDS)
+                await asyncio.wait_for(stop.wait(), POLL_SECONDS)
             except asyncio.TimeoutError:
                 # Poll interval elapsed with no stop signal: loop again.
                 pass
@@ -156,11 +160,14 @@ def start_worker() -> None:
     if _worker and not _worker.done():
         return
     _stop = asyncio.Event()
-    _worker = asyncio.create_task(_loop())
+    _worker = asyncio.create_task(_loop(_stop))
 
 
 async def stop_worker() -> None:
-    if _stop:
-        _stop.set()
-    if _worker:
-        await _worker
+    global _stop, _worker
+    stop, worker = _stop, _worker
+    _stop, _worker = None, None
+    if stop:
+        stop.set()
+    if worker:
+        await worker

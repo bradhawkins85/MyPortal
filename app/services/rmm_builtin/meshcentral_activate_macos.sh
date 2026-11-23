@@ -20,8 +20,10 @@ if [ -z "${MESH_GROUP_ID:-}" ]; then
 fi
 
 # Check launchd's system service, not an unrelated foreground meshagent process.
+# grep reads all of launchctl's output: with pipefail, `grep -q` stopping at the
+# first match can kill launchctl with SIGPIPE and fail the check.
 is_active() {
-  launchctl print system/meshagent 2>/dev/null | grep -q 'state = running'
+  launchctl print system/meshagent 2>/dev/null | grep 'state = running' >/dev/null
 }
 
 # Always re-run the full installer: re-running it

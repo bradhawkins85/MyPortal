@@ -49,113 +49,7 @@ def tray_db(tray_event_loop):
 
     tray_event_loop.run_until_complete(db.connect())
 
-    sqlite_ddl = [
-        """CREATE TABLE IF NOT EXISTS migrations (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               name TEXT NOT NULL UNIQUE,
-               applied_at TEXT DEFAULT (datetime('now'))
-           )""",
-        """INSERT OR IGNORE INTO migrations (name)
-               VALUES ('235_tray_app.sql')""",
-        """CREATE TABLE IF NOT EXISTS chat_rooms (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               tray_device_id INTEGER NULL
-           )""",
-        """CREATE TABLE IF NOT EXISTS companies (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-              name TEXT NULL,
-              tray_chat_enabled INTEGER NOT NULL DEFAULT 0
-           )""",
-        """CREATE TABLE IF NOT EXISTS tray_install_tokens (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               company_id INTEGER NULL,
-               label TEXT NOT NULL,
-               token_hash TEXT NOT NULL UNIQUE,
-               token_prefix TEXT NOT NULL,
-               created_by_user_id INTEGER NULL,
-               created_at TEXT DEFAULT (datetime('now')),
-               expires_at TEXT NULL,
-               revoked_at TEXT NULL,
-               last_used_at TEXT NULL,
-               use_count INTEGER NOT NULL DEFAULT 0
-           )""",
-        """CREATE TABLE IF NOT EXISTS tray_devices (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               company_id INTEGER NULL,
-               asset_id INTEGER NULL,
-               device_uid TEXT NOT NULL UNIQUE,
-               enrolment_token_id INTEGER NULL,
-               auth_token_hash TEXT NOT NULL,
-               auth_token_prefix TEXT NOT NULL,
-               os TEXT NULL,
-               os_version TEXT NULL,
-               hostname TEXT NULL,
-               serial_number TEXT NULL,
-               agent_version TEXT NULL,
-               console_user TEXT NULL,
-               last_ip TEXT NULL,
-               last_seen_utc TEXT NULL,
-               status TEXT NOT NULL DEFAULT 'pending',
-               created_at TEXT DEFAULT (datetime('now')),
-               updated_at TEXT DEFAULT (datetime('now'))
-           )""",
-        """CREATE TABLE IF NOT EXISTS tray_menu_configs (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               name TEXT NOT NULL,
-               scope TEXT NOT NULL DEFAULT 'global',
-               scope_ref_id INTEGER NULL,
-               payload_json TEXT NOT NULL,
-               display_text TEXT NULL,
-               env_allowlist TEXT NULL,
-               branding_icon_url TEXT NULL,
-               enabled INTEGER NOT NULL DEFAULT 1,
-               version INTEGER NOT NULL DEFAULT 1,
-               created_by_user_id INTEGER NULL,
-               updated_by_user_id INTEGER NULL,
-               created_at TEXT DEFAULT (datetime('now')),
-               updated_at TEXT DEFAULT (datetime('now')),
-               target_rules TEXT NULL,
-               priority INTEGER NOT NULL DEFAULT 100
-           )""",
-        """CREATE TABLE IF NOT EXISTS tray_command_log (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               device_id INTEGER NOT NULL,
-               command TEXT NOT NULL,
-               payload_json TEXT NULL,
-               initiated_by_user_id INTEGER NULL,
-               status TEXT NOT NULL DEFAULT 'queued',
-               error TEXT NULL,
-               created_at TEXT DEFAULT (datetime('now')),
-               delivered_at TEXT NULL
-           )""",
-        # Phase 5 tables
-        """CREATE TABLE IF NOT EXISTS tray_diagnostics (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               device_id INTEGER NOT NULL,
-               filename TEXT NOT NULL,
-               content_type TEXT NOT NULL DEFAULT 'application/zip',
-               size_bytes INTEGER NOT NULL DEFAULT 0,
-               stored_path TEXT NOT NULL,
-               uploaded_at TEXT DEFAULT (datetime('now')),
-               reviewed_by_user_id INTEGER NULL,
-               reviewed_at TEXT NULL,
-               notes TEXT NULL
-           )""",
-        """CREATE TABLE IF NOT EXISTS tray_versions (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               version TEXT NOT NULL,
-               platform TEXT NOT NULL DEFAULT 'all',
-               download_url TEXT NOT NULL,
-               required INTEGER NOT NULL DEFAULT 0,
-               enabled INTEGER NOT NULL DEFAULT 1,
-               release_notes TEXT NULL,
-               published_by_user_id INTEGER NULL,
-               published_at TEXT DEFAULT (datetime('now')),
-               rollout_percent INTEGER NOT NULL DEFAULT 100,
-               rollout_start_at TEXT NULL,
-               sha256 TEXT NULL
-           )""",
-    ]
+    from tests._tray_schema import TRAY_SQLITE_DDL as sqlite_ddl
 
     async def _bootstrap():
         for stmt in sqlite_ddl:
@@ -869,37 +763,19 @@ def test_resolve_config_omits_service_status_link_without_portal_url(
 
 @pytest.fixture(scope="module")
 def http_client(tray_db):
-    """A FastAPI TestClient bound to our test SQLite singleton."""
+    """A FastAPI TestClient bound to our test SQLite singleton.
+
+    Built without a ``with`` block so the app's startup and shutdown hooks
+    never run: they would reconnect the shared ``db`` and start background
+    workers that outlive this module.
+    """
 
     from fastapi.testclient import TestClient
-    from app.core.database import db
     from app.main import app
-    from app.services.scheduler import scheduler_service
 
-    # Stop the scheduler from spinning up in tests; keep db pointed at our
-    # fixture-controlled SQLite singleton.
-    async def _noop():  # pragma: no cover - trivial
-        return None
-
-    original_connect = db.connect
-    original_disconnect = db.disconnect
-    original_run_migrations = db.run_migrations
-    db.connect = _noop  # type: ignore[assignment]
-    db.disconnect = _noop  # type: ignore[assignment]
-    db.run_migrations = _noop  # type: ignore[assignment]
-    original_start = scheduler_service.start
-    original_stop = scheduler_service.stop
-    scheduler_service.start = _noop  # type: ignore[assignment]
-    scheduler_service.stop = _noop  # type: ignore[assignment]
-
-    with TestClient(app, follow_redirects=False, headers={"Accept": "application/json"}) as client:
-        yield client
-
-    db.connect = original_connect  # type: ignore[assignment]
-    db.disconnect = original_disconnect  # type: ignore[assignment]
-    db.run_migrations = original_run_migrations  # type: ignore[assignment]
-    scheduler_service.start = original_start  # type: ignore[assignment]
-    scheduler_service.stop = original_stop  # type: ignore[assignment]
+    client = TestClient(app, follow_redirects=False, headers={"Accept": "application/json"})
+    yield client
+    client.close()
 
 
 def test_enrol_rejects_invalid_install_token(http_client):
@@ -1285,8 +1161,10 @@ def test_diagnostics_upload_requires_auth(http_client):
     assert resp.status_code in (401, 403)
 
 
-def test_diagnostics_upload_and_list(http_client, tray_db, run, tmp_path):
+def test_diagnostics_upload_and_list(http_client, tray_db, run, tmp_path, monkeypatch):
     """Authenticated device can upload a diagnostic bundle."""
+    # Bundles are saved under ./media; keep them out of the checkout.
+    monkeypatch.chdir(tmp_path)
     from app.repositories import tray as repo
     from app.services import tray as svc
 

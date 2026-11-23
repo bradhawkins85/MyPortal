@@ -1,13 +1,9 @@
 """Ticket AI prompts include what MyPortal learned from technicians' ratings."""
 from __future__ import annotations
 
-import sys
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
-sys.modules.setdefault("magic", SimpleNamespace(Magic=lambda *a, **k: None, from_buffer=lambda *a, **k: ""))
 
 from app.services import ai_text_learning
 from app.services import ticket_reply_suggestions as replies_service

@@ -97,6 +97,57 @@ def test_load_is_idempotent(tmp_path, app, registry, temp_pack_slug):
         assert resp.json() == {"v": "first"}
 
 
+def test_reloading_a_pack_does_not_nest_the_app_lifespan(
+    tmp_path, app, registry, temp_pack_slug
+):
+    """Each load used to wrap the app's lifespan in another merged_lifespan,
+    so an app restarted or reloaded often enough overflowed the stack."""
+    _write_pack(tmp_path, temp_pack_slug, "1.0.0", "first")
+    lifespan = app.router.lifespan_context
+
+    async def run() -> None:
+        for _ in range(3):
+            await registry.load(temp_pack_slug)
+            await registry.unload(temp_pack_slug)
+        await registry.load(temp_pack_slug)
+
+    asyncio.run(run())
+
+    assert app.router.lifespan_context is lifespan
+    with TestClient(app) as client:
+        assert client.get(f"/_t_{temp_pack_slug}/ping").json() == {"v": "first"}
+
+
+def test_loading_a_pack_leaves_its_own_router_untouched(
+    tmp_path, app, registry, temp_pack_slug
+):
+    """Mounting wraps copies of the pack's routes for in-flight tracking; the
+    pack module's router keeps its plain endpoints, so loading the same
+    module again does not stack one tracking wrapper on another."""
+    _write_pack(tmp_path, temp_pack_slug, "1.0.0", "first")
+    module = importlib.import_module(f"app.features.{temp_pack_slug}")
+    pack_route = module.router.routes[0]
+    endpoint = pack_route.endpoint
+
+    async def run() -> None:
+        for _ in range(2):
+            await registry.load(temp_pack_slug)
+            await registry.unload(temp_pack_slug)
+        await registry.load(temp_pack_slug)
+
+    asyncio.run(run())
+
+    assert pack_route.endpoint is endpoint
+    assert pack_route.dependant.call is endpoint
+    mounted = [r for r in app.router.routes if getattr(r, "path", "") == f"/_t_{temp_pack_slug}/ping"]
+    assert len(mounted) == 1
+    # Exactly one tracking layer around a plain endpoint.
+    assert hasattr(mounted[0].endpoint, "__wrapped__")
+    assert not hasattr(mounted[0].endpoint.__wrapped__, "__wrapped__")
+    with TestClient(app) as client:
+        assert client.get(f"/_t_{temp_pack_slug}/ping").json() == {"v": "first"}
+
+
 def test_disabled_pack_is_never_imported_or_mounted(
     tmp_path, app, registry, temp_pack_slug
 ):

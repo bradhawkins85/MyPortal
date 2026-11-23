@@ -1,0 +1,7 @@
+{
+  "guid": "cb70ea4e-f7c9-4e13-88d6-63a20d73fe42",
+  "occurred_at": "2026-11-23T09:53Z",
+  "change_type": "Fix",
+  "summary": "Microsoft 365 background jobs such as mailbox syncs and group cleanup scans now keep running after a brief database outage, instead of silently stopping until MyPortal is restarted.",
+  "content_hash": "ac88739bd2d6375ca9c2a54f0f7a850b0a1f7f646fa1835a33c3b79045e0d88c"
+}

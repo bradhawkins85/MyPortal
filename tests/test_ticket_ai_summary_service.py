@@ -1,17 +1,7 @@
 from typing import Any
 import json
-import sys
-from types import SimpleNamespace
 
 import pytest
-
-sys.modules.setdefault(
-    "magic",
-    SimpleNamespace(
-        Magic=lambda *args, **kwargs: None,
-        from_buffer=lambda *args, **kwargs: "application/octet-stream",
-    ),
-)
 
 from app.services import tickets as tickets_service
 
