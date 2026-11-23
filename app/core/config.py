@@ -908,6 +908,15 @@ class Settings(BaseSettings):
             "straight away in the background."
         ),
     )
+    ticket_user_resolved_status: str = Field(
+        default="resolved",
+        validation_alias="TICKET_USER_RESOLVED_STATUS",
+        description=(
+            "Ticket status applied when an end user clicks \"My issue is "
+            "resolved\" on the portal ticket page. Falls back to 'resolved' "
+            "when unset or not a configured ticket status."
+        ),
+    )
     bcp_enabled: bool = Field(
         default=True,
         validation_alias="BCP_ENABLED",

@@ -95,6 +95,13 @@
                     </div>
                   {% endif %}
                 </dl>
+                {% if can_mark_resolved %}
+                  <form action="/tickets/{{ ticket.id }}/resolve" method="post" class="form-actions ticket-resolve-form">
+                    {% include "partials/csrf.html" %}
+                    <p class="form-help">Fixed? Let us know and we'll mark this ticket as resolved.</p>
+                    <button type="submit" class="button button--primary">My Issue Is Resolved</button>
+                  </form>
+                {% endif %}
               </div>
             </div>
           </details>

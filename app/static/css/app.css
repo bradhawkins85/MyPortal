@@ -13970,6 +13970,15 @@ a.service-card__ai-icon:hover {
   max-width: 85%;
 }
 
+.ticket-resolve-form {
+  flex-wrap: wrap;
+  margin-top: var(--space-gap-base);
+}
+
+.ticket-resolve-form .form-help {
+  margin: 0;
+}
+
 .ticket-reply-form .form-input,
 .ticket-reply-form .form-textarea,
 .ticket-reply-form .rich-text-editor {

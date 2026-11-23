@@ -7,6 +7,7 @@ Mirrors the routes that used to live in ``app/main.py``:
 * ``POST /tickets``               — create a ticket from the portal.
 * ``GET  /tickets/{ticket_id}``   — portal ticket detail.
 * ``POST /tickets/{ticket_id}/replies`` — post a reply from the portal.
+* ``POST /tickets/{ticket_id}/resolve`` — end user marks their issue resolved.
 * ``POST /tickets/suggestions``   — KB articles and resolved tickets for a draft.
 * ``POST /tickets/suggestions/feedback`` — record "Did this fix it?" answers.
 
@@ -97,6 +98,53 @@ def _main():
     from app import main as main_module
 
     return main_module
+
+
+async def _require_portal_ticket_write_access(
+    request: Request,
+    user: Mapping[str, Any],
+    ticket: Mapping[str, Any],
+    user_id: int,
+) -> tuple[bool, bool, bool]:
+    """Raise 404 unless ``user`` may reply to or update ``ticket`` from the portal.
+
+    Returns ``(has_helpdesk_access, is_super_admin, is_requester)``.
+    """
+
+    main_module = _main()
+    has_helpdesk_access = await main_module._has_admin_technician_access(user, request)
+    is_super_admin = bool(user.get("is_super_admin"))
+    is_requester = ticket.get("requester_id") == user_id
+
+    has_company_ticket_access = False
+    if not (has_helpdesk_access or is_super_admin or is_requester):
+        has_all_ticket_access = await main_module._has_menu_page_access(
+            request, user, "menu.tickets", write=True
+        )
+        if has_all_ticket_access:
+            available_companies = await main_module.company_access.list_accessible_companies(user)
+            active_company_id = getattr(request.state, "active_company_id", None)
+            allowed_company_ids: set[int] = set()
+            parsed_active_company_id = tickets_service.parse_company_id(active_company_id)
+            if parsed_active_company_id is not None:
+                allowed_company_ids.add(parsed_active_company_id)
+            if not allowed_company_ids:
+                for entry in available_companies:
+                    try:
+                        allowed_company_ids.add(int(entry.get("company_id")))
+                    except (AttributeError, TypeError, ValueError):
+                        continue
+            try:
+                ticket_company_id = int(ticket.get("company_id"))
+            except (TypeError, ValueError):
+                ticket_company_id = 0
+            has_company_ticket_access = ticket_company_id in allowed_company_ids
+
+    if not (has_helpdesk_access or is_super_admin or is_requester or has_company_ticket_access):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+    return has_helpdesk_access, is_super_admin, is_requester
 
 
 @router.get("/tickets/new", response_class=HTMLResponse)
@@ -377,38 +425,9 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
         )
 
-    has_helpdesk_access = await main_module._has_admin_technician_access(user, request)
-    is_super_admin = bool(user.get("is_super_admin"))
-    is_requester = ticket.get("requester_id") == user_id
-
-    has_company_ticket_access = False
-    if not (has_helpdesk_access or is_super_admin or is_requester):
-        has_all_ticket_access = await main_module._has_menu_page_access(
-            request, user, "menu.tickets", write=True
-        )
-        if has_all_ticket_access:
-            available_companies = await main_module.company_access.list_accessible_companies(user)
-            active_company_id = getattr(request.state, "active_company_id", None)
-            allowed_company_ids: set[int] = set()
-            parsed_active_company_id = tickets_service.parse_company_id(active_company_id)
-            if parsed_active_company_id is not None:
-                allowed_company_ids.add(parsed_active_company_id)
-            if not allowed_company_ids:
-                for entry in available_companies:
-                    try:
-                        allowed_company_ids.add(int(entry.get("company_id")))
-                    except (AttributeError, TypeError, ValueError):
-                        continue
-            try:
-                ticket_company_id = int(ticket.get("company_id"))
-            except (TypeError, ValueError):
-                ticket_company_id = 0
-            has_company_ticket_access = ticket_company_id in allowed_company_ids
-
-    if not (has_helpdesk_access or is_super_admin or is_requester or has_company_ticket_access):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
-        )
+    has_helpdesk_access, is_super_admin, _is_requester = await _require_portal_ticket_write_access(
+        request, user, ticket, user_id
+    )
 
     form = await parse_csrf_form(request)
     body = str(form.get("body") or "").strip()
@@ -533,6 +552,79 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
 
     return flash_redirect(f"/tickets/{ticket_id}", "Reply posted.", "success")
+
+
+@router.post("/tickets/{ticket_id}/resolve", response_class=HTMLResponse)
+async def portal_ticket_mark_resolved(request: Request, ticket_id: int):
+    """Let the requester (or anyone who may reply) mark the ticket resolved."""
+
+    main_module = _main()
+    user, redirect = await main_module._require_menu_page_access(request, "menu.tickets")
+    if redirect:
+        return redirect
+
+    try:
+        user_id = int(user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        ) from None
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
+    has_helpdesk_access, is_super_admin, _is_requester = await _require_portal_ticket_write_access(
+        request, user, ticket, user_id
+    )
+    await parse_csrf_form(request)
+
+    resolved_status = await tickets_service.resolve_user_resolved_status()
+    previous_status = str(ticket.get("status") or "").strip().lower()
+    if previous_status in {resolved_status, "closed"}:
+        return flash_redirect(
+            f"/tickets/{ticket_id}", "This ticket is already resolved.", "info"
+        )
+
+    try:
+        updated = await tickets_repo.set_ticket_status(ticket_id, resolved_status)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to mark portal ticket resolved",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        return flash_redirect(
+            f"/tickets/{ticket_id}",
+            "We couldn't update your ticket. Please try again.",
+            "error",
+        )
+
+    await audit_service.record(
+        action="tickets.resolved_by_user",
+        request=request,
+        user_id=user_id,
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before={"status": previous_status or None},
+        after={"status": resolved_status},
+    )
+
+    actor_type = "technician" if has_helpdesk_access or is_super_admin else "requester"
+    await tickets_service.emit_ticket_updated_event(
+        updated or ticket_id,
+        actor_type=actor_type,
+        actor=user,
+    )
+    await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
+
+    return flash_redirect(
+        f"/tickets/{ticket_id}",
+        "Thanks for letting us know. Your ticket has been marked as resolved.",
+        "success",
+    )
 
 
 __all__ = ["router"]

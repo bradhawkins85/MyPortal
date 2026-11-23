@@ -11579,6 +11579,11 @@ async def _render_portal_ticket_detail(
 
     from app.services import ai_text_outputs
 
+    user_resolved_status = await tickets_service.resolve_user_resolved_status(status_definitions)
+    can_mark_resolved = bool(
+        has_helpdesk_access or is_super_admin or is_requester or has_company_ticket_access
+    ) and status_value not in {user_resolved_status, "closed"}
+
     extra = {
         "title": f"Ticket {ticket_id}",
         "ai_rating_ids": await ai_text_outputs.ticket_rating_ids(ticket, viewer_id=user.get("id")),
@@ -11633,6 +11638,7 @@ async def _render_portal_ticket_detail(
         "is_requester": is_requester,
         "is_watcher": is_watcher,
         "has_helpdesk_access": has_helpdesk_access,
+        "can_mark_resolved": can_mark_resolved,
         "relevant_kb_articles": relevant_articles,
         "success_message": success_message,
         "error_message": error_message,

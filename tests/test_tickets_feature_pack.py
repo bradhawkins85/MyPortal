@@ -15,6 +15,7 @@ EXPECTED = {
     ("POST", "/tickets"),
     ("GET", "/tickets/{ticket_id}"),
     ("POST", "/tickets/{ticket_id}/replies"),
+    ("POST", "/tickets/{ticket_id}/resolve"),
     ("GET", "/admin/tickets"),
     ("GET", "/admin/tickets/{ticket_id}"),
     ("POST", "/admin/tickets"),
