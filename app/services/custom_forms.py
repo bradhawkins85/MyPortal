@@ -698,6 +698,9 @@ async def submit_form(
         external_reference=None,
         send_creation_notification=True,
         record_initial_reply=False,
+        # Fired below once the uploads are saved, so creation filters such as
+        # ``ticket.attachment_extensions`` can see the submitted files.
+        trigger_automations=False,
     )
     ticket_id = int(ticket["id"]) if ticket and ticket.get("id") is not None else None
     if ticket_id is None:
@@ -741,6 +744,15 @@ async def submit_form(
         user_agent=user_agent,
         submitted_by=requester_id,
     )
+
+    try:
+        await tickets_service.emit_ticket_created_event(ticket_id)
+    except Exception as exc:  # noqa: BLE001 - the ticket and submission are saved
+        log_error(
+            "Custom form ticket automations failed",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
 
     log_info(
         "Custom form submitted",

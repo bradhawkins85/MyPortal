@@ -504,6 +504,8 @@ async def test_submit_form_creates_ticket_and_private_attachment(monkeypatch):
     monkeypatch.setattr("app.services.ticket_attachments.save_uploaded_file", save_file)
     create_submission = AsyncMock(return_value={"id": 77})
     monkeypatch.setattr(forms_repo, "create_submission", create_submission)
+    emit_created = AsyncMock()
+    monkeypatch.setattr("app.services.tickets.emit_ticket_created_event", emit_created)
     monkeypatch.setattr(custom_forms, "log_info", lambda *a, **k: None)
     monkeypatch.setattr(custom_forms, "log_error", lambda *a, **k: None)
 
@@ -546,6 +548,66 @@ async def test_submit_form_creates_ticket_and_private_attachment(monkeypatch):
     assert sub_kwargs["submitted_by"] == 9
     assert sub_kwargs["ip_address"] == "1.2.3.4"
 
+    # ``tickets.created`` fires only after the attachments are saved, so
+    # filters such as ``ticket.attachment_extensions`` can match them.
+    assert ticket_kwargs["trigger_automations"] is False
+    emit_created.assert_awaited_once_with(555)
+
+
+@pytest.mark.anyio
+async def test_submit_form_fires_created_event_after_attachments_saved(monkeypatch):
+    calls: list[str] = []
+
+    async def create_ticket(**_kwargs):
+        calls.append("create_ticket")
+        return {"id": 555}
+
+    async def save_file(**_kwargs):
+        calls.append("save_file")
+        return {"id": 900, "filename": "memo.m4a", "size": 5, "content_type": "audio/mp4"}
+
+    async def emit_created(_ticket_id):
+        calls.append("emit_created")
+
+    monkeypatch.setattr("app.services.tickets.create_ticket", create_ticket)
+    monkeypatch.setattr("app.services.ticket_attachments.save_uploaded_file", save_file)
+    monkeypatch.setattr("app.services.tickets.emit_ticket_created_event", emit_created)
+    monkeypatch.setattr(forms_repo, "create_submission", AsyncMock(return_value={"id": 77}))
+    monkeypatch.setattr(custom_forms, "log_info", lambda *a, **k: None)
+
+    await custom_forms.submit_form(
+        form=dict(_FORM),
+        fields=[_field(1, "text", label="Issue"), _field(2, "file", label="Attach")],
+        values={1: "Voicemail"},
+        files={2: [SimpleNamespace(filename="memo.m4a")]},
+        requester=_SUPER_ADMIN,
+    )
+
+    assert calls == ["create_ticket", "save_file", "emit_created"]
+
+
+@pytest.mark.anyio
+async def test_submit_form_survives_automation_failure(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.tickets.create_ticket", AsyncMock(return_value={"id": 555})
+    )
+    monkeypatch.setattr(
+        "app.services.tickets.emit_ticket_created_event",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    monkeypatch.setattr(forms_repo, "create_submission", AsyncMock(return_value={"id": 77}))
+    monkeypatch.setattr(custom_forms, "log_info", lambda *a, **k: None)
+    monkeypatch.setattr(custom_forms, "log_error", lambda *a, **k: None)
+
+    result = await custom_forms.submit_form(
+        form=dict(_FORM),
+        fields=[_field(1, "text", label="Issue")],
+        values={1: "Issue"},
+        files={},
+        requester=_SUPER_ADMIN,
+    )
+    assert result["ticket_id"] == 555
+
 
 @pytest.mark.anyio
 async def test_submit_form_validation_failure_raises_before_any_write(monkeypatch):
@@ -587,6 +649,8 @@ async def test_submit_form_ignores_attachment_errors(monkeypatch):
     monkeypatch.setattr("app.services.ticket_attachments.save_uploaded_file", save_file)
     create_submission = AsyncMock(return_value={"id": 77})
     monkeypatch.setattr(forms_repo, "create_submission", create_submission)
+    emit_created = AsyncMock()
+    monkeypatch.setattr("app.services.tickets.emit_ticket_created_event", emit_created)
     monkeypatch.setattr(custom_forms, "log_info", lambda *a, **k: None)
     monkeypatch.setattr(custom_forms, "log_error", lambda *a, **k: None)
 

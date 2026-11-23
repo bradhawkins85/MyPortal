@@ -1,0 +1,7 @@
+{
+  "guid": "c2b89b38-e865-4e42-af3d-191481051680",
+  "occurred_at": "2026-11-23T06:40Z",
+  "change_type": "Fix",
+  "summary": "Ticket created automations now see files uploaded with a custom form, so attachment filters such as .m4a recordings match tickets raised from forms.",
+  "content_hash": "c2810c5fe6d15680a69849f3138e3f49a97787670e1a14fa3d88349ee3fc4c04"
+}
