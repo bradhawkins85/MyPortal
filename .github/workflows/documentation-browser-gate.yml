@@ -9,22 +9,33 @@ permissions:
 
 jobs:
   journeys:
-    if: github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'deployment_status' &&
+       github.event.deployment.environment == 'documentation-staging' &&
+       github.event.deployment_status.state == 'success')
     runs-on: ubuntu-latest
-    environment: documentation-staging
+    environment:
+      name: documentation-staging
+      # The browser job verifies a deployment and must not trigger another run.
+      deployment: false
     steps:
+      - name: Write non-production journey fixture
+        env:
+          BROWSER_FIXTURE_JSON: ${{ secrets.DOCUMENTATION_BROWSER_FIXTURE_JSON }}
+        run: |
+          if [[ -z "$BROWSER_FIXTURE_JSON" ]]; then
+            echo '::error::Set DOCUMENTATION_BROWSER_FIXTURE_JSON in the documentation-staging environment. See docs/operations/documentation-core-rollout.md.'
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$BROWSER_FIXTURE_JSON" > "$RUNNER_TEMP/documentation-browser-fixture.json"
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: pip install -e '.[dev]'
       - run: playwright install --with-deps chromium
-      - name: Write non-production journey fixture
-        env:
-          BROWSER_FIXTURE_JSON: ${{ secrets.DOCUMENTATION_BROWSER_FIXTURE_JSON }}
-        run: |
-          test -n "$BROWSER_FIXTURE_JSON"
-          printf '%s' "$BROWSER_FIXTURE_JSON" > "$RUNNER_TEMP/documentation-browser-fixture.json"
       - name: Gate staged rollout on browser journeys
         env:
           MYPORTAL_BROWSER_FIXTURE: ${{ runner.temp }}/documentation-browser-fixture.json
