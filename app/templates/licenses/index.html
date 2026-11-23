@@ -568,7 +568,7 @@
       const counts = history.map((d) => d.count);
       const allocateds = history.map((d) => d.allocated);
       const maxVal = Math.max(...counts, ...allocateds, 1);
-      const dates = history.map((d) => new Date(d.recorded_at));
+      const dates = history.map((d) => window.MyPortalTime.toDate(d.recorded_at));
       const minTime = dates[0].getTime();
       // When there is only one data point spread it across the full chart width.
       const maxTime = dates.length > 1 ? dates[dates.length - 1].getTime() : minTime;

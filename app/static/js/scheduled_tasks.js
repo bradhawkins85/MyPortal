@@ -416,7 +416,7 @@
 
   function localiseTimestamps(root) {
     root.querySelectorAll('[data-utc]').forEach((element) => {
-      const date = new Date(element.getAttribute('data-utc'));
+      const date = window.MyPortalTime.toDate(element.getAttribute('data-utc'));
       if (Number.isNaN(date.getTime())) {
         return;
       }
@@ -1959,7 +1959,7 @@
         chip.className = `scf-chip sch-chip sch-chip--${run.status || 'never'}`;
         chip.textContent = run.status ? run.status.charAt(0).toUpperCase() + run.status.slice(1).replace(/_/g, ' ') : 'Unknown';
         heading.appendChild(chip);
-        const started = new Date(run.started_at || run.startedAt || '');
+        const started = window.MyPortalTime.toDate(run.started_at || run.startedAt || '');
         if (!Number.isNaN(started.getTime())) {
           const when = document.createElement('span');
           when.className = 'sch-run__when';

@@ -579,7 +579,7 @@
       if (!iso) {
         return;
       }
-      const date = new Date(iso);
+      const date = window.MyPortalTime.toDate(iso);
       if (Number.isNaN(date.getTime())) {
         return;
       }
@@ -698,7 +698,7 @@
           table.innerHTML = '<thead><tr><th>Technician</th><th>Opened</th><th>Duration</th></tr></thead>';
           const body = document.createElement('tbody');
           rows.forEach((entry) => {
-            const started = new Date(entry.started_at); const finished = new Date(entry.ended_at || entry.last_seen_at);
+            const started = window.MyPortalTime.toDate(entry.started_at); const finished = window.MyPortalTime.toDate(entry.ended_at || entry.last_seen_at);
             const row = document.createElement('tr');
             [entry.user_display_name || entry.user_email || 'Unknown', Number.isNaN(started) ? '—' : started.toLocaleString(), Number.isNaN(started) || Number.isNaN(finished) ? '—' : formatDuration((finished - started) / 1000)].forEach((value) => { const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); });
             body.appendChild(row);
@@ -3750,7 +3750,7 @@
 
   function formatAutomationHistoryDate(value) {
     if (!value) return '—';
-    const date = new Date(value);
+    const date = window.MyPortalTime.toDate(value);
     if (Number.isNaN(date.getTime())) return String(value);
     return date.toLocaleString();
   }

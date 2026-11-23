@@ -9,7 +9,7 @@
 {% block content %}<div class="report-page">
   <header class="card card--panel report-cover"><div class="report-cover__body">
     <p class="report-cover__eyebrow">Company overview report</p><h1>{{ report.company.name }}</h1>
-    <p>Generated <span data-utc="{{ report.generated_at.isoformat() }}">{{ report.generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</span></p>
+    <p>Generated {{ local_time(report.generated_at) }}</p>
   </div></header>
   {% for row in report.rows %}{% if row.type == 'divider' %}<div class="report-divider{% if row.title %} report-divider--labelled{% endif %}" role="separator" style="--report-divider-height: {{ row.height }}px">{% if row.title %}<span>{{ row.title }}</span>{% endif %}</div>{% else %}<section class="report-layout-row">
     {% if row.title %}<h2 class="report-layout-row__title">{{ row.title }}</h2>{% endif %}

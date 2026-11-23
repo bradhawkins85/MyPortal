@@ -98,7 +98,7 @@
     // Best-effort fallback rendering so the cell isn't blank before the
     // global UTC->local localiser in main.js runs.
     try {
-      span.textContent = new Date(value).toLocaleString();
+      span.textContent = window.MyPortalTime.toDate(value).toLocaleString();
     } catch (e) {
       span.textContent = value;
     }

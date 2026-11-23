@@ -17,7 +17,7 @@
 
   const formatTimestamp = (value) => {
     if (!value) return '—';
-    const date = new Date(value);
+    const date = window.MyPortalTime.toDate(value);
     if (Number.isNaN(date.getTime())) return value;
     const stamp = date.toLocaleString();
     const seconds = Math.round((Date.now() - date.getTime()) / 1000);

@@ -162,7 +162,7 @@
                   </td>
                   <td>
                     {% if action.completed_at %}
-                      <span class="badge badge-success">✓ {{ action.completed_at.strftime('%Y-%m-%d') }}</span>
+                      <span class="badge badge-success">✓ {{ local_time(action.completed_at, 'date') }}</span>
                     {% else %}
                       <span class="badge badge-warning">Pending</span>
                     {% endif %}

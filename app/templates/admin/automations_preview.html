@@ -47,11 +47,11 @@
           </article>
           <article class="stat-card">
             <h3 class="stat-card__title">{{ 'Trigger event' if is_simulation else 'Next run' }}</h3>
-            <p class="stat-card__value stat-card__value--small">{{ automation.trigger_event if is_simulation else (automation.next_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.next_run_at else '—') }}</p>
+            <p class="stat-card__value stat-card__value--small">{{ automation.trigger_event if is_simulation else (local_time(automation.next_run_at)) }}</p>
           </article>
           <article class="stat-card">
             <h3 class="stat-card__title">Checked</h3>
-            <p class="stat-card__value stat-card__value--small">{{ preview.checked_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</p>
+            <p class="stat-card__value stat-card__value--small">{{ local_time(preview.checked_at) }}</p>
           </article>
         </div>
 
@@ -90,7 +90,7 @@
                     <td data-label="Status" data-column-key="status">{{ ticket.status or '—' }}</td>
                     <td data-label="Priority" data-column-key="priority">{{ ticket.priority or '—' }}</td>
                     <td data-label="Company" data-column-key="company">{{ ticket.company_id or '—' }}</td>
-                    <td data-label="Updated" data-column-key="updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
+                    <td data-label="Updated" data-column-key="updated">{{ local_time(ticket.updated_at) }}</td>
                     <td data-label="Age (days)" data-column-key="age">{{ '%.1f'|format(ticket.age_days) if ticket.age_days is not none else '—' }}</td>
                   </tr>
                 {% endfor %}

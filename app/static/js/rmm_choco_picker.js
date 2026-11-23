@@ -53,7 +53,7 @@
         if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not load the app list.');
         render(data.packages);
         status.textContent = (data.packages.length ? (multiple ? 'Tick the applications.' : 'Choose an application.') : 'No applications found in the downloaded list.')
-          + (data.updated_at ? ' App list updated ' + new Date(data.updated_at).toLocaleString() + '.' : ' The app list has not been downloaded yet.');
+          + (data.updated_at ? ' App list updated ' + window.MyPortalTime.toDate(data.updated_at).toLocaleString() + '.' : ' The app list has not been downloaded yet.');
       } catch (error) {
         if (current === sequence) status.textContent = error.message;
       } finally {

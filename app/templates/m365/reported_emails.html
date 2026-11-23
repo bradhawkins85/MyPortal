@@ -102,7 +102,7 @@
         </td>
         <td data-column-key="window" data-sort-value="{{ alert.anchor_at or '' }}">
           {% if alert.window_start %}
-          <div class="reported-window">{{ alert.window_start.strftime('%Y-%m-%d %H:%M') }}<br>to {{ alert.window_end.strftime('%Y-%m-%d %H:%M') }}</div>
+          <div class="reported-window">{{ local_time(alert.window_start) }}<br>to {{ local_time(alert.window_end) }}</div>
           {% else %}&mdash;{% endif %}
         </td>
         <td data-column-key="status">{{ alert.status|replace('_',' ')|title }}</td>

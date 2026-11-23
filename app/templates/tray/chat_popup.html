@@ -255,7 +255,7 @@
          data-event-id="{{ msg.matrix_event_id | default('') }}">
       <div class="chat-message__meta">
         {{ msg.sender_display_name | default(msg.sender_matrix_id) | default('Unknown') }}
-        {% if msg.sent_at %}&bull; <time>{{ msg.sent_at }}</time>{% endif %}
+        {% if msg.sent_at %}&bull; <time data-sent-at="{{ msg.sent_at }}">{{ msg.sent_at }}</time>{% endif %}
       </div>
       {% if msg.media and msg.media.kind == 'location' %}
       <div class="chat-message__body">Shared a location</div>
@@ -310,6 +310,14 @@
 
   const messagesEl = document.getElementById('chat-messages');
   const inputEl    = document.getElementById('chat-input');
+
+  // Server-rendered messages carry UTC times; show them in local time.
+  document.querySelectorAll('time[data-sent-at]').forEach(function (node) {
+    const raw = node.getAttribute('data-sent-at') || '';
+    const iso = raw.replace(' ', 'T');
+    const date = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');
+    if (!Number.isNaN(date.getTime())) node.textContent = date.toLocaleTimeString();
+  });
   const sendBtn    = document.getElementById('chat-send');
   const errorEl    = document.getElementById('chat-error');
 

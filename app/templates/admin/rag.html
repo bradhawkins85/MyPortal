@@ -121,7 +121,7 @@
   const status = root.querySelector('[data-rag-status]');
   const fmt = (value) => value === null || value === undefined || value === '' ? '—' : value;
   const number = (value) => Number(value || 0).toLocaleString();
-  const date = (value) => value ? new Date(value).toLocaleString() : '—';
+  const date = (value) => value ? (window.MyPortalTime.format(value) || value) : '—';
   const canStop = (status) => ['queued', 'running', 'cancelling'].includes(String(status || '').toLowerCase());
   const esc = (value) => String(fmt(value)).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   function metric(label, value, hint, variant = 'neutral') {

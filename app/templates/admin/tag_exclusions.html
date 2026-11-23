@@ -91,7 +91,7 @@
 
         exclusionsTable.innerHTML = exclusions.map(exc => {
           const escapedSlug = exc.tag_slug.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-          const createdAt = exc.created_at ? new Date(exc.created_at).toLocaleString() : '—';
+          const createdAt = exc.created_at ? (window.MyPortalTime.format(exc.created_at) || exc.created_at) : '—';
           return `
           <tr data-tag-slug="${escapedSlug}">
             <td data-label="Tag Slug">${escapedSlug}</td>

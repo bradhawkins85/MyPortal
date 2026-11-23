@@ -745,7 +745,7 @@
                     <td data-label="Company" data-column="company" class="tickets-table__cell tickets-table__cell--company">{{ company.name if company else (ticket.company_id or '—') }}</td>
                     {% set sla = (ticket_sla_lookup or {}).get(ticket.id, {}) %}<td data-label="SLA" data-column="sla"><span class="status status--{{ 'danger' if sla.state == 'breached' else ('warning' if sla.state == 'at_risk' else ('success' if sla.state in ['met','on_track'] else 'neutral')) }}">{{ sla.label or 'No SLA' }}</span></td>
                     <td data-label="Assigned" data-column="assigned" class="tickets-table__cell tickets-table__cell--assigned">{{ assigned_label }}</td>
-                    <td data-label="Updated" data-column="updated" class="tickets-table__cell tickets-table__cell--updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
+                    <td data-label="Updated" data-column="updated" class="tickets-table__cell tickets-table__cell--updated">{{ local_time(ticket.updated_at) }}</td>
                     {% set automation_data = (ticket_automation_filter_lookup or {}).get(ticket.id, {}) %}
                     {% set last_reply_status = automation_data.get('latest_public_reply_email_status') %}
                     {% set last_reply_status_class = {
@@ -771,8 +771,8 @@
                     <td data-label="Requester" data-column="requester" class="tickets-table__cell tickets-table__cell--requester">{{ requester_label }}</td>
                     <td data-label="Module" data-column="module" class="tickets-table__cell tickets-table__cell--module">{{ ticket.module_slug or '—' }}</td>
                     <td data-label="External Ref" data-column="external-ref" class="tickets-table__cell tickets-table__cell--external-ref">{{ ticket.external_reference or '—' }}</td>
-                    <td data-label="Created" data-column="created" class="tickets-table__cell tickets-table__cell--created">{{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}</td>
-                    <td data-label="Closed" data-column="closed" class="tickets-table__cell tickets-table__cell--closed">{{ ticket.closed_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.closed_at else '—' }}</td>
+                    <td data-label="Created" data-column="created" class="tickets-table__cell tickets-table__cell--created">{{ local_time(ticket.created_at) }}</td>
+                    <td data-label="Closed" data-column="closed" class="tickets-table__cell tickets-table__cell--closed">{{ local_time(ticket.closed_at) }}</td>
                     {% set ai_status_label = resolution_label_map.get(ticket.ai_resolution_state) or (ticket.ai_resolution_state.replace('_', ' ').title() if ticket.ai_resolution_state else '—') %}
                     <td data-label="AI Status" data-column="ai-status" class="tickets-table__cell tickets-table__cell--ai-status">{{ ai_status_label }}</td>
                     <td data-label="AI Tags" data-column="ai-tags" class="tickets-table__cell tickets-table__cell--ai-tags">{{ (ticket.ai_tags or []) | join(', ') or '—' }}</td>

@@ -1485,7 +1485,7 @@
     if (!value) {
       return null;
     }
-    const parsed = new Date(value);
+    const parsed = window.MyPortalTime.toDate(value);
     if (Number.isNaN(parsed.getTime())) {
       return null;
     }

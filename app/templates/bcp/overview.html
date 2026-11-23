@@ -243,7 +243,7 @@
       {% for change in recent_plan_changes %}
       <div class="ce-subsection">
         <div>
-          <strong>{{ change.changed_at.strftime('%Y-%m-%d %H:%M') if change.changed_at else 'Unknown time' }}</strong>
+          <strong>{{ local_time(change.changed_at, empty='Unknown time') }}</strong>
           <span class="text-muted">by {{ change.changed_by }}</span>
           <ul class="list-disc list-inside space-y-1">
             {% for field_name in change.changed_fields %}

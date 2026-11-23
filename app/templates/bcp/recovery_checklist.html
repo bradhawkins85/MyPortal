@@ -50,7 +50,7 @@
     <div class="card-header">
       <h2 class="card-title">Crisis & Recovery Checklist ({{ checklist_items|length }} items)</h2>
       {% if active_incident %}
-      <p class="text-sm text-muted">Incident started: {{ active_incident.started_at.strftime('%Y-%m-%d %H:%M UTC') if active_incident.started_at else 'Unknown' }}</p>
+      <p class="text-sm text-muted">Incident started: {{ local_time(active_incident.started_at, empty='Unknown') }}</p>
       {% endif %}
     </div>
     <div class="card-body">
@@ -83,7 +83,7 @@
               </div>
               {% if item.tick and item.tick.is_done and item.tick.done_at %}
               <div class="checklist-timestamp">
-                ✓ Completed {{ item.tick.done_at.strftime('%Y-%m-%d %H:%M UTC') if item.tick.done_at else 'Unknown' }}
+                ✓ Completed {{ local_time(item.tick.done_at, empty='Unknown') }}
               </div>
               {% endif %}
             </div>

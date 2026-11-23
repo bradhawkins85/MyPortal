@@ -149,7 +149,7 @@ sudo "$DIR/myportal-tray/install.sh" --url "$URL" --token "$TOKEN"</code></pre>
                     {% if token.revoked_at %}
                       <span class="status status--danger">Revoked</span>
                     {% elif token.expires_at %}
-                      <span class="status status--warning">Expires {{ token.expires_at }}</span>
+                      <span class="status status--warning">Expires {{ local_time(token.expires_at) }}</span>
                     {% else %}
                       <span class="status status--success">Active</span>
                     {% endif %}

@@ -43,7 +43,7 @@
               <td data-label="Company" data-column-key="company">{{ entry.company_name or '—' }}</td>
               <td data-label="Last login" data-column-key="last_login"
                   data-sort-value="{{ entry.last_login_at.isoformat() if entry.last_login_at else '' }}">
-                {{ entry.last_login_at.strftime('%d %b %Y, %H:%M') if entry.last_login_at else 'Never' }}
+                {{ local_time(entry.last_login_at, empty='Never') }}
               </td>
               {% set sso_identity = entry.sso_identity %}
               <td data-label="Microsoft sign-in" data-column-key="microsoft" data-sort-value="{{ 'linked' if sso_identity else 'not linked' }}">

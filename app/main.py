@@ -122,6 +122,7 @@ from app.core.config import get_settings, get_templates_config
 from app.core.database import DatabaseTimeoutError, db
 from app.core.env_reload import EnvReloader, poll_seconds_from_env
 from app.core.event_log_database import event_log_db
+from app.core.local_time import register as register_local_time_helpers
 from app.core.stats_database import stats_db
 from app.core.static_assets import CompressedStaticFiles, content_hash, content_hash_for, release_files
 from app.core.features import init_registry
@@ -957,6 +958,7 @@ app.add_middleware(IncomingWebhookMonitorMiddleware)
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
 templates.env.globals["ai_agent_name"] = get_agent_name
+register_local_time_helpers(templates.env)
 
 
 def _parse_tray_agent_version(value: str | None) -> tuple[int, int, int]:
