@@ -136,6 +136,10 @@
                     {{ rmm_ui.agent_indicator(value) }}
                     {% if asset.rmm_install %}<a class="rmm-install-latest status status--{{ asset.rmm_install.variant }}" href="/assets/{{ asset.id }}#scripts" title="{{ asset.rmm_install.reason or asset.rmm_install.label }}">Install: {{ asset.rmm_install.label | lower }}</a>{% endif %}
                   </td>
+                {% elif key == 'windows_activation' %}
+                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ asset.get('windows_activation_sort', '') }}"{% if mobile_priority %} data-mobile-priority="{{ mobile_priority }}"{% endif %}>
+                    {% if value %}<span class="status status--{{ value.variant }}" title="{{ value.title }}">{{ value.label }}</span>{% else %}<span class="text-muted">—</span>{% endif %}
+                  </td>
                 {% elif key in ['ram_gb', 'approx_age', 'performance_score'] %}
                   <td
                     data-label="{{ column.label }}"

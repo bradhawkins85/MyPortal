@@ -17,6 +17,7 @@ const windowsOutput = `{"manufacturer":"Dell Inc.","model":"Latitude 7440","doma
            {"name":"C:","label":"","fs":"NTFS","size":511000000000,"free":200000000000}],
 "drives":[{"model":"NVMe Samsung SSD 980","size":512110190592,"media":"SSD","bus":"NVMe","serial":"S1"},
           {"model":"Virtual","size":10,"media":"Unspecified","bus":"SAS","serial":null}],
+"activation":{"status":1,"channel":"OEM:DM","grace_minutes":0},
 "gpus":["Intel(R) Iris(R) Xe Graphics",null],
 "network":[{"name":"Intel(R) Wi-Fi 6E AX211","mac":"AA-BB-CC-DD-EE-FF","addresses":["10.0.0.5","fe80::1"]}],
 "software":[{"name":"Google Chrome","version":"129.0.6668.90","publisher":"Google LLC","install_date":"20241001","scope":"machine"},
@@ -60,6 +61,32 @@ func TestApplyWindows(t *testing.T) {
 	}
 	if len(s.Errors) != 1 {
 		t.Fatalf("errors: %v", s.Errors)
+	}
+	if s.Activation == nil || s.Activation.Status != "licensed" || s.Activation.Channel != "OEM:DM" {
+		t.Fatalf("activation: %+v", s.Activation)
+	}
+}
+
+func TestApplyWindowsActivation(t *testing.T) {
+	cases := map[string]string{
+		`{"activation":{"status":0,"channel":null,"grace_minutes":null}}`:       "unlicensed",
+		`{"activation":{"status":"3","channel":"Retail","grace_minutes":4320}}`: "grace",
+		`{"activation":{"status":5}}`:                                           "notification",
+		`{"activation":{"status":4}}`:                                           "non_genuine",
+	}
+	for output, want := range cases {
+		s := Snapshot{}
+		if err := applyWindows(&s, []byte(output)); err != nil {
+			t.Fatal(err)
+		}
+		if s.Activation == nil || s.Activation.Status != want {
+			t.Fatalf("%s: %+v", output, s.Activation)
+		}
+	}
+	// A failed query (activation null) reports nothing rather than "unlicensed".
+	s := Snapshot{}
+	if err := applyWindows(&s, []byte(`{"activation":null}`)); err != nil || s.Activation != nil {
+		t.Fatalf("null activation: %+v %v", s.Activation, err)
 	}
 }
 

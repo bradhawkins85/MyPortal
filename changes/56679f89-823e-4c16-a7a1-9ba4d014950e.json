@@ -1,0 +1,7 @@
+{
+  "guid": "56679f89-823e-4c16-a7a1-9ba4d014950e",
+  "occurred_at": "2026-11-23T21:46Z",
+  "change_type": "Feature",
+  "summary": "Assets now show whether Windows is activated, as a badge on the asset page and a Windows activation column in the Assets list, so technicians can see which machines still need activating.",
+  "content_hash": "679867699c1b98bf625ea1cf6eb6eacbcfb22001d32089a8a5a2da582ced8598"
+}

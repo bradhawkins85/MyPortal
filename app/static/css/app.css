@@ -16335,6 +16335,22 @@ a.stat-strip__stat:focus-visible {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hf-success) 30%, transparent);
 }
 
+.scf-chip--danger {
+  color: var(--hf-danger);
+  background: color-mix(in srgb, var(--hf-danger) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hf-danger) 32%, transparent);
+}
+
+.scf-chip__link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.scf-chip__link:hover,
+.scf-chip__link:focus-visible {
+  text-decoration: underline;
+}
+
 .scf-chip--m365 {
   color: var(--hf-copy-strong);
   background: color-mix(in srgb, var(--hf-accent) 22%, transparent);

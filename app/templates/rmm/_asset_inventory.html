@@ -25,6 +25,7 @@
       <dt>Memory</dt><dd>{{ size(inv.ram_bytes) or '—' }}{% if inv.details.memory_modules %} <span class="text-muted">in {{ inv.details.memory_modules | length }} module{{ 's' if inv.details.memory_modules | length != 1 }}</span>{% endif %}</dd>
       <dt>Storage</dt><dd>{{ size(inv.disk_total_bytes) or '—' }}{% if inv.system_disk_free_bytes is not none %} <span class="text-muted">({{ size(inv.system_disk_free_bytes) or '0 B' }} free on the system disk)</span>{% endif %}</dd>
       {% if inv.details.gpus %}<dt>Graphics</dt><dd>{{ inv.details.gpus | join(', ') }}</dd>{% endif %}
+      {% if rmm.inventory.windows_activation %}{% set activation = rmm.inventory.windows_activation %}<dt>Windows activation</dt><dd><span class="status status--{{ activation.variant }}">{{ activation.label }}</span>{% if activation.title != activation.label %} <span class="text-muted">{{ activation.title.split(' · ')[1:] | join(' · ') }}</span>{% endif %}</dd>{% endif %}
       <dt>Domain</dt><dd>{{ inv.domain or '—' }}</dd>
       <dt>BIOS / firmware</dt><dd>{{ inv.bios_version or '—' }}</dd>
       <dt>Last boot</dt><dd>{% if inv.last_boot_at %}<span data-utc="{{ inv.last_boot_at }}">{{ inv.last_boot_at }}</span>{% else %}—{% endif %}</dd>

@@ -525,6 +525,20 @@ async def assets_page(request: Request):
 
         rmm_agents = await rmm_routes.company_agent_details(company_id)
     rmm_agent_asset_ids = set(rmm_agents)
+    # Technicians who see RMM agents also see which Windows machines need activating.
+    windows_activation_by_asset: dict[int, dict[str, Any]] = {}
+    if show_rmm_agent:
+        from app.services import rmm_inventory as rmm_inventory_service
+
+        activation_inventory = rmm_inventory_by_asset
+        if not tray_sets_last_sync:
+            from app.repositories import rmm_inventory as rmm_inventory_repo
+
+            activation_inventory = await rmm_inventory_repo.list_for_company_assets(company_id)
+        for inventory_asset_id, inventory_row in activation_inventory.items():
+            badge = rmm_inventory_service.windows_activation_badge(inventory_row.get("windows_activation"))
+            if badge:
+                windows_activation_by_asset[inventory_asset_id] = badge
     # The latest RMM agent install attempt of each asset, shown under its indicator.
     rmm_install_attempts: dict[int, dict[str, Any]] = {}
     # Technicians who run scripts get the RMM actions (run a script, remote
@@ -638,6 +652,9 @@ async def assets_page(request: Request):
             record["rmm_agent_version"] = _clean_text(rmm_agent.get("version"))
             if not rmm_agent:
                 record["rmm_install"] = rmm_install_attempts.get(int(record["id"]))
+            activation = windows_activation_by_asset.get(int(record["id"]))
+            record["windows_activation"] = activation
+            record["windows_activation_sort"] = activation["rank"] if activation else ""
         asset_id = record.get("id")
         asset_cf = cf_values_by_asset.get(asset_id, {})
         for field_def in field_definitions:
@@ -665,6 +682,9 @@ async def assets_page(request: Request):
         status_index = next((i for i, column in enumerate(all_columns) if column["key"] == "status"), 0)
         all_columns.insert(status_index + 1, {"key": "rmm_agent", "label": "RMM agent", "sort": "number"})
         all_columns.insert(status_index + 2, {"key": "rmm_agent_version", "label": "RMM agent version", "sort": "string"})
+        all_columns.insert(
+            status_index + 3, {"key": "windows_activation", "label": "Windows activation", "sort": "number"}
+        )
     if show_health_score:
         performance_index = next(
             (i for i, column in enumerate(all_columns) if column["key"] == "performance_score"), len(all_columns) - 1

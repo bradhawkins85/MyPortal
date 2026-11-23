@@ -108,6 +108,8 @@
             {% if asset.criticality %}<li class="scf-chip scf-chip--logic">{{ asset.criticality | title }} criticality</li>{% endif %}
             <li class="scf-chip{% if asset.review_status != 'reviewed' %} scf-chip--muted{% endif %}">{{ (asset.review_status or 'not_reviewed') | replace('_', ' ') | title }}</li>
             {% if is_asset_staff %}<li class="scf-chip{% if asset.customer_visible %} scf-chip--visibility{% else %} scf-chip--muted{% endif %}">{{ 'Customer portal' if asset.customer_visible else 'Internal asset' }}</li>{% endif %}
+            {% set activation = rmm.inventory.windows_activation if rmm and rmm.inventory else none %}
+            {% if activation %}<li class="scf-chip scf-chip--{{ {'success': 'visibility', 'warning': 'muted'}.get(activation.variant, 'danger') }}" data-windows-activation="{{ activation.status }}" title="{{ activation.title }}"><a class="scf-chip__link" href="#hardware">{{ activation.label }}</a></li>{% endif %}
           {% endif %}
         </ul>
       </div>

@@ -60,6 +60,14 @@ type NetworkAdapter struct {
 	Addresses []string `json:"addresses,omitempty"`
 }
 
+// WindowsActivation is the Windows licence state (Windows only).
+type WindowsActivation struct {
+	// Status is licensed, grace, notification, non_genuine or unlicensed.
+	Status       string `json:"status"`
+	Channel      string `json:"channel,omitempty"`
+	GraceMinutes int    `json:"grace_minutes,omitempty"`
+}
+
 // Program is one installed application or package.
 type Program struct {
 	Name        string `json:"name"`
@@ -71,30 +79,31 @@ type Program struct {
 
 // Snapshot is everything sent to MyPortal.
 type Snapshot struct {
-	CollectedAt   time.Time        `json:"collected_at"`
-	Hostname      string           `json:"hostname,omitempty"`
-	Manufacturer  string           `json:"manufacturer,omitempty"`
-	Model         string           `json:"model,omitempty"`
-	SerialNumber  string           `json:"serial_number,omitempty"`
-	BIOSVersion   string           `json:"bios_version,omitempty"`
-	OSName        string           `json:"os_name,omitempty"`
-	OSVersion     string           `json:"os_version,omitempty"`
-	OSBuild       string           `json:"os_build,omitempty"`
-	Arch          string           `json:"arch,omitempty"`
-	Domain        string           `json:"domain,omitempty"`
-	CPUModel      string           `json:"cpu_model,omitempty"`
-	CPUCores      int              `json:"cpu_cores,omitempty"`
-	CPULogical    int              `json:"cpu_logical_processors,omitempty"`
-	RAMBytes      uint64           `json:"ram_bytes,omitempty"`
-	LastBoot      *time.Time       `json:"last_boot_at,omitempty"`
-	Disks         []Disk           `json:"disks"`
-	PhysicalDisks []PhysicalDisk   `json:"physical_disks"`
-	Memory        []MemoryModule   `json:"memory_modules"`
-	GPUs          []string         `json:"gpus"`
-	Network       []NetworkAdapter `json:"network_adapters"`
-	Software      []Program        `json:"software"`
-	Proxmox       *proxmox.Status  `json:"proxmox,omitempty"`
-	Errors        []string         `json:"errors"`
+	CollectedAt   time.Time          `json:"collected_at"`
+	Hostname      string             `json:"hostname,omitempty"`
+	Manufacturer  string             `json:"manufacturer,omitempty"`
+	Model         string             `json:"model,omitempty"`
+	SerialNumber  string             `json:"serial_number,omitempty"`
+	BIOSVersion   string             `json:"bios_version,omitempty"`
+	OSName        string             `json:"os_name,omitempty"`
+	OSVersion     string             `json:"os_version,omitempty"`
+	OSBuild       string             `json:"os_build,omitempty"`
+	Arch          string             `json:"arch,omitempty"`
+	Domain        string             `json:"domain,omitempty"`
+	CPUModel      string             `json:"cpu_model,omitempty"`
+	CPUCores      int                `json:"cpu_cores,omitempty"`
+	CPULogical    int                `json:"cpu_logical_processors,omitempty"`
+	RAMBytes      uint64             `json:"ram_bytes,omitempty"`
+	LastBoot      *time.Time         `json:"last_boot_at,omitempty"`
+	Disks         []Disk             `json:"disks"`
+	PhysicalDisks []PhysicalDisk     `json:"physical_disks"`
+	Memory        []MemoryModule     `json:"memory_modules"`
+	GPUs          []string           `json:"gpus"`
+	Network       []NetworkAdapter   `json:"network_adapters"`
+	Software      []Program          `json:"software"`
+	Activation    *WindowsActivation `json:"windows_activation,omitempty"`
+	Proxmox       *proxmox.Status    `json:"proxmox,omitempty"`
+	Errors        []string           `json:"errors"`
 }
 
 func (s *Snapshot) fail(part string, err error) {

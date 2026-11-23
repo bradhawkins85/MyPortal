@@ -17,6 +17,7 @@ the `menu.rmm_scripts` permission see the section; those who can run scripts can
 | Graphics | WMI | `system_profiler` | – |
 | Network adapters with an address | WMI | Go's network list | Go's network list |
 | Domain and last boot | WMI | last boot | NIS domain and last boot |
+| Windows activation (activated, grace period, not activated, not genuine) and licence channel | WMI (`SoftwareLicensingProduct`) | – | – |
 | Installed software | the registry's uninstall entries, for the machine and each signed-in user | applications outside `/System` | `dpkg`, `rpm` or `pacman` packages |
 
 On Windows, software that hides itself from **Apps & features** (system components and updates) is
@@ -24,6 +25,11 @@ left out; installed and missing Windows updates have their own **Windows updates
 [RMM Patch Management](RMM%20Patch%20Management.md#device-windows-updates)). A part that cannot be read (for example a broken WMI class) is skipped; the rest is still
 sent and the section lists what failed under **Some details could not be read**. At most 5000
 programs are kept per device.
+
+Windows activation is shown as a badge in the asset page's summary (next to the visibility chip),
+on the Hardware page with the licence channel and any grace days left, and in the **Windows
+activation** column of the Assets list, which technicians who can see RMM agents get; sort it to
+bring machines that still need activating to the top.
 
 On a Proxmox VE host the Hardware page also has a **Proxmox VE** section: the pve-manager version
 and node, cluster name, quorum and nodes online, subscription status, pending package updates,

@@ -11,7 +11,7 @@ from app.core.database import db
 SUMMARY_COLUMNS = (
     "hostname", "manufacturer", "model", "serial_number", "bios_version", "os_name", "os_version", "os_build",
     "arch", "domain", "cpu_model", "cpu_cores", "cpu_logical_processors", "ram_bytes", "disk_total_bytes",
-    "system_disk_free_bytes", "last_boot_at",
+    "system_disk_free_bytes", "last_boot_at", "windows_activation",
 )
 
 
