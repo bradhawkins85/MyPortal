@@ -259,6 +259,34 @@ async def deactivate_scripts(paths: Iterable[str]) -> None:
         )
 
 
+async def replace_private_files(files: Iterable[tuple[str, str, int, int | None]]) -> int:
+    """Store the Private-Files list from the latest sync as ``(path, sha, size, company_id)``.
+
+    The new rows are written before the previous sync's rows are removed, so
+    the Add file editor never sees an empty list mid-sync.
+    """
+
+    row = await db.fetch_one("SELECT MAX(id) AS max_id FROM rmm_private_files")
+    previous = int(row["max_id"]) if row and row.get("max_id") is not None else None
+    now = _utcnow()
+    rows = [(path, sha, int(size), company_id, now) for path, sha, size, company_id in files]
+    if rows:
+        await db.execute_many(
+            "INSERT INTO rmm_private_files (path, sha, size, company_id, synced_at) VALUES (%s, %s, %s, %s, %s)",
+            rows,
+        )
+    if previous is not None:
+        await db.execute("DELETE FROM rmm_private_files WHERE id <= %s", (previous,))
+    return len(rows)
+
+
+async def list_private_files() -> list[dict[str, Any]]:
+    """Return the Private-Files list stored by the latest sync."""
+
+    rows = await db.fetch_all("SELECT path, sha, size, company_id FROM rmm_private_files ORDER BY id")
+    return [dict(row) for row in rows or []]
+
+
 async def set_script_timeout(script_id: int, timeout_seconds: int) -> None:
     await db.execute(
         "UPDATE rmm_scripts SET default_timeout_seconds = %s, updated_at = %s WHERE id = %s",

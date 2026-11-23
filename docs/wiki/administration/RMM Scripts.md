@@ -145,6 +145,7 @@ you connect yourself keeps its own accounts.
 Sync loads every `.ps1`, `.sh`, `.bash` and `.zsh` file (up to 1 MB) in the folders below.
 Subfolders become groups in the library. Unchanged files are skipped, and a script deleted from
 Gitea disappears from the library while its past runs keep the exact version that ran.
+Sync also refreshes the list of `Private-Files` files offered by a script's **Add file** editor.
 
 ### Repository layout
 
@@ -200,7 +201,10 @@ company folder.
 
 Open a script in **Scripts**, then use its **Files** section to add a `Private-Files` file and
 an absolute endpoint file path, including the filename. The editor lists the files this script
-can use, and creates any missing `Private-Files` folders first. **Script editing → Write** permission
+can use from the `Private-Files` list loaded by the last **Sync from Gitea**, so it opens quickly
+even on large repositories. After adding or moving files in `Private-Files`, a super admin runs
+**Sync from Gitea** to refresh the list; sync also creates any missing `Private-Files` folders.
+Queueing a run still checks each file in Gitea. **Script editing → Write** permission
 is required to add, edit or remove these associations. They are stored in MyPortal and kept
 when the script is synced again.
 

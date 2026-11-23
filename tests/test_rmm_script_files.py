@@ -80,18 +80,13 @@ async def test_file_catalog_respects_common_and_company_script_scope(monkeypatch
 
 
 @pytest.mark.anyio
-async def test_file_choices_create_missing_files_folders_first(monkeypatch):
+async def test_sync_file_list_creates_missing_files_folders_first(monkeypatch):
     settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
-    created = []
-
-    async def load_settings():
-        return settings
+    created, stored = [], []
 
     async def list_files(_settings):
-        # Script folders in the scripts repository do not stand in for Private-Files folders.
-        if _settings.repo == "scripts":
-            return [gitea.GiteaFile("Common/README.md", "a" * 40, 1), gitea.GiteaFile("Companies/Contoso/.myportal-company", "b" * 40, 1)]
-        return []
+        assert _settings.repo == "Private-Files"
+        return [gitea.GiteaFile("Common/tool.exe", "a" * 40, 1)]
 
     async def companies(**kwargs):
         return [{"id": 1, "name": "Contoso"}]
@@ -100,20 +95,45 @@ async def test_file_choices_create_missing_files_folders_first(monkeypatch):
         assert _settings.repo == "Private-Files"
         created.append(sorted(files))
 
-    monkeypatch.setattr(gitea, "load_settings", load_settings)
+    async def replace(files):
+        stored.append(list(files))
+
     monkeypatch.setattr(gitea, "list_files", list_files)
     monkeypatch.setattr(gitea, "create_files", create_files)
     monkeypatch.setattr(rmm_script_files.companies_repo, "list_companies", companies)
-    choices, warning = await rmm_script_files.file_choices({"company_id": 1}, 1)
-    assert choices == [] and warning is None
-    assert created == [["Common/README.md", "Companies/Contoso/.myportal-company", "Companies/README.md"]]
+    monkeypatch.setattr(rmm_script_files.rmm_repo, "replace_private_files", replace)
+    assert await rmm_script_files.sync_file_list(settings) == (1, 2, None)
+    assert created == [["Companies/Contoso/.myportal-company", "Companies/README.md"]]
+    assert stored == [[("Common/tool.exe", "a" * 40, 1, None)]]
 
     async def refuse(_settings, _files, _message):
         raise gitea.GiteaError("Gitea refused to create folders. GITEA_API_TOKEN needs write access to the repository.")
 
     monkeypatch.setattr(gitea, "create_files", refuse)
+    count, folders, warning = await rmm_script_files.sync_file_list(settings)
+    # The list is still stored when the folders cannot be created.
+    assert (count, folders) == (1, 0) and "GITEA_API_TOKEN needs write access" in warning
+    assert len(stored) == 2
+
+
+@pytest.mark.anyio
+async def test_file_choices_explain_an_empty_stored_list(monkeypatch):
+    settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
+
+    async def load_settings():
+        return settings
+
+    async def stored():
+        return []
+
+    async def no_gitea(_settings):
+        raise AssertionError("Add file must not list Private-Files from Gitea")
+
+    monkeypatch.setattr(gitea, "load_settings", load_settings)
+    monkeypatch.setattr(gitea, "list_files", no_gitea)
+    monkeypatch.setattr(rmm_script_files.rmm_repo, "list_private_files", stored)
     choices, warning = await rmm_script_files.file_choices({"company_id": 1}, 1)
-    assert choices == [] and "GITEA_API_TOKEN needs write access" in warning
+    assert choices == [] and "Sync from Gitea" in warning
 
 
 @pytest.mark.anyio
@@ -353,16 +373,17 @@ async def test_legacy_files_folder_moves_to_private_files(monkeypatch, prefix):
 
 @pytest.mark.anyio
 async def test_adding_a_file_only_checks_the_changed_source(monkeypatch):
-    async def available(_settings, _script, company_ids=None):
-        return {
-            "Common/tool.exe": gitea.GiteaFile("Common/tool.exe", "a" * 40, 1),
-            "Common/large.msi": gitea.GiteaFile("Common/large.msi", "b" * 40, rmm_script_files.MAX_FILE_BYTES + 1),
-        }
+    async def stored():
+        return [
+            {"path": "Common/tool.exe", "sha": "a" * 40, "size": 1, "company_id": None},
+            {"path": "Common/large.msi", "sha": "b" * 40, "size": rmm_script_files.MAX_FILE_BYTES + 1, "company_id": None},
+        ]
 
     async def settings():
-        return None
+        return gitea.private_files_settings(
+            gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True))
 
-    monkeypatch.setattr(rmm_script_files, "available_files", available)
+    monkeypatch.setattr(rmm_script_files.rmm_repo, "list_private_files", stored)
     monkeypatch.setattr(rmm_script_files, "_settings", settings)
     files = [
         {"source_path": "Common/moved.exe", "destination": "C:\\Tools\\moved.exe"},
