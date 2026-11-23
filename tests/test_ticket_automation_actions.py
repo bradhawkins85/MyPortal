@@ -16,7 +16,7 @@ def mock_webhook_monitor(monkeypatch):
         "status": "pending",
     }
     mock_create = AsyncMock(return_value=mock_event)
-    monkeypatch.setattr("app.services.modules.webhook_monitor.create_manual_event", mock_create)
+    monkeypatch.setattr("app.services.webhook_monitor.create_manual_event", mock_create)
     return mock_create
 
 
@@ -231,6 +231,64 @@ async def test_invoke_update_ticket_supports_shipment_fields(
         public_comments_enabled=False,
     )
     assert "shipment_poll_interval_seconds" in result["updated_fields"]
+
+
+@pytest.mark.asyncio
+async def test_invoke_update_ticket_ignores_disabled_shipment_defaults_without_url(
+    monkeypatch, mock_webhook_monitor, mock_record_success
+):
+    """Default false shipment toggles without a URL must not fail the update."""
+    from app.repositories import tickets as tickets_repo
+    from app.services import ticket_shipment_tracking, tickets as tickets_service
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", AsyncMock(return_value={"id": 44, "status": "new"}))
+    update_mock = AsyncMock()
+    monkeypatch.setattr(tickets_repo, "update_ticket", update_mock)
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", AsyncMock())
+    monkeypatch.setattr(ticket_shipment_tracking, "get_watch_for_ticket", AsyncMock(return_value=None))
+    upsert_mock = AsyncMock()
+    monkeypatch.setattr(ticket_shipment_tracking, "upsert_watch", upsert_mock)
+
+    result = await modules._invoke_update_ticket(
+        {},
+        {
+            "ticket_id": "44",
+            "status": "open",
+            "shipment_monitoring_enabled": False,
+            "shipment_public_comments_enabled": False,
+        },
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    update_mock.assert_awaited_once_with(44, status="open")
+    upsert_mock.assert_not_awaited()
+    assert result["updated_fields"] == ["status"]
+
+
+@pytest.mark.asyncio
+async def test_invoke_update_ticket_enabling_shipment_without_url_fails(
+    monkeypatch, mock_webhook_monitor, mock_record_success, mock_record_failure
+):
+    """Switching monitoring on with no URL or existing watch is still an error."""
+    from app.repositories import tickets as tickets_repo
+    from app.services import ticket_shipment_tracking, tickets as tickets_service
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", AsyncMock(return_value={"id": 45}))
+    monkeypatch.setattr(tickets_repo, "update_ticket", AsyncMock())
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", AsyncMock())
+    monkeypatch.setattr(ticket_shipment_tracking, "get_watch_for_ticket", AsyncMock(return_value=None))
+    upsert_mock = AsyncMock()
+    monkeypatch.setattr(ticket_shipment_tracking, "upsert_watch", upsert_mock)
+
+    result = await modules._invoke_update_ticket(
+        {},
+        {"ticket_id": 45, "shipment_monitoring_enabled": True},
+        event_future=None,
+    )
+
+    assert result["status"] != "succeeded"
+    upsert_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio

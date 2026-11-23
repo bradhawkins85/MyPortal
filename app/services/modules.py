@@ -6336,10 +6336,18 @@ async def _invoke_update_ticket(
             if tracking_url is None:
                 tracking_url = (current_watch or {}).get("tracking_url")
             tracking_url = str(tracking_url or "").strip()
-            if not tracking_url:
+            if not tracking_url and not _coerce_boolean(
+                payload.get("shipment_monitoring_enabled")
+            ):
+                # Nothing to track and monitoring is not being switched on, so the
+                # default shipment fields an action form always sends are a no-op.
+                shipment_requested = False
+            elif not tracking_url:
                 raise ValueError(
                     "shipment_tracking_url is required when the ticket has no shipment watch"
                 )
+
+        if shipment_requested:
 
             raw_interval = payload.get(
                 "shipment_poll_interval_seconds",
