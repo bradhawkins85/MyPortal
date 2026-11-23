@@ -19,7 +19,7 @@ def test_sync_history_is_rendered_as_a_modal_after_the_account_list():
 
 
 def test_sync_history_completed_time_is_formatted_in_browser_local_time():
-    assert 'datetime="{{ run.completed_at.isoformat() }}"' in TEMPLATE
+    assert 'datetime="{{ utc_iso(run.completed_at) }}"' in TEMPLATE
     assert "new Date(element.dateTime)" in TEMPLATE
     assert "completedAt.getFullYear()" in TEMPLATE
     assert "completedAt.getMonth() + 1" in TEMPLATE
