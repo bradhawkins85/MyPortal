@@ -2004,9 +2004,13 @@ async def update_device_type_from_devices(request: Request, device_type_id: int)
 
 
 def _parse_mac_vendors(value: str) -> list[str]:
-    """Accept one vendor per line or comma-separated, preserving display casing."""
+    """Accept one vendor per line, preserving display casing.
+
+    Commas are kept because registered MAC vendor names often contain them
+    (e.g. "Brother Industries, LTD.").
+    """
     vendors: dict[str, str] = {}
-    for item in value.replace(",", "\n").splitlines():
+    for item in value.splitlines():
         vendor = " ".join(item.split())
         if vendor:
             vendors.setdefault(vendor.casefold(), vendor[:255])
