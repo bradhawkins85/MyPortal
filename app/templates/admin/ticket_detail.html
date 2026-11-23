@@ -8,6 +8,7 @@
   <span hidden data-ai-agent-name="{{ ai_agent_name() }}"></span>
   <div class="header-title-menu ticket-detail-header">
     <span class="header-title-menu__label ticket-detail-header__subject" title="{{ ticket.subject }}">{{ ticket.subject }}</span>
+    {%- if ticket_sla.state != 'not_applicable' %}
     <span class="ticket-detail-header__sla">
       <span class="status status--{{ 'danger' if ticket_sla.state == 'breached' else ('warning' if ticket_sla.state == 'at_risk' else ('success' if ticket_sla.state in ['met','on_track'] else 'neutral')) }}" title="SLA">{{ ticket_sla.name ~ ' · ' if ticket_sla.name else '' }}{{ ticket_sla.label }}</span>
       {%- if ticket_sla.paused %}
@@ -17,6 +18,7 @@
         <span class="ticket-detail-header__sla-meta">Resolution due <span data-utc="{{ ticket_sla.resolution_due_at.isoformat() }}">{{ ticket_sla.resolution_due_at.isoformat() }}</span></span>
       {%- endif %}
     </span>
+    {%- endif %}
   </div>
 {% endblock %}
 

@@ -14132,9 +14132,10 @@ a.service-card__ai-icon:hover {
 /* Admin ticket detail: subject and SLA sit in the page header bar, with
  * navigation links directly left of the Actions menu. */
 .ticket-detail-header {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.15rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  min-width: 0;
 }
 
 .ticket-detail-header__subject {
