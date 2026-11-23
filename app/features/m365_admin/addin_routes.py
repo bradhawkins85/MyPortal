@@ -8,6 +8,7 @@ call with the signer's Microsoft access token instead (see
 
 from __future__ import annotations
 
+import json
 import re
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -60,6 +61,28 @@ async def addin_launch_script(addin_id: str) -> Response:
     return Response(
         addin_service.build_launch_script(client_id=client_id, base_url=base_url),
         media_type="text/javascript",
+        headers=_ASSET_HEADERS,
+    )
+
+
+@router.get("/.well-known/microsoft-officeaddins-allowed.json", include_in_schema=False)
+async def addin_allowed_scripts() -> Response:
+    """Launch scripts allowed to sign in and call MyPortal from Outlook events.
+
+    Classic Outlook on Windows runs launch events in a JavaScript-only runtime
+    that refuses single sign-on and cross-origin requests unless the script is
+    listed here, at the origin that serves it.
+    """
+    base_url = addin_service.portal_base_url()
+    addin_ids = await companies_repo.list_outlook_addin_ids() if base_url else []
+    allowed = [
+        addin_service.launch_script_url(base_url, addin_id)
+        for addin_id in addin_ids
+        if _ADDIN_ID.match(addin_id)
+    ]
+    return Response(
+        json.dumps({"allowed": allowed}),
+        media_type="application/json",
         headers=_ASSET_HEADERS,
     )
 

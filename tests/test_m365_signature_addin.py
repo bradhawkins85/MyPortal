@@ -537,3 +537,96 @@ def test_migration_adds_delivery_columns():
     assert "-- phase: expand" in sql
     assert "ADD COLUMN IF NOT EXISTS signature_delivery_mode VARCHAR(16) NOT NULL DEFAULT 'exchange'" in sql
     assert "ADD COLUMN IF NOT EXISTS outlook_addin_id CHAR(36) NULL" in sql
+
+
+def test_well_known_allows_each_addin_launch_script(api, monkeypatch):
+    first = "0f8fad5b-d9cb-469f-a165-70867728950e"
+    second = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    monkeypatch.setattr(addin_routes.addin_service, "portal_base_url", lambda: BASE)
+    monkeypatch.setattr(
+        addin_routes.companies_repo, "list_outlook_addin_ids", _async([first, second, "bad id"])
+    )
+
+    response = api.get("/.well-known/microsoft-officeaddins-allowed.json")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {
+        "allowed": [
+            f"{BASE}/outlook-addin/{first}/launch.js",
+            f"{BASE}/outlook-addin/{second}/launch.js",
+        ]
+    }
+
+
+def test_well_known_is_empty_without_a_portal_url(api, monkeypatch):
+    monkeypatch.setattr(addin_routes.addin_service, "portal_base_url", lambda: None)
+    monkeypatch.setattr(
+        addin_routes.companies_repo,
+        "list_outlook_addin_ids",
+        _async(["0f8fad5b-d9cb-469f-a165-70867728950e"]),
+    )
+
+    assert api.get("/.well-known/microsoft-officeaddins-allowed.json").json() == {"allowed": []}
+
+
+def _cors_app():
+    from fastapi.middleware.cors import CORSMiddleware
+
+    from app.security.addin_cors import OutlookAddinCORSMiddleware
+
+    app = FastAPI()
+    app.include_router(addin_routes.router)
+
+    @app.get("/api/other")
+    async def other():
+        return {"ok": True}
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[],
+        allow_credentials=True,
+        allow_methods=["GET"],
+        allow_headers=["Authorization"],
+    )
+    app.add_middleware(OutlookAddinCORSMiddleware)
+    return TestClient(app)
+
+
+PREFLIGHT = {
+    "Origin": "https://outlook.office.com",
+    "Access-Control-Request-Method": "GET",
+    "Access-Control-Request-Headers": "authorization",
+}
+
+
+def test_signature_api_answers_cross_origin_preflight():
+    client = _cors_app()
+
+    response = client.options("/api/outlook-addin/signature", headers=PREFLIGHT)
+
+    assert response.status_code == 204
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert "authorization" in response.headers["access-control-allow-headers"].lower()
+    assert "access-control-allow-credentials" not in response.headers
+
+
+def test_signature_api_responses_allow_any_origin_without_credentials():
+    client = _cors_app()
+
+    response = client.get(
+        "/api/outlook-addin/signature", headers={"Origin": "https://outlook.office.com"}
+    )
+
+    assert response.status_code == 401
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert "access-control-allow-credentials" not in response.headers
+
+
+def test_other_api_paths_keep_the_portal_cors_policy():
+    client = _cors_app()
+
+    response = client.options("/api/other", headers=PREFLIGHT)
+
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
