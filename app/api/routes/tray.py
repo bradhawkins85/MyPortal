@@ -70,6 +70,7 @@ from app.schemas.tray import (
     TrayOutlookSignaturesRequest,
     TrayOutlookSignaturesResponse,
     NetworkScanRequest,
+    PortCheckResultRequest,
     TrayInstallTokenCreate,
     TrayInstallTokenResponse,
     TrayMenuConfigCreate,
@@ -114,6 +115,7 @@ from app.services.sanitization import sanitize_rich_text
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.repositories import tray_ticket_questions as tq_repo
 from app.repositories import network_devices as network_devices_repo
+from app.services import port_checks as port_checks_service
 
 router = APIRouter(prefix="/api/tray", tags=["Tray App"])
 
@@ -631,6 +633,36 @@ async def upload_network_scan(
                     error=str(exc),
                 )
     return {"accepted": len(hosts)}
+
+
+@router.post(
+    "/network-scan/port-checks/{check_id}",
+    summary="Report a discovered device port check",
+)
+async def report_port_check(
+    check_id: int,
+    payload: PortCheckResultRequest,
+    device: dict = Depends(get_current_tray_device),
+) -> dict[str, str]:
+    """Store which requested ports answered on the scanner's target device."""
+    check = await network_devices_repo.get_port_check_for_scanner(
+        check_id, int(device["id"])
+    )
+    if not check or int(check.get("command_id") or 0) != payload.command_id:
+        raise HTTPException(status_code=404, detail="Port check not found")
+    requested = set(port_checks_service.parse_port_spec(str(check.get("ports") or "")))
+    open_ports = sorted(set(payload.open_ports))
+    if any(port not in requested for port in open_ports):
+        raise HTTPException(status_code=422, detail="Reported a port that was not requested")
+    error = (payload.error or "").strip() or None
+    await network_devices_repo.complete_port_check(
+        check_id,
+        open_ports=",".join(str(port) for port in open_ports),
+        checked_count=payload.checked_count,
+        error=error,
+    )
+    await tray_repo.mark_command_completed(payload.command_id, error=error)
+    return {"status": "ok"}
 
 
 @router.get("/wan-ip", summary="Determine this scanner's WAN IP address")

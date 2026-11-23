@@ -238,6 +238,15 @@ class NetworkScanRequest(BaseModel):
     hosts: list[NetworkScanHost] = Field(max_length=4096)
 
 
+class PortCheckResultRequest(BaseModel):
+    """A scanner's answer to a ``check_ports`` command."""
+
+    command_id: int = Field(ge=1)
+    open_ports: list[int] = Field(default_factory=list, max_length=1024)
+    checked_count: int = Field(default=0, ge=0, le=1024)
+    error: Optional[str] = Field(default=None, max_length=500)
+
+
 class TrayMenuConfigCreate(BaseModel):
     name: str = Field(min_length=1, max_length=150)
     scope: str = Field(default="global")
