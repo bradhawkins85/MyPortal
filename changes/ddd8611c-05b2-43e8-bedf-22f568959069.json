@@ -1,0 +1,7 @@
+{
+  "guid": "ddd8611c-05b2-43e8-bedf-22f568959069",
+  "occurred_at": "2026-11-23T02:30Z",
+  "change_type": "Fix",
+  "summary": "Analysing a blue screen minidump now completes and shows its report, instead of staying on Analysing\u2026 until it failed with \"The analysis did not finish\".",
+  "content_hash": "fc17acbec548858662357a8f1c2ddd73818516e0ff75a1cb071023cb2e1a2e91"
+}

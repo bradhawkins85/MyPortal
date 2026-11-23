@@ -506,7 +506,9 @@ async def start_analysis(
         raise MinidumpError("No LLM model is configured for the AI assistant.")
     if ticket_id:
         await _valid_ticket(dump, int(ticket_id))
-    now = _utcnow()
+    # Whole seconds, as the DATETIME column stores it: run_analysis matches this
+    # exact value to save its report, and MySQL would round any microseconds.
+    now = _utcnow().replace(microsecond=0)
     user_id = (requested_by or {}).get("id")
     claimed = await repo.claim_analysis(
         dump_id, user_id=user_id if isinstance(user_id, int) else None, ticket_id=int(ticket_id) if ticket_id else None,

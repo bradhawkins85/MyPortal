@@ -527,6 +527,27 @@ async def test_run_analysis_saves_the_report(analysis):
 
 
 @pytest.mark.anyio
+async def test_run_analysis_finishes_when_the_database_drops_microseconds(analysis, store, monkeypatch):
+    """MySQL DATETIME keeps whole seconds, so the claim time must too or the run never finishes."""
+
+    dump = await _ingested()
+    monkeypatch.setattr(service, "_utcnow", lambda: NOW.replace(microsecond=654321))
+    await service.start_analysis(dump=dump, requested_by={"id": 7})
+    # Store the claim time the way a MySQL DATETIME column does: rounded to whole seconds.
+    conn = store["conn"]
+    async with conn.execute("SELECT analysis_started_at FROM asset_minidumps WHERE id = ?", (dump["id"],)) as cursor:
+        stored = str((await cursor.fetchone())[0])
+    rounded = datetime.fromisoformat(stored)
+    rounded = rounded.replace(microsecond=0) + timedelta(seconds=1 if rounded.microsecond >= 500_000 else 0)
+    await conn.execute("UPDATE asset_minidumps SET analysis_started_at = ? WHERE id = ?",
+                       (rounded.strftime("%Y-%m-%d %H:%M:%S"), dump["id"]))
+    await conn.commit()
+    await _run(analysis)
+    row = await repo.get_dump(dump["id"])
+    assert row["analysis_status"] == "completed" and row["analysis"]["likely_cause"] == REPORT["likely_cause"]
+
+
+@pytest.mark.anyio
 async def test_chat_uses_the_minidump_feature(monkeypatch):
     seen = {}
 
