@@ -244,3 +244,85 @@ def test_call_recording_transcription_uses_whispercpp_env(monkeypatch, tmp_path)
     assert set(post.kwargs["files"]) == {"file"}
     assert post.kwargs["data"] == {"response_format": "verbose_json", "language": "en"}
     assert post.kwargs["params"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Speech transcription appears on Administration > LLM Usage
+# ---------------------------------------------------------------------------
+
+
+def _capture_usage(monkeypatch):
+    events: list[dict] = []
+
+    async def fake_record_event(**kwargs):
+        events.append(kwargs)
+
+    monkeypatch.setattr(transcription.llm_usage.usage_repo, "record_event", fake_record_event)
+    return events
+
+
+def test_transcription_client_records_speech_transcription_usage(monkeypatch, tmp_path):
+    events = _capture_usage(monkeypatch)
+    audio = tmp_path / "call.wav"
+    audio.write_bytes(b"RIFF fake")
+    factory = _AsyncClientFactory(_FakeResponse({"text": "Hello from the voice monitor call."}))
+    monkeypatch.setattr(transcription.httpx, "AsyncClient", lambda *a, **kw: factory)
+
+    client = TranscriptionClient(TranscriptionSettings(base_url="http://wx.local"))
+    asyncio.run(client.transcribe(audio))
+
+    assert len(events) == 1
+    event = events[0]
+    assert event["feature"] == "speech_transcription"
+    assert event["provider"] == ENGINE_WHISPERX
+    assert event["model"] == "WhisperX"
+    assert event["status"] == "succeeded"
+    assert event["input_tokens"] == 0
+    assert event["output_tokens"] > 0
+    assert event["tokens_estimated"] is True
+
+
+def test_transcription_client_records_failed_transcription(monkeypatch, tmp_path):
+    events = _capture_usage(monkeypatch)
+    audio = tmp_path / "call.wav"
+    audio.write_bytes(b"RIFF fake")
+    factory = _AsyncClientFactory(_FakeResponse({"error": "down"}, status_code=500))
+    monkeypatch.setattr(transcription.httpx, "AsyncClient", lambda *a, **kw: factory)
+
+    client = TranscriptionClient(TranscriptionSettings(base_url="http://cpp.local", engine=ENGINE_WHISPERCPP))
+    with pytest.raises(transcription.TranscriptionUnavailable):
+        asyncio.run(client.transcribe(audio))
+
+    assert [(e["feature"], e["provider"], e["status"], e["output_tokens"]) for e in events] == [
+        ("speech_transcription", ENGINE_WHISPERCPP, "failed", 0)
+    ]
+
+
+def test_unconfigured_transcription_records_no_usage(monkeypatch, tmp_path):
+    events = _capture_usage(monkeypatch)
+    with pytest.raises(transcription.TranscriptionUnavailable):
+        asyncio.run(TranscriptionClient(TranscriptionSettings(base_url="")).transcribe(tmp_path / "x.wav"))
+    assert events == []
+
+
+def test_ticket_transcription_records_speech_transcription_usage(monkeypatch, tmp_path):
+    events = _capture_usage(monkeypatch)
+    test_invoke_ticket_transcription_with_whispercpp(monkeypatch, tmp_path)
+    assert [(e["feature"], e["provider"], e["status"], e["webhook_event_id"]) for e in events] == [
+        ("speech_transcription", ENGINE_WHISPERCPP, "succeeded", 3)
+    ]
+    assert events[0]["output_tokens"] > 0
+
+
+def test_call_recording_transcription_records_speech_transcription_usage(monkeypatch, tmp_path):
+    events = _capture_usage(monkeypatch)
+    test_call_recording_transcription_uses_whispercpp_env(monkeypatch, tmp_path)
+    assert [(e["feature"], e["provider"], e["status"], e["webhook_event_id"]) for e in events] == [
+        ("speech_transcription", ENGINE_WHISPERCPP, "succeeded", 1)
+    ]
+
+
+def test_speech_transcription_is_listed_on_llm_usage_page():
+    from app.services import llm_usage
+
+    assert llm_usage.feature_label("speech_transcription") == "Speech transcription"

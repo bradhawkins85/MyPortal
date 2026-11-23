@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import re
+import time
 import wave
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +26,12 @@ from app.services.ai_prompt_security import (
     build_prompt,
     parse_json_object,
 )
-from app.services.transcription import TranscriptionSettings, build_asr_request, engine_label
+from app.services.transcription import (
+    TranscriptionSettings,
+    build_asr_request,
+    engine_label,
+    record_transcription_usage,
+)
 
 # Kept as a compatibility seam for deployments/tests which inject module
 # persistence independently from the higher-level module service.
@@ -1184,6 +1190,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
 
     # Prepare webhook event
     file_path = recording["file_path"]
+    usage_started: float | None = None
     asr_request = build_asr_request(
         engine, base_url, api_key=api_key, language=settings.get("language") or ""
     )
@@ -1255,6 +1262,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                 )
 
         await require_module_enabled("whisperx")
+        usage_started = time.monotonic()
         async with httpx.AsyncClient(timeout=300.0) as client:
             try:
                 # Options are placed where each engine reads them (WhisperX:
@@ -1454,6 +1462,11 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                 except Exception as webhook_exc:
                     logger.warning(f"Failed to record webhook success: {webhook_exc}")
 
+            await record_transcription_usage(
+                engine, status="succeeded", started=usage_started,
+                transcript=transcription, webhook_event_id=webhook_event_id,
+            )
+
             # Update recording with transcription
             updated = await call_recordings_repo.update_call_recording(
                 recording_id,
@@ -1467,8 +1480,16 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
     except ValueError:
         # ValueError is raised for known errors (file not found, invalid JSON)
         # These have already been logged and webhook recorded, so just re-raise
+        if usage_started is not None:
+            await record_transcription_usage(
+                engine, status="failed", started=usage_started, webhook_event_id=webhook_event_id
+            )
         raise
     except httpx.HTTPError as e:
+        if usage_started is not None:
+            await record_transcription_usage(
+                engine, status="failed", started=usage_started, webhook_event_id=webhook_event_id
+            )
         error_message = f"HTTP error during transcription: {str(e)}"
         logger.error(f"Failed to transcribe recording {recording_id}: {error_message}")
         
@@ -1511,6 +1532,10 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
         raise ValueError(f"Failed to transcribe recording: {e}")
         
     except Exception as e:
+        if usage_started is not None:
+            await record_transcription_usage(
+                engine, status="error", started=usage_started, webhook_event_id=webhook_event_id
+            )
         error_message = f"Unexpected error: {str(e)}"
         logger.error(f"Unexpected error transcribing recording {recording_id}: {error_message}")
         

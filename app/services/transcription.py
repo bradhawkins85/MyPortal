@@ -17,11 +17,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
+
+from app.services import llm_usage
 
 ENGINE_WHISPERX = "whisperx"
 ENGINE_WHISPERCPP = "whispercpp"
@@ -147,6 +150,32 @@ class TranscriptionSettings:
 
 
 
+async def record_transcription_usage(
+    engine: str,
+    *,
+    status: str,
+    started: float,
+    transcript: str | None = None,
+    webhook_event_id: int | None = None,
+) -> None:
+    """Record one speech transcription on the LLM Usage page. Never raises.
+
+    ASR services do not report tokens, so output tokens are estimated from
+    the transcript text; ``started`` is a ``time.monotonic()`` reading.
+    """
+
+    await llm_usage.record_usage(
+        feature=llm_usage.SPEECH_TRANSCRIPTION_FEATURE,
+        provider=normalise_engine(engine),
+        model=engine_label(normalise_engine(engine)),
+        status=status,
+        usage=None,
+        response_text=transcript,
+        duration_ms=max(0, int((time.monotonic() - started) * 1000)),
+        webhook_event_id=webhook_event_id,
+    )
+
+
 class TranscriptionClient:
     """Small reusable ASR client which never logs audio or transcripts."""
 
@@ -169,6 +198,20 @@ class TranscriptionClient:
             self.settings.engine, self.settings.base_url,
             api_key=self.settings.api_key, language=self.settings.language,
         )
+        started = time.monotonic()
+        try:
+            result = await self._post(request, path, filename, label)
+        except TranscriptionUnavailable:
+            await record_transcription_usage(self.settings.engine, status="failed", started=started)
+            raise
+        await record_transcription_usage(
+            self.settings.engine, status="succeeded", started=started, transcript=result.text
+        )
+        return result
+
+    async def _post(
+        self, request: AsrRequest, path: Path, filename: str | None, label: str
+    ) -> TranscriptionResult:
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 with path.open("rb") as audio:

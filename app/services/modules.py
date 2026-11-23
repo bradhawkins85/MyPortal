@@ -45,6 +45,7 @@ from app.services.transcription import (
     build_asr_request,
     engine_label,
     normalise_engine,
+    record_transcription_usage,
 )
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt, validate_object
 from app.services.realtime import RefreshNotifier, refresh_notifier
@@ -8476,6 +8477,8 @@ async def _invoke_whisperx(
         event_future.set_result(event_id)
 
     attempt_number = 1
+    usage_started: float | None = None
+    usage_recorded = False
     try:
         # -- verify ticket exists -----------------------------------------
         existing = await _tickets_repo().get_ticket(ticket_id_int)
@@ -8532,6 +8535,7 @@ async def _invoke_whisperx(
 
         stereo_split = settings.get("stereo_split", False)
 
+        usage_started = time.monotonic()
         async with httpx.AsyncClient(timeout=300.0) as client:
             for attachment, file_path in ready_attachment_paths:
                 original_name = (
@@ -8611,6 +8615,14 @@ async def _invoke_whisperx(
             raise ValueError(
                 f"{label} returned empty transcriptions for all audio attachments"
             )
+        usage_recorded = True
+        await record_transcription_usage(
+            engine,
+            status="succeeded",
+            started=usage_started,
+            transcript="\n".join(t["transcription"] for t in transcriptions),
+            webhook_event_id=event_id,
+        )
 
         # -- optionally post an internal note -----------------------------
         reply_id = None
@@ -8636,6 +8648,10 @@ async def _invoke_whisperx(
             )
 
     except Exception as exc:
+        if usage_started is not None and not usage_recorded:
+            await record_transcription_usage(
+                engine, status="error", started=usage_started, webhook_event_id=event_id
+            )
         logger.error(
             "{} transcription failed",
             label,
