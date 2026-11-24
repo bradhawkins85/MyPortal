@@ -1,0 +1,7 @@
+{
+  "guid": "17185352-c7f0-4153-9752-1205bee97e3d",
+  "occurred_at": "2026-11-23T07:59Z",
+  "change_type": "Fix",
+  "summary": "Dates and times across the portal now show in your own browser's time zone instead of UTC or the server's time zone, including ticket, automation, device, BCP, staff and Microsoft 365 pages.",
+  "content_hash": "780edd00e36d59ba018a58f79fb8538c99c9795c3608448b136f62050acc9130"
+}
