@@ -181,6 +181,7 @@ from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import clear_flash, flash_redirect, local_redirect, pop_flash, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
+from app.security.trusted_networks import TrustedNetworkMiddleware, TrustedNetworkPolicy, is_trusted_network
 from app.security.honeypot import HoneypotMiddleware
 from app.security.maintenance import MaintenanceMiddleware
 from app.security.oauth_state import (
@@ -765,6 +766,43 @@ elif settings.ip_whitelist_enabled:
         "IP whitelist enabled but no IP addresses configured. "
         "Set IP_WHITELIST in .env to enable IP-based access control."
     )
+
+# Staff and configuration pages answer only to TRUSTED_IPS (all addresses when unset).
+trusted_network_policy = TrustedNetworkPolicy(
+    trusted_ips=settings.trusted_ips,
+    extra_paths=settings.trusted_ip_extra_paths,
+    exempt_paths=settings.trusted_ip_exempt_paths,
+)
+if trusted_network_policy.invalid_entries:
+    logger.error(
+        "TRUSTED_IPS has invalid entries; they are ignored",
+        invalid_entries=trusted_network_policy.invalid_entries,
+    )
+if trusted_network_policy.configured:
+    logger.info(
+        "Trusted network restriction enabled",
+        network_count=len(trusted_network_policy.networks),
+        restricted_path_count=len(trusted_network_policy.restricted_paths),
+    )
+
+
+async def _render_untrusted_network_page(request: Request) -> Response:
+    return await _render_error_page(
+        request,
+        status_code=status.HTTP_403_FORBIDDEN,
+        title="Not available from this network",
+        message=(
+            "This page is only available from your organisation's trusted network. "
+            "Connect from the office or VPN and try again."
+        ),
+    )
+
+
+app.add_middleware(
+    TrustedNetworkMiddleware,
+    policy=trusted_network_policy,
+    html_renderer=_render_untrusted_network_page,
+)
 
 # Add security headers middleware
 app.add_middleware(
@@ -2818,6 +2856,7 @@ async def _build_base_context(
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
         "matrix_chat_enabled": settings.matrix_enabled,
         "is_impersonating": is_impersonating,
+        "trusted_network": is_trusted_network(request),
         "impersonator_user": impersonator_user,
         "impersonation_started_at": impersonation_started_at,
         "has_issue_tracker_access": has_issue_tracker_access,
@@ -2934,6 +2973,7 @@ async def _build_public_context(
         "module_enabled": {},
         "enabled_module_slugs": frozenset(),
         "llm_search_available": False,
+        "trusted_network": is_trusted_network(request),
     }
     if extra:
         context.update(extra)

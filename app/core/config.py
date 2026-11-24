@@ -1217,6 +1217,22 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="IP_WHITELIST_ADMIN_ONLY",
     )
+    # Trusted networks for staff and configuration pages. When set, only
+    # these IPs/CIDR ranges can open the paths listed in
+    # app.security.trusted_networks.DEFAULT_RESTRICTED_PATHS (plus
+    # TRUSTED_IP_EXTRA_PATHS, minus TRUSTED_IP_EXEMPT_PATHS). Empty = allow all.
+    trusted_ips: str = Field(
+        default="",
+        validation_alias="TRUSTED_IPS",
+    )
+    trusted_ip_extra_paths: str = Field(
+        default="",
+        validation_alias="TRUSTED_IP_EXTRA_PATHS",
+    )
+    trusted_ip_exempt_paths: str = Field(
+        default="",
+        validation_alias="TRUSTED_IP_EXEMPT_PATHS",
+    )
     honeypot_enabled: bool = Field(
         default=True,
         validation_alias="HONEYPOT_ENABLED",
