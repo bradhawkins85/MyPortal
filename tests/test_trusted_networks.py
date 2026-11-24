@@ -18,6 +18,7 @@ from app.security.trusted_networks import (
 PATHS = [
     "/admin/tickets",
     "/admin/tickets/12345",
+    "/admin/system-updates/1",
     "/admin/profile",
     "/xero/connect",
     "/m365",
@@ -68,7 +69,7 @@ def test_untrusted_address_refused_on_restricted_paths(path):
     client = _client(TrustedNetworkPolicy(trusted_ips="203.0.113.0/24"), "198.51.100.9")
     response = client.get(path)
     assert response.status_code == 403
-    assert response.json() == {"detail": trusted_networks.BLOCKED_DETAIL}
+    assert response.json()["detail"] == trusted_networks.BLOCKED_DETAIL
     assert client.post(path).status_code == 403
 
 
@@ -163,3 +164,45 @@ def test_client_ip_uses_trusted_proxy_header(monkeypatch):
     # A spoofed header from an untrusted peer is ignored.
     spoofed = _client(TrustedNetworkPolicy(trusted_ips="203.0.113.0/24"), "198.51.100.9")
     assert spoofed.get("/admin/tickets", headers={"x-forwarded-for": "203.0.113.8"}).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '"203.0.113.10,192.168.1.0/24"',
+        "'203.0.113.10, 192.168.1.0/24'",
+        "203.0.113.10 192.168.1.0/24",
+        "203.0.113.10;192.168.1.0/24",
+        "203.0.113.10,192.168.1.0/24  # office WAN and LAN",
+        "203.0.113.10,\n192.168.1.0/24",
+    ],
+)
+def test_env_file_formatting_does_not_invalidate_entries(raw):
+    policy = TrustedNetworkPolicy(trusted_ips=raw)
+    assert policy.invalid_entries == []
+    assert [str(network) for network in policy.networks] == ["203.0.113.10/32", "192.168.1.0/24"]
+    assert policy.is_trusted_ip("203.0.113.10")
+    assert policy.is_trusted_ip("192.168.1.77")
+
+
+def test_refusal_reports_the_address_that_was_checked():
+    async def renderer(request: Request):
+        return HTMLResponse(f"from {trusted_networks.client_ip_seen(request)}", status_code=403)
+
+    client = _client(TrustedNetworkPolicy(trusted_ips="203.0.113.0/24"), "198.51.100.9", renderer=renderer)
+    assert client.get("/admin/tickets").json()["client_ip"] == "198.51.100.9"
+    assert "from 198.51.100.9" in client.get("/admin/tickets", headers={"accept": "text/html"}).text
+
+
+def test_refusal_log_names_the_client_ip():
+    from loguru import logger
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    try:
+        client = _client(TrustedNetworkPolicy(trusted_ips="203.0.113.0/24"), "198.51.100.9")
+        client.get("/admin/system-updates/1")
+    finally:
+        logger.remove(sink_id)
+    refusal = [m for m in messages if "Trusted network check refused" in m]
+    assert refusal and "client_ip=198.51.100.9" in refusal[0]

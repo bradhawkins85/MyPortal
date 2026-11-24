@@ -181,7 +181,12 @@ from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import clear_flash, flash_redirect, local_redirect, pop_flash, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
-from app.security.trusted_networks import TrustedNetworkMiddleware, TrustedNetworkPolicy, is_trusted_network
+from app.security.trusted_networks import (
+    TrustedNetworkMiddleware,
+    TrustedNetworkPolicy,
+    client_ip_seen as trusted_network_client_ip,
+    is_trusted_network,
+)
 from app.security.honeypot import HoneypotMiddleware
 from app.security.maintenance import MaintenanceMiddleware
 from app.security.oauth_state import (
@@ -774,26 +779,30 @@ trusted_network_policy = TrustedNetworkPolicy(
     exempt_paths=settings.trusted_ip_exempt_paths,
 )
 if trusted_network_policy.invalid_entries:
-    logger.error(
-        "TRUSTED_IPS has invalid entries; they are ignored",
-        invalid_entries=trusted_network_policy.invalid_entries,
+    log_error(
+        "TRUSTED_IPS has invalid entries; they are ignored"
+        + ("" if trusted_network_policy.networks else " and restricted pages are refused to every address"),
+        invalid_entries=", ".join(trusted_network_policy.invalid_entries),
     )
 if trusted_network_policy.configured:
-    logger.info(
+    log_info(
         "Trusted network restriction enabled",
-        network_count=len(trusted_network_policy.networks),
+        trusted_networks=", ".join(str(network) for network in trusted_network_policy.networks),
         restricted_path_count=len(trusted_network_policy.restricted_paths),
     )
 
 
 async def _render_untrusted_network_page(request: Request) -> Response:
+    client_ip = trusted_network_client_ip(request) or "an unknown address"
     return await _render_error_page(
         request,
         status_code=status.HTTP_403_FORBIDDEN,
         title="Not available from this network",
         message=(
             "This page is only available from your organisation's trusted network. "
-            "Connect from the office or VPN and try again."
+            f"Your connection reached the portal from {client_ip}. Connect from the "
+            "office or VPN and try again, or ask an administrator to add this address "
+            "to TRUSTED_IPS."
         ),
     )
 
