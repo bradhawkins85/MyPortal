@@ -40,6 +40,16 @@ def test_timestamp_lines_is_utc_when_the_server_zone_is_not(name, tmp_path):
     unshare = shutil.which("unshare")
     if not unshare or not ZONE.exists() or not Path("/etc/localtime").exists():
         pytest.skip("needs unshare and the tz database to emulate a non-UTC server")
+    probe = subprocess.run(
+        [unshare, "--user", "--map-root-user", "--mount", "true"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        # CI runners often forbid unprivileged user namespaces; the source
+        # check above still guards the fix there.
+        pytest.skip("user/mount namespaces unavailable: " + probe.stderr.strip())
     snippet = tmp_path / "stamp.sh"
     snippet.write_text(_timestamp_function(name) + "\nprintf 'line\\n' | timestamp_lines\n")
     program = (
@@ -52,8 +62,6 @@ def test_timestamp_lines_is_utc_when_the_server_zone_is_not(name, tmp_path):
         capture_output=True,
         check=False,
     )
-    if result.returncode != 0 and "mount" in result.stderr + result.stdout:
-        pytest.skip("mount namespaces are not available here: " + result.stderr.strip())
     assert result.returncode == 0, result.stderr
     match = STAMP.match(result.stdout.strip())
     assert match, result.stdout
