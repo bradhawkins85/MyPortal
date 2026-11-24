@@ -36,6 +36,33 @@ def _peer_is_trusted(peer_ip: str, trusted_networks: list[Any]) -> bool:
     return False
 
 
+def _client_from_forwarded_for(request: Request, trusted: list[Any]) -> str | None:
+    """Return the address the outermost trusted proxy received the request from.
+
+    Each proxy appends the address it saw to ``X-Forwarded-For``, so only the
+    right-hand entries were written by trusted proxies; anything further left
+    came from the client and can be forged. Walk from the right, skipping
+    trusted proxies, and return the first other address. When every entry is
+    a trusted proxy, the left-most one is the closest to the client.
+    """
+
+    getter = getattr(request.headers, "getlist", None)
+    values = getter("x-forwarded-for") if callable(getter) else [request.headers.get("x-forwarded-for")]
+    entries = [part.strip() for value in values if value for part in value.split(",")]
+    entries = [entry for entry in entries if entry]
+    if not entries:
+        return None
+    for entry in reversed(entries):
+        try:
+            ip_address(entry)
+        except ValueError:
+            # Unparseable text cannot be a hop a trusted proxy recorded.
+            return None
+        if not _peer_is_trusted(entry, trusted):
+            return entry
+    return entries[0]
+
+
 def get_client_ip(
     request: Request,
     *,
@@ -47,8 +74,10 @@ def get_client_ip(
     Behaviour:
 
     * If the direct peer (``request.client.host``) is inside one of the
-      configured ``TRUSTED_PROXIES`` networks, the first value from
-      ``X-Forwarded-For`` (falling back to ``X-Real-IP``) is returned.
+      configured ``TRUSTED_PROXIES`` networks, the right-most
+      ``X-Forwarded-For`` entry that is not itself a trusted proxy is
+      returned (falling back to ``X-Real-IP``). Entries further left are
+      written by the client and are never trusted.
     * Otherwise the direct peer is returned, regardless of any proxy
       headers the attacker may have sent.
     * If neither is available, ``default`` is returned (defaults to
@@ -66,11 +95,9 @@ def get_client_ip(
     peer_ip = request.client.host if request.client else None
 
     if peer_ip and _peer_is_trusted(peer_ip, trusted):
-        forwarded = request.headers.get("x-forwarded-for")
+        forwarded = _client_from_forwarded_for(request, trusted)
         if forwarded:
-            first = forwarded.split(",")[0].strip()
-            if first:
-                return first
+            return forwarded
         real_ip = request.headers.get("x-real-ip")
         if real_ip:
             real_ip = real_ip.strip()

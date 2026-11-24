@@ -26,9 +26,55 @@ def test_xff_ignored_when_no_trusted_proxies():
 
 
 def test_xff_honoured_when_peer_is_trusted_proxy():
-    trusted = [ip_network("127.0.0.1")]
+    trusted = [ip_network("127.0.0.1"), ip_network("10.0.0.0/8")]
     req = _StubRequest("127.0.0.1", {"x-forwarded-for": "203.0.113.7, 10.0.0.1"})
     assert get_client_ip(req, trusted_networks=trusted) == "203.0.113.7"  # type: ignore[arg-type]
+
+
+def test_client_written_xff_entries_cannot_spoof_the_address():
+    """nginx appends the real peer to whatever the client sent, so the
+    left-most entries are attacker-controlled and must be ignored."""
+
+    trusted = [ip_network("127.0.0.1")]
+    req = _StubRequest("127.0.0.1", {"x-forwarded-for": "198.51.100.99, 203.0.113.10"})
+    assert get_client_ip(req, trusted_networks=trusted) == "203.0.113.10"  # type: ignore[arg-type]
+
+
+def test_untrusted_hop_between_proxies_is_the_client():
+    trusted = [ip_network("127.0.0.1")]
+    req = _StubRequest("127.0.0.1", {"x-forwarded-for": "203.0.113.7, 10.0.0.1"})
+    assert get_client_ip(req, trusted_networks=trusted) == "10.0.0.1"  # type: ignore[arg-type]
+
+
+def test_all_trusted_hops_returns_left_most():
+    trusted = [ip_network("10.0.0.0/8")]
+    req = _StubRequest("10.0.0.2", {"x-forwarded-for": "10.0.0.5, 10.0.0.9"})
+    assert get_client_ip(req, trusted_networks=trusted) == "10.0.0.5"  # type: ignore[arg-type]
+
+
+def test_garbage_xff_falls_back_to_x_real_ip():
+    trusted = [ip_network("127.0.0.1")]
+    req = _StubRequest(
+        "127.0.0.1", {"x-forwarded-for": "not-an-ip", "x-real-ip": "203.0.113.10"}
+    )
+    assert get_client_ip(req, trusted_networks=trusted) == "203.0.113.10"  # type: ignore[arg-type]
+
+
+def test_multiple_xff_headers_are_combined():
+    from starlette.requests import Request
+
+    trusted = [ip_network("127.0.0.1")]
+    req = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-forwarded-for", b"198.51.100.99"),
+                (b"x-forwarded-for", b"203.0.113.10"),
+            ],
+            "client": ("127.0.0.1", 1),
+        }
+    )
+    assert get_client_ip(req, trusted_networks=trusted) == "203.0.113.10"
 
 
 def test_xff_ignored_when_peer_not_in_trusted_cidr():
