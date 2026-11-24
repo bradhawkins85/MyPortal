@@ -94,7 +94,10 @@ snapshot_flag_file() {
 # Prefix each captured line with the UTC time it was produced, so the System
 # updates page shows how long each step took and whether one is stuck.
 timestamp_lines() {
-  local TZ=UTC line
+  # Export TZ: printf %(...)T ignores an unexported TZ and would stamp the
+  # server's local time with a Z. UTC0 needs no zone file.
+  local -x TZ=UTC0
+  local line
   while IFS= read -r line || [[ -n "$line" ]]; do
     printf '[%(%Y-%m-%dT%H:%M:%SZ)T] %s\n' -1 "$line"
   done
