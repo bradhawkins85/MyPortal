@@ -16,9 +16,10 @@ messages emitted by the application whenever a login succeeds or fails.
 
 Each failed login writes a line similar to:
 ```
-2025-10-15T12:18:28.123+0000 | ERROR | AUTH LOGIN FAIL email=user@example.com ip=203.0.113.10 reason=invalid_credentials
+2025-10-15T12:18:28.123+00:00 | ERROR | 6f1c0e2a-... | - | - | AUTH LOGIN FAIL | client_ip=203.0.113.10 email_hash=b4c9a289323b ip=203.0.113.10 reason=invalid_credentials request_id=6f1c0e2a-... route=/auth/login user_agent=Mozilla/5.0 ...
 ```
-Successful logins are also recorded with `AUTH LOGIN SUCCESS` entries to assist
+The email address is never written; `email_hash` is a short hash so repeated
+attempts on one account can still be correlated. Successful logins are also recorded with `AUTH LOGIN SUCCESS` entries to assist
 with forensic reviews without affecting Fail2ban rules.
 
 ## 2. Install the Fail2ban filter and jail
