@@ -151,6 +151,7 @@
           <p class="card__subtitle">Create and authorise a dedicated enterprise app without manually configuring the Azure portal.</p>
         </div></header>
         <div class="ce-section__body">
+          {% if not trusted_network %}<p class="alert alert--warning" role="status">Connection set-up is only available from your organisation's trusted network. Connect from the office or VPN to change these settings.</p>{% endif %}
           <p class="alert alert--{{ connection_health.variant }}" role="status">{{ connection_health.message }}</p>
           {% set tenant_done = has_credentials %}
           {% set consent_done = has_credentials and consent_granted %}

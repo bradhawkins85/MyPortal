@@ -130,6 +130,48 @@ IP whitelisting respects the following proxy headers to determine the client's r
 4. **Logging** - Failed IP whitelist checks are logged for security monitoring
 5. **Multiple layers** - IP whitelisting should complement, not replace, authentication
 
+## Trusted Networks for Staff and Set-up Pages
+
+`TRUSTED_IPS` limits pages that only staff need — and that attackers probe —
+to your office and VPN addresses. Unlike `IP_WHITELIST`, which covers every
+`/admin` (and optionally `/api`) path, it covers a curated list, so end users
+keep their own pages wherever they are. Leave it empty to allow every address.
+
+```bash
+TRUSTED_IPS=203.0.113.10,192.168.1.0/24,2001:db8::/48
+# Optional: restrict more path prefixes (* matches one path segment)
+TRUSTED_IP_EXTRA_PATHS=/admin/marketing
+# Optional: lift a built-in restriction
+TRUSTED_IP_EXEMPT_PATHS=/admin/knowledge-base
+```
+
+Restricted by default (each prefix includes the pages below it):
+
+- **Staff work areas and administration** — `/admin/tickets`,
+  `/admin/approvals`, `/admin/companies`, `/admin/users`, `/admin/roles`,
+  `/admin/sessions`, `/admin/impersonation`, `/admin/modules`,
+  `/admin/scheduled-tasks`, `/admin/system-updates`, `/admin/tray`,
+  `/admin/webhooks`, `/admin/audit-logs` and the other super-admin pages.
+- **Xero set-up** — `/xero/connect` and its OAuth callback.
+- **Microsoft 365 set-up** — `/m365/discover`, `/m365/provision`,
+  `/m365/connect`, `/m365/connection`, `/m365/credentials`,
+  `/m365/admin-credentials`, `/m365/test`, `/m365/diagnostics`,
+  `/m365/permissions`, best-practice settings and remediation, and
+  `/companies/{id}/m365-credentials`.
+- **Administration APIs** — `/docs`, `/internal/openapi.json`, `/api-keys`,
+  `/audit-logs`, `/scheduler`, `/api/system`, `/api/features`, `/api/plugins`.
+
+Not restricted: `/admin/profile`, company-admin pages (`/admin/marketing`,
+`/admin/subscriptions`, `/admin/calls`), M365 mailbox pages and
+`/m365/callback`, which Microsoft sign-in also uses. The full list lives in
+`app/security/trusted_networks.py` (`DEFAULT_RESTRICTED_PATHS`).
+
+Browsers outside the trusted networks see a *Not available from this
+network* page (HTTP 403); API clients get a JSON 403. Refusals are logged as
+`Trusted network check refused request` with the client IP and path. Behind a
+reverse proxy, set `TRUSTED_PROXIES` so the real client address is checked
+rather than the proxy's.
+
 ## Example Configurations
 
 ### Development Environment
