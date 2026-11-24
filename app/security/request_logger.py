@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Iterable
 from uuid import uuid4
@@ -18,6 +19,23 @@ from app.core.logging import (
 )
 from app.core.log_redaction import redact_headers
 from app.security.client_ip import get_client_ip
+
+
+_SAFE_REQUEST_ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+
+
+def resolve_request_id(header_value: str | None) -> str:
+    """Return the caller's ``X-Request-ID`` when it is a plain token, else a new id.
+
+    The id is written into every log line for the request, including the
+    lines Fail2ban reads. Spaces, ``|`` or other punctuation from a client
+    could forge extra log columns and get a different address banned.
+    """
+
+    candidate = (header_value or "").strip()
+    if _SAFE_REQUEST_ID.fullmatch(candidate):
+        return candidate
+    return str(uuid4())
 
 
 class RequestLoggingMiddleware:
@@ -39,7 +57,7 @@ class RequestLoggingMiddleware:
 
         request = Request(scope)
         path = request.url.path
-        request_id = request.headers.get("x-request-id") or str(uuid4())
+        request_id = resolve_request_id(request.headers.get("x-request-id"))
         request.state.request_id = request_id
         status_code = 500
 
