@@ -181,6 +181,7 @@ from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import clear_flash, flash_redirect, local_redirect, pop_flash, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
+from app.security.honeypot import HoneypotMiddleware
 from app.security.maintenance import MaintenanceMiddleware
 from app.security.oauth_state import (
     DISCOVERED_TENANT_MAX_AGE_SECONDS,
@@ -927,6 +928,10 @@ app.add_middleware(
 # Registered outermost so authentication, body parsing, dependency validation,
 # handler failures, and maintenance/rate-limit rejections are all observable.
 app.add_middleware(IncomingWebhookMonitorMiddleware)
+
+# Registered outside every other layer so it sees the final status of each
+# request and can tell unknown paths (bot scanning) from real routes.
+app.add_middleware(HoneypotMiddleware, enabled=settings.honeypot_enabled)
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
 templates.env.globals["ai_agent_name"] = get_agent_name

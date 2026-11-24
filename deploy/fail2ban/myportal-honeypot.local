@@ -1,0 +1,43 @@
+# MyPortal honeypot jails. Copy to /etc/fail2ban/jail.d/ and set logpath to
+# the FAIL2BAN_LOG_PATH value from MyPortal's .env.
+#
+# Both jails block offenders with iptables on the web ports. See
+# docs/wiki/getting-started/Honeypot and Bot Blocking.md for how to unban an
+# address and (not recommended) how to allowlist one with ignoreip.
+
+# Scanner signatures (/.env, /wp-login.php, /.git/config ...): ban on the
+# first hit for a day, doubling for repeat offenders up to four weeks.
+[myportal-honeypot]
+enabled = true
+filter = myportal-honeypot
+# Never ban the host itself. Add other addresses only as a last resort.
+ignoreip = 127.0.0.1/8 ::1
+logpath = /var/log/myportal/auth.log
+backend = auto
+banaction = iptables-multiport
+port = http,https
+maxretry = 1
+findtime = 3600
+bantime = 86400
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 2419200
+
+# Unknown pages and API endpoints from anonymous clients: ban after 10
+# misses in 10 minutes for an hour. Raise maxretry if many staff share one
+# office IP and you see false positives.
+[myportal-probe]
+enabled = true
+filter = myportal-probe
+# Never ban the host itself. Add other addresses only as a last resort.
+ignoreip = 127.0.0.1/8 ::1
+logpath = /var/log/myportal/auth.log
+backend = auto
+banaction = iptables-multiport
+port = http,https
+maxretry = 10
+findtime = 600
+bantime = 3600
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 604800

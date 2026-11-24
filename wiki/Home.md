@@ -77,6 +77,7 @@ Welcome to the MyPortal documentation wiki. MyPortal is a Python-first customer 
 
 ### Security and Compliance
 - [Fail2ban Integration](Fail2ban)
+- [Honeypot and Bot Blocking](Honeypot-and-Bot-Blocking)
 - [Essential 8 Requirements](ESSENTIAL8-REQUIREMENTS-IMPLEMENTATION)
 - [Permission Migration](PERMISSION-MIGRATION)
 - [Permission Migration Test Summary](PERMISSION-MIGRATION-TEST-SUMMARY)
