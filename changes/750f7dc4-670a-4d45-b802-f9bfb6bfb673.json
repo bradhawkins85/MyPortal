@@ -1,0 +1,7 @@
+{
+  "guid": "750f7dc4-670a-4d45-b802-f9bfb6bfb673",
+  "occurred_at": "2026-11-24T06:26Z",
+  "change_type": "Fix",
+  "summary": "Running a script on several devices from RMM \u2192 Scripts now confirms the script is queued and closes the editor straight away, instead of appearing to hang before showing Done.",
+  "content_hash": "6f57c0af47edd56cfd673d154dd1959a013df69a218020238019a3c0e9fbff0c"
+}

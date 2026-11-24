@@ -1965,7 +1965,7 @@ async def test_prequeue_associated_files_checked_when_agent_arrives(sqlite_db, m
     await _sync(monkeypatch, {"rmm/Common/a.ps1": "echo 1"})
     script = (await rmm_repo.list_scripts())[0]
     await rmm_repo.set_script_platforms(script["id"], ["windows", "linux"])
-    async def files(script, agent):
+    async def files(script, agent, cache=None):
         assert agent["pending_install"]
         return [{"source_path": "Common/tool.exe", "destination": "C:\\Tools\\tool.exe",
                  "md5": "0" * 32, "sha256": "0" * 64, "size": 1}]

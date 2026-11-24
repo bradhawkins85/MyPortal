@@ -35,7 +35,7 @@ def mount(browser):
     contexts = []
     errors = []
 
-    def create(status="failed", *, can_run=True, picked_up=False, width=1280, result_status=None, finished=False):
+    def create(status="failed", *, can_run=True, picked_up=False, width=1280, result_status=None, finished=False, queued_runs=None):
         run = {
             "id": 4, "script_id": 7, "asset_id": 10, "script_name": "Check disk",
             "script_path": "Common/check.ps1", "asset_name": "PC-01", "status": status,
@@ -64,6 +64,8 @@ def mount(browser):
             '<!doctype html><meta charset="utf-8"><meta name="csrf-token" content="test-csrf">'
             '<link rel="stylesheet" href="/static/css/app.css">'
             '<link rel="stylesheet" href="/static/css/rmm.css">'
+            '<script>window.__toasts = []; window.__portalToast = { show: (message, options) => '
+            'window.__toasts.push([message, options.variant]), hide() {} };</script>'
             '<div data-rmm-page><div class="table-wrapper"><table class="table"><tbody>' + str(rows) + '</tbody></table></div></div>'
             '<script type="application/json" id="rmm-config">' + json.dumps({"can_run": can_run, "asset_id": 11}) + '</script>'
             + modal + '<script src="/static/js/rmm_scripts.js"></script>'
@@ -107,7 +109,7 @@ def mount(browser):
                 response = detail
             elif path == "/api/rmm/scripts/7/runs":
                 posts.append((path, route.request.headers, route.request.post_data_json))
-                response = {"queued": [{"run_id": 5}], "problems": []}
+                response = {"queued": queued_runs or [{"run_id": 5}], "problems": [], "script": {"id": 7, "name": "Check disk"}}
             elif path == "/api/rmm/runs/5":
                 response = {"run": {**run, "id": 5, "status": "queued"}}
             else:
@@ -246,3 +248,24 @@ def test_result_cancel_keeps_the_list_in_sync(mount):
     expect(page.locator('[data-rmm-run-row="4"] [data-column-key="status"]')).to_contain_text("Cancelled")
     expect(page.locator('[data-rmm-cancel-run]')).to_be_hidden()
     assert len(posts) == 1
+
+
+def test_running_on_several_devices_confirms_and_closes_the_editor(mount):
+    from playwright.sync_api import expect
+
+    page, posts = mount(queued_runs=[{"run_id": 5, "asset_id": 10}, {"run_id": 6, "asset_id": 11}])
+    page.locator('[data-rmm-retry-run-id="4"]').click()
+    page.locator('[data-rmm-value="param:Password"]').fill("secret")
+    page.locator('[data-rmm-value="env:API_TOKEN"]').fill("token")
+    page.locator('#rmm-device-11').check()
+    submit = page.locator('[data-rmm-submit]')
+    expect(submit).to_have_text("Run on 2 devices")
+    with page.expect_navigation():
+        submit.click()
+    assert posts[-1][2]["asset_ids"] == [10, 11]
+    page.wait_for_function("window.__toasts.length > 0")
+    message, variant = page.evaluate("window.__toasts[0]")
+    assert message.startswith("Check disk is queued on 2 devices.")
+    assert variant == "success"
+    expect(page.locator('[data-rmm-run-modal]')).to_be_hidden()
+    assert page.evaluate("window.sessionStorage.length") == 0

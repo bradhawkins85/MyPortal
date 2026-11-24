@@ -225,7 +225,14 @@ async def validate_sources(
     return result
 
 
-async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> list[dict[str, Any]]:
+async def prepare_files(
+    script: Mapping[str, Any], agent: Mapping[str, Any], cache: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """The script's associated files for one device.
+
+    Pass the same ``cache`` dict when queuing one script on several devices so
+    the Gitea listing, commit and file downloads happen once per request
+    instead of once per device."""
     associations = validate_associations(script.get("files") or [])
     if not associations:
         return []
@@ -233,11 +240,18 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
         raise ScriptFileError("Update the RMM agent before running a script with associated files.")
     if script.get("company_id") is not None and int(script["company_id"]) != int(agent["company_id"]):
         raise ScriptFileError("The script's files are unavailable to this company.")
-    settings = await _settings()
-    allowed = await available_files(settings, script, {int(agent["company_id"])})
+    cache = {} if cache is None else cache
+    if "settings" not in cache:
+        cache["settings"] = await _settings()
+    settings = cache["settings"]
+    allowed_by_company = cache.setdefault("allowed", {})
+    company_id = int(agent["company_id"])
+    if company_id not in allowed_by_company:
+        allowed_by_company[company_id] = await available_files(settings, script, {company_id})
+    allowed = allowed_by_company[company_id]
     prepared: list[dict[str, Any]] = []
-    metadata_by_sha: dict[str, dict[str, Any]] = {}
-    commit: str | None = None
+    metadata_by_sha: dict[str, dict[str, Any]] = cache.setdefault("metadata_by_sha", {})
+    commit: str | None = cache.get("commit")
     for item in associations:
         destination = item["destination"]
         windows = str(agent.get("os") or "").lower() == "windows"
@@ -251,7 +265,7 @@ async def prepare_files(script: Mapping[str, Any], agent: Mapping[str, Any]) -> 
             raise ScriptFileError(f"{source.path} is larger than 50 MB.")
         if source.sha not in metadata_by_sha:
             if commit is None:
-                commit = await gitea.resolve_commit(settings)
+                commit = cache["commit"] = await gitea.resolve_commit(settings)
             raw = await gitea.fetch_blob(settings, source.sha, max_bytes=MAX_FILE_BYTES, path=source.path, ref=commit)
             metadata_by_sha[source.sha] = {
                 "size": len(raw), "md5": hashlib.md5(raw, usedforsecurity=False).hexdigest(),
