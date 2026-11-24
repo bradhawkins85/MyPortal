@@ -51,6 +51,13 @@ password) and confirm that the attempt appears in the jail log. Once the retry
 threshold is exceeded, Fail2ban will block the IP address until the ban expires
 or is manually removed.
 
+## Blocking scanning bots
+
+The same log file also feeds the honeypot jails, which block bots that probe
+for pages and API endpoints MyPortal does not have. See
+[Honeypot and Bot Blocking](Honeypot-and-Bot-Blocking) for setup, how to
+unblock an address and how to allowlist one.
+
 ## Troubleshooting
 
 - Ensure the service account running MyPortal can create and write to the log

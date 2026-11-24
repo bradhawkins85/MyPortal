@@ -1217,6 +1217,15 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="IP_WHITELIST_ADMIN_ONLY",
     )
+    honeypot_enabled: bool = Field(
+        default=True,
+        validation_alias="HONEYPOT_ENABLED",
+        description=(
+            "Log requests for paths the portal does not serve as HONEYPOT TRAP "
+            "or HONEYPOT PROBE lines so the bundled Fail2ban jails can block "
+            "scanning bots with iptables."
+        ),
+    )
 
     # Comma-separated list of trusted proxy IP/CIDR ranges. When set, the
     # application will honour ``X-Forwarded-For`` and ``X-Real-IP`` headers
@@ -1390,6 +1399,7 @@ class Settings(BaseSettings):
         "mcp_log_tools_enabled",
         "ip_whitelist_enabled",
         "ip_whitelist_admin_only",
+        "honeypot_enabled",
         "matrix_enabled",
         "matrix_is_self_hosted",
         "matrix_e2ee_enabled",
