@@ -411,3 +411,44 @@ def test_association_errors_name_their_problem(files, code):
     with pytest.raises(rmm_script_files.ScriptFileError) as error:
         rmm_script_files.validate_associations(files)
     assert error.value.code == code
+
+
+@pytest.mark.anyio
+async def test_shared_cache_fetches_files_once_for_many_devices(monkeypatch):
+    settings = gitea.GiteaSettings("https://git", "https://git", "token", "msp", "scripts", "main", "", True)
+    raw = b"installer"
+    blob = gitea.GiteaFile("Common/setup.exe", "c" * 40, len(raw))
+    calls = {"settings": 0, "catalog": 0, "commit": 0, "blob": 0}
+
+    async def load_settings():
+        calls["settings"] += 1
+        return settings
+
+    async def catalog(_settings, _script, company_ids=None):
+        calls["catalog"] += 1
+        return {"Common/setup.exe": blob}
+
+    async def fetch_blob(_settings, _sha, **kwargs):
+        calls["blob"] += 1
+        return raw
+
+    async def resolve_commit(_settings):
+        calls["commit"] += 1
+        return "d" * 40
+
+    monkeypatch.setattr(gitea, "resolve_commit", resolve_commit)
+    monkeypatch.setattr(gitea, "load_settings", load_settings)
+    monkeypatch.setattr(gitea, "fetch_blob", fetch_blob)
+    monkeypatch.setattr(rmm_script_files, "available_files", catalog)
+    script = {"company_id": None, "files": [{"source_path": "Common/setup.exe", "destination": "C:\\Tools\\setup.exe"}]}
+    cache: dict = {}
+    results = [
+        await rmm_script_files.prepare_files(script, {"company_id": 1, "os": "windows", "script_files_supported": True}, cache)
+        for _ in range(5)
+    ]
+    assert all(result == results[0] for result in results)
+    assert results[0][0]["commit_sha"] == "d" * 40
+    assert calls == {"settings": 1, "catalog": 1, "commit": 1, "blob": 1}
+    # Per-device checks still apply with a warm cache.
+    with pytest.raises(rmm_script_files.ScriptFileError, match="absolute file path"):
+        await rmm_script_files.prepare_files(script, {"company_id": 1, "os": "linux", "script_files_supported": True}, cache)

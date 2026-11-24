@@ -757,6 +757,43 @@
 
   window.MyPortalRmm = Object.assign(window.MyPortalRmm || {}, { openEditor: openRunEditor, api: api, formatDate: formatDate, openResult: (runId) => openResult(runId) });
 
+  // The page reloads after a run is queued so the run history shows it; the
+  // confirmation is carried across the reload and shown once.
+  const CONFIRM_KEY = 'myportal.rmm.scripts.confirmation';
+
+  function showToast(message) {
+    if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+      window.__portalToast.show(message, { variant: 'success', persist: false });
+    }
+  }
+
+  function confirmAfterReload(message) {
+    try {
+      window.sessionStorage.setItem(CONFIRM_KEY, message);
+    } catch (error) {
+      showToast(message);
+    }
+  }
+
+  function showPendingConfirmation() {
+    try {
+      const pending = window.sessionStorage.getItem(CONFIRM_KEY);
+      if (pending) {
+        window.sessionStorage.removeItem(CONFIRM_KEY);
+        showToast(pending);
+      }
+    } catch (error) {
+      // Storage is unavailable; the run history still shows the queued runs.
+    }
+  }
+
+  // main.js sets up the toast on DOMContentLoaded, after deferred page scripts run.
+  if (window.__portalToast) {
+    showPendingConfirmation();
+  } else {
+    document.addEventListener('DOMContentLoaded', showPendingConfirmation, { once: true });
+  }
+
   function closeRunEditor() {
     if (state.dirty && !state.done && !window.confirm('Discard the values you entered?')) {
       return;
@@ -873,6 +910,8 @@
       await saveAutomation(Math.round(minutes * 60));
       return;
     }
+    const idleLabel = submitButton.textContent;
+    submitButton.textContent = later ? 'Scheduling…' : 'Queuing…';
     try {
       const result = await api(forAsset('/api/rmm/scripts/' + state.detail.script.id + '/runs'), {
         method: 'POST',
@@ -889,9 +928,20 @@
         openResult(queued[0].run_id, true);
         return;
       }
+      const devices = queued.length + ' device' + (queued.length === 1 ? '' : 's');
+      if (queued.length && !problems.length) {
+        const name = (result.script && result.script.name) || state.detail.script.name;
+        state.done = true;
+        closeModal(runModal);
+        confirmAfterReload(when
+          ? name + ' is scheduled on ' + devices + ' for ' + when.toLocaleString() + '.'
+          : name + ' is queued on ' + devices + '. Results appear in the run history as each device reports back.');
+        window.location.reload();
+        return;
+      }
+      // Some devices could not take the script: keep the editor open and list them.
       const lines = [];
       if (queued.length) {
-        const devices = queued.length + ' device' + (queued.length === 1 ? '' : 's');
         lines.push(when ? 'Scheduled on ' + devices + ' for ' + when.toLocaleString() + '.' : 'Sent to ' + devices + '.');
       }
       problems.forEach((problem) => {
@@ -902,9 +952,12 @@
       if (queued.length) {
         state.done = true;
         submitButton.textContent = 'Done';
+      } else {
+        submitButton.textContent = idleLabel;
       }
       submitButton.disabled = false;
     } catch (error) {
+      submitButton.textContent = idleLabel;
       submitButton.disabled = false;
       if (error.data && error.data.errors) {
         showErrors(error.data.errors);

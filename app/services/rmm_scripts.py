@@ -790,6 +790,7 @@ async def queue_for_agent(
     queue_timeout_seconds: Any = None,
     extra_env: Mapping[str, str] | None = None,
     scheduled_for: datetime | None = None,
+    files_cache: dict[str, Any] | None = None,
 ) -> int:
     """Resolve the values for one device and queue the run. Raises
     :class:`RunRequestError` with a ``device`` message when it cannot run there.
@@ -800,7 +801,9 @@ async def queue_for_agent(
     previous run's result for a script result rule; the script's own values
     win. ``run_as`` is ``system`` or ``user`` (the user logged in to the device);
     when omitted the script's default applies. ``scheduled_for`` (naive UTC)
-    holds the run back until that time; its offline wait starts then."""
+    holds the run back until that time; its offline wait starts then.
+    ``files_cache`` is shared across the devices of one request (see
+    :func:`app.services.rmm_script_files.prepare_files`)."""
 
     run_as = script_run_as(script, run_as)
     queue_wait = queue_timeout(queue_timeout_seconds, int(script.get("default_queue_timeout_seconds") or 0))
@@ -823,7 +826,7 @@ async def queue_for_agent(
     from app.services import rmm_script_files
 
     try:
-        payload["files"] = await rmm_script_files.prepare_files(script, agent)
+        payload["files"] = await rmm_script_files.prepare_files(script, agent, cache=files_cache)
     except (rmm_script_files.ScriptFileError, gitea.GiteaError) as exc:
         raise RunRequestError({"files": str(exc)}) from exc
     run_id = await rmm_repo.create_run(
@@ -908,6 +911,7 @@ async def queue_runs(
 
     queued: list[dict[str, Any]] = []
     problems: list[dict[str, Any]] = []
+    files_cache: dict[str, Any] = {}
     for asset_id in targets:
         asset = await assets_repo.get_asset_by_id(asset_id)
         if not asset or int(asset.get("company_id") or 0) != int(company_id):
@@ -930,6 +934,7 @@ async def queue_runs(
                 requested_by_user_id=requested_by_user_id,
                 run_as=run_as,
                 scheduled_for=run_at,
+                files_cache=files_cache,
             )
         except RunRequestError as exc:
             problem: dict[str, Any] = {
