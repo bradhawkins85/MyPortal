@@ -1,0 +1,7 @@
+{
+  "guid": "8143fc29-a968-4ec2-8db2-56b91f000858",
+  "occurred_at": "2026-11-24T04:03Z",
+  "change_type": "Fix",
+  "summary": "The System updates log no longer shows times hours in the future on servers that are not set to UTC; each line now shows the time it actually ran in your local time.",
+  "content_hash": "c7731123900276e34fa845b04f4eb68d8aa0ef0ff47186cebff5f0b24f14c76f"
+}
