@@ -1,0 +1,7 @@
+{
+  "guid": "46086835-79d3-49f4-9e58-e9c3b9a04ae5",
+  "occurred_at": "2026-11-24T03:54Z",
+  "change_type": "Fix",
+  "summary": "Windows activation status now appears on assets; the portal was discarding it when RMM agents reported their inventory.",
+  "content_hash": "45beebb1744fdc35c9834452a47c52fd48197adb97065e741352b53d659cd59b"
+}

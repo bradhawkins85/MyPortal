@@ -215,6 +215,25 @@ async def test_agent_routes_validate_the_snapshot(inventory_db):
 
 
 @pytest.mark.anyio
+async def test_agent_route_keeps_windows_activation(inventory_db):
+    """The agent's ``windows_activation`` must survive the route's model, which drops unknown fields."""
+    from app.features.rmm import inventory_routes as routes
+
+    _result, agent = await _enrol(inventory_db)
+    # As the Go agent marshals inventory.WindowsActivation.
+    payload = routes.AgentInventory(**_snapshot(
+        windows_activation={"status": "unlicensed", "channel": "Retail", "grace_minutes": 4320},
+    ))
+    await routes.agent_inventory(payload, agent)
+    assert (await inventory_repo.list_for_company_assets(1))[10]["windows_activation"] == "unlicensed"
+    stored = await inventory_repo.get_for_agent(int(agent["id"]))
+    assert stored["details"]["windows_activation"]["channel"] == "Retail"
+    # Older agents leave it out.
+    await routes.agent_inventory(routes.AgentInventory(**_snapshot()), agent)
+    assert (await inventory_repo.list_for_company_assets(1))[10]["windows_activation"] is None
+
+
+@pytest.mark.anyio
 async def test_filter_agents_by_hardware_and_software(inventory_db):
     _r1, big = await _enrol(inventory_db, uid="agent-uid-0001", tray_id=5, asset_id=10)
     _r2, small = await _enrol(inventory_db, uid="agent-uid-0002", tray_id=6, asset_id=11)

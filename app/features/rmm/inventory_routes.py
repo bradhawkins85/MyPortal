@@ -134,6 +134,13 @@ class AgentProgram(_Loose):
     source: str | None = None
 
 
+class AgentWindowsActivation(_Loose):
+    # Unknown states are dropped by rmm_inventory.normalise.
+    status: str | None = None
+    channel: str | None = None
+    grace_minutes: int | None = Field(default=None, ge=0)
+
+
 class AgentInventory(_Loose):
     collected_at: str | None = None
     hostname: str | None = None
@@ -157,6 +164,7 @@ class AgentInventory(_Loose):
     gpus: list[str] = Field(default_factory=list, max_length=128)
     network_adapters: list[AgentNetworkAdapter] = Field(default_factory=list, max_length=128)
     software: list[AgentProgram] = Field(default_factory=list, max_length=rmm_inventory.MAX_SOFTWARE)
+    windows_activation: AgentWindowsActivation | None = None
     # A Proxmox VE host's state; cleaned and capped by rmm_proxmox.normalise.
     proxmox: dict[str, Any] | None = None
     errors: list[str] = Field(default_factory=list, max_length=128)
