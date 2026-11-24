@@ -14,14 +14,15 @@ which only honours ``X-Forwarded-For`` from ``TRUSTED_PROXIES``.
 from __future__ import annotations
 
 import posixpath
+import re
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from typing import Awaitable, Callable, Iterable
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse, Response
-from loguru import logger
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.core.logging import log_error, log_warning
 from app.security.client_ip import get_client_ip
 
 Network = IPv4Network | IPv6Network
@@ -101,18 +102,27 @@ DEFAULT_RESTRICTED_PATHS: tuple[str, ...] = (
 BLOCKED_DETAIL = "This page is only available from a trusted network."
 
 
+def _split_entries(raw: str | Iterable[str]) -> list[str]:
+    """Split a setting into entries, forgiving how ``.env`` files get written.
+
+    Values arrive verbatim from systemd and Docker env files, so an inline
+    ``# comment``, wrapping quotes, or spaces/semicolons between entries must
+    not turn valid addresses into invalid ones.
+    """
+
+    text = raw if isinstance(raw, str) else ",".join(str(item) for item in raw)
+    text = text.split("#", 1)[0]
+    return [part.strip("\"'") for part in re.split(r"[,;\s]+", text) if part.strip("\"'")]
+
+
 def parse_networks(raw: str | Iterable[str] | None) -> tuple[list[Network], list[str]]:
-    """Parse comma-separated IPs/CIDR ranges into networks plus invalid entries."""
+    """Parse IPs/CIDR ranges into networks plus the entries that are invalid."""
 
     if raw is None:
         return [], []
-    entries = raw.split(",") if isinstance(raw, str) else list(raw)
     networks: list[Network] = []
     invalid: list[str] = []
-    for entry in entries:
-        text = str(entry).strip()
-        if not text:
-            continue
+    for text in _split_entries(raw):
         try:
             networks.append(ip_network(text, strict=False))
         except ValueError:
@@ -125,12 +135,8 @@ def parse_paths(raw: str | Iterable[str] | None) -> list[str]:
 
     if raw is None:
         return []
-    entries = raw.split(",") if isinstance(raw, str) else list(raw)
     rules: list[str] = []
-    for entry in entries:
-        text = str(entry).strip()
-        if not text:
-            continue
+    for text in _split_entries(raw):
         rules.append(normalise_path(text if text.startswith("/") else "/" + text))
     return rules
 
@@ -227,16 +233,19 @@ class TrustedNetworkMiddleware:
         request = Request(scope)
         client_ip = get_client_ip(request, default=None) if self.policy.configured else None
         trusted = self.policy.is_trusted_ip(client_ip)
-        scope.setdefault("state", {})["trusted_network"] = trusted
+        state = scope.setdefault("state", {})
+        state["trusted_network"] = trusted
+        state["trusted_network_client_ip"] = client_ip
 
         path = scope.get("path") or "/"
         if trusted or not self.policy.is_restricted(path):
             await self.app(scope, receive, send)
             return
 
-        logger.warning(
-            "Trusted network check refused request",
-            client_ip=client_ip,
+        log_warning(
+            "Trusted network check refused request; add the client address to TRUSTED_IPS if it should be allowed",
+            client_ip=client_ip or "unknown",
+            peer_ip=(scope.get("client") or ("unknown",))[0],
             path=path,
             method=scope.get("method", "WEBSOCKET"),
         )
@@ -253,10 +262,10 @@ class TrustedNetworkMiddleware:
             try:
                 return await self.html_renderer(request)
             except Exception as exc:  # pragma: no cover - fall back to JSON
-                logger.error("Failed to render trusted network error page", error=str(exc))
+                log_error("Failed to render trusted network error page", error=str(exc))
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            content={"detail": BLOCKED_DETAIL},
+            content={"detail": BLOCKED_DETAIL, "client_ip": client_ip_seen(request)},
         )
 
 
@@ -264,3 +273,9 @@ def is_trusted_network(request: Request) -> bool:
     """Whether the request came from a trusted network (True when unrestricted)."""
 
     return bool(getattr(request.state, "trusted_network", True))
+
+
+def client_ip_seen(request: Request) -> str | None:
+    """The address the trusted network check judged, for refusal messages."""
+
+    return getattr(request.state, "trusted_network_client_ip", None)
