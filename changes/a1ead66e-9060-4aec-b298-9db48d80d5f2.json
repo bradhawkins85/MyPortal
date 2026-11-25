@@ -1,0 +1,7 @@
+{
+  "guid": "a1ead66e-9060-4aec-b298-9db48d80d5f2",
+  "occurred_at": "2026-11-25T05:00Z",
+  "change_type": "Feature",
+  "summary": "Asset pages now have a Printers section listing each Windows device's installed printers (status, driver, port and IP, sharing, location, users and default printer, first and last seen) in a sortable, filterable table, collected daily or on demand without updating the RMM agent; printers no longer seen are kept for a year.",
+  "content_hash": "4eaa61def0a20f62e59cfd03f933b50f088bb923ccda151ea0deb104f57f72ec"
+}

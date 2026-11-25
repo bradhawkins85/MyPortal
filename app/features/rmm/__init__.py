@@ -29,6 +29,10 @@
   still needs and its installation history, from a built-in scan run daily
   and on request, with a button to install the chosen updates
   (:mod:`app.services.rmm_windows_updates`)
+* each asset page's Printers section: the printers installed on a Windows
+  device (Get-Printer plus signed-in users' connections), from a built-in scan
+  run daily and on request, kept with first and last seen dates
+  (:mod:`app.services.rmm_printers`)
 * ``POST /api/rmm/assets/{id}/agent-install`` push the RMM agent to a device
   through its tray app, and the tray app's download and result APIs
   (:mod:`app.services.rmm_agent_deploy`)
@@ -53,7 +57,8 @@ from __future__ import annotations
 from app.core.features import FeaturePack
 
 from app.services import (rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_live, rmm_scripts,
-                          rmm_patching, rmm_software_updates, rmm_ticket_scripts, rmm_windows_updates)
+                          rmm_patching, rmm_printers, rmm_software_updates, rmm_ticket_scripts,
+                          rmm_windows_updates)
 
 from .agent_deploy_routes import router as agent_deploy_router
 from .automation_routes import router as automation_router
@@ -65,6 +70,7 @@ from .inventory_routes import router as inventory_router
 from .remote_control_routes import router as remote_control_router
 from .result_rule_routes import router as result_rule_router
 from .patch_routes import router as patch_router
+from .printer_routes import router as printer_router
 from .windows_update_routes import router as windows_update_router
 from .routes import router
 
@@ -76,6 +82,8 @@ rmm_automation.register_tick_job(rmm_checks.tick)
 rmm_automation.register_tick_job(rmm_patching.tick)
 # Connected Windows devices scan for Windows updates once a day.
 rmm_automation.register_tick_job(rmm_windows_updates.tick)
+# Connected Windows devices report their installed printers once a day.
+rmm_automation.register_tick_job(rmm_printers.tick)
 # Findings analyses start on the tick when one is due and run in the background.
 rmm_automation.register_tick_job(rmm_findings.tick)
 # Ticket automation runs that expire or are cancelled are posted to their ticket.
@@ -92,10 +100,10 @@ rmm_automation.register_package_steps(validate=rmm_software_updates.package_ids,
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.29.0",
+    version="1.30.0",
     routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router,
              event_log_rule_router, inventory_router, check_router, finding_router, patch_router,
-             windows_update_router, result_rule_router),
+             windows_update_router, result_rule_router, printer_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),
 )
 

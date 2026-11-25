@@ -83,6 +83,8 @@
     {{ 'Windows updates' if run.script_name == 'Install Windows updates' else 'Patch policy' }}{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'update_scan' -%}
     Windows Update scan{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
+  {%- elif run.run_source == 'printer_scan' -%}
+    Printer scan{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'check' -%}
     Check
   {%- elif run.run_source == 'ticket' -%}

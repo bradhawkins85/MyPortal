@@ -1,0 +1,68 @@
+{# The asset page's Printers section (rmm.printers from app.features.rmm.printer_routes). #}
+{% from "macros/counters.html" import counter_strip %}
+{% set pr = rmm.printers %}{% set scan = pr.scan %}
+<section class="card card--panel ce-section" id="printers" data-asset-edit-section="printers" aria-labelledby="asset-printers-heading">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="asset-printers-heading">Printers</h2>
+      <p class="card__subtitle">{% if scan %}Scanned <span data-utc="{{ scan.scanned_at }}">{{ scan.scanned_at }}</span>. Lists the device's printers and the printer connections of users signed in at the time. Printers no longer seen are kept for a year.{% else %}This device has not reported its printers yet. Connected Windows devices scan once a day{% if pr.can_run %}, or press <strong>Scan now</strong>{% endif %}.{% endif %}{% if pr.scan_pending %} <strong>A scan is waiting for the device.</strong>{% endif %}</p>
+    </div>
+    {% if pr.can_run %}<form method="post" action="/rmm/assets/{{ asset.id }}/printers/scan">{% include "partials/csrf.html" %}
+      <button type="submit" class="button button--ghost button--small"{% if pr.scan_pending %} disabled{% endif %}>Scan now</button>
+    </form>{% endif %}
+  </header>
+  {% if scan %}
+  <div class="ce-section__body rmm-inventory">
+    {{ counter_strip([
+      {"label": "Installed", "value": pr.counts.total, "variant": "info"},
+      {"label": "Shared", "value": pr.counts.shared, "variant": "neutral"},
+      {"label": "Need attention", "value": pr.counts.attention, "variant": "danger" if pr.counts.attention else "success"},
+      {"label": "No longer seen", "value": pr.counts.removed, "variant": "neutral"},
+    ]) }}
+    {% if scan.errors %}<details class="rmm-inventory__errors"><summary>Some printer details could not be read ({{ scan.errors | length }})</summary>
+      <ul>{% for error in scan.errors %}<li><code>{{ error }}</code></li>{% endfor %}</ul>
+    </details>{% endif %}
+    {% if pr.printers %}
+    <p class="text-muted" role="status">Sort by any column heading, and filter a column from its header.</p>
+    <label class="visually-hidden" for="rmm-printers-search">Find a printer</label>
+    <input type="search" id="rmm-printers-search" class="form-input rmm-inventory__filter" placeholder="Find a printer, driver or port…" autocomplete="off" data-table-filter="rmm-printers-table">
+    <div class="table-wrapper rmm-inventory__software"><table class="table table--stack-mobile" id="rmm-printers-table" data-table data-table-id="asset-printers" data-table-paginate data-page-size-max="25">
+      <caption class="visually-hidden">Printers installed on this device</caption>
+      <thead><tr>
+        <th scope="col" data-sort="string" data-column-key="name">Name</th>
+        <th scope="col" data-sort="string" data-column-key="status" data-filter-options="multiple" data-filter-values="{{ pr.status_options | tojson | forceescape }}">Status</th>
+        <th scope="col" data-sort="string" data-column-key="type" data-filter-options="multiple" data-filter-values="{{ pr.type_options | tojson | forceescape }}">Type</th>
+        <th scope="col" data-sort="string" data-column-key="driver">Driver</th>
+        <th scope="col" data-sort="string" data-column-key="port">Port</th>
+        <th scope="col" data-sort="string" data-column-key="shared" data-filter-options="multiple">Shared</th>
+        <th scope="col" data-sort="string" data-column-key="location" data-mobile-hidden="true">Location</th>
+        <th scope="col" data-sort="string" data-column-key="users" data-mobile-hidden="true">Users</th>
+        <th scope="col" data-sort="string" data-column-key="presence" data-filter-options="multiple">Presence</th>
+        <th scope="col" data-sort="date" data-column-key="first-seen">First seen</th>
+        <th scope="col" data-sort="date" data-column-key="last-seen">Last seen</th>
+      </tr></thead>
+      <tbody>{% for printer in pr.printers %}<tr>
+        <td data-label="Name">{{ printer.name }}{% if printer.comment %}<br><span class="text-muted">{{ printer.comment }}</span>{% endif %}</td>
+        <td data-label="Status" data-value="{{ printer.status_label }}"><span class="status status--{{ printer.status_variant }}">{{ printer.status_label }}</span></td>
+        <td data-label="Type">{{ printer.type_label }}</td>
+        <td data-label="Driver">{{ printer.driver_name or '—' }}</td>
+        <td data-label="Port">{{ printer.port_name or '—' }}{% if printer.port_address and printer.port_address != printer.port_name %}<br><span class="text-muted">{{ printer.port_address }}</span>{% endif %}</td>
+        <td data-label="Shared" data-value="{{ 'Yes' if printer.is_shared else 'No' }}">{% if printer.is_shared %}Yes{% if printer.share_name %} <span class="text-muted">({{ printer.share_name }})</span>{% endif %}{% else %}No{% endif %}</td>
+        <td data-label="Location">{{ printer.location or '—' }}</td>
+        <td data-label="Users">{% if printer.connected_users %}{{ printer.connected_users }}{% else %}All users{% endif %}{% if printer.default_for %}<br><span class="text-muted">Default for {{ printer.default_for }}</span>{% endif %}</td>
+        <td data-label="Presence" data-value="{{ printer.presence_label }}"><span class="status status--{{ 'success' if printer.is_installed else 'neutral' }}">{{ printer.presence_label }}</span></td>
+        <td data-label="First seen" data-value="{{ printer.first_seen_at }}"><span data-utc="{{ printer.first_seen_at }}">{{ printer.first_seen_at }}</span></td>
+        <td data-label="Last seen" data-value="{{ printer.last_seen_at }}"><span data-utc="{{ printer.last_seen_at }}">{{ printer.last_seen_at }}</span></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    <div class="table-pagination" data-pagination="rmm-printers-table">
+      <div class="table-pagination__group">
+        <button type="button" class="button button--ghost button--small table-pagination__button" data-page-prev disabled>Previous</button>
+        <button type="button" class="button button--ghost button--small table-pagination__button" data-page-next>Next</button>
+      </div>
+      <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+    </div>
+    {% else %}<p class="text-muted">The device did not report any printers.</p>{% endif %}
+  </div>
+  {% endif %}
+</section>
