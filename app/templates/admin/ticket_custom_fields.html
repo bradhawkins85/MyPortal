@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Custom ticket details</span>
+  </div>
+{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "+ Add detail", "variant": "primary", "type": "button",
+     "attrs": {"data-tcf-create": "", "aria-haspopup": "dialog", "aria-controls": "ticket-custom-field-modal"}},
+    {"label": "Back to tickets", "type": "link", "href": "/admin/tickets"}
+  ]) }}
+{% endblock %}
+
+{% set visibility_variant = {"public": "scf-chip--logic", "private": "scf-chip--visibility", "admin_only": "scf-chip--danger"} %}
+
+{% block content %}
+  <section class="card card--panel" aria-labelledby="tcf-list-title">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="tcf-list-title">Details collected on tickets</h2>
+        <p class="card__subtitle">These fields appear below <em>Additional details</em> on every ticket. Read-only details can only be set by automations, for example from an AI prompt or a status rule.</p>
+      </div>
+      <span class="badge badge--muted">{{ definitions | length }} detail{% if definitions | length != 1 %}s{% endif %}</span>
+    </header>
+    <div class="card__body scf">
+      <noscript><p class="text-muted">Turn on JavaScript to add or edit custom ticket details.</p></noscript>
+      {% if definitions %}
+        <div class="scf-toolbar">
+          <input type="search" class="form-input scf-toolbar__search" placeholder="Search details by label, key or help text" aria-label="Search custom ticket details" data-tcf-search />
+        </div>
+        <div class="scf-groups" data-tcf-list>
+          {% for visibility, visibility_label in visibilities.items() %}
+            {% set group = definitions | selectattr("visibility", "equalto", visibility) | list %}
+            {% if group %}
+              <section class="scf-group" data-tcf-group aria-labelledby="tcf-group-{{ visibility }}">
+                <h3 class="scf-group__title" id="tcf-group-{{ visibility }}">{{ visibility_label }} <span class="text-muted">· {{ visibility_help[visibility] }}</span></h3>
+                <ul class="scf-list">
+                  {% for field in group %}
+                    <li class="scf-item{% if not field.is_active %} scf-item--inactive{% endif %}" data-tcf-item data-tcf-search-text="{{ [field.label, field.field_key, field.help_text or ''] | join(' ') }}">
+                      <span class="scf-type-icon scf-type-icon--{{ field.field_type }}" aria-hidden="true"></span>
+                      <div class="scf-item__main">
+                        <div class="scf-item__heading">
+                          <button type="button" class="scf-item__label" data-tcf-edit="{{ field.id }}" aria-haspopup="dialog" aria-controls="ticket-custom-field-modal">{{ field.label }}</button>
+                          <code class="scf-item__key">{{ field.field_key }}</code>
+                        </div>
+                        {% if field.help_text %}<p class="scf-item__help">{{ field.help_text }}</p>{% endif %}
+                        <ul class="scf-item__chips" aria-label="Summary of {{ field.label }}">
+                          <li class="scf-chip">{{ field_types.get(field.field_type, field.field_type) }}{% if field.field_type in option_types %} · {{ field.options | length }} option{% if field.options | length != 1 %}s{% endif %}{% endif %}{% if field.field_type == 'rating' %} · out of {{ field.config.max or 5 }}{% endif %}</li>
+                          <li class="scf-chip {{ visibility_variant.get(field.visibility, '') }}">{{ visibilities.get(field.visibility, field.visibility) }}</li>
+                          {% if field.editable %}
+                            <li class="scf-chip">Technicians can edit</li>
+                          {% else %}
+                            <li class="scf-chip scf-chip--muted">Read-only · set by automations</li>
+                          {% endif %}
+                          {% if field.show_in_list %}<li class="scf-chip">Ticket list column</li>{% endif %}
+                          {% if not field.is_active %}<li class="scf-chip scf-chip--muted">Hidden (inactive)</li>{% endif %}
+                          <li class="scf-chip scf-chip--quiet">{{ field.usage_count }} ticket{% if field.usage_count != 1 %}s{% endif %} with a value</li>
+                        </ul>
+                      </div>
+                      <div class="scf-item__actions">
+                        <span class="scf-item__order" title="Sort order">#{{ field.sort_order }}</span>
+                        <button type="button" class="button button--ghost button--small" data-tcf-edit="{{ field.id }}" aria-haspopup="dialog" aria-controls="ticket-custom-field-modal">Edit</button>
+                        <button type="button" class="button button--ghost button--small" data-tcf-duplicate="{{ field.id }}" aria-haspopup="dialog" aria-controls="ticket-custom-field-modal">Duplicate</button>
+                      </div>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </section>
+            {% endif %}
+          {% endfor %}
+        </div>
+        <p class="scf-empty scf-empty--search" data-tcf-no-results hidden>No details match your search.</p>
+      {% else %}
+        <div class="scf-empty">
+          <p class="scf-empty__title">No custom ticket details yet</p>
+          <p class="text-muted">Collect extra information on tickets, such as an escalation reason, a site visit date or a value an automation works out from the conversation.</p>
+          <button type="button" class="button" data-tcf-create aria-haspopup="dialog" aria-controls="ticket-custom-field-modal">+ Add your first detail</button>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  {% set tcf_editor_fields = [] %}
+  {% for field in definitions %}
+    {% set _ = tcf_editor_fields.append({
+      'id': field.id,
+      'label': field.label,
+      'field_key': field.field_key,
+      'help_text': field.help_text or '',
+      'field_type': field.field_type,
+      'options': field.options,
+      'rating_max': field.config.max or 5,
+      'visibility': field.visibility,
+      'editable': field.editable,
+      'show_in_list': field.show_in_list,
+      'is_active': field.is_active,
+      'sort_order': field.sort_order,
+      'usage_count': field.usage_count,
+    }) %}
+  {% endfor %}
+  <script type="application/json" id="ticket-custom-field-editor-data">{{ {'fields': tcf_editor_fields, 'optionTypes': option_types, 'typeLabels': field_types, 'visibilityLabels': visibilities, 'maxRating': max_rating} | tojson }}</script>
+
+  <div class="modal scf-modal" id="ticket-custom-field-modal" role="dialog" aria-modal="true" aria-labelledby="tcf-modal-title" hidden>
+    <form class="modal__panel modal__panel--wide scf-editor" method="post" action="/admin/tickets/custom-fields" data-tcf-form novalidate>
+      {% include "partials/csrf.html" %}
+      <input type="hidden" name="field_id" data-tcf-out="field_id" />
+      <input type="hidden" name="options_json" data-tcf-out="options_json" />
+
+      <header class="modal__header scf-editor__header">
+        <div>
+          <h2 class="modal__title" id="tcf-modal-title" data-tcf-title>Add custom ticket detail</h2>
+          <p class="scf-editor__subtitle" data-tcf-subtitle>Name the detail, choose how it is answered, then decide who sees and changes it.</p>
+        </div>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close detail editor"></button>
+      </header>
+
+      <nav class="scf-tabs" role="tablist" aria-label="Detail settings">
+        <button type="button" class="scf-tab is-active" role="tab" id="tcf-tab-details" aria-controls="tcf-panel-details" aria-selected="true" data-tcf-tab="details">Details</button>
+        <button type="button" class="scf-tab" role="tab" id="tcf-tab-options" aria-controls="tcf-panel-options" aria-selected="false" tabindex="-1" data-tcf-tab="options" hidden>Choices<span class="scf-tab__count" data-tcf-options-count></span></button>
+        <button type="button" class="scf-tab" role="tab" id="tcf-tab-access" aria-controls="tcf-panel-access" aria-selected="false" tabindex="-1" data-tcf-tab="access">Who sees it</button>
+      </nav>
+
+      <div class="modal__body scf-editor__body">
+        <div class="scf-editor__main">
+          <section class="scf-panel" id="tcf-panel-details" role="tabpanel" aria-labelledby="tcf-tab-details" data-tcf-panel="details">
+            <div class="scf-grid">
+              <div class="form-field scf-grid__full">
+                <label class="form-label" for="tcf-label">Label</label>
+                <input class="form-input" id="tcf-label" name="label" maxlength="255" placeholder="e.g. Escalation reason" autocomplete="off" required data-tcf-input="label" />
+                <p class="form-help">Shown next to the value on the ticket.</p>
+                <p class="scf-error" data-tcf-error="label" hidden></p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="tcf-key">Key</label>
+                <input class="form-input scf-mono" id="tcf-key" name="field_key" maxlength="100" placeholder="escalation_reason" autocomplete="off" spellcheck="false" data-tcf-input="field_key" />
+                <p class="form-help">Generated from the label. Automations use it, e.g. <code data-tcf-key-example>{{ '{{ ticket.custom_fields.escalation_reason }}' }}</code>.</p>
+                <p class="scf-error" data-tcf-error="field_key" hidden></p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="tcf-order">Sort order</label>
+                <input class="form-input" id="tcf-order" name="sort_order" type="number" step="1" value="0" data-tcf-input="sort_order" />
+                <p class="form-help">Lower numbers appear first.</p>
+              </div>
+              <fieldset class="scf-grid__full scf-fieldset">
+                <legend class="form-label">How is it answered?</legend>
+                <div class="scf-type-grid">
+                  {% for type_value, type_label in field_types.items() %}
+                    <label class="scf-type-card">
+                      <input type="radio" name="field_type" value="{{ type_value }}" data-tcf-input="field_type" {% if loop.first %}checked{% endif %} />
+                      <span class="scf-type-icon scf-type-icon--{{ type_value }}" aria-hidden="true"></span>
+                      <span class="scf-type-card__label">{{ type_label }}</span>
+                      <span class="scf-type-card__help">{{ field_type_help[type_value] }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </fieldset>
+              <div class="form-field" data-tcf-rating-field hidden>
+                <label class="form-label" for="tcf-rating-max">Number of stars</label>
+                <input class="form-input" id="tcf-rating-max" name="rating_max" type="number" min="1" max="{{ max_rating }}" value="5" data-tcf-input="rating_max" />
+              </div>
+              <div class="form-field scf-grid__full">
+                <label class="form-label" for="tcf-help">Help text <span class="scf-optional">optional</span></label>
+                <textarea class="form-input" id="tcf-help" name="help_text" rows="2" maxlength="500" placeholder="Explain what belongs here" data-tcf-input="help_text"></textarea>
+              </div>
+            </div>
+          </section>
+
+          <section class="scf-panel" id="tcf-panel-options" role="tabpanel" aria-labelledby="tcf-tab-options" data-tcf-panel="options" hidden>
+            <div class="scf-panel__intro">
+              <h3 class="scf-panel__title">Choices</h3>
+              <p class="text-muted">Add the answers to pick from, in the order they should appear. Press Enter in a choice to add the next one.</p>
+            </div>
+            <ol class="scf-options" data-tcf-options></ol>
+            <div class="scf-options__actions">
+              <button type="button" class="button button--ghost button--small" data-tcf-option-add>+ Add choice</button>
+              <button type="button" class="button button--ghost button--small" data-tcf-bulk-toggle aria-expanded="false">Paste a list</button>
+            </div>
+            <div class="scf-bulk" data-tcf-bulk hidden>
+              <label class="form-label" for="tcf-bulk-input">One choice per line</label>
+              <textarea class="form-input" id="tcf-bulk-input" rows="5" placeholder="Waiting on vendor&#10;Waiting on customer&#10;Parts on order" data-tcf-bulk-input></textarea>
+              <div class="scf-bulk__actions">
+                <button type="button" class="button button--small" data-tcf-bulk-apply>Add choices</button>
+                <button type="button" class="button button--ghost button--small" data-tcf-bulk-toggle>Cancel</button>
+              </div>
+            </div>
+            <p class="scf-error" data-tcf-error="options" hidden></p>
+          </section>
+
+          <section class="scf-panel" id="tcf-panel-access" role="tabpanel" aria-labelledby="tcf-tab-access" data-tcf-panel="access" hidden>
+            <div class="scf-panel__intro">
+              <h3 class="scf-panel__title">Who can see it?</h3>
+            </div>
+            <div class="scf-choice-list" role="radiogroup" aria-label="Visibility">
+              {% for value, label in visibilities.items() %}
+                <label class="scf-choice">
+                  <input type="radio" name="visibility" value="{{ value }}" data-tcf-input="visibility" {% if value == 'private' %}checked{% endif %} />
+                  <span><strong>{{ label }}</strong><span class="text-muted">{{ visibility_help[value] }}</span></span>
+                </label>
+              {% endfor %}
+            </div>
+            <div class="scf-panel__intro">
+              <h3 class="scf-panel__title">Who can change it?</h3>
+            </div>
+            <div class="scf-choice-list" role="radiogroup" aria-label="Editing">
+              <label class="scf-choice">
+                <input type="radio" name="editable" value="1" data-tcf-input="editable" checked />
+                <span><strong>Read and write</strong><span class="text-muted">Technicians and admins who can see it can change it on the ticket. Automations can too.</span></span>
+              </label>
+              <label class="scf-choice">
+                <input type="radio" name="editable" value="" data-tcf-input="editable" />
+                <span><strong>Read-only</strong><span class="text-muted">Shown on the ticket but only automations can set it.</span></span>
+              </label>
+            </div>
+            <div class="form-field">
+              <label class="scf-switch">
+                <input type="checkbox" name="show_in_list" value="1" data-tcf-input="show_in_list" />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span>Offer as a column in ticket lists</span>
+              </label>
+              <p class="form-help">Public details also appear in the requester's ticket list.</p>
+            </div>
+            <div class="form-field" data-tcf-active-field hidden>
+              <label class="scf-switch">
+                <input type="checkbox" name="is_active" value="1" data-tcf-input="is_active" checked />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span>Active on tickets</span>
+              </label>
+              <p class="form-help">Inactive details are hidden from tickets but keep saved values.</p>
+            </div>
+          </section>
+        </div>
+
+        <aside class="scf-preview" aria-label="Live preview">
+          <p class="scf-preview__eyebrow">Live preview</p>
+          <div class="scf-preview__card" data-tcf-preview></div>
+          <ul class="scf-preview__rules" data-tcf-preview-rules aria-live="polite"></ul>
+        </aside>
+      </div>
+
+      <footer class="modal__footer scf-editor__footer">
+        <button type="button" class="button button--danger" data-tcf-delete hidden>Delete detail</button>
+        <span class="scf-editor__spacer"></span>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button" data-tcf-submit>Save detail</button>
+      </footer>
+    </form>
+  </div>
+  <form method="post" data-tcf-delete-form hidden>
+    {% include "partials/csrf.html" %}
+  </form>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/ticket_custom_fields_admin.js') }}" defer></script>
+{% endblock %}

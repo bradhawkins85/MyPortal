@@ -457,6 +457,12 @@ async def get_ticket_dashboard(
     )
     from app.services import slas as sla_service
     sla_lookup = await sla_service.statuses_for_tickets(ticket_ids) if ticket_ids else {}
+    from app.services import ticket_custom_fields as ticket_custom_fields_service
+
+    custom_columns = await ticket_custom_fields_service.list_columns(
+        is_super_admin=bool(current_user.get("is_super_admin")), is_staff=True
+    )
+    custom_lookup = await ticket_custom_fields_service.list_values(ticket_ids, custom_columns)
     dashboard_now = datetime.now(timezone.utc)
 
     def _display_name(record: dict | None) -> str | None:
@@ -580,6 +586,7 @@ async def get_ticket_dashboard(
                 sla_name=sla_data.get("name"),
                 sla_response_due_at=sla_data.get("response_due_at"),
                 sla_resolution_due_at=sla_data.get("resolution_due_at"),
+                custom_fields=custom_lookup.get(numeric_id, {}),
             )
         )
     filters = TicketSearchFilters(

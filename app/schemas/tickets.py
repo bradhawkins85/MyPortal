@@ -223,6 +223,7 @@ class TicketDashboardRow(BaseModel):
     sla_name: Optional[str] = None
     sla_response_due_at: Optional[datetime] = None
     sla_resolution_due_at: Optional[datetime] = None
+    custom_fields: dict[str, str] = Field(default_factory=dict, description="Custom ticket detail list columns, keyed by field key (display text).")
 
     class Config:
         from_attributes = True

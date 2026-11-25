@@ -197,6 +197,12 @@
                   <span>{{ column_label }}</span>
                 </label>
               {% endfor %}
+              {% for column in ticket_custom_columns | default([]) %}
+                <label class="ticket-columns__option">
+                  <input type="checkbox" class="ticket-column-toggle" data-column="{{ column.column }}" checked />
+                  <span>{{ column.label }}</span>
+                </label>
+              {% endfor %}
             </div>
           </div>
         </div>
@@ -290,6 +296,11 @@
               >
                 Edit statuses
               </button>
+            </li>
+          {% endif %}
+          {% if is_super_admin %}
+            <li class="header-title-menu__item" role="none">
+              <a href="/admin/tickets/custom-fields" class="header-title-menu__link" role="menuitem">Custom ticket details</a>
             </li>
           {% endif %}
           {% if show_labour_type_editor %}
@@ -694,6 +705,9 @@
                 <th scope="col" data-sort="string" data-column="latest-reply-internal" class="tickets-table__column tickets-table__column--latest-reply-internal">reply.is_internal</th>
                 <th scope="col" data-sort="string" data-column="latest-reply-kind" class="tickets-table__column tickets-table__column--latest-reply-kind">reply.kind</th>
                 <th scope="col" data-sort="string" data-column="ticket-update-actor-type" class="tickets-table__column tickets-table__column--ticket-update-actor-type">ticket_update.actor_type</th>
+                {% for column in ticket_custom_columns | default([]) %}
+                  <th scope="col" data-sort="{{ 'int' if column.field_type in ('number', 'rating') else 'string' }}" data-column="{{ column.column }}" data-custom-field-key="{{ column.field_key }}" class="tickets-table__column tickets-table__column--custom">{{ column.label }}</th>
+                {% endfor %}
               </tr>
             </thead>
             <tbody>
@@ -806,11 +820,15 @@
                     <td data-label="reply.is_internal" data-column="latest-reply-internal" class="tickets-table__cell tickets-table__cell--latest-reply-internal">{{ 'true' if automation_data.get('latest_reply_is_internal') else ('false' if automation_data.get('latest_reply_id') else '—') }}</td>
                     <td data-label="reply.kind" data-column="latest-reply-kind" class="tickets-table__cell tickets-table__cell--latest-reply-kind">{{ automation_data.get('latest_reply_kind') or '—' }}</td>
                     <td data-label="ticket_update.actor_type" data-column="ticket-update-actor-type" class="tickets-table__cell tickets-table__cell--ticket-update-actor-type">{{ automation_data.get('ticket_update_actor_type') or '—' }}</td>
+                    {% set custom_values = (ticket_custom_values | default({})).get(ticket.id, {}) %}
+                    {% for column in ticket_custom_columns | default([]) %}
+                      <td data-label="{{ column.label }}" data-column="{{ column.column }}" class="tickets-table__cell tickets-table__cell--custom">{{ custom_values.get(column.field_key) or '—' }}</td>
+                    {% endfor %}
                   </tr>
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="{{ 39 + (1 if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
+                  <td colspan="{{ 39 + (ticket_custom_columns | default([]) | length) + (1 if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
                 </tr>
               {% endif %}
             </tbody>

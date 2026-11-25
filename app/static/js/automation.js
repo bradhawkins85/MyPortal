@@ -320,6 +320,32 @@
         }),
       },
     ],
+    'set-ticket-custom-field': [
+      {
+        label: 'Set a custom detail to fixed text',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          field_key: 'escalation_reason',
+          value: 'Waiting on vendor',
+        }),
+      },
+      {
+        label: 'Copy the ticket priority into a custom detail',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          field_key: 'last_known_priority',
+          value: '{{ ticket.priority }}',
+        }),
+      },
+      {
+        label: 'Clear a custom detail',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          field_key: 'escalation_reason',
+          clear: true,
+        }),
+      },
+    ],
     'ai-classify-ticket': [
       {
         label: 'Classify category, priority and duplicates',

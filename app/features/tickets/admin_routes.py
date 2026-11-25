@@ -63,6 +63,8 @@ from app.services import agent as agent_service
 from app.services import ai_consent
 from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
+from app.services import ticket_custom_fields as ticket_custom_fields_service
+from app.repositories import ticket_custom_fields as ticket_custom_fields_repo
 from app.services import rag_index as rag_index_service
 from app.services import rag_retrieval
 from app.services import tickets as tickets_service
@@ -2540,6 +2542,162 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     if has_failed_attachments:
         message_text = "Reply posted, but some attachments failed to upload."
     return flash_redirect(f"/admin/tickets/{ticket_id}", message_text, "success")
+
+
+# ---------------------------------------------------------------------------
+# Custom ticket details
+# ---------------------------------------------------------------------------
+
+_CUSTOM_FIELDS_PAGE = "/admin/tickets/custom-fields"
+
+
+async def _require_custom_field_admin(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return None, redirect
+    if not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+    return current_user, None
+
+
+@router.get("/admin/tickets/custom-fields", response_class=HTMLResponse)
+async def admin_ticket_custom_fields_page(request: Request):
+    current_user, redirect = await _require_custom_field_admin(request)
+    if redirect:
+        return redirect
+    definitions = await ticket_custom_fields_repo.list_definitions()
+    usage = await ticket_custom_fields_repo.count_values_by_field()
+    for definition in definitions:
+        definition["usage_count"] = usage.get(definition["id"], 0)
+    return await _main()._render_template(
+        "admin/ticket_custom_fields.html",
+        request,
+        current_user,
+        extra={
+            "title": "Custom ticket details",
+            "definitions": definitions,
+            "field_types": ticket_custom_fields_service.FIELD_TYPES,
+            "field_type_help": ticket_custom_fields_service.FIELD_TYPE_HELP,
+            "visibilities": ticket_custom_fields_service.VISIBILITIES,
+            "visibility_help": ticket_custom_fields_service.VISIBILITY_HELP,
+            "option_types": sorted(ticket_custom_fields_service.OPTION_TYPES),
+            "max_rating": ticket_custom_fields_service.custom_forms.MAX_RATING,
+        },
+    )
+
+
+@router.post("/admin/tickets/custom-fields", response_class=HTMLResponse)
+async def admin_save_ticket_custom_field(request: Request):
+    current_user, redirect = await _require_custom_field_admin(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    raw_id = str(form.get("field_id") or "").strip()
+    definition_id = int(raw_id) if raw_id.isdigit() else None
+    data = {key: form.get(key) for key in (
+        "label", "field_key", "help_text", "field_type", "visibility", "sort_order", "rating_max",
+    )}
+    data["options"] = form.get("options_json") or ""
+    for flag in ("editable", "show_in_list", "is_active"):
+        data[flag] = bool(form.get(flag))
+    previous = await ticket_custom_fields_repo.get_definition(definition_id) if definition_id else None
+    saved_id, errors = await ticket_custom_fields_service.save_definition(data, definition_id=definition_id)
+    if errors:
+        return flash_redirect(_CUSTOM_FIELDS_PAGE, " ".join(errors), "error")
+    await audit_service.log_action(
+        action="ticket_custom_field.update" if previous else "ticket_custom_field.create",
+        user_id=current_user.get("id"),
+        entity_type="ticket_custom_field",
+        entity_id=saved_id,
+        previous_value=previous,
+        new_value=await ticket_custom_fields_repo.get_definition(saved_id) if saved_id else None,
+        request=request,
+    )
+    return flash_redirect(_CUSTOM_FIELDS_PAGE, "Custom ticket detail saved.", "success")
+
+
+@router.post("/admin/tickets/custom-fields/{field_id:int}/delete", response_class=HTMLResponse)
+async def admin_delete_ticket_custom_field(field_id: int, request: Request):
+    current_user, redirect = await _require_custom_field_admin(request)
+    if redirect:
+        return redirect
+    previous = await ticket_custom_fields_repo.get_definition(field_id)
+    if not previous:
+        return flash_redirect(_CUSTOM_FIELDS_PAGE, "That field no longer exists.", "error")
+    await ticket_custom_fields_repo.delete_definition(field_id)
+    await audit_service.log_action(
+        action="ticket_custom_field.delete",
+        user_id=current_user.get("id"),
+        entity_type="ticket_custom_field",
+        entity_id=field_id,
+        previous_value=previous,
+        request=request,
+    )
+    return flash_redirect(_CUSTOM_FIELDS_PAGE, f"Deleted “{previous['label']}” and its saved values.", "success")
+
+
+def _submitted_custom_field_values(form: Any, fields: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Read ``cf__<key>`` inputs for the keys the page listed in ``cf_keys``."""
+    listed = {str(key) for key in form.getlist("cf_keys")}
+    submitted: dict[str, Any] = {}
+    for field in fields:
+        key = field["field_key"]
+        if key not in listed:
+            continue
+        values = [str(value) for value in form.getlist("cf__" + key)]
+        if field["field_type"] == "multiselect":
+            submitted[key] = values
+        else:
+            submitted[key] = values[-1] if values else ""
+    for key in listed - {field["field_key"] for field in fields}:
+        submitted[key] = ""
+    return submitted
+
+
+@router.post("/admin/tickets/{ticket_id:int}/custom-fields", response_class=HTMLResponse)
+async def admin_save_ticket_custom_field_values(ticket_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    if not await tickets_repo.get_ticket(ticket_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    is_super_admin = bool(current_user.get("is_super_admin"))
+    fields = await ticket_custom_fields_service.build_ticket_fields(
+        ticket_id, is_super_admin=is_super_admin, is_staff=True
+    )
+    form = await request.form()
+    editable = [field for field in fields if field["can_edit"]]
+    submitted = _submitted_custom_field_values(form, editable)
+    target = f"/admin/tickets/{ticket_id}#ticket-custom-details"
+    changes, errors = await ticket_custom_fields_service.save_ticket_values(
+        ticket_id,
+        submitted,
+        is_super_admin=is_super_admin,
+        is_staff=True,
+        user_id=current_user.get("id"),
+    )
+    if errors:
+        return flash_redirect(target, " ".join(errors), "error")
+    if not changes:
+        return flash_redirect(target, "No custom details changed.", "info")
+    await audit_service.log_action(
+        action="ticket.custom_fields.update",
+        user_id=current_user.get("id"),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        previous_value={change["field_key"]: change["previous"] for change in changes},
+        new_value={change["field_key"]: change["value"] for change in changes},
+        request=request,
+    )
+    try:
+        await tickets_service.emit_ticket_updated_event(
+            ticket_id, actor_type="technician", actor=current_user
+        )
+    except Exception as exc:  # pragma: no cover - the values are already saved
+        log_error("Failed to emit ticket update after custom detail change", ticket_id=int(ticket_id), error=str(exc))
+    return flash_redirect(target, "Custom details saved.", "success")
 
 
 __all__ = ["router"]

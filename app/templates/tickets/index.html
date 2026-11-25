@@ -66,6 +66,9 @@
             <th scope="col" data-column-key="status" data-sort="string">Status</th>
             <th scope="col" data-column-key="requester" data-sort="string">Requestor</th>
             <th scope="col" data-column-key="updated" data-sort="date">Updated</th>
+            {% for column in ticket_custom_columns | default([]) %}
+              <th scope="col" data-column-key="{{ column.column }}" data-sort="{{ 'int' if column.field_type in ('number', 'rating') else 'string' }}">{{ column.label }}</th>
+            {% endfor %}
           </tr>
         </thead>
         <tbody>
@@ -87,11 +90,14 @@
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
+                {% for column in ticket_custom_columns | default([]) %}
+                  <td data-column-key="{{ column.column }}" data-label="{{ column.label }}">{{ ((ticket_custom_values | default({})).get(ticket.id) or {}).get(column.field_key) or '—' }}</td>
+                {% endfor %}
               </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="5" class="table__empty">No tickets available.</td>
+              <td colspan="{{ 5 + (ticket_custom_columns | default([]) | length) }}" class="table__empty">No tickets available.</td>
             </tr>
           {% endif %}
         </tbody>

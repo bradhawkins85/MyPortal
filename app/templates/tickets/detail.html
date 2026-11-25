@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "macros/mobile.html" import mobile_collapsible %}
 {% from "macros/ai_rating.html" import ai_rating %}
+{% from "macros/ticket_custom_details.html" import custom_details_card with context %}
 
 {% block header_title %}
   <div class="page-header-bar page-header-bar--record">
@@ -105,6 +106,8 @@
               </div>
             </div>
           </details>
+
+          {{ custom_details_card(ticket_custom_fields | default([]), show_visibility=has_helpdesk_access) }}
 
           {% if assigned_user and assigned_user.booking_link_url %}
             <article class="card card--panel">

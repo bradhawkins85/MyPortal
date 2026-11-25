@@ -1403,6 +1403,14 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "enabled": True,
     },
     {
+        "slug": "set-ticket-custom-field",
+        "name": "Set Ticket Custom Detail",
+        "description": "Set or clear a custom ticket detail, including read-only details technicians cannot change.",
+        "icon": "🗂️",
+        "settings": {},
+        "enabled": True,
+    },
+    {
         "slug": "ai-rename-ticket",
         "name": "AI Rename Ticket",
         "description": "Use the current subject and initial problem description to create a more descriptive 3 to 12 word ticket subject.",
@@ -2837,6 +2845,19 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "set-ticket-custom-field": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string", "placeholder": "{{ ticket.id }}"},
+            {"name": "field_key", "label": "Custom detail", "type": "string", "required": True},
+            {
+                "name": "value",
+                "label": "Value",
+                "type": "string",
+                "placeholder": "Text, a template such as {{ ticket.priority }}, or a step output",
+            },
+            {"name": "clear", "label": "Clear the value instead", "type": "boolean"},
+        ],
+    },
     "ai-rename-ticket": {
         "fields": [
             {
@@ -3215,11 +3236,35 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
             internal_module["payload_schema"] = await _rmm_script_payload_schema(
                 internal_module["payload_schema"]
             )
+        elif module_slug == "set-ticket-custom-field":
+            internal_module["payload_schema"] = await _ticket_custom_field_payload_schema(
+                internal_module["payload_schema"]
+            )
         actionable_by_slug[module_slug] = internal_module
     return sorted(
         actionable_by_slug.values(),
         key=lambda module: str(module.get("name") or "").lower(),
     )
+
+
+async def _ticket_custom_field_payload_schema(schema: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The custom detail action's schema with the defined field keys to choose from."""
+
+    if not schema:
+        return None
+    try:
+        definitions = await import_module("app.repositories.ticket_custom_fields").list_definitions()
+    except Exception as exc:  # pragma: no cover - the form still accepts a typed value
+        logger.warning("Could not list custom ticket details for the automation form", error=str(exc))
+        return dict(schema)
+    keys = [str(definition["field_key"]) for definition in definitions]
+    fields = []
+    for field in schema.get("fields") or []:
+        field = dict(field)
+        if field.get("name") == "field_key" and keys:
+            field["enum"] = keys
+        fields.append(field)
+    return {**schema, "fields": fields}
 
 
 async def _rmm_script_payload_schema(schema: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -3439,6 +3484,7 @@ async def trigger_module(
         "unifi-talk": _invoke_unifi_talk,
         "update-ticket": _invoke_update_ticket,
         "update-ticket-description": _invoke_update_ticket_description,
+        "set-ticket-custom-field": _invoke_set_ticket_custom_field,
         "ai-rename-ticket": _invoke_ai_rename_ticket,
         "ai-classify-ticket": _invoke_ai_classify_ticket,
         "ai-link-related": _invoke_ai_link_related,
@@ -6555,6 +6601,56 @@ async def _invoke_update_ticket_description(
             "updated_fields": ["description"],
         },
     )
+
+
+async def _invoke_set_ticket_custom_field(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Set (or clear) one custom ticket detail from an automation step.
+
+    Automations may set read-only details; that is what the read-only flag is
+    for. The ticket defaults to the one in the automation context.
+    """
+    raw_context = payload.get("context")
+    context = raw_context if isinstance(raw_context, Mapping) else {}
+    ticket_id = payload.get("ticket_id")
+    if ticket_id in (None, ""):
+        ticket_id = context.get("ticket_id")
+    if ticket_id in (None, ""):
+        ticket_context = context.get("ticket")
+        if isinstance(ticket_context, Mapping):
+            ticket_id = ticket_context.get("id")
+    try:
+        ticket_id_int = int(str(ticket_id).strip())
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id is required and must be a whole number") from None
+    field_key = str(payload.get("field_key") or "").strip()
+    if not field_key:
+        raise ValueError("field_key is required")
+    if not await _tickets_repo().get_ticket(ticket_id_int):
+        raise ValueError(f"Ticket {ticket_id_int} not found")
+
+    value = None if payload.get("clear") is True else payload.get("value")
+    from app.services import ticket_custom_fields as ticket_custom_fields_service
+
+    try:
+        outcome = await ticket_custom_fields_service.set_value_by_key(
+            ticket_id_int, field_key, value, source="automation"
+        )
+    except ValueError as exc:
+        return {"status": "failed", "error": str(exc), "ticket_id": ticket_id_int, "field_key": field_key}
+    return {
+        "status": "succeeded",
+        "ticket_id": ticket_id_int,
+        "field_key": outcome["field_key"],
+        "value": outcome["value"],
+        "changed": outcome["changed"],
+        "previous_values": {"custom_fields." + outcome["field_key"]: outcome["previous"]},
+        "updated_fields": ["custom_fields." + outcome["field_key"]] if outcome["changed"] else [],
+    }
 
 
 def _extract_ai_ticket_subject(payload: Any) -> str | None:

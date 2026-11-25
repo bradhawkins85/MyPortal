@@ -2,6 +2,7 @@
 {% from "macros/header.html" import page_header_overflow %}
 {% from "macros/ai_rating.html" import ai_rating %}
 {% import "rmm/_macros.html" as rmm_ui %}
+{% from "macros/ticket_custom_details.html" import custom_details_card with context %}
 
 
 {% block header_title %}
@@ -606,6 +607,8 @@
             </div>
             </div>
           </details>
+
+          {{ custom_details_card(ticket_custom_fields, action='/admin/tickets/' ~ ticket.id ~ '/custom-fields', show_visibility=True) }}
 
           {% if ticket_assigned_user and ticket_assigned_user.booking_link_url %}
             <article class="card card--panel">

@@ -1342,6 +1342,11 @@
       appendTextCell('latest-reply-internal', 'reply.is_internal', ticket.latest_reply_is_internal ?? '—');
       appendTextCell('latest-reply-kind', 'reply.kind', ticket.latest_reply_kind || '—');
       appendTextCell('ticket-update-actor-type', 'ticket_update.actor_type', ticket.ticket_update_actor_type || '—');
+      const customValues = ticket.custom_fields && typeof ticket.custom_fields === 'object' ? ticket.custom_fields : {};
+      table.querySelectorAll('thead th[data-custom-field-key]').forEach((header) => {
+        const cell = appendTextCell(header.dataset.column, header.textContent.trim(), customValues[header.dataset.customFieldKey] || '—');
+        cell.className = 'tickets-table__cell tickets-table__cell--custom';
+      });
 
       return row;
     }

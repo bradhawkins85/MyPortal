@@ -24284,3 +24284,45 @@ a.sch-item__company:focus-visible {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* Custom ticket details ---------------------------------------------------- */
+.scf-option.tcf-option {
+  grid-template-columns: 3.75rem minmax(0, 1fr) 2.25rem;
+}
+
+.tcd-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tcd-term {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
+.tcd-term .form-label {
+  margin: 0;
+}
+
+.tcd-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+}
+
+.tcd-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight) var(--space-gap-roomy);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.tcd-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-gap-roomy);
+}

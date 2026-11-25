@@ -838,6 +838,18 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
         filter_context = await _safely_call(tickets_repo.get_automation_filter_context, ticket_id)
         if isinstance(filter_context, Mapping):
             enriched.update(filter_context)
+        if "custom_fields" not in enriched:
+            from app.services import ticket_custom_fields as ticket_custom_fields_service
+
+            try:
+                custom_fields = await _safely_call(
+                    ticket_custom_fields_service.automation_context, ticket_id
+                )
+            except Exception as exc:  # pragma: no cover - never block ticket events
+                log_warning("Could not load custom ticket details", ticket_id=ticket_id, error=str(exc))
+                custom_fields = None
+            enriched["custom_fields"] = custom_fields or {}
+    enriched.setdefault("custom_fields", {})
     enriched.setdefault("billable_minutes", 0)
     enriched.setdefault("non_billable_minutes", 0)
     enriched.setdefault(
