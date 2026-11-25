@@ -171,7 +171,7 @@
   const rulesField = runModal.querySelector('[data-rmm-rules-field]');
   const targeting = window.MyPortalRmmTargeting ? window.MyPortalRmmTargeting.create({
     host: rulesField, api: api,
-    getContext: () => ({ scope: state.mode === 'schedule' && scopeSelect.value === 'all' ? 'global' : 'company',
+    getContext: () => ({ scope: state.mode !== 'run' && scopeSelect.value === 'all' ? 'global' : 'company',
       script_id: state.detail && state.detail.script.id }),
   }) : null;
 
@@ -466,7 +466,7 @@
     runModal.querySelectorAll('[data-rmm-mode-only]').forEach((node) => {
       node.hidden = node.getAttribute('data-rmm-mode-only') !== state.mode;
     });
-    scopeField.hidden = state.mode !== 'schedule' || !config.is_super_admin || Boolean(state.item);
+    scopeField.hidden = state.mode === 'run' || !config.is_super_admin || Boolean(state.item);
     const everyCompany = scopeSelect.value === 'all';
     const assetsOption = targetMode.querySelector('[data-rmm-company-only]');
     assetsOption.disabled = everyCompany || state.mode === 'onboarding';
@@ -998,6 +998,7 @@
         enabled: enabledBox.checked,
       });
     } else {
+      body.scope = scopeSelect.value;
       body.tag_ids = targetMode.value === 'tags' ? selectedTags() : [];
       body.continue_on_failure = continueBox.checked;
       body.skip_existing_assets = skipExistingBox.checked;

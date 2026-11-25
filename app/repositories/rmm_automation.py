@@ -52,6 +52,7 @@ def _step_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     # A Chocolatey step installs these packages instead of running a script.
     step["package_ids"] = [str(item) for item in _decode_json(step.pop("package_ids_json", None), [])]
     step["kind"] = "chocolatey" if step.get("script_id") is None else "script"
+    step["scope"] = "all" if step.get("company_id") is None else "company"
     return step
 
 
@@ -218,14 +219,20 @@ def _package_ids_json(values: dict[str, Any]) -> str | None:
     return json.dumps(values["package_ids"]) if values.get("package_ids") else None
 
 
-async def list_steps(*, company_id: int) -> list[dict[str, Any]]:
-    """A company's onboarding steps, in order."""
+async def list_steps(*, company_id: int | None) -> list[dict[str, Any]]:
+    """A company's onboarding steps, in order; ``None`` lists the every-company steps."""
 
-    rows = await db.fetch_all(
-        f"SELECT {_STEP_COLUMNS} FROM rmm_onboarding_steps o LEFT JOIN rmm_scripts sc ON sc.id = o.script_id "  # nosec B608 - fixed columns
-        "WHERE o.company_id = %s ORDER BY o.position, o.id",
-        (company_id,),
-    )
+    if company_id is None:
+        rows = await db.fetch_all(
+            "SELECT " + _STEP_COLUMNS + " FROM rmm_onboarding_steps o LEFT JOIN rmm_scripts sc ON sc.id = o.script_id "
+            "WHERE o.company_id IS NULL ORDER BY o.position, o.id",
+        )
+    else:
+        rows = await db.fetch_all(
+            "SELECT " + _STEP_COLUMNS + " FROM rmm_onboarding_steps o LEFT JOIN rmm_scripts sc ON sc.id = o.script_id "
+            "WHERE o.company_id = %s ORDER BY o.position, o.id",
+            (company_id,),
+        )
     return [_step_row(row) for row in rows or []]
 
 
@@ -242,9 +249,12 @@ async def get_step(step_id: int, *, with_secrets: bool = False) -> dict[str, Any
 async def create_step(values: dict[str, Any]) -> int:
     now = _utcnow()
     company_id = values["company_id"]
-    row = await db.fetch_one(
-        "SELECT MAX(position) AS top FROM rmm_onboarding_steps WHERE company_id = %s", (company_id,)
-    )
+    if company_id is None:
+        row = await db.fetch_one("SELECT MAX(position) AS top FROM rmm_onboarding_steps WHERE company_id IS NULL")
+    else:
+        row = await db.fetch_one(
+            "SELECT MAX(position) AS top FROM rmm_onboarding_steps WHERE company_id = %s", (company_id,)
+        )
     position = int((row or {}).get("top") or 0) + 1
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_onboarding_steps (company_id, position, script_id, tag_ids_json, target_rules_json, target_mode, entries_encrypted, "

@@ -363,12 +363,14 @@ async def sqlite_db(monkeypatch):
                  "504_chocolatey_software_matches.sql", "505_chocolatey_catalog_lookups.sql", "510_rmm_script_policy.sql", "511_rmm_offline_wait_timeout.sql",
                  "572_rmm_windows_activation.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
-    # Mirrors migration 506 (Chocolatey onboarding steps), whose MODIFY SQLite cannot run.
+    # Mirrors migrations 506 (Chocolatey onboarding steps) and 573 (every-company
+    # onboarding steps), whose MODIFY SQLite cannot run.
     cursor = await conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'rmm_onboarding_steps'")
     steps_sql = (await cursor.fetchone())[0]
-    assert "script_id INT NOT NULL" in steps_sql
+    assert "script_id INT NOT NULL" in steps_sql and "company_id INT NOT NULL" in steps_sql
+    steps_sql = steps_sql.replace("script_id INT NOT NULL", "script_id INT NULL").replace("company_id INT NOT NULL", "company_id INT NULL")
     await conn.executescript(
-        "DROP TABLE rmm_onboarding_steps;\n" + steps_sql.replace("script_id INT NOT NULL", "script_id INT NULL") + ";\n"
+        "DROP TABLE rmm_onboarding_steps;\n" + steps_sql + ";\n"
         "ALTER TABLE rmm_onboarding_steps ADD COLUMN package_ids_json TEXT;"
     )
     for name in ("508_rmm_script_run_as.sql", "509_rmm_ticket_script_runs.sql", "512_rmm_onboarding_skip_existing.sql",

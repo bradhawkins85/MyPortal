@@ -21,6 +21,9 @@ and are resolved per device each time a run is queued.
   cancelled still moves its sequence on. A step can install Chocolatey
   packages instead of running a script; those steps run on Windows devices
   only, through the built-in patch job (see :func:`register_package_steps`).
+  Steps with no company run for every company, before each company's own
+  steps; their device rules (such as "Company name is not …") decide where
+  they apply. Only scripts in Common/ can be used for them.
 """
 
 from __future__ import annotations
@@ -476,7 +479,7 @@ async def _skip_existing_before(payload: Mapping[str, Any], step_id: int | None)
     return _utcnow().replace(microsecond=0)
 
 
-async def _save_package_step(*, step_id: int | None, company_id: int, payload: Mapping[str, Any],
+async def _save_package_step(*, step_id: int | None, company_id: int | None, payload: Mapping[str, Any],
                              user_id: int | None) -> int:
     errors: dict[str, str] = {}
     if "validate" not in _PACKAGE_STEPS:
@@ -493,7 +496,7 @@ async def _save_package_step(*, step_id: int | None, company_id: int, payload: M
     if errors:
         raise RunRequestError(errors)
     values = {
-        "company_id": int(company_id), "target_mode": target_mode, "target_rules": target_rules,
+        "company_id": company_id, "target_mode": target_mode, "target_rules": target_rules,
         "script_id": None, "tag_ids": tag_ids, "entries_encrypted": None,
         "inputs": [{"key": "applications", "label": "Applications", "value": ", ".join(package_ids)}],
         "timeout_seconds": 7200, "continue_on_failure": bool(payload.get("continue_on_failure")),
@@ -509,17 +512,18 @@ async def _save_package_step(*, step_id: int | None, company_id: int, payload: M
 async def save_step(
     *,
     step_id: int | None,
-    company_id: int,
+    company_id: int | None,
     payload: Mapping[str, Any],
     user_id: int | None,
 ) -> int:
     """Create or update an onboarding step with all, tag or rule targeting.
-    A payload with ``kind`` ``chocolatey`` installs ``package_ids`` instead."""
+    A payload with ``kind`` ``chocolatey`` installs ``package_ids`` instead.
+    ``company_id`` None makes the step run for every company."""
 
     if payload.get("kind") == "chocolatey":
         return await _save_package_step(step_id=step_id, company_id=company_id, payload=payload, user_id=user_id)
     errors: dict[str, str] = {}
-    script = await _scoped_script(payload.get("script_id"), int(company_id))
+    script = await _scoped_script(payload.get("script_id"), company_id)
     tag_ids = await tags_repo.existing_tag_ids(
         _int_list(payload.get("tag_ids"), MAX_SCHEDULE_TAGS, "tags", "tags")
     )
@@ -542,7 +546,7 @@ async def save_step(
     if errors:
         raise RunRequestError(errors)
     values = {
-        "company_id": int(company_id),
+        "company_id": company_id,
         "target_mode": target_mode,
         "target_rules": target_rules,
         "script_id": int(script["id"]),
@@ -565,7 +569,9 @@ async def save_step(
     return step_id
 
 
-async def reorder_steps(company_id: int, step_ids: Iterable[Any]) -> None:
+async def reorder_steps(company_id: int | None, step_ids: Iterable[Any]) -> None:
+    """Reorder a company's steps, or (``company_id`` None) the every-company steps."""
+
     current = [int(step["id"]) for step in await automation_repo.list_steps(company_id=company_id)]
     try:
         wanted = [int(step_id) for step_id in step_ids]
@@ -586,8 +592,14 @@ def step_name(step: Mapping[str, Any]) -> str:
     return step.get("script_name") or "Script"
 
 
+async def list_plan_steps(company_id: int) -> list[dict[str, Any]]:
+    """The every-company steps, then the company's own, in the order they run."""
+
+    return await automation_repo.list_steps(company_id=None) + await automation_repo.list_steps(company_id=company_id)
+
+
 async def build_plan(company_id: int) -> list[dict[str, Any]]:
-    """The company's steps, in order, as a fresh onboarding plan."""
+    """The every-company and company steps, in order, as a fresh onboarding plan."""
 
     names = await tag_names()
     return [
@@ -597,11 +609,12 @@ async def build_plan(company_id: int) -> list[dict[str, Any]]:
             "script_name": step_name(step),
             "tags": [names[tag_id] for tag_id in step.get("tag_ids") or [] if tag_id in names],
             "continue_on_failure": bool(step.get("continue_on_failure")),
+            "scope": step.get("scope") or "company",
             "status": "pending",
             "run_id": None,
             "message": None,
         }
-        for step in await automation_repo.list_steps(company_id=company_id)
+        for step in await list_plan_steps(company_id)
     ]
 
 

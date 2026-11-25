@@ -13,6 +13,14 @@
   const skipExisting = modal.querySelector('[data-rmm-choco-step-skip-existing]');
   const error = modal.querySelector('[data-rmm-choco-step-error]');
   const submit = modal.querySelector('[data-rmm-choco-step-submit]');
+  const scopeField = modal.querySelector('[data-rmm-choco-step-scope-field]');
+  const scope = modal.querySelector('[data-rmm-choco-step-scope]');
+  const rulesHost = modal.querySelector('[data-rmm-choco-step-rules] [data-rmm-rules-field]');
+  const rmm = window.MyPortalRmm;
+  const targeting = rulesHost && window.MyPortalRmmTargeting && rmm ? window.MyPortalRmmTargeting.create({
+    host: rulesHost, api: rmm.api,
+    getContext: () => ({ scope: scope && scope.value === 'all' ? 'global' : 'company' }),
+  }) : null;
   const picker = window.MyPortalChocoPicker.create({
     search: modal.querySelector('[data-rmm-choco-step-search]'),
     button: modal.querySelector('[data-rmm-choco-step-search-button]'),
@@ -28,6 +36,8 @@
   function setTarget(value) {
     modal.querySelectorAll('[data-rmm-choco-step-target]').forEach((radio) => { radio.checked = radio.value === value; });
     tagsField.hidden = value !== 'tags';
+    if (rulesHost) rulesHost.hidden = value !== 'rules';
+    if (targeting) targeting.invalidate();
   }
 
   function open(item) {
@@ -37,7 +47,12 @@
     error.hidden = true;
     extra.value = '';
     picker.select(item ? item.package_ids || [] : []);
-    setTarget(item && item.target_mode === 'tags' ? 'tags' : 'all');
+    if (scope) {
+      scope.value = item && item.scope === 'all' ? 'all' : 'company';
+      scopeField.hidden = Boolean(item);
+    }
+    if (targeting) targeting.setRules((item && item.target_rules) || { operator: 'and', children: [] });
+    setTarget(item && ['tags', 'rules'].includes(item.target_mode) ? item.target_mode : 'all');
     const chosenTags = new Set((item && item.tag_ids) || []);
     Array.from(tags.options).forEach((option) => { option.selected = chosenTags.has(Number(option.value)); });
     carryOn.checked = Boolean(item && item.continue_on_failure);
@@ -59,6 +74,7 @@
   function fail(text) { error.textContent = text; error.hidden = false; }
 
   modal.querySelectorAll('[data-rmm-choco-step-target]').forEach((radio) => radio.addEventListener('change', () => setTarget(target())));
+  if (scope) scope.addEventListener('change', () => { if (targeting) targeting.invalidate(); });
   modal.querySelectorAll('[data-rmm-choco-step-close]').forEach((button) => button.addEventListener('click', close));
   modal.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
   document.querySelectorAll('[data-rmm-choco-step-new]').forEach((button) => button.addEventListener('click', () => open(null)));
@@ -70,13 +86,15 @@
     const tagIds = Array.from(tags.selectedOptions).map((option) => Number(option.value));
     if (!ids.length) { fail('Choose at least one application.'); return; }
     if (target() === 'tags' && !tagIds.length) { fail('Choose at least one tag.'); return; }
+    if (target() === 'rules' && (!targeting || !targeting.validate(true))) { fail('Add at least one valid device rule.'); return; }
     submit.disabled = true;
     try {
       const csrf = document.querySelector('meta[name="csrf-token"]');
       const response = await fetch('/api/rmm/onboarding/steps' + (stepId ? '/' + encodeURIComponent(stepId) : ''), {
         method: stepId ? 'PUT' : 'POST', credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrf ? csrf.content : '' },
-        body: JSON.stringify({ kind: 'chocolatey', package_ids: ids, target_mode: target(),
+        body: JSON.stringify({ kind: 'chocolatey', scope: scope ? scope.value : 'company', package_ids: ids, target_mode: target(),
+          target_rules: target() === 'rules' && targeting ? targeting.getRules() : null,
           tag_ids: target() === 'tags' ? tagIds : [], continue_on_failure: carryOn.checked,
           skip_existing_assets: skipExisting.checked }),
       });

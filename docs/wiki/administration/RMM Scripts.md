@@ -609,11 +609,23 @@ first.
 
 **Add Chocolatey packages** adds a step that installs apps instead of running a script:
 tick apps from the downloaded Chocolatey app list (or enter package IDs, up to 20) and
-choose every device or devices with any of the chosen tags. The step runs the built-in patch
+choose every device, devices with any of the chosen tags or devices that match rules. The step runs the built-in patch
 job with the company's enabled Chocolatey sources, updates apps that are already installed,
 never restarts the device and shows in Scripts run history. Only Windows devices run it;
 others skip it. Apply migration **506** first. See
 [RMM Patch Management](RMM%20Patch%20Management.md) for how packages are installed.
+
+#### Onboarding steps for every company
+
+Super admins can set **Runs for** to **Every company's devices** when adding a script or
+Chocolatey step, so one step covers every client instead of being added to each company.
+Every-company steps are listed under **Every company** on each company's Onboarding scripts
+section, run before that company's own steps, and are reordered among themselves. Only
+scripts in the Common folder can be used, and a Chocolatey step installs with each device's
+company's Chocolatey sources. Use device rules to choose where the step applies, for example
+**Asset tag** equals `Workstation` AND **Company name** is not `Company ABC` runs on every
+workstation except Company ABC's. Other users see these steps but cannot change them.
+Apply migration **573** first.
 
 **Onboarding history** shows each device's progress; choose **View** to see every step and
 open its run. **Run onboarding** runs the current steps on a device again, for example after

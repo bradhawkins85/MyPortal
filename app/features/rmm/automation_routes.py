@@ -1,9 +1,11 @@
 """Scheduled and onboarding RMM scripts: page and APIs.
 
 Company scoped like the Scripts page (``menu.rmm_scripts``; write access
-changes schedules and onboarding). Onboarding steps belong to the company.
-Schedules for every company are shown to everyone and changed only by super
-admins.
+changes schedules and onboarding). Onboarding steps belong to the company, or
+(``scope="all"``) to every company: those run before each company's own steps
+and use device rules such as "Company name is not …" to leave companies out.
+Schedules and onboarding steps for every company are shown to everyone and
+changed only by super admins.
 
 * ``GET /rmm/automation`` schedules, onboarding steps and onboarding history
 * ``/api/rmm/schedules`` create, edit, enable, run now and delete schedules;
@@ -74,6 +76,14 @@ def _step_public(step: dict[str, Any]) -> dict[str, Any]:
     return _serialise({key: value for key, value in step.items() if key != "entries_encrypted"}) or {}
 
 
+def _step_view(step: dict[str, Any], names: dict[int, str]) -> dict[str, Any]:
+    return {
+        **_step_public(step),
+        "name": automation.step_name(step),
+        "tag_names": [names[tag_id] for tag_id in step.get("tag_ids") or [] if tag_id in names],
+    }
+
+
 async def _editable(item: dict[str, Any]) -> dict[str, str]:
     if item.get("script_id") is None:
         return {}
@@ -101,10 +111,8 @@ async def automation_page(request: Request):
             "title": "Script automation",
             "company": company,
             "schedules": [_schedule_public(item) for item in schedules],
-            "steps": [
-                {**_step_public(step), "name": automation.step_name(step), "tag_names": [names[tag_id] for tag_id in step.get("tag_ids") or [] if tag_id in names]}
-                for step in await automation_repo.list_steps(company_id=company_id)
-            ],
+            "steps": [_step_view(step, names) for step in await automation_repo.list_steps(company_id=company_id)],
+            "global_steps": [_step_view(step, names) for step in await automation_repo.list_steps(company_id=None)],
             "onboarding_runs": [_serialise(run) for run in await automation_repo.list_onboarding_runs(company_id=company_id)],
             "agents": [_serialise(agent) for agent in agents],
             "windows_agents": [_serialise(agent) for agent in agents if str(agent.get("os") or "").lower() == "windows"],
@@ -263,6 +271,7 @@ async def delete_schedule_api(schedule_id: int, request: Request):
 
 class StepRequest(BaseModel):
     kind: Literal["script", "chocolatey"] = "script"
+    scope: Scope = "company"
     target_mode: str = Field(default="tags", max_length=16)
     target_rules: dict[str, Any] | None = None
     script_id: int | None = None
@@ -278,6 +287,7 @@ class StepRequest(BaseModel):
 
 class OrderRequest(BaseModel):
     step_ids: list[int] = Field(default_factory=list, max_length=500)
+    scope: Scope = "company"
 
 
 @router.get("/api/rmm/onboarding/steps/{step_id:int}", summary="Get an onboarding step and its saved values")
@@ -289,18 +299,22 @@ async def get_step_api(step_id: int, request: Request):
 
 async def _save_step(request: Request, payload: StepRequest, step_id: int | None):
     user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    scope_company = _scope_company(payload.scope, company_id, user)
     if step_id is not None:
-        _check_visible(await automation_repo.get_step(step_id), company_id, "Step")
+        existing = _check_visible(await automation_repo.get_step(step_id), company_id, "Step")
+        _check_writable(existing, user)
+        # A step keeps its scope; the editor does not move it between lists.
+        scope_company = None if existing.get("company_id") is None else int(company_id)
     try:
         saved_id = await automation.save_step(
-            step_id=step_id, company_id=company_id, payload=payload.model_dump(), user_id=user.get("id"),
+            step_id=step_id, company_id=scope_company, payload=payload.model_dump(), user_id=user.get("id"),
         )
     except RunRequestError as exc:
         return _invalid(exc)
     await audit_service.record(
         action="rmm.onboarding.step.create" if step_id is None else "rmm.onboarding.step.update",
         request=request, user_id=user.get("id"), entity_type="rmm_onboarding_step", entity_id=saved_id,
-        metadata={"script_id": payload.script_id, "package_ids": payload.package_ids, "company_id": company_id,
+        metadata={"script_id": payload.script_id, "package_ids": payload.package_ids, "company_id": scope_company,
                   "tag_ids": payload.tag_ids, "run_as": payload.run_as,
                   "skip_existing_assets": payload.skip_existing_assets},
     )
@@ -321,6 +335,7 @@ async def update_step_api(step_id: int, payload: StepRequest, request: Request):
 async def delete_step_api(step_id: int, request: Request):
     user, _company, company_id, _can_run = await _context(request, write=True, api=True)
     step = _check_visible(await automation_repo.get_step(step_id), company_id, "Step")
+    _check_writable(step, user)
     await automation_repo.delete_step(step_id)
     await audit_service.record(
         action="rmm.onboarding.step.delete", request=request, user_id=user.get("id"),
@@ -332,13 +347,14 @@ async def delete_step_api(step_id: int, request: Request):
 @router.post("/api/rmm/onboarding/steps/order", summary="Reorder onboarding steps")
 async def reorder_steps_api(payload: OrderRequest, request: Request):
     user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    scope_company = _scope_company(payload.scope, company_id, user)
     try:
-        await automation.reorder_steps(company_id, payload.step_ids)
+        await automation.reorder_steps(scope_company, payload.step_ids)
     except RunRequestError as exc:
         return JSONResponse({"detail": next(iter(exc.errors.values()))}, status_code=409)
     await audit_service.record(
         action="rmm.onboarding.reorder", request=request, user_id=user.get("id"),
-        entity_type="rmm_onboarding_step", metadata={"company_id": company_id, "order": payload.step_ids},
+        entity_type="rmm_onboarding_step", metadata={"company_id": scope_company, "order": payload.step_ids},
     )
     return {"ok": True}
 
