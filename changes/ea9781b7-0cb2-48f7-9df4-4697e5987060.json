@@ -1,0 +1,7 @@
+{
+  "guid": "ea9781b7-0cb2-48f7-9df4-4697e5987060",
+  "occurred_at": "2026-11-25T03:38Z",
+  "change_type": "Improvement",
+  "summary": "The asset page no longer shows the \"reported by the tray agent\" note after WAN location or the \"reported as\" note after Type.",
+  "content_hash": "6a4802101cfb7c74ad4e54413e9ca4665f719b412dd4e0a5f3b175a89e0e3510"
+}
