@@ -163,6 +163,25 @@ func TestAbortStopsTheScriptAndWhatItStarted(t *testing.T) {
 	}
 }
 
+// A script that leaves a background process holding its output (as RustDesk's
+// first install on macOS does) still finished: report its exit code and output.
+func TestBackgroundProcessHoldingOutputDoesNotFailTheRun(t *testing.T) {
+	requireBash(t)
+	previous := outputDrainDelay
+	outputDrainDelay = 200 * time.Millisecond
+	t.Cleanup(func() { outputDrainDelay = previous })
+	script := "sleep 5 &\necho '##myportal[session.id]=123'"
+	job := client.Job{ID: 10, Language: "bash", Script: script, SHA256: checksum(script), TimeoutSeconds: 60}
+	result := New(t.TempDir()).Run(context.Background(), job)
+	if result.Error != "" || result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("result = %#v", result)
+	}
+	want := []client.CustomValue{{Scope: "session", Name: "id", Value: "123"}}
+	if !reflect.DeepEqual(result.CustomValues, want) {
+		t.Fatalf("custom values = %#v", result.CustomValues)
+	}
+}
+
 func TestOutputIsCapped(t *testing.T) {
 	buf := &limitedBuffer{limit: 4}
 	_, _ = buf.Write([]byte("abcdef"))

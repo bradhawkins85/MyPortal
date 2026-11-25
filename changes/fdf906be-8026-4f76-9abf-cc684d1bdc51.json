@@ -1,0 +1,7 @@
+{
+  "guid": "fdf906be-8026-4f76-9abf-cc684d1bdc51",
+  "occurred_at": "2026-11-25T04:38Z",
+  "change_type": "Fix",
+  "summary": "Remote control activation (such as RustDesk's first install on a Mac) no longer fails with \"Could not start the script\" when the script finished but left a background process running; the run now reports its result and session ID.",
+  "content_hash": "627d8452be700419e3c007f0a8faff963517c41a2134cbd2c2c44291010049c2"
+}
