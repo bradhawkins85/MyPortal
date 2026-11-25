@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 
@@ -206,3 +206,41 @@ def test_refusal_log_names_the_client_ip():
         logger.remove(sink_id)
     refusal = [m for m in messages if "Trusted network check refused" in m]
     assert refusal and "client_ip=198.51.100.9" in refusal[0]
+
+
+def _websocket_app(policy: TrustedNetworkPolicy) -> FastAPI:
+    app = FastAPI()
+
+    async def ws_endpoint(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.send_json({"trusted": websocket.scope["state"]["trusted_network"]})
+        await websocket.close()
+
+    app.add_api_websocket_route("/ws/updates", ws_endpoint)
+    app.add_api_websocket_route("/admin/tickets/ws", ws_endpoint)
+    app.add_middleware(TrustedNetworkMiddleware, policy=policy)
+    return app
+
+
+@pytest.mark.parametrize("trusted_ips", ["", "203.0.113.0/24"])
+def test_websocket_connections_pass_through(trusted_ips):
+    """Regression: Request(scope) asserted scope["type"] == "http" for websockets."""
+    app = _websocket_app(TrustedNetworkPolicy(trusted_ips=trusted_ips))
+    client = TestClient(app, client=("203.0.113.5", 50000))
+    with client.websocket_connect("/ws/updates") as websocket:
+        assert websocket.receive_json() == {"trusted": True}
+
+
+def test_untrusted_websocket_refused_on_restricted_path():
+    from starlette.websockets import WebSocketDisconnect
+
+    app = _websocket_app(TrustedNetworkPolicy(trusted_ips="203.0.113.0/24"))
+    client = TestClient(app, client=("198.51.100.9", 50000))
+    with pytest.raises(WebSocketDisconnect) as excinfo:
+        with client.websocket_connect("/admin/tickets/ws"):
+            pass
+    assert excinfo.value.code == 1008
+
+    trusted = TestClient(app, client=("203.0.113.5", 50000))
+    with trusted.websocket_connect("/admin/tickets/ws") as websocket:
+        assert websocket.receive_json() == {"trusted": True}
