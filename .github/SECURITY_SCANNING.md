@@ -143,6 +143,11 @@ All security scanning results are aggregated in the Security tab:
 3. Apply the suggested fix or dismiss if false positive
 4. Document dismissal reason for audit trail
 
+For SQL findings, replace fixed query fragments with literal SQL. For dynamic
+queries, review each execution path and verify that every runtime data value is
+bound separately and that only approved SQL structure reaches the query text.
+Follow the [SQL injection prevention rules](agents.md#sql-injection-prevention).
+
 ### Dependency Alerts
 1. Review vulnerable dependency in Dependabot alerts
 2. Check if Dependabot has opened a PR to update it
