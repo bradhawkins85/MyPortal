@@ -4,12 +4,30 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import uuid
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 POWERSHELL = shutil.which('powershell') or shutil.which('pwsh')
 pytestmark = pytest.mark.skipif(not POWERSHELL, reason='Requires PowerShell; Windows calls are mocked')
+
+
+def _patch_script_text() -> str:
+    """patch.ps1 with a mutex name of its own.
+
+    The real script holds a machine-wide mutex so two patch runs never overlap;
+    tests running in parallel on one machine would otherwise refuse each other.
+    """
+    content = (ROOT / 'app/services/rmm_builtin/patch.ps1').read_text()
+    assert 'Global\\MyPortalPatchManagement' in content
+    return content.replace('Global\\MyPortalPatchManagement', 'Global\\MyPortalPatchTest-' + uuid.uuid4().hex)
+
+
+def _patch_script_copy(tmp_path: Path) -> Path:
+    script = tmp_path / 'patch.ps1'
+    script.write_text(_patch_script_text(), encoding='utf-8')
+    return script
 
 
 @pytest.mark.parametrize('managed,installed,missing,expected', [
@@ -54,7 +72,7 @@ function Get-ItemProperty {
     env = {**os.environ, 'TEST_MANAGED': managed or '', 'TEST_INSTALLED': installed or '',
            'TEST_CHOCO': str(fake), 'TEST_COMMAND_LOG': str(log),
            'TEST_SEARCH_LOG': str(tmp_path / 'searches.txt'), 'TEST_AVAILABLE_SOURCE': available_source,
-           'TEST_PATCH_SCRIPT': str(ROOT / 'app/services/rmm_builtin/patch.ps1'), 'MYPORTAL_PATCH_PLAN': json.dumps(plan)}
+           'TEST_PATCH_SCRIPT': str(_patch_script_copy(tmp_path)), 'MYPORTAL_PATCH_PLAN': json.dumps(plan)}
     result = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
                              '-File', str(harness)], env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -92,7 +110,7 @@ switch ($args[0]) {
 function Sync-ChocolateySources { param($sources); $script:choco = $env:TEST_CHOCO }
 function Test-Path { param($Path); $Path -like '*RebootPending' }
 function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
-''' + (ROOT / 'app/services/rmm_builtin/patch.ps1').read_text(), encoding='utf-8')
+''' + _patch_script_text(), encoding='utf-8')
     # Ignore checksums follows force here to keep the matrix small.
     options = {'mode': mode, 'package_ids': ['testapp'], 'force': force, 'ignore_checksums': force}
     if ignore_reboots is not None:
@@ -104,7 +122,7 @@ function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
     log = tmp_path / 'commands.txt'
     result = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(harness)],
         env={**os.environ, 'TEST_CHOCO': str(fake), 'TEST_COMMAND_LOG': str(log), 'TEST_EXIT_CODE': '3010',
-             'TEST_PATCH_SCRIPT': str(ROOT / 'app/services/rmm_builtin/patch.ps1'), 'MYPORTAL_PATCH_PLAN': json.dumps(plan)},
+             'TEST_PATCH_SCRIPT': str(_patch_script_copy(tmp_path)), 'MYPORTAL_PATCH_PLAN': json.dumps(plan)},
         capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'Reboot pending: True' in result.stdout
@@ -143,7 +161,7 @@ switch ($args[0]) {
 function Sync-ChocolateySources { param($sources); $script:choco = $env:TEST_CHOCO }
 function Test-Path { $false }
 function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
-''' + (ROOT / 'app/services/rmm_builtin/patch.ps1').read_text(), encoding='utf-8')
+''' + _patch_script_text(), encoding='utf-8')
     log = tmp_path / 'commands.txt'
     plan = {'manual_apps': {'mode': mode, 'force': False, 'ignore_pending_reboots': False},
             'sources': [{'name': 'company', 'enabled': True, 'priority': 1}],
@@ -151,7 +169,7 @@ function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
             'reboot': {'reboot_mode': 'never'}}
     result = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-File', str(harness)],
         env={**os.environ, 'TEST_CHOCO': str(fake), 'TEST_COMMAND_LOG': str(log),
-             'TEST_PATCH_SCRIPT': str(ROOT / 'app/services/rmm_builtin/patch.ps1'), 'MYPORTAL_PATCH_PLAN': json.dumps(plan)},
+             'TEST_PATCH_SCRIPT': str(_patch_script_copy(tmp_path)), 'MYPORTAL_PATCH_PLAN': json.dumps(plan)},
         capture_output=True, text=True, timeout=30)
     assert result.returncode != 0
     command = log.read_text(encoding='utf-8-sig').split()
@@ -179,7 +197,7 @@ switch ($args[0]) {
 function Sync-ChocolateySources { param($sources); $script:choco = $env:TEST_CHOCO }
 function Test-Path { param($Path); $Path -like '*RebootPending' }
 function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
-''' + (ROOT / 'app/services/rmm_builtin/patch.ps1').read_text(), encoding='utf-8')
+''' + _patch_script_text(), encoding='utf-8')
     plan = {'sources': [{'name': 'company', 'enabled': True, 'priority': 1}],
             'apps': [{'package_id': 'testapp', 'display_name': 'Test Application', 'install_missing': False}],
             'windows': None, 'reboot': {'reboot_mode': 'never'}}
