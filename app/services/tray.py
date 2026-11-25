@@ -34,7 +34,6 @@ from app.repositories import m365_signatures as m365_signatures_repo
 from app.repositories import site_settings as site_settings_repo
 from app.repositories import tray as tray_repo
 from app.security.device_tokens import (
-    generate_auth_token as generate_auth_token,
     generate_install_token as generate_install_token,
     hash_token as hash_token,
     token_prefix as token_prefix,
