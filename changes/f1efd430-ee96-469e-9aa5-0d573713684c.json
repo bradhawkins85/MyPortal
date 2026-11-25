@@ -1,0 +1,7 @@
+{
+  "guid": "f1efd430-ee96-469e-9aa5-0d573713684c",
+  "occurred_at": "2026-11-25T05:28Z",
+  "change_type": "Security",
+  "summary": "Updated the tray chat packaging dependency to fix a denial-of-service vulnerability.",
+  "content_hash": "bac011f63e3eefd16ce24a9803fd248eb292836e38d4881c8a251147a8fcd3aa"
+}
