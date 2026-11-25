@@ -273,6 +273,10 @@ func buildEnv(base []string, job client.Job, resultFile string) []string {
 	return env
 }
 
+// outputDrainDelay is how long a run keeps reading output after the script
+// exits, in case something the script started still holds its output open.
+var outputDrainDelay = 10 * time.Second
+
 // launch is a prepared script command.
 type launch struct {
 	name           string
@@ -294,11 +298,13 @@ func runExec(cmd *exec.Cmd, spec launch, configure func(*exec.Cmd)) (*int, error
 	if configure != nil {
 		configure(cmd)
 	}
-	cmd.WaitDelay = 10 * time.Second
+	cmd.WaitDelay = outputDrainDelay
 	err := cmd.Run()
 	var exitErr *exec.ExitError
 	switch {
-	case err == nil:
+	case err == nil, errors.Is(err, exec.ErrWaitDelay):
+		// ErrWaitDelay: the script exited successfully but something it
+		// started kept its output open; the script itself finished.
 		code := 0
 		return &code, nil
 	case errors.As(err, &exitErr) && exitErr.ExitCode() >= 0:
