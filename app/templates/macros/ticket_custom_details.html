@@ -48,7 +48,7 @@
     {%- set rating_max = (field.config.max or 5) | int -%}
     <select id="{{ input_id }}" name="{{ name }}" class="form-input" form="ticket-custom-details-form"{{ described | safe }}>
       <option value="">Not set</option>
-      {% for score in range(1, rating_max + 1) %}<option value="{{ score }}" {% if field.value_text == score | string %}selected{% endif %}>{{ '★' * score }} {{ score }} / {{ rating_max }}</option>{% endfor %}
+      {% for score in range(1, rating_max + 1) %}<option value="{{ score }}" {% if field.value_text == score | string %}selected{% endif %}>{{ score }} of {{ rating_max }} stars</option>{% endfor %}
     </select>
   {%- else %}
     {%- set html_type = {'email': 'email', 'number': 'number', 'time': 'time', 'url': 'url', 'date': 'date'}.get(field.field_type, 'text') -%}
