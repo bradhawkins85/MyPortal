@@ -1,7 +1,60 @@
 (function () {
   'use strict';
+
+  const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  function readSimpleSchedule(expression) {
+    const fields = /^(\d|[0-5]\d)\s+(\d|[01]\d|2[0-3])\s+\*\s+\*\s+([0-6]|\*)$/.exec(expression.trim());
+    if (!fields) return null;
+    const [, minute, hour, day] = fields;
+    return { day, time: `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}` };
+  }
+
+  document.querySelectorAll('[data-patch-cron]').forEach((label) => {
+    const schedule = readSimpleSchedule(label.textContent);
+    if (!schedule) return;
+    const frequency = schedule.day === '*' ? 'Daily' : `Every ${weekdays[Number(schedule.day)]}`;
+    label.textContent = `${frequency} at ${schedule.time}`;
+  });
+
   const form = document.querySelector('[data-rmm-patch-form]');
   if (!form) return;
+
+  const frequency = form.querySelector('#patch-frequency');
+  const day = form.querySelector('#patch-day');
+  const time = form.querySelector('#patch-time');
+  const cron = form.querySelector('[name="cron"]');
+  function showScheduleFields() {
+    const custom = frequency.value === 'custom';
+    day.closest('.form-field').hidden = frequency.value !== 'weekly';
+    time.closest('.form-field').hidden = custom;
+    time.required = !custom;
+    cron.closest('.form-field').hidden = !custom;
+  }
+  function selectScheduleFromCron() {
+    const schedule = cron.getAttribute('aria-invalid') === 'true' ? null : readSimpleSchedule(cron.value);
+    frequency.value = !schedule ? 'custom' : schedule.day === '*' ? 'daily' : 'weekly';
+    day.value = schedule && schedule.day !== '*' ? schedule.day : '0';
+    time.value = schedule ? schedule.time : time.defaultValue;
+    showScheduleFields();
+  }
+  function writeSimpleSchedule() {
+    if (frequency.value === 'custom' || !time.value) return;
+    const [hour, minute] = time.value.split(':').map(Number);
+    cron.value = `${minute} ${hour} * * ${frequency.value === 'daily' ? '*' : day.value}`;
+    cron.removeAttribute('aria-invalid');
+    cron.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  frequency.closest('.form-field').hidden = false;
+  selectScheduleFromCron();
+  frequency.addEventListener('change', () => {
+    showScheduleFields();
+    writeSimpleSchedule();
+  });
+  day.addEventListener('change', writeSimpleSchedule);
+  time.addEventListener('input', writeSimpleSchedule);
+  form.addEventListener('ae:discarded', selectScheduleFromCron);
+  form.addEventListener('reset', () => window.setTimeout(selectScheduleFromCron, 0));
+
   const search = form.querySelector('[data-choco-search]');
   const results = form.querySelector('[data-choco-results]');
   const status = form.querySelector('[data-choco-status]');

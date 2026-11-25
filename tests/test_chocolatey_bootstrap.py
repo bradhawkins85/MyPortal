@@ -4,9 +4,10 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import uuid
 
 import pytest
+
+from app.services.rmm_patching import script_content
 
 ROOT = Path(__file__).resolve().parents[1]
 POWERSHELL = shutil.which('powershell') or shutil.which('pwsh')
@@ -59,13 +60,11 @@ function Test-Path {
     Microsoft.PowerShell.Management\Test-Path $Path
 }
 '''
-    builtin = ROOT / 'app/services/rmm_builtin'
     script = tmp_path / 'job.ps1'
-    script.write_text(harness + '\n' + (builtin / 'chocolatey_sources.ps1').read_text()
-                      + '\n' + (builtin / 'patch.ps1').read_text().replace(
-                          # A mutex of its own, so parallel test runs on one machine do not refuse each other.
-                          'Global\\MyPortalPatchManagement', 'Global\\MyPortalPatchTest-' + uuid.uuid4().hex),
-                      encoding='utf-8')
+    # Use the production bundle with an unnamed mutex for this mock process.
+    content = script_content().replace(r"New-Object Threading.Mutex($false, 'Global\MyPortalPatchManagement')",
+                                       '[Threading.Mutex]::new($false)', 1)
+    script.write_text(harness + '\n' + content, encoding='utf-8')
     plan = {'sources': [{'name': 'company', 'url': 'https://repo.example.com', 'priority': 1, 'enabled': True}],
             'apps': [{'package_id': 'testapp', 'display_name': 'Test Application', 'install_missing': True}],
             'reboot': {'reboot_mode': 'never'}}
@@ -74,6 +73,7 @@ function Test-Path {
                                  'TEST_EVENTS': str(events), 'TEST_SYNCED': str(tmp_path / 'synced'),
                                  'MYPORTAL_PATCH_PLAN': json.dumps(plan)},
                             capture_output=True, text=True, timeout=30)
+    assert events.exists(), result.stdout + result.stderr
     calls = events.read_text(encoding='utf-8-sig').splitlines()
     if mode in ('existing', 'fresh'):
         assert result.returncode == 0, result.stdout + result.stderr

@@ -23,7 +23,39 @@ DEFAULTS = {"name": "", "scope": "company", "kind": "windows", "package_id": "",
             "cron": "0 2 * * 0", "timezone": "", "target_mode": "all", "target_rules": None,
             "is_enabled": True, "categories": ["Security Updates", "Critical Updates"], "deferral_days": 0,
             "reboot_mode": "never", "active_start": 8, "active_end": 18, "reboot_delay_minutes": 15,
-            "install_missing": False}
+            "install_missing": False, "target_release": ""}
+
+# Microsoft publishes the minimum cumulative update for each enablement package.
+# These baselines apply to enablement offers; the update source can also offer a full upgrade.
+FEATURE_RELEASES = (
+    {"version": "24H2", "build": 26100, "full_upgrade_prerequisite_builds": [22621, 22631],
+     "full_upgrade_minimum_ubr": 3672, "full_upgrade_prerequisite_kb": "KB5037853"},
+    {"version": "25H2", "build": 26200, "enablement_kb": "KB5054156", "prerequisite_versions": ["24H2"],
+     "minimum_ubr": 5074, "prerequisite_kb": "KB5064081"},
+    # KB5124010 shipped as builds 26100.9550 and 26200.9550.
+    {"version": "26H2", "build": 26300, "enablement_kb": "KB5121794", "prerequisite_versions": ["24H2", "25H2"],
+     "minimum_ubr": 9550, "prerequisite_kb": "KB5124010"},
+)
+FEATURE_RELEASE_OPTIONS = [{"version": release["version"], "label": f"Windows 11 {release['version']}"}
+                           for release in FEATURE_RELEASES]
+
+POLICY_TEMPLATES = {
+    "security-updates": {
+        "name": "Security updates",
+        "description": "Install security, critical and definition updates weekly. Leave restarts to users.",
+        "values": {"categories": ["Security Updates", "Critical Updates", "Definition Updates"]},
+    },
+    "workstation-maintenance": {
+        "name": "Workstation maintenance",
+        "description": "Install quality updates weekly after a 7-day deferral. Restart after hours when no one is signed in.",
+        "values": {"categories": sorted(CATEGORIES), "deferral_days": 7, "reboot_mode": "no_users"},
+    },
+    "windows-feature-rollout": {
+        "name": "Windows 11 feature rollout",
+        "description": "Check daily for Windows 11 26H2 and its prerequisites. Restart after hours when no one is signed in.",
+        "values": {"target_release": "26H2", "cron": "0 2 * * *", "reboot_mode": "no_users"},
+    },
+}
 
 
 def utcnow() -> datetime:
@@ -56,9 +88,16 @@ def validate(payload: Mapping[str, Any], company_id: int, super_admin: bool) -> 
     rules = targeting.parse_rules(payload, errors)
     settings: dict[str, Any] = {}
     if kind == "windows":
+        target_release = str(payload.get("target_release") or "").strip().upper()
+        if target_release:
+            if not any(release["version"] == target_release for release in FEATURE_RELEASES):
+                errors["target_release"] = "Choose a supported Windows 11 release."
+            else:
+                settings["target_release"] = target_release
         categories = payload.get("categories", DEFAULTS["categories"])
-        if not isinstance(categories, list) or not categories or any(c not in CATEGORIES for c in categories):
-            errors["categories"] = "Select at least one supported update category."
+        if (not isinstance(categories, list) or any(not isinstance(c, str) or c not in CATEGORIES for c in categories)
+                or (not categories and not settings.get("target_release"))):
+            errors["categories"] = "Select an update category or a target Windows release."
         settings["categories"] = categories
         for key, low, high in (("deferral_days", 0, 90), ("active_start", 0, 23), ("active_end", 0, 23),
                                ("reboot_delay_minutes", 5, 120)):
@@ -72,6 +111,8 @@ def validate(payload: Mapping[str, Any], company_id: int, super_admin: bool) -> 
         mode = payload.get("reboot_mode", "never")
         if mode not in {"never", "no_users", "always"}:
             errors["reboot_mode"] = "Choose a reboot mode."
+        elif mode == "never" and settings.get("target_release"):
+            errors["reboot_mode"] = "Allow policy restarts to complete Windows feature upgrades."
         if settings.get("active_start") == settings.get("active_end"):
             errors["active_end"] = "Active hours must have different start and end hours."
         settings["reboot_mode"] = mode
@@ -140,20 +181,29 @@ def stamp(policy: Mapping[str, Any]) -> dict[str, int]:
 
 def plan(policies: list[dict[str, Any]], selected: set[int]) -> dict[str, Any]:
     windows = next((p for p in policies if p["kind"] == "windows"), None)
-    return {"windows": windows["settings"] if windows and int(windows["id"]) in selected else None,
-            "apps": [{"package_id": p["package_id"], **p["settings"]} for p in policies
-                     if p["kind"] == "chocolatey" and int(p["id"]) in selected],
-            "reboot": windows["settings"] if windows else {"reboot_mode": "never"},
-            "policies": [stamp(p) for p in policies if int(p["id"]) in selected],
-            "reboot_policy": stamp(windows) if windows else None}
+    windows_settings = windows["settings"] if windows and int(windows["id"]) in selected else None
+    config = {
+        "windows": windows_settings,
+        "apps": [{"package_id": p["package_id"], **p["settings"]} for p in policies
+                 if p["kind"] == "chocolatey" and int(p["id"]) in selected],
+        "reboot": windows["settings"] if windows else {"reboot_mode": "never"},
+        "policies": [stamp(p) for p in policies if int(p["id"]) in selected],
+        "reboot_policy": stamp(windows) if windows else None,
+    }
+    if windows_settings and windows_settings.get("target_release"):
+        config["feature_upgrade"] = {"target": windows_settings["target_release"], "releases": FEATURE_RELEASES}
+    return config
 
 
 def script_content() -> str:
     # Windows Update functions skip blocked updates and report the device's new
     # update status after installing (see app.services.rmm_windows_updates).
     builtin = Path(__file__).parent / "rmm_builtin"
-    return (chocolatey_sources.script() + "\n" + (builtin / "windows_updates.ps1").read_text(encoding="utf-8") + "\n"
-            + (builtin / "patch.ps1").read_text(encoding="utf-8"))
+    files = ("windows_updates.ps1", "windows_feature_upgrade.ps1", "patch.ps1")
+    catalog = f"$myPortalFeatureReleases = '{json.dumps(FEATURE_RELEASES)}' | ConvertFrom-Json"
+    return "\n".join([chocolatey_sources.script(), catalog] + [
+        (builtin / name).read_text(encoding="utf-8") for name in files
+    ])
 
 
 def chosen_updates_current(agent: Mapping[str, Any], config: Mapping[str, Any]) -> bool:
@@ -199,11 +249,18 @@ async def queue(agent: Mapping[str, Any], policies: list[dict[str, Any]], select
     problem = rmm_scripts.device_problem(script, agent)
     if problem:
         raise RunRequestError({"device": problem})
+    inputs = [{"key": "policies", "label": "Policies",
+               "value": ", ".join(p["name"] for p in policies if int(p["id"]) in selected)}]
+    feature_upgrade = config.get("feature_upgrade")
+    if feature_upgrade:
+        inputs.append({"key": "target_release", "label": "Target Windows release",
+                       "value": f"Windows 11 {feature_upgrade['target']}"})
     run_id = await rmm_repo.create_run(script=script, content=content, agent_id=int(agent["id"]),
         company_id=int(agent["company_id"]), asset_id=agent.get("asset_id"), requested_by_user_id=user_id,
-        inputs=[{"key": "policies", "label": "Policies", "value": ", ".join(p["name"] for p in policies if int(p["id"]) in selected)}],
+        inputs=inputs,
         payload_encrypted=encrypt_secret(json.dumps({"env": {"MYPORTAL_PATCH_PLAN": json.dumps(config)}})),
-        timeout_seconds=7200, expires_at=expires_at, run_source="patch")
+        timeout_seconds=rmm_scripts.MAX_TIMEOUT_SECONDS if feature_upgrade else 7200,
+        expires_at=expires_at, run_source="patch")
     rmm_scripts.notify_agent(int(agent["id"]))
     return run_id
 

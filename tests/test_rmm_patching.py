@@ -2,11 +2,13 @@
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from jinja2 import Environment, FileSystemLoader
 from fastapi import HTTPException
+from starlette.datastructures import FormData
 
 from app.core.database import Database
 from app.repositories import rmm_patching as repo, rmm as rmm_repo
@@ -44,10 +46,68 @@ def test_validation_rejects_unsafe_inputs_and_global_access():
                       (payload(active_start=8, active_end=8), 'active_end'),
                       (payload(reboot_delay_minutes=0), 'reboot_delay_minutes'),
                       (payload(cron='invalid'), 'cron'), (payload(timezone='invalid'), 'timezone'),
-                      (payload(categories=['Drivers']), 'categories')]:
+                      (payload(categories=['Drivers']), 'categories'),
+                      (payload(categories=[]), 'categories'),
+                      (payload(target_release='26H1'), 'target_release'),
+                      (payload(target_release='26H2'), 'reboot_mode')]:
         with pytest.raises(RunRequestError) as exc:
             patch.validate(data, 1, False)
         assert key in exc.value.errors
+
+
+@pytest.mark.anyio
+async def test_policy_template_prefills_company_policy_without_saving(patch_db, monkeypatch):
+    request = SimpleNamespace()
+    context = ({'id': 9}, {}, 1, True)
+    get_context = AsyncMock(return_value=context)
+    render = AsyncMock()
+    monkeypatch.setattr(patch_routes, '_context', get_context)
+    monkeypatch.setattr(patch_routes, 'render', render)
+    monkeypatch.setattr(patch_routes.rmm_automation, 'default_timezone', lambda: 'Australia/Brisbane')
+
+    for key, sample in patch.POLICY_TEMPLATES.items():
+        await patch_routes.page(request, policy=None, template=key)
+        editing = render.await_args.args[2]
+        assert editing['name'] == sample['name'] and 'id' not in editing
+        values = patch.validate(editing, 1, False)
+        assert values['company_id'] == 1 and values['is_enabled']
+        assert values['timezone'] == 'Australia/Brisbane'
+    assert editing['target_release'] == '26H2' and editing['cron'] == '0 2 * * *'
+    assert await repo.list_policies(1) == []
+
+    with pytest.raises(HTTPException) as exc:
+        await patch_routes.page(request, policy=None, template='unrecognised')
+    assert exc.value.status_code == 404
+    get_context.return_value = (*context[:3], False)
+    await patch_routes.page(request, policy=None, template='windows-feature-rollout')
+    assert render.await_args.args[2] is None
+
+
+@pytest.mark.anyio
+async def test_feature_only_policy_round_trips_and_queues_the_release_catalog(patch_db, monkeypatch):
+    _, agent = await _enrol(patch_db)
+    monkeypatch.setattr(patch_routes, '_context', AsyncMock(return_value=({'id': 9}, {}, 1, True)))
+    monkeypatch.setattr(patch_routes.audit, 'record', AsyncMock())
+    form = payload(target_release=' 26h2 ', categories=[], reboot_mode='no_users')
+    request = SimpleNamespace(form=AsyncMock(return_value=FormData({k: v for k, v in form.items() if k != 'categories'})))
+
+    response = await patch_routes.create(request)
+    assert response.status_code == 303
+    policy, = await repo.list_policies(1)
+    assert policy['settings']['target_release'] == '26H2' and policy['settings']['categories'] == []
+    assert patch_routes.form_values(policy)['target_release'] == '26H2'
+    assert await patch.effective([policy], agent) == [policy]
+
+    await patch.queue(agent, [policy], {policy['id']}, patch.utcnow() + timedelta(minutes=15))
+    row, = await rmm_repo.next_jobs_for_agent(agent['id'])
+    job = rmm_scripts._job_payload(row)
+    assert job['timeout_seconds'] == 4 * 60 * 60
+    config = json.loads(job['env']['MYPORTAL_PATCH_PLAN'])
+    assert config['feature_upgrade']['target'] == '26H2'
+    releases = {release['version']: release for release in config['feature_upgrade']['releases']}
+    assert releases['26H2']['prerequisite_versions'] == ['24H2', '25H2']
+    assert releases['26H2']['prerequisite_kb'] == 'KB5124010'
+    assert await patch.job_is_current(agent, job)
 
 
 @pytest.mark.anyio
@@ -110,13 +170,14 @@ async def test_jobs_pin_policy_and_cancel_on_edit(patch_db):
 @pytest.mark.anyio
 async def test_app_run_reboot_policy_and_expiry(patch_db):
     _, agent = await _enrol(patch_db)
-    win = await save(reboot_mode='no_users')
+    win = await save(reboot_mode='no_users', target_release='26H2')
     app = await save(kind='chocolatey', package_id='7zip', display_name='7-Zip')
     policies = await repo.list_policies(1)
     run = await patch.queue(agent, policies, {app['id']}, patch.utcnow() - timedelta(seconds=1))
     job = rmm_scripts._job_payload((await rmm_repo.next_jobs_for_agent(agent['id']))[0])
     config = json.loads(job['env']['MYPORTAL_PATCH_PLAN'])
     assert config['windows'] is None
+    assert 'feature_upgrade' not in config
     assert config['reboot']['reboot_mode'] == 'no_users'
     assert config['apps'][0]['package_id'] == '7zip'
     await repo.delete(win['id'])
@@ -159,7 +220,6 @@ def test_template_renders_both_forms_and_permissions():
 
 @pytest.mark.anyio
 async def test_preview_limits_to_windows_and_company(patch_db, monkeypatch):
-    from types import SimpleNamespace
     _, agent = await _enrol(patch_db)
     await _enrol(patch_db, asset_id=11, uid='linux-agent', tray_id=6, os_name='linux')
     monkeypatch.setattr(patch_routes, '_context', AsyncMock(return_value=({'id': 9}, {}, 1, True)))

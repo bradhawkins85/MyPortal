@@ -8,6 +8,7 @@
 {% from "macros/counters.html" import counter_strip %}
 {% set policies = policies or [] %}
 {% set blocks = blocks or [] %}
+{% set policy_templates = policy_templates or [] %}
 {% set enabled_policies = policies | selectattr("is_enabled") | list | length %}
 {% set app_policies = policies | selectattr("kind", "equalto", "chocolatey") | list | length %}
 <div class="settings-workspace rmm-page ce-workspace" data-ae-workspace data-ae-storage-key="myportal:rmm-patching:active-section" data-ae-default="policies"{% if editing %} data-ae-initial="editor" data-ae-form="patch-policy-form"{% endif %}>
@@ -39,6 +40,7 @@
       {% set patch_groups = [
         ("Policies", [
           ("policies", "policies", "Patch policies", policies | length, true),
+          ("templates", "policy-templates", "Policy templates", "", can_edit and policy_templates),
           ("editor", "patch-form", ("Edit policy" if editing and editing.id else "New policy"), "", editing),
         ]),
         ("Windows Update", [
@@ -75,14 +77,52 @@
             <h2 class="card__title" id="patch-list-heading">Patch policies</h2>
             <p class="card__subtitle">Install Windows updates and application patches on Windows devices. A matching company policy replaces the policy for every company for Windows Update or the same Chocolatey package. At the same scope the newest policy wins, and a matching policy that is off stops patching for that target.</p>
           </div>
-          {% if can_edit %}<a class="button button--primary button--small" href="/rmm/patching?new=1#patch-form">Add policy</a>{% endif %}
+          {% if can_edit %}
+          <div class="ce-section__meta">
+            {% if policy_templates %}<a class="button button--secondary button--small" href="#policy-templates">Browse templates</a>{% endif %}
+            <a class="button button--primary button--small" href="/rmm/patching?new=1#patch-form">Add policy</a>
+          </div>
+          {% endif %}
         </header>
         <div class="ce-section__body">
-          {% if policies %}<div class="table-wrapper"><table class="table"><caption class="visually-hidden">Patch policies</caption><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Schedule</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>
-          {% for p in policies %}<tr><td data-label="Policy"><strong>{{ p.name }}</strong><br>{{ 'Windows Update' if p.kind == 'windows' else p.package_id }}</td><td data-label="Scope">{{ 'Every company' if p.company_id is none else 'This company' }}{% if p.target_rules is not none %}<br>Advanced rules{% endif %}</td><td data-label="Schedule">{{ p.cron }}<br>{{ p.timezone }}</td><td data-label="Status"><span class="status status--{{ 'success' if p.is_enabled else 'neutral' }}">{{ 'On' if p.is_enabled else 'Off' }}</span></td><td data-label="Actions">{% if p.can_edit %}<a class="button button--ghost button--small" href="/rmm/patching?policy={{ p.id }}#patch-form">Edit<span class="visually-hidden"> {{ p.name }}</span></a>{% if p.is_enabled %}<form method="post" action="/rmm/patching/{{ p.id }}/run" data-confirm="Run this patch policy now on matching Windows devices?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button--secondary button--small">Run now</button></form>{% endif %}<form method="post" action="/rmm/patching/{{ p.id }}/delete" data-confirm="Delete this patch policy?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button--ghost button--small">Delete</button></form>{% endif %}</td></tr>{% endfor %}
-          </tbody></table></div>{% else %}<div class="empty-state"><h3 class="empty-state__title">No patch policies</h3><p class="empty-state__subtitle">Add a Windows Update or application policy to start managing patches.</p>{% if can_edit %}<p><a class="button button--primary" href="/rmm/patching?new=1#patch-form">+ Add your first policy</a></p>{% endif %}</div>{% endif %}
+          {% if policies %}<div class="table-wrapper"><table class="table table--stack-mobile"><caption class="visually-hidden">Patch policies</caption><thead><tr><th scope="col">Policy</th><th scope="col">Scope</th><th scope="col">Schedule</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>
+          {% for p in policies %}<tr>
+            <td data-label="Policy"><span><strong>{{ p.name }}</strong><br>{% if p.kind == 'windows' %}Windows Update{% if p.settings and p.settings.target_release %}<br>Target Windows 11 {{ p.settings.target_release }}{% endif %}{% else %}{{ p.package_id }}{% endif %}</span></td>
+            <td data-label="Scope"><span>{{ 'Every company' if p.company_id is none else 'This company' }}{% if p.target_rules is not none %}<br>Advanced rules{% endif %}</span></td>
+            <td data-label="Schedule"><span><span data-patch-cron>{{ p.cron }}</span><br>{{ p.timezone }}</span></td>
+            <td data-label="Status"><span class="status status--{{ 'success' if p.is_enabled else 'neutral' }}">{{ 'On' if p.is_enabled else 'Off' }}</span></td>
+            <td class="table__actions">{% if p.can_edit %}<a class="button button--ghost button--small" href="/rmm/patching?policy={{ p.id }}#patch-form">Edit<span class="visually-hidden"> {{ p.name }}</span></a>{% if p.is_enabled %}<form method="post" action="/rmm/patching/{{ p.id }}/run" data-confirm="Run this patch policy now on matching Windows devices?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button--secondary button--small">Run now</button></form>{% endif %}<form method="post" action="/rmm/patching/{{ p.id }}/delete" data-confirm="Delete this patch policy?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button--ghost button--small">Delete</button></form>{% endif %}</td>
+          </tr>{% endfor %}
+          </tbody></table></div>{% else %}<div class="empty-state"><h3 class="empty-state__title">No patch policies</h3><p class="empty-state__subtitle">Add a Windows Update or application policy to start managing patches.</p></div>{% endif %}
         </div>
       </section>
+
+      {% if can_edit and policy_templates %}
+      <section class="card card--panel ce-section" id="policy-templates" data-ae-section="templates" aria-labelledby="patch-templates-heading">
+        <header class="ce-section__header">
+          <div class="ce-section__heading">
+            <h2 class="card__title" id="patch-templates-heading">Policy templates</h2>
+            <p class="card__subtitle">Start with a sample policy. Review the schedule, restart settings and devices before saving.</p>
+          </div>
+        </header>
+        <div class="ce-section__body">
+          <div class="table-wrapper">
+            <table class="table table--stack-mobile">
+              <caption class="visually-hidden">Available patch policy templates</caption>
+              <thead><tr><th scope="col">Template</th><th scope="col" class="table__actions"><span class="visually-hidden">Action</span></th></tr></thead>
+              <tbody>
+                {% for template in policy_templates %}
+                <tr>
+                  <td><span><strong>{{ template.name }}</strong><br><span class="text-muted">{{ template.description }}</span></span></td>
+                  <td class="table__actions"><a class="button button--secondary button--small" href="/rmm/patching?template={{ template.key | urlencode }}#patch-form">Use template<span class="visually-hidden"> {{ template.name }}</span></a></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      {% endif %}
 
       {% if editing %}
       {% set e = editing %}
@@ -126,10 +166,30 @@
 
           <div class="ce-subsection" data-patch-windows aria-labelledby="patch-step-windows">
             <h3 id="patch-step-windows">Windows updates and restarts</h3>
-            <fieldset><legend class="form-label">Windows update categories</legend>{% for category in categories %}<label class="checkbox"><input type="checkbox" name="categories" value="{{ category }}" {% if category in e.categories %}checked{% endif %}><span>{{ category }}</span></label>{% endfor %}</fieldset>
+            <div class="form-field">
+              <label class="form-label" for="patch-release">Target Windows 11 release</label>
+              <select class="form-input" id="patch-release" name="target_release" aria-describedby="patch-release-help{% if errors.get('target_release') %} patch-release-error{% endif %}"{% if errors.get('target_release') %} aria-invalid="true"{% endif %}>
+                <option value="" {% if not e.target_release %}selected{% endif %}>Quality updates only</option>
+                {% for release in feature_releases %}<option value="{{ release.version }}" {% if e.target_release == release.version %}selected{% endif %}>{{ release.label }}</option>{% endfor %}
+              </select>
+              <p class="form-help" id="patch-release-help">Devices use their configured update source. If a direct upgrade is unavailable, MyPortal looks for a supported intermediate release and continues on a later run after any required restart. View progress in Scripts run history.</p>
+              {% if errors.get('target_release') %}<p class="form-help form-help--error" id="patch-release-error">{{ errors.target_release }}</p>{% endif %}
+            </div>
+            <fieldset aria-describedby="patch-categories-help">
+              <legend class="form-label">Quality update categories</legend>
+              <p class="form-help" id="patch-categories-help">With a target release selected, leave these unchecked to install only feature updates and their prerequisites.</p>
+              {% for category in categories %}<label class="checkbox"><input type="checkbox" name="categories" value="{{ category }}" {% if category in e.categories %}checked{% endif %}><span>{{ category }}</span></label>{% endfor %}
+            </fieldset>
             <div class="ce-form-grid">
               <div class="form-field"><label class="form-label" for="patch-deferral">Defer updates (days)</label><input class="form-input" id="patch-deferral" name="deferral_days" type="number" min="0" max="90" value="{{ e.deferral_days }}"></div>
-              <div class="form-field"><label class="form-label" for="patch-reboot">When a restart is required</label><select class="form-input" id="patch-reboot" name="reboot_mode">{% for value, label in [('never', 'Leave restart to the user'), ('no_users', 'Restart only when no user is signed in'), ('always', 'Restart even when users are signed in')] %}<option value="{{ value }}" {% if e.reboot_mode == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+              <div class="form-field">
+                <label class="form-label" for="patch-reboot">When a restart is required</label>
+                <select class="form-input" id="patch-reboot" name="reboot_mode" aria-describedby="patch-reboot-help{% if errors.get('reboot_mode') %} patch-reboot-error{% endif %}"{% if errors.get('reboot_mode') %} aria-invalid="true"{% endif %}>
+                  {% for value, label in [('never', 'Leave restart to the user'), ('no_users', 'Restart only when no user is signed in'), ('always', 'Restart even when users are signed in')] %}<option value="{{ value }}" {% if e.reboot_mode == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+                <p class="form-help" id="patch-reboot-help">Select an automatic restart option when targeting a Windows release so MyPortal can finish installing it.</p>
+                {% if errors.get('reboot_mode') %}<p class="form-help form-help--error" id="patch-reboot-error">{{ errors.reboot_mode }}</p>{% endif %}
+              </div>
               <div class="form-field"><label class="form-label" for="patch-start">Active hours start (device local hour)</label><input class="form-input" id="patch-start" name="active_start" type="number" min="0" max="23" value="{{ e.active_start }}"></div>
               <div class="form-field"><label class="form-label" for="patch-end">Active hours end (device local hour)</label><input class="form-input" id="patch-end" name="active_end" type="number" min="0" max="23" value="{{ e.active_end }}"></div>
               <div class="form-field"><label class="form-label" for="patch-delay">Restart warning (minutes)</label><input class="form-input" id="patch-delay" name="reboot_delay_minutes" type="number" min="5" max="120" value="{{ e.reboot_delay_minutes }}"></div>
@@ -140,14 +200,21 @@
           <div class="ce-subsection" aria-labelledby="patch-step-schedule">
             <h3 id="patch-step-schedule">Schedule</h3>
             <div class="ce-form-grid">
-              <div class="form-field"><label class="form-label" for="patch-cron">Schedule (cron)</label><input class="form-input" id="patch-cron" name="cron" value="{{ e.cron }}" required maxlength="128"><p class="form-help">For example, 0 2 * * 0 runs every Sunday at 02:00. Devices must collect queued work within 15 minutes.</p></div>
+              <div class="form-field" hidden><label class="form-label" for="patch-frequency">Frequency</label><select class="form-input" id="patch-frequency"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="custom">Custom cron</option></select></div>
+              <div class="form-field" hidden><label class="form-label" for="patch-day">Day</label><select class="form-input" id="patch-day">
+                {% for day in ('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday') %}<option value="{{ loop.index0 }}">{{ day }}</option>{% endfor %}
+              </select></div>
+              <div class="form-field" hidden><label class="form-label" for="patch-time">Time</label><input class="form-input" id="patch-time" type="time" value="02:00"></div>
+              <div class="form-field"><label class="form-label" for="patch-cron">Schedule (cron)</label><input class="form-input" id="patch-cron" name="cron" value="{{ e.cron }}" required maxlength="128" aria-describedby="patch-cron-help"{% if errors.get('cron') %} aria-invalid="true"{% endif %}><p class="form-help" id="patch-cron-help">For example, <code>0 2 * * 0</code> runs every Sunday at 02:00.</p></div>
               <div class="form-field"><label class="form-label" for="patch-zone">Schedule time zone</label><input class="form-input" id="patch-zone" name="timezone" value="{{ e.timezone }}" required maxlength="64" placeholder="Australia/Brisbane"></div>
             </div>
+            <p class="form-help">Devices must collect queued work within 15 minutes of the scheduled run.</p>
           </div>
 
           <div class="ce-subsection" aria-labelledby="patch-step-devices">
             <h3 id="patch-step-devices">Devices</h3>
             <div class="form-field"><label class="form-label" for="patch-target">Device targeting</label><select class="form-input" id="patch-target" name="target_mode"><option value="all" {% if e.target_mode == 'all' %}selected{% endif %}>All Windows devices in scope</option><option value="rules" {% if e.target_mode == 'rules' %}selected{% endif %}>Advanced device rules</option></select></div>
+            <p class="form-help">For a pilot rollout, use advanced device rules to select a small group and preview which devices match before saving.</p>
             {% set targeting_id = 'patch-device-rules' %}{% include 'rmm/_device_rules.html' %}
           </div>
 

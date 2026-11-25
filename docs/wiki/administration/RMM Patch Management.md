@@ -10,6 +10,24 @@ before installing applications. Devices need HTTPS access to
 `https://community.chocolatey.org/install.ps1`, its package downloads and the
 enabled company feeds. If installation or source sync fails, applications are not installed.
 
+## Start with a policy template
+
+In **Patch management**, select **Browse templates**, then **Use template** to
+open a prefilled policy. You can adjust its settings before saving.
+
+- **Security updates** installs security, critical and definition updates weekly
+  and leaves restarts to users.
+- **Workstation maintenance** installs quality updates weekly after a seven-day
+  deferral. It can restart outside active hours when no one is signed in.
+- **Windows 11 feature rollout** targets 26H2 by default and checks for the next
+  upgrade step daily. It can restart a device outside active hours when no one
+  is signed in.
+
+Review the company scope, schedule time zone and restart settings. For a pilot,
+choose **Advanced device rules**, then **Preview matching devices** before
+selecting **Save policy**. An enabled policy starts at its next scheduled run.
+Use **Run now** on the saved policy to queue a run immediately.
+
 ## Scope and device rules
 
 Policies belong to the currently selected company or to every company. Global
@@ -30,16 +48,18 @@ Create separate application policies to give different apps different device fil
 
 ## Schedule and results
 
-Configure a cron expression and IANA time zone. The automation tick claims due
-policies once. Missed schedules older than an hour are skipped; queued patch jobs
-expire after 15 minutes. Offline devices wait for the next policy run. **Run now**
+Choose **Daily**, **Weekly** or **Custom cron** for the frequency, and set an
+IANA time zone. The automation tick claims due policies once. It skips schedules
+missed by more than an hour. Queued patch jobs expire after 15 minutes.
+Offline devices wait for the next policy run. **Run now**
 also honors scope, targeting, enabled state and overrides. Only one active patch
 job is queued per device; an endpoint mutex prevents concurrent patch operations.
 
 At dispatch, the portal checks current inventory, policy versions and overrides.
 Changed, deleted, disabled or newly overridden policies cancel queued work. Changes
 after dispatch take effect on future runs. Multiple due policies on a device share
-one patch job, with a two-hour execution limit. Results, selected policy names,
+one patch job. Jobs that target a Windows release can run for up to four hours.
+Other patch jobs have a two-hour limit. Results, selected policy names,
 per-update outcomes, app commands and reboot decisions appear in **Scripts** run
 history as **Patch policy**. Failures return a failed run; successful installation
 is distinct from a completed restart. A run that times out may need review because
@@ -50,9 +70,46 @@ an installer can continue outside the PowerShell process.
 Select security, critical, rollup, general or definition updates and a deferral
 period (0–90 days). The agent uses Windows Update COM APIs and the device's
 configured update source (including WSUS), stable category identifiers, publication
-age, EULA acceptance, download and installation. Hidden, installed, driver and
-interactive updates are excluded, as are [blocked updates](#blocking-updates). Download, partial installation and per-update
-failures are visible in run output. Feature upgrades are not included.
+age, EULA acceptance, download and installation. Download, partial installation and
+per-update failures appear in run output. MyPortal skips hidden, installed, driver,
+interactive and [blocked updates](#blocking-updates).
+
+### Windows 11 feature upgrades
+
+Set **Target Windows 11 release** to **24H2**, **25H2** or **26H2**. Select
+quality update categories to maintain devices during the rollout, or clear the
+categories for a feature-only policy. Select **Quality updates only** to install
+the chosen categories without a feature rollout.
+
+A policy that targets a release requires **Restart only when no user is signed in**
+or **Restart even when users are signed in**. Schedule the rollout outside device
+active hours. MyPortal commits the feature installation before requesting the
+restart that completes it. If the device's restart settings prevent the restart,
+MyPortal waits for a later policy run with an eligible window.
+[Microsoft's feature update commit requirements](https://learn.microsoft.com/en-us/windows/win32/api/wuapi/nf-wuapi-iupdateinstaller4-commit)
+
+Each run reads the installed Windows release and checks what the device's update
+source offers. An applicable direct upgrade to the target takes precedence. If
+the source offers a required intermediate release, the policy installs that step
+first. For example, a device on 23H2 can install an offered 24H2 upgrade, restart,
+then take the 26H2 update on a later run. Microsoft's 26H2 enablement package can
+use either 24H2 or 25H2 once the required cumulative update is present.
+[Microsoft's 26H2 enablement package requirements](https://support.microsoft.com/en-us/servicing/os/windows-11/2026/09/kb5121794-feature-update-to-windows-11-version-26h2)
+
+If the source offers a required cumulative update for the next release, the
+policy can install it even when the quality update categories are empty.
+Prerequisite updates follow the policy deferral and update blocks.
+
+Keep the policy scheduled until devices reach the target. Each run installs at
+most one feature upgrade. After the restart, the next run checks the installed
+release before attempting another step. Feature upgrades apply to Windows clients
+with an eligible offer. MyPortal skips devices already at or beyond the target
+and Windows 11 26H1 devices on the separate servicing branch.
+
+**Scripts → Run history** shows the upgrade step, pending restart or reason the
+device is waiting. If an offer is missing, check the configured update source,
+WSUS approval and any Microsoft compatibility holds.
+[Microsoft's safeguard holds documentation](https://learn.microsoft.com/en-us/windows/deployment/update/safeguard-holds)
 
 ## Chocolatey applications
 
@@ -203,7 +260,7 @@ such as Defender's definition updates (KB2267602), blocks every update with that
 
 The effective Windows Update policy controls reboot decisions for both Windows and
 application patch jobs. Without an enabled matching Windows policy, app patching
-never requests a restart. Defaults leave restarts to users.
+never requests a restart. Quality-only policies leave restarts to users by default.
 
 Choose **Leave restart to the user**, **Restart only when no user is signed in**,
 or **Restart even when users are signed in**. Set active hours in the device's
@@ -213,12 +270,12 @@ hours. The no-user mode checks Windows sessions, including disconnected RDP
 sessions; a query failure prevents the restart. This is a check when scheduling,
 not a continuous sign-in restriction during the countdown.
 
-Existing pending restarts defer installation by patch policies. A restart is only
-scheduled once Windows Update has finished installing, whether for this job or its own
-automatic updates; MyPortal waits up to about 100 minutes, then leaves the restart for
-the next run. Pending restart flags and installer
-results trigger the reboot decision; failed patch runs do not request a restart.
-Deferred restarts are reconsidered on the next policy run. Windows shutdown
+Existing pending restarts defer installation by patch policies. MyPortal waits
+for Windows Update to finish installing before it requests a restart. The wait
+deadline is about 100 minutes from job start, or 220 minutes for a job that
+targets a Windows release. Pending restart flags and installer results trigger
+the reboot decision. Failed patch runs leave the restart for a later run.
+MyPortal reconsiders deferred restarts on the next policy run. Windows shutdown
 countdowns display a warning and can force applications closed when they expire.
 The portal does not disable native Windows/GPO or third-party installer reboot
 settings, which can also initiate restarts. Test policy settings on a pilot group

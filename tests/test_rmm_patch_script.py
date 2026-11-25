@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import uuid
 
 import pytest
 
@@ -14,14 +13,19 @@ pytestmark = pytest.mark.skipif(not POWERSHELL, reason='Requires PowerShell; Win
 
 
 def _patch_script_text() -> str:
-    """patch.ps1 with a mutex name of its own.
+    """Load the patch runner and its feature helpers with an isolated mutex.
 
-    The real script holds a machine-wide mutex so two patch runs never overlap;
-    tests running in parallel on one machine would otherwise refuse each other.
+    The test harness supplies Chocolatey stubs. An unnamed mutex avoids sharing
+    the production Windows mutex across tests and also works with Linux PowerShell.
     """
-    content = (ROOT / 'app/services/rmm_builtin/patch.ps1').read_text()
-    assert 'Global\\MyPortalPatchManagement' in content
-    return content.replace('Global\\MyPortalPatchManagement', 'Global\\MyPortalPatchTest-' + uuid.uuid4().hex)
+    builtin = ROOT / 'app/services/rmm_builtin'
+    content = (builtin / 'patch.ps1').read_text(encoding='utf-8')
+    mutex = r"New-Object Threading.Mutex($false, 'Global\MyPortalPatchManagement')"
+    assert mutex in content
+    return '\n'.join([
+        (builtin / 'windows_feature_upgrade.ps1').read_text(encoding='utf-8'),
+        content.replace(mutex, '[Threading.Mutex]::new($false)', 1),
+    ])
 
 
 def _patch_script_copy(tmp_path: Path) -> Path:

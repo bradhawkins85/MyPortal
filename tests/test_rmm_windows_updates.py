@@ -528,6 +528,7 @@ function New-FakeUpdate($id, $title, $interactive, $kb) {
 }
 function New-Object {
     param([string]$TypeName, [object[]]$ArgumentList, [string]$ComObject)
+    if ($TypeName -eq 'Threading.Mutex') { return [Threading.Mutex]::new($false) }
     switch ($ComObject) {
         'Microsoft.Update.Session' {
             $searcher = [pscustomobject]@{}
