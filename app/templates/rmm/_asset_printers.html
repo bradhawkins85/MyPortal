@@ -15,6 +15,7 @@
   <div class="ce-section__body rmm-inventory">
     {{ counter_strip([
       {"label": "Installed", "value": pr.counts.total, "variant": "info"},
+      {"label": "Jobs queued", "value": pr.counts.jobs, "variant": "warning" if pr.counts.jobs else "neutral"},
       {"label": "Shared", "value": pr.counts.shared, "variant": "neutral"},
       {"label": "Need attention", "value": pr.counts.attention, "variant": "danger" if pr.counts.attention else "success"},
       {"label": "No longer seen", "value": pr.counts.removed, "variant": "neutral"},
@@ -31,6 +32,7 @@
       <thead><tr>
         <th scope="col" data-sort="string" data-column-key="name">Name</th>
         <th scope="col" data-sort="string" data-column-key="status" data-filter-options="multiple" data-filter-values="{{ pr.status_options | tojson | forceescape }}">Status</th>
+        <th scope="col" data-sort="number" data-column-key="jobs">Jobs</th>
         <th scope="col" data-sort="string" data-column-key="type" data-filter-options="multiple" data-filter-values="{{ pr.type_options | tojson | forceescape }}">Type</th>
         <th scope="col" data-sort="string" data-column-key="driver">Driver</th>
         <th scope="col" data-sort="string" data-column-key="port">Port</th>
@@ -43,7 +45,8 @@
       </tr></thead>
       <tbody>{% for printer in pr.printers %}<tr>
         <td data-label="Name">{{ printer.name }}{% if printer.comment %}<br><span class="text-muted">{{ printer.comment }}</span>{% endif %}</td>
-        <td data-label="Status" data-value="{{ printer.status_label }}"><span class="status status--{{ printer.status_variant }}">{{ printer.status_label }}</span></td>
+        <td data-label="Status" data-value="{{ printer.status_label }}"><span class="status status--{{ printer.status_variant }}"{% if printer.printer_status and printer.printer_status != printer.status_label %} title="PrinterStatus: {{ printer.printer_status }}"{% endif %}>{{ printer.status_label }}</span></td>
+        <td data-label="Jobs" data-value="{{ printer.job_count if printer.job_count is not none else -1 }}">{{ printer.job_count if printer.job_count is not none else '—' }}</td>
         <td data-label="Type">{{ printer.type_label }}</td>
         <td data-label="Driver">{{ printer.driver_name or '—' }}</td>
         <td data-label="Port">{{ printer.port_name or '—' }}{% if printer.port_address and printer.port_address != printer.port_name %}<br><span class="text-muted">{{ printer.port_address }}</span>{% endif %}</td>

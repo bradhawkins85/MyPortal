@@ -1,0 +1,7 @@
+{
+  "guid": "1bad06df-95e9-4e03-b824-533f64ee4e2e",
+  "occurred_at": "2026-11-25T05:51Z",
+  "change_type": "Improvement",
+  "summary": "The asset Printers section now shows how many jobs are waiting in each printer's queue, and keeps the exact printer status Windows reports alongside the plain-language one.",
+  "content_hash": "de682e5d666611b8d55fe12854fe93dae2c25f27ca8e904d40ba2ac8ba51d823"
+}
