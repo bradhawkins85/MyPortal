@@ -20,6 +20,7 @@ from typing import Awaitable, Callable, Iterable
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse, Response
+from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.logging import log_error, log_warning
@@ -230,8 +231,10 @@ class TrustedNetworkMiddleware:
             await self.app(scope, receive, send)
             return
 
-        request = Request(scope)
-        client_ip = get_client_ip(request, default=None) if self.policy.configured else None
+        # Request() asserts scope["type"] == "http"; HTTPConnection also
+        # accepts websocket scopes and exposes the client and headers needed.
+        connection = HTTPConnection(scope)
+        client_ip = get_client_ip(connection, default=None) if self.policy.configured else None
         trusted = self.policy.is_trusted_ip(client_ip)
         state = scope.setdefault("state", {})
         state["trusted_network"] = trusted
@@ -252,7 +255,7 @@ class TrustedNetworkMiddleware:
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 1008})
             return
-        response = await self._blocked_response(request)
+        response = await self._blocked_response(Request(scope, receive))
         await response(scope, receive, send)
 
     async def _blocked_response(self, request: Request) -> Response:
