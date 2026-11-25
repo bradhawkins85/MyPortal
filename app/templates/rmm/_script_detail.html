@@ -210,33 +210,70 @@
     </div>
   </section>
 
-  <section class="card card--panel ce-section" aria-labelledby="rmm-script-runs-title">
+  {% set usage = script.usage %}
+  {% set reach = 'every company\'s devices' if usage.all_companies else ((company.name if company else 'this company') ~ '\'s devices') %}
+  <section class="card card--panel ce-section" aria-labelledby="rmm-script-usage-title" data-rmm-script-usage>
     <header class="ce-section__header">
       <div class="ce-section__heading">
-        <h2 class="card__title" id="rmm-script-runs-title">Recent runs</h2>
-        <p class="card__subtitle">The latest runs of this script on {{ company.name if company else 'this company' }}'s devices.</p>
+        <h2 class="card__title" id="rmm-script-usage-title">Usage and recent runs</h2>
+        <p class="card__subtitle">Everywhere this script is linked to run, and its latest runs on {{ reach }}, so you can tell whether it is still needed.</p>
+        <ul class="rmm-chips" aria-label="Usage summary">
+          <li class="rmm-chip{{ ' rmm-chip--muted' if not usage.links }}">{{ usage.links }} link{{ '' if usage.links == 1 else 's' }}{% if usage.links and usage.active_links != usage.links %} ({{ usage.active_links }} on){% endif %}</li>
+          <li class="rmm-chip{{ ' rmm-chip--muted' if not usage.recent_runs }}">{{ usage.recent_runs }} run{{ '' if usage.recent_runs == 1 else 's' }} in {{ usage.recent_days }} days</li>
+          <li class="rmm-chip">{% if usage.last_run_at %}Last ran&nbsp;<span data-utc="{{ usage.last_run_at }}">{{ usage.last_run_at }}</span>{% else %}Never run{% endif %}</li>
+        </ul>
       </div>
     </header>
     <div class="ce-section__body">
-      {% if script.runs %}
-      <div class="table-wrapper">
-        <table class="table">
-          <caption class="visually-hidden">Recent runs of {{ script.name }}</caption>
-          <thead><tr>
-            <th scope="col" data-column-key="script">Script</th>
-            <th scope="col" data-column-key="device">Device</th>
-            <th scope="col" data-column-key="status">Status</th>
-            <th scope="col" data-column-key="exit-code">Exit code</th>
-            <th scope="col" data-column-key="requested-by" data-mobile-hidden="true">Started by</th>
-            <th scope="col" data-column-key="queued">Queued</th>
-            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
-          </tr></thead>
-          <tbody>{{ rmm.run_rows(script.runs, can_run=can_run) }}</tbody>
-        </table>
-      </div>
-      {% else %}
-        <p class="text-muted">This script has not run on {{ company.name if company else 'this company' }}'s devices recently.</p>
+      {% if usage.unused %}
+      <p class="alert alert--warning" role="status">Nothing switched on runs this script and it has not run on {{ reach }} in the last {{ usage.recent_days }} days. It may no longer be needed.{% if not usage.all_companies %} Other companies may still use it.{% endif %}</p>
       {% endif %}
+      <div>
+        <h3 class="rmm-detail__label">Where it is used</h3>
+        {% if usage.groups %}
+        {% for group in usage.groups %}
+        <div class="rmm-usage__group">
+          <h4 class="rmm-usage__heading" id="rmm-usage-{{ group.key }}">{{ group.label }} <span class="text-muted">· {{ group.help }}</span></h4>
+          <ul class="rmm-files" aria-labelledby="rmm-usage-{{ group.key }}">
+            {% for item in group['items'] %}
+            <li class="rmm-files__item">
+              <div class="rmm-files__paths">
+                <strong>{% if item.href %}<a href="{{ item.href }}">{{ item.name }}</a>{% else %}{{ item.name }}{% endif %}</strong>
+                <span class="text-muted">{{ item.scope }}{% if item.enabled is not none %} · <span class="status status--{{ 'success' if item.enabled else 'neutral' }}">{{ 'On' if item.enabled else 'Off' }}</span>{% endif %}{% if item.when %} · {{ item.when_label }} <span data-utc="{{ item.when }}">{{ item.when }}</span>{% endif %}</span>
+                {% if item.detail %}<span>{{ item.detail }}</span>{% endif %}
+              </div>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="text-muted">This script is not linked to any schedule, onboarding step, check, event log rule, script result rule, ticket automation, tray menu, health check fix or remote control provider{% if not usage.all_companies %} that reaches {{ reach }}{% endif %}. It only runs when a technician runs it.</p>
+        {% endif %}
+      </div>
+      <div>
+        <h3 class="rmm-detail__label" id="rmm-script-runs-title">Recent runs</h3>
+        {% if script.runs %}
+        <div class="table-wrapper">
+          <table class="table">
+            <caption class="visually-hidden">Recent runs of {{ script.name }}</caption>
+            <thead><tr>
+              <th scope="col" data-column-key="script">Script</th>
+              {% if usage.all_companies %}<th scope="col" data-column-key="company">Company</th>{% endif %}
+              <th scope="col" data-column-key="device">Device</th>
+              <th scope="col" data-column-key="status">Status</th>
+              <th scope="col" data-column-key="exit-code">Exit code</th>
+              <th scope="col" data-column-key="requested-by" data-mobile-hidden="true">Started by</th>
+              <th scope="col" data-column-key="queued">Queued</th>
+              <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+            </tr></thead>
+            <tbody>{{ rmm.run_rows(script.runs, can_run=can_run, show_company=usage.all_companies) }}</tbody>
+          </table>
+        </div>
+        {% else %}
+          <p class="text-muted">This script has not run on {{ reach }} recently.</p>
+        {% endif %}
+      </div>
     </div>
   </section>
 

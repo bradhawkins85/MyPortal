@@ -68,6 +68,8 @@
 
   // On a device's page the calls carry its ID so they resolve against the
   // device's company, even when another company is selected.
+  const pageAssetId = config.asset_id || null;
+
   function forAsset(url) {
     return config.asset_id ? url + (url.includes('?') ? '&' : '?') + 'asset_id=' + encodeURIComponent(config.asset_id) : url;
   }
@@ -805,6 +807,12 @@
   }
 
   document.addEventListener('click', (event) => {
+    // A script's run history can list other companies' runs (super admins);
+    // their actions resolve against the run's own device.
+    const companyRow = event.target.closest('[data-rmm-run-row-asset]');
+    if (companyRow && event.target.closest('button')) {
+      config.asset_id = Number(companyRow.getAttribute('data-rmm-run-row-asset')) || null;
+    }
     const action = event.target.closest('[data-rmm-cancel-run-id], [data-rmm-abort-run-id], [data-rmm-retry-run-id]');
     if (action && config.can_run) {
       event.preventDefault();
@@ -823,6 +831,8 @@
       // The Assets list opens the editor from each row, with that device chosen.
       if (opener.hasAttribute('data-rmm-run-asset')) {
         config.asset_id = Number(opener.getAttribute('data-rmm-run-asset')) || null;
+      } else {
+        config.asset_id = pageAssetId;
       }
       openRunEditor(opener.getAttribute('data-rmm-run-open') || '');
       return;

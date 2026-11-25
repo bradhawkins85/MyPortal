@@ -366,7 +366,15 @@ runs and the devices with the RMM agent. Choose a script to see, on the right:
   **Regenerate** to write a new one. Without the Ollama module the card says so.
 - **Inputs**: the parameters and environment variables it asks for, their types, defaults
   (sensitive defaults are hidden) and help text.
-- **Recent runs** of that script on the company's devices.
+- **Usage and recent runs**: everywhere the script is linked to run (schedules, onboarding
+  steps, checks — as the test or as a failure action — event log rules, script result rules
+  that run it as the follow-up, ticket automations, tray menu items, health check fixes and
+  remote control activation), each with its scope, whether it is on and a link to edit it;
+  how many times it ran in the last 90 days and when it last ran; and its latest runs.
+  Super admins see every company's links and runs (with a Company column); technicians see
+  links that reach the selected company (every-company links included) and that company's
+  runs. A script with nothing switched on that runs it and no runs in 90 days is flagged as
+  possibly no longer needed.
 - **Script**: the source devices receive, as loaded at the last sync, with **Copy** and, for
   technicians who can sign in to Gitea, **Edit in Gitea**.
 

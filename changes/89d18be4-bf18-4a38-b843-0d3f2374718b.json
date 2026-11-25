@@ -1,0 +1,7 @@
+{
+  "guid": "89d18be4-bf18-4a38-b843-0d3f2374718b",
+  "occurred_at": "2026-11-25T04:41Z",
+  "change_type": "Feature",
+  "summary": "Each script on the RMM Scripts page now shows everywhere it is used (schedules, onboarding, checks, event log rules, result rules, ticket automations, tray menus, health check fixes and remote control) alongside its recent runs, with super admins seeing every company, and flags scripts that may no longer be needed.",
+  "content_hash": "b7b0281741a49855d2cf0886b04c10ea8f83a4dc9f53a8017a6d5c20e1c2a3de"
+}

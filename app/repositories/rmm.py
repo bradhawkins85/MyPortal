@@ -667,6 +667,33 @@ async def list_runs(
     return [_run_row(row) for row in rows or []]
 
 
+async def list_script_runs(script_id: int, *, company_id: int | None, limit: int = 25) -> list[dict[str, Any]]:
+    """One script's runs, newest first, on one company's devices or (``None``) every company's."""
+
+    capped = max(1, min(int(limit), 200))
+    # Only fixed column and join strings are joined; every value is a bound parameter.
+    columns = (
+        "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "  # nosec B608
+        "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, r.queue_timeout_seconds, "
+        "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
+        "r.completed_at, r.expires_at, r.scheduled_for, a.name AS asset_name, u.email AS requested_by_email, "
+        "co.name AS company_name, " + _RUN_SOURCE_COLUMNS + " FROM rmm_script_runs r "
+        "LEFT JOIN assets a ON a.id = r.asset_id LEFT JOIN companies co ON co.id = r.company_id "
+        + _RUN_SOURCE_JOINS + " "
+    )
+    if company_id is None:
+        rows = await db.fetch_all(
+            columns + "WHERE r.script_id = %s ORDER BY r.queued_at DESC, r.id DESC LIMIT %s",
+            (script_id, capped),
+        )
+    else:
+        rows = await db.fetch_all(
+            columns + "WHERE r.script_id = %s AND r.company_id = %s ORDER BY r.queued_at DESC, r.id DESC LIMIT %s",
+            (script_id, company_id, capped),
+        )
+    return [_run_row(row) for row in rows or []]
+
+
 async def has_active_run(agent_id: int, script_id: int, *, run_source: str) -> bool:
     """True while ``agent_id`` has an unfinished run of ``script_id`` from ``run_source``."""
 

@@ -23,6 +23,7 @@ from app.repositories import rmm_windows_updates as windows_updates_repo
 from app.repositories import rmm_targeting as targeting_repo
 from app.repositories import rmm_event_log_rules as event_log_rules_repo
 from app.repositories import rmm_script_result_rules as result_rules_repo
+from app.repositories import rmm_script_usage as script_usage_repo
 from app.repositories import rmm_event_logs as event_log_repo
 from app.repositories import rmm_remote_control as remote_repo
 from app.repositories import rmm_agent_deploy as deploy_repo
@@ -343,6 +344,13 @@ async def sqlite_db(monkeypatch):
         CREATE TABLE tray_command_log (
           id INTEGER PRIMARY KEY, device_id INT, command TEXT, payload_json TEXT, initiated_by_user_id INT,
           status TEXT DEFAULT 'queued', error TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, delivered_at TEXT);
+        -- Places outside RMM that can link a script (Scripts page usage).
+        CREATE TABLE automations (id INTEGER PRIMARY KEY, name TEXT, kind TEXT, status TEXT, trigger_event TEXT,
+          action_module TEXT, action_payload TEXT);
+        CREATE TABLE tray_menu_configs (id INTEGER PRIMARY KEY, name TEXT, scope TEXT, scope_ref_id INT,
+          enabled INT DEFAULT 1, payload_json TEXT);
+        CREATE TABLE ai_health_check_remediations (id INTEGER PRIMARY KEY, detection_key TEXT, company_id INT,
+          script_id INT, is_enabled INT DEFAULT 1, last_run_at TEXT);
         CREATE TABLE asset_custom_field_values (
           id INTEGER PRIMARY KEY, asset_id INT, field_definition_id INT, value_text TEXT, value_date TEXT,
           value_boolean INT, created_at TEXT, updated_at TEXT, UNIQUE (asset_id, field_definition_id));
@@ -389,7 +397,7 @@ async def sqlite_db(monkeypatch):
     fake = _SqliteDb(conn)
     for module in (rmm_repo, automation_repo, inventory_repo, remote_repo, event_log_repo, event_log_rules_repo, checks_repo, tags_repo,
                    asset_fields_repo, company_variables_repo, assets_repo, deploy_repo, tray_repo, targeting_repo, patch_repo, chocolatey_sources,
-                   chocolatey_catalog_repo, windows_updates_repo, result_rules_repo):
+                   chocolatey_catalog_repo, windows_updates_repo, result_rules_repo, script_usage_repo):
         monkeypatch.setattr(module, "db", fake)
 
     async def get_company(company_id):
@@ -1441,6 +1449,8 @@ def _detail(**overrides):
         ],
         "ai": {"summary": None, "stale": False, "model": "", "updated_at": None},
         "runs": [],
+        "usage": {"groups": [], "links": 0, "active_links": 0, "recent_runs": 0, "recent_days": 90,
+                  "last_run_at": None, "unused": False, "all_companies": False},
     }
     script.update(overrides)
     return script
@@ -1573,8 +1583,9 @@ async def test_summary_is_stored_against_the_script_version(sqlite_db, monkeypat
     stored = summaries.summary_state(await rmm_repo.get_script(script["id"], with_content=True))
     assert stored["summary"]["actions"] == ["Reads the drive"] and stored["model"] == "llama3" and not stored["stale"]
 
-    detail = await routes._script_detail(script["id"], 1, [{"id": 1, "script_id": script["id"]}, {"id": 2, "script_id": 999}])
-    assert detail["ai"]["summary"]["summary"] == "Checks disk space." and [run["id"] for run in detail["runs"]] == [1]
+    detail = await routes._script_detail(script["id"], 1)
+    assert detail["ai"]["summary"]["summary"] == "Checks disk space." and detail["runs"] == []
+    assert detail["usage"]["unused"] and detail["usage"]["all_companies"] is False
     assert detail["line_count"] > 5 and "content" in detail and detail["fields"]
 
     # The script changes in Gitea: the stored summary is out of date.
@@ -1583,7 +1594,7 @@ async def test_summary_is_stored_against_the_script_version(sqlite_db, monkeypat
 
     # Another company's script is never shown.
     other = next(s for s in await rmm_repo.list_scripts() if s["name"] == "x")
-    assert await routes._script_detail(other["id"], 1, []) is None
+    assert await routes._script_detail(other["id"], 1) is None
 
 
 @pytest.mark.anyio

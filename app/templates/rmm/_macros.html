@@ -102,10 +102,11 @@
   {%- endif -%}
 {%- endmacro %}
 
-{% macro run_rows(runs, show_device=true, can_run=false) -%}
+{% macro run_rows(runs, show_device=true, can_run=false, show_company=false) -%}
   {%- for run in runs %}
-  <tr data-rmm-run-row="{{ run.id }}">
+  <tr data-rmm-run-row="{{ run.id }}"{% if show_company %} data-rmm-run-row-asset="{{ run.asset_id or '' }}"{% endif %}>
     <td data-label="Script" data-column-key="script"><strong>{{ run.script_name }}</strong></td>
+    {% if show_company %}<td data-label="Company" data-column-key="company">{{ run.company_name or ('Company ' ~ run.company_id) }}</td>{% endif %}
     {% if show_device %}<td data-label="Device" data-column-key="device">{% if run.asset_id %}<a href="/assets/{{ run.asset_id }}">{{ run.asset_name or ('Asset ' ~ run.asset_id) }}</a>{% else %}<span class="text-muted">Removed device</span>{% endif %}</td>{% endif %}
     {% set status_key = 'scheduled' if run.scheduled else run.status %}<td data-label="Status" data-column-key="status" data-sort-value="{{ run.status }}" data-value="{{ RUN_STATUS.get(status_key, ('neutral', status_key))[1] }}">{% if run.scheduled %}{{ run_status('scheduled') }} <span class="text-muted">for <span data-utc="{{ run.scheduled_for }}">{{ run.scheduled_for }}</span></span>{% else %}{{ run_status(run.status) }}{% endif %}</td>
     <td data-label="Exit code" data-column-key="exit-code">{% if run.exit_code is not none %}<code>{{ run.exit_code }}</code>{% else %}<span class="text-muted">–</span>{% endif %}</td>
