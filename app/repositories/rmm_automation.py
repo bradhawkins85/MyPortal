@@ -224,12 +224,12 @@ async def list_steps(*, company_id: int | None) -> list[dict[str, Any]]:
 
     if company_id is None:
         rows = await db.fetch_all(
-            "SELECT " + _STEP_COLUMNS + " FROM rmm_onboarding_steps o LEFT JOIN rmm_scripts sc ON sc.id = o.script_id "
+            f"SELECT {_STEP_COLUMNS} FROM rmm_onboarding_steps o LEFT JOIN rmm_scripts sc ON sc.id = o.script_id "  # nosec B608 - fixed columns
             "WHERE o.company_id IS NULL ORDER BY o.position, o.id",
         )
     else:
         rows = await db.fetch_all(
-            "SELECT " + _STEP_COLUMNS + " FROM rmm_onboarding_steps o LEFT JOIN rmm_scripts sc ON sc.id = o.script_id "
+            f"SELECT {_STEP_COLUMNS} FROM rmm_onboarding_steps o LEFT JOIN rmm_scripts sc ON sc.id = o.script_id "  # nosec B608 - fixed columns
             "WHERE o.company_id = %s ORDER BY o.position, o.id",
             (company_id,),
         )
