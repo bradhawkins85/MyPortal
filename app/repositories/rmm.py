@@ -671,8 +671,9 @@ async def list_script_runs(script_id: int, *, company_id: int | None, limit: int
     """One script's runs, newest first, on one company's devices or (``None``) every company's."""
 
     capped = max(1, min(int(limit), 200))
+    # Only fixed column and join strings are joined; every value is a bound parameter.
     columns = (
-        "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "
+        "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "  # nosec B608
         "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, r.queue_timeout_seconds, "
         "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
         "r.completed_at, r.expires_at, r.scheduled_for, a.name AS asset_name, u.email AS requested_by_email, "
