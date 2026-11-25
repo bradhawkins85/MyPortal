@@ -966,6 +966,10 @@ body.navigation--top .rmm-library {
 .rmm-files__actions { display: flex; flex-wrap: wrap; gap: var(--space-gap-tight); flex-shrink: 0; }
 @media (max-width: 640px) { .rmm-files__item { align-items: flex-start; flex-direction: column; } }
 
+/* Script detail: where a script is used (grouped like the result rules list). */
+.rmm-usage__group + .rmm-usage__group { margin-top: var(--space-gap-roomy); }
+.rmm-usage__heading { margin: 0; font-size: 0.9rem; font-weight: 600; }
+
 /* Advanced targeting keeps the group boundary and its AND / OR operator together. */
 .rmm-targeting,
 .rmm-rule-group__children {

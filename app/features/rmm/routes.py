@@ -60,6 +60,7 @@ from app.services import rmm_remote_control
 from app.services import rmm_script_parser as parser
 from app.services import rmm_script_result_rules
 from app.services import rmm_script_summary
+from app.services import rmm_script_usage
 from app.services import rmm_script_files
 from app.services import rmm_scripts
 from app.services import rmm_tray_repair
@@ -234,12 +235,16 @@ async def company_agent_details(company_id: int) -> dict[int, dict[str, Any]]:
     }
 
 
-async def _script_detail(script_id: int, company_id: int, runs: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Everything the Scripts page shows for one script, or None when the company cannot use it."""
+async def _script_detail(script_id: int, company_id: int, *, is_super_admin: bool = False) -> dict[str, Any] | None:
+    """Everything the Scripts page shows for one script, or None when the company cannot use it.
+
+    Super admins see its runs and links across every company; others see
+    those that reach the selected company's devices."""
 
     script = await rmm_repo.get_script(script_id, with_content=True)
     if not rmm_repo.script_available_to(script, company_id):
         return None
+    usage_company = None if is_super_admin else company_id
     return {
         **_script_summary(script),
         "content": script.get("content") or "",
@@ -248,7 +253,13 @@ async def _script_detail(script_id: int, company_id: int, runs: list[dict[str, A
         "fields": rmm_scripts.script_fields(script),
         "source_url": await rmm_scripts.script_source_url(script),
         "ai": rmm_script_summary.summary_state(script),
-        "runs": [run for run in runs if run.get("script_id") == script["id"]][:25],
+        "runs": [
+            _serialise(run)
+            for run in await rmm_repo.list_script_runs(script["id"], company_id=usage_company, limit=25)
+        ],
+        "usage": await rmm_script_usage.script_usage(
+            script, company_id=usage_company, is_super_admin=is_super_admin
+        ),
     }
 
 
@@ -262,9 +273,9 @@ async def scripts_page(request: Request, script: int | None = Query(default=None
     scripts = await rmm_repo.list_scripts(company_id=company_id)
     agents = await rmm_repo.list_company_agents(company_id)
     runs = [_serialise(run) for run in await rmm_repo.list_runs(company_id=company_id, limit=200)]
-    selected = await _script_detail(script, company_id, runs) if script else None
+    is_super_admin = bool(user.get("is_super_admin"))
+    selected = await _script_detail(script, company_id, is_super_admin=is_super_admin) if script else None
     if selected:
-        is_super_admin = bool(user.get("is_super_admin"))
         selected["result_rules"] = [
             {**rmm_script_result_rules.rule_summary(rule), "can_edit": can_run and rmm_script_result_rules.can_edit(
                 rule, company_id=company_id, is_super_admin=is_super_admin)}
