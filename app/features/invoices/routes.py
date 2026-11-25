@@ -8,7 +8,7 @@ from functools import lru_cache
 from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 
 from app.repositories import companies as company_repo
 from app.repositories import invoices as invoice_repo
@@ -19,6 +19,7 @@ from app.security.commerce_permissions import (
     commerce_record_visible,
     require_commerce_record,
 )
+from app.security.flash import local_redirect
 from app.services import audit as audit_service
 from app.services.invoice_assignment import can_assign_invoice, validate_invoice_assignee
 
@@ -344,7 +345,7 @@ async def assign_invoice(request: Request, invoice_id: int, assigned_user_id: st
         entity_type="invoice", entity_id=invoice_id, before=invoice, after=updated,
         metadata={"company_id": int(invoice["company_id"])},
     )
-    return RedirectResponse(url=f"/invoices/{invoice_id}", status_code=303)
+    return local_redirect(f"/invoices/{invoice_id}")
 
 
 __all__ = ["router"]

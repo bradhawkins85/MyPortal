@@ -87,22 +87,16 @@ async def get_membership_by_company_user(company_id: int, user_id: int) -> Optio
 
 
 async def list_memberships_for_user(user_id: int, *, status: str | None = "active") -> List[dict[str, Any]]:
-    filters = ["m.user_id = %s"]
-    params: list[Any] = [user_id]
-    if status is not None:
-        filters.append("m.status = %s")
-        params.append(status)
-    where_clause = " AND ".join(filters)
     rows = await db.fetch_all(
         """
         SELECT m.*, u.email AS user_email, u.first_name, u.last_name, r.name AS role_name, r.permissions
         FROM effective_company_memberships AS m
         INNER JOIN users AS u ON u.id = m.user_id
         INNER JOIN roles AS r ON r.id = m.role_id
-        WHERE """ + where_clause + """
+        WHERE m.user_id = %s AND (%s IS NULL OR m.status = %s)
         ORDER BY m.company_id
-        """,  # nosec B608
-        tuple(params),
+        """,
+        (user_id, status, status),
     )
     return [_normalise_membership(row) for row in rows]
 

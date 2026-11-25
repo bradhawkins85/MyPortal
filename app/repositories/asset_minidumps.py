@@ -8,14 +8,6 @@ from typing import Any, Mapping
 
 from app.core.database import db
 
-_COLUMNS = (
-    "id, company_id, asset_id, tray_device_id, file_name, file_size, file_modified_at, crashed_at, "
-    "bugcheck_code, bugcheck_name, suspect_driver, supported, summary_json, analysis_status, analysis_json, "
-    "analysis_error, analysis_started_at, model, ticket_id, analysed_by_user_id, analysed_at, created_at, updated_at"
-)
-# Newest crash first; a dump with no usable crash time sorts by its file time.
-_ORDER = " ORDER BY COALESCE(crashed_at, file_modified_at) DESC, id DESC"
-
 STATUS_NONE = "none"
 STATUS_ANALYSING = "analysing"
 STATUS_COMPLETED = "completed"
@@ -120,22 +112,27 @@ async def prune(asset_id: int, keep: int = 50) -> int:
     """Delete the asset's oldest dumps beyond ``keep``; one being analysed is never deleted."""
 
     rows = await db.fetch_all(
-        "SELECT id, analysis_status FROM asset_minidumps WHERE asset_id = %s" + _ORDER, (asset_id,)
+        "SELECT id, analysis_status FROM asset_minidumps WHERE asset_id = %s "
+        "ORDER BY COALESCE(crashed_at, file_modified_at) DESC, id DESC",
+        (asset_id,),
     )
     doomed = [int(row["id"]) for row in rows[max(0, int(keep)):] if row["analysis_status"] != STATUS_ANALYSING]
     for start in range(0, len(doomed), 200):
         batch = doomed[start:start + 200]
         placeholders = ", ".join(["%s"] * len(batch))
-        await db.execute(
-            "DELETE FROM asset_minidumps WHERE asset_id = %s AND id IN (" + placeholders + ")",
-            (asset_id, *batch),
-        )
+        # Only the number of bound parameters determines the SQL text.
+        sql = "DELETE FROM asset_minidumps WHERE asset_id = %s AND id IN (" + placeholders + ")"  # nosec B608
+        await db.execute(sql, (asset_id, *batch))
     return len(doomed)
 
 
 async def list_for_asset(asset_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        "SELECT " + _COLUMNS + " FROM asset_minidumps WHERE asset_id = %s" + _ORDER, (asset_id,)
+        "SELECT id, company_id, asset_id, tray_device_id, file_name, file_size, file_modified_at, crashed_at, "
+        "bugcheck_code, bugcheck_name, suspect_driver, supported, summary_json, analysis_status, analysis_json, "
+        "analysis_error, analysis_started_at, model, ticket_id, analysed_by_user_id, analysed_at, created_at, updated_at "
+        "FROM asset_minidumps WHERE asset_id = %s ORDER BY COALESCE(crashed_at, file_modified_at) DESC, id DESC",
+        (asset_id,),
     )
     return [record for record in (_row(row) for row in rows) if record]
 
@@ -146,7 +143,13 @@ async def count_for_asset(asset_id: int) -> int:
 
 
 async def get_dump(dump_id: int) -> dict[str, Any] | None:
-    return _row(await db.fetch_one("SELECT " + _COLUMNS + " FROM asset_minidumps WHERE id = %s", (dump_id,)))
+    return _row(await db.fetch_one(
+        "SELECT id, company_id, asset_id, tray_device_id, file_name, file_size, file_modified_at, crashed_at, "
+        "bugcheck_code, bugcheck_name, suspect_driver, supported, summary_json, analysis_status, analysis_json, "
+        "analysis_error, analysis_started_at, model, ticket_id, analysed_by_user_id, analysed_at, created_at, updated_at "
+        "FROM asset_minidumps WHERE id = %s",
+        (dump_id,),
+    ))
 
 
 async def claim_analysis(
@@ -181,16 +184,16 @@ async def finish_analysis(
     """
 
     now = now or _utcnow()
-    owned = " WHERE id = %s AND analysis_status = %s AND analysis_started_at = %s"
     if analysis is None:
         changed = await db.execute_rowcount(
-            "UPDATE asset_minidumps SET analysis_status = %s, analysis_error = %s, updated_at = %s" + owned,
+            "UPDATE asset_minidumps SET analysis_status = %s, analysis_error = %s, updated_at = %s "
+            "WHERE id = %s AND analysis_status = %s AND analysis_started_at = %s",
             (status, (str(error)[:512] if error else None), now, dump_id, STATUS_ANALYSING, started_at),
         )
     else:
         changed = await db.execute_rowcount(
             "UPDATE asset_minidumps SET analysis_status = %s, analysis_json = %s, analysis_error = %s, "
-            "analysed_at = %s, updated_at = %s" + owned,
+            "analysed_at = %s, updated_at = %s WHERE id = %s AND analysis_status = %s AND analysis_started_at = %s",
             (status, json.dumps(analysis), (str(error)[:512] if error else None), now, now, dump_id,
              STATUS_ANALYSING, started_at),
         )

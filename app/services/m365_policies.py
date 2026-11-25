@@ -24,7 +24,7 @@ from app.repositories import m365 as m365_repo
 from app.repositories import m365_policies as policy_repo
 from app.services import audit as audit_service
 from app.services import m365_policy_targeting as targeting
-from app.services import m365_standard_library  # noqa: F401 - registers built-in standards
+from app.services import m365_standard_library
 from app.services import m365_standards as standards
 from app.services import m365_template_library as template_library
 from app.services import notifications as notifications_service
@@ -35,6 +35,7 @@ OVERRIDE_ACTIONS = ("include", "exclude")
 DRIFT_EVENT = "m365.standard_drift"
 _DRIFTED = ("drift", "failed")
 
+m365_standard_library.register_best_practices()
 template_library.register_templates()
 
 

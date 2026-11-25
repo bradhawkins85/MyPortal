@@ -314,11 +314,9 @@ async def _tactical_rmm_enabled() -> bool:
 # Asset source records come from these integration modules (source == module slug).
 _INTEGRATION_SOURCE_MODULES = ("syncro", "tacticalrmm")
 
-_tray_status = asset_presence.tray_status
 _status_without_tactical = asset_presence.status_without_tactical
 _tray_last_seen = asset_presence.tray_last_seen
 _tray_console_user = asset_presence.tray_console_user
-_as_utc_datetime = asset_presence.as_utc
 
 
 @router.get("/assets", response_class=HTMLResponse)
@@ -2259,11 +2257,12 @@ async def start_discovered_device_port_check(request: Request, device_id: int):
     form = await request.form()
     try:
         ports = port_checks_service.parse_port_spec(str(form.get("ports") or ""))
-    except ValueError as exc:
+    except port_checks_service.PortSpecificationError as exc:
+        detail = exc.user_message
         if wants_json:
-            return JSONResponse({"detail": str(exc)}, status_code=422)
+            return JSONResponse({"detail": detail}, status_code=422)
         return main_module.flash_redirect(
-            f"/devices#discovered-device-{device_id}", str(exc), "error"
+            f"/devices#discovered-device-{device_id}", detail, "error"
         )
 
     device = await network_devices_repo.get_device_for_port_check(company_id, device_id)

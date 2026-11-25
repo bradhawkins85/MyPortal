@@ -1,6 +1,7 @@
 """The tray settings workspace (/admin/tray) and its redirects from old URLs."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -176,6 +177,25 @@ def test_configuration_editor_is_a_sectioned_workspace_with_a_save_bar():
         assert re.search(rf'name="{name}" form="tray-config-form"', html), name
     assert "data-ae-savebar" in html and "data-ae-discard" in html
     assert "ae:discarded" in html
+
+
+@pytest.mark.parametrize(
+    ("payload", "enabled", "expected"),
+    [
+        ([], False, (False, False)),
+        ([{"type": "submit_syncro_ticket"}, {"type": "TRMM_Script"}], False, (True, True)),
+        ([], True, (True, True)),
+    ],
+)
+def test_configuration_editor_keeps_existing_integration_actions(payload, enabled, expected):
+    html = _env().get_template("admin/tray/configuration_form.html").render(
+        config={"payload_json": json.dumps(payload)},
+        trmm_scripts=[], rmm_scripts=[], companies=[],
+        syncro_enabled=enabled, trmm_enabled=enabled,
+    )
+
+    config = json.loads(re.search(r'id="tray-config-targeting-config">(.*?)</script>', html, re.S)[1])
+    assert (config["allowSyncroTicket"], config["allowTrmmScript"]) == expected
 
 
 def _request(path: str, query: str = "") -> Request:

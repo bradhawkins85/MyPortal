@@ -71,6 +71,7 @@ from app.security.encryption import encrypt_secret
 from app.services import rmm_action_steps, rmm_actions, rmm_automation, rmm_scripts, rmm_targeting
 from app.services import rmm_proxmox
 from app.services.rmm_scripts import RunRequestError
+from app.services.rmm_stats import sample_time as _sample_time
 
 RUN_SOURCE = "check"
 CHECK_TYPES = {
@@ -1173,12 +1174,6 @@ def evaluate(check: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[bool,
         text = f"{_round(received)} Mbps received, {_round(sent)} Mbps sent"
         return compare(value, settings.get("operator") or "above", float(settings.get("threshold_mbps") or 0)), text
     return None
-
-
-def _sample_time(now: datetime) -> datetime:
-    minutes = get_settings().stats_sample_minutes
-    start = now.replace(second=0, microsecond=0)
-    return start - timedelta(minutes=(start.hour * 60 + start.minute) % minutes)
 
 
 def samples_from(agent: Mapping[str, Any], report: Mapping[str, Any], kinds: set[str],

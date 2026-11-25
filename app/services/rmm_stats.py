@@ -250,10 +250,14 @@ async def asset_stats_context(asset_id: int, range_key: str | None = None,
     return context
 
 
+def sample_time(now: datetime) -> datetime:
+    minutes = get_settings().stats_sample_minutes
+    start = now.replace(second=0, microsecond=0)
+    return start - timedelta(minutes=(start.hour * 60 + start.minute) % minutes)
+
+
 def thermal_samples(agent: dict[str, Any], snapshot: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
     """Bucket check-in temperatures using server receipt time and stable sensor IDs."""
-    from app.services.rmm_checks import _sample_time
-
     if not agent.get("asset_id") or not agent.get("company_id"):
         return []
     rows = []
@@ -270,7 +274,7 @@ def thermal_samples(agent: dict[str, Any], snapshot: dict[str, Any], now: dateti
                               ensure_ascii=False, separators=(",", ":"))
         rows.append({"company_id": agent["company_id"], "asset_id": agent["asset_id"], "agent_id": agent["id"],
                      "metric": "temperature_celsius", "instance": instance,
-                     "value": round(value, 3), "sampled_at": _sample_time(now)})
+                     "value": round(value, 3), "sampled_at": sample_time(now)})
     return rows
 
 

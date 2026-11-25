@@ -173,11 +173,10 @@ from app.security.menu_permissions import (
     catalogue_for_api,
     membership_menu_can,
     menu_has_access,
-    normalize_menu_permissions,
 )
 from app.repositories import site_settings as site_settings_repo
 from app.security.cache_control import CacheControlMiddleware
-from app.security.client_ip import _peer_is_trusted, get_client_ip
+from app.security.client_ip import get_client_ip
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import clear_flash, flash_redirect, local_redirect, pop_flash, set_flash
@@ -3061,6 +3060,9 @@ async def _render_template(
     # Always clear the flash cookie so it is consumed exactly once.
     clear_flash(response)
     return response
+
+
+forms_api.configure_rendering(_render_template, templates.TemplateResponse)
 
 
 @app.get("/shared-credentials", response_class=HTMLResponse)
@@ -13157,7 +13159,7 @@ _app_ready: bool = False
 _READYZ_DATABASE_TIMEOUT = 3.0
 _READYZ_DATABASE_GRACE = 30.0
 # Event loop time of this worker's last successful database check.
-_database_last_ok: float | None = None
+_readiness_database: dict[str, float] = {}
 
 # Optional dev-only file watcher; started in ``on_startup`` when the
 # ``FEATURE_PACK_WATCH`` setting is true.  Held module-level so the
@@ -13195,8 +13197,6 @@ async def upgrade_status_endpoint() -> JSONResponse:
 async def readiness_probe() -> JSONResponse:
     """Readiness: startup has finished, DB is reachable, packs healthy."""
 
-    global _database_last_ok
-
     checks: dict[str, str] = {"startup": "ok" if _app_ready else "pending"}
     ok = _app_ready
     degraded = False
@@ -13206,18 +13206,19 @@ async def readiness_probe() -> JSONResponse:
         try:
             await asyncio.wait_for(db.fetch_one("SELECT 1"), timeout=_READYZ_DATABASE_TIMEOUT)
             checks["database"] = "ok"
-            _database_last_ok = now
+            _readiness_database["last_ok"] = now
         except Exception as exc:
             name = "Timeout" if isinstance(exc, asyncio.TimeoutError) else exc.__class__.__name__
             checks["database"] = f"error: {name}"
-            if _database_last_ok is not None and now - _database_last_ok < _READYZ_DATABASE_GRACE:
+            last_ok = _readiness_database.get("last_ok")
+            if last_ok is not None and now - last_ok < _READYZ_DATABASE_GRACE:
                 degraded = True
             else:
                 ok = False
             log_warning(
                 "Readiness database check failed",
                 error=name,
-                seconds_since_last_success=None if _database_last_ok is None else round(now - _database_last_ok, 1),
+                seconds_since_last_success=None if last_ok is None else round(now - last_ok, 1),
                 reported_unready=not degraded,
             )
         # With several Uvicorn workers, this one being ready says nothing about

@@ -8,6 +8,7 @@ from app.repositories import tray as tray_repo
 from app.repositories import auth as auth_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
+from app.security.account_status import is_user_active
 from app.security.session import SessionData, session_manager
 from app.services import issues as issues_service
 from app.services import tray as tray_service
@@ -31,17 +32,6 @@ TOTP_ENROLLMENT_EXEMPT_PATHS = frozenset(
         "/auth/password/change",
     }
 )
-
-
-def is_user_active(user: dict) -> bool:
-    """Return False only when the account has been explicitly deactivated."""
-    value = user.get("is_active", 1)
-    if value is None:
-        return True
-    try:
-        return bool(int(value))
-    except (TypeError, ValueError):
-        return bool(value)
 
 
 def _is_totp_enrollment_exempt_path(path: str) -> bool:

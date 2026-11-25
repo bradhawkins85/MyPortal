@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import aiosqlite
 import pytest
@@ -754,6 +755,28 @@ async def test_abort_stops_the_run_on_the_agent_and_frees_the_queue(sqlite_db, m
     # Finished runs cannot be aborted, and the agent's result is ignored.
     assert not await rmm_scripts.abort_run(aborted, aborted_by=None)
     assert (await rmm_scripts.record_result(agent, first["id"], {"exit_code": 1}))["status"] == "aborted"
+
+
+@pytest.mark.anyio
+async def test_server_finished_ticket_run_reaches_follow_up_handlers(monkeypatch):
+    from app.features import rmm
+
+    run = {"run_source": "ticket", "status": "aborted", "stdout": "partial output"}
+    monkeypatch.setattr(rmm.rmm_repo, "get_run", AsyncMock(return_value=run))
+    ticket_result = AsyncMock()
+    onboarding_result = AsyncMock()
+    check_result = AsyncMock()
+    monkeypatch.setattr(rmm.rmm_ticket_scripts, "record_result", ticket_result)
+    monkeypatch.setattr(rmm.rmm_automation, "run_finished", onboarding_result)
+    monkeypatch.setattr(rmm.rmm_checks, "run_finished", check_result)
+
+    await rmm_scripts._finished_by_server(17)
+
+    ticket_result.assert_awaited_once_with(
+        17, status="aborted", exit_code=None, stdout="partial output", stderr="", error=None,
+    )
+    onboarding_result.assert_awaited_once_with(17)
+    check_result.assert_awaited_once_with(17)
 
 
 def test_executing_runs_are_parsed_strictly():

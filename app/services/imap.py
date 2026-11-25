@@ -1585,8 +1585,8 @@ async def _find_existing_ticket_for_reply(
             ticket = await tickets_repo.get_ticket_by_external_reference(syncro_external_id)
             if ticket and not _ticket_is_closed(ticket):
                 return ticket
-        except Exception:  # pragma: no cover - defensive logging
-            ticket = None
+        except Exception:  # pragma: no cover - fall back to matching by subject
+            pass
 
     # If no ticket number found, try to match by normalized subject
     # Only match non-closed tickets where the sender is a participant.

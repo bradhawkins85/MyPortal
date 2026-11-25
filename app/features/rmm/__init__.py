@@ -55,6 +55,7 @@ onboarding steps, remote control settings and run history stay in the database.
 from __future__ import annotations
 
 from app.core.features import FeaturePack
+from app.repositories import rmm as rmm_repo
 
 from app.services import (rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_live, rmm_scripts,
                           rmm_patching, rmm_printers, rmm_software_updates, rmm_ticket_scripts,
@@ -73,6 +74,20 @@ from .patch_routes import router as patch_router
 from .printer_routes import router as printer_router
 from .windows_update_routes import router as windows_update_router
 from .routes import router
+
+
+async def _follow_up_server_finished_run(run_id: int) -> None:
+    run = await rmm_repo.get_run(run_id)
+    if run and run.get("run_source") == "ticket":
+        await rmm_ticket_scripts.record_result(
+            run_id, status=str(run["status"]), exit_code=None, stdout=str(run.get("stdout") or ""),
+            stderr=str(run.get("stderr") or ""), error=run.get("error_message"),
+        )
+    await rmm_automation.run_finished(run_id)
+    await rmm_checks.run_finished(run_id)
+
+
+rmm_scripts.register_server_finish_hook(_follow_up_server_finished_run)
 
 # Event log rules that schedule a script are queued on the automation tick,
 # as are checks judged on the server (agent offline, script results) and

@@ -100,7 +100,12 @@
           <p class="card__subtitle">Build the tray menu row by row. Use Move up and Move down to reorder, and Level to place an item under the submenu above it. Device rules on an item show it only on devices whose inventory matches, such as devices with an app installed or at one location. The JSON view is there for advanced edits.</p>
         </div></header>
         <div class="ce-section__body" data-menu-node-builder>
-          <script type="application/json" id="tray-config-targeting-config">{{ {"fields": targeting_fields | default([])} | tojson }}</script>
+          {% set tray_payload_types = (config.payload_json or '') | lower %}
+          <script type="application/json" id="tray-config-targeting-config">{{ {
+            "fields": targeting_fields | default([]),
+            "allowSyncroTicket": syncro_enabled is not defined or syncro_enabled or 'submit_syncro_ticket' in tray_payload_types,
+            "allowTrmmScript": trmm_enabled is not defined or trmm_enabled or 'trmm_script' in tray_payload_types
+          } | tojson }}</script>
           <div class="form-stack" id="menu-node-list" aria-live="polite"></div>
           <div class="form-actions">
             <button type="button" class="button button--ghost" id="menu-node-add" aria-label="Add menu node">Add item</button>
@@ -223,12 +228,13 @@
       const TRMM_SCRIPTS = {{ (trmm_scripts or [])|tojson }};
       const RMM_SCRIPTS = {{ (rmm_scripts or [])|tojson }};
       const TRAY_COMPANIES = {{ (companies or [])|tojson }};
-      let TARGETING_FIELDS = [];
+      let menuConfig = {};
       try {
-        TARGETING_FIELDS = JSON.parse(document.getElementById('tray-config-targeting-config').textContent || '{}').fields || [];
+        menuConfig = JSON.parse(document.getElementById('tray-config-targeting-config').textContent || '{}');
       } catch (error) {
         // The rule editor loads the field catalogue through the API instead.
       }
+      const TARGETING_FIELDS = menuConfig.fields || [];
 
       async function targetingApi(url, options) {
         const token = document.querySelector('meta[name="csrf-token"]');
@@ -305,13 +311,8 @@
         'env_var',
         'open_chat',
         'submit_ticket',
-{%- set tray_payload_types = (config.payload_json or '') | lower %}
-        {%- if syncro_enabled is not defined or syncro_enabled or 'submit_syncro_ticket' in tray_payload_types %}
-        'submit_syncro_ticket',
-        {%- endif %}
-        {%- if trmm_enabled is not defined or trmm_enabled or 'trmm_script' in tray_payload_types %}
-        'TRMM_Script',
-        {%- endif %}
+        ...(menuConfig.allowSyncroTicket !== false ? ['submit_syncro_ticket'] : []),
+        ...(menuConfig.allowTrmmScript !== false ? ['TRMM_Script'] : []),
         'rmm_script',
         'scan_network',
         'refresh_config',

@@ -253,28 +253,25 @@ def infer_feature_from_stack() -> str | None:
 
     frame = sys._getframe(1)
     fallback = None
-    try:
-        while frame is not None:
-            module = frame.f_globals.get("__name__", "")
-            qualified_name = frame.f_code.co_qualname
-            # Consider each lexical parent for workers nested in other workers.
-            names = qualified_name.split(".<locals>.")
-            for name in reversed(names):
-                key = _FEATURES_BY_CALLER.get((module, name))
-                if key:
-                    return key
-            infrastructure = module in {
-                __name__, "app.services.module_dispatch",
-                "app.services.module_runtime",
-            } or (module == "app.services.modules" and names[0] in {
-                "trigger_module", "_invoke_ollama",
-            })
-            if fallback is None and module.startswith("app.") and not infrastructure:
-                fallback = f"{module}.{names[0]}"
-            frame = frame.f_back
-        return fallback
-    finally:
-        del frame
+    while frame is not None:
+        module = frame.f_globals.get("__name__", "")
+        qualified_name = frame.f_code.co_qualname
+        # Consider each lexical parent for workers nested in other workers.
+        names = qualified_name.split(".<locals>.")
+        for name in reversed(names):
+            key = _FEATURES_BY_CALLER.get((module, name))
+            if key:
+                return key
+        infrastructure = module in {
+            __name__, "app.services.module_dispatch",
+            "app.services.module_runtime",
+        } or (module == "app.services.modules" and names[0] in {
+            "trigger_module", "_invoke_ollama",
+        })
+        if fallback is None and module.startswith("app.") and not infrastructure:
+            fallback = f"{module}.{names[0]}"
+        frame = frame.f_back
+    return fallback
 
 
 def _usable_feature(key: Any) -> str | None:

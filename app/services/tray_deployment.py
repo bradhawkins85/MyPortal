@@ -37,7 +37,7 @@ from app.repositories import companies as companies_repo
 from app.repositories import tray as tray_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.schemas.tray import TrayProvisioningSettings
-from app.services import tray as tray_service
+from app.security import device_tokens
 from app.services import tray_installer
 
 # ``NO_EXPIRY`` keeps the link working until an administrator revokes it.
@@ -74,7 +74,7 @@ class InstallerNotAvailable(Exception):
 
 
 def generate_slug() -> str:
-    return tray_service.generate_install_token()
+    return device_tokens.generate_install_token()
 
 
 def link_path(slug: str) -> str:
@@ -151,12 +151,12 @@ async def create_deployment_link(
     clean_label = (label or "").strip() or f"{company.get('name') or 'Company'} deployment"
     clean_label = clean_label[:150]
 
-    raw_token = tray_service.generate_install_token()
+    raw_token = device_tokens.generate_install_token()
     token_record = await tray_repo.create_install_token(
         label=("Deployment URL: " + clean_label)[:150],
         company_id=int(company_id),
-        token_hash=tray_service.hash_token(raw_token),
-        token_prefix=tray_service.token_prefix(raw_token),
+        token_hash=device_tokens.hash_token(raw_token),
+        token_prefix=device_tokens.token_prefix(raw_token),
         created_by_user_id=created_by_user_id,
         expires_at=expires_at,
     )
@@ -164,8 +164,8 @@ async def create_deployment_link(
     record = await tray_repo.create_deployment_link(
         company_id=int(company_id),
         label=clean_label,
-        slug_hash=tray_service.hash_token(slug),
-        slug_prefix=tray_service.token_prefix(slug),
+        slug_hash=device_tokens.hash_token(slug),
+        slug_prefix=device_tokens.token_prefix(slug),
         slug_encrypted=encrypt_secret(slug),
         install_token_id=token_record.get("id"),
         install_token_encrypted=encrypt_secret(raw_token),
@@ -266,7 +266,7 @@ async def resolve_active_link(slug: str) -> tuple[dict[str, Any], str]:
 
     if not slug or not _TOKEN_RE.match(slug):
         raise DeploymentLinkUnavailable("This deployment link is not valid.")
-    link = await tray_repo.get_deployment_link_by_slug_hash(tray_service.hash_token(slug))
+    link = await tray_repo.get_deployment_link_by_slug_hash(device_tokens.hash_token(slug))
     if not link or link.get("revoked_at"):
         raise DeploymentLinkUnavailable("This deployment link is not valid.")
     if _is_past(link.get("expires_at")):

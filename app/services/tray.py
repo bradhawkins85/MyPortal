@@ -16,7 +16,6 @@ Responsibilities
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import html
 import json
 import os
@@ -34,51 +33,23 @@ from app.repositories import companies as companies_repo
 from app.repositories import m365_signatures as m365_signatures_repo
 from app.repositories import site_settings as site_settings_repo
 from app.repositories import tray as tray_repo
+from app.security.device_tokens import (
+    generate_auth_token as generate_auth_token,
+    generate_install_token as generate_install_token,
+    hash_token as hash_token,
+    token_prefix as token_prefix,
+)
 from app.services import ai_consent
 from app.services import service_status as service_status_service
+from app.services.tray_presence import (
+    as_utc as _as_utc,
+    websocket_recently_seen as websocket_recently_seen,
+)
 
 _settings = get_settings()
 
 SERVICE_STATUS_URL_VARIABLE = "{{service_status_url}}"
 _setup_ticket_locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
-
-
-# ---------------------------------------------------------------------------
-# Token helpers
-# ---------------------------------------------------------------------------
-
-
-def generate_install_token() -> str:
-    """Return a fresh install token (URL-safe, ~43 chars)."""
-
-    return secrets.token_urlsafe(32)
-
-
-def generate_auth_token() -> str:
-    """Return a fresh per-device auth token (URL-safe, ~64 chars)."""
-
-    return secrets.token_urlsafe(48)
-
-
-def hash_token(token: str) -> str:
-    """Return a deterministic hash for ``token``.
-
-    The hash is salted with the application secret so a leaked database
-    cannot be used to brute-force the token offline. SHA-256 is sufficient
-    here because tokens are 256+ bits of entropy generated above; we are
-    not protecting against weak passwords, only obscuring the value at
-    rest. Using HMAC binds the hash to this MyPortal install.
-    """
-
-    import hmac
-
-    key = (_settings.secret_key or "").encode("utf-8") or b"myportal-tray"
-    digest = hmac.new(key, token.encode("utf-8"), hashlib.sha256).hexdigest()
-    return digest
-
-
-def token_prefix(token: str) -> str:
-    return token[:8]
 
 
 # ---------------------------------------------------------------------------
@@ -651,13 +622,13 @@ def _platform_from_os_name(value: Any) -> str:
     """Map a free-form OS name ("macOS 14.5", "Microsoft Windows 11 Pro") to a
     script platform key, or ``""`` when it is not recognised."""
 
-    from app.services import rmm_scripts
+    from app.services import rmm_script_platforms
 
     name = str(value or "").strip().lower()
     if not name:
         return ""
-    exact = rmm_scripts.normalise_platform(name)
-    if exact in rmm_scripts.SCRIPT_PLATFORMS:
+    exact = rmm_script_platforms.normalise_platform(name)
+    if exact in rmm_script_platforms.SCRIPT_PLATFORMS:
         return exact
     for needle, platform in (
         ("windows", "windows"),
@@ -716,7 +687,7 @@ async def _filter_rmm_scripts_for_platform(
     """
 
     from app.repositories import rmm as rmm_repo
-    from app.services import rmm_scripts
+    from app.services import rmm_script_platforms
 
     platform = await _device_platform(device)
     script_ids = _collect_rmm_script_ids(nodes)
@@ -725,7 +696,7 @@ async def _filter_rmm_scripts_for_platform(
     allowed: set[int] = set()
     for script_id in script_ids:
         script = await rmm_repo.get_script(script_id) if script_id else None
-        if script and rmm_scripts.platform_allowed(script, {"os": platform}):
+        if script and rmm_script_platforms.platform_allowed(script, {"os": platform}):
             allowed.add(script_id)
 
     def keep(node_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1207,9 +1178,6 @@ async def revoke_device(device_id: int) -> None:
 # A device whose WebSocket touched ``ws_last_seen_utc`` within this window is
 # treated as live on *some* app worker (it re-drains queued commands on its
 # next keep-alive, so a queued command is picked up within ~20 seconds).
-WEBSOCKET_PRESENCE_WINDOW_SECONDS = 90
-
-
 async def mark_websocket_alive(device: dict[str, Any]) -> None:
     """Best-effort record that ``device`` holds a live WebSocket."""
 
@@ -1223,29 +1191,6 @@ async def mark_websocket_alive(device: dict[str, Any]) -> None:
             device_uid=device.get("device_uid"),
             error=str(exc),
         )
-
-
-def _as_utc(value: Any) -> datetime | None:
-    if isinstance(value, str):
-        try:
-            value = datetime.fromisoformat(value)
-        except ValueError:
-            return None
-    if not isinstance(value, datetime):
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
-def websocket_recently_seen(device: dict[str, Any], *, now: datetime | None = None) -> bool:
-    """Return True when the device's WebSocket was active very recently."""
-
-    seen = _as_utc(device.get("ws_last_seen_utc"))
-    if seen is None:
-        return False
-    current = now or datetime.now(timezone.utc)
-    return (current - seen).total_seconds() <= WEBSOCKET_PRESENCE_WINDOW_SECONDS
 
 
 # How often an open device WebSocket re-checks the command log for commands

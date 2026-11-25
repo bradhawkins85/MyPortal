@@ -14,6 +14,7 @@ from fastapi import HTTPException
 
 from app.api.routes import tickets as tickets_routes
 from app.services import tray as tray_service
+from app.services.tray_presence import WEBSOCKET_PRESENCE_WINDOW_SECONDS
 
 
 DEVICE = {"id": 5, "device_uid": "dev-uid", "hostname": "ws-01", "company_id": 3}
@@ -380,8 +381,8 @@ def test_websocket_recently_seen_window():
     from datetime import datetime, timedelta, timezone
 
     now = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
-    within = now - timedelta(seconds=tray_service.WEBSOCKET_PRESENCE_WINDOW_SECONDS - 1)
-    outside = now - timedelta(seconds=tray_service.WEBSOCKET_PRESENCE_WINDOW_SECONDS + 1)
+    within = now - timedelta(seconds=WEBSOCKET_PRESENCE_WINDOW_SECONDS - 1)
+    outside = now - timedelta(seconds=WEBSOCKET_PRESENCE_WINDOW_SECONDS + 1)
     assert tray_service.websocket_recently_seen({"ws_last_seen_utc": within.replace(tzinfo=None)}, now=now)
     assert tray_service.websocket_recently_seen({"ws_last_seen_utc": within.isoformat()}, now=now)
     assert not tray_service.websocket_recently_seen({"ws_last_seen_utc": outside}, now=now)
