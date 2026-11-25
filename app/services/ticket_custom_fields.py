@@ -368,7 +368,7 @@ async def build_ticket_fields(
         definitions = await repo.list_definitions(include_inactive=False)
         values = await repo.get_ticket_values(ticket_id) if definitions else {}
     except Exception as exc:  # pragma: no cover - keep the ticket page rendering
-        log_error("Failed to load custom ticket details", ticket_id=ticket_id, error=str(exc))
+        log_error("Failed to load custom ticket details", ticket_id=int(ticket_id), error=str(exc))
         return []
     scopes = visible_scopes(is_super_admin=is_super_admin, is_staff=is_staff)
     fields: list[dict[str, Any]] = []

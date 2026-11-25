@@ -2696,7 +2696,7 @@ async def admin_save_ticket_custom_field_values(ticket_id: int, request: Request
             ticket_id, actor_type="technician", actor=current_user
         )
     except Exception as exc:  # pragma: no cover - the values are already saved
-        log_error("Failed to emit ticket update after custom detail change", ticket_id=ticket_id, error=str(exc))
+        log_error("Failed to emit ticket update after custom detail change", ticket_id=int(ticket_id), error=str(exc))
     return flash_redirect(target, "Custom details saved.", "success")
 
 
