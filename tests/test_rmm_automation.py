@@ -719,3 +719,45 @@ def test_schedule_editor_offers_run_now():
     )
     assert 'value="now" data-rmm-frequency' in html and "<span>Run now</span>" in html
     assert 'data-rmm-frequency-only="now"' in html
+
+
+def test_every_company_onboarding_steps_need_a_super_admin_and_keep_their_scope():
+    from app.features.rmm import automation_routes as routes
+
+    assert routes.StepRequest(script_id=1).scope == "company"
+    assert routes.StepRequest(script_id=1, scope="all").scope == "all"
+    assert routes.OrderRequest(step_ids=[1], scope="all").scope == "all"
+    view = routes._step_view({"id": 1, "company_id": None, "scope": "all", "tag_ids": [2, 9],
+                              "script_name": "Setup", "entries_encrypted": "x"}, {2: "Workstation"})
+    assert "entries_encrypted" not in view and view["tag_names"] == ["Workstation"] and view["name"] == "Setup"
+
+
+def test_automation_page_shows_every_company_onboarding_steps():
+    from tests.test_rmm_scripts import _environment
+
+    env = _environment()
+    env.globals["static_url"] = lambda path: path
+    common = {"company": {"name": "Contoso"}, "schedules": [], "onboarding_runs": [], "agents": [], "tags": [],
+              "can_run": True, "default_timezone": "UTC",
+              "steps": [{"id": 1, "scope": "company", "script_name": "Own", "script_path": "rmm/Common/Own.ps1",
+                         "script_active": True, "inputs": [], "target_mode": "all", "tag_names": []}],
+              "global_steps": [{"id": 2, "scope": "all", "script_name": "Global", "script_path": "rmm/Common/Global.ps1",
+                                "script_active": True, "inputs": [], "target_mode": "rules", "tag_names": []}]}
+    admin = env.get_template("rmm/automation.html").render(**common, is_super_admin=True)
+    assert 'data-rmm-steps="all"' in admin and 'data-rmm-steps="company"' in admin
+    assert 'data-rmm-step-edit="2"' in admin and 'data-rmm-step-edit="1"' in admin
+    assert "Every company" in admin and "data-rmm-choco-step-scope" in admin
+    assert 'name="rmm-choco-step-target" value="rules"' in admin
+    tech = env.get_template("rmm/automation.html").render(**common, is_super_admin=False)
+    assert 'data-rmm-step-edit="2"' not in tech and 'data-rmm-step-edit="1"' in tech
+    assert "Only super admins can change them." in tech and "data-rmm-choco-step-scope" not in tech
+    empty = env.get_template("rmm/automation.html").render(**{**common, "global_steps": []}, is_super_admin=True)
+    assert "No steps for every company." in empty
+
+
+def test_every_company_onboarding_migration_is_idempotent():
+    from pathlib import Path
+
+    sql = (Path(__file__).resolve().parents[1] / "migrations" / "573_rmm_onboarding_global_steps.sql").read_text()
+    assert "-- phase: expand" in sql
+    assert "ALTER TABLE rmm_onboarding_steps MODIFY company_id INT NULL;" in sql

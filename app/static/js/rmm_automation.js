@@ -122,7 +122,7 @@
     }
     ids.splice(target, 0, ids.splice(index, 1)[0]);
     await act(button, () => api('/api/rmm/onboarding/steps/order', {
-      method: 'POST', body: { step_ids: ids },
+      method: 'POST', body: { step_ids: ids, scope: list.dataset.rmmSteps === 'all' ? 'all' : 'company' },
     }), true);
   }
 
@@ -152,7 +152,7 @@
       item.append(el('span', 'rmm-step__number', index + 1));
       const main = el('div', 'rmm-step__main');
       main.append(el('span', 'rmm-script__name', step.script_name));
-      const meta = el('span', 'text-muted', 'Tags: ' + ((step.tags || []).join(', ') || 'none') + (step.continue_on_failure ? ' · carries on if it fails' : ''));
+      const meta = el('span', 'text-muted', (step.scope === 'all' ? 'Every company · ' : '') + 'Tags: ' + ((step.tags || []).join(', ') || 'none') + (step.continue_on_failure ? ' · carries on if it fails' : ''));
       main.append(meta);
       if (step.message) {
         main.append(el('span', 'text-muted', step.message));

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import uuid
 
 import pytest
 
@@ -61,7 +62,10 @@ function Test-Path {
     builtin = ROOT / 'app/services/rmm_builtin'
     script = tmp_path / 'job.ps1'
     script.write_text(harness + '\n' + (builtin / 'chocolatey_sources.ps1').read_text()
-                      + '\n' + (builtin / 'patch.ps1').read_text(), encoding='utf-8')
+                      + '\n' + (builtin / 'patch.ps1').read_text().replace(
+                          # A mutex of its own, so parallel test runs on one machine do not refuse each other.
+                          'Global\\MyPortalPatchManagement', 'Global\\MyPortalPatchTest-' + uuid.uuid4().hex),
+                      encoding='utf-8')
     plan = {'sources': [{'name': 'company', 'url': 'https://repo.example.com', 'priority': 1, 'enabled': True}],
             'apps': [{'package_id': 'testapp', 'display_name': 'Test Application', 'install_missing': True}],
             'reboot': {'reboot_mode': 'never'}}

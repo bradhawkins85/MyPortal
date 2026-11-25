@@ -21,9 +21,9 @@
   "failed": ("error", "Stopped"),
   "cancelled": ("neutral", "Cancelled"),
 } %}
-{% macro step_list(steps, writable) -%}
+{% macro step_list(steps, writable, scope="company", label="Onboarding steps", empty="") -%}
   {%- if steps %}
-  <ol class="rmm-steps" data-rmm-steps aria-label="Onboarding steps">
+  <ol class="rmm-steps" data-rmm-steps="{{ scope }}" aria-label="{{ label }}">
     {%- for step in steps %}
     <li class="rmm-step" data-rmm-step="{{ step.id }}">
       <span class="rmm-step__number" aria-hidden="true">{{ loop.index }}</span>
@@ -47,6 +47,7 @@
           {% elif not step.script_active %}<li class="rmm-chip rmm-chip--warning">Script removed from Gitea</li>{% endif %}
           {% if step.inputs and step.kind != 'chocolatey' %}<li class="rmm-chip">{{ step.inputs | length }} value{{ '' if step.inputs | length == 1 else 's' }} set</li>{% endif %}
           {% if step.run_as == 'user' and step.kind != 'chocolatey' %}<li class="rmm-chip">Runs as logged in user</li>{% endif %}
+          {% if step.scope == 'all' %}<li class="rmm-chip rmm-chip--env">Every company</li>{% endif %}
           {% if step.skip_existing_assets %}<li class="rmm-chip">Skips existing assets</li>{% endif %}
           <li class="rmm-chip">{{ 'Carries on if it fails' if step.continue_on_failure else 'Stops the sequence if it fails' }}</li>
         </ul>
@@ -63,13 +64,14 @@
     {%- endfor %}
   </ol>
   {%- else %}
-  <p class="text-muted">No onboarding steps for {{ company.name if company else "this company" }} yet.</p>
+  <p class="text-muted">{{ empty or ("No onboarding steps for " ~ (company.name if company else "this company") ~ " yet.") }}</p>
   {%- endif %}
 {%- endmacro %}
 {% block content %}
 {% from "macros/counters.html" import counter_strip %}
 {% set schedules = schedules or [] %}
 {% set steps = steps or [] %}
+{% set global_steps = global_steps or [] %}
 {% set onboarding_runs = onboarding_runs or [] %}
 {% set enabled_schedules = schedules | selectattr("is_enabled") | list | length %}
 {% set running_onboarding = onboarding_runs | selectattr("status", "equalto", "running") | list | length %}
@@ -83,13 +85,14 @@
           {% if company and company.name %}<li class="scf-chip">{{ company.name }}</li>{% endif %}
           <li class="scf-chip{% if not enabled_schedules %} scf-chip--muted{% endif %}">{{ enabled_schedules }} of {{ schedules | length }} schedule{{ 's' if schedules | length != 1 }} on</li>
           <li class="scf-chip{% if not steps %} scf-chip--muted{% endif %}">{{ steps | length }} onboarding step{{ 's' if steps | length != 1 }}</li>
+          {% if global_steps %}<li class="scf-chip">{{ global_steps | length }} for every company</li>{% endif %}
         </ul>
       </div>
     </div>
     {{ counter_strip([
       {"label": "Schedules", "value": schedules | length, "variant": "neutral", "href": "#rmm-automation-schedules"},
       {"label": "Turned on", "value": enabled_schedules, "variant": "success" if enabled_schedules else "neutral", "href": "#rmm-automation-schedules"},
-      {"label": "Onboarding steps", "value": steps | length, "variant": "info", "href": "#rmm-automation-onboarding"},
+      {"label": "Onboarding steps", "value": (steps | length) + (global_steps | length), "variant": "info", "href": "#rmm-automation-onboarding"},
       {"label": "Onboarding running", "value": running_onboarding, "variant": "warning" if running_onboarding else "neutral", "href": "#rmm-automation-history"},
       {"label": "Onboarding stopped", "value": stopped_onboarding, "variant": "danger" if stopped_onboarding else "neutral", "href": "#rmm-automation-history"},
     ], class="ce-overview__stats") }}
@@ -103,7 +106,7 @@
       </div>
       {% set automation_groups = [
         ("Run scripts", [("schedules", "Schedules", schedules | length, true), ("apps", "Chocolatey apps", "", can_run)]),
-        ("New devices", [("onboarding", "Onboarding scripts", steps | length, true), ("history", "Onboarding history", onboarding_runs | length, true)]),
+        ("New devices", [("onboarding", "Onboarding scripts", (steps | length) + (global_steps | length), true), ("history", "Onboarding history", onboarding_runs | length, true)]),
       ] %}
       {% for group_label, items in automation_groups %}
         {% set visible_items = items | selectattr(3) | list %}
@@ -250,7 +253,7 @@
     <header class="ce-section__header">
       <div class="ce-section__heading">
         <h2 class="card__title" id="rmm-onboarding-heading">Onboarding scripts</h2>
-        <p class="card__subtitle">{{ company.name if company else "This company" }}'s steps run once, one at a time and in this order, when the RMM agent is first installed on one of its devices. Each step runs only on devices with any of its tags and is skipped on the rest. A failed step stops the steps after it unless it is set to carry on.</p>
+        <p class="card__subtitle">Steps run once, one at a time and in this order, when the RMM agent is first installed on a device: the steps for every company first, then {{ company.name if company else "this company" }}'s own. Each step runs only on the devices it selects and is skipped on the rest. A failed step stops the steps after it unless it is set to carry on.</p>
       </div>
       {% if can_run %}<div class="rmm-asset-actions">
         <button type="button" class="button button--small" data-rmm-step-new aria-haspopup="dialog" aria-controls="rmm-run-modal">Add step</button>
@@ -258,7 +261,12 @@
       </div>{% endif %}
     </header>
     <div class="ce-section__body">
-      {{ step_list(steps, can_run) }}
+      <h3 class="rmm-subheading" id="rmm-global-steps-heading">Every company</h3>
+      <p class="form-help">Run on every company's new devices. Use device rules, such as <em>Asset tag is Workstation</em> and <em>Company name is not …</em>, to choose where they apply.{% if not is_super_admin %} Only super admins can change them.{% endif %}</p>
+      {{ step_list(global_steps, can_run and is_super_admin, "all", "Onboarding steps for every company",
+                   "No steps for every company." ~ (" Choose “Every company” when adding a step to run it on every company's matching devices." if can_run and is_super_admin else "")) }}
+      <h3 class="rmm-subheading" id="rmm-company-steps-heading">{{ company.name if company else "This company" }}</h3>
+      {{ step_list(steps, can_run, "company", "Onboarding steps for " ~ (company.name if company else "this company")) }}
     </div>
   </section>
 
@@ -340,10 +348,21 @@
         <input type="text" id="rmm-choco-step-extra" class="form-input" maxlength="1000" placeholder="Optional, comma separated, such as googlechrome, 7zip" data-rmm-choco-step-extra>
         <p class="form-help">Up to 20 applications, installed one after another.</p>
       </fieldset>
+      {% if is_super_admin %}
+      <div class="form-field" data-rmm-choco-step-scope-field>
+        <label class="form-label" for="rmm-choco-step-scope">Runs for</label>
+        <select class="form-input" id="rmm-choco-step-scope" data-rmm-choco-step-scope>
+          <option value="company">This company's devices</option>
+          <option value="all">Every company's devices</option>
+        </select>
+        <p class="form-help">Every-company steps run before each company's own steps, using each company's Chocolatey sources.</p>
+      </div>
+      {% endif %}
       <fieldset class="form-field">
         <legend class="form-label">Devices</legend>
         <label><input type="radio" name="rmm-choco-step-target" value="all" checked data-rmm-choco-step-target> Every Windows device</label>
         <label><input type="radio" name="rmm-choco-step-target" value="tags" data-rmm-choco-step-target> Windows devices with any of these tags</label>
+        <label><input type="radio" name="rmm-choco-step-target" value="rules" data-rmm-choco-step-target> Windows devices that match rules</label>
         <div data-rmm-choco-step-tags-field hidden>
           <label class="form-label" for="rmm-choco-step-tags">Tags</label>
           <select id="rmm-choco-step-tags" class="form-input" multiple size="6" data-rmm-choco-step-tags>
@@ -351,6 +370,9 @@
           </select>
         </div>
       </fieldset>
+      <div data-rmm-choco-step-rules>
+        {% set targeting_id = "rmm-choco-step-targeting-title" %}{% include "rmm/_device_rules.html" %}
+      </div>
       <label><input type="checkbox" data-rmm-choco-step-continue> Carry on with the next steps if this one fails</label>
       <label><input type="checkbox" data-rmm-choco-step-skip-existing> Skip existing assets (only devices enrolled from now on)</label>
       <p class="alert alert--warning" role="alert" data-rmm-choco-step-error hidden></p>
