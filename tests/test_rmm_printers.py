@@ -25,8 +25,9 @@ UPSTAIRS = r"\\print01\Upstairs"
 
 @pytest.fixture
 async def printers_db(sqlite_db, monkeypatch):
-    sql = Database()._adapt_sql_for_sqlite((ROOT / "migrations" / "574_rmm_printers.sql").read_text())
-    await sqlite_db.conn.executescript(sql)
+    for name in ("574_rmm_printers.sql", "575_rmm_printer_job_count.sql"):
+        sql = Database()._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text())
+        await sqlite_db.conn.executescript(sql)
     monkeypatch.setattr(repo, "db", sqlite_db)
     yield sqlite_db
 
@@ -39,7 +40,7 @@ def _scan(*names, **overrides):
     rows = {
         "Office HP": {"name": "Office HP", "driver": "HP Universal Printing PCL 6", "port": "IP_10.0.0.20",
                       "port_address": "10.0.0.20", "type": "Local", "device_type": "Print", "status": "Normal",
-                      "shared": True, "share_name": "OfficeHP", "published": False, "location": "Level 2",
+                      "job_count": 3, "shared": True, "share_name": "OfficeHP", "published": False, "location": "Level 2",
                       "comment": None, "computer_name": "PC-01", "users": [], "default_for": ["CONTOSO\\amy"]},
         "PDF": {"name": "Microsoft Print to PDF", "driver": "Microsoft Print To PDF", "port": "PORTPROMPT:",
                 "type": "Local", "status": "7", "shared": False, "users": [], "default_for": []},
@@ -67,7 +68,9 @@ def test_migration_and_script_exist():
     assert "-- phase: expand" in sql
     assert "CREATE TABLE IF NOT EXISTS rmm_printer_scans" in sql and "CREATE TABLE IF NOT EXISTS rmm_printers" in sql
     assert "first_seen_at" in sql and "last_seen_at" in sql and "is_installed" in sql
+    assert "job_count INT" in (ROOT / "migrations" / "575_rmm_printer_job_count.sql").read_text()
     script = printers.scan_script_content()
+    assert "JobCount" in script and "PrinterStatus" in script
     assert "Get-Printer" in script and "Get-PrinterPort" in script and printers.MARKER in script
 
 
@@ -77,6 +80,8 @@ def test_normalise_cleans_printers_and_names_statuses():
     assert names == [UPSTAIRS, "Microsoft Print to PDF", "Office HP"]
     hp = state["printers"][2]
     assert hp["status"] == "Ready" and hp["is_shared"] == 1 and hp["port_address"] == "10.0.0.20"
+    assert hp["printer_status"] == "Normal" and hp["job_count"] == 3
+    assert state["printers"][1]["printer_status"] == "7" and state["printers"][1]["job_count"] is None
     assert hp["default_for"] == "CONTOSO\\amy" and hp["comment"] is None
     assert state["printers"][1]["status"] == "Offline"
     assert state["printers"][0]["connected_users"] == "CONTOSO\\amy, CONTOSO\\bob"
@@ -99,6 +104,7 @@ async def test_scan_captures_printers_and_hides_the_marker(printers_db):
     rows = await repo.list_printers(int(agent["id"]))
     assert {row["name"] for row in rows} == {"Office HP", "Microsoft Print to PDF"}
     assert all(row["is_installed"] == 1 and row["first_seen_at"] and row["last_seen_at"] for row in rows)
+    assert {row["name"]: row["job_count"] for row in rows} == {"Office HP": 3, "Microsoft Print to PDF": None}
     scan = await repo.get_scan(int(agent["id"]))
     assert scan["printer_count"] == 2 and scan["scan_requested_by_user_id"] == 9
 
@@ -221,7 +227,7 @@ def test_printers_section_renders_sortable_filterable_table():
     env.globals["static_url"] = lambda path: path
     rows = [printers._display({
         "name": "<b>Office</b>", "driver_name": "HP", "port_name": "IP_10.0.0.20", "port_address": "10.0.0.20",
-        "printer_type": "Local", "status": "Paper jam", "is_shared": 1, "share_name": "OfficeHP", "location": "L2",
+        "printer_type": "Local", "status": "Paper jam", "printer_status": "PaperJam", "job_count": 4, "is_shared": 1, "share_name": "OfficeHP", "location": "L2",
         "connected_users": None, "default_for": "CONTOSO\\amy", "is_installed": 1,
         "first_seen_at": datetime(2025, 1, 2), "last_seen_at": datetime(2026, 11, 20),
     }), printers._display({
@@ -229,7 +235,7 @@ def test_printers_section_renders_sortable_filterable_table():
         "is_installed": 0, "first_seen_at": datetime(2025, 1, 2), "last_seen_at": datetime(2026, 1, 1),
     })]
     context = {"scan": {"scanned_at": "2026-11-20T01:00:00", "errors": []}, "printers": rows,
-               "counts": {"total": 1, "shared": 1, "attention": 1, "removed": 1},
+               "counts": {"total": 1, "shared": 1, "attention": 1, "removed": 1, "jobs": 4},
                "type_options": ["Local", "Network connection"], "status_options": ["Paper jam", "Unknown"],
                "scan_pending": False, "can_run": True}
     template = env.from_string('{% include "rmm/_asset_printers.html" %}')
@@ -239,4 +245,5 @@ def test_printers_section_renders_sortable_filterable_table():
     assert 'data-filter-options="multiple"' in html and "status--danger" in html
     assert "&lt;b&gt;Office&lt;/b&gt;" in html and "<b>Office</b>" not in html
     assert "No longer seen" in html and "Default for CONTOSO\\amy" in html and "10.0.0.20" in html
+    assert 'data-column-key="jobs"' in html and 'data-value="4"' in html and 'title="PrinterStatus: PaperJam"' in html
     assert 'data-utc="2025-01-02T00:00:00"' in html and "/rmm/assets/10/printers/scan" in html

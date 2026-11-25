@@ -4,7 +4,8 @@ A built-in PowerShell scan (``rmm_builtin/printers.ps1``) runs through the
 device's RMM script runner as a ``printer_scan`` run, so no new RMM agent
 version is needed: daily on connected Windows devices (:func:`tick`) and when a
 technician presses **Scan now** on the asset page. It lists the device's
-printers with ``Get-Printer`` (port address from ``Get-PrinterPort``), adds the
+printers with ``Get-Printer`` (PrinterStatus, JobCount, and the port address
+from ``Get-PrinterPort``), adds the
 printer connections and default printer of every signed-in user, and prints
 one ``##myportal-printers=`` line of gzip-compressed, base64-encoded JSON.
 :func:`capture` takes that line out of the stored run output and :func:`ingest`
@@ -132,6 +133,16 @@ def _names(value: Any) -> str | None:
     return ", ".join(names)[:512] or None
 
 
+def _count(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if 0 <= number <= 1_000_000 else None
+
+
 def status_label(value: Any) -> str | None:
     text = _text(value, 64)
     if not text:
@@ -177,6 +188,8 @@ def normalise(payload: Any) -> dict[str, Any]:
                 "printer_type": _text(item.get("type"), 32),
                 "device_type": _text(item.get("device_type"), 32),
                 "status": status_label(item.get("status")),
+                "printer_status": _text(item.get("status"), 64),
+                "job_count": _count(item.get("job_count")),
                 "is_shared": _bool(item.get("shared")),
                 "share_name": _text(item.get("share_name")),
                 "is_published": _bool(item.get("published")),
@@ -306,6 +319,7 @@ def _display(row: Mapping[str, Any]) -> dict[str, Any]:
     item["type_label"] = _TYPE_LABELS.get(printer_type.lower(), printer_type or "Unknown")
     item["status_label"] = row.get("status") or "Unknown"
     item["status_variant"] = STATUS_VARIANTS.get(item["status_label"], "neutral")
+    item["job_count"] = row.get("job_count")
     item["scope_label"] = "User connection" if row.get("connected_users") else "Device"
     item["is_installed"] = bool(row.get("is_installed", 1))
     item["presence_label"] = "Installed" if item["is_installed"] else "No longer seen"
@@ -333,6 +347,7 @@ async def asset_context(agent: Mapping[str, Any] | None, *, can_run: bool) -> di
             "removed": len(removed),
             "shared": sum(1 for item in printers if item["is_shared"]),
             "attention": sum(1 for item in printers if item["status_variant"] in ("danger", "warning")),
+            "jobs": sum(item["job_count"] or 0 for item in printers),
         },
         "type_options": sorted({item["type_label"] for item in rows}),
         "status_options": sorted({item["status_label"] for item in rows}),

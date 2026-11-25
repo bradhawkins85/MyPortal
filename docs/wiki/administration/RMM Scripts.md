@@ -792,7 +792,7 @@ sensors.
 ### Printers
 
 An asset's **Printers** section (Windows devices with the RMM agent) lists the printers installed
-on the computer: name, status, local or network connection, driver, port and its IP address,
+on the computer: name, status (from `PrinterStatus`), jobs in its queue (`JobCount`), local or network connection, driver, port and its IP address,
 whether it is shared, location, which signed-in users connected it and whose default it is, and
 when it was first and last seen. Sort by any column heading, search the list, or filter the
 Status, Type, Shared and Presence columns from their headers.

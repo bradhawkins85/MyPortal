@@ -10,7 +10,8 @@ from app.core.database import db
 
 # Insert order of the values each printer stores.
 PRINTER_COLUMNS = (
-    "name", "driver_name", "port_name", "port_address", "printer_type", "device_type", "status", "is_shared",
+    "name", "driver_name", "port_name", "port_address", "printer_type", "device_type", "status", "printer_status",
+    "job_count", "is_shared",
     "share_name", "is_published", "location", "comment", "computer_name", "connected_users", "default_for",
 )
 

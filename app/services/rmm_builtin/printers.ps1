@@ -25,17 +25,23 @@ try {
             Add-MyPortalPrinter @{
                 name = $_.Name; driver = $_.DriverName; port = $_.PortName; port_address = $ports[$_.PortName]
                 type = [string]$_.Type; device_type = [string]$_.DeviceType; status = [string]$_.PrinterStatus
-                shared = [bool]$_.Shared; share_name = $_.ShareName; published = [bool]$_.Published
+                job_count = $_.JobCount; shared = [bool]$_.Shared; share_name = $_.ShareName; published = [bool]$_.Published
                 location = $_.Location; comment = $_.Comment; computer_name = $_.ComputerName
                 users = @(); default_for = @()
             }
         }
     } else {
+        $jobs = @{}
+        Get-CimInstance Win32_PrintJob -ErrorAction SilentlyContinue | ForEach-Object {
+            $printer = ($_.Name -split ',')[0]
+            $jobs[$printer] = 1 + [int]$jobs[$printer]
+        }
         Get-CimInstance Win32_Printer | ForEach-Object {
             Add-MyPortalPrinter @{
                 name = $_.Name; driver = $_.DriverName; port = $_.PortName; port_address = $ports[$_.PortName]
                 type = $(if ($_.Network) { 'Connection' } else { 'Local' }); device_type = 'Print'
-                status = [string]$_.PrinterStatus; shared = [bool]$_.Shared; share_name = $_.ShareName
+                status = [string]$_.PrinterStatus; job_count = [int]$jobs[$_.Name]
+                shared = [bool]$_.Shared; share_name = $_.ShareName
                 published = [bool]$_.Published; location = $_.Location; comment = $_.Comment
                 computer_name = $_.ServerName; users = @(); default_for = @()
             }
