@@ -2540,6 +2540,11 @@ async def asset_detail_page(
         rmm_context["windows_updates"] = await rmm_windows_update_routes.asset_windows_updates_context(
             company_id, asset_id, can_run=can_run_scripts, is_super_admin=bool(is_super_admin),
         )
+        from app.features.rmm import printer_routes as rmm_printer_routes
+
+        rmm_context["printers"] = await rmm_printer_routes.asset_printers_context(
+            company_id, asset_id, can_run=can_run_scripts,
+        )
     # The health check is an RMM option: it needs its pack and a deployed RMM agent.
     health_check_context = None
     if (rmm_context and rmm_context.get("agent")

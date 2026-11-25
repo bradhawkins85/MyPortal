@@ -654,7 +654,7 @@ Each rule has:
 - **When this script finishes**: one script, or **Any script**. Rules apply to every run of the
   script however it started: manually, on a schedule, during onboarding, from an event log rule,
   check, ticket automation, the tray menu or another result rule. MyPortal's own jobs (patching,
-  Windows Update scans, remote control, tray repair, agent uninstall and **Execute command**) are
+  Windows Update and printer scans, remote control, tray repair, agent uninstall and **Execute command**) are
   never watched. An offboarding script run before an uninstall is watched like any other run.
   Runs that expire, are cancelled or aborted, or are lost by a restarting agent never report a
   result, so they do not trigger rules.
@@ -788,6 +788,25 @@ The tray app's [Health Check](Health%20Check.md) may install PawnIO on a physica
 the few minutes it takes to read hardware sensors, and removes it before it reports back. If
 the RMM agent starts during that time it removes PawnIO early and the check reports fewer
 sensors.
+
+### Printers
+
+An asset's **Printers** section (Windows devices with the RMM agent) lists the printers installed
+on the computer: name, status, local or network connection, driver, port and its IP address,
+whether it is shared, location, which signed-in users connected it and whose default it is, and
+when it was first and last seen. Sort by any column heading, search the list, or filter the
+Status, Type, Shared and Presence columns from their headers.
+
+MyPortal collects the list with a built-in PowerShell scan (`Get-Printer` and `Get-PrinterPort`,
+plus each signed-in user's printer connections and default printer) run through the existing
+agent's script runner, so no agent update is needed. Connected devices scan once a day, and
+**Scan now** asks for a fresh list (RMM scripts write access). Scans appear in the device's script
+run history as **Printer scan**. A printer the latest scan did not report is shown as
+**No longer seen** with the date it was last seen, and is removed once it has not been seen for
+over a year. Printers that are still installed are always listed. Per-user connections are only
+seen while that user is signed in; they stay listed between scans like any other printer.
+
+The device's printers are also available as JSON from `GET /api/rmm/assets/{id}/printers`.
 
 ### Health check
 
