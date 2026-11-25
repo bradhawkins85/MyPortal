@@ -156,3 +156,69 @@ def test_rule_and_all_onboarding_labels_do_not_warn_about_missing_tags():
         can_run=True, is_super_admin=False, default_timezone='UTC')
     assert 'Device rules' in html and 'Every device' in html
     assert 'No tags: skipped on every device' not in html
+
+
+async def _enrol_other_company(fake):
+    from app.services import rmm_scripts
+
+    result = await rmm_scripts.enrol_agent(
+        tray_device={"id": 7, "company_id": 2, "asset_id": 20},
+        payload={"agent_uid": "agent-uid-other", "hostname": "OTHER-PC", "os": "windows", "shells": ["powershell"]},
+        client_ip="203.0.113.6",
+    )
+    return await rmm_scripts.authenticate_agent(result["auth_token"])
+
+
+@pytest.mark.anyio
+async def test_every_company_onboarding_step_runs_first_and_rules_leave_companies_out(target_db, monkeypatch):
+    from app.services import rmm_scripts
+
+    await _sync(monkeypatch, {
+        "rmm/Common/Global.ps1": "Write-Output global\n",
+        "rmm/Common/Own.ps1": "Write-Output own\n",
+        "rmm/Companies/Contoso/Local.ps1": "Write-Output local\n",
+    })
+    scripts = {script["name"]: script for script in await rmm_repo.list_scripts()}
+    # Workstations everywhere except the company named "Other".
+    rules = group("and", condition("asset.name", "starts_with", "PC"), condition("company.name", "not_equals", "Other"))
+    with pytest.raises(RunRequestError) as exc:
+        await automation.save_step(step_id=None, company_id=None, user_id=9, payload={
+            "script_id": scripts["Local"]["id"], "target_mode": "all"})
+    assert "Common" in exc.value.errors["script"]
+    global_id = await automation.save_step(step_id=None, company_id=None, user_id=9, payload={
+        "script_id": scripts["Global"]["id"], "target_mode": "rules", "target_rules": rules})
+    await automation.save_step(step_id=None, company_id=1, user_id=9, payload={
+        "script_id": scripts["Own"]["id"], "target_mode": "all"})
+
+    saved = await automation_repo.get_step(global_id)
+    assert saved["company_id"] is None and saved["scope"] == "all" and saved["target_rules"] == rules
+    assert [step["id"] for step in await automation_repo.list_steps(company_id=None)] == [global_id]
+    assert global_id not in [step["id"] for step in await automation_repo.list_steps(company_id=1)]
+
+    # Contoso's device runs the every-company step first, then its own.
+    _, contoso = await _enrol(target_db)
+    onboarding_id = await automation.start_onboarding(contoso)
+    plan = (await automation_repo.get_onboarding_run(onboarding_id))["plan"]
+    assert [(entry["script_name"], entry["scope"]) for entry in plan] == [("Global", "all"), ("Own", "company")]
+    for expected in ("Global", "Own"):
+        jobs = await rmm_scripts.wait_for_jobs(contoso, wait_seconds=0)
+        assert [job["name"] for job in jobs] == [expected]
+        await rmm_scripts.record_result(contoso, jobs[0]["id"], {"exit_code": 0})
+        await automation.run_finished(jobs[0]["id"])
+    assert (await automation_repo.get_onboarding_run(onboarding_id))["status"] == "completed"
+
+    # The excluded company's device skips it; with no steps of its own there is nothing to run.
+    other = await _enrol_other_company(target_db)
+    onboarding_id = await automation.start_onboarding(other)
+    onboarding = await automation_repo.get_onboarding_run(onboarding_id)
+    assert [entry["status"] for entry in onboarding["plan"]] == ["skipped"]
+    assert onboarding["plan"][0]["message"] == "The device does not match this step's device rules."
+    assert await rmm_scripts.wait_for_jobs(other, wait_seconds=0) == []
+
+    # Every-company steps are reordered on their own.
+    second_id = await automation.save_step(step_id=None, company_id=None, user_id=9, payload={
+        "script_id": scripts["Own"]["id"], "target_mode": "all"})
+    await automation.reorder_steps(None, [second_id, global_id])
+    assert [step["id"] for step in await automation_repo.list_steps(company_id=None)] == [second_id, global_id]
+    with pytest.raises(RunRequestError):
+        await automation.reorder_steps(1, [second_id, global_id])

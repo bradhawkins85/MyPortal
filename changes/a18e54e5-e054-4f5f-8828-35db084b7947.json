@@ -1,0 +1,7 @@
+{
+  "guid": "a18e54e5-e054-4f5f-8828-35db084b7947",
+  "occurred_at": "2026-11-25T04:33Z",
+  "change_type": "Feature",
+  "summary": "Super admins can add onboarding scripts and Chocolatey steps for every company, which run before each company's own steps on matching new devices; device rules such as Company name is not \"Company ABC\" leave companies out.",
+  "content_hash": "eaf387e0f51debd5005a05aa1c784be15fc839b0d27dda1155a3d00168496d90"
+}
