@@ -61,6 +61,7 @@ from app.api.routes import (
     ai_quality as ai_quality_routes,
     api_keys,
     asset_custom_fields,
+    ticket_custom_fields as ticket_custom_fields_api,
     audit_logs,
     auth,
     automations as automations_api,
@@ -1685,6 +1686,7 @@ app.include_router(system.router)
 app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(asset_custom_fields.router)
+app.include_router(ticket_custom_fields_api.router)
 app.include_router(tag_exclusions.router)
 app.include_router(cpu_release_dates_api.router)
 app.include_router(tag_synonyms.router)
@@ -11076,9 +11078,20 @@ async def _render_portal_tickets_page(
     if status_filter_value is None and selected_status_slugs:
         status_filter_value = _encode_status_value(selected_status_slugs)
 
+    from app.services import ticket_custom_fields as ticket_custom_fields_service
+
+    ticket_custom_columns = await ticket_custom_fields_service.list_columns(
+        is_super_admin=bool(user.get("is_super_admin")),
+        is_staff=await _has_admin_technician_access(user, request),
+    )
+    ticket_custom_values = await ticket_custom_fields_service.list_values(
+        [ticket.get("id") for ticket in formatted_tickets], ticket_custom_columns
+    )
     extra = {
         "title": "Tickets",
         "tickets": formatted_tickets,
+        "ticket_custom_columns": ticket_custom_columns,
+        "ticket_custom_values": ticket_custom_values,
         "tickets_total": total_count,
         "status_options": status_options,
         "status_filter": status_filter_value,
@@ -11678,6 +11691,11 @@ async def _render_portal_ticket_detail(
         "reply_error": reply_error,
         "reply_body": reply_body or "",
     }
+    from app.services import ticket_custom_fields as ticket_custom_fields_service
+
+    extra["ticket_custom_fields"] = await ticket_custom_fields_service.build_ticket_fields(
+        int(ticket_id), is_super_admin=is_super_admin, is_staff=bool(has_helpdesk_access)
+    )
     response = await _render_template("tickets/detail.html", request, user, extra=extra)
     response.status_code = status_code
     return response
@@ -11831,9 +11849,19 @@ async def _render_tickets_dashboard(
         ticket_canned_responses = await canned_responses_repo.list_responses()
     else:
         ticket_canned_responses = []
+    from app.services import ticket_custom_fields as ticket_custom_fields_service
+
+    ticket_custom_columns = await ticket_custom_fields_service.list_columns(
+        is_super_admin=bool(user.get("is_super_admin")), is_staff=True
+    )
+    ticket_custom_values = await ticket_custom_fields_service.list_values(
+        [ticket.get("id") for ticket in tickets], ticket_custom_columns
+    )
     extra = {
         "title": "Ticketing workspace",
         "tickets": tickets,
+        "ticket_custom_columns": ticket_custom_columns,
+        "ticket_custom_values": ticket_custom_values,
         "ticket_total": ticket_total,
         "ticket_status_counts": global_status_counts,
         "ticket_available_statuses": dashboard.available_statuses,
@@ -12749,6 +12777,11 @@ async def _render_ticket_detail(
         "reply_error": reply_error,
         "reply_body": reply_body or "",
     }
+    from app.services import ticket_custom_fields as ticket_custom_fields_service
+
+    extra["ticket_custom_fields"] = await ticket_custom_fields_service.build_ticket_fields(
+        int(ticket_id), is_super_admin=bool(user.get("is_super_admin")), is_staff=True
+    )
     response = await _render_template("admin/ticket_detail.html", request, user, extra=extra)
     response.status_code = status_code
     return response

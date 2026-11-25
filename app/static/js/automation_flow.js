@@ -91,7 +91,7 @@
   const CATEGORY_BY_KEY = new Map(CATEGORIES.map((item) => [item.key, item]));
   const AI_SLUGS = new Set(['run-troubleshooting-bot', 'reprocess-ai', 'whisperx', 'ollama']);
   const TICKET_SLUGS = new Set([
-    'create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply',
+    'create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'set-ticket-custom-field', 'add-ticket-reply',
     'assign-approval-configuration', 'suggest-assets', 'smart-attachment-removal', 'matrix-chat-assign',
   ]);
   const MESSAGE_SLUGS = new Set(['smtp', 'smtp2go', 'm365-mail', 'm365-direct-delivery', 'ntfy', 'sms-gateway', 'unifi-talk']);

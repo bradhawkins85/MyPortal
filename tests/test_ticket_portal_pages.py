@@ -42,7 +42,7 @@ def test_portal_tickets_template_hides_priority_company_and_auto_applies_status(
     assert 'data-label="Company"' not in template
     assert 'data-column-key="requester"' in template
     assert 'data-label="Requestor"' in template
-    assert 'colspan="5"' in template
+    assert 'colspan="{{ 5 + (ticket_custom_columns | default([]) | length) }}"' in template
 
 
 def test_portal_ticket_detail_template_hides_priority():

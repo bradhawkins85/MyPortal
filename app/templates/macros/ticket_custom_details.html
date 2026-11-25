@@ -1,0 +1,113 @@
+{#- Custom ticket details card, shown below "Additional details".
+
+    fields: from app.services.ticket_custom_fields.build_ticket_fields.
+    action: form action for saving editable fields; omit for a read-only card.
+-#}
+{% macro custom_value(field) -%}
+  {%- if field.display -%}
+    {%- if field.field_type == 'url' -%}
+      <a href="{{ field.value_text }}" target="_blank" rel="noopener noreferrer">{{ field.display }}</a>
+    {%- elif field.field_type == 'email' -%}
+      <a href="mailto:{{ field.value_text }}">{{ field.display }}</a>
+    {%- elif field.field_type == 'multiselect' -%}
+      <span class="tag-list">{% for item in field.value %}<span class="tag">{{ item }}</span>{% endfor %}</span>
+    {%- else -%}
+      <span class="tcd-value">{{ field.display }}</span>
+    {%- endif -%}
+  {%- else -%}
+    <span class="text-muted">Not set</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro custom_input(field) -%}
+  {%- set input_id = 'ticket-cf-' ~ field.field_key -%}
+  {%- set name = 'cf__' ~ field.field_key -%}
+  {%- set described = ' aria-describedby="' ~ input_id ~ '-help"' if field.help_text else '' -%}
+  <input type="hidden" name="cf_keys" value="{{ field.field_key }}" form="ticket-custom-details-form" />
+  {%- if field.field_type == 'textarea' %}
+    <textarea id="{{ input_id }}" name="{{ name }}" class="form-input" rows="3" maxlength="10000" form="ticket-custom-details-form"{{ described | safe }}>{{ field.value_text or '' }}</textarea>
+  {%- elif field.field_type in ('select', 'radio') %}
+    <select id="{{ input_id }}" name="{{ name }}" class="form-input" form="ticket-custom-details-form"{{ described | safe }}>
+      <option value="">Not set</option>
+      {% for option in field.options %}<option value="{{ option }}" {% if field.value_text == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
+    </select>
+  {%- elif field.field_type == 'multiselect' %}
+    <fieldset class="tcd-choices" id="{{ input_id }}"{{ described | safe }}>
+      <legend class="visually-hidden">{{ field.label }}</legend>
+      {% for option in field.options %}
+        <label class="checkbox"><input type="checkbox" name="{{ name }}" value="{{ option }}" form="ticket-custom-details-form" {% if field.value and option in field.value %}checked{% endif %} /> <span>{{ option }}</span></label>
+      {% endfor %}
+    </fieldset>
+  {%- elif field.field_type == 'checkbox' %}
+    <select id="{{ input_id }}" name="{{ name }}" class="form-input" form="ticket-custom-details-form"{{ described | safe }}>
+      <option value="">Not set</option>
+      <option value="1" {% if field.value_text == '1' %}selected{% endif %}>Yes</option>
+      <option value="0" {% if field.value_text == '0' %}selected{% endif %}>No</option>
+    </select>
+  {%- elif field.field_type == 'rating' %}
+    {%- set rating_max = (field.config.max or 5) | int -%}
+    <select id="{{ input_id }}" name="{{ name }}" class="form-input" form="ticket-custom-details-form"{{ described | safe }}>
+      <option value="">Not set</option>
+      {% for score in range(1, rating_max + 1) %}<option value="{{ score }}" {% if field.value_text == score | string %}selected{% endif %}>{{ '★' * score }} {{ score }} / {{ rating_max }}</option>{% endfor %}
+    </select>
+  {%- else %}
+    {%- set html_type = {'email': 'email', 'number': 'number', 'time': 'time', 'url': 'url', 'date': 'date'}.get(field.field_type, 'text') -%}
+    <input id="{{ input_id }}" type="{{ html_type }}" name="{{ name }}" class="form-input" value="{{ field.value_text or '' }}" form="ticket-custom-details-form"{% if html_type == 'number' %} step="any"{% endif %}{% if html_type == 'text' %} maxlength="1000"{% endif %}{{ described | safe }} />
+  {%- endif %}
+{%- endmacro %}
+
+{% macro custom_details_card(fields, action=None, show_visibility=False) %}
+  {% if fields %}
+    {% set editable_count = fields | selectattr('can_edit') | list | length if action else 0 %}
+    <details class="card card--panel card-collapsible" id="ticket-custom-details" open>
+      <summary class="card__header card__header--collapsible">
+        <h2 class="card__title">Custom details</h2>
+        <div class="card__collapsible-meta">
+          <span class="card__toggle-icon" aria-hidden="true"></span>
+        </div>
+      </summary>
+      <div class="card-collapsible__content">
+        <div class="card__body card__body--meta">
+          {% if editable_count %}
+            <form id="ticket-custom-details-form" method="post" action="{{ action }}" data-ticket-custom-details-form>
+              {% include "partials/csrf.html" %}
+            </form>
+          {% endif %}
+          <dl class="definition-list">
+            {% for field in fields %}
+              <div class="definition-list__item" data-ticket-custom-detail="{{ field.field_key }}">
+                <dt class="tcd-term">
+                  {% if editable_count and field.can_edit %}
+                    <label class="form-label" for="ticket-cf-{{ field.field_key }}">{{ field.label }}</label>
+                  {% else %}
+                    <span class="form-label">{{ field.label }}</span>
+                  {% endif %}
+                  {% if show_visibility %}
+                    <span class="tcd-chips">
+                      {% if field.visibility == 'public' %}<span class="status status--info">Public</span>{% elif field.visibility == 'admin_only' %}<span class="status status--warning">Admin only</span>{% endif %}
+                      {% if not field.editable %}<span class="status status--neutral" title="Only automations can set this detail">Read-only</span>{% endif %}
+                    </span>
+                  {% endif %}
+                </dt>
+                <dd>
+                  {% if editable_count and field.can_edit %}
+                    {{ custom_input(field) }}
+                  {% else %}
+                    {{ custom_value(field) }}
+                    {% if show_visibility and field.updated_source == 'automation' and field.display %}<p class="form-help">Set by an automation</p>{% endif %}
+                  {% endif %}
+                  {% if field.help_text %}<p class="form-help" id="ticket-cf-{{ field.field_key }}-help">{{ field.help_text }}</p>{% endif %}
+                </dd>
+              </div>
+            {% endfor %}
+          </dl>
+          {% if editable_count %}
+            <div class="tcd-actions">
+              <button type="submit" class="button button--primary" form="ticket-custom-details-form">Save custom details</button>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </details>
+  {% endif %}
+{% endmacro %}

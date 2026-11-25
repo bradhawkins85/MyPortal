@@ -6,6 +6,7 @@ ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
     "create-task",
     "update-ticket",
     "update-ticket-description",
+    "set-ticket-custom-field",
     "ai-rename-ticket",
     "ai-classify-ticket",
     "ai-link-related",
