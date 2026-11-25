@@ -11,6 +11,7 @@ Admins define extra fields shown under *Additional details* on a ticket.
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import date
 from typing import Any, Iterable, Mapping, Sequence
@@ -294,7 +295,7 @@ def coerce_value(definition: Mapping[str, Any], raw: Any) -> str | None:
             number = float(text)
         except ValueError:
             raise ValueError(f"{label} must be a number.") from None
-        if number != number or number in (float("inf"), float("-inf")):
+        if not math.isfinite(number):
             raise ValueError(f"{label} must be a number.")
         return str(int(number)) if number.is_integer() else repr(number)
     if field_type == "rating":
