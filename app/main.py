@@ -3062,7 +3062,17 @@ async def _render_template(
     return response
 
 
-forms_api.configure_rendering(_render_template, templates.TemplateResponse)
+async def _render_custom_form_page(
+    template_name: str,
+    request: Request,
+    user: dict[str, Any],
+    *,
+    extra: dict[str, Any] | None = None,
+) -> Response:
+    return await _render_template(template_name, request, user, extra=extra)
+
+
+forms_api.configure_rendering(_render_custom_form_page, templates.TemplateResponse)
 
 
 @app.get("/shared-credentials", response_class=HTMLResponse)
