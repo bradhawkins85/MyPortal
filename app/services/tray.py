@@ -33,6 +33,7 @@ from app.repositories import companies as companies_repo
 from app.repositories import m365_signatures as m365_signatures_repo
 from app.repositories import site_settings as site_settings_repo
 from app.repositories import tray as tray_repo
+from app.security import device_tokens
 from app.security.device_tokens import (
     generate_install_token as generate_install_token,
     hash_token as hash_token,
@@ -49,6 +50,11 @@ _settings = get_settings()
 
 SERVICE_STATUS_URL_VARIABLE = "{{service_status_url}}"
 _setup_ticket_locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
+
+
+def generate_auth_token() -> str:
+    """Generate an authentication token for a tray client."""
+    return device_tokens.generate_auth_token()
 
 
 # ---------------------------------------------------------------------------
