@@ -54,7 +54,9 @@ async def render(request, context, editing=None, errors=None):
         extra={"title": "Patch management", "company": company, "policies": policies, "can_edit": can_edit,
                "can_manage_sources": can_manage_sources,
                "is_super_admin": bool(user.get("is_super_admin")), "editing": editing, "errors": errors or {},
-               "blocks": blocks,
+               "blocks": blocks, "feature_releases": patching.FEATURE_RELEASE_OPTIONS,
+               "policy_templates": [{"key": key, "name": sample["name"], "description": sample["description"]}
+                                    for key, sample in patching.POLICY_TEMPLATES.items()] if can_edit else [],
                "categories": sorted(patching.CATEGORIES)})
     if errors:
         response.status_code = 400
@@ -62,7 +64,7 @@ async def render(request, context, editing=None, errors=None):
 
 
 @router.get(PATH, response_class=HTMLResponse)
-async def page(request: Request, policy: int | None = Query(None, ge=1), new: bool = False):
+async def page(request: Request, policy: int | None = Query(None, ge=1), new: bool = False, template: str | None = None):
     context = await _context(request)
     if isinstance(context, RedirectResponse):
         return context
@@ -70,8 +72,13 @@ async def page(request: Request, policy: int | None = Query(None, ge=1), new: bo
     editing = None
     if can_edit and policy:
         editing = form_values(await editable(policy, company_id, user))
-    elif can_edit and new:
+    elif can_edit and (new or template is not None):
         editing = {**patching.DEFAULTS, "timezone": rmm_automation.default_timezone()}
+        if template is not None:
+            sample = patching.POLICY_TEMPLATES.get(template)
+            if sample is None:
+                raise HTTPException(404, "Patch policy template not found")
+            editing.update(sample["values"], name=sample["name"])
     return await render(request, context, editing)
 
 

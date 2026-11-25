@@ -66,3 +66,31 @@ def test_patching_editor_is_a_section_with_a_save_bar():
     assert re.search(r'<form class="ce-section__body form rmm-check-form" id="patch-policy-form"', html)
     assert 'form="patch-policy-form"' in html and "data-ae-discard" in html
     assert 'href="/admin/companies/1/chocolatey-sources"' in html
+
+
+def test_patch_templates_and_feature_release_controls_are_rendered_for_policy_editors():
+    policy_templates = [{"key": key, **sample} for key, sample in rmm_patching.POLICY_TEMPLATES.items()]
+    feature = rmm_patching.POLICY_TEMPLATES["windows-feature-rollout"]
+    editing = {**rmm_patching.DEFAULTS, **feature["values"], "name": feature["name"], "timezone": "UTC"}
+    policy = {**editing, "id": 4, "company_id": 1, "settings": {"target_release": "26H2"}, "can_edit": True}
+    template = _env().get_template("rmm/patching.html")
+    data = dict(company={"id": 1, "name": "Contoso"}, policies=[policy], policy_templates=policy_templates,
+                feature_releases=rmm_patching.FEATURE_RELEASE_OPTIONS, categories=sorted(rmm_patching.CATEGORIES),
+                errors={"reboot_mode": "Choose an automatic restart option."}, csrf_token="t")
+
+    html = template.render(**data, can_edit=True, editing=editing)
+
+    assert 'data-ae-section="templates"' in html and 'data-ae-link="templates"' in html
+    for template_key in rmm_patching.POLICY_TEMPLATES:
+        assert f'href="/rmm/patching?template={template_key}#patch-form"' in html
+    assert "Target Windows 11 26H2" in html
+    assert 'name="target_release"' in html
+    assert re.search(r'<option value="26H2"\s+selected>Windows 11 26H2</option>', html)
+    assert re.search(r'<option value="no_users"\s+selected>', html)
+    assert 'aria-describedby="patch-reboot-help patch-reboot-error" aria-invalid="true"' in html
+    assert 'name="cron" value="0 2 * * *"' in html
+
+    read_only = template.render(**data, can_edit=False, editing=None)
+    assert 'data-ae-section="templates"' not in read_only
+    assert 'name="target_release"' not in read_only
+    assert "Target Windows 11 26H2" in read_only

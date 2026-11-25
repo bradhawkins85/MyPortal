@@ -1,0 +1,7 @@
+{
+  "guid": "e3ce3b65-1842-457a-8fdf-208906d822d5",
+  "occurred_at": "2026-11-25T06:05Z",
+  "change_type": "Feature",
+  "summary": "Start with ready-to-use patch policy templates and roll out a selected Windows 11 release, with required upgrade steps applied in order as devices become ready.",
+  "content_hash": "26f0b779175e6c4f7a77700893efffd75943fcea1e46864b96085d0048e09180"
+}

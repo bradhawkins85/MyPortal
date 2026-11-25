@@ -5,8 +5,10 @@ $mutex = New-Object Threading.Mutex($false, 'Global\MyPortalPatchManagement')
 if (-not $mutex.WaitOne(0)) { throw 'Another patch operation is running.' }
 $failed = $false
 $rebootRequired = $false
-# Leaves room inside the 2-hour run timeout to report back after waiting.
-$idleDeadline = (Get-Date).AddMinutes(100)
+$featureInstaller = $null
+$featureStep = $null
+# Leave time to report within the 4-hour feature or 2-hour standard job timeout.
+$idleDeadline = (Get-Date).AddMinutes($(if ($plan.feature_upgrade) { 220 } else { 100 }))
 function Pending-Reboot {
     return (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or
         (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or
@@ -27,6 +29,53 @@ function Wait-WindowsUpdateIdle([datetime]$deadline) {
         Start-Sleep -Seconds 15
     }
 }
+function Get-PatchRebootHold($reboot) {
+    if ($reboot.reboot_mode -notin @('always', 'no_users')) { return 'The policy leaves restarts to users.' }
+    # Check the entire warning countdown, including overnight active hours.
+    if (-not $reboot.immediate) {
+        $start = [int]$reboot.active_start
+        $end = [int]$reboot.active_end
+        $delay = [int]$reboot.reboot_delay_minutes
+        $now = Get-Date
+        for ($i = 0; $i -le $delay; $i++) {
+            $hour = $now.AddMinutes($i).Hour
+            $active = if ($start -lt $end) { $hour -ge $start -and $hour -lt $end }
+                else { $hour -ge $start -or $hour -lt $end }
+            if ($active) { return 'The restart warning or restart would fall within active hours.' }
+        }
+    }
+    if ($reboot.reboot_mode -eq 'no_users') {
+        # WTS includes disconnected RDP sessions. A query failure prevents reboot.
+        if (-not ('PatchSessions' -as [type])) {
+            Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public class PatchSessions {
+    [StructLayout(LayoutKind.Sequential)] public struct Session { public int Id; public IntPtr Name; public int State; }
+    [DllImport("wtsapi32.dll")] static extern bool WTSEnumerateSessions(IntPtr server, int reserved, int version, out IntPtr data, out int count);
+    [DllImport("wtsapi32.dll")] static extern bool WTSQuerySessionInformation(IntPtr server, int id, int info, out IntPtr data, out int bytes);
+    [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(IntPtr data);
+    public static bool HasUsers() {
+        IntPtr data; int count;
+        if (!WTSEnumerateSessions(IntPtr.Zero, 0, 1, out data, out count)) throw new Exception("Cannot enumerate sessions");
+        try {
+            int size = Marshal.SizeOf(typeof(Session));
+            for (int i = 0; i < count; i++) {
+                var s = (Session)Marshal.PtrToStructure(IntPtr.Add(data, i * size), typeof(Session));
+                IntPtr user; int bytes;
+                if (!WTSQuerySessionInformation(IntPtr.Zero, s.Id, 5, out user, out bytes)) throw new Exception("Cannot query session");
+                try { if (!String.IsNullOrEmpty(Marshal.PtrToStringAnsi(user))) return true; }
+                finally { WTSFreeMemory(user); }
+            }
+            return false;
+        } finally { WTSFreeMemory(data); }
+    }
+}
+'@
+        }
+        if ([PatchSessions]::HasUsers()) { return 'A user session exists.' }
+    }
+}
 function Compare-Version($installed, $latest) {
     # Normalize dotted numeric versions, padding components; unknown vendor formats fail closed.
     $installed = ([string]$installed).Trim(); $latest = ([string]$latest).Trim()
@@ -41,13 +90,29 @@ function Compare-Version($installed, $latest) {
     }
     return 0
 }
-function Install-PatchUpdates($session, $updates) {
+function Install-PatchUpdates($session, $updates, [switch]$feature) {
     # Throws when any update fails; a partial installation still records its restart need.
     $downloader = $session.CreateUpdateDownloader(); $downloader.Updates = $updates
     $download = $downloader.Download()
     if ($download.ResultCode -ne 2) { throw "Windows Update download failed: $($download.ResultCode)" }
     $installer = $session.CreateUpdateInstaller(); $installer.Updates = $updates
     $installer.AllowSourcePrompts = $false
+    if ($feature) {
+        $hold = Get-PatchRebootHold $plan.reboot
+        if ($hold) { Write-Output "Feature installation deferred after download: $hold"; return }
+        Initialize-MyPortalFeatureCommit
+        $update = $updates.Item(0)
+        $script:pendingFeature = [pscustomobject]@{
+            boot = Get-MyPortalFeatureBootId
+            target = $plan.feature_upgrade.target
+            id = [string]$update.Identity.UpdateID
+            revision = [int]$update.Identity.RevisionNumber
+            kbs = @($update.KBArticleIDs)
+            title = [string]$update.Title
+            stage = 'staging'
+        }
+        Save-MyPortalPendingFeature $script:pendingFeature
+    }
     $result = $installer.Install()
     if ($result.RebootRequired) { $script:rebootRequired = $true }
     for ($i = 0; $i -lt $updates.Count; $i++) {
@@ -55,6 +120,18 @@ function Install-PatchUpdates($session, $updates) {
         Write-Output "$($updates.Item($i).Title): result=$($detail.ResultCode), HRESULT=$($detail.HResult)"
     }
     if ($result.ResultCode -ne 2) { throw "Windows Update installation failed or partially succeeded: $($result.ResultCode)" }
+    if ($feature) {
+        if ($result.RebootRequired) {
+            $script:featureInstaller = $installer
+            $script:pendingFeature.stage = 'staged'
+            Save-MyPortalPendingFeature $script:pendingFeature
+            Write-Output 'Feature update staged. The installed release will be checked again after restart.'
+        } else {
+            Clear-MyPortalPendingFeature
+            $script:pendingFeature = $null
+            Write-Output 'Feature installation completed without requesting a restart. The next run will verify the installed release.'
+        }
+    }
 }
 function Choco-Output([string[]]$arguments) {
     $output = @(& $script:choco @arguments 2>&1)
@@ -80,6 +157,7 @@ function Run-ChocolateyPackage([string[]]$arguments) {
     elseif ($code -ne 0) { throw "Chocolatey returned $code for $($arguments[1])." }
 }
 try {
+    $pendingFeature = Get-MyPortalPendingFeature
     if (@($plan.apps).Count -gt 0) {
         if ($null -eq $plan.sources) { throw 'Company Chocolatey sources are missing.' }
         Sync-ChocolateySources @($plan.sources)
@@ -95,16 +173,30 @@ try {
     $ignorePendingReboots = [bool]$plan.manual_windows -or [bool]$plan.manual_upgrade -or
         ($plan.manual_apps -and $plan.manual_apps.ignore_pending_reboots -ne $false)
     $pendingReboot = Pending-Reboot
+    if ($pendingFeature -and -not $pendingReboot -and $pendingFeature.stage -eq 'staging') {
+        # A cancelled or failed install may never have staged the update.
+        if (Wait-WindowsUpdateIdle $idleDeadline) {
+            $featureInstaller = Get-MyPortalPendingFeatureInstaller $pendingFeature
+            if (-not $featureInstaller) { Clear-MyPortalPendingFeature; $pendingFeature = $null }
+        }
+    }
+    if ($pendingFeature) { $pendingReboot = $true; $ignorePendingReboots = $false }
     if ($pendingReboot) { $rebootRequired = $true }
     if ($pendingReboot -and -not $ignorePendingReboots) {
-        Write-Output 'Installation deferred: a restart is already pending.'
+        if ($pendingFeature) { Write-Output "Installation deferred while the staged feature update awaits a restart: $($pendingFeature.title)" }
+        else { Write-Output 'Installation deferred: a restart is already pending.' }
     } else {
         if ($pendingReboot) { Write-Output 'Proceeding despite a pending restart as requested.' }
         if ($plan.windows) {
             try {
                 $session = New-Object -ComObject Microsoft.Update.Session
                 $session.ClientApplicationID = 'MyPortal Patch Management'
-                $found = $session.CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
+                $searcher = $session.CreateUpdateSearcher()
+                if ($plan.feature_upgrade) {
+                    # Include optional and hidden offers for route selection. Hidden
+                    # and optional quality updates are still excluded from policy installs.
+                    $found = Search-MyPortalFeatureOffers $searcher "IsInstalled=0 and Type='Software'"
+                } else { $found = $searcher.Search("IsInstalled=0 and IsHidden=0 and Type='Software'") }
                 $updates = New-Object -ComObject Microsoft.Update.UpdateColl
                 $cutoff = (Get-Date).ToUniversalTime().AddDays(-[int]$plan.windows.deferral_days)
                 # Stable category IDs avoid localized Windows category names.
@@ -117,18 +209,38 @@ try {
                 }
                 $allowed = @($plan.windows.categories | ForEach-Object { $ids[$_] })
                 $blocks = Get-MyPortalUpdateBlocks
-                foreach ($update in $found.Updates) {
-                    if (Test-MyPortalUpdateBlocked $update $blocks) { Write-Output "Blocked in MyPortal, skipped: $($update.Title)"; continue }
-                    $match = @($update.Categories | Where-Object { $allowed -contains $_.CategoryID }).Count -gt 0
-                    if ($match -and $update.LastDeploymentChangeTime.ToUniversalTime() -le $cutoff -and
-                        -not $update.InstallationBehavior.CanRequestUserInput) {
-                        if (-not $update.EulaAccepted) { $update.AcceptEula() }
-                        [void]$updates.Add($update)
-                        Write-Output "Windows Update: $($update.Title)"
+                if ($plan.feature_upgrade) {
+                    if ($found.ResultCode -ne 2) { throw "Could not verify feature update offers (search result $($found.ResultCode))." }
+                    $step = Get-MyPortalFeatureStep $plan.feature_upgrade (Get-MyPortalWindowsRelease) $found.Updates $blocks $cutoff
+                    if ($step.feature) {
+                        $hold = Get-PatchRebootHold $plan.reboot
+                        if ($hold) { $step = @{ message = "Feature installation deferred because a policy restart is unavailable: $hold" } }
+                    }
+                    Write-Output "Windows feature target $($plan.feature_upgrade.target) - $($step.message)"
+                    if ($step.update) {
+                        if ($step.feature) { $featureStep = $step.update; $featureSession = $session }
+                        else {
+                            if (-not $step.update.EulaAccepted) { $step.update.AcceptEula() }
+                            [void]$updates.Add($step.update)
+                        }
                     }
                 }
+                if (-not $featureStep -and $updates.Count -eq 0) {
+                    foreach ($update in $found.Updates) {
+                        if (Test-MyPortalUpdateBlocked $update $blocks) { Write-Output "Blocked in MyPortal, skipped: $($update.Title)"; continue }
+                        if ($update.IsHidden -or $update.DeploymentAction -eq 4 -or
+                            (Test-MyPortalFeatureUpdate $update $myPortalFeatureReleases)) { continue }
+                        $match = @($update.Categories | Where-Object { $allowed -contains $_.CategoryID }).Count -gt 0
+                        if ($match -and $update.LastDeploymentChangeTime.ToUniversalTime() -le $cutoff -and
+                            -not $update.InstallationBehavior.CanRequestUserInput) {
+                            if (-not $update.EulaAccepted) { $update.AcceptEula() }
+                            [void]$updates.Add($update)
+                            Write-Output "Windows Update: $($update.Title)"
+                        }
+                    }
+                    if ($updates.Count -eq 0) { Write-Output 'No applicable Windows quality updates.' }
+                }
                 if ($updates.Count -gt 0) { Install-PatchUpdates $session $updates }
-                else { Write-Output 'No applicable Windows updates.' }
             } catch { $failed = $true; Write-Output "Windows Update error: $_" }
         }
         if ($plan.manual_windows) {
@@ -213,6 +325,21 @@ try {
                 } catch { $failed = $true; Write-Output "Application patch error: $_" }
             }
         }
+        if ($featureStep) {
+            try {
+                $hold = Get-PatchRebootHold $plan.reboot
+                if ($failed -or $rebootRequired -or (Pending-Reboot)) {
+                    Write-Output 'Feature installation deferred until other patch operations have completed and any required restart has finished.'
+                } elseif ($hold) {
+                    Write-Output "Feature installation deferred because a policy restart is unavailable: $hold"
+                } else {
+                    $updates = New-Object -ComObject Microsoft.Update.UpdateColl
+                    if (-not $featureStep.EulaAccepted) { $featureStep.AcceptEula() }
+                    [void]$updates.Add($featureStep)
+                    Install-PatchUpdates $featureSession $updates -feature
+                }
+            } catch { $failed = $true; Write-Output "Windows feature update error: $_" }
+        }
     }
     $rebootRequired = $rebootRequired -or (Pending-Reboot)
     Write-Output "Reboot pending: $rebootRequired"
@@ -221,56 +348,22 @@ try {
         try { Send-MyPortalWindowsUpdateState } catch { Write-Output "Could not report Windows Update status: $_" }
     }
     if ($rebootRequired -and -not $failed -and $plan.reboot.reboot_mode -ne 'never') {
-        $idle = Wait-WindowsUpdateIdle $idleDeadline
-        $start = [int]$plan.reboot.active_start; $end = [int]$plan.reboot.active_end
-        function Active-Hour([datetime]$time) {
-            $hour = $time.Hour
-            if ($start -lt $end) { return $hour -ge $start -and $hour -lt $end }
-            return $hour -ge $start -or $hour -lt $end
-        }
-        $delay = [int]$plan.reboot.reboot_delay_minutes
-        $safe = $true
-        # Check the whole countdown, including overnight active hours. A technician's
-        # install from the asset page restarts when they asked, regardless of active hours.
-        if (-not $plan.reboot.immediate) {
-            for ($i = 0; $i -le $delay; $i++) { if (Active-Hour (Get-Date).AddMinutes($i)) { $safe = $false } }
-        }
-        if ($plan.reboot.reboot_mode -eq 'no_users') {
-            # WTS includes disconnected RDP sessions; query failures prevent reboot.
-            Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public class PatchSessions {
-    [StructLayout(LayoutKind.Sequential)] public struct Session { public int Id; public IntPtr Name; public int State; }
-    [DllImport("wtsapi32.dll")] static extern bool WTSEnumerateSessions(IntPtr server, int reserved, int version, out IntPtr data, out int count);
-    [DllImport("wtsapi32.dll")] static extern bool WTSQuerySessionInformation(IntPtr server, int id, int info, out IntPtr data, out int bytes);
-    [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(IntPtr data);
-    public static bool HasUsers() {
-        IntPtr data; int count;
-        if (!WTSEnumerateSessions(IntPtr.Zero, 0, 1, out data, out count)) throw new Exception("Cannot enumerate sessions");
-        try {
-            int size = Marshal.SizeOf(typeof(Session));
-            for (int i = 0; i < count; i++) {
-                var s = (Session)Marshal.PtrToStructure(IntPtr.Add(data, i * size), typeof(Session));
-                IntPtr user; int bytes;
-                if (!WTSQuerySessionInformation(IntPtr.Zero, s.Id, 5, out user, out bytes)) throw new Exception("Cannot query session");
-                try { if (!String.IsNullOrEmpty(Marshal.PtrToStringAnsi(user))) return true; }
-                finally { WTSFreeMemory(user); }
+        $featureHold = Get-MyPortalPendingFeatureHold $pendingFeature $plan.feature_upgrade (Get-MyPortalUpdateBlocks)
+        if ($featureHold) {
+            Write-Output "Reboot deferred: $featureHold"
+        } elseif (-not (Wait-WindowsUpdateIdle $idleDeadline)) {
+            Write-Output 'Reboot deferred: Windows Update may still be installing. Reconsidered at the next policy run.'
+        } else {
+            $hold = Get-PatchRebootHold $plan.reboot
+            if ($hold) { Write-Output "Reboot deferred by policy: $hold Reconsidered at the next policy run." }
+            else {
+                if ($pendingFeature) { Complete-MyPortalPendingFeature $pendingFeature $featureInstaller }
+                $delay = [int]$plan.reboot.reboot_delay_minutes
+                & shutdown.exe /r /t ($delay * 60) /d p:2:17 /c 'MyPortal: updates require a restart. Save your work.'
+                if ($LASTEXITCODE -ne 0) { throw "Could not schedule restart ($LASTEXITCODE)." }
+                Write-Output "Restart scheduled in $delay minutes."
             }
-            return false;
-        } finally { WTSFreeMemory(data); }
-    }
-}
-'@
-            if ([PatchSessions]::HasUsers()) { $safe = $false; Write-Output 'Reboot deferred: a user session exists.' }
         }
-        if (-not $idle) {
-            Write-Output 'Reboot deferred: Windows Update may still be installing. Restart the device once it finishes.'
-        } elseif ($safe) {
-            & shutdown.exe /r /t ($delay * 60) /d p:2:17 /c 'MyPortal: updates require a restart. Save your work.'
-            if ($LASTEXITCODE -ne 0) { throw "Could not schedule restart ($LASTEXITCODE)." }
-            Write-Output "Restart scheduled in $delay minutes."
-        } else { Write-Output 'Reboot deferred by active hours or user sessions; reconsidered at the next policy run.' }
     }
     if ($failed) { exit 1 }
 } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
