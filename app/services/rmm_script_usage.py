@@ -118,6 +118,7 @@ def tray_items_for(nodes: Any, script_id: int) -> list[str]:
                 if int(node.get("script_id") or 0) == script_id:
                     labels.append(str(node.get("label") or "").strip() or "Untitled item")
             except (TypeError, ValueError):
+                # A malformed script_id names no script; its children are still checked below.
                 pass
         labels.extend(tray_items_for(node.get("children"), script_id))
     return labels
