@@ -82,20 +82,25 @@ The authoritative dependency list lives in `pyproject.toml`; update it there and
 
 #### SQL Injection Prevention
 
-- **Never** interpolate user-supplied data—or any variable—directly into a SQL
-  string using f-strings, `str.format()`, or `%` formatting.
-- **Always** use parameterised queries: pass values as bound parameters to the
-  database driver (e.g. `db.execute("… WHERE id = ?", (value,))` for SQLite or
-  `db.execute("… WHERE id = %s", (value,))` for MySQL).
-- When building dynamic queries (dynamic WHERE clauses, IN-lists, SET clauses),
-  only interpolate **static string literals** such as column names you control,
-  SQL keywords, and the placeholder character (`?` / `%s`). Never interpolate
-  runtime data.
-- Avoid f-strings for SQL construction entirely; use plain string concatenation
-  (`"WHERE id = " + p`) or `str.join()` so that static analysis tools (Bandit
-  B608) can confirm no data reaches the query template.
-- Before completing any task, audit every SQL statement in files you have
-  touched and fix any potential injection vector.
+- Write fixed query structure directly as literal SQL. Replace formatting or
+  concatenation of fixed fragments such as column lists, joins, and predicates
+  with a single SQL string literal. Keep placeholders for runtime values.
+- Bind every runtime data value through the database API's parameter argument,
+  regardless of its source. For example, use
+  `await db.fetch_one("SELECT id FROM tickets WHERE id = ?", (ticket_id,))`.
+  Never insert values into SQL text through f-strings, formatting, concatenation,
+  or manual quoting.
+- When the query structure must vary, use concatenation or `str.join()` to
+  assemble SQL from code-defined fragments and generated placeholders only.
+  For identifiers or sort directions that cannot be bound, map supported
+  choices to fixed SQL tokens through an explicit allowlist and reject
+  unsupported choices. For variable-length `IN` lists, bind each item and
+  generate only the placeholders.
+- Before completing any task, review every SQL statement in the files you
+  touched. Inline fixed fragments and trace each dynamic branch to the database
+  call. Verify that every runtime data value is passed separately and that the
+  parameters match the final placeholders in count and order (or by name).
+  Fix any injection risk found during the review.
 
 ### API Development
 
