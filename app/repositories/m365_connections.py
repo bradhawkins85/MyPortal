@@ -8,19 +8,6 @@ from typing import Any
 from app.core.database import db
 
 
-# Tokens on the compatibility row are bound to the application that issued
-# them.  When a cutover or rollback changes that application, a delegated
-# refresh token from the previous app is rejected by Entra when presented with
-# the new client ID and secret, so every cached token must be discarded.
-_RESET_TOKEN_ASSIGNMENTS = (
-    "refresh_token = NULL, access_token = NULL, token_expires_at = NULL, "
-    "token_cache_tenant_id = NULL, token_cache_client_id = NULL, "
-    "token_cache_grant_type = NULL, app_access_token = NULL, "
-    "app_token_expires_at = NULL, app_token_cache_tenant_id = NULL, "
-    "app_token_cache_client_id = NULL"
-)
-
-
 async def _application_identity_changes(
     company_id: int, tenant_id: str, client_id: str
 ) -> bool:
@@ -276,8 +263,25 @@ async def activate(company_id: int, connection_id: int) -> dict[str, Any]:
             # former UPDATE path did.  Tokens are preserved only while the
             # application identity is unchanged (consent granted to the
             # staged app during first-time setup remains valid).
-            await db.execute(
-                """INSERT INTO company_m365_credentials
+            if reset_tokens:
+                sql = """INSERT INTO company_m365_credentials
+                   (tenant_id, client_id, client_secret, app_object_id,
+                    client_secret_key_id, client_secret_expires_at, company_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   ON DUPLICATE KEY UPDATE
+                     tenant_id = VALUES(tenant_id),
+                     client_id = VALUES(client_id),
+                     client_secret = VALUES(client_secret),
+                     app_object_id = VALUES(app_object_id),
+                     client_secret_key_id = VALUES(client_secret_key_id),
+                     client_secret_expires_at = VALUES(client_secret_expires_at),
+                     refresh_token = NULL, access_token = NULL, token_expires_at = NULL,
+                     token_cache_tenant_id = NULL, token_cache_client_id = NULL,
+                     token_cache_grant_type = NULL, app_access_token = NULL,
+                     app_token_expires_at = NULL, app_token_cache_tenant_id = NULL,
+                     app_token_cache_client_id = NULL"""
+            else:
+                sql = """INSERT INTO company_m365_credentials
                    (tenant_id, client_id, client_secret, app_object_id,
                     client_secret_key_id, client_secret_expires_at, company_id)
                    VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -288,9 +292,7 @@ async def activate(company_id: int, connection_id: int) -> dict[str, Any]:
                      app_object_id = VALUES(app_object_id),
                      client_secret_key_id = VALUES(client_secret_key_id),
                      client_secret_expires_at = VALUES(client_secret_expires_at)"""
-                + (", " + _RESET_TOKEN_ASSIGNMENTS if reset_tokens else ""),
-                credential_values,
-            )
+            await db.execute(sql, credential_values)
         except Exception:
             # Preserve the old active pointer if any step before compatibility
             # credential replacement fails. Secrets are reused, not rebuilt.
@@ -336,12 +338,23 @@ async def rollback(company_id: int) -> dict[str, Any]:
     reset_tokens = await _application_identity_changes(
         company_id, str(previous["tenant_id"]), str(previous["client_id"])
     )
-    await db.execute(
-        """UPDATE company_m365_credentials SET tenant_id = %s, client_id = %s,
+    if reset_tokens:
+        sql = """UPDATE company_m365_credentials SET tenant_id = %s, client_id = %s,
            client_secret = %s, app_object_id = %s, client_secret_key_id = %s,
-           client_secret_expires_at = %s"""
-        + (", " + _RESET_TOKEN_ASSIGNMENTS if reset_tokens else "")
-        + " WHERE company_id = %s",
+           client_secret_expires_at = %s,
+           refresh_token = NULL, access_token = NULL, token_expires_at = NULL,
+           token_cache_tenant_id = NULL, token_cache_client_id = NULL,
+           token_cache_grant_type = NULL, app_access_token = NULL,
+           app_token_expires_at = NULL, app_token_cache_tenant_id = NULL,
+           app_token_cache_client_id = NULL
+           WHERE company_id = %s"""
+    else:
+        sql = """UPDATE company_m365_credentials SET tenant_id = %s, client_id = %s,
+           client_secret = %s, app_object_id = %s, client_secret_key_id = %s,
+           client_secret_expires_at = %s
+           WHERE company_id = %s"""
+    await db.execute(
+        sql,
         (previous["tenant_id"], previous["client_id"], previous["client_secret"],
          previous.get("app_object_id"), previous.get("client_secret_key_id"),
          previous.get("client_secret_expires_at"), company_id),

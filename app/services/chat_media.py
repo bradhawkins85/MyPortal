@@ -170,7 +170,7 @@ def popup_message_view(message: Mapping[str, Any]) -> dict[str, Any]:
         room_id = int(message.get("room_id") or 0)
         message_id = int(message.get("id") or 0)
     except (TypeError, ValueError):
-        room_id = message_id = 0
+        return {**view, "media": None}
     if room_id > 0 and message_id > 0:
         media_url = "/api/tray/popup-chat/" + str(room_id) + "/messages/" + str(message_id) + "/media"
         media = public_media(message, media_url=media_url)

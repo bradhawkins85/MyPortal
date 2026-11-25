@@ -23,8 +23,7 @@ UVICORN_ARGV = ["/venv/bin/python", "-m", "uvicorn", "app.main:app", "--port", "
 @pytest.fixture
 def service(monkeypatch, tmp_path):
     """This test process plays one worker of a two-worker Uvicorn service."""
-    for name, value in (("_resolved", False), ("_directory", None), ("_expected", None), ("_service_ready", False)):
-        monkeypatch.setattr(worker_readiness, name, value)
+    monkeypatch.setattr(worker_readiness, "_readiness", worker_readiness._WorkerReadiness())
     monkeypatch.setattr(worker_readiness, "_base_directory", lambda: tmp_path)
     monkeypatch.setattr(worker_readiness, "_parent_details", lambda: (4321, UVICORN_ARGV, "98765"))
     return tmp_path / "myportal-workers-4321-98765"
@@ -83,7 +82,7 @@ def test_readiness_is_kept_when_a_worker_restarts_later(service, monkeypatch):
     (service / str(os.getppid())).unlink()
     assert worker_readiness.status() == "ok"
     # Other workers of the same service see the recorded state too.
-    monkeypatch.setattr(worker_readiness, "_service_ready", False)
+    monkeypatch.setattr(worker_readiness._readiness, "service_ready", False)
     assert worker_readiness.status() == "ok"
 
 

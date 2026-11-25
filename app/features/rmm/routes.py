@@ -682,14 +682,12 @@ async def add_script_file(script_id: int, request: Request):
         message = _SCRIPT_FILE_SERVICE_ERROR
         status_code = 503
     else:
-        message = None
-    if message is not None:
         if request.headers.get("Accept") == "application/json":
-            return JSONResponse({"detail": message}, status_code=status_code)
-        return flash_redirect(f"/rmm/scripts?script={script_id}", message, "error")
+            return JSONResponse({"ok": True})
+        return flash_redirect(f"/rmm/scripts?script={script_id}", "File associated with the script.", "success")
     if request.headers.get("Accept") == "application/json":
-        return JSONResponse({"ok": True})
-    return flash_redirect(f"/rmm/scripts?script={script_id}", "File associated with the script.", "success")
+        return JSONResponse({"detail": message}, status_code=status_code)
+    return flash_redirect(f"/rmm/scripts?script={script_id}", message, "error")
 
 
 @router.post("/rmm/scripts/{script_id:int}/files/{index:int}/remove", response_class=HTMLResponse, summary="Remove a script file association")

@@ -22,6 +22,7 @@ from app.schemas.staff_onboarding_workflows import (
     CompanyWorkflowPolicyUpsertSchema,
     WorkflowConfigSchema,
 )
+from app.security.menu_permissions import normalize_menu_permissions
 from app.services import notifications as notifications_service
 
 from .helpers import (
@@ -393,7 +394,7 @@ async def staff_page(
     is_helpdesk_technician = await main_module._is_helpdesk_technician(user, request)
     has_admin_technician_access = await main_module._has_admin_technician_access(user, request)
     membership_data = membership or {}
-    raw_staff_menu_access = main_module.normalize_menu_permissions(
+    raw_staff_menu_access = normalize_menu_permissions(
         membership_data.get("menu_permissions")
     ).get("menu.staff", "none")
     has_write_staff_menu_access = raw_staff_menu_access == "write"

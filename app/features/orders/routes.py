@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
-from app.security.commerce_permissions import commerce_scope, commerce_record_visible, require_commerce_record
+from app.security.commerce_permissions import commerce_scope, commerce_record_visible
 from app.repositories import shop as shop_repo
 
 

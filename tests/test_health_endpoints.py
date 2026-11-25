@@ -27,7 +27,7 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(db, "run_migrations", _noop)
     monkeypatch.setattr(scheduler_service, "start", _noop)
     monkeypatch.setattr(scheduler_service, "stop", _noop)
-    monkeypatch.setattr(main_module, "_database_last_ok", None)
+    monkeypatch.setattr(main_module, "_readiness_database", {})
 
 
 def test_healthz_always_ok():

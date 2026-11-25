@@ -9,6 +9,14 @@ MAX_PORTS = 1024
 _TOKEN = re.compile(r"^(\d{1,5})(?:-(\d{1,5}))?$")
 
 
+class PortSpecificationError(ValueError):
+    """A validation error with text that can be shown on the device page."""
+
+    def __init__(self, user_message: str) -> None:
+        super().__init__(user_message)
+        self.user_message = user_message
+
+
 def parse_port_spec(raw: str) -> list[int]:
     """Return the sorted, unique ports in ``443, 8000-8100``-style text.
 
@@ -16,25 +24,25 @@ def parse_port_spec(raw: str) -> list[int]:
     """
     tokens = [token for token in re.split(r"[,\s]+", raw or "") if token]
     if not tokens:
-        raise ValueError("Enter at least one port, for example 443 or 8000-8100.")
+        raise PortSpecificationError("Enter at least one port, for example 443 or 8000-8100.")
     ports: set[int] = set()
     for token in tokens:
         match = _TOKEN.match(token)
         if not match:
-            raise ValueError(
+            raise PortSpecificationError(
                 f"“{token}” isn't a port or a range. Use a number like 443 or a range like 8000-8100."
             )
         start = int(match.group(1))
         end = int(match.group(2)) if match.group(2) else start
         if not (1 <= start <= 65535 and 1 <= end <= 65535):
-            raise ValueError(f"“{token}” is outside 1–65535.")
+            raise PortSpecificationError(f"“{token}” is outside 1–65535.")
         if end < start:
-            raise ValueError(f"“{token}” runs backwards. Put the lower port first.")
+            raise PortSpecificationError(f"“{token}” runs backwards. Put the lower port first.")
         if end - start + 1 > MAX_PORTS:
-            raise ValueError(f"Check at most {MAX_PORTS:,} ports at a time.")
+            raise PortSpecificationError(f"Check at most {MAX_PORTS:,} ports at a time.")
         ports.update(range(start, end + 1))
         if len(ports) > MAX_PORTS:
-            raise ValueError(f"Check at most {MAX_PORTS:,} ports at a time.")
+            raise PortSpecificationError(f"Check at most {MAX_PORTS:,} ports at a time.")
     return sorted(ports)
 
 

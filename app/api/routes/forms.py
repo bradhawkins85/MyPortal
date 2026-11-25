@@ -9,6 +9,7 @@ import json
 import base64
 import hashlib
 import secrets
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any
@@ -38,6 +39,20 @@ from app.security.flash import flash_redirect
 
 
 router = APIRouter(tags=["forms"])
+
+
+_render_page: Callable[..., Awaitable[Response]]
+_render_public_page: Callable[..., Response]
+
+
+def configure_rendering(
+    render_page: Callable[..., Awaitable[Response]],
+    render_public_page: Callable[..., Response],
+) -> None:
+    """Bind the portal renderers when assembling the application."""
+    global _render_page, _render_public_page
+    _render_page = render_page
+    _render_public_page = render_public_page
 
 
 def _require_admin(user: dict[str, Any]) -> dict[str, Any]:
@@ -496,9 +511,8 @@ async def _submit_form_request(form, request, user, *, public=False, submit_acti
             if public:
                 return _render_public_form(request, form, fields, submit_action,
                                            errors=exc.errors, submitted_values=values, status_code=400)
-            from app.main import _render_template
 
-            response = await _render_template(
+            response = await _render_page(
                 "forms/submit.html", request, user,
                 extra={"title": form["name"], "form": form, "fields": fields, "errors": exc.errors, "submitted_values": values,
                        "max_file_attachments": custom_forms.MAX_FILE_ATTACHMENTS},
@@ -614,8 +628,7 @@ async def share_links_page(form_id: int, request: Request, user: dict[str, Any] 
 async def _share_links_page(form_id, request, user, *, error=None):
     form = await _get_admin_form(form_id, user)
     created = request.query_params.get("created", "")
-    from app.main import _render_template
-    response = await _render_template("admin/custom_form_sharing.html", request, user, extra={
+    response = await _render_page("admin/custom_form_sharing.html", request, user, extra={
         "title": "Share form", "form": form, "error": error,
         "created_link_id": int(created) if created.isdigit() else None,
         "links": [_reveal_share_link(request, form, link) for link in await forms_repo.list_share_links(form_id)],
@@ -676,8 +689,7 @@ async def _resolve_shared_form(slug: str, request: Request):
 
 
 def _render_public_form(request, form, fields, submit_action, *, status_code=200, **extra):
-    from app.main import templates
-    return templates.TemplateResponse(request, "forms/submit.html", {
+    return _render_public_page(request, "forms/submit.html", {
         "request": request, "title": form["name"], "form": form, "fields": fields,
         "public_share": True, "submit_action": submit_action,
         "max_file_attachments": custom_forms.MAX_FILE_ATTACHMENTS, **extra,

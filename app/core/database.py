@@ -1098,20 +1098,13 @@ class Database:
             try:
                 if lock_acquired and not conn.closed:
                     release_deadline = asyncio.timeout(self._settings.db_query_timeout)
+                    released = False
                     try:
                         async with release_deadline:
                             async with conn.cursor() as cursor:
-                                try:
-                                    await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
-                                except asyncio.CancelledError:
-                                    conn.close()
-                                    raise
-                    except BaseException as exc:
-                        # Cancellation during cleanup can leave ownership unknown
-                        # just as cancellation during GET_LOCK can.
-                        conn.close()
-                        if not isinstance(exc, Exception):
-                            raise
+                                await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                        released = True
+                    except Exception as exc:
                         logger.warning(
                             "Failed to explicitly release lock {lock}: {error}",
                             lock=lock_name,
@@ -1120,6 +1113,10 @@ class Database:
                                 if release_deadline.expired() else str(exc)
                             ),
                         )
+                    finally:
+                        # A failed or cancelled cleanup leaves lock ownership unknown.
+                        if not released:
+                            conn.close()
             finally:
                 self._release_mysql_connection(pool, conn)
 

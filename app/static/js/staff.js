@@ -843,11 +843,9 @@
         });
     }
 
-    function populateStaffSelect(selectEl, options, multipleMode) {
+    function populateStaffSelect(selectEl, options) {
       if (!selectEl) return;
-      while (selectEl.options.length > (multipleMode ? 0 : 1)) {
-        selectEl.remove(multipleMode ? 0 : 1);
-      }
+      selectEl.replaceChildren();
       options.forEach(({ value, label }) => {
         const opt = document.createElement('option');
         opt.value = value;
@@ -950,7 +948,7 @@
 
       const staffOptions = buildStaffOptions(staffId);
       populateForwardOptions(staffId, staffOptions);
-      populateStaffSelect(offboardingMailboxGrantField, staffOptions, true);
+      populateStaffSelect(offboardingMailboxGrantField, staffOptions);
 
       closeModal(editModal);
       openModal(offboardingModal);

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from importlib import import_module
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
@@ -749,9 +750,8 @@ def _staff_pack_offboarding_handler():
 
     Imported on demand so a hot-reloaded staff pack is always used.
     """
-    from app.features.staff import handlers as staff_handlers
-
-    return staff_handlers.request_staff_offboarding
+    handler_module = import_module("app.features.staff.handlers")
+    return handler_module.request_staff_offboarding
 
 
 @router.post(

@@ -26,11 +26,10 @@ from app.repositories import tray as tray_repo
 from app.repositories import wol as wol_repo
 from app.repositories import assets as assets_repo
 from app.services import tray as tray_service
+from app.services.tray_presence import as_utc, device_online as _device_online
 
 # How long to wait for the target to come back online after a WoL attempt.
 WOL_WAKE_WINDOW_SECONDS = 120
-# A device whose HTTP heartbeat is within this window is treated as live.
-HEARTBEAT_PRESENCE_WINDOW_SECONDS = 180
 
 
 # ---------------------------------------------------------------------------
@@ -73,27 +72,6 @@ def _ip_in_subnet(ip_text: str | None, cidr: str | None) -> bool:
         return ip in network
     except (ValueError, TypeError):
         return False
-
-
-def _device_online(device: dict[str, Any], *, now: datetime | None = None) -> bool:
-    """True when the tray device is live on some worker / by heartbeat."""
-
-    current = now or datetime.now(timezone.utc)
-    ws_seen = tray_service._as_utc(device.get("ws_last_seen_utc"))
-    if (
-        ws_seen is not None
-        and (current - ws_seen).total_seconds()
-        <= tray_service.WEBSOCKET_PRESENCE_WINDOW_SECONDS
-    ):
-        return True
-    last_seen = tray_service._as_utc(device.get("last_seen_utc"))
-    if (
-        last_seen is not None
-        and (current - last_seen).total_seconds()
-        <= HEARTBEAT_PRESENCE_WINDOW_SECONDS
-    ):
-        return True
-    return False
 
 
 def _cidr_from_ip(ip_text: str | None) -> str | None:
@@ -351,16 +329,16 @@ async def _target_is_online(target: dict[str, Any]) -> tuple[bool, str]:
 
         asset = await assets_repo.get_asset_by_id(int(asset_id))
         if asset:
-            created = tray_service._as_utc(target.get("created_at"))
+            created = as_utc(target.get("created_at"))
             # The MyPortal RMM agent checking in counts too: with Tactical RMM
             # disabled nothing refreshes the asset's boot time or last sync.
             from app.repositories import rmm as rmm_repo
 
             rmm_agent = await rmm_repo.get_asset_agent(int(asset_id)) or {}
             for value in (
-                tray_service._as_utc(asset.get("boot_time")),
-                tray_service._as_utc(asset.get("last_sync")),
-                tray_service._as_utc(rmm_agent.get("last_seen_utc")),
+                as_utc(asset.get("boot_time")),
+                as_utc(asset.get("last_sync")),
+                as_utc(rmm_agent.get("last_seen_utc")),
             ):
                 if value is not None and created is not None and value >= created:
                     return True, "asset_sync"
@@ -379,9 +357,9 @@ async def check_pending_attempts() -> int:
     for attempt in await wol_repo.list_pending_attempts():
         if attempt.get("status") not in {"pending", "awaiting"}:
             continue
-        deadline = tray_service._as_utc(attempt.get("check_deadline"))
+        deadline = as_utc(attempt.get("check_deadline"))
         if deadline is None:
-            created = tray_service._as_utc(attempt.get("created_at"))
+            created = as_utc(attempt.get("created_at"))
             if created is None:
                 continue
             deadline = created + timedelta(seconds=WOL_WAKE_WINDOW_SECONDS)

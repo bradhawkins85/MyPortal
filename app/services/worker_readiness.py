@@ -32,6 +32,7 @@ import stat
 import tempfile
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +41,16 @@ from app.core.logging import log_info, log_warning
 GRACE_SECONDS = 180.0
 _READY_MARKER = "ready"
 
-_resolved = False
-_directory: Path | None = None
-_expected: int | None = None
-_service_ready = False
+
+@dataclass
+class _WorkerReadiness:
+    resolved: bool = False
+    directory: Path | None = None
+    expected: int | None = None
+    service_ready: bool = False
+
+
+_readiness = _WorkerReadiness()
 
 
 def configured_workers(argv: list[str]) -> int | None:
@@ -85,24 +92,24 @@ def _parent_details() -> tuple[int, list[str], str] | None:
 
 
 def _resolve() -> tuple[Path, int] | None:
-    global _resolved, _directory, _expected
-    if not _resolved:
-        _resolved = True
+    if not _readiness.resolved:
+        _readiness.resolved = True
         details = _parent_details()
         expected = configured_workers(details[1]) if details else None
         if details and expected:
             ppid, _argv, started = details
-            _directory = _base_directory() / f"myportal-workers-{ppid}-{started}"
-            _expected = expected
-    if _directory is None or _expected is None:
+            _readiness.directory = _base_directory() / f"myportal-workers-{ppid}-{started}"
+            _readiness.expected = expected
+    if _readiness.directory is None or _readiness.expected is None:
         return None
-    return _directory, _expected
+    return _readiness.directory, _readiness.expected
 
 
 def _private_directory(path: Path) -> bool:
     try:
         path.mkdir(mode=0o700)
     except FileExistsError:
+        # Validate the existing directory below, including ownership and mode.
         pass
     except OSError:
         return False
@@ -157,8 +164,7 @@ def _started_workers(directory: Path) -> tuple[int, float | None] | None:
 
 
 def _record_ready(directory: Path, log: Callable[..., None], message: str, **meta: Any) -> None:
-    global _service_ready
-    _service_ready = True
+    _readiness.service_ready = True
     # Exclusive, so only the worker that records it logs it.
     if _create(directory / _READY_MARKER, exclusive=True):
         log(message, **meta)
@@ -178,8 +184,7 @@ def mark_started() -> None:
 def status() -> str | None:
     """Return ``None`` when the check does not apply, ``"ok"`` once every worker
     of this service has started, or a description of what it is waiting for."""
-    global _service_ready
-    if _service_ready:
+    if _readiness.service_ready:
         return "ok"
     resolved = _resolve()
     if resolved is None:
@@ -188,7 +193,7 @@ def status() -> str | None:
     if not _private_directory(directory):
         return None
     if (directory / _READY_MARKER).exists():
-        _service_ready = True
+        _readiness.service_ready = True
         return "ok"
     counted = _started_workers(directory)
     if counted is None:

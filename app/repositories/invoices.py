@@ -61,18 +61,11 @@ async def list_company_invoices(company_id: int) -> list[dict[str, Any]]:
 
 
 async def list_xero_sync_exceptions(company_id: int | None = None) -> list[dict[str, Any]]:
-    params: list[Any] = []
-    where_clauses = [
-        "COALESCE(TRIM(xero_invoice_id), '') = ''",
-        "COALESCE(TRIM(xero_sync_error), '') <> ''",
-    ]
-    if company_id is not None:
-        where_clauses.append("company_id = %s")
-        params.append(company_id)
     rows = await db.fetch_all(
-        "SELECT * FROM invoices WHERE " + " AND ".join(where_clauses)
-        + " ORDER BY xero_sync_attempted_at DESC, id DESC",
-        tuple(params),
+        "SELECT * FROM invoices WHERE COALESCE(TRIM(xero_invoice_id), '') = '' "
+        "AND COALESCE(TRIM(xero_sync_error), '') <> '' AND (%s IS NULL OR company_id = %s) "
+        "ORDER BY xero_sync_attempted_at DESC, id DESC",
+        (company_id, company_id),
     )
     return [_normalise_invoice(row) for row in rows]
 
@@ -226,10 +219,8 @@ async def patch_invoice(invoice_id: int, **updates: Any) -> dict[str, Any]:
     columns = ", ".join(column + " = %s" for column in updates)
     params = list(updates.values()) + [invoice_id]
     # Columns are produced by the explicit invoice patch allowlist above; values remain bound.
-    await db.execute(  # nosec B608
-        "UPDATE invoices SET " + columns + " WHERE id = %s",
-        tuple(params),
-    )
+    sql = "UPDATE invoices SET " + columns + " WHERE id = %s"  # nosec B608
+    await db.execute(sql, tuple(params))
     updated = await get_invoice_by_id(invoice_id)
     if not updated:
         raise ValueError("Invoice not found after update")

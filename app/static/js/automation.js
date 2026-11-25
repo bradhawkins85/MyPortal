@@ -1,5 +1,4 @@
 (function () {
-  const actionPayloadEditor = window.MyPortalActionPayloadEditor || null;
   let taskModal = null;
   let logsModal = null;
   let previewModal = null;

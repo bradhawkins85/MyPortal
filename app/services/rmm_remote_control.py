@@ -66,7 +66,7 @@ from functools import lru_cache
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlencode
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 

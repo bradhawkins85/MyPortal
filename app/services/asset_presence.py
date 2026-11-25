@@ -14,6 +14,7 @@ from typing import Any
 
 from app.core.logging import log_warning
 from app.repositories import tray as tray_repo
+from app.services.tray_presence import device_online
 
 
 async def module_enabled(slug: str) -> bool:
@@ -64,9 +65,7 @@ def tray_console_user(device: Mapping[str, Any]) -> str:
 
 def tray_status(device: Mapping[str, Any]) -> str:
     """Online/offline as the tray agent's presence reports it."""
-    from app.services import wol as wol_service
-
-    return "online" if wol_service._device_online(dict(device)) else "offline"
+    return "online" if device_online(device) else "offline"
 
 
 def status_without_tactical(

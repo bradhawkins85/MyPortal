@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 from weakref import WeakValueDictionary
 
-from app.api.dependencies.auth import is_user_active
+from app.security.account_status import is_user_active
 from app.core.logging import log_info, log_warning
 from app.repositories import company_memberships as membership_repo
 from app.repositories import rmm as rmm_repo

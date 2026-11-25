@@ -342,14 +342,13 @@ async def list_entries(
         # a device that stopped reporting means the company's whole history.
         source_sql = _FROM_ASSET_ENTRIES
     # The clauses are fixed strings chosen above; every value is a bound parameter.
-    return await event_log_db.fetch_all(  # nosec B608
-        "SELECT e.id, e.company_id, e.asset_id, e.agent_id, e.log_name, e.record_id, e.event_id, e.level, "
+    sql = (
+        "SELECT e.id, e.company_id, e.asset_id, e.agent_id, e.log_name, e.record_id, e.event_id, e.level, "  # nosec B608
         "e.provider, e.computer, " + MESSAGE_SQL + " AS message, e.repeat_count, e.time_created, "
         "e.last_time_created, e.received_at FROM " + source_sql + " WHERE " + " AND ".join(clauses) + " "
-        "ORDER BY e.time_created DESC, e.id DESC LIMIT %s",
-        tuple(params),
-        timeout_seconds=timeout_seconds,
+        "ORDER BY e.time_created DESC, e.id DESC LIMIT %s"
     )
+    return await event_log_db.fetch_all(sql, tuple(params), timeout_seconds=timeout_seconds)
 
 
 async def _delete_before(table: str, column: str, before: datetime, batch_size: int) -> int:

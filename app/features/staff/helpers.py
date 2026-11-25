@@ -7,6 +7,8 @@ from typing import Any
 from fastapi import HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 
+from app.security.menu_permissions import normalize_menu_permissions
+
 
 _STAFF_PERMISSION_NONE = 0
 _STAFF_PERMISSION_DEPARTMENT = 1
@@ -65,7 +67,7 @@ async def _load_staff_context(
     )
     membership_data = membership or {}
     staff_permission = _normalize_staff_access_scope(membership_data.get("staff_permission", 0)) if membership else 0
-    raw_staff_menu_access = main_module.normalize_menu_permissions(
+    raw_staff_menu_access = normalize_menu_permissions(
         membership_data.get("menu_permissions")
     ).get("menu.staff", "none")
     has_write_staff_menu_access = raw_staff_menu_access == "write"

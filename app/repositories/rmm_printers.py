@@ -90,15 +90,19 @@ async def save_scan(agent: dict[str, Any], *, run_id: int | None, scanned_at: da
                 updates.append((*values, now, existing))
         if updates:
             await db.execute_many(
-                "UPDATE rmm_printers SET " + ", ".join(column + " = %s" for column in PRINTER_COLUMNS)
-                + ", is_installed = 1, last_seen_at = %s WHERE id = %s",
+                "UPDATE rmm_printers SET name = %s, driver_name = %s, port_name = %s, port_address = %s, "
+                "printer_type = %s, device_type = %s, status = %s, printer_status = %s, job_count = %s, "
+                "is_shared = %s, share_name = %s, is_published = %s, location = %s, comment = %s, "
+                "computer_name = %s, connected_users = %s, "
+                "default_for = %s, is_installed = 1, last_seen_at = %s WHERE id = %s",
                 updates,
             )
         if inserts:
-            placeholders = ", ".join(["%s"] * (len(PRINTER_COLUMNS) + 3))
             await db.execute_many(
-                "INSERT INTO rmm_printers (agent_id, " + ", ".join(PRINTER_COLUMNS)
-                + ", first_seen_at, last_seen_at) VALUES (" + placeholders + ")",
+                "INSERT INTO rmm_printers (agent_id, name, driver_name, port_name, port_address, "
+                "printer_type, device_type, status, printer_status, job_count, is_shared, share_name, is_published, "
+                "location, comment, computer_name, connected_users, default_for, first_seen_at, last_seen_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 inserts,
             )
         if ids:

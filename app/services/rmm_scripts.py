@@ -42,13 +42,14 @@ from app.repositories import assets as assets_repo
 from app.repositories import companies as companies_repo
 from app.repositories import company_variables as company_variables_repo
 from app.repositories import rmm as rmm_repo
+from app.security import device_tokens
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import gitea
 from app.services import gitea_sign_in
 from app.services import rmm_agent_key
 from app.services import rmm_script_parser as parser
 from app.services.rmm_output import readable_output
-from app.services import tray as tray_service
+from app.services.rmm_script_platforms import SCRIPT_PLATFORMS, normalise_platform, platform_allowed
 from app.services import value_templates
 from app.services.singleton_jobs import singleton_run
 from app.services.rmm_script_layout import (
@@ -64,10 +65,6 @@ from app.services.rmm_script_layout import (
 MIN_TIMEOUT_SECONDS = 10
 MAX_TIMEOUT_SECONDS = 4 * 60 * 60
 MAX_QUEUE_TIMEOUT_SECONDS = 2_147_483_640
-SCRIPT_PLATFORMS = {
-    "windows": "Windows", "darwin": "Mac", "linux": "Linux",
-    "freebsd": "FreeBSD", "openbsd": "OpenBSD", "netbsd": "NetBSD",
-}
 # How long a queued run waits for an offline device before it expires.
 QUEUE_LIFETIME = timedelta(hours=24)
 # Extra time after the script's own timeout for the agent to report back.
@@ -103,6 +100,7 @@ CUSTOM_VALUE_SCOPES = ("asset", "company", "session")
 DispatchHook = Callable[[Mapping[str, Any], Mapping[str, Any], dict[str, Any]], Awaitable[None]]
 LiveOutputHook = Callable[[Mapping[str, Any], int, str], Awaitable[str]]
 ResultHook = Callable[[Mapping[str, Any], Mapping[str, Any], str], Awaitable[str]]
+_server_finish_hook: Callable[[int], Awaitable[None]] | None = None
 _DISPATCH_HOOKS: dict[str, DispatchHook] = {}
 _LIVE_OUTPUT_HOOKS: dict[str, LiveOutputHook] = {}
 _RESULT_HOOKS: dict[str, ResultHook] = {}
@@ -113,6 +111,12 @@ def register_run_hooks(name: str, *, dispatch: DispatchHook | None = None, live_
     for hooks, hook in ((_DISPATCH_HOOKS, dispatch), (_LIVE_OUTPUT_HOOKS, live_output), (_RESULT_HOOKS, result)):
         if hook is not None:
             hooks[name] = hook
+
+
+def register_server_finish_hook(hook: Callable[[int], Awaitable[None]]) -> None:
+    global _server_finish_hook
+    _server_finish_hook = hook
+
 
 _TRUE = {"1", "true", "yes", "on", "y", "$true"}
 _FALSE = {"0", "false", "no", "off", "n", "$false", ""}
@@ -654,18 +658,6 @@ def queue_timeout_override(value: Any) -> int | None:
     return None if value is None or value == "" else queue_timeout(value)
 
 
-def normalise_platform(value: Any) -> str:
-    name = str(value or "").strip().lower()
-    return {"mac": "darwin", "macos": "darwin", "osx": "darwin", "win32": "windows", "win": "windows"}.get(name, name)
-
-
-def platform_allowed(script: Mapping[str, Any], agent: Mapping[str, Any]) -> bool:
-    platforms = script.get("platforms")
-    if platforms is None:
-        platforms = rmm_repo.default_script_platforms(script.get("language"))
-    return normalise_platform(agent.get("os")) in platforms
-
-
 def clean_run_as(value: Any) -> str:
     """``system`` or ``user``; missing means ``system``, anything else is an error."""
 
@@ -1055,7 +1047,7 @@ def _may_replace_agent(agent: Mapping[str, Any], current_token: str) -> bool:
         return True
     stored = str(agent.get("auth_token_hash") or "")
     if current_token and stored and hmac.compare_digest(
-        tray_service.hash_token(current_token), stored
+        device_tokens.hash_token(current_token), stored
     ):
         return True
     last_seen = agent.get("last_seen_utc")
@@ -1090,8 +1082,8 @@ async def enrol_agent(
     public_key = None
     if payload.get("public_key"):
         public_key = rmm_agent_key.normalise_public_key(str(payload.get("public_key")))
-    token = tray_service.generate_auth_token()
-    token_hash = tray_service.hash_token(token)
+    token = device_tokens.generate_auth_token()
+    token_hash = device_tokens.hash_token(token)
     details = _agent_details(payload, client_ip)
     existing = await rmm_repo.get_agent_by_uid(agent_uid)
     common = {
@@ -1099,7 +1091,7 @@ async def enrol_agent(
         "company_id": int(company_id),
         "asset_id": tray_device.get("asset_id"),
         "auth_token_hash": token_hash,
-        "auth_token_prefix": tray_service.token_prefix(token),
+        "auth_token_prefix": device_tokens.token_prefix(token),
         "details": details,
     }
     tray_device_id = int(tray_device["id"])
@@ -1175,7 +1167,7 @@ async def enrol_agent(
 async def authenticate_agent(token: str) -> dict[str, Any] | None:
     if not token:
         return None
-    return await rmm_repo.get_agent_by_token_hash(tray_service.hash_token(token))
+    return await rmm_repo.get_agent_by_token_hash(device_tokens.hash_token(token))
 
 
 async def checkin(agent: Mapping[str, Any], payload: Mapping[str, Any], client_ip: str | None) -> None:
@@ -1380,17 +1372,10 @@ async def _finished_by_server(run_id: int) -> None:
     """What a result from the agent would have triggered, for a run MyPortal
     closed itself: post it to its ticket and move onboarding and checks on."""
 
-    from app.services import rmm_automation, rmm_checks, rmm_ticket_scripts
-
+    if _server_finish_hook is None:
+        return
     try:
-        run = await rmm_repo.get_run(run_id)
-        if run and run.get("run_source") == "ticket":
-            await rmm_ticket_scripts.record_result(
-                run_id, status=str(run["status"]), exit_code=None, stdout=str(run.get("stdout") or ""),
-                stderr=str(run.get("stderr") or ""), error=run.get("error_message"),
-            )
-        await rmm_automation.run_finished(run_id)
-        await rmm_checks.run_finished(run_id)
+        await _server_finish_hook(run_id)
     except Exception as exc:  # noqa: BLE001 - the run is already closed
         log_warning("RMM run follow-up failed", run_id=run_id, error=str(exc))
 
