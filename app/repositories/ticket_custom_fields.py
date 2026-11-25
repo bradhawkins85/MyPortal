@@ -11,10 +11,6 @@ from typing import Any, Iterable, Sequence
 
 from app.core.database import db
 
-_DEFINITION_COLUMNS = (
-    "id, field_key, label, help_text, field_type, options, config, visibility, "
-    "editable, show_in_list, is_active, sort_order, created_at, updated_at"
-)
 
 
 def _decode_json(value: Any, default: Any) -> Any:
@@ -44,17 +40,36 @@ def _normalise_definition(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 async def list_definitions(*, include_inactive: bool = True) -> list[dict[str, Any]]:
-    query = "SELECT " + _DEFINITION_COLUMNS + " FROM ticket_custom_field_definitions"
-    if not include_inactive:
-        query += " WHERE is_active = 1"
-    query += " ORDER BY sort_order ASC, label ASC, id ASC"
-    rows = await db.fetch_all(query)
+    if include_inactive:
+        rows = await db.fetch_all(
+            """
+            SELECT id, field_key, label, help_text, field_type, options, config, visibility,
+                   editable, show_in_list, is_active, sort_order, created_at, updated_at
+            FROM ticket_custom_field_definitions
+            ORDER BY sort_order ASC, label ASC, id ASC
+            """
+        )
+    else:
+        rows = await db.fetch_all(
+            """
+            SELECT id, field_key, label, help_text, field_type, options, config, visibility,
+                   editable, show_in_list, is_active, sort_order, created_at, updated_at
+            FROM ticket_custom_field_definitions
+            WHERE is_active = 1
+            ORDER BY sort_order ASC, label ASC, id ASC
+            """
+        )
     return [_normalise_definition(row) for row in rows or []]
 
 
 async def get_definition(definition_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        "SELECT " + _DEFINITION_COLUMNS + " FROM ticket_custom_field_definitions WHERE id = ?",
+        """
+        SELECT id, field_key, label, help_text, field_type, options, config, visibility,
+               editable, show_in_list, is_active, sort_order, created_at, updated_at
+        FROM ticket_custom_field_definitions
+        WHERE id = ?
+        """,
         (definition_id,),
     )
     return _normalise_definition(row)
@@ -62,7 +77,12 @@ async def get_definition(definition_id: int) -> dict[str, Any] | None:
 
 async def get_definition_by_key(field_key: str) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        "SELECT " + _DEFINITION_COLUMNS + " FROM ticket_custom_field_definitions WHERE field_key = ?",
+        """
+        SELECT id, field_key, label, help_text, field_type, options, config, visibility,
+               editable, show_in_list, is_active, sort_order, created_at, updated_at
+        FROM ticket_custom_field_definitions
+        WHERE field_key = ?
+        """,
         (field_key,),
     )
     return _normalise_definition(row)
@@ -145,8 +165,9 @@ async def get_values_for_tickets(
         return {}
     ticket_placeholders = ", ".join("?" for _ in tickets)
     field_placeholders = ", ".join("?" for _ in fields)
+    # Only "?" placeholders are joined into the IN lists; every value stays bound.
     query = (
-        "SELECT ticket_id, field_id, value_text FROM ticket_custom_field_values "
+        "SELECT ticket_id, field_id, value_text FROM ticket_custom_field_values "  # nosec B608
         "WHERE ticket_id IN (" + ticket_placeholders + ") "
         "AND field_id IN (" + field_placeholders + ")"
     )
