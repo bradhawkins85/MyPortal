@@ -362,3 +362,21 @@ def test_admin_page_uses_modal_editor_and_script():
     assert "<dialog" not in template
     assert "ticket_custom_fields_admin.js" in template
     assert Path("app/static/js/ticket_custom_fields_admin.js").exists()
+
+
+@pytest.mark.parametrize(
+    ("text", "valid"),
+    [
+        ("a@example.com", True),
+        ("first.last@sub.example.com.au", True),
+        ("a@b", False),
+        ("a@.com", False),
+        ("a@b.", False),
+        ("a b@c.d", False),
+        ("a@@b.c", False),
+        ("@b.c", False),
+        ("x@" + "." * 50000 + "!", False),
+    ],
+)
+def test_email_check_is_linear_and_correct(text, valid):
+    assert service._looks_like_email(text) is valid

@@ -68,7 +68,6 @@ DEFAULT_RATING_MAX = 5
 
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _KEY_SANITISE_RE = re.compile(r"[^a-z0-9]+")
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$")
 _TRUE_VALUES = {"1", "true", "yes", "y", "on", "checked"}
 _FALSE_VALUES = {"0", "false", "no", "n", "off", "unchecked"}
@@ -246,6 +245,14 @@ def _as_list(raw: Any) -> list[str]:
     return [part.strip() for part in text.split(",") if part.strip()]
 
 
+def _looks_like_email(text: str) -> bool:
+    """One ``@`` with a non-empty local part and a dotted domain; no regex backtracking."""
+    if len(text) > 320 or any(char.isspace() for char in text) or text.count("@") != 1:
+        return False
+    local, _, domain = text.partition("@")
+    return bool(local) and "." in domain.strip(".") and not domain.startswith(".") and not domain.endswith(".")
+
+
 def coerce_value(definition: Mapping[str, Any], raw: Any) -> str | None:
     """Validate ``raw`` for a field and return the stored text (``None`` clears).
 
@@ -309,7 +316,7 @@ def coerce_value(definition: Mapping[str, Any], raw: Any) -> str | None:
             raise ValueError(f"{label} must be a time (HH:MM).")
         return text[:5]
     if field_type == "email":
-        if not _EMAIL_RE.match(text) or len(text) > 320:
+        if not _looks_like_email(text):
             raise ValueError(f"{label} must be an email address.")
         return text
     if field_type == "url":

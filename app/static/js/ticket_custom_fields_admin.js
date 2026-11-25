@@ -63,7 +63,7 @@
   }
 
   function keyFromLabel(label) {
-    let key = String(label || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    let key = String(label || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join('_');
     if (key && !/^[a-z]/.test(key)) key = `field_${key}`;
     return key.slice(0, 100);
   }
