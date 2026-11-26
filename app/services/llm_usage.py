@@ -405,11 +405,11 @@ async def record_usage(
 def resolve_date_range(
     start: str | None, end: str | None, *, today: date | None = None
 ) -> tuple[date, date]:
-    """Parse the page's inclusive ``YYYY-MM-DD`` range, defaulting to the last 30 days."""
+    """Parse the page's inclusive ``YYYY-MM-DD`` range, defaulting to the last 7 days."""
 
     today = today or datetime.now(timezone.utc).date()
     end_date = _parse_date(end) or today
-    start_date = _parse_date(start) or end_date - timedelta(days=29)
+    start_date = _parse_date(start) or end_date - timedelta(days=6)
     if start_date > end_date:
         start_date, end_date = end_date, start_date
     return start_date, end_date

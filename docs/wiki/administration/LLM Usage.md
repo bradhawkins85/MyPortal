@@ -6,7 +6,7 @@ admins only) shows how much MyPortal uses its LLM providers.
 ## What the page shows
 
 - **Date range** – pick a *From* and *To* day (inclusive, UTC) or use the
-  *Last 7 / 30 / 90 days* shortcuts. The default is the last 30 days.
+  *Last 7 / 30 / 90 days* shortcuts. The default is the last 7 days.
 - **Totals** – requests, input tokens, output tokens, total tokens and failed
   requests in the range.
 - **Tokens per day** – stacked input/output bars, with the daily figures in an

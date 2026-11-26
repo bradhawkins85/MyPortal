@@ -73,13 +73,13 @@ def test_current_feature_prefers_context_variable():
 
 def test_resolve_date_range_defaults_and_swaps():
     today = date(2026, 10, 6)
-    assert llm_usage.resolve_date_range(None, None, today=today) == (date(2026, 9, 7), today)
+    assert llm_usage.resolve_date_range(None, None, today=today) == (date(2026, 9, 30), today)
     assert llm_usage.resolve_date_range("2026-10-05", "2026-10-01", today=today) == (
         date(2026, 10, 1),
         date(2026, 10, 5),
     )
     assert llm_usage.resolve_date_range("bad", "2026-10-03", today=today) == (
-        date(2026, 9, 4),
+        date(2026, 9, 27),
         date(2026, 10, 3),
     )
 
