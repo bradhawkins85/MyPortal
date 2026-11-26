@@ -16,7 +16,7 @@
         <a href="/admin/schedule?date={{ item.day }}&amp;appointment={{ item.id }}"><strong>{{ item.kind_label }}</strong> · {{ item.when }}</a>
         <span class="text-muted">with {{ item.technician }}{% if item.location %} · {{ item.location }}{% endif %}</span>
         {% if item.status != "scheduled" %}<span class="status status--neutral">{{ ta.statuses[item.status] }}</span>{% endif %}
-        {% if item.sync_status == "failed" %}<span class="status status--danger" title="{{ item.sync_error or '' }}">{{ ta.sync_labels.failed }}</span>{% endif %}
+        {% if item.sync_status == "failed" %}<span class="status status--error" title="{{ item.sync_error or '' }}">{{ ta.sync_labels.failed }}</span>{% endif %}
       </li>
       {% endfor %}
     </ul>

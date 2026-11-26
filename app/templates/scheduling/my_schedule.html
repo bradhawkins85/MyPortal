@@ -37,7 +37,7 @@
           <a href="/admin/schedule?appointment={{ item.id }}"><strong>{{ item.when.split(", ")[-1] }}</strong> {{ item.kind_label }}</a>
           <span>#{{ item.ticket_number or item.ticket_id }} {{ item.ticket_subject or "" }} <span class="text-muted">· {{ item.company_name or "No company" }}</span></span>
           {% if item.location %}<span class="text-muted">{{ item.location }}</span>{% endif %}
-          <span class="sch-agenda__meta">{% if item.status != "scheduled" %}<span class="status status--neutral">{{ statuses[item.status] }}</span>{% endif %}{% if item.sync_status == "failed" %}<span class="status status--danger">{{ sync_labels.failed }}</span>{% endif %}</span>
+          <span class="sch-agenda__meta">{% if item.status != "scheduled" %}<span class="status status--neutral">{{ statuses[item.status] }}</span>{% endif %}{% if item.sync_status == "failed" %}<span class="status status--error">{{ sync_labels.failed }}</span>{% endif %}</span>
         </li>
         {% endfor %}
       </ul>
