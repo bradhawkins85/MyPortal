@@ -1290,6 +1290,26 @@ install_backup_timer() {
   echo "Backup timer installed and enabled (daily by default)." >&2
 }
 
+install_fail2ban_snapshot_timer() {
+  # Install (or refresh) the root timer that writes the read-only Fail2ban
+  # snapshot shown on /admin/fail2ban. Idempotent; safe on every upgrade.
+  # Hosts without Fail2ban still get it so the page can say so.
+  local release_dir="$1"
+  local unit_dir="/etc/systemd/system"
+  local service_src="${release_dir}/deploy/systemd/myportal-fail2ban-snapshot.service"
+  local timer_src="${release_dir}/deploy/systemd/myportal-fail2ban-snapshot.timer"
+  if [[ ! -f "$service_src" || ! -f "$timer_src" ]]; then
+    echo "Warning: Fail2ban snapshot units not found in release; skipping timer install." >&2
+    return 0
+  fi
+  install -m 0644 "$service_src" "${unit_dir}/myportal-fail2ban-snapshot.service"
+  install -m 0644 "$timer_src" "${unit_dir}/myportal-fail2ban-snapshot.timer"
+  systemctl daemon-reload
+  systemctl enable myportal-fail2ban-snapshot.timer 2>/dev/null || true
+  systemctl restart myportal-fail2ban-snapshot.timer 2>/dev/null || true
+  echo "Fail2ban status snapshot timer installed and enabled (every minute)." >&2
+}
+
 run_pre_upgrade_backup() {
   # Take a pre-upgrade database backup before migrations run. Aborts the
   # upgrade on failure unless SKIP_PRE_UPGRADE_BACKUP=true.
@@ -1575,6 +1595,7 @@ if [[ "$MIGRATION_MAINTENANCE_ACTIVE" != true && "$redis_env_before" == "$redis_
 fi
 install_blue_green_service_unit "$RELEASE_DIR"
 install_backup_timer "$RELEASE_DIR"
+install_fail2ban_snapshot_timer "$RELEASE_DIR"
 run_rolling_restart "$TARGET_REVISION" "$RELEASE_DIR"
 clear_published_revision
 retire_legacy_service

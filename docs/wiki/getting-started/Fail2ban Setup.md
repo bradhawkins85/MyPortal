@@ -52,6 +52,46 @@ password) and confirm that the attempt appears in the jail log. Once the retry
 threshold is exceeded, Fail2ban will block the IP address until the ban expires
 or is manually removed.
 
+## 4. Check it from MyPortal
+
+Super administrators can open **Administration → Fail2ban** (`/admin/fail2ban`)
+to see, without signing in to the server:
+
+- **Health**: whether MyPortal is writing the log, whether the ban list is up
+  to date, whether events show real visitor addresses (`TRUSTED_PROXIES`), and
+  whether each MyPortal jail is loaded and reading the right file. Each problem
+  says how to fix it.
+- **Jails**: each MyPortal jail's rule in plain English, and how many addresses
+  it is blocking now and has blocked since Fail2ban started.
+- **Blocked now**: every blocked address, when it was blocked, when it is
+  unblocked and the last event MyPortal logged for it.
+- **Recent activity**: failed sign-ins, scanner traps and unknown pages from
+  the last 24 hours, and the busiest addresses.
+
+The page is view only. MyPortal runs without root access, so it can't talk to
+Fail2ban directly. Instead, a small root job,
+`myportal-fail2ban-snapshot.timer`, asks Fail2ban about the `myportal-*` jails
+every minute and saves the answer to
+`/var/lib/myportal-fail2ban/status.json` (owner root, group `myportal`,
+mode 640), which the page reads. The installer and `scripts/upgrade.sh` set
+the timer up. To set it up by hand on an existing server:
+
+```bash
+sudo install -m 0644 deploy/systemd/myportal-fail2ban-snapshot.service deploy/systemd/myportal-fail2ban-snapshot.timer /etc/systemd/system/
+```
+
+```bash
+sudo systemctl daemon-reload
+```
+
+```bash
+sudo systemctl enable --now myportal-fail2ban-snapshot.timer
+```
+
+Set `FAIL2BAN_STATUS_PATH` in `.env` if you move the snapshot, or leave it
+empty to hide the ban list. Docker deployments have no systemd timer: set
+`FAIL2BAN_STATUS_PATH=` (empty) there and the page shows MyPortal's own events.
+
 ## Blocking scanning bots
 
 The same log file also feeds the honeypot jails, which block bots that probe

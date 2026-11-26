@@ -1,0 +1,7 @@
+{
+  "guid": "e9d9db39-83f9-41e6-bb29-252996844f8f",
+  "occurred_at": "2026-11-26T02:00Z",
+  "change_type": "Feature",
+  "summary": "Super administrators can open Administration > Fail2ban to check that Fail2ban is protecting MyPortal, see each jail's rules and counts, review every blocked address and why it was blocked, and browse the last 24 hours of failed sign-ins and bot scans.",
+  "content_hash": "fb376e3e758f697846da5b33523514279a48dd73a3dd5f40829610a091e283bd"
+}
