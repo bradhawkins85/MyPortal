@@ -37,10 +37,70 @@ async def get_scan(agent_id: int) -> dict[str, Any] | None:
 
 
 async def list_printers(agent_id: int) -> list[dict[str, Any]]:
+    """The device's printers, each with the status of the run carrying its pending change."""
+
     rows = await db.fetch_all(
-        "SELECT * FROM rmm_printers WHERE agent_id = %s ORDER BY is_installed DESC, name", (agent_id,),
+        "SELECT p.*, r.status AS pending_run_status FROM rmm_printers p "
+        "LEFT JOIN rmm_script_runs r ON r.id = p.pending_run_id "
+        "WHERE p.agent_id = %s ORDER BY p.is_installed DESC, p.name",
+        (agent_id,),
     )
     return [dict(row) for row in rows or []]
+
+
+async def set_pending(agent_id: int, printer_id: int, *, action: str, new_name: str | None, run_id: int) -> None:
+    await db.execute(
+        "UPDATE rmm_printers SET pending_action = %s, pending_name = %s, pending_run_id = %s "
+        "WHERE id = %s AND agent_id = %s",
+        (action, new_name, run_id, printer_id, agent_id),
+    )
+
+
+async def get_by_pending_run(agent_id: int, run_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM rmm_printers WHERE agent_id = %s AND pending_run_id = %s", (agent_id, run_id),
+    )
+    return dict(row) if row else None
+
+
+async def clear_pending(agent_id: int, printer_id: int) -> None:
+    await db.execute(
+        "UPDATE rmm_printers SET pending_action = NULL, pending_name = NULL, pending_run_id = NULL "
+        "WHERE id = %s AND agent_id = %s",
+        (printer_id, agent_id),
+    )
+
+
+async def delete_printer(agent_id: int, printer_id: int) -> None:
+    await db.execute("DELETE FROM rmm_printers WHERE id = %s AND agent_id = %s", (printer_id, agent_id))
+    await _refresh_count(agent_id)
+
+
+async def rename_printer(agent_id: int, printer_id: int, new_name: str) -> None:
+    """Give a printer its new name, forgetting any other record already using it
+    (a printer of that name no longer seen)."""
+
+    known = await db.fetch_all("SELECT id, name FROM rmm_printers WHERE agent_id = %s", (agent_id,))
+    stale = [(int(row["id"]),) for row in known or []
+             if int(row["id"]) != printer_id and str(row["name"]).casefold() == new_name.casefold()]
+    if stale:
+        await db.execute_many("DELETE FROM rmm_printers WHERE id = %s", stale)
+    await db.execute(
+        "UPDATE rmm_printers SET name = %s, pending_action = NULL, pending_name = NULL, pending_run_id = NULL "
+        "WHERE id = %s AND agent_id = %s",
+        (new_name, printer_id, agent_id),
+    )
+    await _refresh_count(agent_id)
+
+
+async def _refresh_count(agent_id: int) -> None:
+    count = await db.fetch_one(
+        "SELECT COUNT(*) AS total FROM rmm_printers WHERE agent_id = %s AND is_installed = 1", (agent_id,),
+    )
+    await db.execute(
+        "UPDATE rmm_printer_scans SET printer_count = %s WHERE agent_id = %s",
+        (int((count or {}).get("total") or 0), agent_id),
+    )
 
 
 async def _ensure_scan(agent: dict[str, Any]) -> int:

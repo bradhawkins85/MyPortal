@@ -1,0 +1,7 @@
+{
+  "guid": "b855ffcc-d682-4c2e-a757-4f7a0234e136",
+  "occurred_at": "2026-11-26T04:21Z",
+  "change_type": "Feature",
+  "summary": "Technicians can now rename or remove a device's printers from each printer's Actions menu in the asset page's Printers section, making it easy to clean up old printers and give the rest more useful names.",
+  "content_hash": "fa833b15361ee88e1fe9ee5a6c30fd6e197fea3a9f48469aca36e9cabc7dced3"
+}
