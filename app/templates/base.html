@@ -591,7 +591,7 @@
               </a>
             </li>{% endif %}
           {% if can_access_rmm_scripts %}<li class="menu__item">
-              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') and not current_path.startswith('/rmm/event-logs') and not current_path.startswith('/rmm/checks') and not current_path.startswith('/rmm/findings') and not current_path.startswith('/rmm/patching') and not current_path.startswith('/rmm/remote-control') %}aria-current="page"{% endif %}>
+              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') and not current_path.startswith('/rmm/event-logs') and not current_path.startswith('/rmm/checks') and not current_path.startswith('/rmm/maintenance') and not current_path.startswith('/rmm/findings') and not current_path.startswith('/rmm/patching') and not current_path.startswith('/rmm/remote-control') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 4h18v16H3zm2 4v10h14V8zm1.5 2.5 1-1L11 13l-3.5 3.5-1-1L9 13zM12 15h5v1.5h-5z"/></svg></span>
                 <span class="menu__label">Scripts</span>
               </a>
@@ -612,6 +612,12 @@
               <a href="/rmm/checks" {% if current_path.startswith('/rmm/checks') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6v2h-4.6L13 22.4 9 12.4 8.4 14H3z"/></svg></span>
                 <span class="menu__label">Checks</span>
+              </a>
+            </li>{% endif %}
+          {% if can_access_rmm_scripts %}<li class="menu__item">
+              <a href="/rmm/maintenance" {% if current_path.startswith('/rmm/maintenance') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 2h2v2h6V2h2v2h3v8h-2V9H6v11h6v2H4V4h3zm-1 4v1h12V6zm12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm-1 1.5v3l2.4 1.4.7-1.1-1.6-1V15.5z"/></svg></span>
+                <span class="menu__label">Maintenance</span>
               </a>
             </li>{% endif %}
           {% if can_access_rmm_scripts %}<li class="menu__item">

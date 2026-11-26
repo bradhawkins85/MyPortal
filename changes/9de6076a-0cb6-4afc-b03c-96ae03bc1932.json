@@ -1,0 +1,7 @@
+{
+  "guid": "9de6076a-0cb6-4afc-b03c-96ae03bc1932",
+  "occurred_at": "2026-11-26T12:18Z",
+  "change_type": "Feature",
+  "summary": "Maintenance windows and snoozes now hold RMM check tickets, scripts and installs (and event log rule tickets) during planned work, then act if a problem is still there when the window ends.",
+  "content_hash": "cafdeb2a3d283986c7b15f7996847d3f10bfb0f26a20ae595fe2c4b96d5b703b"
+}

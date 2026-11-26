@@ -868,13 +868,27 @@ async def _on_recovery(check: Mapping[str, Any], agent: Mapping[str, Any], state
 
 
 def _action_waiting(check: Mapping[str, Any], state: Mapping[str, Any]) -> bool:
-    """A failing check limited to some results that has not acted since it
-    started failing, because the result did not match until now."""
+    """A failing check that has not acted since it started failing: its result
+    did not match the results its actions are limited to until now, or a
+    maintenance window held its actions (:mod:`app.services.rmm_maintenance`)."""
 
-    if not rmm_action_steps.steps(check) or not action_results(check):
+    if not rmm_action_steps.steps(check):
         return False
     last, since = state.get("last_action_at"), state.get("changed_at")
     return last is None or (since is not None and last < since)
+
+
+async def _maintenance_hold(check: Mapping[str, Any], agent: Mapping[str, Any], now: datetime) -> str | None:
+    """Why the check's actions are held right now, or ``None`` when they may run."""
+
+    from app.services import rmm_maintenance
+
+    try:
+        found = await rmm_maintenance.agent_coverage(agent, check.get("id"), now)
+    except Exception as exc:  # noqa: BLE001 - never lose an alert because the lookup failed
+        log_error("RMM maintenance window lookup failed", check_id=check.get("id"), error=str(exc))
+        return None
+    return rmm_maintenance.held_message(found) if found else None
 
 
 def _blank_state() -> dict[str, Any]:
@@ -904,15 +918,22 @@ async def record_result(check: Mapping[str, Any], agent: Mapping[str, Any], prob
                 state["problem_since"] = now
             if now - state["problem_since"] >= duration:
                 allowed = action_allowed(check, result)
+                held = (await _maintenance_hold(check, agent, now)
+                        if allowed and rmm_action_steps.steps(check) else None)
                 if previous != "failing":
                     state["status"], state["changed_at"] = "failing", now
-                    if allowed:
+                    if held:
+                        await repo.record_failure(
+                            check_id, f"Failed on {rmm_actions.device_label(agent)}: {result}. {held}")
+                    elif allowed:
                         scheduled = await _act_on_failure(check, agent, state, result, now)
                     else:
                         await repo.record_failure(check_id, f"Failed on {rmm_actions.device_label(agent)}: {result}. "
                                                             f"No action: the result does not match.")
                 elif not allowed:
                     pass  # waits for a result the action is limited to
+                elif held:
+                    pass  # acts once the maintenance window ends, if still failing
                 elif _action_waiting(check, state):
                     scheduled = await _act_on_failure(check, agent, state, result, now)
                 elif (rmm_action_steps.has_type(check, *rmm_action_steps.REPEATABLE_TYPES)

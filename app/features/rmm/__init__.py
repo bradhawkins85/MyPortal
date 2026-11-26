@@ -36,6 +36,9 @@
 * ``POST /api/rmm/assets/{id}/agent-install`` push the RMM agent to a device
   through its tray app, and the tray app's download and result APIs
   (:mod:`app.services.rmm_agent_deploy`)
+* ``GET /rmm/maintenance`` maintenance windows and snoozes: while one covers a
+  device its checks hold their actions and event log rules raise no tickets
+  (:mod:`app.services.rmm_maintenance`)
 * ``GET /rmm/findings`` (super admins) a platform-wide, best-guess look at
   every company's RMM data for abnormalities: event spikes, lockouts, new
   accounts and services, software changes and slow devices, from fixed rules
@@ -57,7 +60,8 @@ from __future__ import annotations
 from app.core.features import FeaturePack
 from app.repositories import rmm as rmm_repo
 
-from app.services import (rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_live, rmm_scripts,
+from app.services import (rmm_automation, rmm_checks, rmm_event_log_rules, rmm_findings, rmm_live, rmm_maintenance,
+                          rmm_scripts,
                           rmm_patching, rmm_printers, rmm_software_updates, rmm_ticket_scripts,
                           rmm_windows_updates)
 
@@ -68,6 +72,7 @@ from .event_log_routes import router as event_log_router
 from .event_log_rule_routes import router as event_log_rule_router
 from .finding_routes import router as finding_router
 from .inventory_routes import router as inventory_router
+from .maintenance_routes import router as maintenance_router
 from .remote_control_routes import router as remote_control_router
 from .result_rule_routes import router as result_rule_router
 from .patch_routes import router as patch_router
@@ -94,6 +99,8 @@ rmm_scripts.register_server_finish_hook(_follow_up_server_finished_run)
 # check actions scheduled for later.
 rmm_automation.register_tick_job(rmm_event_log_rules.run_due_scheduled)
 rmm_automation.register_tick_job(rmm_checks.tick)
+# Snoozes that ended a while ago are tidied away.
+rmm_automation.register_tick_job(rmm_maintenance.tick)
 rmm_automation.register_tick_job(rmm_patching.tick)
 # Connected Windows devices scan for Windows updates once a day.
 rmm_automation.register_tick_job(rmm_windows_updates.tick)
@@ -115,10 +122,10 @@ rmm_automation.register_package_steps(validate=rmm_software_updates.package_ids,
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.32.0",
+    version="1.33.0",
     routers=(router, automation_router, remote_control_router, agent_deploy_router, event_log_router,
              event_log_rule_router, inventory_router, check_router, finding_router, patch_router,
-             windows_update_router, result_rule_router, printer_router),
+             windows_update_router, result_rule_router, printer_router, maintenance_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),
 )
 
