@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
+from app.repositories import asset_checkbox_defaults as checkbox_defaults_repo
 from app.repositories import asset_column_restrictions as column_restrictions_repo
 from app.repositories import assets as assets_repo
 from app.repositories import asset_custom_fields as custom_fields_repo
@@ -97,7 +98,7 @@ async def create_field_definition(
         display_name=definition.display_name or None,
     )
     if definition_id and definition.field_type == FieldType.CHECKBOX:
-        await custom_fields_repo.ensure_unchecked_checkbox_values(definition_id=int(definition_id))
+        await checkbox_defaults_repo.ensure_unchecked_checkbox_values(definition_id=int(definition_id))
     return {"id": definition_id, "message": "Field definition created successfully"}
 
 
@@ -130,7 +131,7 @@ async def update_field_definition(
         display_name=definition.display_name,
     )
     if definition.field_type == FieldType.CHECKBOX:
-        await custom_fields_repo.ensure_unchecked_checkbox_values(definition_id=definition_id)
+        await checkbox_defaults_repo.ensure_unchecked_checkbox_values(definition_id=definition_id)
     return {"message": "Field definition updated successfully"}
 
 
@@ -231,7 +232,7 @@ async def delete_asset_custom_field(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Field definition not found")
     await custom_fields_repo.delete_asset_field_value(asset_id, field_definition_id)
     # Clearing a checkbox leaves it unticked rather than unset.
-    await custom_fields_repo.ensure_unchecked_checkbox_values(
+    await checkbox_defaults_repo.ensure_unchecked_checkbox_values(
         asset_id=asset_id, definition_id=field_definition_id
     )
     return {"message": "Custom field value deleted successfully"}

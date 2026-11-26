@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app.repositories import asset_custom_fields
+from app.repositories import asset_checkbox_defaults
 from app.repositories import rmm_targeting as targeting_repo
 from app.services.rmm_targeting import field_catalogue, matches_rules, validate_rules
 
@@ -87,7 +87,7 @@ def checkbox_db(monkeypatch):
     """)
     adapter = _Database(connection)
     monkeypatch.setattr(targeting_repo, "db", adapter)
-    monkeypatch.setattr(asset_custom_fields, "db", adapter)
+    monkeypatch.setattr(asset_checkbox_defaults, "db", adapter)
 
     async def presence(pairs):
         return None
@@ -117,9 +117,9 @@ async def test_assets_without_a_stored_checkbox_are_targeted_as_unchecked(checkb
 
 @pytest.mark.asyncio
 async def test_unchecked_values_are_stored_for_every_checkbox(checkbox_db):
-    await asset_custom_fields.ensure_unchecked_checkbox_values(asset_id=10)
+    await asset_checkbox_defaults.ensure_unchecked_checkbox_values(asset_id=10)
     assert _stored(checkbox_db) == {(10, 1): 0, (11, 1): 1, (12, 1): None}
-    await asset_custom_fields.ensure_unchecked_checkbox_values()
+    await asset_checkbox_defaults.ensure_unchecked_checkbox_values()
     assert _stored(checkbox_db) == {(10, 1): 0, (11, 1): 1, (12, 1): 0}
 
 
