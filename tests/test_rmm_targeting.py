@@ -248,6 +248,26 @@ def test_unavailable_or_secret_variable_cannot_match_negative_filter(context):
     assert not matches_rules(rules, context)
 
 
+@pytest.mark.parametrize("stored", [None, "", "  "])
+@pytest.mark.parametrize("operator,value", [
+    ("not_contains", "Not Supported"), ("not_equals", "Not Supported"), ("not_in", ["Not Supported"]),
+])
+def test_defined_custom_field_without_value_matches_negative_filters(context, stored, operator, value):
+    context["asset_custom"]["BitLocker_Keys"] = stored
+    assert matches_rules(group(condition("asset.custom", operator, value, key="BitLocker_Keys")), context)
+    assert not matches_rules(group(condition("asset.custom", "contains", "Not", key="BitLocker_Keys")), context)
+    assert matches_rules(group(condition("asset.custom", "is_not_set", key="BitLocker_Keys")), context)
+
+
+def test_unknown_custom_field_or_asset_never_matches_negative_filters(context):
+    rules = group(condition("asset.custom", "not_contains", "Not Supported", key="No such field"))
+    assert not matches_rules(rules, context)
+    context["asset_custom"] = None
+    assert not matches_rules(
+        group(condition("asset.custom", "not_contains", "Not Supported", key="BitLocker_Keys")), context,
+    )
+
+
 @pytest.mark.parametrize("operator,value,expected", [
     ("in_subnet", "10.20.0.0/16", True), ("in_subnet", "2001:db8::/64", True),
     ("not_in_subnet", "10.20.0.0/16", False), ("not_in_subnet", "192.168.0.0/16", True),
