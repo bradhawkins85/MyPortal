@@ -1,0 +1,7 @@
+{
+  "guid": "96658c7a-49ba-4a53-8401-6a960493a44b",
+  "occurred_at": "2026-11-26T23:39Z",
+  "change_type": "Feature",
+  "summary": "Technicians can now be booked for tickets on a dispatch board, with conflict warnings, a ticket note and automation trigger for each booking, and appointments written to their Microsoft 365 calendars.",
+  "content_hash": "0e965e82e95ff678f3a7c1fa5439215e470bb6f10129c460d9746fbdf679f46b"
+}
