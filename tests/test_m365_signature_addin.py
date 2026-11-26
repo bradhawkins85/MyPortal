@@ -630,3 +630,38 @@ def test_other_api_paths_keep_the_portal_cors_policy():
 
     assert response.status_code == 400
     assert "access-control-allow-origin" not in response.headers
+
+
+def _run_handler(scenario):
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    harness = ROOT / "tests" / "js" / "outlook_signature_addin_harness.js"
+    result = subprocess.run(
+        [node, str(harness), str(addin.HANDLER_SCRIPT), scenario],
+        capture_output=True, text=True, timeout=30, check=True,
+    )
+    return json.loads(result.stdout)
+
+
+def test_handler_waits_for_office_before_signing_in():
+    """Desktop Outlook can fire the event before Office's sign-in bridge exists.
+
+    MSAL then quietly returns a non-nested client whose silent sign-in fails
+    with no network request, so the signature never arrives.
+    """
+    outcome = _run_handler("event-before-ready")
+
+    assert outcome["body"] == "<p>sig</p>"
+
+
+def test_handler_does_not_reuse_a_client_after_sign_in_fails():
+    outcome = _run_handler("retry-after-failure")
+
+    assert outcome["body"] == "<p>sig</p>"
+    assert outcome["pcaCreations"] == 2
+    assert any(level == "error" for level, _ in outcome["trace"])
