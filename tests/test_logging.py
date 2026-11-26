@@ -149,6 +149,89 @@ def test_exception_logs_keep_traceback_without_user_record_locals(tmp_path, monk
         logger.remove()
 
 
+def _file_sink_settings(**overrides):
+    from types import SimpleNamespace
+
+    values = dict(
+        log_level="INFO", verbose_logging=False,
+        app_log_path=None, fail2ban_log_path=None, error_log_path=None,
+        log_rotation=None, log_retention=None, log_compression=None,
+    )
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_invalid_log_compression_keeps_fail2ban_log(tmp_path, monkeypatch, capsys):
+    """A bad LOG_COMPRESSION value must not silently disable the Fail2ban log."""
+    from app.core import config
+
+    auth_log = tmp_path / "auth.log"
+    settings = _file_sink_settings(
+        fail2ban_log_path=auth_log,
+        log_rotation="00:00", log_retention="7 days", log_compression="00:00",
+    )
+    monkeypatch.setattr(config, "get_settings", lambda: settings)
+
+    try:
+        configure_logging()
+        log_error("AUTH LOGIN FAIL", email_hash="abc123", ip="203.0.113.10", reason="invalid_credentials")
+        logger.complete()
+        console = capsys.readouterr().out
+    finally:
+        logger.remove()
+
+    assert "AUTH LOGIN FAIL" in auth_log.read_text(encoding="utf-8")
+    assert "LOG_COMPRESSION IGNORED" in console
+    assert "LOG FILE DISABLED" not in console
+    assert list(tmp_path.iterdir()) == [auth_log]
+
+
+def test_invalid_log_rotation_keeps_valid_options():
+    """Only the rejected option is dropped; the rest still apply."""
+    from app.core.logging import _file_sink_options
+
+    settings = _file_sink_settings(
+        log_rotation="every so often", log_retention="7 days", log_compression="gz",
+    )
+    warnings: list[str] = []
+    logger.remove()
+    logger.add(warnings.append, level="WARNING", format="{message}")
+    try:
+        options = _file_sink_options(settings)
+    finally:
+        logger.remove()
+
+    assert options == {"retention": "7 days", "compression": "gz"}
+    assert any("LOG_ROTATION IGNORED" in message for message in warnings)
+
+
+def test_shared_app_and_fail2ban_log_writes_each_event_once(tmp_path, monkeypatch):
+    """APP_LOG_PATH equal to FAIL2BAN_LOG_PATH must not duplicate lines.
+
+    Duplicates make Fail2ban count every failed sign-in twice.
+    """
+    from app.core import config
+
+    shared = tmp_path / "auth.log"
+    settings = _file_sink_settings(
+        log_level="WARNING", app_log_path=shared, fail2ban_log_path=shared,
+    )
+    monkeypatch.setattr(config, "get_settings", lambda: settings)
+
+    try:
+        configure_logging()
+        log_error("AUTH LOGIN FAIL", email_hash="abc123", ip="203.0.113.10", reason="invalid_credentials")
+        log_info("AUTH LOGIN SUCCESS", ip="203.0.113.10")
+        logger.complete()
+    finally:
+        logger.remove()
+
+    lines = shared.read_text(encoding="utf-8").splitlines()
+    assert sum("AUTH LOGIN FAIL" in line for line in lines) == 1
+    # The shared file keeps the Fail2ban sink's INFO level.
+    assert sum("AUTH LOGIN SUCCESS" in line for line in lines) == 1
+
+
 def test_log_level_normalizes_env_value():
     """LOG_LEVEL accepts lowercase values and inline comments from .env files."""
     from app.core.config import Settings

@@ -1,0 +1,7 @@
+{
+  "guid": "74580720-db65-4e20-bda5-cefaf16214ac",
+  "occurred_at": "2026-11-26T01:34Z",
+  "change_type": "Fix",
+  "summary": "Fail2ban keeps receiving sign-in and bot-scan events when a log rotation, retention or compression setting is invalid (such as LOG_COMPRESSION=00:00), and a shared app and Fail2ban log file no longer records each failed sign-in twice.",
+  "content_hash": "4571ebc133a2844ff38b281226d5ea6f40d35c6c91f50469c7b4f1079adb82ba"
+}

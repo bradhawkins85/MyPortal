@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 from importlib import import_module
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
@@ -142,79 +143,78 @@ def configure_logging() -> None:
     )
     _configure_uvicorn_logging(log_level=log_level, verbose=settings.verbose_logging)
 
-    app_log_path = getattr(settings, "app_log_path", None)
-    if app_log_path:
-        app_log_path = app_log_path.expanduser()
-        if _ensure_log_path(app_log_path):
-            try:
-                rotation = _coerce_optional(getattr(settings, "log_rotation", None))
-                retention = _coerce_optional(getattr(settings, "log_retention", None))
-                compression = _coerce_optional(getattr(settings, "log_compression", None))
-                logger.add(
-                    str(app_log_path),
-                    format=_format_file_record,
-                    level=log_level,
-                    encoding="utf-8",
-                    enqueue=True,
-                    diagnose=False,
-                    backtrace=False,
-                    rotation=rotation,
-                    retention=retention,
-                    compression=compression,
-                )
-            except Exception as exc:  # pragma: no cover - defensive logging setup
-                logger.warning(
-                    f"APP LOG FILE DISABLED - unable to open file path={app_log_path} error={exc}"
-                )
-    log_path = settings.fail2ban_log_path
-    if log_path:
-        log_path = log_path.expanduser()
-        if _ensure_log_path(log_path):
-            try:
-                rotation = _coerce_optional(getattr(settings, "log_rotation", None))
-                retention = _coerce_optional(getattr(settings, "log_retention", None))
-                compression = _coerce_optional(getattr(settings, "log_compression", None))
-                logger.add(
-                    str(log_path),
-                    format=_format_file_record,
-                    level="INFO",
-                    encoding="utf-8",
-                    enqueue=True,
-                    diagnose=False,
-                    backtrace=False,
-                    rotation=rotation,
-                    retention=retention,
-                    compression=compression,
-                )
-            except Exception as exc:  # pragma: no cover - defensive logging setup
-                logger.warning(
-                    f"AUTH LOG FILE DISABLED - unable to open file path={log_path} error={exc}"
-                )
+    file_sinks: dict[Path, tuple[str, str]] = {}
+    for setting, level, label in (
+        ("app_log_path", log_level, "APP LOG FILE DISABLED"),
+        ("fail2ban_log_path", "INFO", "AUTH LOG FILE DISABLED"),
+        ("error_log_path", "WARNING", "ERROR LOG FILE DISABLED"),
+    ):
+        path = getattr(settings, setting, None)
+        if not path:
+            continue
+        path = path.expanduser().resolve()
+        # One sink per file: two sinks on the same path duplicate every line
+        # (Fail2ban then counts each failed sign-in twice) and race on rotation.
+        existing = file_sinks.get(path)
+        if existing is not None and _level_no(existing[0]) <= _level_no(level):
+            continue
+        file_sinks[path] = (level, existing[1] if existing else label)
 
-    error_log_path = getattr(settings, "error_log_path", None)
-    if error_log_path:
-        error_log_path = error_log_path.expanduser()
-        if _ensure_log_path(error_log_path):
+    if not file_sinks:
+        return
+    options = _file_sink_options(settings)
+    for path, (level, label) in file_sinks.items():
+        if not _ensure_log_path(path):
+            continue
+        try:
+            logger.add(
+                str(path),
+                format=_format_file_record,
+                level=level,
+                encoding="utf-8",
+                enqueue=True,
+                diagnose=False,
+                backtrace=False,
+                **options,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging setup
+            logger.warning(f"{label} - unable to open file path={path} error={exc}")
+
+
+_FILE_SINK_OPTIONS = ("rotation", "retention", "compression")
+
+
+def _file_sink_options(settings: Any) -> dict[str, Any]:
+    """Return the LOG_ROTATION/RETENTION/COMPRESSION values loguru accepts.
+
+    Loguru refuses a whole file sink when any one of these is invalid (for
+    example ``LOG_COMPRESSION=00:00``), which would silently stop the app,
+    Fail2ban and error log files. Each value is checked on its own against a
+    throwaway file, and only a rejected one is dropped, with a warning.
+    """
+
+    options: dict[str, Any] = {}
+    with tempfile.TemporaryDirectory() as probe_dir:
+        probe_path = str(Path(probe_dir) / "probe.log")
+        for name in _FILE_SINK_OPTIONS:
+            value = _coerce_optional(getattr(settings, f"log_{name}", None))
+            if value is None:
+                continue
             try:
-                rotation = _coerce_optional(getattr(settings, "log_rotation", None))
-                retention = _coerce_optional(getattr(settings, "log_retention", None))
-                compression = _coerce_optional(getattr(settings, "log_compression", None))
-                logger.add(
-                    str(error_log_path),
-                    format=_format_file_record,
-                    level="WARNING",
-                    encoding="utf-8",
-                    enqueue=True,
-                    diagnose=False,
-                    backtrace=False,
-                    rotation=rotation,
-                    retention=retention,
-                    compression=compression,
-                )
-            except Exception as exc:  # pragma: no cover - defensive logging setup
-                logger.warning(
-                    f"ERROR LOG FILE DISABLED - unable to open file path={error_log_path} error={exc}"
-                )
+                handler_id = logger.add(probe_path, delay=True, **{name: value})
+            except (TypeError, ValueError) as exc:
+                logger.warning(f"LOG_{name.upper()} IGNORED - invalid value={value!r} error={exc}")
+                continue
+            logger.remove(handler_id)
+            options[name] = value
+    return options
+
+
+def _level_no(level: str) -> int:
+    try:
+        return logger.level(str(level).upper()).no
+    except ValueError:  # pragma: no cover - unknown level names sort last
+        return 0
 
 
 class _UvicornHeartbeatAccessFilter(logging.Filter):

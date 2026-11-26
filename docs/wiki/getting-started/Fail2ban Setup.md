@@ -64,6 +64,15 @@ unblock an address and how to allowlist one.
 - Ensure the service account running MyPortal can create and write to the log
   file path configured in `FAIL2BAN_LOG_PATH`. When the directory cannot be
   created the application logs a warning and continues writing to stdout.
+- If the log file stays empty, check the service journal
+  (`journalctl -u myportal`) for `LOG FILE DISABLED` or `IGNORED` warnings.
+  `LOG_ROTATION`, `LOG_RETENTION` and `LOG_COMPRESSION` must hold valid
+  values: compression takes a format such as `gz` or `zip`, not a time like
+  `00:00`. MyPortal ignores an invalid value and keeps writing the log.
+- `FAIL2BAN_LOG_PATH` may be the same file as `APP_LOG_PATH`; each event is
+  written once. A separate file keeps the auth log small and quick to scan.
+- Behind nginx, set `TRUSTED_PROXIES=127.0.0.1,::1`. Without it every line
+  records the proxy's address, which the jails' `ignoreip` never bans.
 - If Fail2ban is using the `systemd` backend, set `journalmatch` in the jail to
   match your service unit instead of relying on a file log.
 - Keep the authentication log on a persistent volume so Fail2ban can parse
