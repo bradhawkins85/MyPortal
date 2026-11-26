@@ -10,7 +10,6 @@ import aiomysql
 import aiosqlite
 
 from app.core.database import db
-from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.core.logging import log_warning
 from app.services import asset_types, cpu_catalog
 
@@ -211,6 +210,8 @@ async def get_asset_by_id(asset_id: int) -> dict[str, Any] | None:
 async def _record_unchecked_checkboxes(asset_id: int) -> None:
     """Store unticked checkbox fields for a new asset; never block asset creation."""
     try:
+        from app.repositories import asset_custom_fields as asset_custom_fields_repo
+
         await asset_custom_fields_repo.ensure_unchecked_checkbox_values(asset_id=asset_id)
     except Exception as exc:  # noqa: BLE001 - targeting already treats missing checkboxes as unticked
         log_warning("Could not record unticked checkbox fields", asset_id=asset_id, error=str(exc))
