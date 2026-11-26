@@ -1,0 +1,162 @@
+/*
+ * RMM maintenance windows (/rmm/maintenance) and the asset page's snooze
+ * controls. Builds on the shared tokens and the .scf-* editor components.
+ */
+
+.mw-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mw-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+  padding: var(--space-gap-base) var(--space-gap-roomy);
+  border: 1px solid var(--hf-line);
+  border-left-width: 4px;
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-panel-raised);
+}
+
+.mw-card--active {
+  border-left-color: var(--hf-warning);
+}
+
+.mw-card--upcoming {
+  border-left-color: var(--hf-accent);
+}
+
+.mw-card--ended,
+.mw-card--off {
+  opacity: 0.8;
+}
+
+.mw-card__main {
+  display: flex;
+  flex: 1 1 20rem;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.mw-card__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mw-card__schedule,
+.mw-card__reason {
+  margin: 0;
+  color: var(--hf-muted);
+}
+
+.mw-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.mw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mw-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.mw-type-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mw-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.mw-day {
+  position: relative;
+  cursor: pointer;
+}
+
+.mw-day input {
+  position: absolute;
+  opacity: 0;
+}
+
+.mw-day span {
+  display: inline-block;
+  min-width: 3rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-sm);
+  text-align: center;
+  background: var(--hf-panel);
+}
+
+.mw-day input:checked + span {
+  border-color: var(--hf-accent);
+  background: var(--hf-accent-soft);
+  color: var(--hf-copy-strong);
+}
+
+.mw-day input:focus-visible + span {
+  outline: 2px solid var(--hf-focus);
+  outline-offset: 2px;
+}
+
+.mw-preview {
+  margin: 0;
+  color: var(--hf-copy-strong);
+}
+
+.mw-asset-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+}
+
+.mw-snooze {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin-bottom: var(--space-gap-base);
+}
+
+.mw-snooze .form-input {
+  width: auto;
+}
+
+@media (max-width: 640px) {
+  .mw-type-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mw-page [hidden] {
+  display: none !important;
+}

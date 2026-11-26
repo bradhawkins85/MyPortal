@@ -42,6 +42,7 @@ TRIGGER_EVENTS: list[dict[str, str]] = [
     {"value": "tickets.sla_at_risk", "label": "Ticket SLA at risk"},
     {"value": "tickets.sla_response_breached", "label": "Ticket response SLA breached"},
     {"value": "tickets.sla_resolution_breached", "label": "Ticket resolution SLA breached"},
+    {"value": "tickets.csat_received", "label": "Ticket satisfaction survey answered"},
     {"value": "appointments.scheduled", "label": "Appointment booked"},
     {"value": "appointments.updated", "label": "Appointment changed"},
     {"value": "appointments.cancelled", "label": "Appointment cancelled"},

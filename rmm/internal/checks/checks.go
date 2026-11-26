@@ -1,6 +1,6 @@
 // Package checks measures what MyPortal's checks watch: CPU load, memory,
 // disk space, network throughput, ping targets, services, files,
-// processes and, on Proxmox VE hosts, the cluster, guests, storage, ZFS pools
+// processes, SNMP values from network devices and, on Proxmox VE hosts, the cluster, guests, storage, ZFS pools
 // and backups. MyPortal says what to measure (client.CheckConfig) and judges the
 // results; a service check may also have the agent start, restart or stop the
 // service.
@@ -48,6 +48,7 @@ func (c *Collector) Collect(ctx context.Context, cfg client.CheckConfig) client.
 		Files:     []client.FileStatus{},
 		Processes: []client.ProcessStatus{},
 		Programs:  []client.ProgramStatus{},
+		SNMP:      []client.SNMPResult{},
 	}
 	if cfg.CPU {
 		if percent, ok := c.cpu.Percent(); ok {
@@ -93,11 +94,22 @@ func (c *Collector) Collect(ctx context.Context, cfg client.CheckConfig) client.
 	if len(cfg.Programs) > 0 {
 		report.Programs = CheckPrograms(ctx, cfg.Programs)
 	}
+	snmpResults := make([][]client.SNMPResult, len(cfg.SNMP))
+	for i, target := range cfg.SNMP {
+		wg.Add(1)
+		go func(i int, target client.SNMPTarget) {
+			defer wg.Done()
+			snmpResults[i] = PollSNMP(ctx, target)
+		}(i, target)
+	}
 	if cfg.Proxmox {
 		status := proxmox.Collect(ctx, false)
 		report.Proxmox = &status
 	}
 	wg.Wait()
+	for _, results := range snmpResults {
+		report.SNMP = append(report.SNMP, results...)
+	}
 	return report
 }
 

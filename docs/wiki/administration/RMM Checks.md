@@ -21,6 +21,7 @@ started and when it was last checked.
 | **Process** | No process with a name is running (or one is running when it should not be). Use the program's file name, such as `notepad.exe` or `nginx`; case and `.exe` do not matter. | Agent |
 | **Program check** | A program is missing (or installed when it should not be), or an installed version fails an optional numeric comparison. Use its exact installed software name, ignoring case. | Agent |
 | **Proxmox VE** | On a Proxmox VE host: a virtual machine or container (by VMID or name, anywhere in the cluster) is not running, storage is fuller than a percentage, a ZFS pool is not `ONLINE`, the latest backup job on the node failed, the cluster has lost quorum, or a cluster node is offline. | Agent |
+| **SNMP** | A network device (switch, firewall, UPS, printer, NAS) does not answer SNMP for an OID, or the value is above, below, equal to, different from, containing or not containing what you enter. | Agent on the same network |
 | **Script result** | A Gitea script, run on the device every few minutes, does not return what you expect: an exit code, or output that contains, does not contain or exactly matches some text. | Server queues the script |
 | **Agent offline** | The agent has not checked in for a number of minutes, for example 30 for a server. | Server |
 
@@ -59,6 +60,20 @@ greater than and at least. Numeric components are compared (`1.10` is newer than
 `1.2` equals `1.2.0`), and every installed version must satisfy the requirement.
 Unreadable versions or collection errors report **Unknown**, distinct from **Not installed**.
 Program checks require an updated RMM agent; older agents leave them waiting for measurements.
+
+An **SNMP** check is polled by a device on the same network as the switch, firewall, UPS or
+printer, so add it to that device (**One device**) or use **Advanced device rules** to choose the
+devices that poll it, such as those tagged *SNMP poller*; it can't be added for a whole company
+without rules, so every agent doesn't poll the same switch. Choose **SNMP v1**, **v2c** or **v3**:
+v1 and v2c use a community string (use a read-only one), v3 a user name, a security level and the
+authentication and encryption protocols and passwords it needs. Community strings and passwords are
+stored encrypted, never shown again (leave them blank to keep them when editing) and only sent to
+the polling device. **Watch** fills in a common OID: device reachable (uptime), interface up
+(`ifOperStatus`, replace the last number with the port's index), processor load, UPS battery charge,
+UPS on battery and printer toner level, or enter any numeric OID. Numbers (including counters and
+time ticks) are compared as numbers; text is compared ignoring case. Every SNMP check also fails
+when the device does not answer, with the reason as the result. SNMP checks require an updated RMM
+agent; older agents leave them waiting for measurements.
 
 A **Proxmox VE** check reads the host with `pvesh`, `pveversion` and `zpool` on each measurement,
 so no API token is needed; the agent runs as root on the host. Install the Linux tray on the host
