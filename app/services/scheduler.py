@@ -2728,11 +2728,15 @@ async def _github_main_ref() -> str | None:
 
     repo = os.getenv("MYPORTAL_REPO", "").strip() or "bradhawkins85/MyPortal"
     api = (os.getenv("MYPORTAL_GITHUB_API", "").strip() or "https://api.github.com").rstrip("/")
+    headers = {"Accept": "application/vnd.github.sha"}
+    token = (get_settings().github_token or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.get(
                 f"{api}/repos/{repo}/commits/main",
-                headers={"Accept": "application/vnd.github.sha"},
+                headers=headers,
             )
             response.raise_for_status()
     except httpx.HTTPError as exc:
