@@ -5,7 +5,8 @@ Rules are non-empty trees of ``{operator: and|or, children: [...]}`` groups and
 insensitive. Collection positives match any item; negatives require no matching
 item, including known-empty collections. Unknown inventory never satisfies a
 negative predicate. Only explicit ``is_not_set`` matches absent, null or blank
-values; it also matches known-empty collections. Custom fields and company
+values; it also matches known-empty collections. A defined asset custom field
+with no value is known to be empty, so negative operators match it too. Custom fields and company
 variables also offer ``is_checked``/``is_unchecked``, which match a present
 boolean-like value (checkbox, true/false, yes/no, on/off, 1/0).
 
@@ -499,7 +500,10 @@ def _matches_validated(tree: dict[str, Any], context: Any) -> bool:
             if isinstance(actual, list) and not actual and kind in ("list", "ip", "dynamic"):
                 return operator in _NEGATED
             if _unset(actual):
-                return False
+                # A defined asset custom field without a value is known to be
+                # empty (the portal owns this data), so negatives match it.
+                # Unknown names and assets without custom data stay closed.
+                return operator in _NEGATED and node["field"] == "asset.custom" and actual is not _MISSING
             try:
                 if not _valid_present(actual, kind, node["field"] in _KEYED_COLLECTION_FIELDS):
                     return False

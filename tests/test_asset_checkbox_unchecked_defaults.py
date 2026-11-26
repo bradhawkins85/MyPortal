@@ -129,3 +129,16 @@ def test_migration_backfills_unchecked_values_idempotently(checkbox_db):
     checkbox_db.executescript(sql)
     checkbox_db.executescript(sql)
     assert _stored(checkbox_db) == {(10, 1): 0, (11, 1): 1, (12, 1): 0}
+
+
+@pytest.mark.asyncio
+async def test_defined_text_field_without_value_matches_does_not_contain(checkbox_db):
+    rule = {"operator": "and", "children": [{
+        "field": "asset.custom", "key": "Site", "operator": "not_contains", "value": "Brisbane",
+    }]}
+    checkbox_db.execute(
+        "INSERT INTO asset_custom_field_values (asset_id, field_definition_id, value_text) VALUES (11, 2, 'Brisbane')"
+    )
+    results = {asset_id: matches_rules(rule, await targeting_repo.context_for_asset(1, asset_id))
+               for asset_id in (10, 11)}
+    assert results == {10: True, 11: False}

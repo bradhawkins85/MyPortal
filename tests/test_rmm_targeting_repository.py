@@ -182,11 +182,11 @@ async def test_batch_loading_has_bounded_queries_and_does_not_read_unrelated_dat
     await targeting.contexts_for_agents([
         _agent(1), _agent(2, asset_id=None), _agent(4, company_id=2, asset_id=20),
     ])
-    # One global query for checkbox definitions (unticked defaults); the rest are batched.
+    # One global query for custom field definitions (defaults); the rest are batched.
     assert len(inventory_db.calls) == 14
     assert max(len(params) for _, params in inventory_db.calls) <= 4
     for sql, params in inventory_db.calls:
-        if "field_type = 'checkbox'" in sql:
+        if "FROM asset_custom_field_definitions d" in sql and "JOIN" not in sql:
             assert params == ()
             continue
         assert " IN (" in sql
@@ -301,7 +301,8 @@ async def test_numeric_names_cannot_impersonate_other_definition_ids(inventory_d
     """)
     context = (await targeting.contexts_for_agents([_agent()]))[1]
     assert context["asset_custom"]["15"] == "numeric field name"
-    assert "16" not in context["asset_custom"]
+    # ID 16 is a defined field with no value: known empty, never field "16"'s value.
+    assert context["asset_custom"]["16"] is None
     assert context["company_variables"]["15"] == "numeric variable name"
     assert "16" not in context["company_variables"]
     inventory_db.connection.executescript("""
