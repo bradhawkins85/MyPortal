@@ -36,7 +36,6 @@ SCHEDULE_TYPES = {"once": "One-off", "weekly": "Every week"}
 WEEKDAYS: tuple[tuple[str, str], ...] = (
     ("mon", "Mon"), ("tue", "Tue"), ("wed", "Wed"), ("thu", "Thu"), ("fri", "Fri"), ("sat", "Sat"), ("sun", "Sun"),
 )
-_WEEKDAY_INDEX = {key: index for index, (key, _label) in enumerate(WEEKDAYS)}
 MAX_NAME_LENGTH = 255
 MAX_REASON_LENGTH = 2000
 MIN_DURATION_MINUTES = 5
