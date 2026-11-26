@@ -22,6 +22,13 @@ How each type is checked:
   running with a name. A Proxmox VE check watches a Proxmox VE host: a guest
   that should be running, storage filling up, ZFS pool health, the latest
   backup job, cluster quorum or an offline node (:mod:`app.services.rmm_proxmox`).
+* **SNMP** checks are polled by the device's RMM agent too: it asks a switch,
+  firewall, UPS, printer or other network device on its network for one OID
+  (SNMP v1, v2c or v3) and the server compares the value (:func:`evaluate`).
+  They must be added for one device, or reach devices through targeting
+  rules, so a whole company's agents do not poll the same switch. Community
+  strings and v3 passwords are stored encrypted (:func:`snmp_secrets`) and are
+  only decrypted into the agent's config.
 * **Script** checks queue a Gitea script on the device every
   ``interval_minutes`` and compare its exit code or output with what is
   expected when it finishes (:func:`run_due_script_checks`, :func:`run_finished`).
@@ -67,7 +74,7 @@ from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_checks as repo
 from app.repositories import rmm_stats as stats_repo
 from app.repositories import rmm_targeting as targeting_repo
-from app.security.encryption import encrypt_secret
+from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import rmm_action_steps, rmm_actions, rmm_automation, rmm_commands, rmm_scripts, rmm_targeting
 from app.services import rmm_proxmox
 from app.services.rmm_scripts import RunRequestError
@@ -85,10 +92,11 @@ CHECK_TYPES = {
     "process": "Process",
     "program": "Program check",
     "proxmox": "Proxmox VE",
+    "snmp": "SNMP",
     "script": "Script result",
     "offline": "Agent offline",
 }
-AGENT_TYPES = ("disk", "ping", "cpu", "memory", "service", "network", "file", "process", "program", "proxmox")
+AGENT_TYPES = ("disk", "ping", "cpu", "memory", "service", "network", "file", "process", "program", "proxmox", "snmp")
 STATS_TYPES = ("disk", "ping", "cpu", "memory", "network")
 ACTIONS = {
     "none": "Show the result only",
@@ -117,6 +125,50 @@ MAX_FILES = 50
 MAX_PROCESSES = 50
 MAX_PROGRAMS = 50
 PROGRAM_STATES = {"installed": "Installed", "missing": "Not installed"}
+MAX_SNMP = 50
+SNMP_VERSIONS = {"v2c": "SNMP v2c", "v1": "SNMP v1", "v3": "SNMP v3"}
+SNMP_SECURITY_LEVELS = {"authPriv": "Authentication and encryption", "authNoPriv": "Authentication only",
+                        "noAuthNoPriv": "No authentication"}
+SNMP_AUTH_PROTOCOLS = {"SHA": "SHA-1", "SHA256": "SHA-256", "SHA512": "SHA-512", "MD5": "MD5"}
+SNMP_PRIV_PROTOCOLS = {"AES": "AES-128", "AES256": "AES-256", "DES": "DES"}
+SNMP_CONDITIONS = {
+    "responds": "does not respond",
+    "above": "is above",
+    "below": "is below",
+    "equals": "does not equal",
+    "not_equals": "equals",
+    "contains": "does not contain",
+    "not_contains": "contains",
+}
+# What the form's condition list reads (the value the check passes with is
+# phrased as when it fails in SNMP_CONDITIONS, for the summary).
+SNMP_CONDITION_LABELS = {
+    "responds": "Only when the device does not answer",
+    "above": "Value is above",
+    "below": "Value is below",
+    "equals": "Value is not",
+    "not_equals": "Value is",
+    "contains": "Value does not contain",
+    "not_contains": "Value contains",
+}
+# Common OIDs to start from; the technician can edit the OID afterwards.
+SNMP_PRESETS: dict[str, dict[str, str]] = {
+    "uptime": {"label": "Device is reachable (uptime)", "oid": "1.3.6.1.2.1.1.3.0", "condition": "responds", "value": ""},
+    "if_status": {"label": "Interface is up (ifOperStatus, replace 1 with the port's index)",
+                  "oid": "1.3.6.1.2.1.2.2.1.8.1", "condition": "equals", "value": "1"},
+    "cpu": {"label": "Processor load % (hrProcessorLoad)", "oid": "1.3.6.1.2.1.25.3.3.1.2.1", "condition": "above",
+            "value": "80"},
+    "ups_battery": {"label": "UPS battery charge % (UPS-MIB)", "oid": "1.3.6.1.2.1.33.1.2.4.0", "condition": "below",
+                    "value": "50"},
+    "ups_on_battery": {"label": "UPS running on battery (seconds on battery)", "oid": "1.3.6.1.2.1.33.1.2.2.0",
+                       "condition": "above", "value": "0"},
+    "toner": {"label": "Printer toner or ink level (Printer-MIB)", "oid": "1.3.6.1.2.1.43.11.1.1.9.1.1",
+              "condition": "below", "value": "10"},
+    "custom": {"label": "Another OID", "oid": "", "condition": "above", "value": ""},
+}
+SNMP_SECRET_FIELDS = ("snmp_community", "snmp_auth_password", "snmp_priv_password")
+_OID = re.compile(r"^\.?(?:\d{1,10})(?:\.\d{1,10}){1,127}$")
+_SNMP_USER = re.compile(r"^[^\x00-\x1f]{1,64}$")
 VERSION_OPERATORS = {"none": "Any version", "eq": "Equals", "ne": "Does not equal",
                      "lt": "Less than", "le": "At most", "gt": "Greater than", "ge": "At least"}
 
@@ -230,6 +282,10 @@ def override_key(check: Mapping[str, Any]) -> tuple[str, str]:
     if kind == "proxmox":
         # Different conditions on the same name (storage "local", guest "local") are different things.
         target = f"{(check.get('settings') or {}).get('condition') or ''}:{target}"
+    elif kind == "snmp":
+        # Each OID on a network device is its own thing.
+        settings = check.get("settings") or {}
+        target = f"{normalise_oid(settings.get('oid'))}@{target}:{_snmp_port(settings)}"
     return kind, target
 
 
@@ -391,6 +447,13 @@ def describe(check: Mapping[str, Any]) -> str:
         return f"{target} is not installed{requirement}{lasting}"
     if kind == "proxmox":
         return rmm_proxmox.describe(str(settings.get("condition") or ""), target, settings) + lasting
+    if kind == "snmp":
+        condition = settings.get("condition") or "responds"
+        where = f"{target}" + (f":{_snmp_port(settings)}" if _snmp_port(settings) != 161 else "")
+        if condition == "responds":
+            return f"{where} does not answer SNMP for {normalise_oid(settings.get('oid'))}{lasting}"
+        return (f"SNMP {normalise_oid(settings.get('oid'))} on {where} "
+                f"{SNMP_CONDITIONS.get(condition, condition)} {settings.get('value') or ''}".rstrip() + lasting)
     if kind == "network":
         where = f"{target}" if target else "All interfaces"
         return (f"{where}: data {NETWORK_DIRECTIONS.get(settings.get('direction'), 'received and sent')} "
@@ -596,9 +659,177 @@ def parse_settings(check_type: str, form: Mapping[str, Any]) -> tuple[str, dict[
         settings = {"expect": expect, "value": value,
                     "interval_minutes": _int(form.get("script_interval"), DEFAULT_SCRIPT_INTERVAL,
                                              MIN_SCRIPT_INTERVAL, MAX_SCRIPT_INTERVAL)}
+    elif check_type == "snmp":
+        target, settings = _parse_snmp(form, errors)
     elif check_type == "offline":
         duration = _int(form.get("duration_minutes"), 30, MIN_OFFLINE_MINUTES, MAX_DURATION_MINUTES)
     return target, settings, duration, errors
+
+
+# --------------------------------------------------------------------------- #
+# SNMP
+# --------------------------------------------------------------------------- #
+
+
+def normalise_oid(value: Any) -> str:
+    return str(value or "").strip().lstrip(".")
+
+
+def _snmp_port(settings: Mapping[str, Any]) -> int:
+    return _int(settings.get("port"), 161, 1, 65535)
+
+
+def _parse_snmp(form: Mapping[str, Any], errors: dict[str, str]) -> tuple[str, dict[str, Any]]:
+    """The SNMP fields other than its secrets (:func:`snmp_secrets`)."""
+
+    target = str(form.get("snmp_host") or "").strip()
+    if not _HOST.match(target) or ".." in target:
+        errors["snmp_host"] = "Enter the network device's host name or IP address."
+    preset = str(form.get("snmp_preset") or "custom")
+    if preset not in SNMP_PRESETS:
+        preset = "custom"
+    oid = normalise_oid(form.get("snmp_oid"))
+    if not _OID.match(oid):
+        errors["snmp_oid"] = "Enter a numeric OID such as 1.3.6.1.2.1.1.3.0."
+    version = str(form.get("snmp_version") or "v2c")
+    if version not in SNMP_VERSIONS:
+        errors["snmp_version"] = "Choose SNMP v1, v2c or v3."
+    condition = str(form.get("snmp_condition") or "responds")
+    if condition not in SNMP_CONDITIONS:
+        errors["snmp_condition"] = "Choose when the check fails."
+    value = str(form.get("snmp_value") or "").strip()[:255]
+    if condition in ("above", "below") and _number(value) is None:
+        errors["snmp_value"] = "Enter a number to compare the value with."
+    elif condition in ("equals", "not_equals", "contains", "not_contains") and not value:
+        errors["snmp_value"] = "Enter the value to compare with."
+    if condition == "responds":
+        value = ""
+    port_text = str(form.get("snmp_port") or "161").strip()
+    if not port_text.isdigit() or not 1 <= int(port_text) <= 65535:
+        errors["snmp_port"] = "Enter a port from 1 to 65535 (SNMP uses 161)."
+    settings: dict[str, Any] = {
+        "preset": preset, "oid": oid, "version": version, "condition": condition, "value": value,
+        "port": int(port_text) if port_text.isdigit() else 161,
+    }
+    if version == "v3":
+        username = str(form.get("snmp_username") or "").strip()
+        if not _SNMP_USER.match(username):
+            errors["snmp_username"] = "Enter the SNMP v3 user name."
+        level = str(form.get("snmp_security_level") or "authPriv")
+        if level not in SNMP_SECURITY_LEVELS:
+            errors["snmp_security_level"] = "Choose the security level."
+        auth = str(form.get("snmp_auth_protocol") or "SHA")
+        if auth not in SNMP_AUTH_PROTOCOLS:
+            errors["snmp_auth_protocol"] = "Choose the authentication protocol."
+        priv = str(form.get("snmp_priv_protocol") or "AES")
+        if priv not in SNMP_PRIV_PROTOCOLS:
+            errors["snmp_priv_protocol"] = "Choose the encryption protocol."
+        settings.update(username=username, security_level=level, auth_protocol=auth, priv_protocol=priv)
+    return target, settings
+
+
+def _stored_snmp_secrets(settings: Mapping[str, Any] | None) -> dict[str, str]:
+    encrypted = (settings or {}).get("secret_encrypted")
+    if not encrypted:
+        return {}
+    try:
+        values = json.loads(decrypt_secret(str(encrypted), allow_plaintext=False, field="rmm_check_snmp"))
+    except Exception as exc:  # noqa: BLE001 - a key change leaves the secret unreadable
+        log_error("Could not read an SNMP check's stored credentials", error=str(exc))
+        return {}
+    return {key: str(value) for key, value in values.items() if key in SNMP_SECRET_FIELDS and value}
+
+
+def snmp_secrets(settings: Mapping[str, Any], form: Mapping[str, Any], existing: Mapping[str, Any] | None,
+                 errors: dict[str, str]) -> str | None:
+    """Encrypt the SNMP community or v3 passwords. A blank field keeps the saved
+    value when the check is edited, so secrets are never sent back to the browser."""
+
+    saved = _stored_snmp_secrets((existing or {}).get("settings") if (existing or {}).get("check_type") == "snmp" else None)
+    secrets: dict[str, str] = {}
+    for field in SNMP_SECRET_FIELDS:
+        typed = str(form.get(field) or "")
+        if len(typed) > 255 or re.search(r"[\x00-\x1f]", typed):
+            errors[field] = "Keep it to 255 characters on one line."
+        secrets[field] = typed or saved.get(field, "")
+    version, level = settings.get("version"), settings.get("security_level")
+    if version in ("v1", "v2c"):
+        if not secrets["snmp_community"]:
+            errors["snmp_community"] = "Enter the community string (often public on read-only devices)."
+        secrets = {"snmp_community": secrets["snmp_community"]}
+    else:
+        if level in ("authNoPriv", "authPriv") and len(secrets["snmp_auth_password"]) < 8:
+            errors["snmp_auth_password"] = "Enter the authentication password (at least 8 characters)."
+        if level == "authPriv" and len(secrets["snmp_priv_password"]) < 8:
+            errors["snmp_priv_password"] = "Enter the encryption password (at least 8 characters)."
+        secrets.pop("snmp_community", None)
+        if level == "noAuthNoPriv":
+            secrets = {}
+        elif level == "authNoPriv":
+            secrets.pop("snmp_priv_password", None)
+    secrets = {key: value for key, value in secrets.items() if value}
+    return encrypt_secret(json.dumps(secrets)) if secrets else None
+
+
+def snmp_secret_status(check: Mapping[str, Any]) -> dict[str, bool]:
+    """Which secrets a saved SNMP check holds, for "saved, leave blank to keep" hints."""
+
+    if check.get("check_type") != "snmp":
+        return {}
+    saved = _stored_snmp_secrets(check.get("settings"))
+    return {field: bool(saved.get(field)) for field in SNMP_SECRET_FIELDS}
+
+
+def _snmp_target(check: Mapping[str, Any]) -> dict[str, Any] | None:
+    settings = check.get("settings") or {}
+    oid = normalise_oid(settings.get("oid"))
+    if not oid:
+        return None
+    secrets = _stored_snmp_secrets(settings)
+    target: dict[str, Any] = {
+        "host": str(check.get("target") or ""), "port": _snmp_port(settings),
+        "version": settings.get("version") or "v2c", "oids": [oid],
+    }
+    if target["version"] == "v3":
+        target.update(
+            username=settings.get("username") or "", security_level=settings.get("security_level") or "authPriv",
+            auth_protocol=settings.get("auth_protocol") or "SHA", auth_password=secrets.get("snmp_auth_password", ""),
+            priv_protocol=settings.get("priv_protocol") or "AES", priv_password=secrets.get("snmp_priv_password", ""),
+        )
+    else:
+        target["community"] = secrets.get("snmp_community", "")
+    return target
+
+
+def _snmp_result(check: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[bool, str] | None:
+    settings = check.get("settings") or {}
+    host = str(check.get("target") or "").casefold()
+    port, oid = _snmp_port(settings), normalise_oid(settings.get("oid"))
+    item = next((entry for entry in report.get("snmp") or []
+                 if str(entry.get("host") or "").casefold() == host
+                 and int(entry.get("port") or 161) == port and normalise_oid(entry.get("oid")) == oid), None)
+    if item is None:
+        return None
+    if item.get("error"):
+        return True, f"No SNMP answer from {check.get('target')}: {str(item['error'])[:200]}"
+    value = str(item.get("value") if item.get("value") is not None else "")[:255]
+    shown = f"{oid} = {value}" if value else f"{oid} answered with no value"
+    condition = settings.get("condition") or "responds"
+    expected = str(settings.get("value") or "")
+    if condition == "responds":
+        return False, shown
+    if condition in ("above", "below"):
+        number, limit = _number(value), _number(expected)
+        if number is None or limit is None:
+            return True, f"{shown} (not a number)"
+        problem = number > limit if condition == "above" else number < limit
+        return problem, shown
+    if condition in ("equals", "not_equals"):
+        left, right = _number(value), _number(expected)
+        same = left == right if left is not None and right is not None else value.casefold() == expected.casefold()
+        return (not same if condition == "equals" else same), shown
+    found = expected.casefold() in value.casefold()
+    return (not found if condition == "contains" else found), shown
 
 
 async def save_check(
@@ -653,6 +884,11 @@ async def save_check(
     else:
         target, settings, duration, type_errors = parse_settings(check_type, form)
         errors.update(type_errors)
+        if check_type == "snmp":
+            if asset_id is None and target_rules is None and "asset_id" not in errors:
+                errors["scope"] = ("SNMP checks are polled by a device on the same network: add the check to "
+                                   "that device, or use advanced rules to choose the devices that poll it.")
+            settings["secret_encrypted"] = snmp_secrets(settings, form, existing, errors)
     legacy_action = str(form.get("action") or "none")
     if not rmm_action_steps.form_list(form, "action_key") and legacy_action not in ACTIONS:
         errors["action"] = "Choose what happens when the check fails."
@@ -961,7 +1197,19 @@ def agent_config_for(checks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     processes: dict[str, str] = {}
     programs: dict[str, str] = {}
     services: dict[str, dict[str, str]] = {}
+    snmp: dict[tuple[Any, ...], dict[str, Any]] = {}
+    oid_count = 0
     for check in checks:
+        if check["check_type"] == "snmp" and oid_count < MAX_SNMP:
+            polled = _snmp_target(check)
+            if polled is not None:
+                # One request per device and credentials, asking for every OID.
+                key = tuple(sorted((name, str(value)) for name, value in polled.items() if name != "oids"))
+                current = snmp.setdefault(key, {**polled, "oids": []})
+                if polled["oids"][0] not in current["oids"]:
+                    current["oids"].append(polled["oids"][0])
+                    oid_count += 1
+            continue
         if check["check_type"] == "ping" and check["target"] not in pings and len(pings) < MAX_PINGS:
             pings.append(check["target"])
         elif check["check_type"] == "file" and check["target"] not in files and len(files) < MAX_FILES:
@@ -993,6 +1241,7 @@ def agent_config_for(checks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "processes": list(processes.values()),
         "programs": list(programs.values()),
         "proxmox": "proxmox" in kinds,
+        "snmp": list(snmp.values()),
     }
 
 
@@ -1066,6 +1315,8 @@ def evaluate(check: Mapping[str, Any], report: Mapping[str, Any]) -> tuple[bool,
             return True, "; ".join(item[2] for item in bad)
         worst = min(results, key=lambda item: item[1])
         return False, worst[2] if len(results) == 1 else f"Lowest: {worst[2]}"
+    if kind == "snmp":
+        return _snmp_result(check, report)
     if kind == "ping":
         ping = next((item for item in report.get("pings") or []
                      if str(item.get("target") or "").casefold() == target.casefold()), None)

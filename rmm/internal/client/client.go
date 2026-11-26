@@ -386,6 +386,35 @@ type CheckConfig struct {
 	// Proxmox asks a Proxmox VE host for its cluster, guest, storage, ZFS and
 	// backup state.
 	Proxmox bool `json:"proxmox"`
+	// SNMP lists network devices to ask for OIDs, one entry per device and
+	// credentials.
+	SNMP []SNMPTarget `json:"snmp"`
+}
+
+// SNMPTarget is a network device the agent polls over SNMP v1, v2c or v3.
+// The community string and v3 passwords only ever arrive in this config.
+type SNMPTarget struct {
+	Host          string   `json:"host"`
+	Port          int      `json:"port"`
+	Version       string   `json:"version"`
+	Community     string   `json:"community,omitempty"`
+	Username      string   `json:"username,omitempty"`
+	SecurityLevel string   `json:"security_level,omitempty"`
+	AuthProtocol  string   `json:"auth_protocol,omitempty"`
+	AuthPassword  string   `json:"auth_password,omitempty"`
+	PrivProtocol  string   `json:"priv_protocol,omitempty"`
+	PrivPassword  string   `json:"priv_password,omitempty"`
+	OIDs          []string `json:"oids"`
+}
+
+// SNMPResult is one OID's value, or why it could not be read.
+type SNMPResult struct {
+	Host  string `json:"host"`
+	Port  int    `json:"port"`
+	OID   string `json:"oid"`
+	Value string `json:"value,omitempty"`
+	Type  string `json:"type,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // DiskUsage is one fixed drive or mounted filesystem.
@@ -464,6 +493,7 @@ type CheckReport struct {
 	Processes  []ProcessStatus `json:"processes"`
 	Programs   []ProgramStatus `json:"programs"`
 	Proxmox    *proxmox.Status `json:"proxmox,omitempty"`
+	SNMP       []SNMPResult    `json:"snmp"`
 }
 
 // GetCheckConfig asks what to measure for checks.
@@ -486,6 +516,9 @@ func (c *Client) SendCheckReport(ctx context.Context, report CheckReport) error 
 	}
 	if report.Processes == nil {
 		report.Processes = []ProcessStatus{}
+	}
+	if report.SNMP == nil {
+		report.SNMP = []SNMPResult{}
 	}
 	return c.do(ctx, http.MethodPost, "/api/rmm/agent/checks/report", report, nil)
 }

@@ -165,6 +165,17 @@ guest in the cluster, this node's storage, `zpool list` health and the last ten
 updates). Everything is read locally with `pvesh get ... --output-format json`,
 `pveversion` and `zpool`, so no API token is needed. See `internal/proxmox`.
 
+## SNMP
+
+While a device has **SNMP** checks, `GET /api/rmm/agent/checks/config` lists the
+network devices it polls under `"snmp"`: host, port, version (v1, v2c or v3), the
+community string or v3 user, security level, protocols and passwords, and the
+OIDs to read. The agent sends one SNMP GET per device each report (UDP, 3 second
+timeout and one retry, up to 20 OIDs per request; `github.com/gosnmp/gosnmp`)
+and reports each OID's value as text under `"snmp"` in the check report, or why
+it could not be read. MyPortal compares the values. Credentials are only held in
+memory for the poll and never logged. See `internal/checks/snmp.go`.
+
 Linux servers, Proxmox VE included, get the agent through the headless Linux
 tray (`tray/installer/linux/install.sh`), which enrols the device and installs
 the agent like the Windows and macOS tray apps.

@@ -63,6 +63,9 @@ FORM_DEFAULTS: dict[str, Any] = {
     "process_name": "", "process_expected": "running",
     "program_name": "", "program_expected": "installed", "program_version_operator": "none", "program_version": "",
     "proxmox_condition": "guest", "proxmox_target": "", "proxmox_threshold": "85",
+    "snmp_host": "", "snmp_port": "161", "snmp_version": "v2c", "snmp_preset": "uptime",
+    "snmp_oid": rmm_checks.SNMP_PRESETS["uptime"]["oid"], "snmp_condition": "responds", "snmp_value": "",
+    "snmp_username": "", "snmp_security_level": "authPriv", "snmp_auth_protocol": "SHA", "snmp_priv_protocol": "AES",
     "script_expect": "exit_code", "script_value": "0", "script_interval": str(rmm_checks.DEFAULT_SCRIPT_INTERVAL),
 }
 DEFAULT_DURATIONS = {"cpu": 30, "memory": 15, "network": 15, "offline": 30}
@@ -130,6 +133,16 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
         values.update(network_interface=target, network_direction=settings.get("direction"),
                       network_operator=settings.get("operator"),
                       network_threshold=rmm_checks._round(float(settings.get("threshold_mbps") or 0)))
+    elif kind == "snmp":
+        values.update(
+            snmp_host=target, snmp_port=str(settings.get("port") or 161), snmp_version=settings.get("version") or "v2c",
+            snmp_preset=settings.get("preset") or "custom", snmp_oid=settings.get("oid") or "",
+            snmp_condition=settings.get("condition") or "responds", snmp_value=settings.get("value") or "",
+            snmp_username=settings.get("username") or "", snmp_security_level=settings.get("security_level") or "authPriv",
+            snmp_auth_protocol=settings.get("auth_protocol") or "SHA", snmp_priv_protocol=settings.get("priv_protocol") or "AES",
+        )
+        # Secrets are never sent back; the form only says which are saved.
+        values["snmp_saved"] = rmm_checks.snmp_secret_status(check)
     elif kind == "script":
         values.update(script_expect=settings.get("expect"), script_value=settings.get("value"),
                       script_interval=settings.get("interval_minutes") or rmm_checks.DEFAULT_SCRIPT_INTERVAL)
@@ -270,6 +283,12 @@ async def _render(
             "process_states": rmm_checks.PROCESS_STATES,
             "program_states": rmm_checks.PROGRAM_STATES,
             "proxmox_conditions": rmm_proxmox.CONDITIONS,
+            "snmp_versions": rmm_checks.SNMP_VERSIONS,
+            "snmp_security_levels": rmm_checks.SNMP_SECURITY_LEVELS,
+            "snmp_auth_protocols": rmm_checks.SNMP_AUTH_PROTOCOLS,
+            "snmp_priv_protocols": rmm_checks.SNMP_PRIV_PROTOCOLS,
+            "snmp_conditions": rmm_checks.SNMP_CONDITION_LABELS,
+            "snmp_presets": rmm_checks.SNMP_PRESETS,
             "version_operators": rmm_checks.VERSION_OPERATORS,
             "script_expectations": rmm_checks.SCRIPT_EXPECTATIONS,
             "result_examples": rmm_checks.RESULT_EXAMPLES,
@@ -456,7 +475,8 @@ async def _save(request: Request, check_id: int | None):
         entity_id=saved_id,
         metadata={
             "name": saved["name"], "check_type": saved["check_type"], "target": saved["target"],
-            "settings": saved["settings"], "action": saved["action"],
+            "settings": {key: value for key, value in (saved["settings"] or {}).items() if key != "secret_encrypted"},
+            "action": saved["action"],
             "actions": [{key: value for key, value in step.items() if key in ("key", "type", "script_id", "package_id")}
                         for step in rmm_action_steps.steps(saved)],
             "company_id": saved.get("company_id"),
@@ -681,6 +701,15 @@ class AgentProgram(BaseModel):
     error: str | None = Field(default=None, max_length=1000)
 
 
+class AgentSnmp(BaseModel):
+    host: str = Field(max_length=255)
+    port: int = Field(default=161, ge=1, le=65535)
+    oid: str = Field(max_length=1400)
+    value: str | None = Field(default=None, max_length=4096)
+    type: str | None = Field(default=None, max_length=32)
+    error: str | None = Field(default=None, max_length=1000)
+
+
 class AgentCheckReport(BaseModel):
     cpu_percent: float | None = Field(default=None, ge=0, le=100)
     memory: AgentMemory | None = None
@@ -691,10 +720,11 @@ class AgentCheckReport(BaseModel):
     files: list[AgentFile] = Field(default_factory=list, max_length=rmm_checks.MAX_FILES)
     processes: list[AgentProcess] = Field(default_factory=list, max_length=rmm_checks.MAX_PROCESSES)
     programs: list[AgentProgram] = Field(default_factory=list, max_length=rmm_checks.MAX_PROGRAMS)
+    snmp: list[AgentSnmp] = Field(default_factory=list, max_length=rmm_checks.MAX_SNMP)
     # Cleaned and capped by rmm_proxmox.normalise when a check reads it.
     proxmox: dict[str, Any] | None = None
 
-    @field_validator("pings", "services", "files", "processes", "programs", mode="before")
+    @field_validator("pings", "services", "files", "processes", "programs", "snmp", mode="before")
     @classmethod
     def _null_is_empty(cls, value: Any) -> Any:
         # Go agents send an empty list as null when nothing was measured.
