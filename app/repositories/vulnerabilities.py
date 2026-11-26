@@ -130,7 +130,8 @@ async def existing_cve_ids(cve_ids: Sequence[str]) -> set[str]:
     if not cve_ids:
         return set()
     rows = await db.fetch_all(
-        "SELECT cve_id FROM vuln_cves WHERE cve_id IN (" + _placeholders(len(cve_ids)) + ")", tuple(cve_ids)
+        "SELECT cve_id FROM vuln_cves WHERE cve_id IN (" + _placeholders(len(cve_ids)) + ")",  # nosec B608 - placeholders only
+        tuple(cve_ids),
     )
     return {row["cve_id"] for row in rows or []}
 
@@ -182,7 +183,7 @@ async def list_product_ranges(products: Iterable[tuple[str, str]]) -> dict[tuple
     params = tuple(value for pair in wanted for value in pair)
     rows = await db.fetch_all(
         "SELECT p.cve_id, p.vendor, p.product, p.version_exact, p.start_including, p.start_excluding, "
-        "p.end_including, p.end_excluding FROM vuln_cve_products p WHERE " + clauses,
+        "p.end_including, p.end_excluding FROM vuln_cve_products p WHERE " + clauses,  # nosec B608 - fixed clauses, bound values
         params,
     )
     for row in rows or []:
@@ -224,29 +225,25 @@ async def get_state() -> dict[str, Any]:
     return dict(row) if row else {}
 
 
-_STATE_ASSIGNMENTS = {
-    "nvd_synced_at": "nvd_synced_at = %s",
-    "kev_synced_at": "kev_synced_at = %s",
-    "matched_at": "matched_at = %s",
-    "requested_at": "requested_at = %s",
-    "running_since": "running_since = %s",
-    "last_error": "last_error = %s",
+# One complete statement per column, so no SQL is assembled at run time.
+_STATE_UPDATES = {
+    "nvd_synced_at": "UPDATE vuln_sync_state SET nvd_synced_at = %s WHERE id = 1",
+    "kev_synced_at": "UPDATE vuln_sync_state SET kev_synced_at = %s WHERE id = 1",
+    "matched_at": "UPDATE vuln_sync_state SET matched_at = %s WHERE id = 1",
+    "requested_at": "UPDATE vuln_sync_state SET requested_at = %s WHERE id = 1",
+    "running_since": "UPDATE vuln_sync_state SET running_since = %s WHERE id = 1",
+    "last_error": "UPDATE vuln_sync_state SET last_error = %s WHERE id = 1",
 }
 
 
 async def update_state(**fields: Any) -> None:
-    chosen = [key for key in _STATE_ASSIGNMENTS if key in fields]
+    chosen = [key for key in _STATE_UPDATES if key in fields]
     if not chosen:
         return
-    assignments = ", ".join(_STATE_ASSIGNMENTS[key] for key in chosen)
-    updated = await db.execute_rowcount(
-        "UPDATE vuln_sync_state SET " + assignments + " WHERE id = 1",
-        tuple(fields[key] for key in chosen),
-    )
-    if not updated:
+    if not await db.fetch_one("SELECT id FROM vuln_sync_state WHERE id = 1"):
         await db.execute("INSERT INTO vuln_sync_state (id) VALUES (1)")
-        await db.execute("UPDATE vuln_sync_state SET " + assignments + " WHERE id = 1",
-                         tuple(fields[key] for key in chosen))
+    for key in chosen:
+        await db.execute(_STATE_UPDATES[key], (fields[key],))
 
 
 async def claim_run(now: datetime, stale_before: datetime) -> bool:
