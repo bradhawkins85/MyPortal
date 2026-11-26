@@ -365,6 +365,42 @@ def test_changes_are_not_fetched_when_up_to_date_and_failures_are_reported(monke
     assert result["error"].startswith("Could not list the changes")
 
 
+@pytest.mark.parametrize(
+    ("status", "headers", "expected"),
+    [
+        (403, {"x-ratelimit-remaining": "0"}, "rate limit was reached"),
+        (404, {}, "private repository needs GITHUB_TOKEN"),
+        (401, {}, "rejected the configured GITHUB_TOKEN"),
+        (500, {}, "GitHub returned HTTP 500"),
+    ],
+)
+def test_change_list_failures_explain_the_github_status(monkeypatch, status, headers, expected):
+    import httpx
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        system_updates.httpx, "AsyncClient",
+        lambda **kwargs: real_client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(status, headers=headers, json={})),
+            **kwargs,
+        ),
+    )
+    system_updates._changes_cache.update(key=None, at=0.0, value=None)
+    check = {"deployment": "baremetal", "installed": "a" * 40, "latest": "b" * 40, "available": True}
+    error = asyncio.run(system_updates.list_changes(check))["error"]
+    assert "HTTPStatusError" not in error
+    assert expected in error
+
+
+def test_github_calls_send_the_configured_token(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "github_token", "secret-token")
+    assert system_updates._github_headers()["Authorization"] == "Bearer secret-token"
+    monkeypatch.setattr(get_settings(), "github_token", None)
+    assert "Authorization" not in system_updates._github_headers()
+
+
 def _release(tag):
     return {
         "tag_name": tag, "name": tag, "published_at": "2026-10-01T00:00:00Z",

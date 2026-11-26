@@ -62,6 +62,50 @@ def _github_repo() -> tuple[str, str]:
     return repo, api
 
 
+def _github_headers() -> dict[str, str]:
+    """Headers for GitHub API calls, authenticated when ``GITHUB_TOKEN`` is set.
+
+    Unauthenticated calls are limited to 60 an hour and cannot see a private
+    repository, so both surface as HTTP errors when listing changes.
+    """
+    headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    from app.core.config import get_settings
+
+    token = (get_settings().github_token or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _github_error_reason(exc: Exception) -> str:
+    """Describe a failed GitHub call in words an administrator can act on."""
+    if isinstance(exc, asyncio.TimeoutError):
+        return "timed out"
+    if isinstance(exc, RuntimeError):
+        return str(exc)
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = exc.response
+        status = response.status_code
+        if status in {403, 429} and (
+            response.headers.get("x-ratelimit-remaining") == "0" or status == 429
+        ):
+            return (
+                f"GitHub's API rate limit was reached (HTTP {status}); set GITHUB_TOKEN "
+                "to raise the limit, or try again later"
+            )
+        if status == 401:
+            return "GitHub rejected the configured GITHUB_TOKEN (HTTP 401)"
+        if status in {403, 404}:
+            return (
+                f"GitHub could not find the repository or revision (HTTP {status}); a private "
+                "repository needs GITHUB_TOKEN, and a locally made commit cannot be compared"
+            )
+        return f"GitHub returned HTTP {status}"
+    if isinstance(exc, httpx.HTTPError):
+        return f"GitHub could not be reached ({type(exc).__name__})"
+    return type(exc).__name__
+
+
 def deployment_type() -> str:
     if os.getenv("MYPORTAL_DEPLOYMENT", "").strip().lower() == "docker":
         return "docker"
@@ -93,7 +137,7 @@ async def _latest_release_tag() -> str:
     async with httpx.AsyncClient(timeout=_CHECK_TIMEOUT_SECONDS) as client:
         response = await client.get(
             f"{api}/repos/{repo}/releases/latest",
-            headers={"Accept": "application/vnd.github+json"},
+            headers=_github_headers(),
         )
         response.raise_for_status()
         tag = str(response.json().get("tag_name") or "")
@@ -144,9 +188,7 @@ async def check_for_update(*, refresh: bool = False) -> dict[str, Any]:
         result.update(await asyncio.wait_for(check, timeout=_CHECK_TIMEOUT_SECONDS))
     except Exception as exc:  # network, git or GitHub failures are reported, not raised
         log_error("System update check failed", error=str(exc))
-        reason = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
-        if isinstance(exc, asyncio.TimeoutError):
-            reason = "timed out"
+        reason = _github_error_reason(exc)
         result["error"] = f"Could not check for updates: {reason}. See the application log for details."
     _check_cache.update(at=now, value=result)
     return result
@@ -190,7 +232,7 @@ async def _release_changes(client: httpx.AsyncClient, installed: str, latest: st
         response = await client.get(
             f"{api}/repos/{repo}/releases",
             params={"per_page": 100, "page": page},
-            headers={"Accept": "application/vnd.github+json"},
+            headers=_github_headers(),
         )
         response.raise_for_status()
         batch = response.json()
@@ -240,7 +282,7 @@ async def _commit_changes(client: httpx.AsyncClient, installed: str, latest: str
     repo, api = _github_repo()
     response = await client.get(
         f"{api}/repos/{repo}/compare/{installed}...{latest}",
-        headers={"Accept": "application/vnd.github+json"},
+        headers=_github_headers(),
     )
     response.raise_for_status()
     data = response.json()
@@ -328,9 +370,7 @@ async def _fetch_changes(
             result = {**empty, **await asyncio.wait_for(fetch, timeout=_CHECK_TIMEOUT_SECONDS)}
     except Exception as exc:  # network or GitHub failures are reported, not raised
         log_error("Listing system update changes failed", error=str(exc))
-        reason = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
-        if isinstance(exc, asyncio.TimeoutError):
-            reason = "timed out"
+        reason = _github_error_reason(exc)
         return {**empty, "error": f"Could not list the changes: {reason}."}
     _changes_cache.update(key=key, at=now, value=result)
     return result
@@ -506,7 +546,7 @@ async def _github_revision_is_older(target: str, installed: str) -> bool:
         async with httpx.AsyncClient(timeout=_CHECK_TIMEOUT_SECONDS) as client:
             response = await client.get(
                 f"{api}/repos/{repo}/compare/{target}...{installed}",
-                headers={"Accept": "application/vnd.github+json"},
+                headers=_github_headers(),
             )
             response.raise_for_status()
             # "ahead": the installed revision contains the target and more.
