@@ -147,7 +147,7 @@
       <div class="form-grid">
         {% for field in saved.fields %}
         <div class="form-field">
-          <label class="form-label" for="{{ p }}-entry-{{ loop.index }}">{{ field.name }}{% if field.mandatory %} <span class="rmm-required" aria-hidden="true">*</span>{% endif %}</label>
+          <label class="form-label" for="{{ p }}-entry-{{ loop.index }}">{{ field.name }}{% if field.mandatory and not field.default %} <span class="rmm-required" aria-hidden="true">*</span>{% endif %}</label>
           <input class="form-input" id="{{ p }}-entry-{{ loop.index }}" name="{{ n }}entry:{{ field.key }}" list="{{ c.variables_id }}" value="{{ field.value }}" {% if field.sensitive %}type="password" autocomplete="new-password"{% endif %} placeholder="{% if field.sensitive and field.value_set %}Saved: leave blank to keep it{% elif field.default %}Default: {{ field.default }}{% endif %}"{% if field.help %} aria-describedby="{{ p }}-entry-{{ loop.index }}-help"{% endif %}>
           {% if field.help %}<p class="form-help" id="{{ p }}-entry-{{ loop.index }}-help">{{ field.help }}</p>{% endif %}
         </div>

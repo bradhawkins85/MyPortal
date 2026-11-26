@@ -204,7 +204,7 @@
     const id = fieldInputId(field);
     const header = el('div', { className: 'rmm-field__header' });
     const label = el('label', { className: 'form-label', for: id }, field.name);
-    if (!field.mandatory || field.type === 'switch') {
+    if (!field.mandatory || field.type === 'switch' || (field.default && !field.forceRequired)) {
       label.append(' ', el('span', { className: 'rmm-optional' }, 'optional'));
     }
     header.append(label);
@@ -664,7 +664,7 @@
     const saved = state.item && Number(state.item.script_id) === Number(detail.script.id) ? state.item : null;
     detail.fields.forEach((field) => {
       const needsSecret = saved && saved.retry && saved.secret_keys.includes(field.key);
-      fieldsHost.append(renderField(needsSecret ? Object.assign({}, field, { mandatory: true }) : field, groups));
+      fieldsHost.append(renderField(needsSecret ? Object.assign({}, field, { mandatory: true, forceRequired: true }) : field, groups));
     });
     noFields.hidden = detail.fields.length > 0;
     const timeout = saved ? saved.timeout_seconds : detail.script.default_timeout_seconds;
