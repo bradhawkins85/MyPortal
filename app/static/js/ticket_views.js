@@ -248,8 +248,9 @@
         const dateReference = panel.querySelector('[data-column-filter-date-reference]');
         if (dateReference) {
           dateReference.addEventListener('change', () => this.updateDateFilterValueControl(panel));
-          this.updateDateFilterValueControl(panel);
         }
+        panel.querySelector('[data-column-filter-operator]').addEventListener('change', () => this.updateDateFilterValueControl(panel));
+        this.updateDateFilterValueControl(panel);
         wrapper.append(toggle, panel);
         header.appendChild(wrapper);
 
@@ -272,8 +273,12 @@
           const value = dateReference && dateReference.value === 'today'
             ? 'today'
             : (input ? input.value.trim() : '');
-          if (operator === 'relative' || value !== '') this.filterState.columnFilters[column] = { type, operator, value };
-          else delete this.filterState.columnFilters[column];
+          if (operator === 'relative' || operator === 'has_value' || operator === 'no_value' || value !== '') {
+            this.filterState.columnFilters[column] = { type, operator, value };
+          }
+          else {
+            delete this.filterState.columnFilters[column];
+          }
           panel.hidden = true;
           toggle.setAttribute('aria-expanded', 'false');
           this.updateActiveFilterHeaders();
@@ -305,6 +310,8 @@
           : type === 'date'
             ? [['on', 'On'], ['before', 'Before'], ['after', 'After'], ['on_or_before', 'On or before'], ['on_or_after', 'On or after'], ['relative', 'In the last 30 days']]
             : [['equals', 'Is']];
+      // Presence checks ("Has a value" / "Has no value") take no value.
+      operators.push(['has_value', 'Has a value'], ['no_value', 'Has no value']);
       const options = operators.map(([value, text]) => `<option value="${value}">${text}</option>`).join('');
       const inputType = type === 'number' ? 'number' : type === 'date' ? 'date' : 'text';
       const valueControl = type === 'boolean'
@@ -336,12 +343,15 @@
     }
 
     updateDateFilterValueControl(container) {
+      const operator = container.querySelector('[data-column-filter-operator]');
       const dateReference = container.querySelector('[data-column-filter-date-reference]');
       const value = container.querySelector('[data-column-filter-value]');
-      if (!dateReference || !value) return;
-      const usesToday = dateReference.value === 'today';
-      value.hidden = usesToday;
-      value.disabled = usesToday;
+      const presence = Boolean(operator) && (operator.value === 'has_value' || operator.value === 'no_value');
+      if (dateReference) dateReference.hidden = presence;
+      if (!value) return;
+      const hideValue = presence || (Boolean(dateReference) && dateReference.value === 'today');
+      value.hidden = hideValue;
+      value.disabled = hideValue;
     }
 
     updateActiveFilterHeaders() {
@@ -560,8 +570,12 @@
     rowMatchesColumnFilters(row) {
       return Object.entries(this.filterState.columnFilters).every(([column, filter]) => {
         const cell = row.querySelector(`[data-column="${column}"]`);
+        const raw = cell ? (cell.getAttribute('data-value') || cell.textContent || '').trim() : '';
+        if (filter.operator === 'has_value' || filter.operator === 'no_value') {
+          const hasValue = !['', '-', '\u2013', '\u2014', 'n/a'].includes(raw.toLowerCase());
+          return filter.operator === 'has_value' ? hasValue : !hasValue;
+        }
         if (!cell) return false;
-        const raw = (cell.getAttribute('data-value') || cell.textContent || '').trim();
         if (filter.type === 'number') {
           const actual = Number(raw);
           const expected = Number(filter.value);

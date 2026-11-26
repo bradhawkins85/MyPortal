@@ -42,3 +42,31 @@ def test_open_filter_panels_float_above_scrolling_table_wrappers() -> None:
     assert "panel.style.position = 'fixed'" in javascript
     assert "if (!panel.hidden) positionColumnFilterPanel(panel, wrapper);" in javascript
     assert "window.addEventListener('scroll', repositionOpenPanels, true);" in javascript
+
+
+def test_column_filters_offer_has_value_and_has_no_value() -> None:
+    """Users can filter a column on whether it is filled in, without a value."""
+    javascript = (ROOT / "app/static/js/tables.js").read_text(encoding="utf-8")
+
+    assert "['has_value', 'Has a value'], ['no_value', 'Has no value']" in javascript
+    assert ".concat(PRESENCE_FILTER_OPERATORS)" in javascript
+    assert "if (filter.operator === 'has_value') return cellHasValue(cellValue);" in javascript
+    assert "if (filter.operator === 'no_value') return !cellHasValue(cellValue);" in javascript
+    # Multi-option columns get the operator picker too, so they can use presence checks.
+    assert "['any_of', 'Is any of']" in javascript
+    assert "if (type !== 'multi') panel.append(operator);" not in javascript
+
+
+def test_ticket_column_filters_offer_has_value_and_has_no_value() -> None:
+    javascript = (ROOT / "app/static/js/ticket_views.js").read_text(encoding="utf-8")
+
+    assert "operators.push(['has_value', 'Has a value'], ['no_value', 'Has no value']);" in javascript
+    assert "operator === 'has_value' || operator === 'no_value' || value !== ''" in javascript
+    assert "return filter.operator === 'has_value' ? hasValue : !hasValue;" in javascript
+
+
+def test_hidden_filter_value_controls_stay_hidden() -> None:
+    css = (ROOT / "app/static/css/app.css").read_text(encoding="utf-8")
+
+    assert ".table-column-filter__panel [hidden] { display: none; }" in css
+    assert ".ticket-column-filter__panel [hidden] { display: none; }" in css

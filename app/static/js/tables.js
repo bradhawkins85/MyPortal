@@ -47,6 +47,18 @@
     panel.style.top = `${Math.round(top)}px`;
   }
 
+  /** Operators that test only whether a cell is filled in, so they take no value. */
+  const PRESENCE_FILTER_OPERATORS = [['has_value', 'Has a value'], ['no_value', 'Has no value']];
+  const EMPTY_CELL_PLACEHOLDERS = new Set(['', '-', '\u2013', '\u2014', 'n/a']);
+
+  function isPresenceOperator(operator) {
+    return operator === 'has_value' || operator === 'no_value';
+  }
+
+  function cellHasValue(value) {
+    return !EMPTY_CELL_PLACEHOLDERS.has(String(value ?? '').trim().toLowerCase());
+  }
+
   function parseFilterValues(raw) {
     if (!raw) {
       return null;
@@ -415,11 +427,14 @@
         const panel = document.createElement('span');
         panel.className = 'table-column-filter__panel';
         panel.hidden = true;
-        const operators = type === 'text'
-          ? [['contains', 'Contains'], ['not_contains', 'Does not contain'], ['equals', 'Equals'], ['not_equals', 'Does not equal'], ['starts_with', 'Starts with'], ['ends_with', 'Ends with']]
-          : type === 'number'
-            ? [['equals', 'Equals'], ['not_equals', 'Does not equal'], ['greater', 'Greater than'], ['greater_equal', 'At least'], ['less', 'Less than'], ['less_equal', 'At most']]
-            : [['on', 'On'], ['before', 'Before'], ['after', 'After'], ['on_or_before', 'On or before'], ['on_or_after', 'On or after']];
+        const operators = (type === 'multi'
+          ? [['any_of', 'Is any of']]
+          : type === 'text'
+            ? [['contains', 'Contains'], ['not_contains', 'Does not contain'], ['equals', 'Equals'], ['not_equals', 'Does not equal'], ['starts_with', 'Starts with'], ['ends_with', 'Ends with']]
+            : type === 'number'
+              ? [['equals', 'Equals'], ['not_equals', 'Does not equal'], ['greater', 'Greater than'], ['greater_equal', 'At least'], ['less', 'Less than'], ['less_equal', 'At most']]
+              : [['on', 'On'], ['before', 'Before'], ['after', 'After'], ['on_or_before', 'On or before'], ['on_or_after', 'On or after']]
+        ).concat(PRESENCE_FILTER_OPERATORS);
         const title = document.createElement('span');
         title.className = 'table-column-filter__title';
         title.textContent = `Filter ${label}`;
@@ -454,7 +469,7 @@
         actions.className = 'table-column-filter__actions';
         actions.innerHTML = '<button type="button" class="button button--primary button--compact" data-table-column-filter-apply>Apply</button><button type="button" class="button button--ghost button--compact" data-table-column-filter-clear>Clear</button>';
         panel.append(title);
-        if (type !== 'multi') panel.append(operator);
+        panel.append(operator);
         panel.append(valueInput);
         if (type === 'multi') panel.append(optionsList);
         panel.append(actions);
@@ -462,8 +477,19 @@
         header.textContent = '';
         header.appendChild(wrapper);
 
+        // "Has a value" / "Has no value" need no value, so hide the value controls.
+        const syncValueControls = () => {
+          const presence = isPresenceOperator(operator.value);
+          valueInput.hidden = presence;
+          optionsList.hidden = presence;
+        };
+        operator.addEventListener('change', syncValueControls);
+
         const current = this.columnFilters[key];
-        if (current && typeof current === 'object' && type === 'multi') {
+        if (current && typeof current === 'object' && isPresenceOperator(current.operator)) {
+          operator.value = current.operator;
+          wrapper.classList.add('table-column-filter--active');
+        } else if (current && typeof current === 'object' && type === 'multi') {
           const selected = new Set(Array.isArray(current.values) ? current.values : []);
           optionsList.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
             checkbox.checked = selected.has(checkbox.value);
@@ -474,6 +500,7 @@
           valueInput.value = current.value;
           wrapper.classList.add('table-column-filter--active');
         }
+        syncValueControls();
         const close = () => { panel.hidden = true; toggle.setAttribute('aria-expanded', 'false'); };
         toggle.addEventListener('click', (event) => {
           event.stopPropagation();
@@ -494,9 +521,19 @@
           });
         }
         actions.querySelector('[data-table-column-filter-apply]').addEventListener('click', () => {
+          if (isPresenceOperator(operator.value)) {
+            this.columnFilters[key] = { type, operator: operator.value };
+            wrapper.classList.add('table-column-filter--active');
+            this.page = 0;
+            this.updateFilterState();
+            this.persistFilterState();
+            this.render();
+            close();
+            return;
+          }
           if (type === 'multi') {
             const values = Array.from(optionsList.querySelectorAll('input:checked')).map((checkbox) => checkbox.value);
-            if (values.length) this.columnFilters[key] = { type, values };
+            if (values.length) this.columnFilters[key] = { type, operator: 'any_of', values };
             else delete this.columnFilters[key];
             wrapper.classList.toggle('table-column-filter--active', values.length > 0);
             this.page = 0;
@@ -517,6 +554,8 @@
           close();
         });
         actions.querySelector('[data-table-column-filter-clear]').addEventListener('click', () => {
+          operator.selectedIndex = 0;
+          syncValueControls();
           valueInput.value = '';
           optionsList.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => { checkbox.checked = false; });
           optionsList.querySelectorAll('.table-column-filter__option').forEach((optionLabel) => { optionLabel.hidden = false; });
@@ -568,6 +607,8 @@
         }
         const cellValue = this.getColumnCellValue(row, columnKey);
         if (typeof filter === 'string') return cellValue.includes(filter);
+        if (filter.operator === 'has_value') return cellHasValue(cellValue);
+        if (filter.operator === 'no_value') return !cellHasValue(cellValue);
         const expected = String(filter.value || '').toLowerCase();
         if (filter.type === 'multi') {
           const selectedValues = Array.isArray(filter.values)

@@ -1,0 +1,7 @@
+{
+  "guid": "c0f85641-34e4-4a1f-933a-57decfff8708",
+  "occurred_at": "2026-11-26T03:22Z",
+  "change_type": "Feature",
+  "summary": "Table column filters now include \"Has a value\" and \"Has no value\", so you can show rows where a column is filled in or empty without typing anything to match.",
+  "content_hash": "97833a957b910abfc536a2f473c97e4c741552874184d015e28d8ec98ed13c84"
+}
