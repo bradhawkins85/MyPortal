@@ -182,9 +182,13 @@ async def test_batch_loading_has_bounded_queries_and_does_not_read_unrelated_dat
     await targeting.contexts_for_agents([
         _agent(1), _agent(2, asset_id=None), _agent(4, company_id=2, asset_id=20),
     ])
-    assert len(inventory_db.calls) == 13
+    # One global query for checkbox definitions (unticked defaults); the rest are batched.
+    assert len(inventory_db.calls) == 14
     assert max(len(params) for _, params in inventory_db.calls) <= 4
     for sql, params in inventory_db.calls:
+        if "field_type = 'checkbox'" in sql:
+            assert params == ()
+            continue
         assert " IN (" in sql
         assert 3 not in params
 

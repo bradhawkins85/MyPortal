@@ -7,8 +7,9 @@
     is_set: 'Is set', is_not_set: 'Is not set', gt: 'Greater than', gte: 'At least',
     lt: 'Less than', lte: 'At most', between: 'Between (inclusive)', version_gte: 'Version at least',
     version_lte: 'Version at most', in_subnet: 'In IP subnet', not_in_subnet: 'Outside IP subnet',
+    is_checked: 'Is checked', is_unchecked: 'Is unchecked',
   };
-  const NO_VALUE = new Set(['is_set', 'is_not_set']);
+  const NO_VALUE = new Set(['is_set', 'is_not_set', 'is_checked', 'is_unchecked']);
   const MULTI_VALUE = new Set(['in', 'not_in', 'between']);
   const NUMERIC = new Set(['gt', 'gte', 'lt', 'lte']);
   let nextId = 0;

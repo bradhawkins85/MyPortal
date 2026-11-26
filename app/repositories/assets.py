@@ -10,6 +10,7 @@ import aiomysql
 import aiosqlite
 
 from app.core.database import db
+from app.repositories import asset_checkbox_defaults
 from app.core.logging import log_warning
 from app.services import asset_types, cpu_catalog
 
@@ -207,6 +208,14 @@ async def get_asset_by_id(asset_id: int) -> dict[str, Any] | None:
     return cpu_catalog.enrich_asset(row) if row else None
 
 
+async def _record_unchecked_checkboxes(asset_id: int) -> None:
+    """Store unticked checkbox fields for a new asset; never block asset creation."""
+    try:
+        await asset_checkbox_defaults.ensure_unchecked_checkbox_values(asset_id=asset_id)
+    except Exception as exc:  # noqa: BLE001 - targeting already treats missing checkboxes as unticked
+        log_warning("Could not record unticked checkbox fields", asset_id=asset_id, error=str(exc))
+
+
 async def create_tray_asset(device: dict[str, Any]) -> int:
     """Create once per tray identity, including concurrent enrolment retries."""
     os_name = " ".join(str(device.get(key) or "").strip() for key in ("os", "os_version")).strip()
@@ -235,6 +244,7 @@ async def create_tray_asset(device: dict[str, Any]) -> int:
         raise ValueError("Tray asset identity belongs to another company")
     asset_id = int(row["id"])
     await _refresh_auto_tags(asset_id)
+    await _record_unchecked_checkboxes(asset_id)
     return asset_id
 
 
@@ -252,6 +262,7 @@ async def create_manual_asset(
         (company_id, name, type, asset_type, status, serial_number, location, created_by),
     )
     await _refresh_auto_tags(asset_id)
+    await _record_unchecked_checkboxes(asset_id)
     return asset_id
 
 
@@ -931,6 +942,7 @@ async def upsert_asset(
             company_id, source, source_key, asset_id, "active", source_fields, None
         )
     await _refresh_auto_tags(asset_id)
+    await _record_unchecked_checkboxes(asset_id)
     return asset_id
 
 
