@@ -16,7 +16,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 from app.services.monitored_http import monitored_client
-from app.services.outbound_url_guard import redirect_guard_hooks, validate_outbound_url_async
+from app.services.outbound_url_guard import (
+    redirect_guard_hooks,
+    resolve_outbound_address,
+    validate_outbound_url_async,
+)
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
@@ -1881,16 +1885,22 @@ async def _execute_policy_step(
             field_name="url",
         )
         # Re-validate the template-resolved URL so a staff field cannot point
-        # the fetch at loopback/link-local/metadata addresses, and do not
-        # follow redirects (they would bypass that validation).  DNS is
-        # resolved by curl itself at connect time, so only the fast
-        # literal-IP pre-flight is performed here.
-        await validate_outbound_url_async(url, check_dns=False)
+        # the fetch at loopback/link-local/metadata addresses. The hostname is
+        # resolved and checked here, and curl is pinned to that address with
+        # --resolve so it cannot look the name up again and be rebound to an
+        # internal address. Redirects are not followed (they would bypass the
+        # check) and only http/https are allowed.
+        hostname, port, address = await resolve_outbound_address(url)
+        curl_args = ["--proto", "=http,https", "--max-redirs", "0"]
+        if hostname != address:
+            pinned = f"[{address}]" if ":" in address else address
+            curl_args += ["--resolve", f"{hostname}:{port}:{pinned}"]
         timeout_seconds = max(1, int(step.get("timeout_seconds") or 30))
         process = await asyncio.create_subprocess_exec(
             "curl",
             "--silent",
             "--show-error",
+            *curl_args,
             "--max-time",
             str(timeout_seconds),
             url,

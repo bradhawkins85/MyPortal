@@ -14,6 +14,14 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture
+def public_dns(monkeypatch):
+    """Resolve every hostname to a public address (no real DNS in tests)."""
+    from app.services import outbound_url_guard
+
+    monkeypatch.setattr(outbound_url_guard, "_resolve", lambda hostname: ["93.184.216.34"])
+
+
 @pytest.fixture(autouse=True)
 def _mock_external_checkpoints(monkeypatch):
     monkeypatch.setattr(
@@ -76,7 +84,7 @@ async def test_http_post_step_supports_query_headers_and_json_string(monkeypatch
 
 
 @pytest.mark.anyio
-async def test_curl_text_step_returns_plain_text_and_escapes_html(monkeypatch):
+async def test_curl_text_step_returns_plain_text_and_escapes_html(monkeypatch, public_dns):
     class DummyProcess:
         returncode = 0
 
@@ -103,6 +111,60 @@ async def test_curl_text_step_returns_plain_text_and_escapes_html(monkeypatch):
     assert result["status_code"] == 0
     assert result["body"] == "&lt;script&gt;alert(1)&lt;/script&gt;SELECT * FROM staff;"
 
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("address", ["169.254.169.254", "127.0.0.1", "::1", "0.0.0.0"])
+async def test_curl_text_step_refuses_hostnames_resolving_to_internal_addresses(monkeypatch, address):
+    """A public-looking hostname that resolves to metadata/loopback must not be fetched."""
+    from app.services import outbound_url_guard
+
+    monkeypatch.setattr(outbound_url_guard, "_resolve", lambda hostname: [address])
+    spawned = AsyncMock()
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawned)
+
+    with pytest.raises(outbound_url_guard.UnsafeOutboundURLError):
+        await workflows._execute_policy_step(
+            step={"type": "curl_text", "url": "http://${vars.host}/latest/meta-data/"},
+            company_id=7,
+            staff={"id": 88},
+            policy_config={},
+            vars_map={"host": "metadata.attacker.example"},
+        )
+    spawned.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_curl_text_step_pins_curl_to_the_validated_address(monkeypatch, public_dns):
+    captured: dict[str, tuple] = {}
+
+    class DummyProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"ok", b"")
+
+    async def fake_subprocess_exec(*args, **kwargs):
+        captured["args"] = args
+        return DummyProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subprocess_exec)
+
+    await workflows._execute_policy_step(
+        step={"type": "curl_text", "url": "https://example.test:8443/source.txt"},
+        company_id=7,
+        staff={"id": 88},
+        policy_config={},
+        vars_map={},
+    )
+
+    args = captured["args"]
+    assert args[0] == "curl"
+    assert args[args.index("--resolve") + 1] == "example.test:8443:93.184.216.34"
+    assert args[args.index("--proto") + 1] == "=http,https"
+    assert args[args.index("--max-redirs") + 1] == "0"
+    assert "-L" not in args and "--location" not in args
+    assert args[-1] == "https://example.test:8443/source.txt"
 
 def test_coerce_step_json_fields_parses_store_and_http_payload_fields():
     normalized = workflows._coerce_step_json_fields(
@@ -899,7 +961,7 @@ async def test_get_staff_workflow_history_returns_executions_with_steps(monkeypa
 
 
 @pytest.mark.anyio
-async def test_store_json_variable_is_applied_after_step_and_resolves_in_next_step(monkeypatch):
+async def test_store_json_variable_is_applied_after_step_and_resolves_in_next_step(monkeypatch, public_dns):
     """Regression: store_json mapping must use the coerced resolved_step so that
     variables like ${vars.pwd} are populated and substituted in subsequent steps."""
 

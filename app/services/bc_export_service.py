@@ -19,6 +19,7 @@ from docx.shared import Pt, RGBColor
 from jinja2 import Environment, BaseLoader, select_autoescape
 try:  # pragma: no cover - import guard for optional dependency
     from weasyprint import HTML
+    from app.services.pdf_rendering import pdf_url_fetcher
 except (ImportError, OSError) as exc:  # pragma: no cover - executed only when missing deps
     HTML = None  # type: ignore[assignment]
     _WEASYPRINT_IMPORT_ERROR = exc
@@ -421,7 +422,7 @@ async def export_to_pdf(
     
     # Convert HTML to PDF using WeasyPrint
     pdf_buffer = io.BytesIO()
-    HTML(string=html_content).write_pdf(pdf_buffer)
+    HTML(string=html_content, url_fetcher=pdf_url_fetcher()).write_pdf(pdf_buffer)
     pdf_buffer.seek(0)
     
     return pdf_buffer, content_hash
@@ -479,7 +480,7 @@ async def export_bcp_to_pdf(
     
     # Convert HTML to PDF using WeasyPrint
     pdf_buffer = io.BytesIO()
-    HTML(string=html_content).write_pdf(pdf_buffer)
+    HTML(string=html_content, url_fetcher=pdf_url_fetcher()).write_pdf(pdf_buffer)
     pdf_buffer.seek(0)
     
     return pdf_buffer, content_hash

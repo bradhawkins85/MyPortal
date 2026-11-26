@@ -833,6 +833,7 @@ async def export_requirement_bundle(
     if export_format == "pdf":
         try:
             from weasyprint import HTML  # type: ignore
+            from app.services.pdf_rendering import pdf_url_fetcher
         except (ImportError, OSError) as exc:  # pragma: no cover
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -873,7 +874,7 @@ async def export_requirement_bundle(
             f"<tbody>{''.join(rows)}</tbody></table>"
             "</body></html>"
         )
-        pdf_bytes = HTML(string=pdf_html).write_pdf()
+        pdf_bytes = HTML(string=pdf_html, url_fetcher=pdf_url_fetcher()).write_pdf()
         return StreamingResponse(
             iter([pdf_bytes]),
             media_type="application/pdf",

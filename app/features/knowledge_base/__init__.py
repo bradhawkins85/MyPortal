@@ -22,7 +22,7 @@ from .routes import router as knowledge_base_router
 
 PACK = FeaturePack(
     slug="knowledge_base",
-    version="1.2.1",
+    version="1.2.2",
     routers=(knowledge_base_router,),
 )
 

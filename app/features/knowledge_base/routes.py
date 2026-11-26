@@ -38,13 +38,14 @@ def _main():
 def _write_pdf(html: str, base_url: str) -> bytes:
     try:
         from weasyprint import HTML  # type: ignore
+        from app.services.pdf_rendering import pdf_url_fetcher
     except (ImportError, OSError) as exc:  # pragma: no cover - environment dependent
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="PDF export is temporarily unavailable.",
         ) from exc
 
-    return HTML(string=html, base_url=base_url).write_pdf()
+    return HTML(string=html, base_url=base_url, url_fetcher=pdf_url_fetcher(base_url)).write_pdf()
 
 
 @router.get("/knowledge-base", response_class=HTMLResponse)

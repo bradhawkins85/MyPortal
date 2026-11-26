@@ -38,6 +38,7 @@ __all__ = [
     "is_forbidden_address",
     "validate_outbound_url",
     "validate_outbound_url_async",
+    "resolve_outbound_address",
     "redirect_guard_hooks",
 ]
 
@@ -150,6 +151,27 @@ async def validate_outbound_url_async(
     else:
         _check_literal_host(hostname, allow_private=allow_private)
     return str(url).strip()
+
+
+async def resolve_outbound_address(
+    url: str,
+    *,
+    allow_private: bool = True,
+    schemes: Iterable[str] = ("http", "https"),
+) -> tuple[str, int, str]:
+    """Validate ``url`` and return ``(hostname, port, address)`` to connect to.
+
+    For clients that resolve DNS themselves (such as ``curl``), pin the
+    connection to the returned address (``curl --resolve``) so a second lookup
+    cannot rebind the hostname to a forbidden address after this check.
+    """
+    hostname, scheme = _check_url(url, allow_private=allow_private, schemes=schemes)
+    port = urlparse(str(url).strip()).port or (443 if scheme.lower() == "https" else 80)
+    addresses = await asyncio.to_thread(_resolve, hostname)
+    if not addresses:
+        raise UnsafeOutboundURLError(f"Unable to resolve hostname: {hostname}")
+    _check_addresses(hostname, addresses, allow_private=allow_private)
+    return hostname, port, addresses[0].split("%", 1)[0]
 
 
 def redirect_guard_hooks(
