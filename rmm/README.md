@@ -86,6 +86,15 @@ Deploy MyPortal and migration 495 before updating RMM agents for Run Anyway.
 Agents advertise `run_anyway_supported: true` on enrolment and check-in; Run Anyway
 runs fail with an update message on older agents. Sequential and parallel execution
 continue to work without an agent update.
+For three minutes after the service starts, collected scripts wait before they
+run (Check in now does not), and on Windows each run pauses two seconds between
+writing its script files and starting the interpreter. Application control such
+as ThreatLocker records which process created a file shortly after it is written
+and may still be starting with Windows; without these pauses a script can be
+checked before `myportal-rmm.exe` is recorded as its creator, so rules allowing
+files *Created By* the agent do not match. Polling continues meanwhile, so the
+device stays connected.
+
 Jobs are PowerShell, Bash, Zsh or, on Windows, `cmd` (Command Prompt, used for
 ad hoc commands: the text is written to a `.cmd` file after `@echo off` and run with
 `cmd /D /Q /C`). Windows agents list `cmd` in their shells.

@@ -68,3 +68,25 @@ func TestJitterSpreadsWaits(t *testing.T) {
 		t.Fatalf("jitter returned only %d distinct waits; agents would retry together", len(seen))
 	}
 }
+
+func TestScriptsWaitUntilStartupDelayHasPassed(t *testing.T) {
+	jobsFrom := time.Now().Add(300 * time.Millisecond)
+	began := time.Now()
+	waitForStartup(context.Background(), jobsFrom, client.Job{ID: 1, Path: "builtin/windows_updates.ps1"})
+	if time.Now().Before(jobsFrom) {
+		t.Fatalf("script released after %s, before the startup delay", time.Since(began))
+	}
+}
+
+func TestStartupWaitSkipsCheckinAndPastDeadlinesAndStopsOnCancel(t *testing.T) {
+	far := time.Now().Add(time.Hour)
+	began := time.Now()
+	waitForStartup(context.Background(), far, client.Job{Path: "agent/checkin"})
+	waitForStartup(context.Background(), time.Now().Add(-time.Minute), client.Job{Path: "scripts/x.ps1"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	waitForStartup(ctx, far, client.Job{Path: "scripts/x.ps1"})
+	if time.Since(began) > time.Second {
+		t.Fatal("startup wait held a job it should have released")
+	}
+}

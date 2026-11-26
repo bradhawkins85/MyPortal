@@ -64,6 +64,13 @@ const (
 	checksOffWait    = 5 * time.Minute
 )
 
+// jobStartDelay holds scripts after the service starts. Application control
+// such as ThreatLocker may still be starting with Windows, and a script file
+// written before it is ready is seen without its creating process, so rules
+// that allow files created by myportal-rmm.exe do not match and it is blocked.
+// Jobs are still collected meanwhile, so the device stays connected.
+var jobStartDelay = 3 * time.Minute
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	if len(os.Args) < 2 {
@@ -471,6 +478,7 @@ func loop(ctx context.Context) {
 		chocolateySourcesLoop(ctx, api, r)
 	}()
 
+	jobsFrom := time.Now().Add(jobStartDelay)
 	backoff := 5 * time.Second
 	for ctx.Err() == nil {
 		poll, err := api.Jobs(ctx, pollWait, runs.executing())
@@ -504,6 +512,7 @@ func loop(ctx context.Context) {
 			}
 			if !startJob(ctx, slots, &wg, job, func(job client.Job) {
 				defer runs.done(job.ID)
+				waitForStartup(runCtx, jobsFrom, job)
 				execute(runCtx, api, r, job)
 			}) {
 				return
@@ -533,6 +542,18 @@ func startJob(ctx context.Context, slots chan struct{}, wg *sync.WaitGroup, job 
 		run(job)
 	}()
 	return true
+}
+
+// waitForStartup holds a script until jobsFrom (see jobStartDelay). Check in
+// now writes no script file, so it is not held.
+func waitForStartup(ctx context.Context, jobsFrom time.Time, job client.Job) {
+	if job.Path == "agent/checkin" {
+		return
+	}
+	if wait := time.Until(jobsFrom); wait > 0 {
+		log.Printf("run %d: waiting %s for the device to finish starting up", job.ID, wait.Round(time.Second))
+		sleep(ctx, wait)
+	}
 }
 
 // execute runs a job and reports its result. ctx is cancelled when the service

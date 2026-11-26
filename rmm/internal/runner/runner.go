@@ -188,6 +188,15 @@ func (r *Runner) RunStreaming(ctx context.Context, job client.Job, report func(c
 		}
 		base = account.environ()
 	}
+	if launchSettleDelay > 0 {
+		select {
+		case <-time.After(launchSettleDelay):
+		case <-runCtx.Done():
+			result.Error = "The script was stopped before it started: " + runCtx.Err().Error()
+			result.TimedOut = errors.Is(runCtx.Err(), context.DeadlineExceeded)
+			return result
+		}
+	}
 	stdout := &limitedBuffer{limit: MaxOutputBytes}
 	stderr := &limitedBuffer{limit: MaxOutputBytes}
 	spec := launch{name: name, args: args, dir: dir, env: buildEnv(base, job, resultFile), stdout: stdout, stderr: stderr}
@@ -272,6 +281,18 @@ func buildEnv(base []string, job client.Job, resultFile string) []string {
 	env = append(env, "MYPORTAL_RUN_ID="+strconv.FormatInt(job.ID, 10), "MYPORTAL_RESULT_FILE="+resultFile)
 	return env
 }
+
+// launchSettleDelay is the pause between writing a run's script files and
+// starting the interpreter. Application control such as ThreatLocker records
+// which process created a file shortly after it is written; starting the
+// script at once can let it be checked before myportal-rmm.exe is recorded as
+// its creator, so rules that rely on that do not match.
+var launchSettleDelay = func() time.Duration {
+	if runtime.GOOS == "windows" {
+		return 2 * time.Second
+	}
+	return 0
+}()
 
 // outputDrainDelay is how long a run keeps reading output after the script
 // exits, in case something the script started still holds its output open.

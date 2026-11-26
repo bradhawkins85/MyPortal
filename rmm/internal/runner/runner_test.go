@@ -277,3 +277,41 @@ func TestCmdWritesABatchFile(t *testing.T) {
 		t.Fatalf("batch file = %q", data)
 	}
 }
+
+// The interpreter starts only after the settle pause, with the script file
+// already written, so application control can record its creator first.
+func TestRunPausesBetweenWritingFilesAndStarting(t *testing.T) {
+	requireBash(t)
+	previous := launchSettleDelay
+	launchSettleDelay = 300 * time.Millisecond
+	t.Cleanup(func() { launchSettleDelay = previous })
+	script := "echo ran"
+	job := client.Job{ID: 11, Language: "bash", Script: script, SHA256: checksum(script), TimeoutSeconds: 60}
+	began := time.Now()
+	result := New(t.TempDir()).Run(context.Background(), job)
+	if result.Error != "" || result.ExitCode == nil || *result.ExitCode != 0 || !strings.Contains(result.Stdout, "ran") {
+		t.Fatalf("result = %#v", result)
+	}
+	if elapsed := time.Since(began); elapsed < launchSettleDelay {
+		t.Fatalf("script started after %s, before the %s settle pause", elapsed, launchSettleDelay)
+	}
+}
+
+func TestStopDuringSettlePauseDoesNotStartTheScript(t *testing.T) {
+	requireBash(t)
+	previous := launchSettleDelay
+	launchSettleDelay = time.Minute
+	t.Cleanup(func() { launchSettleDelay = previous })
+	marker := filepath.Join(t.TempDir(), "ran")
+	script := "touch " + marker
+	job := client.Job{ID: 12, Language: "bash", Script: script, SHA256: checksum(script), TimeoutSeconds: 60}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	result := New(t.TempDir()).Run(ctx, job)
+	if result.ExitCode != nil || !strings.Contains(result.Error, "stopped before it started") {
+		t.Fatalf("result = %#v", result)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("the script ran after being stopped during the settle pause")
+	}
+}
