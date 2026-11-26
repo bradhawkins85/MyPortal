@@ -168,6 +168,30 @@ provisioning helper, change settings or update WiX; a copy on its own fetches
 the latest `main`, and a script inside a `tray` folder uses that folder, so
 keep that folder up to date.
 
+### Disk cleanup
+
+Between builds, at most once every six hours, the agent frees disk space:
+
+- It keeps the three most recently used tray releases under
+  `C:\MyPortalBuild\payloads` and deletes older ones, along with any release
+  a failed build left half finished. A deleted release is rebuilt from source
+  the next time a build needs it.
+- It deletes job folders an interrupted build left under
+  `C:\MyPortalBuild\jobs`.
+- It deletes files and folders older than three days from the SYSTEM
+  account's temporary folders (`C:\Windows\SystemTemp` and
+  `C:\Windows\Temp`), where Go, npm, WiX, electron-builder and Windows
+  Configuration Designer leave build files. Anything still in use, or written
+  to recently, is left alone.
+- It renames `agent.log` to `agent.log.old` once it passes 10 MB.
+
+The amount freed is written to `agent.log`. Change how much is kept with the
+installer's `-KeepPayloads` (1–50, default 3) and `-TempRetentionDays`
+(default 3; `0` stops temporary-folder cleanup), or with `KeepPayloads` and
+`TempRetentionDays` in `config.json`. Agents installed before this change
+clean up with the defaults once `MyPortalBuildAgent.ps1` is updated by
+running the installer again.
+
 ### Release signing
 
 Each tray release is signed by the **Sign release** GitHub workflow once you

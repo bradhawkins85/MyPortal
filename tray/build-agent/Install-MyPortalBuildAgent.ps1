@@ -31,6 +31,8 @@ param(
     [string]$WixVersion = '7.*',
     [string]$IcdPath,
     [string]$SourceRef = 'main',
+    [ValidateRange(1, 50)][int]$KeepPayloads = 3,
+    [ValidateRange(0, 365)][int]$TempRetentionDays = 3,
     [switch]$RunNow
 )
 
@@ -127,6 +129,8 @@ $configPath = Join-Path $configDir 'config.json'
     IcdPath               = $resolvedIcd
     VerifierPath          = $verifier
     ReleaseKeyPath        = $releaseKey
+    KeepPayloads          = $KeepPayloads
+    TempRetentionDays     = $TempRetentionDays
 } | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding utf8
 
 # The config holds the API key and the work folder briefly holds install
