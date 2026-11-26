@@ -2525,6 +2525,14 @@ async def asset_detail_page(
             stats_type=request.query_params.get("stats_type"),
             stats_hardware=request.query_params.get("stats_hardware"),
         )
+        from app.features.rmm import maintenance_routes as rmm_maintenance_routes
+
+        rmm_context["checks"]["maintenance"] = await rmm_maintenance_routes.asset_maintenance_context(
+            company_id, asset_id
+        )
+        from app.features.rmm import vulnerability_routes as rmm_vulnerability_routes
+
+        rmm_context["vulnerabilities"] = await rmm_vulnerability_routes.asset_vulnerability_context(asset_id)
         from app.features.rmm import inventory_routes as rmm_inventory_routes
 
         rmm_context["inventory"] = await rmm_inventory_routes.asset_inventory_context(

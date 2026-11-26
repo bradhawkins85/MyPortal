@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% block title %}Maintenance windows{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}"><link rel="stylesheet" href="{{ static_url('/static/css/rmm_maintenance.css') }}">{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Maintenance windows</span>
+    {% if window_count %}
+      <div class="page-header-toolbar">
+        <label class="visually-hidden" for="mw-search">Find a window</label>
+        <input id="mw-search" type="search" class="form-input page-header-toolbar__search" placeholder="Find a window" data-mw-search />
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions(([{"label": "+ Add maintenance window", "type": "link", "variant": "primary", "href": "/rmm/maintenance?new=1#mw-modal", "attrs": {"data-mw-open": "", "aria-haspopup": "dialog", "aria-controls": "mw-modal"}}] if can_edit else []) + [{"label": "Checks", "type": "link", "href": "/rmm/checks"}], menu_id="rmm-maintenance-actions") }}
+{% endblock %}
+
+{% macro utc(value) -%}
+  {%- if value and value.isoformat is defined -%}
+    {%- set iso = value.isoformat() ~ ('' if value.tzinfo else 'Z') -%}
+    <span data-utc="{{ iso }}">{{ iso }}</span>
+  {%- else -%}—{%- endif -%}
+{%- endmacro %}
+
+{% macro window_card(item) -%}
+  <li class="mw-card mw-card--{{ item.state }}" data-mw-item data-mw-text="{{ (item.name ~ ' ' ~ item.scope_label ~ ' ' ~ (item.reason or '')) | lower }}">
+    <div class="mw-card__main">
+      <div class="mw-card__title">
+        <strong>{{ item.name }}</strong>
+        {% if item.state == "active" %}<span class="status status--warning">In maintenance</span>
+        {% elif item.state == "upcoming" %}<span class="status status--info">Upcoming</span>
+        {% elif item.state == "recurring" %}<span class="status status--neutral">Recurring</span>
+        {% elif item.state == "off" %}<span class="status status--neutral">Off</span>
+        {% else %}<span class="status status--neutral">Ended</span>{% endif %}
+      </div>
+      <p class="mw-card__schedule">{% if item.schedule_type == "once" and item.starts_at and item.ends_at %}From {{ utc(item.starts_at) }} to {{ utc(item.ends_at) }}{% else %}{{ item.schedule_label }}{% endif %}</p>
+      <ul class="mw-chips" aria-label="Details">
+        <li class="rmm-chip">{{ item.scope_label }}</li>
+        {% if item.is_snooze %}<li class="rmm-chip">Snooze</li>{% endif %}
+        {% if item.state == "active" and item.active_until %}<li class="rmm-chip">Alerts back&nbsp;{{ utc(item.active_until) }}</li>
+        {% elif item.next_start %}<li class="rmm-chip">Next starts&nbsp;{{ utc(item.next_start) }}</li>{% endif %}
+      </ul>
+      {% if item.reason %}<p class="mw-card__reason">{{ item.reason }}</p>{% endif %}
+    </div>
+    {% if item.can_edit %}
+    <div class="mw-card__actions">
+      {% if item.state in ("active", "upcoming", "recurring") %}
+      <form method="post" action="/rmm/maintenance/{{ item.id }}/end">
+        {% include "partials/csrf.html" %}
+        <button type="submit" class="button button--ghost button--small">{{ ("Cancel" if item.state == "upcoming" else "End now") if item.schedule_type == "once" else "Switch off" }}</button>
+      </form>
+      {% endif %}
+      <a class="button button--ghost button--small" href="/rmm/maintenance?window={{ item.id }}#mw-modal">Edit</a>
+      <form method="post" action="/rmm/maintenance/{{ item.id }}/delete" data-confirm="Delete {{ item.name }}?">
+        {% include "partials/csrf.html" %}
+        <button type="submit" class="button button--ghost button--small button--danger">Delete</button>
+      </form>
+    </div>
+    {% endif %}
+  </li>
+{%- endmacro %}
+
+{% block content %}
+<div class="admin-grid mw-page">
+  {{ counter_strip([
+    {"label": "In maintenance now", "value": groups.active | length, "variant": ("warning" if groups.active else "neutral")},
+    {"label": "Upcoming", "value": groups.upcoming | length, "variant": "info"},
+    {"label": "Recurring", "value": groups.recurring | length, "variant": "neutral"},
+  ], total=window_count, total_label="Windows") }}
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="mw-intro-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="mw-intro-heading">Planned work without the noise</h2>
+        <p class="card__subtitle">While a window covers a device, its checks keep recording results but don't raise tickets, run scripts or install packages, and event log rules don't raise tickets. If a check is still failing when the window ends, its actions run then. Snooze a single device or check from its asset page.</p>
+      </div>
+    </div>
+  </section>
+
+  {% if not window_count %}
+    <section class="card card--panel admin-grid__full">
+      <p class="empty-state">No maintenance windows yet. Add one for regular patching nights or a one-off server move, so planned reboots don't flood the helpdesk.{% if can_edit %} <a href="/rmm/maintenance?new=1#mw-modal" data-mw-open aria-haspopup="dialog" aria-controls="mw-modal">+ Add your first window</a>{% endif %}</p>
+    </section>
+  {% endif %}
+
+  {% for key, heading, subtitle in [
+      ("active", "In maintenance now", "Alerts for these are held until the window ends."),
+      ("upcoming", "Upcoming", "One-off windows that haven't started yet."),
+      ("recurring", "Recurring", "Weekly windows, between occurrences."),
+      ("ended", "Ended or off", "Past one-off windows and windows that are switched off."),
+  ] %}
+    {% if groups[key] %}
+    <section class="card card--panel admin-grid__full" aria-labelledby="mw-{{ key }}-heading" data-mw-group>
+      <div class="card__header"><div>
+        <h2 class="card__title" id="mw-{{ key }}-heading">{{ heading }} <span class="text-muted">({{ groups[key] | length }})</span></h2>
+        <p class="card__subtitle">{{ subtitle }}</p>
+      </div></div>
+      <ul class="mw-list">{% for item in groups[key] %}{{ window_card(item) }}{% endfor %}</ul>
+    </section>
+    {% endif %}
+  {% endfor %}
+  <p class="empty-state admin-grid__full" data-mw-no-results hidden>No windows match your search.</p>
+</div>
+
+{% if can_edit %}
+{% set e = editing or {} %}
+{% set err = errors or {} %}
+{% set sched = e.schedule_type or "once" %}
+{% set scope = e.scope or "company" %}
+<div class="modal scf-modal mw-modal" id="mw-modal" role="dialog" aria-modal="true" aria-labelledby="mw-modal-title" {% if not editing %}hidden{% endif %} data-mw-modal {% if editing %}data-mw-open-on-load{% endif %}>
+  <form class="modal__panel modal__panel--wide scf-editor" method="post" action="/rmm/maintenance{% if e.id %}/{{ e.id }}{% endif %}" data-mw-form novalidate>
+    {% include "partials/csrf.html" %}
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Maintenance window</p>
+        <h2 class="modal__title" id="mw-modal-title">{{ "Edit " ~ e.name if e.id else "Add maintenance window" }}</h2>
+        <p class="scf-editor__subtitle">Choose when it happens and which devices and checks it covers.</p>
+      </div>
+      <a href="/rmm/maintenance" class="modal__close" data-modal-close aria-label="Close maintenance window editor"></a>
+    </header>
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        {% if err %}<div class="alert alert--error" role="alert">Check the highlighted fields.</div>{% endif %}
+        <div class="scf-grid">
+          <div class="form-field scf-grid__full">
+            <label class="form-label" for="mw-name">Name</label>
+            <input class="form-input" id="mw-name" name="name" maxlength="255" value="{{ e.name or '' }}" placeholder="e.g. Monthly patching" data-mw-input required />
+            {% if err.name %}<p class="form-help form-help--error">{{ err.name }}</p>{% endif %}
+          </div>
+        </div>
+
+        <fieldset class="mw-fieldset">
+          <legend class="form-label">When</legend>
+          <div class="scf-type-grid mw-type-grid">
+            {% for value, label, help in [("once", "One-off", "A single start and end"), ("weekly", "Every week", "Same days and time each week")] %}
+            <label class="scf-type-card">
+              <input type="radio" name="schedule_type" value="{{ value }}" {% if sched == value %}checked{% endif %} data-mw-schedule />
+              <span class="scf-type-card__label">{{ label }}</span>
+              <span class="scf-type-card__help">{{ help }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <div class="scf-grid" data-mw-when="once" {% if sched != "once" %}hidden{% endif %}>
+            <div class="form-field">
+              <label class="form-label" for="mw-starts">Starts</label>
+              <input class="form-input" type="datetime-local" id="mw-starts" name="starts_at" value="{{ e.starts_local or '' }}" data-mw-input />
+              {% if err.starts_at %}<p class="form-help form-help--error">{{ err.starts_at }}</p>{% endif %}
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="mw-ends">Ends</label>
+              <input class="form-input" type="datetime-local" id="mw-ends" name="ends_at" value="{{ e.ends_local or '' }}" data-mw-input />
+              {% if err.ends_at %}<p class="form-help form-help--error">{{ err.ends_at }}</p>{% endif %}
+            </div>
+          </div>
+          <div data-mw-when="weekly" {% if sched != "weekly" %}hidden{% endif %}>
+            <div class="form-field">
+              <span class="form-label" id="mw-days-label">Days</span>
+              <div class="mw-days" role="group" aria-labelledby="mw-days-label">
+                {% for key, label in weekdays %}
+                <label class="mw-day"><input type="checkbox" name="weekdays" value="{{ key }}" {% if key in (e.weekday_list or []) %}checked{% endif %} data-mw-input /><span>{{ label }}</span></label>
+                {% endfor %}
+              </div>
+              {% if err.weekdays %}<p class="form-help form-help--error">{{ err.weekdays }}</p>{% endif %}
+            </div>
+            <div class="scf-grid">
+              <div class="form-field">
+                <label class="form-label" for="mw-start-time">Starts at</label>
+                <input class="form-input" type="time" id="mw-start-time" name="start_time" value="{{ e.start_time or '' }}" data-mw-input />
+                {% if err.start_time %}<p class="form-help form-help--error">{{ err.start_time }}</p>{% endif %}
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="mw-duration">Lasts (minutes)</label>
+                <input class="form-input" type="number" min="5" max="10080" step="5" id="mw-duration" name="duration_minutes" value="{{ e.duration_minutes or '' }}" placeholder="240" data-mw-input />
+                <p class="form-help">May run past midnight, e.g. 22:00 for 240 minutes ends at 02:00.</p>
+                {% if err.duration_minutes %}<p class="form-help form-help--error">{{ err.duration_minutes }}</p>{% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="mw-timezone">Time zone</label>
+            <select class="form-input" id="mw-timezone" name="timezone" data-mw-input>
+              {% set chosen_tz = e.timezone or default_timezone %}
+              {% for zone in timezones %}<option value="{{ zone }}" {% if zone == chosen_tz %}selected{% endif %}>{{ zone }}</option>{% endfor %}
+            </select>
+            <p class="form-help">Times above are in this zone. Weekly windows follow daylight saving.</p>
+            {% if err.timezone %}<p class="form-help form-help--error">{{ err.timezone }}</p>{% endif %}
+          </div>
+        </fieldset>
+
+        <fieldset class="mw-fieldset">
+          <legend class="form-label">Covers</legend>
+          <div class="ce-choice-list scf-choice-list">
+            <label class="scf-choice"><input type="radio" name="scope" value="company" {% if scope == "company" %}checked{% endif %} data-mw-scope /> <span>All of {{ company.name if company and company.name else "this company" }}'s devices</span></label>
+            <label class="scf-choice"><input type="radio" name="scope" value="device" {% if scope == "device" %}checked{% endif %} data-mw-scope /> <span>One device</span></label>
+            {% if is_super_admin %}<label class="scf-choice"><input type="radio" name="scope" value="all" {% if scope == "all" %}checked{% endif %} data-mw-scope /> <span>Every company's devices</span></label>{% endif %}
+          </div>
+          {% if err.scope %}<p class="form-help form-help--error">{{ err.scope }}</p>{% endif %}
+          <div class="form-field" data-mw-device {% if scope != "device" %}hidden{% endif %}>
+            <label class="form-label" for="mw-device">Device</label>
+            <select class="form-input" id="mw-device" name="asset_id" data-mw-input>
+              <option value="">Choose a device…</option>
+              {% for device in devices %}<option value="{{ device.asset_id }}" {% if e.asset_id == device.asset_id %}selected{% endif %}>{{ device.asset_name or device.hostname }}</option>{% endfor %}
+            </select>
+            {% if err.asset_id %}<p class="form-help form-help--error">{{ err.asset_id }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="mw-check">Checks</label>
+            <select class="form-input" id="mw-check" name="check_id" data-mw-input>
+              <option value="">All checks</option>
+              {% for check in checks %}<option value="{{ check.id }}" {% if e.check_id == check.id %}selected{% endif %}>{{ check.name }}</option>{% endfor %}
+            </select>
+            <p class="form-help">Choose one check to hold only its alerts, such as Agent offline during reboots.</p>
+            {% if err.check_id %}<p class="form-help form-help--error">{{ err.check_id }}</p>{% endif %}
+          </div>
+        </fieldset>
+
+        <div class="form-field">
+          <label class="form-label" for="mw-reason">Reason <span class="field-optional">optional</span></label>
+          <textarea class="form-input" id="mw-reason" name="reason" rows="2" maxlength="2000" placeholder="e.g. Server move to the new rack">{{ e.reason or '' }}</textarea>
+        </div>
+        <label class="scf-switch">
+          <input type="hidden" name="is_enabled" value="0" />
+          <input type="checkbox" name="is_enabled" value="1" {% if e.is_enabled is not defined or e.is_enabled %}checked{% endif %} data-mw-input />
+          <span class="scf-switch__track" aria-hidden="true"></span>
+          <span>Window is on</span>
+        </label>
+      </div>
+      <aside class="scf-preview" aria-label="Summary">
+        <p class="scf-preview__eyebrow">In plain English</p>
+        <p class="mw-preview" data-mw-preview role="status" aria-live="polite">Fill in the window to see a summary.</p>
+        <ul class="scf-preview__rules">
+          <li>Checks keep recording results.</li>
+          <li>Tickets, scripts and installs are held.</li>
+          <li>Still failing afterwards? The actions run then.</li>
+        </ul>
+      </aside>
+    </div>
+    <footer class="modal__footer scf-editor__footer">
+      <span class="scf-editor__spacer"></span>
+      <a href="/rmm/maintenance" class="button button--ghost" data-modal-close>Cancel</a>
+      <button type="submit" class="button button--primary">Save window</button>
+    </footer>
+  </form>
+</div>
+<noscript><style>#mw-modal[hidden] { display: none !important; } #mw-modal:not([hidden]) { position: static; } [data-mw-when][hidden], [data-mw-device][hidden] { display: block !important; }</style></noscript>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script id="mw-blank" type="application/json">{{ {"timezone": default_timezone} | tojson }}</script>
+  <script src="{{ static_url('/static/js/rmm_maintenance.js') }}" defer></script>
+{% endblock %}

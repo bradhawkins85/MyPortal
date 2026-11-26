@@ -16,7 +16,7 @@
   <span class="header__title-meta">{{ asset_display_name }}</span>
 {% endblock %}
 {% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
-{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if rmm %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endif %}{% if asset_tags is not none %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if rmm %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}"><link rel="stylesheet" href="{{ static_url('/static/css/vulnerabilities.css') }}"><link rel="stylesheet" href="{{ static_url('/static/css/rmm_maintenance.css') }}">{% endif %}{% if asset_tags is not none %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
 {% block header_actions %}
     {% import "assets/_action_icons.html" as action_icons %}
     {%- set icons = {} -%}
@@ -142,6 +142,7 @@
           ("software", "software", "Software", rmm.inventory.software | length if rmm and rmm.inventory and rmm.inventory.software else "", rmm and rmm.inventory),
           ("printers", "printers", "Printers", rmm.printers.counts.total or "" if rmm and rmm.printers else "", rmm and rmm.printers),
           ("windows-updates", "windows-updates", "Windows updates", rmm.windows_updates.counts.missing or "" if rmm and rmm.windows_updates else "", rmm and rmm.windows_updates),
+          ("vulnerabilities", "vulnerabilities", "Vulnerabilities", rmm.vulnerabilities.summary.software or "" if rmm and rmm.vulnerabilities else "", rmm and rmm.vulnerabilities),
           ("scripts", "scripts", "Scripts", "", rmm),
           ("checks", "checks", "Checks", rmm.checks.failing or "" if rmm and rmm.checks else "", rmm and rmm.checks),
           ("machine-stats", "machine-stats", "Machine stats", "", rmm and rmm.checks),
@@ -257,6 +258,44 @@
       {% if chk.can_edit %}<a class="button button--primary button--small" href="/rmm/checks?new=1&amp;asset_id={{ asset.id }}#rmm-check-form">Add a check for this device</a>{% endif %}
     </header>
     <div class="ce-section__body">
+      {% set mw = chk.maintenance if chk.maintenance is defined else none %}
+      {% if mw and mw.active %}
+      <div class="alert alert--warning mw-asset-banner" role="status">
+        <div>
+          <strong>In maintenance.</strong>
+          {% for window in mw.active %}{{ window.name }}{% if window.check_id %} ({{ window.check_name }} only){% endif %}{% if window.active_until %}, until <span data-utc="{{ window.active_until.isoformat() }}Z">{{ window.active_until.isoformat() }}</span>{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}.
+          Checks still record results, but their tickets, scripts and installs are held.
+        </div>
+        {% if chk.can_edit %}{% for window in mw.active %}{% if window.schedule_type == "once" and (window.company_id is not none or is_super_admin) %}
+        <form method="post" action="/rmm/maintenance/{{ window.id }}/end">
+          {% include "partials/csrf.html" %}
+          <input type="hidden" name="return_asset_id" value="{{ asset.id }}">
+          <button type="submit" class="button button--ghost button--small">End {{ "snooze" if window.is_snooze else "window" }}</button>
+        </form>
+        {% endif %}{% endfor %}{% endif %}
+      </div>
+      {% endif %}
+      {% if mw and chk.can_edit and chk.has_agent %}
+      <form method="post" action="/rmm/maintenance/snooze" class="mw-snooze" aria-label="Snooze alerts for this device">
+        {% include "partials/csrf.html" %}
+        <input type="hidden" name="asset_id" value="{{ asset.id }}">
+        <div class="form-field">
+          <label class="form-label" for="mw-snooze-check">Snooze alerts from</label>
+          <select class="form-input" id="mw-snooze-check" name="check_id">
+            <option value="">All checks</option>
+            {% for check in chk.checks if check.applies %}<option value="{{ check.id }}">{{ check.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="mw-snooze-for">for</label>
+          <select class="form-input" id="mw-snooze-for" name="minutes">
+            {% for minutes, label in mw.snooze_choices %}<option value="{{ minutes }}">{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="button button--ghost button--small">Snooze</button>
+        <a class="button-link" href="/rmm/maintenance">Maintenance windows</a>
+      </form>
+      {% endif %}
       {% if not chk.has_agent %}<p class="text-muted">The RMM agent is not installed on this device, so its checks have no results.</p>{% endif %}
       {% if chk.checks %}
       <div class="table-wrapper rmm-rule-table"><table class="table">
@@ -355,6 +394,7 @@
   {% if rmm and rmm.inventory %}{% include "rmm/_asset_inventory.html" %}{% include "rmm/_asset_software.html" %}{% endif %}
   {% if rmm and rmm.printers %}{% include "rmm/_asset_printers.html" %}{% endif %}
   {% if rmm and rmm.windows_updates %}{% include "rmm/_asset_windows_updates.html" %}{% endif %}
+  {% if rmm and rmm.vulnerabilities %}{% include "rmm/_asset_vulnerabilities.html" %}{% endif %}
 
   {% if rmm and rmm.event_logs %}{% set elog = rmm.event_logs %}{% set LEVEL_STATUS = {"Critical": "error", "Error": "error", "Warning": "warning", "Information": "info", "Verbose": "neutral"} %}<section class="card card--panel ce-section" id="event-logs" data-asset-edit-section="event-logs" aria-labelledby="asset-event-logs-heading">
     <header class="ce-section__header"><div class="ce-section__heading">
