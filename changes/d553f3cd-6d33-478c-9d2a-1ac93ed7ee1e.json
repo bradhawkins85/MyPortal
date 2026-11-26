@@ -1,0 +1,7 @@
+{
+  "guid": "d553f3cd-6d33-478c-9d2a-1ac93ed7ee1e",
+  "occurred_at": "2026-11-26T05:41Z",
+  "change_type": "Fix",
+  "summary": "The Assets list now shows each device's serial number as reported by its RMM agent, including devices that were never connected to Tactical RMM, matching the serial on the asset's Hardware tab.",
+  "content_hash": "a837f8c535137ac6d59bd0b38a373b037ee7caadef862960cb283cb99a849b26"
+}
