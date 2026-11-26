@@ -19,7 +19,7 @@ from .routes import router
 
 PACK = FeaturePack(
     slug="fail2ban",
-    version="1.0.0",
+    version="1.0.1",
     routers=(router,),
 )
 

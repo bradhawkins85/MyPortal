@@ -108,7 +108,8 @@ def test_healthy_overview(files):
     overview = service.build_overview(files.log, files.status, NOW)
 
     assert checks(overview) == {
-        "The Fail2ban log is being written": "success",
+        "The Fail2ban log is receiving entries": "success",
+        "1 failed sign-in in the last 24 hours": "info",
         "The ban snapshot is current": "success",
     }
     assert [jail["label"] for jail in overview["jails"]] == ["Sign-in failures", "Scanner traps", "Unknown pages"]
@@ -141,8 +142,45 @@ def test_stale_snapshot_and_quiet_log(files):
     files.log.write_text(fail(NOW - timedelta(days=2), "203.0.113.10"))
     write_status(files, snapshot(NOW - timedelta(minutes=20), log_path=str(files.log)))
     result = checks(service.build_overview(files.log, files.status, NOW))
-    assert result["No events in the last 24 hours"] == "warning"
+    assert result["The Fail2ban log has had no new entries for 2 days"] == "warning"
     assert result["The ban snapshot is out of date"] == "warning"
+    assert not any("failed sign-in" in title for title in result)
+
+
+def test_log_with_only_ordinary_entries_is_receiving_and_has_no_failed_sign_ins(files):
+    """A quiet portal logs normal INFO lines but no failed sign-ins: that is healthy."""
+    files.log.write_text(
+        line(NOW - timedelta(hours=3), "INFO", "-", "API OPERATION create | entity_type=ticket")
+        + line(NOW - timedelta(minutes=7), "INFO", "tickets", "Ticket 42 updated")
+    )
+    write_status(files, snapshot(log_path=str(files.log)))
+    overview = service.build_overview(files.log, files.status, NOW)
+    result = checks(overview)
+    assert result["The Fail2ban log is receiving entries"] == "success"
+    assert result["No failed sign-ins in the last 24 hours"] == "info"
+    assert "warning" not in result.values()
+    receiving = next(c for c in overview["health"] if c["title"] == "The Fail2ban log is receiving entries")
+    assert "7 minutes ago" in receiving["detail"]
+
+
+def test_failed_sign_ins_are_counted_by_address(files):
+    files.log.write_text(
+        fail(NOW - timedelta(minutes=9), "203.0.113.10")
+        + fail(NOW - timedelta(minutes=8), "203.0.113.10")
+        + fail(NOW - timedelta(minutes=7), "198.51.100.3")
+    )
+    write_status(files, snapshot(log_path=str(files.log)))
+    overview = service.build_overview(files.log, files.status, NOW)
+    check = next(c for c in overview["health"] if "failed sign-ins in the last 24 hours" in c["title"])
+    assert check["title"] == "3 failed sign-ins in the last 24 hours"
+    assert check["status"] == "info"
+    assert "2 addresses" in check["detail"]
+
+
+def test_empty_log_file_has_never_received_entries(files):
+    files.log.write_text("")
+    result = checks(service.build_overview(files.log, None, NOW))
+    assert result["The Fail2ban log hasn't received any entries"] == "warning"
 
 
 def test_loopback_addresses_point_at_trusted_proxies(files):
