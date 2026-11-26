@@ -1,0 +1,7 @@
+{
+  "guid": "2739e14b-d930-4cf5-ad25-78c3919874ab",
+  "occurred_at": "2026-11-26T04:31Z",
+  "change_type": "Fix",
+  "summary": "AI requests to slow local models (Ollama or llama.cpp) no longer fail after 15 seconds: they now wait up to 2 minutes by default (set OLLAMA_REQUEST_TIMEOUT_SECONDS to change this), and a timed-out webhook attempt now shows ReadTimeout instead of a blank error.",
+  "content_hash": "d5ad607429d98a04f68e2db9b370a0c0d3c1cdaaf1e0730c00b3d60596bf74b0"
+}

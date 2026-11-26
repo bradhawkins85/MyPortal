@@ -61,3 +61,36 @@ async def test_retry_restores_redacted_authorization_from_settings():
     captured = await _retry(event, {"api_key": "sk-test"})
     assert captured["json"] == body
     assert captured["headers"]["Authorization"] == "Bearer sk-test"
+
+
+@pytest.mark.asyncio
+async def test_retry_records_exception_type_when_message_is_empty():
+    event = {
+        "id": 3,
+        "name": "module.ollama.llamacpp.generate",
+        "target_url": "http://llama.local/v1/chat/completions",
+        "headers": {"Content-Type": "application/json"},
+        "payload": {"model": "m", "messages": [], "stream": False},
+        "max_attempts": 1,
+    }
+    captured_timeout: dict = {}
+
+    def make_client(*args, **kwargs):
+        captured_timeout["timeout"] = kwargs.get("timeout")
+        client = AsyncMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.post = AsyncMock(side_effect=httpx.ReadTimeout(""))
+        return client
+
+    with patch("app.services.webhook_monitor.webhook_repo") as repo, \
+         patch("app.services.webhook_monitor.httpx.AsyncClient", side_effect=make_client), \
+         patch("app.services.modules.get_module_settings", new=AsyncMock(return_value={})), \
+         patch.dict("os.environ", {"OLLAMA_REQUEST_TIMEOUT_SECONDS": "90"}):
+        repo.record_attempt = AsyncMock()
+        repo.mark_event_failed = AsyncMock()
+        await webhook_monitor._attempt_event(event)
+
+    assert repo.record_attempt.await_args.kwargs["error_message"] == "ReadTimeout"
+    assert repo.mark_event_failed.await_args.kwargs["error_message"] == "ReadTimeout"
+    assert captured_timeout["timeout"].read == 90.0

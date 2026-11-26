@@ -1222,3 +1222,63 @@ def test_huntress_module_is_non_triggerable():
     from app.services import modules
 
     assert "huntress" in modules._NON_TRIGGERABLE_MODULE_SLUGS
+
+
+def test_invoke_ollama_timeout_records_readable_error_and_uses_ai_timeout(monkeypatch):
+    attempts: list[dict[str, object]] = []
+    client_kwargs: dict[str, object] = {}
+
+    async def fake_create_manual_event(**kwargs):
+        return {"id": 7, "status": "pending", "attempt_count": 0}
+
+    async def fake_record_attempt(**kwargs):
+        attempts.append(kwargs)
+
+    async def fake_get_event(event_id):
+        return {"id": event_id, "status": "failed", "attempt_count": 1}
+
+    class TimeoutClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            raise httpx.ReadTimeout("")
+
+    def make_client(*args, **kwargs):
+        client_kwargs.update(kwargs)
+        return TimeoutClient()
+
+    from app.services import webhook_monitor
+
+    monkeypatch.setenv("OLLAMA_REQUEST_TIMEOUT_SECONDS", "45")
+    monkeypatch.setattr(webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
+    monkeypatch.setattr(modules.webhook_repo, "get_event", fake_get_event)
+    monkeypatch.setattr(modules.llm_usage, "record_usage", _noop)
+    monkeypatch.setattr(modules.httpx, "AsyncClient", make_client)
+
+    asyncio.run(
+        modules._invoke_ollama(
+            {"provider": "llamacpp", "base_url": "http://llama.local:8484"},
+            {"prompt": "Hi"},
+        )
+    )
+
+    assert attempts[0]["status"] == "error"
+    assert attempts[0]["error_message"] == "ReadTimeout"
+    assert client_kwargs["timeout"].read == 45.0
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("", 120.0), ("300", 300.0), ("0", 120.0), ("abc", 120.0), ("-5", 120.0)],
+)
+def test_ollama_request_timeout_env(monkeypatch, raw, expected):
+    monkeypatch.setenv("OLLAMA_REQUEST_TIMEOUT_SECONDS", raw)
+    timeout = modules.ollama_request_timeout()
+    assert timeout.read == expected
+    assert timeout.connect == 5.0

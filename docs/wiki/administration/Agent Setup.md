@@ -8,6 +8,7 @@ The MyPortal agent provides a permission-aware assistant that searches knowledge
 2. **Portal configuration** – Ensure the following environment variables are defined (already included in `.env.example`):
    - `OLLAMA_BASE_URL` – HTTP(S) endpoint for your Ollama host.
    - `OLLAMA_MODEL` – Default model name (for example `llama3`).
+   - `OLLAMA_REQUEST_TIMEOUT_SECONDS` – Optional. Seconds to wait for a model reply before the request fails with `ReadTimeout` (default `120`). Raise it for slow local models.
 3. **Database connectivity** – Run migrations through the existing startup process so the `tickets`, `knowledge_base`, and `shop` tables are available. SQLite fallback is supported when MySQL credentials are not configured.
 4. **Webhook monitoring** – The agent records Ollama requests in the webhook monitor (`/admin/webhooks`). Ensure the monitoring tables are migrated and accessible to administrators.
 
