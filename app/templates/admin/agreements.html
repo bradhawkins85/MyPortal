@@ -33,7 +33,7 @@
     <span class="agr-card__head">
       <strong>{{ item.name }}</strong>
       <span class="status status--{{ st[0] }}">{{ st[1] }}</span>
-      {% if 'exhausted' in item.flags %}<span class="status status--danger">Hours used up</span>{% elif 'near_limit' in item.flags %}<span class="status status--warning">{{ item.percent }}% used</span>{% endif %}
+      {% if 'exhausted' in item.flags %}<span class="status status--error">Hours used up</span>{% elif 'near_limit' in item.flags %}<span class="status status--warning">{{ item.percent }}% used</span>{% endif %}
     </span>
     <span class="agr-chips">
       <span class="agr-chip">{{ item.type_label }}</span>
