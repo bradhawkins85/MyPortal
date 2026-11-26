@@ -41,6 +41,14 @@
     }
   }
 
+  // Only numeric IDs from the row are used to build the form's URL.
+  function actionUrl(button, action) {
+    const assetId = button.getAttribute('data-asset-id') || '';
+    const printerId = button.getAttribute('data-printer-id') || '';
+    if (!/^\d+$/.test(assetId) || !/^\d+$/.test(printerId)) return null;
+    return '/rmm/assets/' + Number(assetId) + '/printers/' + Number(printerId) + '/' + action;
+  }
+
   function setCurrent(modal, name) {
     modal.querySelectorAll('[data-printer-current]').forEach((node) => { node.textContent = name; });
   }
@@ -67,8 +75,10 @@
 
   document.querySelectorAll('[data-printer-rename]').forEach((button) => {
     button.addEventListener('click', () => {
+      const url = actionUrl(button, 'rename');
+      if (!url) return;
       currentName = button.getAttribute('data-printer-name') || '';
-      renameForm.setAttribute('action', button.getAttribute('data-printer-rename'));
+      renameForm.action = url;
       setCurrent(renameModal, currentName);
       nameInput.value = currentName;
       renameError.hidden = true;
@@ -82,9 +92,11 @@
 
   document.querySelectorAll('[data-printer-remove]').forEach((button) => {
     button.addEventListener('click', () => {
+      const url = actionUrl(button, 'remove');
+      if (!url) return;
       const kind = button.getAttribute('data-printer-kind') || 'device';
       const users = button.getAttribute('data-printer-users');
-      removeForm.setAttribute('action', button.getAttribute('data-printer-remove'));
+      removeForm.action = url;
       setCurrent(removeModal, button.getAttribute('data-printer-name') || '');
       removeModal.querySelectorAll('[data-printer-remove-kind]').forEach((node) => {
         node.hidden = node.getAttribute('data-printer-remove-kind') !== kind;

@@ -424,11 +424,11 @@ def test_printers_section_renders_row_actions():
                "type_options": [], "status_options": [], "scan_pending": False, "can_run": True}
     template = env.from_string('{% include "rmm/_asset_printers.html" %}')
     html = template.render(rmm={"printers": context}, asset={"id": 10}, csrf_token="t")
-    assert 'data-printer-rename="/rmm/assets/10/printers/1/rename"' in html
-    assert 'data-printer-rename="/rmm/assets/10/printers/2/rename"' not in html
-    assert 'data-printer-remove="/rmm/assets/10/printers/2/remove"' in html and 'data-printer-kind="connection"' in html
+    assert 'data-printer-rename data-asset-id="10" data-printer-id="1"' in html
+    assert 'data-printer-rename data-asset-id="10" data-printer-id="2"' not in html
+    assert 'data-printer-remove data-asset-id="10" data-printer-id="2"' in html and 'data-printer-kind="connection"' in html
     assert 'data-printer-kind="forget"' in html and "Remove from list…" in html
-    assert "Rename pending</span>" in html and "to Front desk" in html and "/printers/4/" not in html
+    assert "Rename pending</span>" in html and "to Front desk" in html and 'data-printer-id="4"' not in html
     assert 'id="rmm-printer-rename-modal"' in html and 'name="new_name"' in html and 'name="_csrf"' in html
     context["can_run"] = False
     html = template.render(rmm={"printers": context}, asset={"id": 10}, csrf_token="t")
