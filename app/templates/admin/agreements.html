@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/agreements.css') }}">{% endblock %}
+{% set STATUS = {"active": ("success", "Active"), "expiring": ("warning", "Ends soon"), "upcoming": ("info", "Starts later"), "ended": ("neutral", "Ended"), "cancelled": ("neutral", "Cancelled")} %}
+
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Service agreements</span>
+    <form class="page-header-toolbar" method="get" action="/admin/agreements">
+      <label class="visually-hidden" for="agr-company">Company</label>
+      <select id="agr-company" name="company_id" class="form-input page-header-toolbar__select" data-submit-on-change>
+        <option value="">All companies</option>
+        {% for company in companies %}<option value="{{ company.id }}" {% if selected_company_id == company.id %}selected{% endif %}>{{ company.name }}</option>{% endfor %}
+      </select>
+      <label class="visually-hidden" for="agr-search">Find an agreement</label>
+      <input id="agr-search" type="search" class="form-input page-header-toolbar__search" placeholder="Find an agreement" data-agr-search>
+      <noscript><button type="submit" class="button button--ghost">Apply</button></noscript>
+    </form>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {% if can_manage %}
+    {{ page_header_actions([{"label": "+ Add agreement", "type": "link", "variant": "primary", "href": "/admin/agreements?new=1" ~ ("&company_id=" ~ selected_company_id if selected_company_id else ""), "attrs": {"data-agr-open": "", "aria-haspopup": "dialog", "aria-controls": "agr-modal"}}]) }}
+  {% endif %}
+{% endblock %}
+
+{% macro agreement_card(item) -%}
+{% set st = STATUS.get(item.status, ("neutral", item.status)) %}
+<li class="agr-card agr-card--{{ item.status }}{% if 'exhausted' in item.flags or 'overage' in item.flags %} agr-card--over{% elif 'near_limit' in item.flags %} agr-card--near{% endif %}" data-agr-item data-agr-text="{{ (item.name ~ ' ' ~ (item.company_name or '') ~ ' ' ~ item.type_label) | lower }}">
+  <a class="agr-card__link" href="/admin/agreements/{{ item.id }}">
+    <span class="agr-card__head">
+      <strong>{{ item.name }}</strong>
+      <span class="status status--{{ st[0] }}">{{ st[1] }}</span>
+      {% if 'exhausted' in item.flags %}<span class="status status--danger">Hours used up</span>{% elif 'near_limit' in item.flags %}<span class="status status--warning">{{ item.percent }}% used</span>{% endif %}
+    </span>
+    <span class="agr-chips">
+      <span class="agr-chip">{{ item.type_label }}</span>
+      <span class="agr-chip">{{ item.period_label }}</span>
+      {% if item.labour_type_ids %}<span class="agr-chip">{% for labour_id in item.labour_type_ids %}{{ labour_names.get(labour_id, labour_id) }}{% if not loop.last %}, {% endif %}{% endfor %}</span>{% else %}<span class="agr-chip">All labour types</span>{% endif %}
+    </span>
+    {% if item.agreement_type == "unlimited" %}
+      <span class="agr-usage">{{ item.covered_text }} covered this period{% if item.effective_rate %} · effective {{ "%.2f" | format(item.effective_rate) }}/h{% endif %}</span>
+    {% else %}
+      <span class="agr-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ item.meter }}" aria-label="Hours used this period"><span class="agr-meter__fill" style="width: {{ item.meter }}%"></span></span>
+      <span class="agr-usage">{{ item.used_text }} of {{ item.allowance_text }} used · {{ item.remaining_text }} left{% if item.usage.overage_minutes %} · <strong>{{ item.overage_text }} over</strong>{% endif %}</span>
+    {% endif %}
+    <span class="agr-dates text-muted">{% if item.agreement_type == "block" %}Used since {{ item.start_date.isoformat() }}{% else %}This period {{ item.period_start.isoformat() }} – {{ item.period_end.isoformat() if item.period_end else "now" }}{% endif %} · runs {{ item.start_date.isoformat() }} to {{ item.end_date.isoformat() if item.end_date else "no end date" }}</span>
+  </a>
+</li>
+{%- endmacro %}
+
+{% block content %}
+<div class="admin-grid agr-page">
+  {{ counter_strip([
+    {"label": "Active", "value": counts.active, "variant": "success"},
+    {"label": "Near their limit", "value": counts.near_limit, "variant": ("warning" if counts.near_limit else "neutral")},
+    {"label": "Used up or over", "value": counts.over, "variant": ("danger" if counts.over else "neutral")},
+    {"label": "Ending within 30 days", "value": counts.expiring, "variant": ("warning" if counts.expiring else "neutral")},
+  ], total=count, total_label="Agreements") }}
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="agr-list-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="agr-list-heading">Agreements by company</h2>
+      <p class="card__subtitle">What each company's contract covers and how much of it this period's ticket time has used. Agreements only track coverage; invoicing is unchanged.</p>
+    </div></div>
+    {% if groups %}
+      {% for company_name, items in groups.items() %}
+      <div class="agr-group" data-agr-group>
+        <h3 class="agr-group__title">{{ company_name }}</h3>
+        <ul class="agr-list">{% for item in items %}{{ agreement_card(item) }}{% endfor %}</ul>
+      </div>
+      {% endfor %}
+      <p class="empty-state" data-agr-no-results hidden>No agreements match your search.</p>
+    {% else %}
+      <p class="empty-state">No service agreements yet. Record what each client's contract covers, such as managed services or 10 hours a month, to see usage, balances and overage against their ticket time.{% if can_manage %} <a href="/admin/agreements?new=1" data-agr-open aria-haspopup="dialog" aria-controls="agr-modal">+ Add the first agreement</a>{% endif %}</p>
+    {% endif %}
+  </section>
+</div>
+
+{% if can_manage %}
+{% set e = editing or {"agreement_type": "hours", "period": "monthly", "alert_percent": 80, "labour_type_ids": [], "start_date": today} %}
+{% include "admin/_agreement_editor.html" %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script id="agr-labour-names" type="application/json">{{ labour_names | tojson }}</script>
+  <script src="{{ static_url('/static/js/agreements.js') }}" defer></script>
+{% endblock %}

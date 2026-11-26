@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% set a = detail.agreement %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/agreements.css') }}">{% endblock %}
+{% block header_title %}<span class="header__title-text">{{ a.name }}</span>{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions(([{"label": "Edit agreement", "type": "link", "variant": "primary", "href": "/admin/agreements?agreement=" ~ a.id}] if can_manage else []) + [{"label": "All agreements", "type": "link", "href": "/admin/agreements?company_id=" ~ a.company_id}]) }}
+{% endblock %}
+{% block content %}
+<div class="admin-grid agr-page">
+  {% if a.agreement_type == "unlimited" %}
+    {{ counter_strip([
+      {"label": "Covered this period", "value": a.covered_text, "variant": "info"},
+      {"label": "Value of covered work", "value": "%.2f" | format(a.value), "variant": "neutral", "title": "Covered hours × labour type rates"},
+      {"label": "Effective hourly rate", "value": ("%.2f" | format(a.effective_rate)) if a.effective_rate else "—", "variant": "neutral", "title": "Fee ÷ covered hours"},
+    ]) }}
+  {% else %}
+    {{ counter_strip([
+      {"label": "Used so far" if a.agreement_type == "block" else "Used this period", "value": a.used_text ~ " of " ~ a.allowance_text, "variant": ("danger" if 'exhausted' in a.flags else ("warning" if 'near_limit' in a.flags else "info"))},
+      {"label": "Left", "value": a.remaining_text, "variant": "success"},
+      {"label": "Overage", "value": a.overage_text, "variant": ("danger" if a.usage.overage_minutes else "neutral")},
+      {"label": "Effective hourly rate", "value": ("%.2f" | format(a.effective_rate)) if a.effective_rate else "—", "variant": "neutral", "title": "Fee ÷ covered hours"},
+    ]) }}
+  {% endif %}
+
+  <section class="card card--panel admin-grid__full{% if 'exhausted' in a.flags or 'overage' in a.flags %} agr-card--over{% elif 'near_limit' in a.flags %} agr-card--near{% endif %}" aria-labelledby="agr-about-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="agr-about-heading">{{ a.company_name }} · {{ a.type_label }}</h2>
+      <p class="card__subtitle">{{ description }} Runs {{ a.start_date.isoformat() }} to {{ a.end_date.isoformat() if a.end_date else "no end date" }}.{% if a.fee_amount %} Fee {{ "%.2f" | format(a.fee_amount) }} per {{ "agreement" if a.agreement_type == "block" else {"monthly": "month", "quarterly": "quarter", "annual": "year"}.get(a.period, "period") }}.{% endif %}</p>
+    </div></div>
+    {% if a.agreement_type != "unlimited" %}
+    <span class="agr-meter agr-meter--large" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ a.meter }}" aria-label="Hours used this period"><span class="agr-meter__fill" style="width: {{ a.meter }}%"></span></span>
+    {% endif %}
+    {% if a.notes %}<p class="agr-notes">{{ a.notes }}</p>{% endif %}
+  </section>
+
+  <section class="card card--panel" aria-labelledby="agr-history-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="agr-history-heading">Recent periods</h2>
+      <p class="card__subtitle">Covered time and overage for each period, newest first.</p>
+    </div></div>
+    <div class="table-wrapper"><table class="table">
+      <caption class="visually-hidden">Usage by period</caption>
+      <thead><tr><th scope="col">Period</th><th scope="col">Covered</th><th scope="col">Overage</th><th scope="col">Used</th><th scope="col">Value</th></tr></thead>
+      <tbody>
+      {% for row in detail.history %}
+        <tr><td>{{ row.start.isoformat() }} – {{ row.end.isoformat() if row.end else "now" }}</td><td>{{ row.covered_text }}</td><td>{{ row.overage_text }}</td><td>{{ (row.percent ~ "%") if row.percent is not none else "—" }}</td><td>{{ "%.2f" | format(row.value) }}</td></tr>
+      {% else %}
+        <tr><td colspan="5" class="text-muted">The agreement hasn't started yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="agr-entries-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="agr-entries-heading">{{ "Time counted so far" if a.agreement_type == "block" else "Time counted this period" }}</h2>
+      <p class="card__subtitle">Ticket time entries this agreement covered, newest first.</p>
+    </div></div>
+    {% if detail.entries %}
+    <div class="table-wrapper"><table class="table">
+      <caption class="visually-hidden">Time entries counted this period</caption>
+      <thead><tr><th scope="col">When</th><th scope="col">Ticket</th><th scope="col">Labour</th><th scope="col">Covered</th><th scope="col">Over</th></tr></thead>
+      <tbody>
+      {% for entry in detail.entries %}
+        <tr>
+          <td>{% if entry.created_at and entry.created_at.isoformat is defined %}<span data-utc="{{ entry.created_at.isoformat() }}Z">{{ entry.created_at.isoformat() }}</span>{% else %}{{ entry.created_at }}{% endif %}</td>
+          <td><a href="/admin/tickets/{{ entry.ticket_id }}">#{{ entry.ticket_number or entry.ticket_id }}</a> <span class="text-muted">{{ entry.subject }}</span></td>
+          <td>{{ entry.labour_type_name or "—" }}</td>
+          <td>{{ hours_text(entry.covered_minutes) }}</td>
+          <td>{{ hours_text(entry.overage_minutes) if entry.overage_minutes else "—" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}
+    <p class="empty-state">No ticket time has counted against this agreement this period.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
