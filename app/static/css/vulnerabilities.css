@@ -138,6 +138,19 @@
   border-radius: var(--hf-radius-md);
 }
 
+.vuln-mapping,
+.vuln-unmapped li {
+  transition: background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.vuln-mapping:hover,
+.vuln-mapping:focus-within,
+.vuln-unmapped li:hover,
+.vuln-unmapped li:focus-within {
+  background: color-mix(in srgb, var(--hf-accent-soft) 70%, transparent);
+  box-shadow: inset 3px 0 0 var(--hf-accent);
+}
+
 .vuln-exception__reason {
   margin: 0.25rem 0;
 }
@@ -174,7 +187,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-gap-base);
-  padding: 0.4rem 0;
+  padding: 0.4rem 0.6rem;
   border-bottom: 1px solid var(--hf-line-soft);
 }
 
@@ -223,6 +236,13 @@
 .vuln-preview {
   margin: 0;
   color: var(--hf-copy-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vuln-mapping,
+  .vuln-unmapped li {
+    transition: none;
+  }
 }
 
 @media (max-width: 640px) {
