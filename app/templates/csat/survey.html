@@ -1,0 +1,72 @@
+{% from "auth/_auth_macros.html" import brand_mark %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="color-scheme" content="dark" />
+  <title>How did we do? · {{ app_name }}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="stylesheet" href="{{ static_url('/static/css/app.css') }}" />
+  <link rel="stylesheet" href="{{ static_url('/static/css/csat.css') }}" />
+</head>
+<body class="csat-body">
+  <main class="csat-shell">
+    <header class="csat-brand">
+      {{ brand_mark("csat-brand__mark") }}
+      <span class="csat-brand__name">{{ app_name }}</span>
+    </header>
+
+    {% if state == "open" %}
+      <section class="card card--panel csat-card" aria-labelledby="csat-title">
+        <p class="csat-eyebrow">Ticket {{ ticket_number }}</p>
+        <h1 class="csat-title" id="csat-title">How satisfied were you with our support?</h1>
+        {% if ticket_subject %}<p class="csat-subtitle">{{ ticket_subject }}</p>{% endif %}
+
+        {% if error %}<div class="alert alert--error" role="alert">{{ error }}</div>{% endif %}
+
+        <form method="post" action="/csat/{{ token }}" class="csat-form">
+          <fieldset class="csat-scale">
+            <legend class="csat-scale__legend">Your rating</legend>
+            <div class="csat-scale__options">
+              {% for value, label in rating_labels | dictsort(reverse=true) %}
+                <label class="csat-choice csat-choice--{{ value }}">
+                  <input class="csat-choice__input" type="radio" name="rating" value="{{ value }}" required {% if rating == value %}checked{% endif %} />
+                  <span class="csat-choice__face" aria-hidden="true">{{ value }}</span>
+                  <span class="csat-choice__label">{{ label }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+
+          <div class="form-field">
+            <label class="form-label" for="csat-comment">Anything you'd like to tell us? <span class="field-optional">optional</span></label>
+            <textarea id="csat-comment" class="form-input" name="comment" rows="4" maxlength="{{ max_comment_length }}">{{ comment }}</textarea>
+            <p class="form-help">Your comment goes to the team that worked on this ticket.</p>
+          </div>
+
+          <div class="csat-actions">
+            <button type="submit" class="button button--primary">Send feedback</button>
+          </div>
+        </form>
+      </section>
+    {% else %}
+      {% if state == "thanks" %}
+        {% set variant, heading, message = "success", "Thank you for your feedback", "We've passed your rating on to the team. It helps us improve the support we give you." %}
+      {% elif state == "answered" %}
+        {% set variant, heading, message = "success", "You've already rated this ticket", "Thanks, we already have your feedback for this ticket." %}
+      {% elif state == "expired" %}
+        {% set variant, heading, message = "warning", "This survey has closed", "This survey link has expired. If you'd like to tell us something, reply to any of our emails." %}
+      {% else %}
+        {% set variant, heading, message = "warning", "This survey link isn't valid", "Check you used the whole link from the email. If you'd like to tell us something, reply to any of our emails." %}
+      {% endif %}
+      <section class="card card--panel csat-card csat-result csat-result--{{ variant }}" role="status" aria-live="polite">
+        <h1 class="csat-title">{{ heading }}</h1>
+        <p class="csat-subtitle">{{ message }}</p>
+      </section>
+    {% endif %}
+  </main>
+</body>
+</html>

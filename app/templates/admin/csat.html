@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% from "macros/tables.html" import data_table %}
+
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/csat.css') }}">{% endblock %}
+
+{% macro utc_time(value) -%}
+  {%- if value and value.isoformat is defined -%}
+    {%- set iso = value.isoformat() ~ ('' if value.tzinfo else 'Z') -%}
+    <span data-utc="{{ iso }}">{{ iso }}</span>
+  {%- else -%}—{%- endif -%}
+{%- endmacro %}
+
+{% macro rating_pill(rating) -%}
+  {%- set variant = "success" if rating >= 4 else ("warning" if rating == 3 else "danger") -%}
+  <span class="status status--{{ variant }}">{{ rating }}/5 · {{ rating_labels[rating] }}</span>
+{%- endmacro %}
+
+{% macro score(value) -%}
+  <span class="csat-score">{% if value is none %}—{% else %}{{ value }}%{% endif %}</span>
+{%- endmacro %}
+
+{% macro ticket_link(item) -%}
+  <a href="/admin/tickets/{{ item.ticket_id }}">#{{ item.ticket_number or item.ticket_id }}</a>
+  {% if item.ticket_subject %}<span class="text-muted">{{ item.ticket_subject }}</span>{% endif %}
+{%- endmacro %}
+
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Customer satisfaction</span>
+    <form class="page-header-toolbar" method="get" action="/admin/csat">
+      <label class="visually-hidden" for="csat-period">Period</label>
+      <select id="csat-period" name="period" class="form-input page-header-toolbar__select" data-submit-on-change>
+        {% for value, label in periods %}<option value="{{ value }}" {% if report.period == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <label class="visually-hidden" for="csat-company">Company</label>
+      <select id="csat-company" name="company_id" class="form-input page-header-toolbar__select" data-submit-on-change>
+        <option value="">All companies</option>
+        {% for company in companies %}<option value="{{ company.id }}" {% if selected_company_id == company.id %}selected{% endif %}>{{ company.name }}</option>{% endfor %}
+      </select>
+      <noscript><button type="submit" class="button button--ghost">Apply</button></noscript>
+    </form>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {% if can_manage %}
+    {{ page_header_actions([
+      {"label": "Survey settings", "type": "link", "variant": "ghost", "href": "#csat-settings"},
+      {"label": "Edit survey email", "type": "link", "variant": "ghost", "href": "/admin/message-templates?search=ticket-csat-survey"}
+    ]) }}
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/csat_admin.js') }}" defer></script>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  {% if not settings.enabled %}
+    <div class="alert alert--info admin-grid__full" role="status">
+      Satisfaction surveys are off, so no surveys are being sent.
+      {% if can_manage %}<a href="#csat-settings">Turn them on in the survey settings</a>.{% else %}Ask a super admin to turn them on.{% endif %}
+    </div>
+  {% endif %}
+
+  {{ counter_strip([
+    {"label": "CSAT score", "value": (report.csat_percent ~ "%") if report.csat_percent is not none else "—", "variant": ("success" if (report.csat_percent or 0) >= 80 else ("warning" if report.csat_percent is not none else "neutral")), "title": "Share of responses rated 4 or 5"},
+    {"label": "Responses", "value": report.counts.responded, "variant": "info"},
+    {"label": "Response rate", "value": (report.response_rate ~ "%") if report.response_rate is not none else "—", "variant": "neutral", "title": "Responses as a share of surveys sent"},
+    {"label": "Open follow-ups", "value": report.follow_ups | length, "variant": ("danger" if report.follow_ups else "neutral"), "href": "#csat-follow-ups"},
+  ], total=report.counts.sent, total_label="Surveys sent") }}
+
+  <section class="card card--panel admin-grid__full" id="csat-follow-ups" aria-labelledby="csat-follow-ups-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="csat-follow-ups-heading">Low scores to follow up</h2>
+        <p class="card__subtitle">Responses at or below the low-score threshold stay here until someone marks the follow-up done.</p>
+      </div>
+    </div>
+    {% if report.follow_ups %}
+      {% call data_table([
+        {"label": "Ticket"}, {"label": "Rating"}, {"label": "Company"}, {"label": "Technician"}, {"label": "Answered", "sort_type": "date"}, {"label": "", "sortable": false}
+      ], aria_label="Low scores to follow up") %}
+        {% for item in report.follow_ups %}
+          <tr>
+            <td>{{ ticket_link(item) }}{% if item.comment %}<p class="csat-comment">{{ item.comment }}</p>{% endif %}</td>
+            <td>{{ rating_pill(item.rating) }}</td>
+            <td>{{ item.company_name or "—" }}</td>
+            <td>{{ ((item.technician_first_name or "") ~ " " ~ (item.technician_last_name or "")) | trim or "Unassigned" }}</td>
+            <td>{{ utc_time(item.responded_at) }}</td>
+            <td>
+              <form method="post" action="/admin/csat/{{ item.id }}/follow-up">
+                {% include "partials/csrf.html" %}
+                <button type="submit" class="button button--ghost button--sm">Mark done</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      {% endcall %}
+    {% else %}
+      <p class="empty-state">No low scores need following up.</p>
+    {% endif %}
+  </section>
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="csat-responses-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="csat-responses-heading">Recent responses</h2>
+        <p class="card__subtitle">Each response is also posted to its ticket as an internal note.</p>
+      </div>
+    </div>
+    {% if report.responses %}
+      {% call data_table([
+        {"label": "Ticket"}, {"label": "Rating", "sort_type": "string"}, {"label": "Company"}, {"label": "Technician"}, {"label": "Answered", "sort_type": "date"}
+      ], aria_label="Recent survey responses") %}
+        {% for item in report.responses %}
+          <tr>
+            <td>{{ ticket_link(item) }}{% if item.comment %}<p class="csat-comment">{{ item.comment }}</p>{% endif %}</td>
+            <td>{{ rating_pill(item.rating) }}</td>
+            <td>{{ item.company_name or "—" }}</td>
+            <td>{{ ((item.technician_first_name or "") ~ " " ~ (item.technician_last_name or "")) | trim or "Unassigned" }}</td>
+            <td>{{ utc_time(item.responded_at) }}</td>
+          </tr>
+        {% endfor %}
+      {% endcall %}
+    {% else %}
+      <p class="empty-state">No responses in this period yet. Surveys are emailed to the requester once a ticket is resolved.</p>
+    {% endif %}
+  </section>
+
+  <section class="card card--panel" aria-labelledby="csat-technicians-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="csat-technicians-heading">By technician</h2>
+        <p class="card__subtitle">Scored against the technician assigned when the ticket was resolved.</p>
+      </div>
+    </div>
+    {% if report.technicians %}
+      {% call data_table([
+        {"label": "Technician"}, {"label": "Responses", "sort_type": "number"}, {"label": "CSAT", "sort_type": "number"}, {"label": "Average", "sort_type": "number"}
+      ], aria_label="Satisfaction by technician") %}
+        {% for row in report.technicians %}
+          <tr><td>{{ row.name }}</td><td>{{ row.responses }}</td><td>{{ score(row.csat_percent) }}</td><td>{{ row.average if row.average is not none else "—" }}</td></tr>
+        {% endfor %}
+      {% endcall %}
+    {% else %}
+      <p class="empty-state">No responses yet.</p>
+    {% endif %}
+  </section>
+
+  {% if not selected_company_id %}
+  <section class="card card--panel" aria-labelledby="csat-companies-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="csat-companies-heading">By company</h2>
+        <p class="card__subtitle">Pick a company above to see only its responses.</p>
+      </div>
+    </div>
+    {% if report.companies %}
+      {% call data_table([
+        {"label": "Company"}, {"label": "Responses", "sort_type": "number"}, {"label": "CSAT", "sort_type": "number"}, {"label": "Average", "sort_type": "number"}
+      ], aria_label="Satisfaction by company") %}
+        {% for row in report.companies %}
+          <tr><td><a href="/admin/csat?company_id={{ row.company_id }}&period={{ report.period }}">{{ row.company_name or "No company" }}</a></td><td>{{ row.responses }}</td><td>{{ score(row.csat_percent) }}</td><td>{{ row.average if row.average is not none else "—" }}</td></tr>
+        {% endfor %}
+      {% endcall %}
+    {% else %}
+      <p class="empty-state">No responses yet.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if can_manage %}
+  <section class="card card--panel admin-grid__full" id="csat-settings" aria-labelledby="csat-settings-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="csat-settings-heading">Survey settings</h2>
+        <p class="card__subtitle">The requester gets one survey per ticket, a while after it is resolved or closed. Only tickets resolved after surveys are turned on are surveyed.</p>
+      </div>
+    </div>
+    <form method="post" action="/admin/csat/settings" class="csat-settings">
+      {% include "partials/csrf.html" %}
+      <label class="scf-switch">
+        <input type="checkbox" name="enabled" value="1" {% if settings.enabled %}checked{% endif %} />
+        <span class="scf-switch__track" aria-hidden="true"></span>
+        <span>Email satisfaction surveys for resolved tickets</span>
+      </label>
+      <div class="csat-settings__grid">
+        <div class="form-field">
+          <label class="form-label" for="csat-delay">Wait before sending (minutes)</label>
+          <input id="csat-delay" class="form-input" type="number" name="delay_minutes" min="0" max="{{ max_delay_minutes }}" value="{{ settings.delay_minutes }}" />
+          <p class="form-help">Gives the requester time to reopen the ticket before being asked to rate it.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="csat-expiry">Link works for (days)</label>
+          <input id="csat-expiry" class="form-input" type="number" name="expiry_days" min="1" max="{{ max_expiry_days }}" value="{{ settings.expiry_days }}" />
+          <p class="form-help">After this the survey closes and can no longer be answered.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="csat-threshold">Follow up ratings of</label>
+          <select id="csat-threshold" class="form-input" name="low_score_threshold">
+            <option value="0" {% if settings.low_score_threshold == 0 %}selected{% endif %}>Never</option>
+            {% for value in [1, 2, 3, 4] %}
+              <option value="{{ value }}" {% if settings.low_score_threshold == value %}selected{% endif %}>{{ value }} or lower ({{ rating_labels[value] }}{% if value > 1 %} or worse{% endif %})</option>
+            {% endfor %}
+          </select>
+          <p class="form-help">These responses are listed under <em>Low scores to follow up</em>. Use the <em>Ticket satisfaction survey answered</em> automation trigger to notify someone.</p>
+        </div>
+      </div>
+      <fieldset class="form-field csat-exclusions-field">
+        <legend class="form-label">Don't survey these companies <span class="field-optional">optional</span></legend>
+        <div class="csat-exclusions">
+          {% for company in companies %}
+            <label class="csat-exclusions__item">
+              <input type="checkbox" name="excluded_company_ids" value="{{ company.id }}" {% if company.id in excluded_company_ids %}checked{% endif %} />
+              <span>{{ company.name }}</span>
+            </label>
+          {% else %}
+            <p class="form-help">No companies yet.</p>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <div class="form-actions">
+        <button type="submit" class="button button--primary">Save settings</button>
+      </div>
+    </form>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
