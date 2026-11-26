@@ -5,7 +5,9 @@ Rules are non-empty trees of ``{operator: and|or, children: [...]}`` groups and
 insensitive. Collection positives match any item; negatives require no matching
 item, including known-empty collections. Unknown inventory never satisfies a
 negative predicate. Only explicit ``is_not_set`` matches absent, null or blank
-values; it also matches known-empty collections.
+values; it also matches known-empty collections. Custom fields and company
+variables also offer ``is_checked``/``is_unchecked``, which match a present
+boolean-like value (checkbox, true/false, yes/no, on/off, 1/0).
 
 Keyed custom fields and company variables support scalar or multi-value data.
 Their equality compares booleans and numeric values when possible, otherwise
@@ -32,13 +34,15 @@ MAX_LIST_VALUES = 100
 MAX_KEY_LENGTH = 256
 
 _PRESENCE = ("is_set", "is_not_set")
+_CHECKBOX = ("is_checked", "is_unchecked")
+_VALUELESS = _PRESENCE + _CHECKBOX
 _EQUALITY = ("equals", "not_equals", "in", "not_in")
 _TEXT = _EQUALITY + ("contains", "not_contains", "starts_with", "ends_with") + _PRESENCE
 _NUMBER = _EQUALITY + ("gt", "gte", "lt", "lte", "between") + _PRESENCE
 _BOOLEAN = ("equals", "not_equals") + _PRESENCE
 _VERSION = _TEXT + ("version_gte", "version_lte")
 _IP = _EQUALITY + ("in_subnet", "not_in_subnet") + _PRESENCE
-_DYNAMIC = tuple(dict.fromkeys(_TEXT + _NUMBER + _VERSION + _IP))
+_DYNAMIC = tuple(dict.fromkeys(_TEXT + _NUMBER + _VERSION + _IP + _CHECKBOX))
 _OPERATORS = {
     "text": _TEXT,
     "number": _NUMBER,
@@ -308,9 +312,9 @@ def validate_rules(rules: Any) -> dict[str, Any]:
                 result["key"] = _normalize_key(field, key)
             elif "key" in node:
                 raise ValueError("only custom fields, company variables and software metadata accept a key")
-            if operator in _PRESENCE:
+            if operator in _VALUELESS:
                 # Editors may retain the previous scalar value after selecting
-                # a presence operator. It is immaterial and never persisted.
+                # a presence or checkbox operator. It is immaterial and never persisted.
                 if "value" in node and node["value"] is not None:
                     _text(node["value"])
                 return result
@@ -501,6 +505,9 @@ def _matches_validated(tree: dict[str, Any], context: Any) -> bool:
                     return False
                 if operator == "is_set":
                     return True
+                if operator in _CHECKBOX:
+                    states = [_boolean(value) for value in (actual if isinstance(actual, list) else [actual])]
+                    return all(states) if operator == "is_checked" else not any(states)
                 values = actual if isinstance(actual, list) else [actual]
                 positive = _NEGATED.get(operator, operator)
                 # Evaluate every item before negating: malformed inventory may

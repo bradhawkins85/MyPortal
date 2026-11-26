@@ -67,6 +67,7 @@ OPERATOR_LABELS = {
     "is_set": "is set", "is_not_set": "is not set", "gt": "is greater than", "gte": "is at least",
     "lt": "is less than", "lte": "is at most", "between": "is between", "version_gte": "is version at least",
     "version_lte": "is version at most", "in_subnet": "is in subnet", "not_in_subnet": "is outside subnet",
+    "is_checked": "is checked", "is_unchecked": "is unchecked",
 }
 
 # When computers were last checked against the groups (seeding is throttled).

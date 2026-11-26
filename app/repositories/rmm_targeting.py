@@ -131,8 +131,8 @@ def _ip_address(value: Any) -> str | None:
 def _custom_value(row: Mapping[str, Any]) -> Any:
     field_type = row.get("field_type")
     if field_type == "checkbox":
-        value = row.get("value_boolean")
-        return bool(value) if value is not None else None
+        # A checkbox is either ticked or not; a cleared (NULL) value is unticked.
+        return bool(row.get("value_boolean"))
     if field_type == "date":
         value = row.get("value_date")
         return value.isoformat() if hasattr(value, "isoformat") else value
@@ -152,6 +152,21 @@ def _boolean(value: Any) -> bool | None:
         if normalised in {"false", "0"}:
             return False
     return None
+
+
+async def _checkbox_definitions() -> list[dict[str, Any]]:
+    """Checkbox definitions are global; an asset without a stored value is unchecked."""
+    return list(await db.fetch_all(
+        "SELECT d.id AS definition_id, d.name FROM asset_custom_field_definitions d "
+        "WHERE d.field_type = 'checkbox'",
+    ) or [])
+
+
+def _unchecked_defaults(definitions: list[dict[str, Any]]) -> dict[str, Any]:
+    defaults: dict[str, Any] = {}
+    for row in definitions:
+        _map_value(defaults, row, False)
+    return defaults
 
 
 def _map_value(mapping: dict[str, Any], row: Mapping[str, Any], value: Any) -> None:
@@ -318,7 +333,8 @@ async def contexts_for_agents(agents: list[dict[str, Any]]) -> dict[int, dict[st
             presence_pairs.append((row, asset))
     await _apply_tray_presence(presence_pairs)
 
-    asset_custom: dict[int, dict[str, Any]] = {key: {} for key in assets}
+    defaults = _unchecked_defaults(await _checkbox_definitions()) if assets else {}
+    asset_custom: dict[int, dict[str, Any]] = {key: dict(defaults) for key in assets}
     asset_direct_tags: dict[int, set[str]] = {key: set() for key in assets}
     asset_blocks: dict[int, set[int]] = {key: set() for key in assets}
     for batch in _batches(assets):
@@ -508,7 +524,7 @@ async def context_for_asset(
                 if ip.get("company_id") == company_id and address is not None and address not in addresses:
                     addresses.append(address)
             asset["ip_address"] = addresses or None
-            asset_custom = {}
+            asset_custom = _unchecked_defaults(await _checkbox_definitions())
             for value in await db.fetch_all(
                 "SELECT v.asset_id, d.id AS definition_id, d.name, d.field_type, "
                 "v.value_text, v.value_date, v.value_boolean FROM asset_custom_field_values v "

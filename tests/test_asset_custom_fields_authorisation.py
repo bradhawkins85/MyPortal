@@ -110,9 +110,13 @@ async def test_helpdesk_technician_can_delete_value(monkeypatch, asset_in_compan
     )
     deleter = AsyncMock()
     monkeypatch.setattr(route.custom_fields_repo, "delete_asset_field_value", deleter)
+    unticked = AsyncMock()
+    monkeypatch.setattr(route.custom_fields_repo, "ensure_unchecked_checkbox_values", unticked)
 
     await route.delete_asset_custom_field(12, 3, current_user={"id": 9, "is_super_admin": False})
     deleter.assert_awaited_once_with(12, 3)
+    # A cleared checkbox is stored as unticked rather than left unset.
+    unticked.assert_awaited_once_with(asset_id=12, definition_id=3)
 
 
 def _value_row(definition_id: int, value: str) -> dict:
