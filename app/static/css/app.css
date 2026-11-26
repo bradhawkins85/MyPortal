@@ -3290,6 +3290,7 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
 }
 
 .ticket-column-filter__panel[hidden] { display: none; }
+.ticket-column-filter__panel [hidden] { display: none; }
 .ticket-column-filter__title { color: var(--color-text); font-weight: 600; }
 .ticket-column-filter__actions { display: flex; gap: 0.4rem; }
 
@@ -3343,6 +3344,7 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
 }
 
 .table-column-filter__panel[hidden] { display: none; }
+.table-column-filter__panel [hidden] { display: none; }
 .table-column-filter__title { color: var(--color-text); font-weight: 600; }
 .table-column-filter__actions { display: flex; gap: 0.4rem; }
 .table-column-filter__options {
