@@ -392,6 +392,7 @@ class Settings(BaseSettings):
         default=None, validation_alias="SYNCRO_WEBHOOK_URL"
     )
     syncro_api_key: str | None = Field(default=None, validation_alias="SYNCRO_API_KEY")
+    nvd_api_key: str | None = Field(default=None, validation_alias="NVD_API_KEY")
     verify_webhook_url: AnyHttpUrl | None = Field(
         default=None, validation_alias="VERIFY_WEBHOOK_URL"
     )
