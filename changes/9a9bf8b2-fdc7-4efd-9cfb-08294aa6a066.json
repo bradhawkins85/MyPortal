@@ -1,0 +1,7 @@
+{
+  "guid": "9a9bf8b2-fdc7-4efd-9cfb-08294aa6a066",
+  "occurred_at": "2026-11-26T12:27Z",
+  "change_type": "Feature",
+  "summary": "RMM checks can now watch switches, firewalls, UPSs and printers over SNMP v1, v2c or v3, polled by a device on the same network, with presets for uptime, interface status, CPU, UPS battery and toner levels.",
+  "content_hash": "799ff1c3f5a4a94acb61f5662191347a19fd4c1c9bb6eb3a4385f0dc17ca8b04"
+}
