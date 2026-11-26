@@ -1,0 +1,253 @@
+/*
+ * Projects (/admin/projects and a project's page). Builds on the shared tokens
+ * and the .scf-* editor components.
+ */
+
+.prj-page [hidden] {
+  display: none !important;
+}
+
+.prj-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+  gap: var(--space-gap-base);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prj-card {
+  border: 1px solid var(--hf-line);
+  border-left-width: 4px;
+  border-left-color: var(--hf-accent);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-panel-raised);
+}
+
+.prj-card--warn {
+  border-left-color: var(--hf-warning);
+}
+
+.prj-card--alert {
+  border-left-color: var(--hf-danger);
+}
+
+.prj-card__link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: var(--space-gap-base) var(--space-gap-roomy);
+  color: inherit;
+  text-decoration: none;
+}
+
+.prj-card__link:focus-visible {
+  outline: 2px solid var(--hf-focus);
+  outline-offset: 2px;
+}
+
+.prj-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.prj-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.prj-chip {
+  display: inline-flex;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--hf-line);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  color: var(--hf-muted);
+  background: var(--hf-bg-sunken);
+}
+
+.prj-progress {
+  display: grid;
+  grid-template-columns: minmax(6rem, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.prj-progress--wide {
+  margin-top: var(--space-gap-base);
+}
+
+.prj-meter {
+  display: block;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--hf-bg-sunken);
+  overflow: hidden;
+}
+
+.prj-meter__fill {
+  display: block;
+  height: 100%;
+  background: var(--hf-success);
+}
+
+.prj-meter--hours .prj-meter__fill {
+  background: var(--hf-accent);
+}
+
+.prj-card--warn .prj-meter--hours .prj-meter__fill {
+  background: var(--hf-warning);
+}
+
+.prj-card--alert .prj-meter--hours .prj-meter__fill {
+  background: var(--hf-danger);
+}
+
+.prj-description {
+  margin: var(--space-gap-base) 0 0;
+  white-space: pre-line;
+}
+
+.prj-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-gap-base);
+  margin-bottom: var(--space-gap-base);
+}
+
+.prj-disclosure > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.prj-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.prj-disclosure[open] {
+  flex-basis: 100%;
+}
+
+.prj-disclosure--inline[open] {
+  flex-basis: auto;
+}
+
+.prj-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  margin-top: var(--space-gap-base);
+  padding: var(--space-gap-base);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-panel-raised);
+  text-align: left;
+}
+
+.prj-form__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-gap-base);
+}
+
+.prj-form.prj-form__row {
+  flex-direction: row;
+}
+
+.prj-grow {
+  flex: 1 1 16rem;
+}
+
+.prj-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-bottom: 0.6rem;
+}
+
+.prj-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.prj-billing {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.prj-preview {
+  margin: 0;
+  color: var(--hf-copy-strong);
+}
+
+.prj-phase + .prj-phase {
+  margin-top: var(--space-gap-roomy);
+}
+
+.prj-phase__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.prj-phase__title {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--hf-copy-strong);
+}
+
+.prj-phase__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+.prj-phase__actions form,
+.prj-inline {
+  display: inline;
+}
+
+.prj-phase__empty {
+  margin: 0.25rem 0 0;
+}
+
+.prj-task--done td {
+  opacity: 0.7;
+}
+
+@media (max-width: 640px) {
+  .prj-billing {
+    grid-template-columns: 1fr;
+  }
+
+  .prj-phase__actions {
+    margin-left: 0;
+  }
+}
+
+.prj-tasks {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.prj-tasks th:nth-child(1) { width: 40%; }
+.prj-tasks th:nth-child(2) { width: 14%; }
+.prj-tasks th:nth-child(3) { width: 16%; }
+.prj-tasks th:nth-child(4) { width: 14%; }
+.prj-tasks th:nth-child(5) { width: 16%; }
+
+.prj-disclosure > summary.button {
+  display: inline-flex;
+  width: auto;
+}

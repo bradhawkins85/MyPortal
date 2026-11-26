@@ -305,6 +305,16 @@ async def generate_invoice(
         )
         all_tickets = []
 
+    # Time on fixed-fee project tasks is billed by milestone, never as ticket
+    # time; their expenses are still invoiced.
+    from app.services import projects as projects_service
+
+    fixed_fee_ticket_ids = (
+        await projects_service.fixed_fee_ticket_ids(ticket.get("id") for ticket in all_tickets)
+        if include_ticket_items
+        else set()
+    )
+
     for ticket in all_tickets if include_ticket_items else []:
         try:
             ticket_id = int(ticket.get("id")) if ticket.get("id") is not None else None
@@ -320,6 +330,8 @@ async def generate_invoice(
             continue
 
         unbilled_reply_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
+        if ticket_id in fixed_fee_ticket_ids:
+            unbilled_reply_ids = set()
         unbilled_expenses = await expenses_repo.list_expenses(
             ticket_id, unbilled_only=True
         )

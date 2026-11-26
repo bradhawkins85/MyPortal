@@ -1,0 +1,103 @@
+{#- Create or edit a project (projects/list.html). static/js/projects.js opens it in place. -#}
+{% set e = editing or {"status": "planning", "billing_type": "time_materials"} %}
+{% set err = errors or {} %}
+<div class="modal scf-modal" id="prj-modal" role="dialog" aria-modal="true" aria-labelledby="prj-modal-title" {% if not editing %}hidden{% endif %} data-prj-modal {% if editing %}data-prj-open-on-load{% endif %}>
+  <form class="modal__panel modal__panel--wide scf-editor" method="post" action="/admin/projects{% if e.id %}/{{ e.id }}{% endif %}" data-prj-form novalidate>
+    {% include "partials/csrf.html" %}
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Project</p>
+        <h2 class="modal__title" id="prj-modal-title">{{ "Edit " ~ e.name if e.id else "New project" }}</h2>
+        <p class="scf-editor__subtitle">Who it's for, how it's billed and its budget. Add phases and tasks on the project's page.</p>
+      </div>
+      <a href="/admin/projects" class="modal__close" data-modal-close aria-label="Close project editor"></a>
+    </header>
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        {% if err %}<div class="alert alert--error" role="alert">Check the highlighted fields.</div>{% endif %}
+        <div class="scf-grid">
+          <div class="form-field">
+            <label class="form-label" for="prj-name">Name</label>
+            <input class="form-input" id="prj-name" name="name" maxlength="255" value="{{ e.name or '' }}" placeholder="e.g. Office move" required data-prj-input>
+            {% if err.name %}<p class="form-help form-help--error">{{ err.name }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="prj-company-field">Company</label>
+            <select class="form-input" id="prj-company-field" name="company_id" required data-prj-input>
+              <option value="">Choose a company…</option>
+              {% for company in companies %}<option value="{{ company.id }}" {% if e.company_id == company.id %}selected{% endif %}>{{ company.name }}</option>{% endfor %}
+            </select>
+            {% if err.company_id %}<p class="form-help form-help--error">{{ err.company_id }}</p>{% endif %}
+          </div>
+        </div>
+        <fieldset class="prj-fieldset">
+          <legend class="form-label">Billing</legend>
+          <div class="scf-type-grid prj-billing">
+            {% for key, info in billing_types.items() %}
+            <label class="scf-type-card"><input type="radio" name="billing_type" value="{{ key }}" {% if (e.billing_type or "time_materials") == key %}checked{% endif %} data-prj-input><span class="scf-type-card__label">{{ info[0] }}</span><span class="scf-type-card__help">{{ info[1] }}</span></label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <div class="scf-grid">
+          <div class="form-field">
+            <label class="form-label" for="prj-hours">Hours budget <span class="field-optional">optional</span></label>
+            <input class="form-input" id="prj-hours" name="budget_hours" type="number" min="0.25" step="0.25" value="{{ e.budget_hours or '' }}" data-prj-input>
+            <p class="form-help">Leave blank to compare against the tasks' estimates.</p>
+            {% if err.budget_hours %}<p class="form-help form-help--error">{{ err.budget_hours }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="prj-amount" data-prj-amount-label>{{ "Fixed fee" if e.billing_type == "fixed_fee" else "Budget" }} <span class="field-optional" data-prj-amount-optional {% if e.billing_type == "fixed_fee" %}hidden{% endif %}>optional</span></label>
+            <input class="form-input" id="prj-amount" name="budget_amount" type="number" min="0" step="0.01" value="{{ e.budget_amount or '' }}" data-prj-input>
+            {% if err.budget_amount %}<p class="form-help form-help--error">{{ err.budget_amount }}</p>{% endif %}
+          </div>
+        </div>
+        <div class="scf-grid">
+          <div class="form-field">
+            <label class="form-label" for="prj-start">Starts <span class="field-optional">optional</span></label>
+            <input class="form-input" id="prj-start" name="start_date" type="date" value="{{ e.start_date or '' }}" data-prj-input>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="prj-due">Due <span class="field-optional">optional</span></label>
+            <input class="form-input" id="prj-due" name="due_date" type="date" value="{{ e.due_date or '' }}" data-prj-input>
+            {% if err.due_date %}<p class="form-help form-help--error">{{ err.due_date }}</p>{% endif %}
+          </div>
+        </div>
+        <div class="scf-grid">
+          <div class="form-field">
+            <label class="form-label" for="prj-manager">Project manager <span class="field-optional">optional</span></label>
+            <select class="form-input" id="prj-manager" name="manager_user_id" data-prj-input>
+              <option value="">No one yet</option>
+              {% for tech in technicians %}<option value="{{ tech.id }}" {% if e.manager_user_id == tech.id %}selected{% endif %}>{{ tech.name }}</option>{% endfor %}
+            </select>
+            {% if err.manager_user_id %}<p class="form-help form-help--error">{{ err.manager_user_id }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="prj-status">Status</label>
+            <select class="form-input" id="prj-status" name="status" data-prj-input>
+              {% for key, label in statuses.items() %}<option value="{{ key }}" {% if (e.status or "planning") == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="prj-description">Scope <span class="field-optional">optional</span></label>
+          <textarea class="form-input" id="prj-description" name="description" rows="3" maxlength="8000">{{ e.description or '' }}</textarea>
+        </div>
+      </div>
+      <aside class="scf-preview" aria-label="Summary">
+        <p class="scf-preview__eyebrow">In plain English</p>
+        <p class="prj-preview" data-prj-preview role="status" aria-live="polite">Name the project and choose the company.</p>
+        <ul class="scf-preview__rules">
+          <li>Tasks are tickets, so time, assignment and scheduling work as usual.</li>
+          <li data-prj-show="fixed_fee">Ticket time stays off invoices; bill the fee by milestone.</li>
+          <li data-prj-show="time_materials">Ticket time is invoiced as usual.</li>
+        </ul>
+      </aside>
+    </div>
+    <footer class="modal__footer scf-editor__footer">
+      <span class="scf-editor__spacer"></span>
+      <a href="/admin/projects" class="button button--ghost" data-modal-close>Cancel</a>
+      <button type="submit" class="button button--primary">{{ "Save project" if e.id else "Create project" }}</button>
+    </footer>
+  </form>
+</div>
+<noscript><style>#prj-modal:not([hidden]) { position: static; }</style></noscript>

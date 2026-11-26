@@ -1,0 +1,7 @@
+{
+  "guid": "01d9bb41-eeb4-41df-adeb-afb39902a7df",
+  "occurred_at": "2026-11-26T23:49Z",
+  "change_type": "Feature",
+  "summary": "Projects plan larger jobs as phases of task tickets with progress, hours and budget tracking, and fixed-fee projects keep their time off ticket invoices and bill the fee by milestone.",
+  "content_hash": "69042780c8a58b8cc9305d709bb7e2a7637462062339f9031d7261f1a483088e"
+}

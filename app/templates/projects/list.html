@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/projects.css') }}">{% endblock %}
+{% set STATUS_VARIANT = {"planning": "info", "active": "success", "on_hold": "warning", "completed": "neutral", "cancelled": "neutral"} %}
+
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Projects</span>
+    <form class="page-header-toolbar" method="get" action="/admin/projects">
+      <label class="visually-hidden" for="prj-company">Company</label>
+      <select id="prj-company" name="company_id" class="form-input page-header-toolbar__select" data-submit-on-change>
+        <option value="">All companies</option>
+        {% for company in companies %}<option value="{{ company.id }}" {% if selected_company_id == company.id %}selected{% endif %}>{{ company.name }}</option>{% endfor %}
+      </select>
+      <label class="visually-hidden" for="prj-show">Show</label>
+      <select id="prj-show" name="show" class="form-input page-header-toolbar__select" data-submit-on-change>
+        <option value="open" {% if show == "open" %}selected{% endif %}>Open projects</option>
+        <option value="all" {% if show == "all" %}selected{% endif %}>All projects</option>
+      </select>
+      <label class="visually-hidden" for="prj-search">Find a project</label>
+      <input id="prj-search" type="search" class="form-input page-header-toolbar__search" placeholder="Find a project" data-prj-search>
+      <noscript><button type="submit" class="button button--ghost">Apply</button></noscript>
+    </form>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([{"label": "+ New project", "type": "link", "variant": "primary", "href": "/admin/projects?new=1" ~ ("&company_id=" ~ selected_company_id if selected_company_id else ""), "attrs": {"data-prj-open": "", "aria-haspopup": "dialog", "aria-controls": "prj-modal"}}]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid prj-page">
+  {{ counter_strip([
+    {"label": "Open", "value": counts.open, "variant": "info"},
+    {"label": "Over budget", "value": counts.over, "variant": ("danger" if counts.over else "neutral")},
+    {"label": "Overdue", "value": counts.overdue, "variant": ("danger" if counts.overdue else "neutral")},
+    {"label": "Due within 2 weeks", "value": counts.due_soon, "variant": ("warning" if counts.due_soon else "neutral")},
+  ]) }}
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="prj-list-heading">
+    <div class="card__header"><div>
+      <h2 class="card__title" id="prj-list-heading">{{ "All projects" if show == "all" else "Open projects" }}</h2>
+      <p class="card__subtitle">Progress is the share of task tickets resolved; hours are the time logged on them against the budget (or the tasks' estimates).</p>
+    </div></div>
+    {% if items %}
+    <ul class="prj-list">
+      {% for item in items %}
+      <li class="prj-card{% if 'over_budget' in item.flags or 'overdue' in item.flags %} prj-card--alert{% elif 'near_budget' in item.flags or 'due_soon' in item.flags %} prj-card--warn{% endif %}" data-prj-item data-prj-text="{{ (item.name ~ ' ' ~ (item.company_name or '') ~ ' ' ~ (item.manager or '')) | lower }}">
+        <a class="prj-card__link" href="/admin/projects/{{ item.id }}">
+          <span class="prj-card__head">
+            <strong>{{ item.name }}</strong>
+            <span class="status status--{{ STATUS_VARIANT.get(item.status, 'neutral') }}">{{ item.status_label }}</span>
+            {% if 'overdue' in item.flags %}<span class="status status--error">Overdue</span>{% endif %}
+            {% if 'over_budget' in item.flags %}<span class="status status--error">Over budget</span>{% endif %}
+          </span>
+          <span class="prj-chips">
+            <span class="prj-chip">{{ item.company_name }}</span>
+            <span class="prj-chip">{{ item.billing_label }}</span>
+            {% if item.manager %}<span class="prj-chip">{{ item.manager }}</span>{% endif %}
+            {% if item.due_date %}<span class="prj-chip">Due {{ item.due_date.isoformat() }}</span>{% endif %}
+          </span>
+          <span class="prj-progress">
+            <span class="prj-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ item.progress }}" aria-label="Tasks done"><span class="prj-meter__fill" style="width: {{ item.progress }}%"></span></span>
+            <span>{{ item.done }} of {{ item.tasks }} task{{ "s" if item.tasks != 1 }} done</span>
+          </span>
+          <span class="prj-progress">
+            <span class="prj-meter prj-meter--hours" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ item.hours_meter }}" aria-label="Hours used"><span class="prj-meter__fill" style="width: {{ item.hours_meter }}%"></span></span>
+            <span>{{ item.used_text }} of {{ item.budget_text }}{% if item.budget_source == "estimates" %} (estimates){% endif %}</span>
+          </span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="empty-state" data-prj-no-results hidden>No projects match your search.</p>
+    {% else %}
+    <p class="empty-state">No {{ "" if show == "all" else "open " }}projects yet. Plan larger jobs, such as an office move or server replacement, as phases of task tickets with a budget. <a href="/admin/projects?new=1" data-prj-open aria-haspopup="dialog" aria-controls="prj-modal">+ Start a project</a></p>
+    {% endif %}
+  </section>
+</div>
+{% include "projects/_project_editor.html" %}
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/projects.js') }}" defer></script>{% endblock %}
