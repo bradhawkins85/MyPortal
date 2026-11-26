@@ -933,6 +933,9 @@ app.add_middleware(
         # The public client onboarding form authenticates with the single-use
         # magic-link token in its URL; clients have no portal session.
         "/onboarding/",
+        # The public satisfaction survey authenticates with the unguessable
+        # token emailed to the ticket's requester; they have no portal session.
+        "/csat/",
         "/api/integration-modules/uptimekuma/alerts",
         "/api/integration-modules/trello/webhook",
         "/api/integration-modules/xero/webhook",

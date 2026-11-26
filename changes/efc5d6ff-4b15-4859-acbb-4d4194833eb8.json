@@ -1,0 +1,7 @@
+{
+  "guid": "efc5d6ff-4b15-4859-acbb-4d4194833eb8",
+  "occurred_at": "2026-11-26T12:08Z",
+  "change_type": "Feature",
+  "summary": "Requesters can now rate resolved tickets in a one-question satisfaction survey, and technicians see CSAT scores per technician and company with low scores flagged for follow-up on the new Satisfaction page.",
+  "content_hash": "dcc27b83f47fb3cb870a4b2bd925e33d5e29757835ad36f7c5b5abc46a09ee3d"
+}

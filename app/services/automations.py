@@ -42,6 +42,7 @@ TRIGGER_EVENTS: list[dict[str, str]] = [
     {"value": "tickets.sla_at_risk", "label": "Ticket SLA at risk"},
     {"value": "tickets.sla_response_breached", "label": "Ticket response SLA breached"},
     {"value": "tickets.sla_resolution_breached", "label": "Ticket resolution SLA breached"},
+    {"value": "tickets.csat_received", "label": "Ticket satisfaction survey answered"},
     {"value": "webhook.delivered", "label": "Webhook delivered"},
     {"value": "smtp2go.opened", "label": "SMTP2Go email opened"},
     {"value": "smtp2go.clicked", "label": "SMTP2Go email clicked"},
