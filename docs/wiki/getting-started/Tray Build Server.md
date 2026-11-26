@@ -33,6 +33,12 @@ The agent:
 Builds are queued when a deployment URL is created, when you press
 **Rebuild**, and automatically when MyPortal caches a newer tray release.
 
+To rebuild many URLs at once, use the page's **Actions** menu on
+*Admin > Tray*: **Rebuild failed** retries every URL whose last build failed,
+**Rebuild outdated** rebuilds URLs whose ready installers are for an older
+tray release than the one cached, and **Rebuild all** rebuilds every active
+URL. URLs already queued or building are skipped.
+
 The GitHub release workflows are not involved: the public MSI, pkg and DMG
 are built exactly as before, and the company-specific installers never leave
 your build server and MyPortal.
@@ -367,8 +373,8 @@ a wrong package password and a revoked MyPortal enrolment token.
 | Upload fails with 413 | Raise the proxy upload limit as in step 4. |
 | A build stopped half way | Builds that do not report back within two hours are handed out again automatically. |
 
-Failed builds are not retried for the same release; press **Rebuild** after
-fixing the cause. Expired and revoked deployment URLs are not built, and
+Failed builds are not retried for the same release; press **Rebuild** (or
+**Actions > Rebuild failed** for all of them) after fixing the cause. Expired and revoked deployment URLs are not built, and
 their installers stop downloading because the link no longer resolves.
 Already downloaded provisioning packages retain their local setup behavior
 as described above.

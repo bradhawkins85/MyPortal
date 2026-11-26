@@ -300,3 +300,83 @@ def test_server_installers_show_whether_they_are_signed():
 
     assert html.count('<span class="status status--success">Signed</span>') == 1
     assert "Not signed yet" in html
+
+
+def test_header_menu_offers_bulk_installer_rebuilds():
+    html = _render()
+
+    menu = html.split('id="tray-workspace-actions"', 1)[1]
+    for scope, label in (("failed", "Rebuild failed"), ("outdated", "Rebuild outdated"), ("all", "Rebuild all")):
+        assert f'action="/admin/tray/deployment-links/bulk-rebuild/{scope}"' in menu, scope
+        assert f"<span>{label}</span>" in menu, label
+    assert re.search(r'action="/admin/tray/deployment-links/bulk-rebuild/all"[^>]*data-confirm=', menu)
+    assert 'name="_csrf" value="t"' in menu
+
+
+def test_technicians_do_not_see_bulk_rebuilds():
+    assert "bulk-rebuild" not in _render(super_admin=False)
+
+
+class _FlashCalls:
+    def __init__(self, monkeypatch):
+        self.flash: tuple[str, str] | None = None
+        self.audit: list[dict[str, Any]] = []
+        real = main.flash_redirect
+
+        def flash(url, message, variant="info", **kwargs):
+            self.flash = (message, variant)
+            return real(url, message, variant, **kwargs)
+
+        async def audit(**kwargs):
+            self.audit.append(kwargs)
+
+        async def admin(request):
+            return {"id": 1, "is_super_admin": True}, None
+
+        monkeypatch.setattr(main, "flash_redirect", flash)
+        monkeypatch.setattr(main.audit_service, "log_action", audit)
+        monkeypatch.setattr(main, "_require_super_admin_page", admin)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("scope, queued, message, variant, audited", [
+    ("failed", 2, "Queued Windows installer builds for 2 failed deployment URLs.", "success", True),
+    ("outdated", 1, "Queued Windows installer builds for 1 outdated deployment URL.", "success", True),
+    ("all", 0, "No active deployment URLs need a rebuild.", "info", False),
+])
+async def test_bulk_rebuild_route(monkeypatch, scope, queued, message, variant, audited):
+    from app.services import tray_deployment_builds
+
+    calls = _FlashCalls(monkeypatch)
+    queue = AsyncMock(return_value=queued)
+    monkeypatch.setattr(tray_deployment_builds, "queue_rebuilds", queue)
+    monkeypatch.setattr(tray_deployment_builds, "current_release_tag", lambda: "v1.2.3")
+
+    response = await main.admin_tray_bulk_rebuild_deployment_links(scope, SimpleNamespace())
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/tray#deployment-urls"
+    queue.assert_awaited_once_with(scope)
+    assert calls.flash[0].startswith(message) and calls.flash[1] == variant
+    assert bool(calls.audit) is audited
+    if audited:
+        assert calls.audit[0]["new_value"] == {"scope": scope, "queued": queued}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("scope, release, message", [
+    ("everything", "v1.2.3", "Unknown rebuild option."),
+    ("outdated", None, "No tray release is cached on this server"),
+])
+async def test_bulk_rebuild_route_rejects_without_queueing(monkeypatch, scope, release, message):
+    from app.services import tray_deployment_builds
+
+    calls = _FlashCalls(monkeypatch)
+    queue = AsyncMock(return_value=0)
+    monkeypatch.setattr(tray_deployment_builds, "queue_rebuilds", queue)
+    monkeypatch.setattr(tray_deployment_builds, "current_release_tag", lambda: release)
+
+    await main.admin_tray_bulk_rebuild_deployment_links(scope, SimpleNamespace())
+
+    queue.assert_not_awaited()
+    assert calls.flash[0].startswith(message) and calls.flash[1] == "error"

@@ -135,6 +135,41 @@ async def queue_outdated_builds(release_tag: str) -> int:
     return queued
 
 
+REBUILD_SCOPES = ("failed", "outdated", "all")
+
+
+async def queue_rebuilds(scope: str) -> int:
+    """Queue builds for active links matching ``scope`` and return how many.
+
+    ``failed``: the link's latest build failed. ``outdated``: the link's
+    latest build is ready but for an older release than the cached one.
+    ``all``: every active link. Links already queued or building are skipped.
+    """
+
+    if scope not in REBUILD_SCOPES:
+        raise ValueError(f"Unsupported rebuild scope: {scope}")
+    release_tag = current_release_tag()
+    if scope == "outdated" and release_tag is None:
+        return 0
+    latest = await latest_build_by_link()
+    queued = 0
+    for link in await tray_repo.list_active_deployment_links():
+        link_id = int(link["id"])
+        build = latest.get(link_id)
+        status = build.get("status") if build else None
+        if status in ("queued", "building"):
+            continue
+        if scope == "failed" and status != "failed":
+            continue
+        if scope == "outdated" and (
+            status != "ready" or build.get("release_tag") == release_tag
+        ):
+            continue
+        await tray_repo.create_deployment_build(link_id)
+        queued += 1
+    return queued
+
+
 async def claim_next_build(portal_url: str, *, supports_ppkg: bool = False) -> dict[str, Any] | None:
     """Claim the next build for the agent and return its job description."""
 

@@ -437,3 +437,58 @@ async def test_upload_route_accepts_parts(sqlite_db):
     request = SimpleNamespace(stream=lambda: _chunks(b"cd"))
     result = await deploy_routes.build_agent_upload(build_id, "msi", request, offset=2, total=4, _api_key={})
     assert result == {"status": "uploaded", "sha256": hashlib.sha256(b"abcd").hexdigest()}
+
+
+async def _add_active_link(conn, link_id: int) -> None:
+    await conn.execute(
+        "INSERT INTO tray_deployment_links (id, company_id, label, slug_hash, slug_prefix, "
+        "slug_encrypted, install_token_id, install_token_encrypted) VALUES (?, 3, 'L', 's', 's', ?, 11, ?)",
+        (link_id, encrypt_secret("slug"), encrypt_secret(TOKEN)),
+    )
+
+
+async def _add_build(conn, link_id: int, status: str, release_tag: str | None) -> None:
+    await conn.execute(
+        "INSERT INTO tray_deployment_builds (deployment_link_id, status, release_tag) VALUES (?, ?, ?)",
+        (link_id, status, release_tag),
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("scope, expected", [
+    ("failed", {8}),
+    ("outdated", {9}),
+    ("all", {7, 8, 9, 10, 12}),
+])
+async def test_queue_rebuilds_by_scope(sqlite_db, scope, expected):
+    # 7: ready for current release; 8: failed; 9: ready for an older release;
+    # 10: never built; 11: already queued; 12: failed then superseded ready old build.
+    for link_id in (8, 9, 10, 11, 12):
+        await _add_active_link(sqlite_db, link_id)
+    await _add_build(sqlite_db, 7, "ready", "v1.4.2")
+    await _add_build(sqlite_db, 8, "ready", "v1.4.1")
+    await _add_build(sqlite_db, 8, "failed", "v1.4.2")
+    await _add_build(sqlite_db, 9, "ready", "v1.4.1")
+    await _add_build(sqlite_db, 11, "queued", None)
+    await _add_build(sqlite_db, 12, "superseded", "v1.4.0")
+    await _add_build(sqlite_db, 12, "ready", "v1.4.2")
+    await sqlite_db.commit()
+    before = {b["id"] for b in await tray_repo.list_deployment_builds()}
+
+    assert await builds.queue_rebuilds(scope) == len(expected)
+
+    new = [b for b in await tray_repo.list_deployment_builds() if b["id"] not in before]
+    assert {b["deployment_link_id"] for b in new} == expected
+    assert all(b["status"] == "queued" for b in new)
+    # Running it again queues nothing: every match is now waiting.
+    assert await builds.queue_rebuilds(scope) == 0
+
+
+@pytest.mark.anyio
+async def test_queue_rebuilds_skips_outdated_without_release(sqlite_db, monkeypatch):
+    await _add_build(sqlite_db, 7, "ready", "v1.4.1")
+    await sqlite_db.commit()
+    monkeypatch.setattr(builds.tray_installer, "get_cached_latest_release_info", lambda: {})
+    assert await builds.queue_rebuilds("outdated") == 0
+    with pytest.raises(ValueError):
+        await builds.queue_rebuilds("bogus")

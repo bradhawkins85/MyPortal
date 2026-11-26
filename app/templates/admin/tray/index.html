@@ -12,7 +12,11 @@
   {% if is_super_admin %}
     {{ page_header_actions([
       {"label": "New menu configuration", "type": "link", "variant": "primary", "href": "/admin/tray/configurations/new"},
-      {"label": "Tray app documentation", "type": "link", "href": "/docs/tray_app"}
+      {"label": "Tray app documentation", "type": "link", "href": "/docs/tray_app"},
+      {"type": "section", "label": "Deployment URL installers"},
+      {"label": "Rebuild failed", "type": "form", "action": "/admin/tray/deployment-links/bulk-rebuild/failed"},
+      {"label": "Rebuild outdated", "type": "form", "action": "/admin/tray/deployment-links/bulk-rebuild/outdated"},
+      {"label": "Rebuild all", "type": "form", "action": "/admin/tray/deployment-links/bulk-rebuild/all", "confirm": "Rebuild the Windows installers for every active deployment URL? Provisioning packages get new unlock passwords."}
     ], menu_id="tray-workspace-actions") }}
   {% endif %}
 {% endblock %}
