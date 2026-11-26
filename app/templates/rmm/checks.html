@@ -35,7 +35,7 @@
           {% if check.last_summary %}<br><span class="text-muted">{{ check.last_summary }}</span>{% endif %}
         </td>
         <td data-label="Status" data-column-key="status"><span class="status status--{{ 'success' if check.is_enabled else 'neutral' }}">{{ "On" if check.is_enabled else "Off" }}</span></td>
-        <td class="table__actions" data-column-key="actions">{% if check.can_edit %}{{ rmm_ui.check_menu(check, csrf_token) }}{% endif %}</td>
+        <td class="table__actions" data-column-key="actions">{% if check.can_edit or (can_edit and check.is_enabled) %}{{ rmm_ui.check_menu(check, csrf_token, can_run=can_edit) }}{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

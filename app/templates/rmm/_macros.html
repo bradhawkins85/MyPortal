@@ -273,10 +273,17 @@
 {# Edit, turn on or off, and delete one RMM check. On an asset page
    (asset_id) a company or every-company check can also be copied as the
    device's own check, which replaces it on that device. #}
-{% macro check_menu(check, csrf_token=none, asset_id=none) -%}
+{% macro check_menu(check, csrf_token=none, asset_id=none, can_run=false) -%}
 <details class="rmm-menu rmm-menu--end" data-rmm-menu>
   <summary class="button button--ghost button--small rmm-menu__toggle" aria-label="Actions for {{ check.name }}">Action <span aria-hidden="true">▾</span></summary>
   <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="Actions for {{ check.name }}">
+    {%- if can_run and check.is_enabled and (check.applies is not defined or check.applies) %}
+    <form method="post" action="/rmm/checks/{{ check.id }}/run" class="rmm-menu__form">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+      {% if asset_id %}<input type="hidden" name="return_asset_id" value="{{ asset_id }}">{% endif %}
+      <button class="dropdown__item" role="menuitem" type="submit" title="Run this check now instead of waiting for its next interval">Check now{% if not asset_id %} on all devices{% endif %}</button>
+    </form>
+    {%- endif %}
     {%- if check.can_edit %}
     <a class="dropdown__item" role="menuitem" href="/rmm/checks?check={{ check.id }}#rmm-check-form">Edit</a>
     {%- endif %}

@@ -26,23 +26,42 @@ DEFAULT_TIMEOUT_SECONDS = 300
 SHOWN_COMMAND_LENGTH = 2000
 
 
-async def queue_checkin(agent: Mapping[str, Any], requested_by_user_id: int | None) -> int:
-    """Queue a one-off native task through the normal immediate RMM channel."""
+async def _queue_agent_task(agent: Mapping[str, Any], requested_by_user_id: int | None, *, name: str,
+                            path: str, timeout_seconds: int) -> int:
+    """Queue a native agent task through the normal immediate RMM channel.
+
+    Agents too old to know the task run the fallback, which fails asking for an update."""
+
     windows = str(agent.get("os") or "").lower() == "windows"
-    text = ('throw "Update the MyPortal RMM agent to use Check in now."'
-            if windows else 'echo "Update the MyPortal RMM agent to use Check in now." >&2; exit 1')
-    script = {"id": None, "name": "Check in now", "path": "agent/checkin",
+    message = f"Update the MyPortal RMM agent to use {name}."
+    text = f'throw "{message}"' if windows else f'echo "{message}" >&2; exit 1'
+    script = {"id": None, "name": name, "path": path,
               "language": "powershell" if windows else "bash", "run_anyway": True,
               "content_sha256": hashlib.sha256(text.encode()).hexdigest()}
     run_id = await rmm_repo.create_run(
         script=script, content=text, agent_id=int(agent["id"]), company_id=int(agent["company_id"]),
         asset_id=int(agent["asset_id"]), requested_by_user_id=requested_by_user_id, inputs=[],
         payload_encrypted=encrypt_secret(json.dumps({"parameters": {}, "parameter_order": [], "env": {}, "files": []})),
-        timeout_seconds=900, expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + rmm_scripts.QUEUE_LIFETIME,
+        timeout_seconds=timeout_seconds,
+        expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + rmm_scripts.QUEUE_LIFETIME,
         run_source=RUN_SOURCE, run_as="system",
     )
     rmm_scripts.notify_agent(int(agent["id"]))
     return run_id
+
+
+async def queue_checkin(agent: Mapping[str, Any], requested_by_user_id: int | None) -> int:
+    """Queue a one-off full check-in: device facts, inventory, checks and event logs."""
+
+    return await _queue_agent_task(agent, requested_by_user_id, name="Check in now", path="agent/checkin",
+                                   timeout_seconds=900)
+
+
+async def queue_checks_now(agent: Mapping[str, Any], requested_by_user_id: int | None) -> int:
+    """Queue a one-off measurement of the device's checks (disk, services, files and so on)."""
+
+    return await _queue_agent_task(agent, requested_by_user_id, name="Check now", path="agent/checks",
+                                   timeout_seconds=300)
 
 
 def languages_for(agent: Mapping[str, Any] | None) -> list[dict[str, str]]:

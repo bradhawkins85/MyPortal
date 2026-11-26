@@ -276,7 +276,7 @@
               {% else %}<span class="status status--neutral">Waiting</span> <span class="text-muted">for the first result</span>{% endif %}
             </td>
             <td data-label="Applies to">{{ "This device" if check.asset_id else check.scope_label }}{% if check.target_rules %}<br><span class="rmm-chip">Advanced rules</span>{% endif %}</td>
-            <td class="table__actions">{% if chk.can_edit %}{{ rmm_ui.check_menu(check, csrf_token, asset.id) }}{% endif %}</td>
+            <td class="table__actions">{% if chk.can_edit %}{{ rmm_ui.check_menu(check, csrf_token, asset.id, can_run=chk.has_agent) }}{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>

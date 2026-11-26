@@ -61,6 +61,28 @@ func runCheckinSteps(ctx context.Context, steps []checkinStep) client.Result {
 		TimedOut: errors.Is(ctx.Err(), context.DeadlineExceeded)}
 }
 
+// reportChecks measures the device's configured checks once and reports them,
+// outside the regular checks loop and without resetting its timer.
+func reportChecks(ctx context.Context, api *client.Client) error {
+	cfg, err := api.GetCheckConfig(ctx)
+	if err != nil || !cfg.Enabled {
+		return err
+	}
+	collector := checks.NewCollector()
+	collector.Prime()
+	return api.SendCheckReport(ctx, collector.Collect(ctx, cfg))
+}
+
+// performChecksNow is the "Check now" task: only the monitoring checks, so a
+// technician sees a result without waiting for the next report.
+func performChecksNow(ctx context.Context, api *client.Client) client.Result {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	return runCheckinSteps(ctx, []checkinStep{
+		{"Configured monitoring checks", func(ctx context.Context) error { return reportChecks(ctx, api) }},
+	})
+}
+
 func performFullCheckin(ctx context.Context, api *client.Client, r *runner.Runner) client.Result {
 	if !fullCheckinMu.TryLock() {
 		code := 1
@@ -78,15 +100,7 @@ func performFullCheckin(ctx context.Context, api *client.Client, r *runner.Runne
 		{"Hardware and software inventory", func(ctx context.Context) error {
 			return api.SendInventory(ctx, inventory.Collect(ctx))
 		}},
-		{"Configured monitoring checks", func(ctx context.Context) error {
-			cfg, err := api.GetCheckConfig(ctx)
-			if err != nil || !cfg.Enabled {
-				return err
-			}
-			collector := checks.NewCollector()
-			collector.Prime()
-			return api.SendCheckReport(ctx, collector.Collect(ctx, cfg))
-		}},
+		{"Configured monitoring checks", func(ctx context.Context) error { return reportChecks(ctx, api) }},
 		{"Configured Windows event logs", func(ctx context.Context) error {
 			if !eventlog.Supported {
 				return nil

@@ -68,7 +68,7 @@ from app.repositories import rmm_checks as repo
 from app.repositories import rmm_stats as stats_repo
 from app.repositories import rmm_targeting as targeting_repo
 from app.security.encryption import encrypt_secret
-from app.services import rmm_action_steps, rmm_actions, rmm_automation, rmm_scripts, rmm_targeting
+from app.services import rmm_action_steps, rmm_actions, rmm_automation, rmm_commands, rmm_scripts, rmm_targeting
 from app.services import rmm_proxmox
 from app.services.rmm_scripts import RunRequestError
 from app.services.rmm_stats import sample_time as _sample_time
@@ -1257,6 +1257,15 @@ def _ago(delta: timedelta) -> str:
     return f"{hours // 24} days"
 
 
+def _offline_result(check: Mapping[str, Any], agent: Mapping[str, Any], now: datetime) -> tuple[bool, str]:
+    last_seen = agent.get("last_seen_utc")
+    if last_seen is None:
+        return True, "Has never checked in"
+    away = now - last_seen
+    problem = away >= timedelta(minutes=int(check.get("duration_minutes") or 30))
+    return problem, f"Last checked in {_ago(away)} ago" if away >= timedelta(minutes=1) else "Checked in just now"
+
+
 async def evaluate_offline(now: datetime | None = None) -> int:
     """Check every agent's last check-in against its offline checks. Returns how many results were recorded."""
 
@@ -1275,14 +1284,8 @@ async def evaluate_offline(now: datetime | None = None) -> int:
         if not applicable:
             continue
         states = states_by_agent[int(agent["id"])]
-        last_seen = agent.get("last_seen_utc")
         for check in applicable:
-            if last_seen is None:
-                problem, result = True, "Has never checked in"
-            else:
-                away = now - last_seen
-                problem = away >= timedelta(minutes=int(check.get("duration_minutes") or 30))
-                result = f"Last checked in {_ago(away)} ago" if away >= timedelta(minutes=1) else "Checked in just now"
+            problem, result = _offline_result(check, agent, now)
             await record_result(check, agent, problem, result, now=now,
                                 state=states.get(int(check["id"])) or _blank_state(),
                                 duration_minutes=0)
@@ -1341,35 +1344,45 @@ async def run_due_script_checks(now: datetime | None = None) -> int:
             if state["next_run_at"] is not None and state["next_run_at"] > now:
                 continue
             try:
-                if state["run_id"]:
-                    run = await rmm_repo.get_run(int(state["run_id"]))
-                    if run and run.get("status") in _RUN_WAITING:
-                        continue  # still waiting for the last run
-                    if run:  # finished without reporting here (expired or cancelled)
-                        state["run_id"] = None
-                        state = await record_result(check, agent, *script_outcome(check, run), now=now, state=state)
                 full_agent = full_agent or await rmm_repo.get_agent(int(agent["id"]))
-                interval = timedelta(minutes=int((check.get("settings") or {}).get("interval_minutes")
-                                                 or DEFAULT_SCRIPT_INTERVAL))
-                state["next_run_at"] = now + interval
-                run_id, summary, attempted = await rmm_actions.run_script(
-                    script_id=check.get("check_script_id"),
-                    entries_encrypted=check.get("check_entries_encrypted"),
-                    inputs=check.get("check_inputs"),
-                    timeout_seconds=check.get("timeout_seconds"),
-                    agent=full_agent or agent,
-                    run_source=RUN_SOURCE,
-                    extra_context=check_context(check, agent, ""),
-                )
-                state["run_id"] = run_id
-                if run_id is None:
-                    await repo.set_summary(int(check["id"]), summary)
-                else:
+                if await _queue_script_check(check, full_agent or agent, state, now):
                     queued += 1
-                await repo.save_state(int(check["id"]), int(agent["id"]), state)
             except Exception as exc:  # noqa: BLE001 - one device must not stop the others
                 log_error("RMM script check failed", check_id=check["id"], agent_id=agent["id"], error=str(exc))
     return queued
+
+
+async def _queue_script_check(check: Mapping[str, Any], agent: Mapping[str, Any], state: dict[str, Any],
+                              now: datetime) -> bool:
+    """Queue a script check's script on the device and start its interval again from ``now``.
+
+    Nothing is queued while the last run is still waiting on the device.
+    Returns whether a run was queued."""
+
+    if state["run_id"]:
+        run = await rmm_repo.get_run(int(state["run_id"]))
+        if run and run.get("status") in _RUN_WAITING:
+            return False  # still waiting for the last run
+        if run:  # finished without reporting here (expired or cancelled)
+            state["run_id"] = None
+            state.update(await record_result(check, agent, *script_outcome(check, run), now=now, state=state))
+    interval = timedelta(minutes=int((check.get("settings") or {}).get("interval_minutes")
+                                     or DEFAULT_SCRIPT_INTERVAL))
+    state["next_run_at"] = now + interval
+    run_id, summary, _attempted = await rmm_actions.run_script(
+        script_id=check.get("check_script_id"),
+        entries_encrypted=check.get("check_entries_encrypted"),
+        inputs=check.get("check_inputs"),
+        timeout_seconds=check.get("timeout_seconds"),
+        agent=agent,
+        run_source=RUN_SOURCE,
+        extra_context=check_context(check, agent, ""),
+    )
+    state["run_id"] = run_id
+    if run_id is None:
+        await repo.set_summary(int(check["id"]), summary)
+    await repo.save_state(int(check["id"]), int(agent["id"]), state)
+    return run_id is not None
 
 
 async def run_finished(run_id: int) -> int:
@@ -1461,6 +1474,60 @@ async def run_due_scheduled_checks(now: datetime | None = None) -> int:
         except Exception as exc:  # noqa: BLE001 - one failure must not stop the others
             log_error("RMM check scheduled run failed", check_id=check_id, agent_id=agent_id, error=str(exc))
     return queued
+
+
+async def check_now(check: Mapping[str, Any], *, company_id: int, asset_id: int | None = None,
+                    requested_by_user_id: int | None = None, now: datetime | None = None) -> dict[str, int]:
+    """Run ``check`` straight away on the company's devices it applies to (or one device),
+    rather than waiting for its interval.
+
+    A script check queues its script now and starts its interval again; an
+    agent offline check is judged now; the agent measures every other type,
+    so each device is sent a task to measure and report its checks now.
+    The check's duration and actions apply to the result as usual.
+    Returns how many ``devices`` it applies to, how many tasks were ``queued``
+    and how many results were ``recorded``."""
+
+    now = now or _utcnow()
+    kind = str(check.get("check_type") or "")
+    agents = [agent for agent in await repo.list_active_agents()
+              if agent.get("company_id") is not None and int(agent["company_id"]) == int(company_id)
+              and (asset_id is None or (agent.get("asset_id") is not None and int(agent["asset_id"]) == int(asset_id)))]
+    outcome = {"devices": 0, "queued": 0, "recorded": 0}
+    if not agents or not check.get("is_enabled") or kind not in CHECK_TYPES:
+        return outcome
+    candidates = await repo.list_checks_of_types([kind], with_secrets=True)
+    selected = await targeted_checks_for_agents(candidates, agents)
+    check_id = int(check["id"])
+    targets = []
+    for agent in agents:
+        current = next((item for item in selected[int(agent["id"])] if int(item["id"]) == check_id), None)
+        if current is not None:
+            targets.append((agent, current))
+    outcome["devices"] = len(targets)
+    if not targets:
+        return outcome
+    states_by_agent = await repo.list_states_for_agents(int(agent["id"]) for agent, _current in targets)
+    for agent, current in targets:
+        state = {**_blank_state(), **(states_by_agent[int(agent["id"])].get(check_id) or {})}
+        try:
+            if kind == "offline":
+                await record_result(current, agent, *_offline_result(current, agent, now), now=now, state=state,
+                                    duration_minutes=0)
+                outcome["recorded"] += 1
+                continue
+            full_agent = await rmm_repo.get_agent(int(agent["id"]))
+            if not full_agent:
+                continue
+            if kind == "script":
+                queued = await _queue_script_check(current, full_agent, state, now)
+            else:
+                await rmm_commands.queue_checks_now(full_agent, requested_by_user_id)
+                queued = True
+            outcome["queued"] += int(queued)
+        except Exception as exc:  # noqa: BLE001 - one device must not stop the others
+            log_error("RMM check now failed", check_id=check_id, agent_id=agent["id"], error=str(exc))
+    return outcome
 
 
 async def tick() -> None:
