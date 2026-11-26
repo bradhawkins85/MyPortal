@@ -1,0 +1,7 @@
+{
+  "guid": "aa97cdec-97b3-4bda-b143-23710951812b",
+  "occurred_at": "2026-11-26T04:21Z",
+  "change_type": "Improvement",
+  "summary": "The LLM Usage page now opens on the last 7 days instead of the last 30, so recent activity is easier to see.",
+  "content_hash": "c36bc4a08ad77fb538389560a25acb56c4b62f4dddf42f56f150d7ea2367f2c4"
+}
