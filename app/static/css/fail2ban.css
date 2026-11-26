@@ -1,0 +1,118 @@
+/* Fail2ban status page (/admin/fail2ban). */
+.f2b {
+  --f2b-ok: var(--color-success);
+  --f2b-warn: var(--hf-warning, var(--color-accent));
+  --f2b-bad: var(--color-danger);
+  --f2b-info: var(--color-text-muted);
+}
+
+.f2b > .management__content,
+.f2b .card {
+  min-width: 0;
+}
+
+.f2b .table-wrapper,
+.f2b .table-container {
+  overflow-x: auto;
+}
+
+.f2b-health {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-gap-base);
+}
+
+.f2b-health__item {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  align-items: start;
+  gap: var(--space-gap-base);
+  padding: var(--space-gap-base) var(--space-compact-inline);
+  border-left: 3px solid var(--f2b-info);
+  border-radius: 0.35rem;
+}
+
+.f2b-health__item--success { border-left-color: var(--f2b-ok); }
+.f2b-health__item--warning { border-left-color: var(--f2b-warn); }
+.f2b-health__item--danger { border-left-color: var(--f2b-bad); }
+
+.f2b-health__item .status { justify-self: start; }
+
+.f2b-health__title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.f2b-health__detail {
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.f2b-jails {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: var(--space-gap-base);
+}
+
+.f2b-jail {
+  display: grid;
+  align-content: start;
+  gap: var(--space-gap-tight);
+  padding: var(--space-gap-base) var(--space-compact-inline);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+}
+
+.f2b-jail__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
+.f2b-jail__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.f2b-jail__name,
+.f2b-jail__description,
+.f2b-jail__rules {
+  margin: 0;
+}
+
+.f2b-jail__stats {
+  margin: var(--space-gap-tight) 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.f2b-jail__stats dd { margin: 0; }
+
+.f2b-activity__counts {
+  margin: 0 0 var(--space-gap-base);
+}
+
+.f2b-activity__counts dd { margin: 0; }
+
+.f2b-subheading {
+  margin: var(--space-gap-base) 0 var(--space-gap-tight);
+  font-size: 1rem;
+}
+
+.f2b-detail,
+.f2b code {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .f2b-health__item {
+    grid-template-columns: 1fr;
+  }
+
+  .f2b-optional {
+    display: none;
+  }
+}

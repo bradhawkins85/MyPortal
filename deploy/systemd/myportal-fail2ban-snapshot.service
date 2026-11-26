@@ -1,0 +1,24 @@
+[Unit]
+Description=MyPortal Fail2ban status snapshot for the admin page
+After=fail2ban.service
+
+[Service]
+Type=oneshot
+# Runs as root because Fail2ban's control socket is root-only. It only reads
+# from Fail2ban and writes /var/lib/myportal-fail2ban/status.json, which the
+# MyPortal web service (group myportal) may read but not change.
+User=root
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+# Resolve the current release at execution time so the script is always
+# the latest version without requiring a unit-file update per release.
+ExecStart=/bin/bash -c 'release="$(readlink -f /opt/myportal/current 2>/dev/null || true)"; [[ -n "$release" && -f "$release/scripts/fail2ban_snapshot.py" ]] || { echo "Error: cannot resolve the current MyPortal release." >&2; exit 1; }; exec /usr/bin/python3 -I "$release/scripts/fail2ban_snapshot.py"'

@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import data_table, table_toolbar %}
+
+{% macro utc(value, fallback="—") -%}
+  {%- if value -%}<span data-utc="{{ value }}">{{ value }}</span>{%- else -%}{{ fallback }}{%- endif -%}
+{%- endmacro %}
+
+{% set check_labels = {"success": "OK", "warning": "Check", "danger": "Problem", "info": "Off"} %}
+{% set snap = f2b.snapshot %}
+
+{% block title %}Fail2ban{% endblock %}
+{% block header_title %}Fail2ban{% endblock %}
+{% block header_meta %}
+  <span class="muted" role="status" aria-live="polite">
+    {%- if snap.generated_at -%}
+      Ban list checked {{ utc(snap.generated_at) }}{% if snap.fail2ban_version %} · Fail2ban {{ snap.fail2ban_version }}{% endif %}
+    {%- else -%}
+      See whether Fail2ban is protecting MyPortal and who it has blocked.
+    {%- endif -%}
+  </span>
+{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([{"label": "Refresh", "type": "link", "href": "/admin/fail2ban", "variant": "primary"},
+                          {"label": "Setup guide", "type": "link", "href": "/help/getting-started/fail2ban-setup"}]) }}
+{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ static_url('/static/css/fail2ban.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="management management--single f2b">
+  <section class="management__content">
+
+    <section class="card card--panel" aria-labelledby="f2b-health-title">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title" id="f2b-health-title">Health</h2>
+          <p class="card__subtitle">MyPortal logs failed sign-ins and bot scans; Fail2ban reads that log and blocks the sender.</p>
+        </div>
+      </header>
+      <div class="card__body">
+        <ul class="f2b-health">
+          {% for check in f2b.health %}
+          <li class="f2b-health__item f2b-health__item--{{ check.status }}">
+            <span class="status status--{{ 'neutral' if check.status == 'info' else check.status }}">{{ check_labels.get(check.status, check.status) }}</span>
+            <div>
+              <p class="f2b-health__title">{{ check.title }}</p>
+              <p class="f2b-health__detail muted">{{ check.detail }}</p>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </section>
+
+    {% if f2b.jails %}
+    <section class="card card--panel" aria-labelledby="f2b-jails-title">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title" id="f2b-jails-title">Jails</h2>
+          <p class="card__subtitle">Each jail watches the log for one kind of event and blocks addresses that break its rule.</p>
+        </div>
+      </header>
+      <div class="card__body f2b-jails">
+        {% for jail in f2b.jails %}
+        <article class="f2b-jail" aria-labelledby="f2b-jail-{{ loop.index }}">
+          <header class="f2b-jail__header">
+            <h3 class="f2b-jail__title" id="f2b-jail-{{ loop.index }}">{{ jail.label }}</h3>
+            {% if not jail.loaded %}
+              <span class="status status--warning">Not loaded</span>
+            {% elif jail.running %}
+              <span class="status status--success">Running</span>
+            {% else %}
+              <span class="status status--danger">Problem</span>
+            {% endif %}
+          </header>
+          <p class="f2b-jail__name muted"><code>{{ jail.name }}</code></p>
+          {% if jail.description %}<p class="f2b-jail__description">{{ jail.description }}</p>{% endif %}
+          {% if jail.loaded and jail.running %}
+          <dl class="stats-grid f2b-jail__stats">
+            <div class="stat"><dt class="stat__label">Blocked now</dt><dd class="stat__value">{{ jail.currently_banned if jail.currently_banned is not none else "—" }}</dd></div>
+            <div class="stat"><dt class="stat__label">Blocked since start</dt><dd class="stat__value">{{ jail.total_banned if jail.total_banned is not none else "—" }}</dd></div>
+            <div class="stat"><dt class="stat__label">Watching</dt><dd class="stat__value">{{ jail.currently_failed if jail.currently_failed is not none else "—" }}</dd></div>
+          </dl>
+          {% if jail.rules %}<p class="f2b-jail__rules">{{ jail.rules }}</p>{% endif %}
+          {% if jail.bans_truncated %}<p class="muted">Only the first 5,000 blocked addresses are listed below.</p>{% endif %}
+          {% elif jail.error %}
+          <p class="f2b-jail__rules">{{ jail.error }}</p>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% if snap.state == "ok" and snap.fail2ban_running %}
+    <section class="card card--panel" aria-labelledby="f2b-bans-title">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title" id="f2b-bans-title">Blocked now</h2>
+          <p class="card__subtitle">This page is view only. To unblock an address, run <code>sudo fail2ban-client unban <var>address</var></code> on the server.</p>
+        </div>
+      </header>
+      <div class="card__body">
+        {% set ban_columns = [
+          {"key": "ip", "label": "Address", "mobile_priority": "essential"},
+          {"key": "jail", "label": "Jail", "filter_options": "multiple", "width": "16%"},
+          {"key": "banned", "label": "Blocked", "sort_type": "date", "width": "16%"},
+          {"key": "unbans", "label": "Unblocks", "sort_type": "date", "width": "16%"},
+          {"key": "reason", "label": "Last event", "mobile_priority": "essential"}
+        ] %}
+        {{ table_toolbar("f2b-bans", search=true, search_placeholder="Search addresses or events", search_value=f2b_search,
+                         columns=ban_columns) }}
+        <div id="f2b-bans">
+        {% call data_table(ban_columns, table_id="f2b-bans", columns=ban_columns, aria_label="Addresses Fail2ban is blocking now") %}
+          {% for ban in f2b_bans %}
+          <tr>
+            <td data-column-key="ip"><code>{{ ban.ip }}</code></td>
+            <td data-column-key="jail">{{ ban.jail_label }}</td>
+            <td data-column-key="banned" data-sort-value="{{ ban.banned_at or '' }}">{{ utc(ban.banned_at) }}</td>
+            <td data-column-key="unbans" data-sort-value="{{ ban.unbans_at or '' }}">{% if ban.permanent %}Never{% else %}{{ utc(ban.unbans_at) }}{% endif %}</td>
+            <td data-column-key="reason">{{ ban.reason or "Not in the last 24 hours of the log" }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="table__empty">
+            {%- if f2b_search or f2b_jail_filter -%}No blocked addresses match this search.
+            {%- else -%}Nobody is blocked right now. Addresses appear here as soon as a jail blocks them.{%- endif -%}
+          </td></tr>
+          {% endfor %}
+        {% endcall %}
+        </div>
+      </div>
+    </section>
+    {% endif %}
+
+    {% set activity = f2b.activity %}
+    <section class="card card--panel" aria-labelledby="f2b-activity-title">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title" id="f2b-activity-title">Recent activity</h2>
+          <p class="card__subtitle">What MyPortal reported to Fail2ban in the last 24 hours{% if f2b.log_path %}, from <code>{{ f2b.log_path }}</code>{% endif %}.</p>
+        </div>
+      </header>
+      <div class="card__body">
+        <dl class="stats-grid f2b-activity__counts">
+          {% for item in activity.counts %}
+          <div class="stat"><dt class="stat__label">{{ item.label }}</dt><dd class="stat__value">{{ item.count }}</dd></div>
+          {% endfor %}
+          <div class="stat"><dt class="stat__label">Addresses</dt><dd class="stat__value">{{ activity.addresses }}</dd></div>
+        </dl>
+
+        <h3 class="f2b-subheading">Busiest addresses</h3>
+        {% if activity.top_addresses %}
+        <div class="table-wrapper">
+          <table class="table">
+            <caption class="visually-hidden">Addresses with the most failed sign-ins, scanner traps and unknown pages</caption>
+            <thead><tr><th scope="col">Address</th><th scope="col">Events</th><th scope="col" class="f2b-optional">Breakdown</th><th scope="col" class="f2b-optional">Last seen</th><th scope="col">Status</th></tr></thead>
+            <tbody>
+              {% for row in activity.top_addresses %}
+              <tr>
+                <td><code>{{ row.ip }}</code></td>
+                <td>{{ row.total }}</td>
+                <td class="f2b-optional">{{ row.breakdown }}</td>
+                <td class="f2b-optional">{{ utc(row.last_seen) }}</td>
+                <td>{% if row.blocked %}<span class="status status--danger">Blocked</span>{% else %}<span class="status status--neutral">Not blocked</span>{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="muted">No failed sign-ins or bot scans in the last 24 hours.</p>
+        {% endif %}
+
+        <h3 class="f2b-subheading">Latest events</h3>
+        {% if activity.latest %}
+        <div class="table-wrapper">
+          <table class="table">
+            <caption class="visually-hidden">The latest {{ activity.latest | length }} events MyPortal logged for Fail2ban</caption>
+            <thead><tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">Address</th><th scope="col">Detail</th></tr></thead>
+            <tbody>
+              {% for event in activity.latest %}
+              <tr>
+                <td>{{ utc(event.occurred_at) }}</td>
+                <td>{{ event.label }}</td>
+                <td><code>{{ event.ip }}</code></td>
+                <td class="f2b-detail">{{ event.detail or "—" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="muted">No events yet. They appear here as soon as MyPortal logs a failed sign-in or a bot scan.</p>
+        {% endif %}
+      </div>
+    </section>
+
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+{% endblock %}

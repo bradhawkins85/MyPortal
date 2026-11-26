@@ -851,6 +851,15 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="FAIL2BAN_LOG_PATH",
     )
+    fail2ban_status_path: Path | None = Field(
+        default=Path("/var/lib/myportal-fail2ban/status.json"),
+        validation_alias="FAIL2BAN_STATUS_PATH",
+        description=(
+            "Read-only Fail2ban snapshot written every minute by the root "
+            "myportal-fail2ban-snapshot.timer and shown on /admin/fail2ban. "
+            "Set empty to hide the ban list."
+        ),
+    )
     log_rotation: str | None = Field(
         default="00:00",
         validation_alias="LOG_ROTATION",
@@ -1469,6 +1478,7 @@ class Settings(BaseSettings):
     @field_validator(
         "app_log_path",
         "fail2ban_log_path",
+        "fail2ban_status_path",
         "error_log_path",
         mode="before",
     )

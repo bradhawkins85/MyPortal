@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the MyPortal Fail2ban status snapshot every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

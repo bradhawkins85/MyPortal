@@ -820,6 +820,14 @@ if [[ "$ENVIRONMENT" == "production" ]]; then
     systemctl enable myportal-backup.timer 2>/dev/null || true
     echo "Backup timer installed and enabled (daily by default)."
   fi
+  # Refresh the read-only Fail2ban snapshot for /admin/fail2ban every minute.
+  if [[ -f "${PROJECT_ROOT}/deploy/systemd/myportal-fail2ban-snapshot.service" ]]; then
+    install -m 0644 "${PROJECT_ROOT}/deploy/systemd/myportal-fail2ban-snapshot.service" /etc/systemd/system/myportal-fail2ban-snapshot.service
+    install -m 0644 "${PROJECT_ROOT}/deploy/systemd/myportal-fail2ban-snapshot.timer" /etc/systemd/system/myportal-fail2ban-snapshot.timer
+    systemctl daemon-reload
+    systemctl enable --now myportal-fail2ban-snapshot.timer 2>/dev/null || true
+    echo "Fail2ban status snapshot timer installed and enabled."
+  fi
 
   gitea_note=""
   if [[ -f /etc/gitea/admin-credentials ]]; then

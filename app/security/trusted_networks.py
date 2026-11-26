@@ -50,6 +50,7 @@ DEFAULT_RESTRICTED_PATHS: tuple[str, ...] = (
     "/admin/cron-calendar",
     "/admin/system-updates",
     "/admin/env-checker",
+    "/admin/fail2ban",
     "/admin/feature-packs",
     "/admin/modules",
     "/admin/webhooks",
