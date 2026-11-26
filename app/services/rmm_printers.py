@@ -45,6 +45,14 @@ FORGET_AFTER = timedelta(days=365)
 MAX_PRINTERS = 500
 MAX_ERRORS = 20
 
+ACTION_RUN_SOURCE = "printer_action"
+ACTION_MARKER = "##myportal-printer-action="
+ACTION_TIMEOUT_SECONDS = 180
+ACTION_EXPIRY = timedelta(hours=24)
+ACTIONS = ("rename", "remove")
+MAX_NAME_LENGTH = 220
+_ACTIVE_RUN_STATUSES = {"queued", "dispatched", "running"}
+
 _BUILTIN = Path(__file__).parent / "rmm_builtin"
 
 # Win32_Printer's numeric PrinterStatus (used where Get-Printer is missing).
@@ -94,17 +102,17 @@ def _builtin_script(content: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def take_marker(stdout: str) -> tuple[str, str | None]:
+def take_marker(stdout: str, marker: str = MARKER) -> tuple[str, str | None]:
     """Remove the printer line from ``stdout``; return the rest and the encoded scan."""
 
-    if MARKER not in stdout:
+    if marker not in stdout:
         return stdout, None
     encoded = None
     kept = []
     for line in stdout.splitlines(keepends=True):
         stripped = line.strip()
-        if stripped.startswith(MARKER):
-            encoded = stripped[len(MARKER):]
+        if stripped.startswith(marker):
+            encoded = stripped[len(marker):]
             continue
         kept.append(line)
     return "".join(kept), encoded
@@ -323,6 +331,13 @@ def _display(row: Mapping[str, Any]) -> dict[str, Any]:
     item["scope_label"] = "User connection" if row.get("connected_users") else "Device"
     item["is_installed"] = bool(row.get("is_installed", 1))
     item["presence_label"] = "Installed" if item["is_installed"] else "No longer seen"
+    pending = row.get("pending_action") if row.get("pending_run_status") in _ACTIVE_RUN_STATUSES else None
+    item["pending_action"] = pending
+    item["pending_name"] = row.get("pending_name") if pending == "rename" else None
+    item["pending_label"] = ({"rename": "Rename pending", "remove": "Removal pending"}.get(pending) if pending else None)
+    item["is_connection"] = is_connection(row)
+    item["can_rename"] = item["is_installed"] and not item["is_connection"] and not pending
+    item["can_remove"] = not pending
     return item
 
 
@@ -356,4 +371,121 @@ async def asset_context(agent: Mapping[str, Any] | None, *, can_run: bool) -> di
     }
 
 
+# --------------------------------------------------------------------------- #
+# Renaming and removing printers
+# --------------------------------------------------------------------------- #
+
+
+def is_connection(row: Mapping[str, Any]) -> bool:
+    """A print server connection (\\\\server\\printer), which Windows cannot rename."""
+
+    return (str(row.get("name") or "").startswith("\\\\")
+            or str(row.get("printer_type") or "").lower() == "connection")
+
+
+def action_script_content() -> str:
+    return (_BUILTIN / "printer_action.ps1").read_text(encoding="utf-8")
+
+
+def clean_new_name(value: Any, current: str, others: list[str]) -> str:
+    """The new name for a printer, or :class:`RunRequestError` explaining why it cannot be used."""
+
+    name = " ".join(str(value or "").split())
+    if not name:
+        raise RunRequestError({"new_name": "Enter the printer's new name."})
+    if len(name) > MAX_NAME_LENGTH:
+        raise RunRequestError({"new_name": f"Printer names can be at most {MAX_NAME_LENGTH} characters."})
+    if "\\" in name or "," in name or any(ord(char) < 32 for char in name):
+        raise RunRequestError({"new_name": "Printer names cannot contain backslashes or commas."})
+    if name == current:
+        raise RunRequestError({"new_name": "That is already the printer's name."})
+    if any(name.casefold() == other.casefold() for other in others if other != current):
+        raise RunRequestError({"new_name": "Another printer on this device already has that name."})
+    return name
+
+
+async def queue_action(agent: Mapping[str, Any] | None, printer_id: int, action: str, *,
+                       new_name: Any = None, user_id: int | None = None) -> dict[str, Any]:
+    """Rename or remove a device's printer.
+
+    Returns ``{"printer": name, "run_id": id}`` for a change queued on the
+    device, or ``{"printer": name, "run_id": None}`` when a printer no longer
+    seen was simply forgotten."""
+
+    if action not in ACTIONS:
+        raise RunRequestError({"action": "Choose to rename or remove the printer."})
+    if not is_windows(agent):
+        raise RunRequestError({"device": "Printer changes need an RMM agent on Windows."})
+    agent_id = int(agent["id"])
+    rows = await repo.list_printers(agent_id)
+    printer = next((row for row in rows if int(row["id"]) == int(printer_id)), None)
+    if printer is None:
+        raise RunRequestError({"printer": "That printer is no longer listed for this device."})
+    shown = _display(printer)
+    if shown["pending_action"]:
+        raise RunRequestError({"printer": "A change to this printer is already waiting for the device."})
+    if action == "remove" and not shown["is_installed"]:
+        await repo.delete_printer(agent_id, int(printer["id"]))
+        return {"printer": printer["name"], "run_id": None}
+    if action == "rename":
+        if not shown["is_installed"]:
+            raise RunRequestError({"printer": "Only printers still installed on the device can be renamed."})
+        if shown["is_connection"]:
+            raise RunRequestError({"printer": "Printer connections to a print server are named by the server "
+                                              "and cannot be renamed on the device."})
+        new_name = clean_new_name(new_name, printer["name"], [row["name"] for row in rows if row["is_installed"]])
+    else:
+        new_name = None
+    if agent.get("status") != "active":
+        raise RunRequestError({"device": "Printer changes need an active RMM agent."})
+    content = action_script_content()
+    script = {**_builtin_script(content), "name": "Printer " + action, "path": "builtin/printer_action.ps1"}
+    problem = rmm_scripts.device_problem(script, agent)
+    if problem:
+        raise RunRequestError({"device": problem})
+    request = {"action": action, "name": printer["name"], "new_name": new_name}
+    run_id = await rmm_repo.create_run(
+        script=script, content=content, agent_id=agent_id, company_id=int(agent["company_id"]),
+        asset_id=agent.get("asset_id"), requested_by_user_id=user_id, inputs=[],
+        payload_encrypted=encrypt_secret(json.dumps({"env": {"MYPORTAL_PRINTER_ACTION": json.dumps(request)}})),
+        timeout_seconds=ACTION_TIMEOUT_SECONDS, expires_at=utcnow() + ACTION_EXPIRY, run_source=ACTION_RUN_SOURCE,
+    )
+    await repo.set_pending(agent_id, int(printer["id"]), action=action, new_name=new_name, run_id=run_id)
+    rmm_scripts.notify_agent(agent_id)
+    return {"printer": printer["name"], "new_name": new_name, "run_id": run_id}
+
+
+async def capture_action(agent: Mapping[str, Any], run: Mapping[str, Any], stdout: str) -> str:
+    """Apply a finished rename or removal to the stored printer list."""
+
+    if run.get("run_source") != ACTION_RUN_SOURCE:
+        return stdout
+    stdout, encoded = take_marker(stdout, ACTION_MARKER)
+    agent_id = int(agent["id"])
+    printer = await repo.get_by_pending_run(agent_id, int(run["id"]))
+    if printer is None:
+        return stdout
+    try:
+        result = json.loads(encoded) if encoded else {}
+    except ValueError:
+        result = {}
+    status = result.get("status") if isinstance(result, Mapping) else None
+    if status == "removed" and printer["pending_action"] == "remove":
+        await repo.delete_printer(agent_id, int(printer["id"]))
+    elif status == "renamed" and printer["pending_action"] == "rename" and printer.get("pending_name"):
+        await repo.rename_printer(agent_id, int(printer["id"]), printer["pending_name"])
+    else:
+        await repo.clear_pending(agent_id, int(printer["id"]))
+    log_info("RMM printer action finished", agent_id=agent_id, run_id=run.get("id"),
+             action=printer["pending_action"], status=status or "failed")
+    return stdout
+
+
+async def strip_live_action_output(agent: Mapping[str, Any], run_id: int, stdout: str) -> str:
+    if ACTION_MARKER not in stdout:
+        return stdout
+    return take_marker(stdout, ACTION_MARKER)[0]
+
+
 rmm_scripts.register_run_hooks("printers", live_output=strip_live_output, result=capture)
+rmm_scripts.register_run_hooks("printer_actions", live_output=strip_live_action_output, result=capture_action)

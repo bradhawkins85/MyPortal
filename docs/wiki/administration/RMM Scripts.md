@@ -806,6 +806,23 @@ run history as **Printer scan**. A printer the latest scan did not report is sho
 over a year. Printers that are still installed are always listed. Per-user connections are only
 seen while that user is signed in; they stay listed between scans like any other printer.
 
+Technicians who can run scripts can tidy the list from each printer's **Actions** menu:
+
+- **Rename…** gives a printer installed on the device a more useful name (for example
+  "Reception colour laser"). It runs `Rename-Printer` on the device; print jobs, sharing and the
+  driver are unchanged. Connections to a print server (`\\server\printer`) are named by the
+  server and cannot be renamed.
+- **Remove…** deletes a printer from the device with `Remove-Printer`. For a print server
+  connection it also removes the machine-wide connection and the connection of every signed-in
+  user; users who are not signed in keep it. The printer driver stays installed.
+- **Remove from list…** (printers no longer seen) only clears MyPortal's record; nothing is sent
+  to the device.
+
+Renames and removals run as a built-in **Printer rename** / **Printer remove** script through the
+RMM agent, show as *Rename pending* or *Removal pending* until the device reports back, and are
+recorded in the audit log (`rmm.printers.rename`, `rmm.printers.remove`). If the device reports a
+failure, the printer is left as it was and the run's output explains why.
+
 The device's printers are also available as JSON from `GET /api/rmm/assets/{id}/printers`.
 
 ### Health check

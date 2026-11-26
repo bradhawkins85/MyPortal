@@ -25,7 +25,7 @@ UPSTAIRS = r"\\print01\Upstairs"
 
 @pytest.fixture
 async def printers_db(sqlite_db, monkeypatch):
-    for name in ("574_rmm_printers.sql", "575_rmm_printer_job_count.sql"):
+    for name in ("574_rmm_printers.sql", "575_rmm_printer_job_count.sql", "577_rmm_printer_actions.sql"):
         sql = Database()._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text())
         await sqlite_db.conn.executescript(sql)
     monkeypatch.setattr(repo, "db", sqlite_db)
@@ -247,3 +247,189 @@ def test_printers_section_renders_sortable_filterable_table():
     assert "No longer seen" in html and "Default for CONTOSO\\amy" in html and "10.0.0.20" in html
     assert 'data-column-key="jobs"' in html and 'data-value="4"' in html and 'title="PrinterStatus: PaperJam"' in html
     assert 'data-utc="2025-01-02T00:00:00"' in html and "/rmm/assets/10/printers/scan" in html
+
+
+# --------------------------------------------------------------------------- #
+# Renaming and removing printers
+# --------------------------------------------------------------------------- #
+
+
+async def _printer(agent, name):
+    return next(row for row in await repo.list_printers(int(agent["id"])) if row["name"] == name)
+
+
+async def _finish_action(agent, stdout, *, exit_code=0):
+    [job] = await rmm_scripts.claim_jobs(agent)
+    assert "MYPORTAL_PRINTER_ACTION" in job["script"]
+    await rmm_scripts.record_result(agent, job["id"], {"exit_code": exit_code, "stdout": stdout})
+    return job
+
+
+def _action_line(status):
+    return printers.ACTION_MARKER + json.dumps({"status": status, "message": "done"}) + "\n"
+
+
+def test_action_migration_and_script():
+    sql = (ROOT / "migrations" / "577_rmm_printer_actions.sql").read_text()
+    assert "-- phase: expand" in sql and "pending_run_id" in sql and "pending_action" in sql
+    script = printers.action_script_content()
+    assert "Rename-Printer" in script and "Remove-Printer" in script and printers.ACTION_MARKER in script
+    assert "$env:MYPORTAL_PRINTER_ACTION" in script
+
+
+def test_clean_new_name():
+    assert printers.clean_new_name("  Reception   laser ", "Office HP", ["Office HP"]) == "Reception laser"
+    for bad in ("", "a\\b", "a,b", "Office HP", "office pdf", "x" * 221):
+        with pytest.raises(RunRequestError) as exc:
+            printers.clean_new_name(bad, "Office HP", ["Office HP", "Office PDF"])
+        assert "new_name" in exc.value.errors
+
+
+@pytest.mark.anyio
+async def test_rename_runs_on_the_device_and_updates_the_list(printers_db):
+    _, agent = await _enrol(printers_db)
+    await _finish_scan(agent, _scan("Office HP", "PDF"))
+    hp = await _printer(agent, "Office HP")
+    result = await printers.queue_action(agent, hp["id"], "rename", new_name="Reception laser", user_id=9)
+    assert result["run_id"] and result["new_name"] == "Reception laser"
+    run = await rmm_repo.get_run(result["run_id"])
+    assert run["run_source"] == "printer_action" and run["requested_by_user_id"] == 9
+
+    shown = {row["name"]: row for row in (await printers.asset_context(agent, can_run=True))["printers"]}
+    assert shown["Office HP"]["pending_label"] == "Rename pending"
+    assert shown["Office HP"]["pending_name"] == "Reception laser"
+    assert not shown["Office HP"]["can_rename"] and not shown["Office HP"]["can_remove"]
+    with pytest.raises(RunRequestError):  # one change at a time
+        await printers.queue_action(agent, hp["id"], "remove")
+
+    job = await _finish_action(agent, "Renaming\n" + _action_line("renamed"))
+    request = json.loads(job["env"]["MYPORTAL_PRINTER_ACTION"])
+    assert request == {"action": "rename", "name": "Office HP", "new_name": "Reception laser"}
+    run = await rmm_repo.get_run(result["run_id"])
+    assert printers.ACTION_MARKER not in run["stdout"]
+    rows = {row["name"]: row for row in await repo.list_printers(int(agent["id"]))}
+    assert set(rows) == {"Reception laser", "Microsoft Print to PDF"}
+    renamed = rows["Reception laser"]
+    assert renamed["id"] == hp["id"] and renamed["pending_action"] is None and renamed["pending_run_id"] is None
+
+
+@pytest.mark.anyio
+async def test_failed_action_leaves_the_printer_unchanged(printers_db):
+    _, agent = await _enrol(printers_db)
+    await _finish_scan(agent, _scan("Office HP"))
+    hp = await _printer(agent, "Office HP")
+    await printers.queue_action(agent, hp["id"], "remove")
+    await _finish_action(agent, "The printer is busy\n", exit_code=1)
+    row = await _printer(agent, "Office HP")
+    assert row["pending_action"] is None and row["is_installed"] == 1
+    assert (await printers.asset_context(agent, can_run=True))["printers"][0]["can_remove"]
+
+
+@pytest.mark.anyio
+async def test_remove_installed_printer_and_connection(printers_db):
+    _, agent = await _enrol(printers_db)
+    await _finish_scan(agent, _scan("Office HP", "Upstairs"))
+    upstairs = await _printer(agent, UPSTAIRS)
+    shown = {row["name"]: row for row in (await printers.asset_context(agent, can_run=True))["printers"]}
+    assert shown[UPSTAIRS]["is_connection"] and not shown[UPSTAIRS]["can_rename"]
+    with pytest.raises(RunRequestError):
+        await printers.queue_action(agent, upstairs["id"], "rename", new_name="Upstairs")
+    result = await printers.queue_action(agent, upstairs["id"], "remove")
+    assert result["run_id"]
+    await _finish_action(agent, _action_line("removed"))
+    assert [row["name"] for row in await repo.list_printers(int(agent["id"]))] == ["Office HP"]
+    assert (await repo.get_scan(int(agent["id"])))["printer_count"] == 1
+
+
+@pytest.mark.anyio
+async def test_removing_a_printer_no_longer_seen_only_forgets_it(printers_db):
+    _, agent = await _enrol(printers_db)
+    await _finish_scan(agent, _scan("Office HP", "PDF"))
+    await _finish_scan(agent, _scan("Office HP"))
+    pdf = await _printer(agent, "Microsoft Print to PDF")
+    with pytest.raises(RunRequestError):
+        await printers.queue_action(agent, pdf["id"], "rename", new_name="PDF")
+    result = await printers.queue_action(agent, pdf["id"], "remove")
+    assert result["run_id"] is None
+    assert [row["name"] for row in await repo.list_printers(int(agent["id"]))] == ["Office HP"]
+    assert await rmm_scripts.claim_jobs(agent) == []
+
+
+@pytest.mark.anyio
+async def test_actions_only_reach_the_agents_own_printers(printers_db):
+    _, agent = await _enrol(printers_db)
+    await _finish_scan(agent, _scan("Office HP"))
+    with pytest.raises(RunRequestError):
+        await printers.queue_action(agent, 99999, "remove")
+    hp = await _printer(agent, "Office HP")
+    with pytest.raises(RunRequestError):
+        await printers.queue_action({**agent, "id": int(agent["id"]) + 1}, hp["id"], "remove")
+    with pytest.raises(RunRequestError):
+        await printers.queue_action(agent, hp["id"], "delete")
+
+
+def _rename_request(path: str, new_name: str) -> Request:
+    body = urlencode([("new_name", new_name)]).encode()
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request({"type": "http", "method": "POST", "path": path, "headers": [
+        (b"content-type", b"application/x-www-form-urlencoded")]}, receive)
+
+
+@pytest.mark.anyio
+async def test_rename_and_remove_routes_audit(printers_db, monkeypatch):
+    from app.features.rmm import printer_routes as routes
+
+    _, agent = await _enrol(printers_db)
+    await _finish_scan(agent, _scan("Office HP", "PDF"))
+    audits = []
+
+    async def context(request, **kwargs):
+        return {"id": 9}, {}, 1, True
+
+    async def audit(**kwargs):
+        audits.append(kwargs)
+
+    monkeypatch.setattr(routes, "_context", context)
+    monkeypatch.setattr(routes.audit_service, "record", audit)
+    hp = await _printer(agent, "Office HP")
+    response = await routes.rename_printer(10, hp["id"], _rename_request("/rename", "a,b"))
+    assert response.headers["location"] == "/assets/10#printers" and audits == []
+    response = await routes.rename_printer(10, hp["id"], _rename_request("/rename", "Reception laser"))
+    assert response.headers["location"] == "/assets/10#printers"
+    assert audits[-1]["action"] == "rmm.printers.rename"
+    assert audits[-1]["metadata"]["new_name"] == "Reception laser"
+    pdf = await _printer(agent, "Microsoft Print to PDF")
+    await routes.remove_printer(10, pdf["id"], _form_request("/remove"))
+    assert audits[-1]["action"] == "rmm.printers.remove" and audits[-1]["metadata"]["run_id"]
+
+
+def test_printers_section_renders_row_actions():
+    env = _environment()
+    env.globals["static_url"] = lambda path: path
+    base = {"printer_type": "Local", "status": "Normal", "is_shared": 0, "connected_users": None,
+            "first_seen_at": datetime(2025, 1, 2), "last_seen_at": datetime(2026, 11, 20)}
+    rows = [
+        printers._display({**base, "id": 1, "name": "Office HP", "is_installed": 1}),
+        printers._display({**base, "id": 2, "name": UPSTAIRS, "printer_type": "Connection",
+                           "connected_users": "CONTOSO\\bob", "is_installed": 1}),
+        printers._display({**base, "id": 3, "name": "Old", "is_installed": 0}),
+        printers._display({**base, "id": 4, "name": "Busy", "is_installed": 1, "pending_action": "rename",
+                           "pending_name": "Front desk", "pending_run_status": "queued"}),
+    ]
+    context = {"scan": {"scanned_at": "2026-11-20T01:00:00", "errors": []}, "printers": rows,
+               "counts": {"total": 3, "shared": 0, "attention": 0, "removed": 1, "jobs": 0},
+               "type_options": [], "status_options": [], "scan_pending": False, "can_run": True}
+    template = env.from_string('{% include "rmm/_asset_printers.html" %}')
+    html = template.render(rmm={"printers": context}, asset={"id": 10}, csrf_token="t")
+    assert 'data-printer-rename="/rmm/assets/10/printers/1/rename"' in html
+    assert 'data-printer-rename="/rmm/assets/10/printers/2/rename"' not in html
+    assert 'data-printer-remove="/rmm/assets/10/printers/2/remove"' in html and 'data-printer-kind="connection"' in html
+    assert 'data-printer-kind="forget"' in html and "Remove from list…" in html
+    assert "Rename pending</span>" in html and "to Front desk" in html and "/printers/4/" not in html
+    assert 'id="rmm-printer-rename-modal"' in html and 'name="new_name"' in html and 'name="_csrf"' in html
+    context["can_run"] = False
+    html = template.render(rmm={"printers": context}, asset={"id": 10}, csrf_token="t")
+    assert "data-printer-rename" not in html and "rmm-printer-rename-modal" not in html

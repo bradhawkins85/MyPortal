@@ -42,9 +42,10 @@
         <th scope="col" data-sort="string" data-column-key="presence" data-filter-options="multiple">Presence</th>
         <th scope="col" data-sort="date" data-column-key="first-seen">First seen</th>
         <th scope="col" data-sort="date" data-column-key="last-seen">Last seen</th>
+        {% if pr.can_run %}<th scope="col" data-column-key="actions"><span class="visually-hidden">Actions</span></th>{% endif %}
       </tr></thead>
       <tbody>{% for printer in pr.printers %}<tr>
-        <td data-label="Name">{{ printer.name }}{% if printer.comment %}<br><span class="text-muted">{{ printer.comment }}</span>{% endif %}</td>
+        <td data-label="Name">{{ printer.name }}{% if printer.comment %}<br><span class="text-muted">{{ printer.comment }}</span>{% endif %}{% if printer.pending_label %}<br><span class="status status--info" title="Waiting for the device to report back">{{ printer.pending_label }}</span>{% if printer.pending_name %} <span class="text-muted">to {{ printer.pending_name }}</span>{% endif %}{% endif %}</td>
         <td data-label="Status" data-value="{{ printer.status_label }}"><span class="status status--{{ printer.status_variant }}"{% if printer.printer_status and printer.printer_status != printer.status_label %} title="PrinterStatus: {{ printer.printer_status }}"{% endif %}>{{ printer.status_label }}</span></td>
         <td data-label="Jobs" data-value="{{ printer.job_count if printer.job_count is not none else -1 }}">{{ printer.job_count if printer.job_count is not none else '—' }}</td>
         <td data-label="Type">{{ printer.type_label }}</td>
@@ -56,6 +57,17 @@
         <td data-label="Presence" data-value="{{ printer.presence_label }}"><span class="status status--{{ 'success' if printer.is_installed else 'neutral' }}">{{ printer.presence_label }}</span></td>
         <td data-label="First seen" data-value="{{ printer.first_seen_at }}"><span data-utc="{{ printer.first_seen_at }}">{{ printer.first_seen_at }}</span></td>
         <td data-label="Last seen" data-value="{{ printer.last_seen_at }}"><span data-utc="{{ printer.last_seen_at }}">{{ printer.last_seen_at }}</span></td>
+        {% if pr.can_run %}<td data-label="Actions">{% if printer.can_rename or printer.can_remove %}{% set menu_id = 'rmm-printer-menu-' ~ printer.id %}
+          <div class="header-menu" data-header-menu>
+            <button type="button" class="button button--ghost button--small header-menu__button" data-header-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-controls="{{ menu_id }}">
+              <span>Actions</span><span class="visually-hidden"> for {{ printer.name }}</span>
+              <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14"><path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" /></svg>
+            </button>
+            <div id="{{ menu_id }}" class="header-menu__panel" role="menu" data-header-menu-panel hidden>
+              {% if printer.can_rename %}<button type="button" class="header-menu__item" role="menuitem" aria-haspopup="dialog" aria-controls="rmm-printer-rename-modal" data-printer-rename="/rmm/assets/{{ asset.id }}/printers/{{ printer.id }}/rename" data-printer-name="{{ printer.name }}">Rename…</button>{% endif %}
+              {% if printer.can_remove %}<button type="button" class="header-menu__item" role="menuitem" aria-haspopup="dialog" aria-controls="rmm-printer-remove-modal" data-printer-remove="/rmm/assets/{{ asset.id }}/printers/{{ printer.id }}/remove" data-printer-name="{{ printer.name }}" data-printer-kind="{{ 'forget' if not printer.is_installed else ('connection' if printer.is_connection else 'device') }}"{% if printer.connected_users %} data-printer-users="{{ printer.connected_users }}"{% endif %}>{{ 'Remove from list…' if not printer.is_installed else 'Remove…' }}</button>{% endif %}
+            </div>
+          </div>{% elif printer.pending_label %}<span class="text-muted">Waiting for device</span>{% endif %}</td>{% endif %}
       </tr>{% endfor %}</tbody>
     </table></div>
     <div class="table-pagination" data-pagination="rmm-printers-table">
@@ -69,3 +81,56 @@
   </div>
   {% endif %}
 </section>
+{% if pr.can_run and pr.printers %}
+<div class="modal rmm-modal" id="rmm-printer-rename-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-printer-rename-title" hidden data-printer-rename-modal>
+  <form class="modal__panel" method="post" action="" data-printer-rename-form novalidate>
+    {% include "partials/csrf.html" %}
+    <header class="modal__header">
+      <div>
+        <p class="rmm-editor__eyebrow">Printers</p>
+        <h2 class="modal__title" id="rmm-printer-rename-title">Rename printer</h2>
+        <p class="rmm-editor__subtitle">Currently <strong data-printer-current>this printer</strong>.</p>
+      </div>
+      <button type="button" class="modal__close" data-printer-modal-close aria-label="Close rename printer"></button>
+    </header>
+    <div class="modal__body">
+      <div class="form-field">
+        <label class="form-label" for="rmm-printer-new-name">New name</label>
+        <input class="form-input" id="rmm-printer-new-name" name="new_name" maxlength="220" autocomplete="off" required data-printer-new-name>
+        <p class="form-help">The name users see when they print. Choose something that says where the printer is or what it is for, such as “Reception colour laser”. Backslashes and commas are not allowed.</p>
+        <p class="form-help form-help--error" role="alert" data-printer-rename-error hidden></p>
+      </div>
+      <p class="form-help" role="status" aria-live="polite" data-printer-rename-preview></p>
+      <p class="form-help">The device renames the printer the next time it collects work, usually within a few minutes. Print jobs, sharing and the driver are not changed.</p>
+    </div>
+    <footer class="modal__footer">
+      <span class="rmm-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-printer-modal-close>Cancel</button>
+      <button type="submit" class="button button--primary">Rename printer</button>
+    </footer>
+  </form>
+</div>
+<div class="modal rmm-modal" id="rmm-printer-remove-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-printer-remove-title" hidden data-printer-remove-modal>
+  <form class="modal__panel" method="post" action="" data-printer-remove-form>
+    {% include "partials/csrf.html" %}
+    <header class="modal__header">
+      <div>
+        <p class="rmm-editor__eyebrow">Printers</p>
+        <h2 class="modal__title" id="rmm-printer-remove-title">Remove printer</h2>
+        <p class="rmm-editor__subtitle"><strong data-printer-current>this printer</strong></p>
+      </div>
+      <button type="button" class="modal__close" data-printer-modal-close aria-label="Close remove printer"></button>
+    </header>
+    <div class="modal__body">
+      <p data-printer-remove-kind="device" hidden>The printer is deleted from this device for every user, the next time the device collects work. Its driver stays installed, so it can be added again later.</p>
+      <p data-printer-remove-kind="connection" hidden>The connection to this print server printer is removed from the device and from the signed-in users who have it<span data-printer-remove-users></span>. Users who are not signed in keep it until it is removed again. The printer itself on the print server is not changed.</p>
+      <p data-printer-remove-kind="forget" hidden>This printer is no longer on the device. Removing it only clears it from MyPortal’s list; nothing is sent to the device.</p>
+    </div>
+    <footer class="modal__footer">
+      <span class="rmm-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-printer-modal-close>Cancel</button>
+      <button type="submit" class="button button--danger" data-printer-remove-submit>Remove printer</button>
+    </footer>
+  </form>
+</div>
+{% endif %}
