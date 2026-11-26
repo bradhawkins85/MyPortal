@@ -5,20 +5,28 @@
  * MYPORTAL_OUTLOOK_ADDIN config object. Runs in Outlook's event-based
  * runtime: it never shows UI, and every path ends with event.completed() so
  * composing is never blocked when MyPortal or Microsoft sign-in is unavailable.
+ *
+ * MSAL must not be created until Office is ready.  New and classic Outlook on
+ * Windows can fire the launch event before Office has set up its nested app
+ * authentication bridge; MSAL then silently returns a standard client whose
+ * silent sign-in fails without any network request.
  */
 (function () {
   "use strict";
 
   var config = typeof MYPORTAL_OUTLOOK_ADDIN === "object" ? MYPORTAL_OUTLOOK_ADDIN : {};
   var clientPromise = null;
+  var officeReady = Office.onReady();
 
   function getClient() {
     if (!clientPromise) {
-      clientPromise = msal.createNestablePublicClientApplication({
-        auth: {
-          clientId: config.clientId,
-          authority: "https://login.microsoftonline.com/common",
-        },
+      clientPromise = officeReady.then(function () {
+        return msal.createNestablePublicClientApplication({
+          auth: {
+            clientId: config.clientId,
+            authority: "https://login.microsoftonline.com/common",
+          },
+        });
       });
     }
     return clientPromise;
@@ -29,7 +37,23 @@
       return client.acquireTokenSilent({ scopes: [config.scope] });
     }).then(function (result) {
       return result.accessToken;
+    }, function (error) {
+      clientPromise = null;
+      throw stageError("sign-in", error);
     });
+  }
+
+  function stageError(stage, error) {
+    return { stage: stage, cause: error };
+  }
+
+  function describe(failure) {
+    var cause = (failure && failure.cause) || failure || {};
+    return [
+      "stage=" + ((failure && failure.stage) || "unknown"),
+      "code=" + (cause.errorCode || cause.code || cause.name || ""),
+      "message=" + (cause.errorMessage || cause.message || String(cause)),
+    ].join(" ");
   }
 
   function fetchSignature(token) {
@@ -40,6 +64,7 @@
       cache: "no-store",
     }).then(function (response) {
       if (response.status !== 200) {
+        console.error("MyPortal signature API returned " + response.status);
         return null;
       }
       return response.json();
@@ -77,14 +102,13 @@
         });
       })
       .catch(function (error) {
-        console.warn("MyPortal signature was not added", error);
+        console.error("MyPortal signature was not added: " + describe(error));
       })
       .then(function () {
         event.completed();
       });
   }
 
-  Office.onReady(function () {});
   Office.actions.associate("onNewMessageComposeHandler", insertSignature);
   Office.actions.associate("onNewAppointmentOrganizerHandler", insertSignature);
 })();
