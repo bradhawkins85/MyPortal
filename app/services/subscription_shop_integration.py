@@ -82,15 +82,15 @@ async def create_subscriptions_from_order(
         is_vip = bool(int(item.get("is_vip") or 0) == 1)
         unit_price = shop_service.get_product_price(product, is_vip=is_vip)
         
-        # Determine term length based on commitment type
-        commitment_type = product.get("commitment_type")
-        if commitment_type == "monthly":
-            term_days = 30  # Monthly commitment = 30 days
-        elif commitment_type == "annual":
-            term_days = 365  # Annual commitment = 365 days
-        else:
-            # Fallback for legacy products without commitment_type
-            term_days = 365
+        # Newer products leave the legacy commitment_type column empty and set
+        # only the price option they offer, so use the effective billing plan.
+        billing_plan = shop_service.get_subscription_billing_plan(product)
+        commitment_type = (
+            billing_plan[0]
+            if billing_plan
+            else str(product.get("commitment_type") or "").strip().lower()
+        )
+        term_days = 30 if commitment_type == "monthly" else 365
         
         # Adopt manually maintained recurring items by SKU. Their already billed
         # quantity and schedule are retained; only the newly ordered quantity is
