@@ -238,6 +238,40 @@ async def test_blank_fields_with_variable_defaults_are_filled_for_the_device():
     assert rendered["param:organizationName"] == {"template": "{{ COMPANY_NAME }}", "value": "Acme Pty"}
 
 
+MANDATORY_DEFAULTS_SCRIPT = {
+    "id": 3,
+    "parameters": [
+        {"name": "ProKey", "type": "string", "mandatory": True, "default": "{{ asset.variables.Home2ProKey }}",
+         "choices": [], "help": "", "sensitive": False},
+        {"name": "Edition", "type": "string", "mandatory": True, "default": "Pro",
+         "choices": [], "help": "", "sensitive": False},
+    ],
+    "env_vars": [],
+}
+
+
+def test_mandatory_fields_with_a_default_need_no_value():
+    assert rmm_scripts.validate_entries(MANDATORY_DEFAULTS_SCRIPT, {}) == {"param:ProKey": "", "param:Edition": ""}
+
+
+@pytest.mark.anyio
+async def test_mandatory_defaults_are_sent_when_the_device_has_a_value():
+    entries = rmm_scripts.validate_entries(MANDATORY_DEFAULTS_SCRIPT, {})
+    context = {"asset": {"variables": {"Home2ProKey": "ABCDE-12345"}}}
+    payload = await rmm_scripts.resolve_entries(MANDATORY_DEFAULTS_SCRIPT, entries, context)
+    # PowerShell ignores a mandatory parameter's default, so the literal default is sent as well.
+    assert payload["parameters"] == {"ProKey": "ABCDE-12345", "Edition": "Pro"}
+
+
+@pytest.mark.anyio
+async def test_mandatory_variable_default_without_a_value_skips_the_device():
+    entries = rmm_scripts.validate_entries(MANDATORY_DEFAULTS_SCRIPT, {})
+    with pytest.raises(rmm_scripts.RunRequestError) as exc:
+        await rmm_scripts.resolve_entries(MANDATORY_DEFAULTS_SCRIPT, entries, {"asset": {"variables": {}}})
+    assert set(exc.value.errors) == {"param:ProKey"}
+    assert "ProKey" in exc.value.errors["param:ProKey"]
+
+
 @pytest.mark.anyio
 async def test_entered_values_override_variable_defaults():
     entries = rmm_scripts.validate_entries(DEFAULTS_SCRIPT, {"param:organizationName": "{{company.name}} Ltd"})

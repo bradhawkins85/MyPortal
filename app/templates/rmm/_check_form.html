@@ -393,7 +393,7 @@
           <div class="form-grid">
             {% for field in check_script_fields %}
             <div class="form-field">
-              <label class="form-label" for="rmm-check-check-entry-{{ loop.index }}">{{ field.name }}{% if field.mandatory %} <span class="rmm-required" aria-hidden="true">*</span>{% endif %}</label>
+              <label class="form-label" for="rmm-check-check-entry-{{ loop.index }}">{{ field.name }}{% if field.mandatory and not field.default %} <span class="rmm-required" aria-hidden="true">*</span>{% endif %}</label>
               <input class="form-input" id="rmm-check-check-entry-{{ loop.index }}" name="check_entry:{{ field.key }}" list="rmm-check-variables" value="{{ field.value }}" {% if field.sensitive %}type="password" autocomplete="new-password"{% endif %} placeholder="{% if field.sensitive and field.value_set %}Saved: leave blank to keep it{% elif field.default %}Default: {{ field.default }}{% endif %}"{% if field.help %} aria-describedby="rmm-check-check-entry-{{ loop.index }}-help"{% endif %}>
               {% if field.help %}<p class="form-help" id="rmm-check-check-entry-{{ loop.index }}-help">{{ field.help }}</p>{% endif %}
             </div>

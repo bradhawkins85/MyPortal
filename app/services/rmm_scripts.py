@@ -553,6 +553,16 @@ def _stored_input(field_def: Mapping[str, Any], entered: str) -> dict[str, Any]:
     }
 
 
+def _has_default(field_def: Mapping[str, Any]) -> bool:
+    return bool(str(field_def.get("default") or "").strip())
+
+
+def _is_required(field_def: Mapping[str, Any]) -> bool:
+    """A mandatory field must be filled in unless the script gives it a default."""
+
+    return bool(field_def["mandatory"]) and field_def["type"] != "switch" and not _has_default(field_def)
+
+
 def validate_entries(script: Mapping[str, Any], submitted: Mapping[str, Any]) -> dict[str, str]:
     """Return the entered value per field key, or raise when a required one is missing."""
 
@@ -564,7 +574,7 @@ def validate_entries(script: Mapping[str, Any], submitted: Mapping[str, Any]) ->
         if len(text) > 65535:
             errors[field_def["key"]] = "This value is too long."
             continue
-        if not text.strip() and field_def["mandatory"] and field_def["type"] != "switch":
+        if not text.strip() and _is_required(field_def):
             errors[field_def["key"]] = "This field is required."
             continue
         entries[field_def["key"]] = text
@@ -583,8 +593,12 @@ async def resolve_entries(
 
     A blank field whose script default is a MyPortal variable, such as
     ``{{ COMPANY_NAME }}``, is filled from that default; left to the script it
-    would receive the variable's text. When given, ``rendered`` collects each
-    variable resolved, keyed like ``entries``, as ``template`` and ``value``."""
+    would receive the variable's text. A blank mandatory field is filled from
+    its default too, because PowerShell ignores the default of a mandatory
+    parameter. When a mandatory field's variable default has no value for the
+    device, the device is reported instead of run. When given, ``rendered``
+    collects each variable resolved, keyed like ``entries``, as ``template``
+    and ``value``."""
 
     errors: dict[str, str] = {}
     params: dict[str, Any] = {}
@@ -593,8 +607,9 @@ async def resolve_entries(
     for field_def in script_fields(script):
         entered = entries.get(field_def["key"], "")
         from_default = False
-        if not entered.strip() and _TOKEN.search(str(field_def.get("default") or "")):
-            entered = str(field_def["default"])
+        default = str(field_def.get("default") or "")
+        if not entered.strip() and (_TOKEN.search(default) or (field_def["mandatory"] and _has_default(field_def))):
+            entered = default
             from_default = True
         if _TOKEN.search(entered):
             resolved = await render_value(entered, context)
@@ -602,6 +617,9 @@ async def resolve_entries(
                 rendered[field_def["key"]] = {"template": entered, "value": resolved}
         else:
             resolved = entered
+        if from_default and not resolved.strip() and field_def["mandatory"] and field_def["type"] != "switch":
+            errors[field_def["key"]] = f"{field_def['name']} has no value for this device, so it was not run here."
+            continue
         if from_default and not resolved.strip() and field_def["type"] in {"string", "secret"}:
             # The script's own default would be the variable's text, so send the empty value instead.
             if field_def["kind"] == "env":
