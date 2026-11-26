@@ -10,6 +10,8 @@ write access, and checks for every company need a super admin):
 * ``POST /rmm/checks`` and ``/rmm/checks/{id}`` save a check and return to the
   list, or stay on it while a newly chosen script's values need filling in
 * ``POST /rmm/checks/{id}/enabled`` and ``/delete``
+* ``POST /rmm/checks/{id}/run`` checks now on the company's devices it applies
+  to (or one device, with ``return_asset_id``) instead of waiting for its interval
 * ``GET /api/rmm/checks/{id}/devices?status=failing`` the company's devices a
   check is failing (or ``warning``) on, with their latest values, for the
   checks page's device list
@@ -507,6 +509,49 @@ async def set_check_enabled(check_id: int, request: Request):
         entity_type="rmm_check", entity_id=check_id, metadata={"enabled": enabled},
     )
     return flash_redirect(_asset_back(form) or PAGE_PATH, f"{check['name']} turned {'on' if enabled else 'off'}.", "success")
+
+
+def _check_now_message(check: dict[str, Any], outcome: dict[str, int], *, one_device: bool) -> tuple[str, str]:
+    name = check["name"]
+    if not outcome["devices"]:
+        where = "this device" if one_device else "any of this company's devices with the RMM agent"
+        return f"{name} does not apply to {where}, so there is nothing to check.", "warning"
+    devices = "this device" if one_device else f"{outcome['devices']} device{'s' if outcome['devices'] != 1 else ''}"
+    if check.get("check_type") == "offline":
+        return f"Checked {name} on {devices} now.", "success"
+    if not outcome["queued"]:
+        return (f"{name} is already running on {devices}; its result will show when it finishes."
+                if check.get("check_type") == "script" else f"{name} could not be started on {devices}."), "warning"
+    tasks = outcome["queued"]
+    return (f"Checking {name} now on {devices} ({tasks} task{'s' if tasks != 1 else ''} queued). "
+            "Results show here as the devices report back."), "success"
+
+
+@router.post(PAGE_PATH + "/{check_id:int}/run", response_class=HTMLResponse,
+             summary="Run an RMM check now instead of waiting for its interval")
+async def run_check_now(check_id: int, request: Request):
+    context = await _load(request, write=True)
+    if isinstance(context, RedirectResponse):
+        return context
+    user, _company, company_id, _can_edit = context
+    check = await checks_repo.get_check(check_id)
+    if not check or (check.get("company_id") is not None and int(check["company_id"]) != int(company_id)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Check not found")
+    form = await request.form()
+    back = _asset_back(form)
+    if not check.get("is_enabled"):
+        return flash_redirect(back or PAGE_PATH, f"Turn {check['name']} on before checking it now.", "warning")
+    asset_value = str(form.get("return_asset_id") or "")
+    asset_id = int(asset_value) if asset_value.isdigit() else None
+    outcome = await rmm_checks.check_now(check, company_id=company_id, asset_id=asset_id,
+                                         requested_by_user_id=user.get("id"))
+    await audit_service.record(
+        action="rmm.check.run_now", request=request, user_id=user.get("id"),
+        entity_type="rmm_check", entity_id=check_id,
+        metadata={"name": check["name"], "company_id": company_id, "asset_id": asset_id, **outcome},
+    )
+    message, kind = _check_now_message(check, outcome, one_device=asset_id is not None)
+    return flash_redirect(back or PAGE_PATH, message, kind)
 
 
 @router.post(PAGE_PATH + "/{check_id:int}/delete", response_class=HTMLResponse, summary="Delete an RMM check")

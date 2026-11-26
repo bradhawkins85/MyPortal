@@ -465,6 +465,95 @@ async def test_script_checks_run_on_their_interval_and_judge_the_output(sqlite_d
 
 
 @pytest.mark.anyio
+async def test_check_now_runs_a_script_check_before_its_interval(sqlite_db, monkeypatch):
+    await _sync(monkeypatch, {"rmm/Common/Health.ps1": HEALTH})
+    script = (await rmm_repo.list_scripts())[0]
+    _result, agent = await _enrol(sqlite_db)
+    check_id = await _save({"name": "Health", "scope": "company", "check_type": "script",
+                            "check_script_id": str(script["id"]), "script_expect": "output_contains",
+                            "script_value": "OK", "script_interval": "1440"})
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    assert await checks.run_due_script_checks(now) == 1
+    first = (await checks_repo.get_state(check_id, agent["id"]))["run_id"]
+    await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
+    await rmm_scripts.record_result(agent, first, {"exit_code": 0, "stdout": "OK"})
+    await checks.run_finished(first)
+    check = await checks_repo.get_check(check_id, with_secrets=True)
+
+    # Not due for a day, but Check now queues it and restarts the interval.
+    later = now + timedelta(minutes=5)
+    assert await checks.check_now(check, company_id=1, now=later) == {"devices": 1, "queued": 1, "recorded": 0}
+    state = await checks_repo.get_state(check_id, agent["id"])
+    assert state["run_id"] and state["run_id"] != first
+    assert state["next_run_at"] == later + timedelta(minutes=1440)
+    # While that run waits on the device, another click queues nothing more.
+    assert (await checks.check_now(check, company_id=1, now=later))["queued"] == 0
+    # Other companies' devices and devices the check does not reach are left alone.
+    assert await checks.check_now(check, company_id=2, now=later) == {"devices": 0, "queued": 0, "recorded": 0}
+    assert (await checks.check_now(check, company_id=1, asset_id=999, now=later))["devices"] == 0
+
+
+@pytest.mark.anyio
+async def test_check_now_judges_offline_and_asks_the_agent_to_measure(sqlite_db):
+    _result, agent = await _enrol(sqlite_db)
+    offline_id = await _save({"name": "Offline", "scope": "company", "check_type": "offline", "duration_minutes": "30"})
+    disk_id = await _save({"name": "Disk", "scope": "asset", "asset_id": "10", "check_type": "disk",
+                           "disk_drive": "C:", "disk_metric": "free_percent", "disk_operator": "below",
+                           "disk_threshold": "10"})
+    later = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=2)
+    offline = await checks_repo.get_check(offline_id, with_secrets=True)
+    assert await checks.check_now(offline, company_id=1, now=later) == {"devices": 1, "queued": 0, "recorded": 1}
+    assert (await checks_repo.get_state(offline_id, agent["id"]))["status"] == "failing"
+
+    disk = await checks_repo.get_check(disk_id, with_secrets=True)
+    assert await checks.check_now(disk, company_id=1, asset_id=10) == {"devices": 1, "queued": 1, "recorded": 0}
+    jobs = await rmm_scripts.claim_jobs({**await rmm_repo.get_agent(agent["id"]), "run_anyway_supported": True})
+    assert [job["path"] for job in jobs] == ["agent/checks"]
+    assert "Update the MyPortal RMM agent to use Check now." in jobs[0]["script"]
+
+    # A check that is off is not run.
+    await checks_repo.set_check_enabled(disk_id, False, None)
+    disk = await checks_repo.get_check(disk_id, with_secrets=True)
+    assert (await checks.check_now(disk, company_id=1))["devices"] == 0
+
+
+@pytest.mark.anyio
+async def test_check_now_route_needs_write_access_and_the_companys_check(sqlite_db, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from fastapi import HTTPException
+    from starlette.datastructures import FormData
+
+    await _enrol(sqlite_db)
+    check_id = await _save({"name": "Offline", "scope": "company", "check_type": "offline", "duration_minutes": "30"})
+    context = AsyncMock(return_value=({"id": None}, {}, 1, True))
+    audit = AsyncMock()
+    monkeypatch.setattr(check_routes, "_context", context)
+    monkeypatch.setattr(check_routes.audit_service, "record", audit)
+
+    class _Request:
+        def __init__(self, form):
+            self._form = form
+
+        async def form(self):
+            return FormData(self._form)
+
+    response = await check_routes.run_check_now(check_id, _Request({"return_asset_id": "10"}))
+    assert response.status_code == 303 and response.headers["location"] == "/assets/10#checks"
+    assert audit.await_args.kwargs["action"] == "rmm.check.run_now"
+    assert audit.await_args.kwargs["metadata"]["recorded"] == 1
+
+    context.return_value = ({"id": None}, {}, 2, True)
+    with pytest.raises(HTTPException) as exc:
+        await check_routes.run_check_now(check_id, _Request({}))
+    assert exc.value.status_code == 404
+    context.return_value = ({"id": None}, {}, 1, False)
+    with pytest.raises(HTTPException) as exc:
+        await check_routes.run_check_now(check_id, _Request({}))
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.anyio
 async def test_asset_context_and_charts(sqlite_db, stats_db, monkeypatch):
     from app.features.rmm import check_routes
 
@@ -625,12 +714,13 @@ def test_checks_page_and_asset_sections_render():
     assert 'name="process_name"' in html and '<option value="not_running" >Not running</option>' in html
     assert 'name="action_results"' in html and 'data-rmm-result-example="Not installed"' in html
     assert 'action="/rmm/checks/3/enabled"' in html and "/static/js/rmm_checks.js" in html
+    assert 'action="/rmm/checks/3/run"' in html and "Check now on all devices" in html
     assert html.index("/static/js/rmm_action_steps.js") < html.index("/static/js/rmm_checks.js")
 
     detail = (ROOT / "app/templates/assets/detail.html").read_text()
     env.parse(detail)  # compiles
     assert 'id="checks"' in detail and 'id="machine-stats"' in detail
-    assert "rmm_ui.check_menu(check, csrf_token, asset.id)" in detail
+    assert "rmm_ui.check_menu(check, csrf_token, asset.id, can_run=chk.has_agent)" in detail
 
 
 @pytest.mark.anyio

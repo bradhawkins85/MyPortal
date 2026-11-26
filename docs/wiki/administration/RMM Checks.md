@@ -130,6 +130,29 @@ Rules are evaluated **before** scope overrides: a company or device check only
 replaces a broader check on devices its rules match. This includes disabled
 overrides. A pending script action is dropped if the check no longer applies.
 
+## Check now
+
+Checks run on their own timers: the agent reports its measurements every minute, an agent offline
+check is judged every 30 seconds, and a script check runs every **interval** minutes, which can be
+hours or a day. To see a result without waiting, choose **Action ▾ → Check now** on the check:
+
+* on the **asset page** (Checks section) it runs the check on that device only;
+* on the **Checks page** (**Check now on all devices**) it runs on every one of the company's
+  devices the check applies to, honouring advanced device rules and device-specific replacements.
+
+What happens depends on the type:
+
+* **Script result**: the check's script is queued straight away and its interval starts again from
+  now. If the last run is still waiting on the device, nothing more is queued.
+* **Agent offline**: the device's last check-in is judged immediately.
+* **Every other type**: the device is sent a **Check now** task that measures and reports all of its
+  checks once. It shows in run history and needs an RMM agent that knows the task; older agents
+  fail it with a message asking for an update.
+
+The result is judged as usual: a problem still has to last the check's duration before the check
+fails, and the check's actions run as they normally would. **Check now** needs RMM scripts write
+access, is only offered for checks that are on, and is recorded in the audit log.
+
 ## What happens when a check fails
 
 The result always shows on the asset page and the Checks page. Under **What happens when it

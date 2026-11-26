@@ -82,6 +82,7 @@ func TestStartupWaitSkipsCheckinAndPastDeadlinesAndStopsOnCancel(t *testing.T) {
 	far := time.Now().Add(time.Hour)
 	began := time.Now()
 	waitForStartup(context.Background(), far, client.Job{Path: "agent/checkin"})
+	waitForStartup(context.Background(), far, client.Job{Path: "agent/checks"})
 	waitForStartup(context.Background(), time.Now().Add(-time.Minute), client.Job{Path: "scripts/x.ps1"})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

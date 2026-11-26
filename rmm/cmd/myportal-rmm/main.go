@@ -547,7 +547,7 @@ func startJob(ctx context.Context, slots chan struct{}, wg *sync.WaitGroup, job 
 // waitForStartup holds a script until jobsFrom (see jobStartDelay). Check in
 // now writes no script file, so it is not held.
 func waitForStartup(ctx context.Context, jobsFrom time.Time, job client.Job) {
-	if job.Path == "agent/checkin" {
+	if job.Path == "agent/checkin" || job.Path == "agent/checks" {
 		return
 	}
 	if wait := time.Until(jobsFrom); wait > 0 {
@@ -598,6 +598,8 @@ func runJob(ctx context.Context, api *client.Client, r *runner.Runner, job clien
 	}
 	if job.Path == "agent/checkin" {
 		result = performFullCheckin(ctx, api, r)
+	} else if job.Path == "agent/checks" {
+		result = performChecksNow(ctx, api)
 	} else if !refreshChocolateyPlan(ctx, api, &job) {
 		result.Error = "Company Chocolatey sources could not be refreshed; app management was stopped."
 	} else {
