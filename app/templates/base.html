@@ -469,6 +469,16 @@
               </a>
             </li>
           {% endif %}
+          {% if feature_pack_available('csat') and ((is_super_admin | default(false)) or (has_admin_technician_access | default(false))) %}
+            <li class="menu__item">
+              <a href="/admin/csat" {% if current_path.startswith('/admin/csat') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm-3.5-9A1.5 1.5 0 1 0 7 9.5 1.5 1.5 0 0 0 8.5 11zm7 0A1.5 1.5 0 1 0 14 9.5a1.5 1.5 0 0 0 1.5 1.5zM12 17.5a5.5 5.5 0 0 0 5.1-3.5H6.9a5.5 5.5 0 0 0 5.1 3.5z"/></svg>
+                </span>
+                <span class="menu__label">Satisfaction</span>
+              </a>
+            </li>
+          {% endif %}
           {% if can_manage_issues %}
             <li class="menu__item">
               <a href="/admin/issues" {% if current_path.startswith('/admin/issues') %}aria-current="page"{% endif %}>
@@ -591,7 +601,7 @@
               </a>
             </li>{% endif %}
           {% if can_access_rmm_scripts %}<li class="menu__item">
-              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') and not current_path.startswith('/rmm/event-logs') and not current_path.startswith('/rmm/checks') and not current_path.startswith('/rmm/maintenance') and not current_path.startswith('/rmm/findings') and not current_path.startswith('/rmm/patching') and not current_path.startswith('/rmm/remote-control') %}aria-current="page"{% endif %}>
+              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') and not current_path.startswith('/rmm/event-logs') and not current_path.startswith('/rmm/checks') and not current_path.startswith('/rmm/maintenance') and not current_path.startswith('/rmm/vulnerabilities') and not current_path.startswith('/rmm/findings') and not current_path.startswith('/rmm/patching') and not current_path.startswith('/rmm/remote-control') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 4h18v16H3zm2 4v10h14V8zm1.5 2.5 1-1L11 13l-3.5 3.5-1-1L9 13zM12 15h5v1.5h-5z"/></svg></span>
                 <span class="menu__label">Scripts</span>
               </a>
@@ -618,6 +628,12 @@
               <a href="/rmm/maintenance" {% if current_path.startswith('/rmm/maintenance') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 2h2v2h6V2h2v2h3v8h-2V9H6v11h6v2H4V4h3zm-1 4v1h12V6zm12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm-1 1.5v3l2.4 1.4.7-1.1-1.6-1V15.5z"/></svg></span>
                 <span class="menu__label">Maintenance</span>
+              </a>
+            </li>{% endif %}
+          {% if can_access_rmm_scripts %}<li class="menu__item">
+              <a href="/rmm/vulnerabilities" {% if current_path.startswith('/rmm/vulnerabilities') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5.1 3.4 9.9 8 11 4.6-1.1 8-5.9 8-11V5zm-1 5h2v6h-2zm0 8h2v2h-2z"/></svg></span>
+                <span class="menu__label">Vulnerabilities</span>
               </a>
             </li>{% endif %}
           {% if can_access_rmm_scripts %}<li class="menu__item">

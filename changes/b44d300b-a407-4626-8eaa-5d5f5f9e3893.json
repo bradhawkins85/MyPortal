@@ -1,0 +1,7 @@
+{
+  "guid": "b44d300b-a407-4626-8eaa-5d5f5f9e3893",
+  "occurred_at": "2026-11-26T12:40Z",
+  "change_type": "Feature",
+  "summary": "The new Vulnerabilities page shows known CVEs in the third-party apps on each company's devices, flags those CISA lists as actively exploited, says which version fixes them, and can raise a ticket or record an accepted risk.",
+  "content_hash": "894eec165e81480a58033d5f83c410a7eb8f80251cf62fe33892f89642ad466d"
+}

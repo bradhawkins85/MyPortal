@@ -2530,6 +2530,9 @@ async def asset_detail_page(
         rmm_context["checks"]["maintenance"] = await rmm_maintenance_routes.asset_maintenance_context(
             company_id, asset_id
         )
+        from app.features.rmm import vulnerability_routes as rmm_vulnerability_routes
+
+        rmm_context["vulnerabilities"] = await rmm_vulnerability_routes.asset_vulnerability_context(asset_id)
         from app.features.rmm import inventory_routes as rmm_inventory_routes
 
         rmm_context["inventory"] = await rmm_inventory_routes.asset_inventory_context(

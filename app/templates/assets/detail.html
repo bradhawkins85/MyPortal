@@ -16,7 +16,7 @@
   <span class="header__title-meta">{{ asset_display_name }}</span>
 {% endblock %}
 {% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
-{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if rmm %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}"><link rel="stylesheet" href="{{ static_url('/static/css/rmm_maintenance.css') }}">{% endif %}{% if asset_tags is not none %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if rmm %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}"><link rel="stylesheet" href="{{ static_url('/static/css/vulnerabilities.css') }}"><link rel="stylesheet" href="{{ static_url('/static/css/rmm_maintenance.css') }}">{% endif %}{% if asset_tags is not none %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
 {% block header_actions %}
     {% import "assets/_action_icons.html" as action_icons %}
     {%- set icons = {} -%}
@@ -142,6 +142,7 @@
           ("software", "software", "Software", rmm.inventory.software | length if rmm and rmm.inventory and rmm.inventory.software else "", rmm and rmm.inventory),
           ("printers", "printers", "Printers", rmm.printers.counts.total or "" if rmm and rmm.printers else "", rmm and rmm.printers),
           ("windows-updates", "windows-updates", "Windows updates", rmm.windows_updates.counts.missing or "" if rmm and rmm.windows_updates else "", rmm and rmm.windows_updates),
+          ("vulnerabilities", "vulnerabilities", "Vulnerabilities", rmm.vulnerabilities.summary.software or "" if rmm and rmm.vulnerabilities else "", rmm and rmm.vulnerabilities),
           ("scripts", "scripts", "Scripts", "", rmm),
           ("checks", "checks", "Checks", rmm.checks.failing or "" if rmm and rmm.checks else "", rmm and rmm.checks),
           ("machine-stats", "machine-stats", "Machine stats", "", rmm and rmm.checks),
@@ -393,6 +394,7 @@
   {% if rmm and rmm.inventory %}{% include "rmm/_asset_inventory.html" %}{% include "rmm/_asset_software.html" %}{% endif %}
   {% if rmm and rmm.printers %}{% include "rmm/_asset_printers.html" %}{% endif %}
   {% if rmm and rmm.windows_updates %}{% include "rmm/_asset_windows_updates.html" %}{% endif %}
+  {% if rmm and rmm.vulnerabilities %}{% include "rmm/_asset_vulnerabilities.html" %}{% endif %}
 
   {% if rmm and rmm.event_logs %}{% set elog = rmm.event_logs %}{% set LEVEL_STATUS = {"Critical": "error", "Error": "error", "Warning": "warning", "Information": "info", "Verbose": "neutral"} %}<section class="card card--panel ce-section" id="event-logs" data-asset-edit-section="event-logs" aria-labelledby="asset-event-logs-heading">
     <header class="ce-section__header"><div class="ce-section__heading">

@@ -1,0 +1,228 @@
+/*
+ * Customer satisfaction: the public survey page (/csat/{token}) and the
+ * admin report (/admin/csat). Builds on the shared --hf-* and --space-* tokens.
+ */
+
+.csat-body {
+  color-scheme: dark;
+  color: var(--hf-copy);
+}
+
+.csat-shell {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-gap-roomy) * 2);
+  width: 100%;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: calc(var(--space-gap-roomy) * 2.5) calc(var(--space-gap-roomy) * 1.5);
+  box-sizing: border-box;
+}
+
+.csat-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.csat-brand__mark {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.csat-brand__name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--hf-copy-strong);
+}
+
+.csat-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+}
+
+.csat-eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hf-accent-strong);
+}
+
+.csat-title {
+  margin: 0;
+  font-size: 1.4rem;
+  color: var(--hf-copy-strong);
+}
+
+.csat-subtitle {
+  margin: 0;
+  color: var(--hf-muted);
+}
+
+.csat-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-roomy);
+}
+
+.csat-scale {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.csat-scale__legend {
+  margin-bottom: var(--space-gap-base);
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.csat-scale__options {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-gap-base);
+}
+
+.csat-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.75rem 0.4rem;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-panel-raised);
+  text-align: center;
+  cursor: pointer;
+}
+
+.csat-choice__input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.csat-choice__face {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  font-weight: 700;
+  background: var(--hf-bg-sunken);
+  color: var(--hf-copy-strong);
+}
+
+.csat-choice__label {
+  font-size: 0.8rem;
+  color: var(--hf-muted);
+}
+
+.csat-choice:hover {
+  border-color: var(--hf-line-strong);
+}
+
+.csat-choice:has(.csat-choice__input:focus-visible) {
+  outline: 2px solid var(--hf-focus);
+  outline-offset: 2px;
+}
+
+.csat-choice:has(.csat-choice__input:checked) {
+  border-color: var(--hf-accent);
+  background: var(--hf-accent-soft);
+}
+
+.csat-choice--5:has(.csat-choice__input:checked) .csat-choice__face,
+.csat-choice--4:has(.csat-choice__input:checked) .csat-choice__face {
+  background: var(--hf-success);
+}
+
+.csat-choice--3:has(.csat-choice__input:checked) .csat-choice__face {
+  background: var(--hf-warning);
+}
+
+.csat-choice--2:has(.csat-choice__input:checked) .csat-choice__face,
+.csat-choice--1:has(.csat-choice__input:checked) .csat-choice__face {
+  background: var(--hf-danger);
+}
+
+.csat-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.csat-result--success .csat-title {
+  color: var(--hf-success);
+}
+
+.csat-result--warning .csat-title {
+  color: var(--hf-warning);
+}
+
+/* Admin report */
+.csat-score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.csat-comment {
+  margin: 0.25rem 0 0;
+  color: var(--hf-muted);
+  white-space: pre-line;
+}
+
+.csat-settings__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-gap-roomy);
+}
+
+.csat-exclusions {
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: var(--space-gap-base);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-sm);
+}
+
+.csat-exclusions__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+
+@media (max-width: 640px) {
+  .csat-scale__options {
+    grid-template-columns: 1fr;
+  }
+
+  .csat-choice {
+    flex-direction: row;
+    justify-content: flex-start;
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .csat-choice {
+    transition: none;
+  }
+}
+
+.csat-exclusions-field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.csat-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-roomy);
+}

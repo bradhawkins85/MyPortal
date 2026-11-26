@@ -1132,6 +1132,27 @@ async def emit_ticket_replied_event(
     )
 
 
+async def emit_ticket_csat_received_event(
+    ticket: Mapping[str, Any] | int,
+    *,
+    csat: Mapping[str, Any],
+) -> None:
+    """Emit ``tickets.csat_received`` when a requester answers a satisfaction survey."""
+
+    ticket_record = ticket if isinstance(ticket, Mapping) else await tickets_repo.get_ticket(int(ticket))
+    if not ticket_record or ticket_record.get("merged_into_ticket_id"):
+        return
+    enriched = await _enrich_ticket_context(ticket_record)
+    await automations_service.handle_event(
+        "tickets.csat_received",
+        {
+            "ticket": enriched,
+            "csat": dict(csat),
+            "ticket_update": {"actor_type": "requester", "actor_label": "Requester", "actor_user": None},
+        },
+    )
+
+
 async def emit_ticket_updated_event(
     ticket: Mapping[str, Any] | int,
     *,

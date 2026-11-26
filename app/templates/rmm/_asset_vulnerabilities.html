@@ -1,0 +1,18 @@
+{# The asset page's Vulnerabilities section (rmm.vulnerabilities from app.features.rmm.vulnerability_routes). #}
+{% import "rmm/_vulnerability_macros.html" as vuln_ui %}
+{% set vu = rmm.vulnerabilities %}
+<section class="card card--panel ce-section" id="vulnerabilities" data-asset-edit-section="vulnerabilities" aria-labelledby="asset-vulnerabilities-heading">
+  <header class="ce-section__header">
+    <div class="ce-section__heading">
+      <h2 class="card__title" id="asset-vulnerabilities-heading">Vulnerabilities</h2>
+      <p class="card__subtitle">Known CVEs in this device's installed software, from NVD, with CISA's actively exploited list. Updated daily from the device's inventory. <a href="/rmm/vulnerabilities">All vulnerabilities</a></p>
+    </div>
+  </header>
+  <div class="ce-section__body">
+    {% if vu.groups %}
+      <ul class="vuln-list">{% for group in vu.groups %}{{ vuln_ui.software_card(group, vu.severity_labels, show_devices=false, show_actions=false) }}{% endfor %}</ul>
+    {% else %}
+      <p class="text-muted">No known vulnerabilities in this device's mapped software. Windows and Office updates are listed under Windows updates.</p>
+    {% endif %}
+  </div>
+</section>
