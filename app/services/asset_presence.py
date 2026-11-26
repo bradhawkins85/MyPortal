@@ -93,6 +93,9 @@ def rmm_inventory_fields(inventory: Mapping[str, Any]) -> dict[str, Any]:
     agent did not report are left out so stored values stay in place.
     """
     fields: dict[str, Any] = {}
+    serial = str(inventory.get("serial_number") or "").strip()
+    if serial:
+        fields["serial_number"] = serial
     os_name = str(inventory.get("os_name") or "").strip()
     if os_name:
         fields["os_name"] = os_name

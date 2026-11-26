@@ -88,3 +88,37 @@ async def test_last_sync_unchanged_without_a_tray_agent(monkeypatch):
     await assets_routes.assets_page(SimpleNamespace(state=SimpleNamespace()))
 
     assert captured["assets"][0]["last_sync_iso"] == TRMM_SYNC.isoformat()
+
+
+@pytest.mark.anyio
+async def test_rmm_serial_number_fills_asset_table_when_trmm_disabled(monkeypatch):
+    captured = _wire(monkeypatch, trmm_enabled=False, tray_device=None,
+                     rmm_inventory={"serial_number": "5CG1234XYZ"})
+
+    await assets_routes.assets_page(SimpleNamespace(state=SimpleNamespace()))
+
+    assert captured["assets"][0]["serial_number"] == "5CG1234XYZ"
+
+
+@pytest.mark.anyio
+async def test_rmm_inventory_fills_assets_tactical_rmm_never_synced(monkeypatch):
+    captured = _wire(monkeypatch, trmm_enabled=True, tray_device=None,
+                     rmm_inventory={"serial_number": "5CG1234XYZ", "os_name": "Windows 11 Pro"})
+
+    await assets_routes.assets_page(SimpleNamespace(state=SimpleNamespace()))
+
+    asset = captured["assets"][0]
+    assert asset["serial_number"] == "5CG1234XYZ"
+    assert asset["os_name"] == "Windows 11 Pro"
+
+
+@pytest.mark.anyio
+async def test_rmm_inventory_keeps_tactical_rmm_values_for_synced_assets(monkeypatch):
+    captured = _wire(monkeypatch, trmm_enabled=True, tray_device=None,
+                     rmm_inventory={"serial_number": "5CG1234XYZ"})
+    synced = dict(ASSET, tactical_asset_id="agent-10", serial_number="TRMM-SN")
+    monkeypatch.setattr(assets_routes.asset_repo, "list_company_assets", AsyncMock(return_value=[synced]))
+
+    await assets_routes.assets_page(SimpleNamespace(state=SimpleNamespace()))
+
+    assert captured["assets"][0]["serial_number"] == "TRMM-SN"

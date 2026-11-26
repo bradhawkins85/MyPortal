@@ -212,7 +212,8 @@ async def test_assets_page_shows_windows_activation_to_rmm_technicians(monkeypat
 
     user = {"id": 1, "company_id": 42, "is_super_admin": True}
     assets = [
-        {"id": 100, "company_id": 42, "name": "PC-100", "type": "workstation", "status": "active"},
+        {"id": 100, "company_id": 42, "name": "PC-100", "type": "workstation", "status": "active",
+         "tactical_asset_id": "agent-100"},
         {"id": 200, "company_id": 42, "name": "PC-200", "type": "workstation", "status": "active"},
     ]
     monkeypatch.setattr(main_module, "_require_authenticated_user", AsyncMock(return_value=(user, None)))
@@ -227,7 +228,7 @@ async def test_assets_page_shows_windows_activation_to_rmm_technicians(monkeypat
     monkeypatch.setattr(rmm_routes, "company_agent_details", AsyncMock(return_value={100: {"state": "connected"}}))
     monkeypatch.setattr(rmm_agent_deploy, "company_latest_attempts", AsyncMock(return_value={}))
     monkeypatch.setattr(rmm_remote_control, "enabled_providers", AsyncMock(return_value=[]))
-    # Tactical RMM is on, so the inventory is read only for the activation column.
+    # Tactical RMM is on and syncs PC-100, so its inventory only feeds the activation column.
     inventory = AsyncMock(return_value={100: {"windows_activation": "unlicensed", "os_name": "Windows 11 Pro"}})
     monkeypatch.setattr(rmm_inventory_repo, "list_for_company_assets", inventory)
     renderer = AsyncMock(return_value=HTMLResponse("assets page"))

@@ -496,16 +496,16 @@ async def assets_page(request: Request):
     # the tray agent's last check-in and signed-in user are the latest facts.
     tray_sets_last_sync = not await _tactical_rmm_enabled()
     syncro_enabled = await _module_enabled("syncro") if tray_sets_last_sync else True
-    # Tactical RMM's hardware columns stop refreshing too; MyPortal RMM agents
-    # report the same facts in their inventory.
-    rmm_inventory_by_asset: dict[int, dict[str, Any]] = {}
-    if tray_sets_last_sync:
-        from app.repositories import rmm_inventory as rmm_inventory_repo
+    # MyPortal RMM agents report the hardware facts Tactical RMM used to fill.
+    # They replace Tactical's columns once it is off, and fill them for assets
+    # Tactical RMM never synced.
+    from app.repositories import rmm_inventory as rmm_inventory_repo
 
-        rmm_inventory_by_asset = await rmm_inventory_repo.list_for_company_assets(company_id)
+    rmm_inventory_by_asset = await rmm_inventory_repo.list_for_company_assets(company_id)
     # Customers only see these inventory columns.
     rmm_inventory_keys = (
-        {"os_name", "cpu_name", "ram_gb", "hdd_size", "boot_time"} if can_view_assets else {"os_name"}
+        {"serial_number", "os_name", "cpu_name", "ram_gb", "hdd_size", "boot_time"}
+        if can_view_assets else {"serial_number", "os_name"}
     )
     # Technicians who run RMM scripts can push the RMM agent through the tray app.
     can_push_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
@@ -528,12 +528,7 @@ async def assets_page(request: Request):
     if show_rmm_agent:
         from app.services import rmm_inventory as rmm_inventory_service
 
-        activation_inventory = rmm_inventory_by_asset
-        if not tray_sets_last_sync:
-            from app.repositories import rmm_inventory as rmm_inventory_repo
-
-            activation_inventory = await rmm_inventory_repo.list_for_company_assets(company_id)
-        for inventory_asset_id, inventory_row in activation_inventory.items():
+        for inventory_asset_id, inventory_row in rmm_inventory_by_asset.items():
             badge = rmm_inventory_service.windows_activation_badge(inventory_row.get("windows_activation"))
             if badge:
                 windows_activation_by_asset[inventory_asset_id] = badge
@@ -594,7 +589,8 @@ async def assets_page(request: Request):
                 record["last_user"] = tray_user
         inventory = (
             rmm_inventory_by_asset.get(int(record["id"]))
-            if record.get("id") and record.get("id") not in manual_asset_ids else None
+            if record.get("id") and record.get("id") not in manual_asset_ids
+            and (tray_sets_last_sync or not record.get("tactical_asset_id")) else None
         )
         if inventory:
             for key, value in asset_presence.rmm_inventory_fields(inventory).items():
