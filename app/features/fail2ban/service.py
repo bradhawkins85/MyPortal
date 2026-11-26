@@ -208,6 +208,20 @@ class LogRead:
     error: str | None = None
     events: list[LogEvent] | None = None
     last_event_at: datetime | None = None
+    # Newest line of any kind. The Fail2ban sink also receives MyPortal's
+    # ordinary INFO messages, so this shows the log is being written even
+    # when nobody has failed to sign in.
+    last_entry_at: datetime | None = None
+
+
+def _last_entry_time(lines: list[str]) -> datetime | None:
+    for raw in reversed(lines):
+        stamp, sep, _ = raw.partition(" | ")
+        if sep:
+            parsed = _parse_time(stamp.strip())
+            if parsed is not None:
+                return parsed
+    return None
 
 
 def read_recent_events(path: Path | None, now: datetime, window: timedelta = ACTIVITY_WINDOW) -> LogRead:
@@ -220,14 +234,16 @@ def read_recent_events(path: Path | None, now: datetime, window: timedelta = ACT
     result.exists = True
     since = now - window
     try:
-        files = [path]
         lines = _tail_lines(path)
+        result.last_entry_at = _last_entry_time(lines)
         events = [event for event in map(parse_log_line, lines) if event]
         if not events or events[0].occurred_at > since:
             previous = _previous_log(path)
             if previous is not None:
-                files.insert(0, previous)
-                older = [event for event in map(parse_log_line, _tail_lines(previous)) if event]
+                older_lines = _tail_lines(previous)
+                if result.last_entry_at is None:
+                    result.last_entry_at = _last_entry_time(older_lines)
+                older = [event for event in map(parse_log_line, older_lines) if event]
                 events = older + events
     except OSError as exc:
         result.readable = False
@@ -325,6 +341,23 @@ def describe_rules(info: JailInfo | None, settings: dict[str, Any]) -> str | Non
     return text
 
 
+def humanize_age(delta: timedelta) -> str:
+    seconds = max(0, int(delta.total_seconds()))
+    if seconds < 60:
+        return "less than a minute"
+    for size, unit in ((86400, "day"), (3600, "hour"), (60, "minute")):
+        if seconds >= size:
+            count = seconds // size
+            return f"{count} {unit}{'' if count == 1 else 's'}"
+    return f"{seconds} seconds"  # pragma: no cover - unreachable
+
+
+def _plural(count: int, word: str) -> str:
+    if count == 1:
+        return f"{count} {word}"
+    return f"{count} {word}{'es' if word.endswith('s') else 's'}"
+
+
 def _is_loopback(value: str) -> bool:
     try:
         return ipaddress.ip_address(value).is_loopback
@@ -343,7 +376,10 @@ def _check(status: str, title: str, detail: str) -> dict[str, str]:
     return {"status": status, "title": title, "detail": detail}
 
 
-def build_health(log: LogRead, snapshot: SnapshotRead, jails: list[dict[str, Any]]) -> list[dict[str, str]]:
+def build_health(
+    log: LogRead, snapshot: SnapshotRead, jails: list[dict[str, Any]], now: datetime | None = None
+) -> list[dict[str, str]]:
+    now = now or datetime.now(timezone.utc)
     checks: list[dict[str, str]] = []
     events = log.events or []
 
@@ -360,18 +396,35 @@ def build_health(log: LogRead, snapshot: SnapshotRead, jails: list[dict[str, Any
         ))
     elif not log.readable:
         checks.append(_check("danger", "The Fail2ban log file can't be read", f"{log.path}: {log.error}"))
-    elif not events:
-        when = "never" if log.last_event_at is None else "more than 24 hours ago"
+    elif log.last_entry_at is None:
         checks.append(_check(
-            "warning", "No events in the last 24 hours",
-            f"The last event in {log.path} was {when}. An internet-facing portal normally sees bots every day; "
-            "check the service journal for 'LOG FILE DISABLED' or 'IGNORED' warnings.",
+            "warning", "The Fail2ban log hasn't received any entries",
+            f"{log.path} is empty. Check the service journal for 'LOG FILE DISABLED' or 'IGNORED' warnings "
+            "and restart MyPortal.",
+        ))
+    elif now - log.last_entry_at > ACTIVITY_WINDOW:
+        checks.append(_check(
+            "warning", f"The Fail2ban log has had no new entries for {humanize_age(now - log.last_entry_at)}",
+            f"MyPortal normally writes to {log.path} every day. Check the service journal for "
+            "'LOG FILE DISABLED' or 'IGNORED' warnings and restart MyPortal.",
         ))
     else:
         checks.append(_check(
-            "success", "The Fail2ban log is being written",
-            f"{len(events)} events in the last 24 hours in {log.path}.",
+            "success", "The Fail2ban log is receiving entries",
+            f"Last entry {humanize_age(now - log.last_entry_at)} ago in {log.path}.",
         ))
+        failures = [event for event in events if event.kind == EVENT_LOGIN_FAIL]
+        if failures:
+            addresses = len({event.ip for event in failures})
+            checks.append(_check(
+                "info", f"{_plural(len(failures), 'failed sign-in')} in the last 24 hours",
+                f"From {_plural(addresses, 'address')}. The Sign-in failures jail blocks repeat offenders.",
+            ))
+        else:
+            checks.append(_check(
+                "info", "No failed sign-ins in the last 24 hours",
+                "Nobody has entered a wrong password. Failed sign-ins appear here as soon as they happen.",
+            ))
 
     blocking = [event for event in events if event.kind != EVENT_LOGIN_SUCCESS]
     if len(blocking) >= PROXY_CHECK_MIN_EVENTS:
@@ -386,7 +439,7 @@ def build_health(log: LogRead, snapshot: SnapshotRead, jails: list[dict[str, Any
 
     if snapshot.state == "disabled":
         checks.append(_check(
-            "info", "The ban list is turned off",
+            "off", "The ban list is turned off",
             "Set FAIL2BAN_STATUS_PATH to show who Fail2ban has blocked.",
         ))
         return checks
@@ -556,7 +609,7 @@ def build_overview(log_path: Path | None, status_path: Path | None, now: datetim
     bans = build_bans(snapshot, jails, events) if snapshot.state == "ok" else []
     fail2ban = (snapshot.data or {}).get("fail2ban") or {}
     return {
-        "health": build_health(log, snapshot, jails),
+        "health": build_health(log, snapshot, jails, now),
         "snapshot": {
             "state": snapshot.state,
             "generated_at": snapshot.generated_at.isoformat() if snapshot.generated_at else None,

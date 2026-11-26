@@ -6,7 +6,7 @@
   {%- if value -%}<span data-utc="{{ value }}">{{ value }}</span>{%- else -%}{{ fallback }}{%- endif -%}
 {%- endmacro %}
 
-{% set check_labels = {"success": "OK", "warning": "Check", "danger": "Problem", "info": "Off"} %}
+{% set check_labels = {"success": "OK", "warning": "Check", "danger": "Problem", "info": "Info", "off": "Off"} %}
 {% set snap = f2b.snapshot %}
 
 {% block title %}Fail2ban{% endblock %}
@@ -43,7 +43,7 @@
         <ul class="f2b-health">
           {% for check in f2b.health %}
           <li class="f2b-health__item f2b-health__item--{{ check.status }}">
-            <span class="status status--{{ 'neutral' if check.status == 'info' else check.status }}">{{ check_labels.get(check.status, check.status) }}</span>
+            <span class="status status--{{ 'neutral' if check.status == 'off' else check.status }}">{{ check_labels.get(check.status, check.status) }}</span>
             <div>
               <p class="f2b-health__title">{{ check.title }}</p>
               <p class="f2b-health__detail muted">{{ check.detail }}</p>

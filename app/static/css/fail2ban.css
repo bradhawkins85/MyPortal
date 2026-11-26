@@ -37,6 +37,7 @@
 .f2b-health__item--success { border-left-color: var(--f2b-ok); }
 .f2b-health__item--warning { border-left-color: var(--f2b-warn); }
 .f2b-health__item--danger { border-left-color: var(--f2b-bad); }
+.f2b-health__item--info { border-left-color: var(--color-info); }
 
 .f2b-health__item .status { justify-self: start; }
 

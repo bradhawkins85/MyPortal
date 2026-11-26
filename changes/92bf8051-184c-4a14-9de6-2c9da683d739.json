@@ -1,0 +1,7 @@
+{
+  "guid": "92bf8051-184c-4a14-9de6-2c9da683d739",
+  "occurred_at": "2026-11-26T02:20Z",
+  "change_type": "Fix",
+  "summary": "The Fail2ban page no longer warns when nobody has failed to sign in: it now shows whether the Fail2ban log is receiving entries and, separately, how many failed sign-ins it recorded in the last 24 hours.",
+  "content_hash": "ebe5d48d630063aaa5f60cd18658726206f82ece1f955f7746493dcc70b27a1c"
+}
