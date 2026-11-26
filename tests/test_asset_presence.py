@@ -99,12 +99,12 @@ async def test_only_requested_fields_change(monkeypatch):
 
 def test_rmm_inventory_fields_map_to_asset_columns():
     fields = asset_presence.rmm_inventory_fields({
-        "os_name": " Microsoft Windows 11 Pro ", "cpu_model": "Intel Core i5", "ram_bytes": 8 * 1024 ** 3,
-        "disk_total_bytes": 256 * 1024 ** 3, "last_boot_at": "2026-11-18 07:00:00",
+        "serial_number": " 5CG1234XYZ ", "os_name": " Microsoft Windows 11 Pro ", "cpu_model": "Intel Core i5",
+        "ram_bytes": 8 * 1024 ** 3, "disk_total_bytes": 256 * 1024 ** 3, "last_boot_at": "2026-11-18 07:00:00",
     })
 
     assert fields == {
-        "os_name": "Microsoft Windows 11 Pro", "cpu_name": "Intel Core i5", "ram_gb": 8.0,
+        "serial_number": "5CG1234XYZ", "os_name": "Microsoft Windows 11 Pro", "cpu_name": "Intel Core i5", "ram_gb": 8.0,
         "hdd_size": "256 GB", "boot_time": datetime(2026, 11, 18, 7, tzinfo=timezone.utc),
     }
     assert asset_presence.rmm_inventory_fields({"ram_bytes": None, "cpu_model": " "}) == {}
