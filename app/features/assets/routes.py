@@ -2839,7 +2839,8 @@ async def _serve_rack_image(request: Request, image_id: int, variant: str) -> Fi
     path = rack_image_service.resolve_rack_image(str(row["storage_name"]), serve)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(path, media_type=str(row.get("content_type") or "image/jpeg"),
+    media_type = rack_image_service.safe_media_type(row.get("content_type"), str(row["storage_name"]))
+    return FileResponse(path, media_type=media_type,
                         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 

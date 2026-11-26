@@ -1,0 +1,7 @@
+{
+  "guid": "a9cc90be-286d-4597-930a-3022d373a32f",
+  "occurred_at": "2026-11-26T01:17Z",
+  "change_type": "Security",
+  "summary": "Rack item images are always served as the image type they really are, PDF exports can no longer read server files or reach internal network addresses, and staff workflow text-fetch steps refuse web addresses that point at internal systems.",
+  "content_hash": "04a73c55037410545d5511d592aadf37615105b850bbdd68d53d692a7a8ec32e"
+}

@@ -30,6 +30,7 @@ from app.security.menu_permissions import membership_menu_can
 from app.security.session import session_manager
 from app.services import freight_rules as freight_rules_service
 from app.services.sanitization import sanitize_rich_text
+from app.services.pdf_rendering import pdf_url_fetcher
 
 router = APIRouter(tags=["Quotes"])
 
@@ -503,7 +504,9 @@ async def export_quote_pdf(
         include_line_images=with_images,
         freight_amount=await _calculate_quote_freight(quote_items),
     )
-    pdf_bytes = HTML(string=html, base_url=str(request.base_url)).write_pdf()
+    pdf_bytes = HTML(
+        string=html, base_url=str(request.base_url), url_fetcher=pdf_url_fetcher(str(request.base_url))
+    ).write_pdf()
     filename = f"{quote_number}-{'with-images' if with_images else 'no-images'}.pdf"
     return Response(
         content=pdf_bytes,
@@ -549,7 +552,9 @@ async def download_quote_magic_pdf(
         freight_amount=await _calculate_quote_freight(quote_items),
         watermark_expired=_is_quote_expired(quote_summary.get("expires_at")),
     )
-    pdf_bytes = HTML(string=html, base_url=str(request.base_url)).write_pdf()
+    pdf_bytes = HTML(
+        string=html, base_url=str(request.base_url), url_fetcher=pdf_url_fetcher(str(request.base_url))
+    ).write_pdf()
     filename = f"{quote_number}-{'with-images' if with_images else 'no-images'}.pdf"
     return Response(
         content=pdf_bytes,

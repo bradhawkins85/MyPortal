@@ -231,12 +231,13 @@ async def export_pdf(request: Request):
     )
     try:
         from weasyprint import HTML  # type: ignore
+        from app.services.pdf_rendering import pdf_url_fetcher
     except (ImportError, OSError) as exc:  # pragma: no cover - depends on system packages
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="PDF export requires WeasyPrint and its native dependencies.",
         ) from exc
-    pdf_bytes = await asyncio.to_thread(lambda: HTML(string=html).write_pdf())
+    pdf_bytes = await asyncio.to_thread(lambda: HTML(string=html, url_fetcher=pdf_url_fetcher()).write_pdf())
     await audit_service.record(action="network_map.export", request=request, entity_type="network_map",
                                user_id=int(user["id"]) if user.get("id") else None,
                                after={"company_id": company_id, "format": "pdf", "detail": options.detail})

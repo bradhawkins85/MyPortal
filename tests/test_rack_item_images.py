@@ -337,3 +337,53 @@ def test_save_selection_adds_and_removes_links_without_deleting_library(monkeypa
     asyncio.run(repo.save_selection(1, 8, [2, 3]))
     attach.assert_awaited_once_with(1, 8, 3)
     detach.assert_awaited_once_with(1, 8, 1)
+
+
+class _FakeUpload:
+    def __init__(self, payload: bytes, filename: str, content_type: str):
+        self._buffer = BytesIO(payload)
+        self.filename = filename
+        self.content_type = content_type
+
+    async def read(self, size: int = -1) -> bytes:
+        return self._buffer.read(size)
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.mark.parametrize("claimed_type", ["text/html", "image/svg+xml", "application/xhtml+xml"])
+def test_prepare_upload_ignores_client_content_type(monkeypatch, tmp_path, claimed_type):
+    """A valid PNG sent with an active-content type must be stored as image/png.
+
+    Serving the client's claimed type would let a PNG/HTML polyglot render as a
+    page on the portal origin (stored XSS).
+    """
+    monkeypatch.setattr(service, "_UPLOADS_ROOT", tmp_path)
+    buffer = BytesIO()
+    Image.new("RGB", (40, 40), "red").save(buffer, "PNG")
+
+    result = asyncio.run(service.prepare_rack_image(
+        _FakeUpload(buffer.getvalue(), "front.png", claimed_type), 1, "switch", "device"))
+
+    assert result["content_type"] == "image/png"
+
+
+def test_prepare_upload_uses_decoded_format_over_extension(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "_UPLOADS_ROOT", tmp_path)
+    buffer = BytesIO()
+    Image.new("RGB", (40, 40), "red").save(buffer, "GIF")
+
+    result = asyncio.run(service.prepare_rack_image(
+        _FakeUpload(buffer.getvalue(), "front.png", "image/png"), 1, "switch", "device"))
+
+    assert result["content_type"] == "image/gif"
+    assert result["storage_name"].endswith(".gif")
+
+
+@pytest.mark.parametrize("stored, expected", [
+    ("image/png", "image/png"), ("image/webp", "image/webp"),
+    ("text/html", "image/jpeg"), ("image/svg+xml", "image/jpeg"), (None, "image/jpeg"),
+])
+def test_served_media_type_only_allows_raster_images(stored, expected):
+    assert service.safe_media_type(stored, "rack-item-images/1/switch/device/a.jpg") == expected

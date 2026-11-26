@@ -22,7 +22,7 @@ from .routes import router as compliance_router
 
 PACK = FeaturePack(
     slug="compliance",
-    version="1.3.0",
+    version="1.3.1",
     routers=(compliance_router,),
 )
 

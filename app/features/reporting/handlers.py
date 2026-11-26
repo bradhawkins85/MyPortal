@@ -413,6 +413,7 @@ async def reporting_export(
     # PDF
     try:
         from weasyprint import HTML  # type: ignore
+        from app.services.pdf_rendering import pdf_url_fetcher
     except (
         ImportError,
         OSError,
@@ -431,7 +432,9 @@ async def reporting_export(
         rows,
         datetime.now(timezone.utc),
     )
-    pdf_bytes = HTML(string=html, base_url=str(request.base_url)).write_pdf()
+    pdf_bytes = HTML(
+        string=html, base_url=str(request.base_url), url_fetcher=pdf_url_fetcher(str(request.base_url))
+    ).write_pdf()
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

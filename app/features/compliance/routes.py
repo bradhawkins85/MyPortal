@@ -305,6 +305,7 @@ async def smb1001_attestation_report(request: Request):
 
     try:
         from weasyprint import HTML  # type: ignore
+        from app.services.pdf_rendering import pdf_url_fetcher
     except (ImportError, OSError) as exc:  # pragma: no cover - system dependency
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -330,7 +331,11 @@ async def smb1001_attestation_report(request: Request):
         generated_at=generated_at,
     )
     pdf_bytes = await asyncio.to_thread(
-        lambda: HTML(string=rendered_html, base_url=str(request.base_url)).write_pdf()
+        lambda: HTML(
+            string=rendered_html,
+            base_url=str(request.base_url),
+            url_fetcher=pdf_url_fetcher(str(request.base_url)),
+        ).write_pdf()
     )
     await audit_service.record(
         action="smb1001.attestation_report.export_pdf",

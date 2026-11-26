@@ -26,6 +26,11 @@ _EXT_CONTENT_TYPE = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".gif": "image/gif", ".webp": "image/webp",
 }
+# Pillow's decoded format decides the stored suffix and content type. The
+# client's Content-Type header is never trusted: echoing it back would let a
+# PNG/HTML polyglot be served as text/html on the portal origin.
+_FORMAT_SUFFIX = {"PNG": ".png", "JPEG": ".jpg", "GIF": ".gif", "WEBP": ".webp"}
+_SERVABLE_CONTENT_TYPES = frozenset(_EXT_CONTENT_TYPE.values())
 # Private uploads root, resolved from the project location (tests monkeypatch this).
 _UPLOADS_ROOT = Path(__file__).resolve().parents[2] / "private_uploads"
 _IMAGE_FOLDER = "rack-item-images"
@@ -49,6 +54,18 @@ def _resolve_under_base(base: Path, candidate: Path) -> Path:
     if not (resolved == base or base in resolved.parents):
         raise RackImageError(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid image path")
     return resolved
+
+
+def safe_media_type(content_type: str | None, storage_name: str) -> str:
+    """Return a raster image type to serve, never an active-content type.
+
+    Rows written before uploads were typed from the decoded image may hold the
+    client's claimed type, so the stored value is allowlisted again here.
+    """
+    candidate = str(content_type or "").strip().lower()
+    if candidate in _SERVABLE_CONTENT_TYPES:
+        return candidate
+    return _EXT_CONTENT_TYPE.get(Path(str(storage_name or "")).suffix.lower(), "image/jpeg")
 
 
 def resolve_rack_image(storage_name: str, variant: str = "full") -> Path:
@@ -129,6 +146,14 @@ async def prepare_rack_image(
             detail="Uploaded file is not a valid image.",
         ) from exc
 
+    decoded_suffix = _FORMAT_SUFFIX.get(str(image.format or "").upper())
+    if decoded_suffix is None:
+        raise RackImageError(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported image type. Upload PNG, JPEG, GIF, or WebP files.",
+        )
+    suffix = decoded_suffix
+
     width, height = image.size
     if width < _MIN_EDGE or height < _MIN_EDGE:
         raise RackImageError(
@@ -136,7 +161,7 @@ async def prepare_rack_image(
             detail="Image is too small. Upload an image at least 16 pixels wide and tall.",
         )
 
-    target_content_type = content_type or _EXT_CONTENT_TYPE.get(suffix) or "image/jpeg"
+    target_content_type = _EXT_CONTENT_TYPE[suffix]
     directory = _image_directory(company_id, item_type, kind)
     directory.mkdir(parents=True, exist_ok=True)
     original = directory / f"{uuid.uuid4().hex}{suffix}"
