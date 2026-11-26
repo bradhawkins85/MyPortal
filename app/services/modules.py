@@ -56,6 +56,36 @@ from app.services.component_availability import (
 )
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+DEFAULT_OLLAMA_REQUEST_TIMEOUT_SECONDS = 120.0
+
+
+def ollama_request_timeout() -> httpx.Timeout:
+    """Timeout for AI model calls made through the Ollama module.
+
+    Local models (Ollama, llama.cpp) often take well over the generic 15
+    seconds to answer a non-streamed request, especially when the server is
+    busy with another request, so model calls get their own longer limit.
+    Override with ``OLLAMA_REQUEST_TIMEOUT_SECONDS``.
+    """
+
+    seconds = DEFAULT_OLLAMA_REQUEST_TIMEOUT_SECONDS
+    raw = os.getenv("OLLAMA_REQUEST_TIMEOUT_SECONDS", "").strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = 0.0
+        if value > 0:
+            seconds = value
+    return httpx.Timeout(seconds, connect=5.0)
+
+
+def describe_exception(exc: BaseException) -> str:
+    """Return a non-empty error message; httpx timeouts often have no text."""
+
+    message = str(exc).strip()
+    name = type(exc).__name__
+    return f"{name}: {message}" if message else name
 
 
 def _tickets_repo():
@@ -3875,7 +3905,7 @@ async def _invoke_ollama(
         for k, v in request_headers.items()
     }
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=ollama_request_timeout()) as client:
             if not streaming:
                 response = await client.post(endpoint, json=body, headers=request_headers)
                 response.raise_for_status()
@@ -3947,7 +3977,7 @@ async def _invoke_ollama(
             event_id,
             attempt_number=attempt_number,
             status="error",
-            error_message=str(exc),
+            error_message=describe_exception(exc),
             response_status=None,
             response_body=None,
             request_headers=recorded_headers,

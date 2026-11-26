@@ -662,13 +662,17 @@ async def _attempt_event(event: dict[str, Any]) -> None:
     response_body: str | None = None
     response_headers: dict[str, Any] | None = None
     error_message: str | None = None
+    timeout: httpx.Timeout | float = 10.0
+    if str(event.get("name") or "").startswith(_OLLAMA_EVENT_PREFIX):
+        with suppress(Exception):
+            timeout = import_module("app.services.modules").ollama_request_timeout()
     try:
         # Every hop (initial request and each redirect) is re-validated so a
         # webhook target cannot bounce the server to loopback/link-local or
         # cloud metadata addresses.  Private LAN targets remain allowed because
         # webhook destinations are configured by administrators.
         async with httpx.AsyncClient(
-            timeout=10.0,
+            timeout=timeout,
             follow_redirects=True,
             event_hooks=redirect_guard_hooks(),
         ) as client:
@@ -705,7 +709,9 @@ async def _attempt_event(event: dict[str, Any]) -> None:
             return
         error_message = f"Unexpected status {response.status_code}"
     except Exception as exc:  # pragma: no cover - network safety
-        error_message = str(exc)
+        # httpx timeouts stringify to "", which left failed attempts with no
+        # visible reason; fall back to the exception type.
+        error_message = str(exc).strip() or type(exc).__name__
         await webhook_repo.record_attempt(
             event_id=event_id,
             attempt_number=attempt,
