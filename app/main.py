@@ -9659,6 +9659,53 @@ async def admin_tray_create_deployment_link(request: Request):
     )
 
 
+_TRAY_BULK_REBUILD_LABELS = {
+    "failed": "failed",
+    "outdated": "outdated",
+    "all": "active",
+}
+
+
+@app.post("/admin/tray/deployment-links/bulk-rebuild/{scope}", response_class=HTMLResponse)
+async def admin_tray_bulk_rebuild_deployment_links(scope: str, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    from app.services import tray_deployment_builds
+
+    if scope not in tray_deployment_builds.REBUILD_SCOPES:
+        return flash_redirect("/admin/tray#deployment-urls", "Unknown rebuild option.", "error")
+    if scope == "outdated" and tray_deployment_builds.current_release_tag() is None:
+        return flash_redirect(
+            "/admin/tray#deployment-urls",
+            "No tray release is cached on this server, so no installers can be outdated.",
+            "error",
+        )
+    queued = await tray_deployment_builds.queue_rebuilds(scope)
+    kind = _TRAY_BULK_REBUILD_LABELS[scope]
+    if not queued:
+        return flash_redirect(
+            "/admin/tray#deployment-urls",
+            f"No {kind} deployment URLs need a rebuild. URLs already queued or building are skipped.",
+            "info",
+        )
+    await audit_service.log_action(
+        action="tray.deployment_link.bulk_rebuild",
+        user_id=int(current_user["id"]),
+        entity_type="tray_deployment_link",
+        new_value={"scope": scope, "queued": queued},
+        request=request,
+    )
+    plural = "s" if queued != 1 else ""
+    return flash_redirect(
+        "/admin/tray#deployment-urls",
+        f"Queued Windows installer builds for {queued} {kind} deployment URL{plural}. "
+        "The build server picks them up on its next check.",
+        "success",
+    )
+
+
 @app.post("/admin/tray/deployment-links/{link_id}/rebuild", response_class=HTMLResponse)
 async def admin_tray_rebuild_deployment_link(link_id: int, request: Request):
     _current_user, redirect = await _require_super_admin_page(request)
