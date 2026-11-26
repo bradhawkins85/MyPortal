@@ -2186,9 +2186,9 @@ async def sync_billable_tickets(
             billable_tickets.append(ticket)
     
     # Time on fixed-fee project tasks is billed by milestone, never as ticket time.
-    from app.services import projects as projects_service
+    from app.services import project_billing
 
-    fixed_fee_ticket_ids = await projects_service.fixed_fee_ticket_ids(t.get("id") for t in billable_tickets)
+    fixed_fee_ticket_ids = await project_billing.fixed_fee_ticket_ids(t.get("id") for t in billable_tickets)
     if fixed_fee_ticket_ids:
         billable_tickets = [t for t in billable_tickets if t.get("id") not in fixed_fee_ticket_ids]
 

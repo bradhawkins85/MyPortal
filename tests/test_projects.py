@@ -231,9 +231,12 @@ async def test_local_invoice_generator_skips_fixed_fee_time_but_keeps_expenses(m
 
 def test_xero_ticket_sync_excludes_fixed_fee_tickets():
     source = Path("app/services/xero.py").read_text(encoding="utf-8")
-    assert "projects_service.fixed_fee_ticket_ids" in source
+    assert "project_billing.fixed_fee_ticket_ids" in source
     generator = Path("app/services/invoice_generator.py").read_text(encoding="utf-8")
-    assert "projects_service.fixed_fee_ticket_ids" in generator
+    assert "project_billing.fixed_fee_ticket_ids" in generator
+    # project_billing must not import the invoicing modules back (no import cycle).
+    billing = Path("app/services/project_billing.py").read_text(encoding="utf-8")
+    assert "invoice_generator" not in billing.split('"""', 2)[2] and "xero" not in billing.split('"""', 2)[2]
 
 
 @pytest.mark.asyncio

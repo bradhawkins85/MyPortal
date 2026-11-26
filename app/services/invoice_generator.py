@@ -307,10 +307,10 @@ async def generate_invoice(
 
     # Time on fixed-fee project tasks is billed by milestone, never as ticket
     # time; their expenses are still invoiced.
-    from app.services import projects as projects_service
+    from app.services import project_billing
 
     fixed_fee_ticket_ids = (
-        await projects_service.fixed_fee_ticket_ids(ticket.get("id") for ticket in all_tickets)
+        await project_billing.fixed_fee_ticket_ids(ticket.get("id") for ticket in all_tickets)
         if include_ticket_items
         else set()
     )

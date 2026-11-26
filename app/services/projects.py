@@ -24,7 +24,6 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from loguru import logger
 
 from app.repositories import projects as repo
 
@@ -323,24 +322,11 @@ async def link_ticket(project: Mapping[str, Any], ticket_id: int, *, phase_id: i
 
 
 async def fixed_fee_ticket_ids(ticket_ids: Iterable[Any]) -> set[int]:
-    """Tickets whose time must stay off ticket invoices (tasks of fixed-fee projects).
+    """See :func:`app.services.project_billing.fixed_fee_ticket_ids`."""
 
-    Never raises: if projects can't be read, nothing is excluded, so a
-    projects problem can't stop invoicing."""
+    from app.services import project_billing
 
-    ids = []
-    for value in ticket_ids:
-        try:
-            ids.append(int(value))
-        except (TypeError, ValueError):
-            continue
-    if not ids:
-        return set()
-    try:
-        return await repo.fixed_fee_ticket_ids(ids)
-    except Exception as exc:  # noqa: BLE001 - invoicing must not fail because of projects
-        logger.warning("Could not check fixed-fee project tickets: {}", exc)
-        return set()
+    return await project_billing.fixed_fee_ticket_ids(ticket_ids)
 
 
 # --------------------------------------------------------------------------- #
