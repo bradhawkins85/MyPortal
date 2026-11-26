@@ -11,6 +11,10 @@
     wraps it in a Burn bundle (MyPortal-Tray-Setup.exe), signs both, uploads them and marks the job
     complete. Failures are reported back so they show on the admin page.
 
+    Every few hours, between builds, it also removes old release payloads,
+    leftover job folders and stale files in the SYSTEM account's temporary
+    folders (C:\Windows\SystemTemp), so old build files do not fill the disk.
+
     Installed and scheduled by Install-MyPortalBuildAgent.ps1. Runs once per
     invocation unless -Loop is passed. See
     docs/wiki/getting-started/Tray Build Server.md.
@@ -42,6 +46,14 @@ $ReleaseKey = if ($config.PSObject.Properties['ReleaseKeyPath']) { [string]$conf
 $requestedIcd = if ($config.PSObject.Properties['IcdPath']) { [string]$config.IcdPath } else { '' }
 $Icd = Resolve-MyPortalIcd $requestedIcd
 $IcdProblem = if ($Icd) { '' } else { Get-MyPortalIcdProblem $requestedIcd }
+# Cleanup: how many release payloads to keep (most recently used first) and
+# how old a temporary file must be before it is deleted (0 turns that off).
+$KeepPayloads = if ($config.PSObject.Properties['KeepPayloads'] -and $null -ne $config.KeepPayloads) { [int]$config.KeepPayloads } else { 3 }
+$TempRetentionDays = if ($config.PSObject.Properties['TempRetentionDays'] -and $null -ne $config.TempRetentionDays) { [int]$config.TempRetentionDays } else { 3 }
+if ($KeepPayloads -lt 1) { $KeepPayloads = 1 }
+if ($TempRetentionDays -lt 0) { $TempRetentionDays = 0 }
+$CleanupIntervalHours = 6
+$LogMaxBytes = 10MB
 
 $PayloadDir = Join-Path $WorkDir 'payloads'
 $JobsDir = Join-Path $WorkDir 'jobs'
@@ -156,7 +168,13 @@ function Assert-SignedRelease([string]$Tag, [string]$Src, [string]$Dir) {
 function Get-Payload([string]$Tag) {
     if ($Tag -notmatch '^[A-Za-z0-9][A-Za-z0-9._/+-]{0,127}$') { throw "Invalid release tag: $Tag" }
     $dir = Join-Path $PayloadDir ($Tag -replace '[^A-Za-z0-9._-]', '_')
-    if (Test-Path -LiteralPath (Join-Path $dir '.complete')) { return $dir }
+    $marker = Join-Path $dir '.complete'
+    if (Test-Path -LiteralPath $marker) {
+        # The marker's time records when the payload was last used, so
+        # cleanup keeps the releases that are still being built.
+        [System.IO.File]::SetLastWriteTimeUtc($marker, [DateTime]::UtcNow)
+        return $dir
+    }
 
     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
     $src = Join-Path $dir 'src'
@@ -314,6 +332,123 @@ function Invoke-Build($Job) {
     }
 }
 
+# Deletes a file, or a folder and everything in it, skipping anything in use
+# and never following links or junctions out of the folder. Returns the
+# number of bytes freed.
+function Remove-StaleItem([System.IO.FileSystemInfo]$Item) {
+    [long]$freed = 0
+    if ($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $freed }
+    if ($Item -is [System.IO.FileInfo]) {
+        try {
+            $size = $Item.Length
+            $Item.Attributes = [System.IO.FileAttributes]::Normal
+            $Item.Delete()
+            $freed += $size
+        } catch { }
+        return $freed
+    }
+    # Get-ChildItem does not descend into links without -FollowSymlink.
+    foreach ($file in Get-ChildItem -LiteralPath $Item.FullName -Recurse -Force -File -ErrorAction SilentlyContinue) {
+        try {
+            $size = $file.Length
+            $file.Attributes = [System.IO.FileAttributes]::Normal
+            $file.Delete()
+            $freed += $size
+        } catch { }
+    }
+    # Deepest folders first; a folder that still holds a file in use stays.
+    # Deleting a link or junction this way removes only the link.
+    $dirs = @(Get-ChildItem -LiteralPath $Item.FullName -Recurse -Force -Directory -ErrorAction SilentlyContinue |
+        Sort-Object { $_.FullName.Length } -Descending) + @($Item)
+    foreach ($dir in $dirs) {
+        try { $dir.Delete() } catch { }
+    }
+    return $freed
+}
+
+# The newest write time of an item or of anything inside it, so a folder a
+# running program is still writing to is never treated as stale.
+function Get-LatestWriteTime([System.IO.FileSystemInfo]$Item) {
+    $latest = $Item.LastWriteTimeUtc
+    if ($Item -is [System.IO.DirectoryInfo]) {
+        foreach ($child in Get-ChildItem -LiteralPath $Item.FullName -Recurse -Force -ErrorAction SilentlyContinue) {
+            if ($child.LastWriteTimeUtc -gt $latest) { $latest = $child.LastWriteTimeUtc }
+        }
+    }
+    return $latest
+}
+
+# The temporary folders this account's builds write to. Go, npm, WiX,
+# electron-builder and Windows Configuration Designer leave files there; as
+# SYSTEM, .NET and Windows use C:\Windows\SystemTemp rather than %TEMP%.
+function Get-TempFolders {
+    $paths = @([System.IO.Path]::GetTempPath(), $env:TEMP, $env:TMP)
+    if ([System.Security.Principal.WindowsIdentity]::GetCurrent().IsSystem) {
+        $paths += Join-Path $env:SystemRoot 'SystemTemp'
+    }
+    return @($paths | Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') } |
+        Where-Object { (Split-Path -Leaf $_) -match '^(Temp|SystemTemp|Tmp)$' -and (Test-Path -LiteralPath $_ -PathType Container) } |
+        Sort-Object -Unique)
+}
+
+# Keeps the $KeepPayloads most recently used release payloads and removes the
+# rest, plus any payload a failed build left unfinished.
+function Clear-OldPayloads {
+    [long]$freed = 0
+    $complete = @()
+    foreach ($dir in Get-ChildItem -LiteralPath $PayloadDir -Directory -Force -ErrorAction SilentlyContinue) {
+        $marker = Join-Path $dir.FullName '.complete'
+        if (Test-Path -LiteralPath $marker) {
+            $complete += [pscustomobject]@{ Dir = $dir; Used = (Get-Item -LiteralPath $marker -Force).LastWriteTimeUtc }
+        } else {
+            Write-Log "Removing unfinished payload $($dir.Name)"
+            $freed += Remove-StaleItem $dir
+        }
+    }
+    foreach ($old in @($complete | Sort-Object Used -Descending | Select-Object -Skip $KeepPayloads)) {
+        Write-Log "Removing payload $($old.Dir.Name) (last used $($old.Used.ToString('yyyy-MM-dd')))"
+        $freed += Remove-StaleItem $old.Dir
+    }
+    return $freed
+}
+
+# Frees disk space between builds, at most once every $CleanupIntervalHours.
+# Only runs while this agent holds its mutex, so no build is using the
+# payload, job or temporary files it removes.
+function Invoke-Cleanup {
+    $stamp = Join-Path $WorkDir 'last-cleanup.txt'
+    if ((Test-Path -LiteralPath $stamp) -and
+        (Get-Item -LiteralPath $stamp).LastWriteTimeUtc -gt [DateTime]::UtcNow.AddHours(-$CleanupIntervalHours)) {
+        return
+    }
+    # Record the attempt first so a failing cleanup is not retried every run.
+    Set-Content -LiteralPath $stamp -Value ([DateTime]::UtcNow.ToString('o'))
+
+    if ((Test-Path -LiteralPath $LogPath) -and (Get-Item -LiteralPath $LogPath).Length -gt $LogMaxBytes) {
+        Move-Item -LiteralPath $LogPath -Destination "$LogPath.old" -Force
+    }
+
+    [long]$freed = Clear-OldPayloads
+    # Job folders are removed after every build; any left were interrupted
+    # and still hold a company's install token.
+    foreach ($job in Get-ChildItem -LiteralPath $JobsDir -Force -ErrorAction SilentlyContinue) {
+        $freed += Remove-StaleItem $job
+    }
+    if ($TempRetentionDays -gt 0) {
+        $cutoff = [DateTime]::UtcNow.AddDays(-$TempRetentionDays)
+        foreach ($temp in Get-TempFolders) {
+            [long]$tempFreed = 0
+            foreach ($item in Get-ChildItem -LiteralPath $temp -Force -ErrorAction SilentlyContinue) {
+                if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
+                if ((Get-LatestWriteTime $item) -lt $cutoff) { $tempFreed += Remove-StaleItem $item }
+            }
+            if ($tempFreed -gt 0) { Write-Log ('Removed {0:N0} MB of temporary files older than {1} days from {2}' -f ($tempFreed / 1MB), $TempRetentionDays, $temp) }
+            $freed += $tempFreed
+        }
+    }
+    if ($freed -gt 0) { Write-Log ('Cleanup freed {0:N0} MB' -f ($freed / 1MB)) }
+}
+
 # Logs why MyPortal had no build to hand out, once per change, so a quiet
 # agent can be told apart from a broken one without filling the log.
 function Write-IdleStatus([string]$Status) {
@@ -378,6 +513,12 @@ try {
         exit 1
     }
     do {
+        # Before claiming work, so a full disk is freed before the next build.
+        try {
+            Invoke-Cleanup
+        } catch {
+            Write-Log "Cleanup failed: $($_.Exception.Message)"
+        }
         try {
             Invoke-Queue
         } catch {

@@ -1,0 +1,7 @@
+{
+  "guid": "59f11524-7ea4-4de7-8cee-6f483d05571e",
+  "occurred_at": "2026-11-26T05:52Z",
+  "change_type": "Improvement",
+  "summary": "The Windows tray build server now deletes old tray release builds and stale temporary files on its own, so its disk no longer fills up with old build files.",
+  "content_hash": "8fc6016b083c9a6b7e6142f54a4d90459ae03fbeafa8b11b4fa386188562f814"
+}
