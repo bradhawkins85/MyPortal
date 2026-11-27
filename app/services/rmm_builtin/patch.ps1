@@ -308,17 +308,24 @@ try {
                         "--version=$latest")
                     $external = @($installedApps | Where-Object { $_.DisplayName -ieq $app.display_name })
                     if ($external.Count -gt 1) { throw "Multiple installations match $($app.display_name); review before patching." }
+                    if ($managed.Count -gt 1) { throw "Multiple Chocolatey entries match $id." }
+                    $externalOrder = if ($external.Count -eq 1) { Compare-Version $external[0].DisplayVersion $latest } else { $null }
                     # Auto-updated binaries may be newer than Chocolatey's local metadata or catalog.
-                    if ($external.Count -eq 1 -and (Compare-Version $external[0].DisplayVersion $latest) -ge 0) {
+                    if ($managed.Count -eq 1 -and $null -ne $externalOrder -and $externalOrder -ge 0) {
                         Write-Output "$id is current ($($external[0].DisplayVersion))."; continue
                     }
-                    if ($managed.Count -gt 1) { throw "Multiple Chocolatey entries match $id." }
-                    if ($managed.Count -eq 1) {
+                    if ($managed.Count -eq 0 -and $externalOrder -gt 0) {
+                        # Bring a newer unmanaged install under Chocolatey without running
+                        # the older package installer, so the app is never downgraded.
+                        Write-Output "$id $($external[0].DisplayVersion) is newer than $latest and not managed by Chocolatey; registering it with Chocolatey."
+                        $chocoArgs = @('install', $id, '--force', '--skip-automation-scripts') + $chocoArgs
+                    } elseif ($managed.Count -eq 1) {
                         $version = ([string]$managed[0]).Split('|')[1]
                         if ((Compare-Version $version $latest) -ge 0) { Write-Output "$id is current ($version)."; continue }
                         $chocoArgs = @('upgrade', $id) + $chocoArgs
                     } else {
                         if ($external.Count -eq 0 -and -not $app.install_missing) { Write-Output "$id is not installed; skipped."; continue }
+                        if ($external.Count -eq 1) { Write-Output "$id $($external[0].DisplayVersion) is not managed by Chocolatey; force installing $latest." }
                         $chocoArgs = @('install', $id, '--force') + $chocoArgs
                     }
                     Run-ChocolateyPackage $chocoArgs

@@ -49,10 +49,14 @@ Create separate application policies to give different apps different device fil
 ## Schedule and results
 
 Choose **Daily**, **Weekly** or **Custom cron** for the frequency, and set an
-IANA time zone. The automation tick claims due policies once. It skips schedules
-missed by more than an hour. Queued patch jobs expire after 15 minutes.
-Offline devices wait for the next policy run. **Run now**
-also honors scope, targeting, enabled state and overrides. Only one active patch
+IANA time zone. The automation tick claims due policies once. Queued patch jobs
+stay available until the policy's next scheduled run, so a device that is offline
+at the scheduled time runs the job once when it next checks in. A job that is still
+uncollected when the next window starts is cancelled and replaced by that window's
+job, so missed windows never queue up repeat updates. When several policies are due
+together, the job expires at the earliest of their next runs. **Run now** jobs
+expire after 15 minutes and also honor
+scope, targeting, enabled state and overrides. Only one active patch
 job is queued per device; an endpoint mutex prevents concurrent patch operations.
 
 At dispatch, the portal checks current inventory, policy versions and overrides.
@@ -150,8 +154,14 @@ Windows uninstall registry inventory, then queries the latest stable version fro
 `https://community.chocolatey.org/api/v2/`.
 
 - Already managed by Chocolatey and older: `choco upgrade <id> --version=<latest> --yes ...`.
-- Installed externally and older: `choco install <id> --force --version=<latest> --yes ...`.
-- Current or newer: skip; never intentionally downgrade.
+- Already managed by Chocolatey and current or newer: skip.
+- Installed but not managed by Chocolatey, at or below the latest version:
+  `choco install <id> --force --version=<latest> --yes ...` to bring it under
+  Chocolatey management.
+- Installed but not managed by Chocolatey and newer than the latest version:
+  `choco install <id> --force --skip-automation-scripts --version=<latest> --yes ...`
+  registers the app with Chocolatey without running the older installer, so it is
+  never downgraded. Later versions are applied with `choco upgrade`.
 - Absent: skip unless **Also install on devices where this app is missing** is enabled.
 
 Commands pin the compared version and source. Registry names are exact,

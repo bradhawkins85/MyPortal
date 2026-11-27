@@ -68,5 +68,8 @@ async def claim(policy: dict[str, Any], next_at: Any) -> bool:
 
 
 async def has_active_run(agent_id: int) -> bool:
-    return bool(await db.fetch_one("SELECT id FROM rmm_script_runs WHERE agent_id = %s AND run_source = 'patch' "
-                                   "AND status IN ('queued', 'dispatched', 'running') LIMIT 1", (agent_id,)))
+    # A queued run past its window is cancelled at collection; it never blocks the next window.
+    return bool(await db.fetch_one(
+        "SELECT id FROM rmm_script_runs WHERE agent_id = %s AND run_source = 'patch' "
+        "AND (status IN ('dispatched', 'running') OR (status = 'queued' AND (expires_at IS NULL OR expires_at > %s))) "
+        "LIMIT 1", (agent_id, datetime.now(timezone.utc).replace(tzinfo=None))))

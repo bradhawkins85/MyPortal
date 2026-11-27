@@ -1,0 +1,7 @@
+{
+  "guid": "97a85c35-4fd0-42d7-8a84-a878436a6020",
+  "occurred_at": "2026-11-27T06:13Z",
+  "change_type": "Improvement",
+  "summary": "Application patch policies now bring apps that are installed but not managed by Chocolatey under Chocolatey management, and scheduled patch runs can be picked up by devices that were offline at the start time until the policy's next scheduled run.",
+  "content_hash": "0b90a9d70f7d9f9c8654207ad64f6cd9ed0003f596e27f7940a3f0130825f84c"
+}
