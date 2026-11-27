@@ -1,0 +1,7 @@
+{
+  "guid": "741fac95-ee11-473b-8ac1-09a8be7e2d7c",
+  "occurred_at": "2026-11-27T04:26Z",
+  "change_type": "Fix",
+  "summary": "Subscriptions ordered through the Shop no longer show an end date while they renew; an end date now shows only once a decrease to zero is requested, an admin sets one on the recurring invoice item, or the subscription will not renew.",
+  "content_hash": "1209aa4ded040625474afd8f3abdc72685cf45ee9873c0d3bf142ed5e886e2dd"
+}

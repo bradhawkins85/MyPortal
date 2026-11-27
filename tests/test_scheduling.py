@@ -247,7 +247,8 @@ async def test_conflicts_only_for_scheduled(monkeypatch):
                                         "starts_at": datetime(2026, 12, 1), "ends_at": datetime(2026, 12, 1, 1)},
                                        exclude_id=7)
     assert found and overlapping.await_args.args[3] == 7
-    assert "Book anyway" in scheduling.conflict_message(found, BRISBANE.zone)
+    message = scheduling.conflict_message(found, BRISBANE.zone)
+    assert "Book anyway" not in message and "Choose another time" in message
 
 
 def test_appointment_events_are_automation_triggers():
@@ -358,7 +359,9 @@ async def test_move_endpoint_saves_and_reports_conflicts(monkeypatch):
     monkeypatch.setattr(routes, "_technicians", AsyncMock(return_value=[{"id": 3}, {"id": 9}]))
     monkeypatch.setattr(audit_service, "log_action", AsyncMock())
     clash = [_appointment(id=8, technician_user_id=9)]
-    monkeypatch.setattr(scheduling, "conflicts", AsyncMock(return_value=clash))
+    conflicts = AsyncMock(return_value=clash)
+    monkeypatch.setattr(scheduling, "conflicts", conflicts)
+    monkeypatch.setattr(scheduling, "busy_conflicts", AsyncMock(return_value=[]))
     save = AsyncMock(return_value=_appointment(technician_user_id=9))
     monkeypatch.setattr(scheduling, "save", save)
     payload = routes.AppointmentMoveIn(technician_user_id=9, date=date(2026, 12, 2), start_time="13:15")
@@ -368,7 +371,21 @@ async def test_move_endpoint_saves_and_reports_conflicts(monkeypatch):
     assert exc.value.status_code == 409 and "conflict" in exc.value.detail
     save.assert_not_awaited()
 
-    payload.book_anyway = True
+    assert "book_anyway" not in routes.AppointmentMoveIn.model_fields
+
+    conflicts.return_value = []
+    busy_settings = scheduling.Settings(timezone="Australia/Brisbane", day_start_hour=8, day_end_hour=18,
+                                        m365_company_id=1)
+    monkeypatch.setattr(scheduling, "load_settings", AsyncMock(return_value=busy_settings))
+    monkeypatch.setattr(scheduling, "busy_conflicts", AsyncMock(return_value=[
+        {"starts_at": datetime(2026, 12, 2, 3, 0), "ends_at": datetime(2026, 12, 2, 4, 0)}]))
+    with pytest.raises(HTTPException) as exc:
+        await routes.api_move(7, payload, SimpleNamespace(), user={"id": 1})
+    assert exc.value.status_code == 409 and "unavailable" in exc.value.detail["conflict"]
+    save.assert_not_awaited()
+    monkeypatch.setattr(scheduling, "busy_conflicts", AsyncMock(return_value=[]))
+
+    conflicts.return_value = []
     result = await routes.api_move(7, payload, SimpleNamespace(), user={"id": 1})
     assert result["technician_user_id"] == 9
     values = save.await_args.args[0]

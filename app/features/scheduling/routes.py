@@ -65,7 +65,9 @@ async def _render_board(request: Request, user: dict[str, Any], *, day: date, ed
     technicians = await _technicians()
     start, end = scheduling.day_window(day, settings)
     appointments = await repo.list_between(start, end)
-    board = scheduling.board(day, technicians, appointments, settings)
+    busy = await repo.list_busy_between(start, end) if settings.calendar_sync else []
+    board = scheduling.board(day, technicians, appointments, settings, busy)
+    busy_sync = await repo.get_busy_sync_state() if settings.calendar_sync else {}
     unscheduled = await repo.list_unscheduled_tickets(datetime.now(timezone.utc).replace(tzinfo=None))
     from app.services import business_hours as business_hours_service
 
@@ -89,6 +91,8 @@ async def _render_board(request: Request, user: dict[str, Any], *, day: date, ed
             "sync_labels": scheduling.SYNC_LABELS,
             "editing": editing,
             "errors": errors or {},
+            "busy_sync": busy_sync,
+            "sync_interval_minutes": scheduling.SYNC_INTERVAL_SECONDS // 60,
             "can_manage": bool(user.get("is_super_admin")),
             "companies": await company_repo.list_companies() if user.get("is_super_admin") else [],
             "timezones": business_hours_service.timezone_options() if user.get("is_super_admin") else [],
@@ -171,6 +175,14 @@ async def my_schedule(request: Request, technician_id: int | None = Query(defaul
     )
 
 
+async def _check_available(values: dict[str, Any], settings: scheduling.Settings, appointment_id: int | None,
+                           technicians: list[dict[str, Any]]) -> None:
+    previous = await repo.get(appointment_id) if appointment_id is not None else None
+    technician = next((tech for tech in technicians if int(tech["id"]) == int(values["technician_user_id"])), None)
+    await scheduling.check_available(values, settings, appointment_id=appointment_id, previous=previous,
+                                     technician=scheduling.technician_name(technician) if technician else None)
+
+
 async def _save(request: Request, appointment_id: int | None):
     user, redirect = await _main()._require_helpdesk_page(request)
     if redirect:
@@ -184,13 +196,11 @@ async def _save(request: Request, appointment_id: int | None):
                                               "duration_minutes", "location", "notes", "status")}
     posted.update(id=appointment_id, ticket_id=_optional_int(posted["ticket_id"]),
                   technician_user_id=_optional_int(posted["technician_user_id"]),
-                  duration_minutes=_optional_int(posted["duration_minutes"]), book_anyway=bool(form.get("book_anyway")))
+                  duration_minutes=_optional_int(posted["duration_minutes"]))
     day = _parse_day(str(form.get("date") or ""), settings)
     try:
         values = scheduling.parse_form(form, settings, technician_ids=[int(tech["id"]) for tech in technicians])
-        overlapping = await scheduling.conflicts(values, exclude_id=appointment_id)
-        if overlapping and not form.get("book_anyway"):
-            raise scheduling.AppointmentError({"conflict": scheduling.conflict_message(overlapping, settings.zone)})
+        await _check_available(values, settings, appointment_id, technicians)
         saved = await scheduling.save(values, appointment_id=appointment_id, user=user, settings=settings)
     except scheduling.AppointmentError as exc:
         return await _render_board(request, user, day=day, editing=posted, errors=exc.errors,
@@ -225,6 +235,13 @@ async def appointment_status(appointment_id: int, request: Request):
     form = await request.form()
     new_status = str(form.get("status") or "")
     settings = await scheduling.load_settings()
+    if new_status == "scheduled" and record["status"] != "scheduled":
+        try:  # putting a cancelled booking back takes its time again
+            await scheduling.check_available({**record, "status": "scheduled"}, settings, appointment_id=appointment_id,
+                                             technician=scheduling.technician_name(record))
+        except scheduling.AppointmentError as exc:
+            return flash_redirect(_back(form, f"{PAGE_PATH}?appointment={appointment_id}"),
+                                  exc.errors["conflict"], "error")
     try:
         await scheduling.set_status(appointment_id, new_status, user=user, settings=settings)
     except scheduling.AppointmentError as exc:
@@ -266,6 +283,8 @@ async def save_settings(request: Request):
     if values["m365_company_id"] and not await company_repo.get_company_by_id(values["m365_company_id"]):
         return flash_redirect(PAGE_PATH + "#schedule-settings", "Choose a company from the list.", "error")
     await repo.save_settings(values)
+    if not values["m365_company_id"]:
+        await repo.clear_busy_times()  # stale once calendars are no longer read
     await audit_service.log_action(action="scheduling.settings", user_id=user.get("id"), entity_type="scheduling_settings",
                                    entity_id=1, new_value=values, request=request)
     message = ("Saved. New and changed appointments will be written to technicians' calendars."
@@ -303,7 +322,6 @@ class AppointmentIn(BaseModel):
     location: str | None = Field(default=None, max_length=500)
     notes: str | None = Field(default=None, max_length=4000)
     status: str = Field(default="scheduled", description="scheduled, completed or cancelled")
-    book_anyway: bool = Field(default=False, description="Save even if the technician is already booked then")
 
 
 def _api_appointment(appointment: dict[str, Any], settings: scheduling.Settings) -> dict[str, Any]:
@@ -362,9 +380,7 @@ async def _api_save(payload: AppointmentIn, request: Request, user: dict, appoin
     technicians = await _technicians()
     try:
         values = scheduling.parse_form(form, settings, technician_ids=[int(tech["id"]) for tech in technicians])
-        overlapping = await scheduling.conflicts(values, exclude_id=appointment_id)
-        if overlapping and not payload.book_anyway:
-            raise scheduling.AppointmentError({"conflict": scheduling.conflict_message(overlapping, settings.zone)})
+        await _check_available(values, settings, appointment_id, technicians)
         saved = await scheduling.save(values, appointment_id=appointment_id, user=user, settings=settings)
     except scheduling.AppointmentError as exc:
         raise HTTPException(status_code=409 if "conflict" in exc.errors else 422, detail=exc.errors) from exc
@@ -389,13 +405,15 @@ class AppointmentMoveIn(BaseModel):
     technician_user_id: int = Field(description="Technician to move the appointment to")
     date: DateType = Field(description="New local date in the scheduling time zone")
     start_time: str = Field(description="New local start time, HH:MM", pattern=r"^\d{2}:\d{2}$")
-    book_anyway: bool = Field(default=False, description="Move even if the technician is already booked then")
 
 
 @router.post("/api/appointments/{appointment_id}/move", summary="Move an appointment to another time or technician")
 async def api_move(appointment_id: int, payload: AppointmentMoveIn, request: Request,
                    user: dict = Depends(require_helpdesk_technician)) -> dict[str, Any]:
-    """Used by dragging a booking on the dispatch board. The length and details stay the same."""
+    """Used by dragging a booking on the dispatch board. The length and details stay the same.
+
+    Refused (409) over another of the technician's appointments or their busy calendar time.
+    """
 
     record = await repo.get(appointment_id)
     if not record:
@@ -406,9 +424,7 @@ async def api_move(appointment_id: int, payload: AppointmentMoveIn, request: Req
         values = scheduling.move_values(record, settings, technician_ids=[int(tech["id"]) for tech in technicians],
                                         technician_user_id=payload.technician_user_id, day=payload.date,
                                         start_time=payload.start_time)
-        overlapping = await scheduling.conflicts(values, exclude_id=appointment_id)
-        if overlapping and not payload.book_anyway:
-            raise scheduling.AppointmentError({"conflict": scheduling.conflict_message(overlapping, settings.zone)})
+        await _check_available(values, settings, appointment_id, technicians)
         saved = await scheduling.save(values, appointment_id=appointment_id, user=user, settings=settings)
     except scheduling.AppointmentError as exc:
         raise HTTPException(status_code=409 if "conflict" in exc.errors else 422, detail=exc.errors) from exc
@@ -429,6 +445,23 @@ async def api_cancel(appointment_id: int, request: Request,
     await audit_service.log_action(action="appointment.cancelled", user_id=user.get("id"), entity_type="appointment",
                                    entity_id=appointment_id, request=request)
     return _api_appointment(saved or {}, settings)
+
+
+@router.get("/api/scheduling/availability", summary="When a technician is unavailable on a day")
+async def api_availability(
+    technician_id: int = Query(ge=1),
+    day: DateType = Query(alias="date", description="Local date in the scheduling time zone"),
+    exclude: int | None = Query(default=None, ge=1, description="An appointment being moved, left out"),
+    _: dict = Depends(require_helpdesk_technician),
+) -> dict[str, Any]:
+    """Taken time as local HH:MM ranges. Calendar time shows only when, never what."""
+
+    settings = await scheduling.load_settings()
+    start, end = scheduling.day_window(day, settings)
+    appointments = await repo.list_between(start, end, technician_user_id=technician_id)
+    busy = await repo.list_busy_between(start, end, technician_user_id=technician_id) if settings.calendar_sync else []
+    return {"date": day.isoformat(), "timezone": settings.timezone, "technician_id": technician_id,
+            "unavailable": scheduling.day_unavailable(day, appointments, busy, settings, exclude_id=exclude)}
 
 
 @router.get("/api/scheduling/settings", summary="Scheduling settings")

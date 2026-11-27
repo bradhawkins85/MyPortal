@@ -18,6 +18,12 @@ time zone and stored in UTC.
   ``Calendars.ReadWrite``), moved when it changes and removed when cancelled.
   Writes happen in the background; failures are recorded on the appointment
   and retried by :func:`sync_job` up to :data:`MAX_SYNC_ATTEMPTS` times.
+* **Busy time**: the same job reads each technician's calendar
+  (``/users/{email}/calendarView``) for the next :data:`BUSY_LOOKAHEAD_DAYS`
+  days and stores only *when* they are busy, never what the event is: the
+  request selects start, end and free/busy state only. The board shows these
+  windows as "Unavailable", and booking a technician over them, or over
+  another of their appointments, is refused (:func:`check_available`).
 """
 
 from __future__ import annotations
@@ -28,7 +34,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from loguru import logger
@@ -49,6 +55,12 @@ MAX_SYNC_ATTEMPTS = 5
 SYNC_INTERVAL_SECONDS = 600
 SYNC_STARTUP_DELAY_SECONDS = 150
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+BUSY_LOOKAHEAD_DAYS = 60
+BUSY_LOOKBACK_DAYS = 1
+# Graph ``showAs`` values that make a technician unavailable; "free" and
+# "workingElsewhere" leave them bookable.
+BUSY_SHOW_AS = ("oof", "busy", "tentative")
+BUSY_LABELS = {"busy": "Busy", "tentative": "Tentative", "oof": "Away"}
 EVENTS = {"created": "appointments.scheduled", "updated": "appointments.updated", "cancelled": "appointments.cancelled"}
 
 
@@ -246,6 +258,41 @@ async def conflicts(values: Mapping[str, Any], *, exclude_id: int | None = None)
                                        exclude_id)
 
 
+async def busy_conflicts(values: Mapping[str, Any], settings: Settings) -> list[dict[str, Any]]:
+    """Time the technician's own calendar shows them unavailable during the booking."""
+
+    if values.get("status") != "scheduled" or not settings.calendar_sync:
+        return []
+    return await repo.list_busy_between(values["starts_at"], values["ends_at"],
+                                        technician_user_id=int(values["technician_user_id"]))
+
+
+def _unchanged_time(values: Mapping[str, Any], previous: Mapping[str, Any] | None) -> bool:
+    if not previous or previous.get("status") != "scheduled":
+        return False
+    return (int(previous["technician_user_id"]) == int(values["technician_user_id"])
+            and _naive_utc(previous["starts_at"]) == _naive_utc(values["starts_at"])
+            and _naive_utc(previous["ends_at"]) == _naive_utc(values["ends_at"]))
+
+
+async def check_available(values: Mapping[str, Any], settings: Settings, *, appointment_id: int | None = None,
+                          previous: Mapping[str, Any] | None = None, technician: str | None = None) -> None:
+    """Refuse a booking over another appointment or over time the technician's calendar shows busy.
+
+    Saving an appointment without moving it (changing its notes, say) is not
+    re-checked, so time that became busy afterwards doesn't lock it.
+    """
+
+    if values.get("status") != "scheduled" or _unchanged_time(values, previous):
+        return
+    booked = await conflicts(values, exclude_id=appointment_id)
+    if booked:
+        raise AppointmentError({"conflict": conflict_message(booked, settings.zone)})
+    busy = await busy_conflicts(values, settings)
+    if busy:
+        raise AppointmentError({"conflict": unavailable_message(busy, settings.zone, technician=technician)})
+
+
 def describe_when(appointment: Mapping[str, Any], zone: ZoneInfo) -> str:
     start, end = to_local(appointment["starts_at"], zone), to_local(appointment["ends_at"], zone)
     if not start or not end:
@@ -257,7 +304,13 @@ def describe_when(appointment: Mapping[str, Any], zone: ZoneInfo) -> str:
 
 def conflict_message(found: Sequence[Mapping[str, Any]], zone: ZoneInfo) -> str:
     items = "; ".join(f"#{item.get('ticket_number') or item['ticket_id']} {describe_when(item, zone)}" for item in found[:3])
-    return f"{technician_name(found[0])} is already booked then ({items}). Tick “Book anyway” to double-book."
+    return f"{technician_name(found[0])} is already booked then ({items}). Choose another time or technician."
+
+
+def unavailable_message(found: Sequence[Mapping[str, Any]], zone: ZoneInfo, *, technician: str | None = None) -> str:
+    times = "; ".join(describe_when(item, zone) for item in found[:3])
+    who = technician or "The technician"
+    return f"{who} is unavailable then: their calendar shows them busy ({times}). Choose another time or technician."
 
 
 def _note(action: str, appointment: Mapping[str, Any], technician: str, zone: ZoneInfo) -> str:
@@ -488,6 +541,7 @@ async def sync_job() -> None:
     @singleton_run("appointment_calendar_sync", ttl_seconds=SYNC_INTERVAL_SECONDS)
     async def _run_once() -> None:
         await sync_pending()
+        await sync_busy_times()
 
     await asyncio.sleep(SYNC_STARTUP_DELAY_SECONDS)
     while True:
@@ -496,6 +550,127 @@ async def sync_job() -> None:
         except Exception as exc:  # pragma: no cover - retried on the next pass
             logger.warning("Appointment calendar sync job failed: {}", exc)
         await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+
+
+# --------------------------------------------------------------------------- #
+# Busy time from technicians' calendars
+# --------------------------------------------------------------------------- #
+
+
+def calendar_view_url(mailbox: str, start: datetime, end: datetime) -> str:
+    """Only the fields needed to know *when* someone is busy: never subject, body or attendees."""
+
+    query = urlencode({
+        "startDateTime": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "endDateTime": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "$select": "id,start,end,showAs,isCancelled,transactionId",
+        "$top": "250",
+    })
+    return f"{GRAPH_BASE}/users/{quote(mailbox, safe='@.')}/calendarView?{query}"
+
+
+def _graph_time(value: Any) -> datetime | None:
+    if not isinstance(value, Mapping) or not value.get("dateTime"):
+        return None
+    text = str(value["dateTime"])[:19]  # Graph sends up to seven fractional digits
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    zone_name = str(value.get("timeZone") or "UTC")
+    if zone_name.upper() not in {"UTC", "ETC/UTC", "Z"}:
+        try:
+            return to_utc(parsed, ZoneInfo(zone_name))
+        except (ZoneInfoNotFoundError, ValueError):
+            pass  # the request asks for UTC; a Windows zone name here is unexpected
+    return parsed
+
+
+def busy_blocks(events: Iterable[Mapping[str, Any]], *, own_event_ids: Iterable[str] = ()) -> list[tuple[datetime, datetime, str]]:
+    """Merge a calendar's busy events into ``(start, end, show_as)`` windows.
+
+    Free and cancelled events, and the events MyPortal wrote for its own
+    appointments, are left out. Overlapping and touching events merge, so the
+    stored windows don't reveal how many events there were.
+    """
+
+    own = {str(event_id) for event_id in own_event_ids if event_id}
+    rank = {name: index for index, name in enumerate(reversed(BUSY_SHOW_AS))}
+    windows: list[tuple[datetime, datetime, str]] = []
+    for event in events:
+        show_as = str(event.get("showAs") or "busy")
+        if show_as not in BUSY_SHOW_AS or event.get("isCancelled"):
+            continue
+        if str(event.get("id") or "") in own or str(event.get("transactionId") or "").startswith("myportal-appointment-"):
+            continue
+        start, end = _graph_time(event.get("start")), _graph_time(event.get("end"))
+        if start is None or end is None or end <= start:
+            continue
+        windows.append((start, end, show_as))
+    merged: list[tuple[datetime, datetime, str]] = []
+    for start, end, show_as in sorted(windows):
+        if merged and start <= merged[-1][1]:
+            last_start, last_end, last_show = merged[-1]
+            stronger = show_as if rank[show_as] > rank[last_show] else last_show
+            merged[-1] = (last_start, max(last_end, end), stronger)
+        else:
+            merged.append((start, end, show_as))
+    return merged
+
+
+async def _calendar_events(m365_service: Any, token: str, url: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    headers = {"Prefer": 'outlook.timezone="UTC"'}
+    pages = 0
+    while url and pages < 40:
+        data = await m365_service._graph_get(token, url, extra_headers=headers)
+        items.extend(data.get("value", []))
+        url = data.get("@odata.nextLink")
+        pages += 1
+    return items
+
+
+async def sync_busy_times(*, now: datetime | None = None) -> int:
+    """Import every technician's busy time. Returns how many technicians were updated."""
+
+    from app.repositories import chat_auto_assign as technicians_repo
+    from app.services import m365 as m365_service
+
+    settings = await load_settings()
+    if not settings.calendar_sync:
+        return 0
+    now = now or _utcnow()
+    start = now - timedelta(days=BUSY_LOOKBACK_DAYS)
+    end = now + timedelta(days=BUSY_LOOKAHEAD_DAYS)
+    errors: list[str] = []
+    updated = 0
+    try:
+        token = await m365_service.acquire_access_token(int(settings.m365_company_id), force_client_credentials=True)
+    except Exception as exc:  # noqa: BLE001 - recorded for the settings card
+        message = str(exc) or type(exc).__name__
+        logger.warning("Could not read technicians' calendars: {}", message)
+        await repo.record_busy_sync(synced_at=now, error=message)
+        return 0
+    for technician in await technicians_repo.list_all_technicians():
+        mailbox = str(technician.get("email") or "").strip()
+        if not mailbox:
+            continue
+        technician_id = int(technician["id"])
+        try:
+            events = await _calendar_events(m365_service, token, calendar_view_url(mailbox, start, end))
+            own = [item.get("m365_event_id") for item in await repo.list_between(
+                start, end, technician_user_id=technician_id, include_cancelled=True)]
+            await repo.replace_busy_times(technician_id, start, end, busy_blocks(events, own_event_ids=own),
+                                          synced_at=now)
+            updated += 1
+        except Exception as exc:  # noqa: BLE001 - one mailbox must not stop the others
+            message = str(exc) or type(exc).__name__
+            if "403" in message or "Forbidden" in message or "AccessDenied" in message:
+                message += " — grant the Microsoft 365 app the Calendars.ReadWrite application permission."
+            logger.warning("Could not read the calendar of technician {}: {}", technician_id, message)
+            errors.append(f"{technician_name(technician)}: {message}")
+    await repo.record_busy_sync(synced_at=now, error="; ".join(errors) or None)
+    return updated
 
 
 # --------------------------------------------------------------------------- #
@@ -523,9 +698,25 @@ def _block(appointment: Mapping[str, Any], day_start: datetime, day_end: datetim
     }
 
 
+def _busy_band(block: Mapping[str, Any], day_start: datetime, day_end: datetime, zone: ZoneInfo) -> dict[str, Any]:
+    start = to_local(block["starts_at"], zone)
+    end = to_local(block["ends_at"], zone)
+    span = (day_end - day_start).total_seconds()
+    left = max(0.0, (start - day_start).total_seconds() / span)
+    right = min(1.0, (end - day_start).total_seconds() / span)
+    return {
+        "left": round(100 * left, 2),
+        "width": round(max(0.5, 100 * (right - left)), 2),
+        "start_label": f"{max(start, day_start):%H:%M}",
+        "end_label": f"{min(end, day_end):%H:%M}",
+        "label": BUSY_LABELS.get(str(block.get("show_as")), "Busy"),
+        "when": describe_when(block, zone),
+    }
+
+
 def board(day: date, technicians: Sequence[Mapping[str, Any]], appointments: Sequence[Mapping[str, Any]],
-          settings: Settings) -> dict[str, Any]:
-    """One row per technician across the working day, with appointments positioned on it."""
+          settings: Settings, busy: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+    """One row per technician across the working day, with appointments and unavailable time on it."""
 
     zone = settings.zone
     day_start = datetime.combine(day, time(settings.day_start_hour), tzinfo=zone)
@@ -537,6 +728,12 @@ def board(day: date, technicians: Sequence[Mapping[str, Any]], appointments: Seq
         if end <= day_start or start >= day_end:
             continue
         by_tech.setdefault(int(appointment["technician_user_id"]), []).append(_block(appointment, day_start, day_end, zone))
+    busy_by_tech: dict[int, list[dict[str, Any]]] = {}
+    for block in busy:
+        start, end = to_local(block["starts_at"], zone), to_local(block["ends_at"], zone)
+        if end <= day_start or start >= day_end:
+            continue
+        busy_by_tech.setdefault(int(block["technician_user_id"]), []).append(_busy_band(block, day_start, day_end, zone))
     for technician in technicians:
         items = sorted(by_tech.get(int(technician["id"]), []), key=lambda item: item["left"])
         # Overlapping bookings stack into lanes so both stay visible.
@@ -549,8 +746,9 @@ def board(day: date, technicians: Sequence[Mapping[str, Any]], appointments: Seq
             lanes[lane] = item["left"] + item["width"]
             item["lane"] = lane
         booked = sum(min(item["width"], 100) for item in items if item.get("status") == "scheduled")
+        unavailable = sorted(busy_by_tech.get(int(technician["id"]), []), key=lambda band: band["left"])
         rows.append({"technician": technician, "name": technician_name(technician), "items": items,
-                     "lanes": max(1, len(lanes)), "booked_percent": min(100, round(booked))})
+                     "busy": unavailable, "lanes": max(1, len(lanes)), "booked_percent": min(100, round(booked))})
     hours = [{"label": f"{hour:02d}:00", "left": round(100 * (hour - settings.day_start_hour)
                                                       / (settings.day_end_hour - settings.day_start_hour), 2)}
              for hour in range(settings.day_start_hour, settings.day_end_hour)]
@@ -577,6 +775,31 @@ def group_by_day(appointments: Sequence[Mapping[str, Any]], zone: ZoneInfo) -> l
             "kind_label": KINDS.get(str(appointment.get("kind")), "Appointment"),
         })
     return [{"day": day, "items": items} for day, items in sorted(days.items())]
+
+
+def day_unavailable(day: date, appointments: Sequence[Mapping[str, Any]], busy: Sequence[Mapping[str, Any]],
+                    settings: Settings, *, exclude_id: int | None = None) -> list[dict[str, str]]:
+    """A technician's taken time on ``day`` as local ``HH:MM`` ranges, for the booking editor.
+
+    Only times and whether it's an appointment or calendar time are given; no
+    details of the technician's own calendar events.
+    """
+
+    zone = settings.zone
+    day_start = datetime.combine(day, time(0), tzinfo=zone)
+    day_end = datetime.combine(day + timedelta(days=1), time(0), tzinfo=zone)
+    ranges: list[dict[str, str]] = []
+    items = [(item, "appointment") for item in appointments
+             if item.get("status") == "scheduled" and item.get("id") != exclude_id]
+    items += [(item, "calendar") for item in busy]
+    for item, source in items:
+        start, end = to_local(item["starts_at"], zone), to_local(item["ends_at"], zone)
+        if not start or not end or end <= day_start or start >= day_end:
+            continue
+        start, end = max(start, day_start), min(end, day_end)
+        ranges.append({"start": f"{start:%H:%M}", "end": "24:00" if end == day_end else f"{end:%H:%M}",
+                       "source": source})
+    return sorted(ranges, key=lambda item: (item["start"], item["end"]))
 
 
 def editor_state(appointment: Mapping[str, Any] | None, settings: Settings, *, ticket_id: int | None = None,
