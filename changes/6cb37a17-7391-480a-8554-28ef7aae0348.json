@@ -1,0 +1,7 @@
+{
+  "guid": "6cb37a17-7391-480a-8554-28ef7aae0348",
+  "occurred_at": "2026-11-27T00:32Z",
+  "change_type": "Fix",
+  "summary": "The vulnerability sync no longer fails when a device has the same program installed more than once.",
+  "content_hash": "51c35f38b676459fe0bfbea65e401b1cf935ee83cda0f8f1ad0c5931c1252342"
+}
