@@ -13,7 +13,7 @@
 {%- endmacro %}
 
 {% macro rating_pill(rating) -%}
-  {%- set variant = "success" if rating >= 4 else ("warning" if rating == 3 else "danger") -%}
+  {%- set variant = "success" if rating >= 4 else ("warning" if rating == 3 else "error") -%}
   <span class="status status--{{ variant }}">{{ rating }}/5 · {{ rating_labels[rating] }}</span>
 {%- endmacro %}
 

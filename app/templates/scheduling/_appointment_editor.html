@@ -1,0 +1,112 @@
+{#- Book or change an appointment (scheduling/board.html). static/js/scheduling.js opens it in
+    place and keeps the summary up to date; without JavaScript it opens on its own page load. -#}
+{% set e = editing or {"kind": "onsite", "date": day.isoformat(), "start_time": "09:00", "duration_minutes": settings.default_duration_minutes, "status": "scheduled"} %}
+{% set err = errors or {} %}
+<div class="modal scf-modal" id="sch-modal" role="dialog" aria-modal="true" aria-labelledby="sch-modal-title" {% if not editing %}hidden{% endif %} data-sch-modal {% if editing %}data-sch-open-on-load{% endif %}>
+  <form class="modal__panel modal__panel--wide scf-editor" method="post" action="/admin/schedule/appointments{% if e.id %}/{{ e.id }}{% endif %}" data-sch-form novalidate>
+    {% include "partials/csrf.html" %}
+    <input type="hidden" name="return_to" value="/admin/schedule?date={{ e.date or day.isoformat() }}">
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Appointment</p>
+        <h2 class="modal__title" id="sch-modal-title">{{ "Change appointment" if e.id else "Book appointment" }}</h2>
+        <p class="scf-editor__subtitle">{% if e.ticket_label %}{{ e.ticket_label }}{% else %}Book a technician for a ticket.{% endif %}</p>
+      </div>
+      <a href="/admin/schedule?date={{ day.isoformat() }}" class="modal__close" data-modal-close aria-label="Close appointment editor"></a>
+    </header>
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        {% if err.conflict %}
+        <div class="alert alert--warning" role="alert">{{ err.conflict }}
+          <label class="sch-anyway"><input type="checkbox" name="book_anyway" value="1"> Book anyway</label>
+        </div>
+        {% elif err %}<div class="alert alert--error" role="alert">Check the highlighted fields.</div>{% endif %}
+        <div class="scf-grid">
+          <div class="form-field">
+            <label class="form-label" for="sch-ticket">Ticket</label>
+            <input class="form-input" id="sch-ticket" name="ticket_id" inputmode="numeric" list="sch-ticket-options" value="{{ e.ticket_id or '' }}" placeholder="Ticket ID" required autocomplete="off" data-sch-input>
+            <datalist id="sch-ticket-options">{% for ticket in unscheduled %}<option value="{{ ticket.id }}">#{{ ticket.ticket_number or ticket.id }} {{ ticket.subject }} · {{ ticket.company_name or "" }}</option>{% endfor %}</datalist>
+            <p class="form-help">Type to pick from tickets waiting to be scheduled, or enter any ticket's ID.</p>
+            {% if err.ticket_id %}<p class="form-help form-help--error">{{ err.ticket_id }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="sch-tech">Technician</label>
+            <select class="form-input" id="sch-tech" name="technician_user_id" required data-sch-input>
+              <option value="">Choose…</option>
+              {% for tech in technicians %}<option value="{{ tech.id }}" {% if e.technician_user_id == tech.id %}selected{% endif %}>{{ tech.name }}</option>{% endfor %}
+            </select>
+            {% if err.technician_user_id %}<p class="form-help form-help--error">{{ err.technician_user_id }}</p>{% endif %}
+          </div>
+        </div>
+        <fieldset class="sch-fieldset">
+          <legend class="form-label">Kind</legend>
+          <div class="scf-type-grid sch-kinds">
+            {% for key, label in kinds.items() %}
+            <label class="scf-type-card"><input type="radio" name="kind" value="{{ key }}" {% if (e.kind or "onsite") == key %}checked{% endif %} data-sch-input><span class="scf-type-card__label">{{ label }}</span></label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <div class="scf-grid sch-when">
+          <div class="form-field">
+            <label class="form-label" for="sch-day">Date</label>
+            <input class="form-input" id="sch-day" type="date" name="date" value="{{ e.date or day.isoformat() }}" required data-sch-input>
+            {% if err.date %}<p class="form-help form-help--error">{{ err.date }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="sch-start-time">Starts</label>
+            <input class="form-input" id="sch-start-time" type="time" step="300" name="start_time" value="{{ e.start_time or '09:00' }}" required data-sch-input>
+            {% if err.start_time %}<p class="form-help form-help--error">{{ err.start_time }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="sch-duration">Takes</label>
+            <select class="form-input" id="sch-duration" name="duration_minutes" data-sch-input>
+              {% set chosen = (e.duration_minutes or settings.default_duration_minutes) | int %}
+              {% for minutes in (durations | list) + ([chosen] if chosen not in durations else []) %}<option value="{{ minutes }}" {% if minutes == chosen %}selected{% endif %}>{{ (minutes // 60 ~ " h " if minutes >= 60 else "") ~ (minutes % 60 ~ " min" if minutes % 60 else "") }}</option>{% endfor %}
+            </select>
+            {% if err.duration_minutes %}<p class="form-help form-help--error">{{ err.duration_minutes }}</p>{% endif %}
+          </div>
+        </div>
+        <p class="form-help">Times are in {{ settings.timezone }}.</p>
+        <div class="form-field">
+          <label class="form-label" for="sch-location">Where <span class="field-optional">optional</span></label>
+          <input class="form-input" id="sch-location" name="location" maxlength="500" value="{{ e.location or '' }}" placeholder="e.g. 12 High St, reception" data-sch-input>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="sch-notes">Notes for the technician <span class="field-optional">optional</span></label>
+          <textarea class="form-input" id="sch-notes" name="notes" rows="3" maxlength="4000">{{ e.notes or '' }}</textarea>
+          <p class="form-help">Added to the ticket's internal note and the calendar event.</p>
+        </div>
+        {% if e.id %}<input type="hidden" name="status" value="{{ e.status or 'scheduled' }}">{% endif %}
+        {% if e.id and e.sync_status %}
+        <p class="sch-sync sch-sync--{{ e.sync_status }}" role="status">Calendar: {{ sync_labels.get(e.sync_status, e.sync_status) }}{% if e.sync_error %} — {{ e.sync_error }}{% endif %}</p>
+        {% endif %}
+      </div>
+      <aside class="scf-preview" aria-label="Summary">
+        <p class="scf-preview__eyebrow">In plain English</p>
+        <p class="sch-preview" data-sch-preview role="status" aria-live="polite">Choose a ticket, technician and time.</p>
+        <ul class="scf-preview__rules">
+          <li>The ticket gets an internal note.</li>
+          <li>Automations can email the requester.</li>
+          {% if settings.calendar_sync %}<li>It goes in the technician's Outlook calendar.</li>{% endif %}
+        </ul>
+      </aside>
+    </div>
+    <footer class="modal__footer scf-editor__footer">
+      {% if e.id and e.status == "scheduled" %}
+      <button type="submit" form="sch-cancel-form" class="button button--danger">Cancel appointment</button>
+      <button type="submit" form="sch-done-form" class="button button--ghost">Mark as done</button>
+      {% endif %}
+      {% if e.id and e.sync_status == "failed" %}<button type="submit" form="sch-sync-form" class="button button--ghost">Retry calendar</button>{% endif %}
+      <span class="scf-editor__spacer"></span>
+      <a href="/admin/schedule?date={{ day.isoformat() }}" class="button button--ghost" data-modal-close>Close</a>
+      <button type="submit" class="button button--primary">{{ "Save changes" if e.id else "Book" }}</button>
+    </footer>
+  </form>
+  {% if e.id %}
+  <form id="sch-cancel-form" method="post" action="/admin/schedule/appointments/{{ e.id }}/status" data-confirm="Cancel this appointment? The technician's calendar event is removed.">{% include "partials/csrf.html" %}<input type="hidden" name="status" value="cancelled"></form>
+  <form id="sch-done-form" method="post" action="/admin/schedule/appointments/{{ e.id }}/status">{% include "partials/csrf.html" %}<input type="hidden" name="status" value="completed"></form>
+  <form id="sch-sync-form" method="post" action="/admin/schedule/appointments/{{ e.id }}/sync">{% include "partials/csrf.html" %}<input type="hidden" name="return_to" value="/admin/schedule?date={{ e.date }}&amp;appointment={{ e.id }}"></form>
+  {% endif %}
+</div>
+<script id="sch-technicians" type="application/json">{{ technicians | tojson }}</script>
+<noscript><style>#sch-modal:not([hidden]) { position: static; }</style></noscript>
