@@ -35,8 +35,8 @@ def _patch_script_copy(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize('managed,installed,missing,expected', [
-    ('1.0', '1.0', False, 'upgrade'), (None, '1.0', False, 'install'),
-    ('3.0', '3.0', False, None), ('1.0', '3.0', False, None), (None, '3.0', False, None),
+    ('1.0', '1.0', False, 'upgrade'), (None, '1.0', False, 'install'), (None, '2.0', False, 'install'),
+    ('3.0', '3.0', False, None), ('1.0', '3.0', False, None), (None, '3.0', False, 'register'),
     (None, None, False, None), (None, None, True, 'install'),
 ])
 @pytest.mark.parametrize('available_source', ['custom1', 'custom2', 'custom10', 'default'])
@@ -86,9 +86,11 @@ function Get-ItemProperty {
     assert all(f'--source={name}' in search for name, search in zip(order, searches))
     commands = log.read_text() if log.exists() else ''
     if expected:
-        assert commands.startswith(expected + ' testapp ')
+        # Unmanaged apps are brought under Chocolatey; a newer one is only registered, never downgraded.
+        assert commands.startswith(('install' if expected == 'register' else expected) + ' testapp ')
         assert '--version=2.0' in commands and '--source=' not in commands
-        assert ('--force' in commands) == (expected == 'install')
+        assert ('--force' in commands) == (expected in {'install', 'register'})
+        assert ('--skip-automation-scripts' in commands) == (expected == 'register')
     else:
         assert commands == ''
 

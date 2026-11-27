@@ -208,7 +208,7 @@
               <div class="form-field"><label class="form-label" for="patch-cron">Schedule (cron)</label><input class="form-input" id="patch-cron" name="cron" value="{{ e.cron }}" required maxlength="128" aria-describedby="patch-cron-help"{% if errors.get('cron') %} aria-invalid="true"{% endif %}><p class="form-help" id="patch-cron-help">For example, <code>0 2 * * 0</code> runs every Sunday at 02:00.</p></div>
               <div class="form-field"><label class="form-label" for="patch-zone">Schedule time zone</label><input class="form-input" id="patch-zone" name="timezone" value="{{ e.timezone }}" required maxlength="64" placeholder="Australia/Brisbane"></div>
             </div>
-            <p class="form-help">Devices must collect queued work within 15 minutes of the scheduled run.</p>
+            <p class="form-help">Devices that are offline at the scheduled time run it once when they next check in, up until the next scheduled run.</p>
           </div>
 
           <div class="ce-subsection" aria-labelledby="patch-step-devices">

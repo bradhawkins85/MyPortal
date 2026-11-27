@@ -187,7 +187,7 @@ async def test_app_run_reboot_policy_and_expiry(patch_db):
 
 
 @pytest.mark.anyio
-async def test_scheduler_claims_once_and_skips_old_windows(patch_db, monkeypatch):
+async def test_scheduler_claims_once_and_runs_until_next_window(patch_db, monkeypatch):
     _, agent = await _enrol(patch_db)
     policy = await save()
     now = datetime(2026, 10, 14, 12)
@@ -195,15 +195,40 @@ async def test_scheduler_claims_once_and_skips_old_windows(patch_db, monkeypatch
     await patch_db.execute('UPDATE rmm_patch_policies SET next_run_at = %s WHERE id = %s',
                            (now - timedelta(minutes=1), policy['id']))
     await patch.tick()
-    assert len(await rmm_repo.next_jobs_for_agent(agent['id'])) == 1
+    rows = await rmm_repo.next_jobs_for_agent(agent['id'])
+    assert len(rows) == 1
+    # Collectable until the next scheduled window, not just 15 minutes.
+    next_window = (await repo.get_policy(policy['id']))['next_run_at']
+    if isinstance(next_window, str):
+        next_window = datetime.fromisoformat(next_window)
+    expires_at = rows[0]['expires_at']
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    assert expires_at == next_window and next_window - now > timedelta(days=1)
     await patch.tick()
     assert len(await rmm_repo.next_jobs_for_agent(agent['id'])) == 1
     for row in await rmm_repo.next_jobs_for_agent(agent['id']):
         await rmm_repo.cancel_run(row['id'])
+    # A window missed by hours is still run once.
     await patch_db.execute('UPDATE rmm_patch_policies SET next_run_at = %s WHERE id = %s',
                            (now - timedelta(hours=2), policy['id']))
     await patch.tick()
-    assert await rmm_repo.next_jobs_for_agent(agent['id']) == []
+    assert len(await rmm_repo.next_jobs_for_agent(agent['id'])) == 1
+
+
+@pytest.mark.anyio
+async def test_uncollected_run_does_not_block_next_window(patch_db, monkeypatch):
+    _, agent = await _enrol(patch_db)
+    policy = await save()
+    stale = await patch.queue(agent, [policy], {policy['id']}, patch.utcnow() - timedelta(seconds=1))
+    assert stale
+    assert not await repo.has_active_run(agent['id'])
+    fresh = await patch.queue(agent, [policy], {policy['id']}, patch.utcnow() + timedelta(days=7))
+    assert fresh and fresh != stale
+    assert await repo.has_active_run(agent['id'])
+    jobs = await rmm_scripts.claim_jobs(agent)
+    assert len(jobs) == 1
+    assert (await rmm_repo.get_run(stale))['status'] == 'cancelled'
 
 
 def test_template_renders_both_forms_and_permissions():
