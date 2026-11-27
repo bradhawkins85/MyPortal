@@ -148,6 +148,27 @@ should set `category` in their `INSERT`.
 | Tray: Deployment URL Usage | `tray-deployment-links` | Tray deployment URLs per company with downloads, last download, expiry, revocation and the latest installer build status. |
 | Tray: Failed Installer Builds (Last 30 Days) | `tray-deployment-builds-failed` | Tray deployment installer builds that failed in the last 30 days with the company, release and error. |
 
+## Vulnerabilities
+
+Migration `584_vulnerability_reporting_queries.sql` adds these under the
+*Vulnerabilities* category. Every report also has a company scoped copy: add
+`-company-scoped` to the slug and ` (Company Scoped)` to the name. Detection
+reports count only open findings on active RMM agents, so accepted risks are
+left out. *Last online* is the later of the RMM agent's last check-in and the
+asset's last sync. The online-window copies show whether detections apply to
+devices that are still in use.
+
+| Report | Slug | What it shows |
+| --- | --- | --- |
+| Vulnerabilities: Assets by Vulnerability Count | `vulnerabilities-assets-by-vulnerability-count` | Each device with open vulnerabilities: distinct CVEs, critical, high, medium and low, known exploited, highest CVSS, oldest detection, last online and days since online. Worst first. |
+| … (Online in Last 90 Days) | `vulnerabilities-assets-by-vulnerability-count-online-90-days` | The same, for devices seen online in the last 90 days. |
+| … (Online in Last 30 Days) | `vulnerabilities-assets-by-vulnerability-count-online-30-days` | The same, for devices seen online in the last 30 days. |
+| … (Not Online in 90 Days) | `vulnerabilities-assets-by-vulnerability-count-offline-over-90-days` | The same, for devices not seen for over 90 days, so stale detections can be cleaned up. |
+| Vulnerabilities: Asset CVE Detections | `vulnerabilities-asset-detections` | Every open detection: device, CVE, severity, CVSS, known exploited and ransomware flags, matched software and version, first and last detected, and last online. |
+| … (Online in Last 90 Days) | `vulnerabilities-asset-detections-online-90-days` | The same, for devices seen online in the last 90 days. |
+| Vulnerabilities: CVEs by Affected Devices | `vulnerabilities-cves-by-affected-devices` | Each open CVE with severity, CVSS, known exploited and ransomware flags, CISA due date, affected devices and companies, and the products involved. |
+| … (Online in Last 90 Days) | `vulnerabilities-cves-by-affected-devices-online-90-days` | The same, counting only devices seen online in the last 90 days. |
+
 ## Assets, warranty and network map
 
 | Report | Slug | What it shows |
@@ -223,6 +244,8 @@ should set `category` in their `INSERT`.
 | Stat Strip - Health Checks - Overview | `stat-strip-health-checks` | Devices with a completed health check, average score, healthy, attention and critical devices, and health checks run in the last 30 days. |
 | Stat Strip - AI Usage - Last 30 Days | `stat-strip-llm-usage` | LLM requests, failures, input and output tokens (input_tok, output_tok), features used and average latency over the last 30 days. |
 | Stat Strip - Tray - Overview | `stat-strip-tray-overview` | Active tray devices, seen in the last day, not seen in 30 days, Windows and macOS devices and active deployment URLs. |
+| Stat Strip - Vulnerabilities - NVD and CVE Catalogue | `stat-strip-vulnerabilities-nvd-catalogue` | CVEs downloaded from the NVD by severity, published in the last 30 days, CISA KEV entries and tracked known exploited CVEs, tracked products, products whose sync failed, and days since the NVD and KEV syncs. The company scoped copy counts only products detected on the company's devices and adds its accepted risks. |
+| Stat Strip - Vulnerabilities - CVE Detections | `stat-strip-vulnerabilities-cve-detections` | Distinct open CVEs on devices by severity, known exploited and ransomware-linked CVEs, affected devices and open detections. `-online-90-days` and `-online-30-days` copies limit it to devices seen online in that window. All have company scoped copies. |
 | Stat Strip - Marketing - Campaigns | `stat-strip-marketing-campaigns` | Campaigns sent, emails sent, opened, clicked, replied and bounced across all marketing campaigns, and opt-outs in the last 30 days. |
 | Stat Strip - Company Overview - RMM Devices | `stat-strip-report-rmm-devices` | The current company's RMM devices: total, online, offline, awaiting reboot, devices with missing updates and failing checks. |
 | Stat Strip - Company Overview - Device Health | `stat-strip-report-health-checks` | The current company's latest health check per device: devices checked, average score, healthy, attention and critical. |
