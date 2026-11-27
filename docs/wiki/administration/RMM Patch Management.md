@@ -154,6 +154,15 @@ Windows uninstall registry inventory, then queries the latest stable version fro
 - Current or newer: skip; never intentionally downgrade.
 - Absent: skip unless **Also install on devices where this app is missing** is enabled.
 
+Application policies also offer two options, both off by default:
+
+- **Ignore pending reboots** patches the app even when the device is already waiting
+  for a restart. Windows updates, feature upgrades and other apps in the same run still
+  wait for the restart, and a staged Windows feature update always holds every change
+  until its restart completes. The setting never restarts the device.
+- **Ignore checksums** passes Chocolatey's `--ignore-checksums` option, for installers a
+  vendor updated in place. Only use it for packages you trust.
+
 Commands pin the compared version and source. Registry names are exact,
 case-insensitive matches. Ambiguous installations and version formats that cannot
 be compared safely fail the app operation instead of guessing. Dotted numeric
@@ -194,7 +203,7 @@ restart is cleared. Neither choice restarts the device. The mode and options are
 recorded in run history. These options apply to package pushes. The one-click
 upgrade of an application from an asset's **Software** list also proceeds despite a
 pending restart; scheduled patch policies keep their version checks and
-pending-reboot deferral.
+pending-reboot deferral unless the application policy ignores pending reboots.
 
 ## Device Windows updates
 

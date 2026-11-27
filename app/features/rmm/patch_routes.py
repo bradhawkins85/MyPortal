@@ -97,7 +97,8 @@ async def save(request, policy_id):
     except RunRequestError as exc:
         posted = {**patching.DEFAULTS, **payload, "id": policy_id,
                   "is_enabled": patching.flag(payload.get("is_enabled")),
-                  "install_missing": patching.flag(payload.get("install_missing"))}
+                  **{key: patching.flag(payload.get(key))
+                     for key in ("install_missing", "ignore_pending_reboots", "ignore_checksums")}}
         try:
             posted["target_rules"] = json.loads(payload.get("target_rules") or "null")
         except ValueError:

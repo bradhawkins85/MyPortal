@@ -58,6 +58,8 @@ def inventory_db(monkeypatch):
             system_disk_free_bytes INT, os_name TEXT, os_version TEXT, os_build TEXT,
             bios_version TEXT, domain TEXT, arch TEXT, hostname TEXT, last_boot_at TEXT, details_json TEXT);
         CREATE TABLE rmm_device_software (agent_id INT, name TEXT, version TEXT, publisher TEXT);
+        CREATE TABLE vuln_findings (id INTEGER PRIMARY KEY, agent_id INT, company_id INT, cve_id TEXT,
+            software_name TEXT, status TEXT);
         INSERT INTO companies VALUES (1, 'VIP', 0, 1, 'private-token'), (2, 'Other', 0, 0, NULL),
                                      (3, 'Archived', 1, 1, NULL);
         INSERT INTO rmm_agents (id, company_id, asset_id, status, hostname, os_version, arch,
@@ -397,3 +399,46 @@ async def test_without_tactical_rmm_asset_status_follows_the_tray_agent(inventor
         assert asset["status"] == "online"
         assert asset["last_sync"] == seen
         assert asset["last_user"] == "CORP\\alice"
+
+
+@pytest.mark.asyncio
+async def test_open_vulnerability_findings_follow_known_software_and_company(inventory_db):
+    _snapshot(inventory_db, agent_id=1)
+    _snapshot(inventory_db, agent_id=4, company_id=2, asset_id=20)
+    inventory_db.connection.executescript("""
+        INSERT INTO rmm_device_software VALUES (1, 'Google Chrome', '120.0', 'Google');
+        INSERT INTO vuln_findings (agent_id, company_id, cve_id, software_name, status) VALUES
+            (1, 1, 'CVE-2026-0001', 'Google Chrome', 'open'),
+            (1, 1, 'CVE-2026-0002', 'Google Chrome', 'open'),
+            (1, 1, 'CVE-2026-0003', '7-Zip', 'accepted'),
+            (1, 1, 'CVE-2026-0004', 'WinRAR', 'resolved'),
+            (1, 2, 'CVE-2026-0005', 'Other company app', 'open'),
+            (2, 1, 'CVE-2026-0006', 'Unknown inventory app', 'open');
+    """)
+    contexts = await targeting.contexts_for_agents([
+        _agent(1), _agent(2, asset_id=30), _agent(4, company_id=2, asset_id=20),
+    ])
+    assert contexts[1]["vulnerable_software"] == ["Google Chrome"]
+    assert contexts[1]["vulnerability"] == {"has_vulnerable_software": True}
+    assert contexts[4]["vulnerable_software"] == []
+    assert contexts[4]["vulnerability"] == {"has_vulnerable_software": False}
+    # Agent 2 has no inventory snapshot, so its software (and findings) are unknown.
+    assert contexts[2]["vulnerable_software"] is None
+    assert contexts[2]["vulnerability"] == {"has_vulnerable_software": None}
+
+
+@pytest.mark.asyncio
+async def test_missing_vulnerability_table_leaves_findings_unknown(inventory_db):
+    _snapshot(inventory_db, agent_id=1)
+    inventory_db.connection.execute("DROP TABLE vuln_findings")
+    context = (await targeting.contexts_for_agents([_agent(1)]))[1]
+    assert context["software"] == []
+    assert context["vulnerable_software"] is None
+    assert context["vulnerability"] == {"has_vulnerable_software": None}
+
+
+@pytest.mark.asyncio
+async def test_asset_context_without_agent_has_unknown_vulnerabilities(inventory_db):
+    context = await targeting.context_for_asset(1, 10)
+    assert context["vulnerable_software"] is None
+    assert context["vulnerability"] == {"has_vulnerable_software": None}

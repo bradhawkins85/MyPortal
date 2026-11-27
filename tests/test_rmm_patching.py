@@ -248,3 +248,39 @@ async def test_disabled_deleted_overridden_and_corrupt_policy_cancel(patch_db):
     assert not await patch.job_is_current(agent, job)
     await repo.delete(policy['id'])
     assert not await patch.job_is_current(agent, job)
+
+
+def test_app_policy_ignore_options_are_saved_only_when_on():
+    base = payload(kind='chocolatey', package_id='googlechrome', display_name='Google Chrome')
+    assert patch.validate(base, 1, False)['settings'] == {'display_name': 'Google Chrome', 'install_missing': False}
+    checked = patch.validate({**base, 'ignore_pending_reboots': '1', 'ignore_checksums': '1'}, 1, False)
+    assert checked['settings'] == {'display_name': 'Google Chrome', 'install_missing': False,
+                                   'ignore_pending_reboots': True, 'ignore_checksums': True}
+    # Windows Update policies do not take the application-only options.
+    assert 'ignore_checksums' not in patch.validate(payload(ignore_checksums='1'), 1, False)['settings']
+
+
+def test_app_policies_saved_before_the_ignore_options_stay_valid():
+    policy = {**payload(kind='chocolatey', package_id='googlechrome'), 'company_id': 1,
+              'settings': {'display_name': 'Google Chrome', 'install_missing': False}}
+    assert patch.valid_saved(policy)
+    policy['settings'] = {**policy['settings'], 'ignore_checksums': True}
+    assert patch.valid_saved(policy)
+
+
+@pytest.mark.anyio
+async def test_app_policy_ignore_options_reach_the_device_plan(patch_db):
+    _, agent = await _enrol(patch_db)
+    app = await save(kind='chocolatey', package_id='googlechrome', display_name='Google Chrome',
+                     ignore_pending_reboots='1', ignore_checksums='1')
+    await patch.queue(agent, await repo.list_policies(1), {app['id']}, patch.utcnow() + timedelta(minutes=15))
+    job = rmm_scripts._job_payload((await rmm_repo.next_jobs_for_agent(agent['id']))[0])
+    config = json.loads(job['env']['MYPORTAL_PATCH_PLAN'])
+    assert config['apps'][0]['ignore_pending_reboots'] is True
+    assert config['apps'][0]['ignore_checksums'] is True
+    assert await patch.job_is_current(agent, job)
+
+
+def test_policy_editor_shows_app_ignore_options():
+    template = (ROOT / 'app/templates/rmm/patching.html').read_text()
+    assert 'name="ignore_pending_reboots"' in template and 'name="ignore_checksums"' in template
