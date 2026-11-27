@@ -1,7 +1,7 @@
 # Scheduling and Dispatch
 
 **Schedule** (`/admin/schedule`, helpdesk technicians) books technicians for tickets: onsite visits,
-remote sessions, phone calls and meetings.
+remote sessions, phone calls, meetings or any other booking kind you add.
 
 ## The dispatch board
 
@@ -17,7 +17,22 @@ technician's calendar. Each row shows how much of the day is booked.
 - **My schedule** (`/admin/schedule/me`) lists a technician's week, day by day.
 
 Every ticket page also has an **Appointments** card with the ticket's bookings and a **Book
-appointment** button.
+appointment** button. It opens the booking editor on the ticket itself, with the ticket filled in
+and its assigned technician chosen, and once the appointment is booked you stay on the ticket.
+
+## Booking kinds
+
+Super admins manage booking kinds from the schedule page's **Actions** menu:
+
+- **Manage booking kinds** lists every kind with its colour, how many appointments use it and which
+  one is the default. Edit a kind to rename it or change its colour on the board.
+- **+ Add booking kind** adds one.
+- **Default booking kind** chooses the kind new bookings start with (also *Make default* in the
+  list, or *Start new bookings with this kind* in the editor).
+
+Deleting a kind that appointments already use archives it instead: those appointments keep its
+name, but it is no longer offered for new bookings. *Restore* brings it back. The default kind
+can't be removed; make another kind the default first.
 
 ## Booking
 
@@ -59,5 +74,9 @@ Settings also set the board's hours, the time zone and the default appointment l
 | `PUT` | `/api/appointments/{id}` |
 | `POST` | `/api/appointments/{id}/cancel` |
 | `GET` | `/api/scheduling/settings` (super admins) |
+| `GET` | `/api/scheduling/kinds` |
+| `POST` | `/api/scheduling/kinds` (super admins) |
+| `PUT` | `/api/scheduling/kinds/{id}` (super admins) |
+| `DELETE` | `/api/scheduling/kinds/{id}` (super admins; archives a kind that is in use) |
 
 Disable the feature with `DISABLED_FEATURE_PACKS=scheduling`.
