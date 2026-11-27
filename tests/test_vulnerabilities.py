@@ -422,6 +422,63 @@ async def test_tick_runs_once_a_day_or_when_requested(monkeypatch):
     assert await vulns.tick(NOW) is False
 
 
+@pytest.mark.asyncio
+async def test_failed_sync_backs_off_instead_of_restarting_every_minute(monkeypatch):
+    claim = AsyncMock(return_value=True)
+    monkeypatch.setattr(repo, "claim_run", claim)
+    monkeypatch.setattr(vulns, "_run_in_background", AsyncMock())
+    failed = {"nvd_synced_at": NOW - timedelta(days=2), "failed_at": NOW - timedelta(minutes=1)}
+    monkeypatch.setattr(repo, "get_state", AsyncMock(return_value=failed))
+    assert await vulns.tick(NOW) is False
+    claim.assert_not_awaited()
+    monkeypatch.setattr(repo, "get_state", AsyncMock(return_value={**failed, "requested_at": NOW}))
+    assert await vulns.tick(NOW) is True  # Sync now still retries at once
+    monkeypatch.setattr(repo, "get_state", AsyncMock(return_value={
+        "failed_at": NOW - vulns.FAILURE_RETRY - timedelta(minutes=1)}))
+    assert await vulns.tick(NOW) is True
+
+
+@pytest.mark.asyncio
+async def test_run_in_background_records_the_failure_and_clears_running(monkeypatch):
+    monkeypatch.setattr(vulns, "sync", AsyncMock(side_effect=RuntimeError("boom")))
+    update = AsyncMock()
+    monkeypatch.setattr(repo, "update_state", update)
+    await vulns._run_in_background(force=False)
+    failure = update.await_args_list[0].kwargs
+    assert failure["failed_at"] is not None and failure["last_error"] == "Sync failed: boom"
+    assert update.await_args_list[-1].kwargs == {"running_since": None}
+
+
+@pytest.mark.asyncio
+async def test_one_product_failing_unexpectedly_does_not_stop_the_sync(monkeypatch):
+    transport = _transport({}, {"vulnerabilities": []}, [])
+    monkeypatch.setattr(vulns, "monitored_client", lambda _cls, **kwargs: httpx.AsyncClient(transport=transport))
+    monkeypatch.setattr(repo, "get_state", AsyncMock(return_value={}))
+    monkeypatch.setattr(repo, "list_products", AsyncMock(return_value={}))
+    monkeypatch.setattr(repo, "list_mappings", AsyncMock(return_value=[]))
+    monkeypatch.setattr(repo, "list_installed_software", AsyncMock(return_value=[
+        {"agent_id": 1, "name": "Git", "version": "2.4"}, {"agent_id": 1, "name": "Google Chrome", "version": "1"}]))
+    monkeypatch.setattr(repo, "save_cves", AsyncMock(side_effect=[KeyError("bad"), None]))
+    for name in ("save_product", "replace_kev"):
+        monkeypatch.setattr(repo, name, AsyncMock())
+    update = AsyncMock()
+    monkeypatch.setattr(repo, "update_state", update)
+    monkeypatch.setattr(vulns, "match_findings", AsyncMock(return_value={}))
+    result = await vulns.sync(now=NOW, sleep=AsyncMock())
+    assert len(result["errors"]) == 1 and result["products"] == 1
+    assert update.await_args_list[-1].kwargs["nvd_synced_at"] == NOW
+    assert update.await_args_list[-1].kwargs["failed_at"] is None
+
+
+def test_failed_at_migration_runs_on_sqlite():
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE vuln_sync_state (id INTEGER PRIMARY KEY)")
+    sql = db._adapt_sql_for_sqlite(Path("migrations/584_vuln_sync_failed_at.sql").read_text(encoding="utf-8"))
+    for statement in db._split_sql_statements(sql):
+        connection.execute(statement.replace("ADD COLUMN IF NOT EXISTS", "ADD COLUMN"))
+    assert "failed_at" in {row[1] for row in connection.execute("PRAGMA table_info(vuln_sync_state)")}
+
+
 def test_nvd_api_key_is_sent_as_a_header(monkeypatch):
     from app.core import config
 
