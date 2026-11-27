@@ -167,6 +167,70 @@ async def list_unscheduled_tickets(now: datetime, limit: int = 100) -> list[dict
 
 
 # --------------------------------------------------------------------------- #
+# Booking kinds
+# --------------------------------------------------------------------------- #
+
+_KIND_SELECT = (
+    "SELECT k.id, k.kind_key, k.label, k.tone, k.sort_order, k.is_default, k.is_archived, "
+    "(SELECT COUNT(*) FROM appointments a WHERE a.kind = k.kind_key) AS appointment_count "
+    "FROM booking_kinds k"
+)
+
+
+def _kind(row: Any) -> dict[str, Any] | None:
+    if not row:
+        return None
+    record = dict(row)
+    for key in ("id", "sort_order", "appointment_count"):
+        record[key] = int(record.get(key) or 0)
+    record["is_default"] = bool(record.get("is_default"))
+    record["is_archived"] = bool(record.get("is_archived"))
+    return record
+
+
+async def list_kinds() -> list[dict[str, Any]]:
+    """Every booking kind, archived ones included, in display order."""
+
+    rows = await db.fetch_all(_KIND_SELECT + " ORDER BY k.sort_order, k.id")
+    return [record for record in (_kind(row) for row in rows or []) if record]
+
+
+async def get_kind(kind_id: int) -> dict[str, Any] | None:
+    return _kind(await db.fetch_one(_KIND_SELECT + " WHERE k.id = %s", (kind_id,)))
+
+
+async def create_kind(*, kind_key: str, label: str, tone: str, is_default: bool) -> int:
+    row = await db.fetch_one("SELECT COALESCE(MAX(sort_order), 0) AS top FROM booking_kinds")
+    sort_order = int((row or {}).get("top") or 0) + 10
+    kind_id = int(await db.execute_returning_lastrowid(
+        "INSERT INTO booking_kinds (kind_key, label, tone, sort_order, is_default, is_archived) "
+        "VALUES (%s, %s, %s, %s, 0, 0)",
+        (kind_key, label, tone, sort_order),
+    ))
+    if is_default:
+        await set_default_kind(kind_id)
+    return kind_id
+
+
+async def update_kind(kind_id: int, *, label: str, tone: str) -> None:
+    await db.execute("UPDATE booking_kinds SET label = %s, tone = %s, is_archived = 0 WHERE id = %s",
+                     (label, tone, kind_id))
+
+
+async def set_default_kind(kind_id: int) -> None:
+    await db.execute("UPDATE booking_kinds SET is_default = 0 WHERE id <> %s", (kind_id,))
+    await db.execute("UPDATE booking_kinds SET is_default = 1, is_archived = 0 WHERE id = %s", (kind_id,))
+
+
+async def archive_kind(kind_id: int) -> None:
+    await db.execute("UPDATE booking_kinds SET is_archived = 1, is_default = 0 WHERE id = %s", (kind_id,))
+
+
+async def delete_kind(kind_id: int) -> None:
+    await db.execute("DELETE FROM booking_kinds WHERE id = %s", (kind_id,))
+
+
+# --------------------------------------------------------------------------- #
 # Busy time imported from technicians' calendars (no event details are stored)
 # --------------------------------------------------------------------------- #
 

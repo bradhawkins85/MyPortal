@@ -165,7 +165,7 @@ try {
             throw 'No Chocolatey sources are enabled.'
         }
     }
-    # Only actions a technician started from an asset can skip the reboot gate:
+    # Only actions a technician started from an asset skip the reboot gate for the whole run:
     # chosen Windows updates and one-click upgrades always do, and pushed app actions
     # unless the option is unticked. Otherwise the restart they asked for would run
     # without installing anything. Missing options on older queued app jobs use the
@@ -182,12 +182,19 @@ try {
     }
     if ($pendingFeature) { $pendingReboot = $true; $ignorePendingReboots = $false }
     if ($pendingReboot) { $rebootRequired = $true }
-    if ($pendingReboot -and -not $ignorePendingReboots) {
+    # Scheduled application policies may opt out of the gate individually; Windows
+    # updates and other apps in the same run still wait for the restart. A staged
+    # feature update always holds every change until its restart completes.
+    $gateClosed = $pendingReboot -and -not $ignorePendingReboots
+    $appsPastGate = $gateClosed -and -not $pendingFeature -and -not $plan.manual_apps -and
+        @($plan.apps | Where-Object { $_.ignore_pending_reboots -eq $true }).Count -gt 0
+    if ($gateClosed -and -not $appsPastGate) {
         if ($pendingFeature) { Write-Output "Installation deferred while the staged feature update awaits a restart: $($pendingFeature.title)" }
         else { Write-Output 'Installation deferred: a restart is already pending.' }
     } else {
-        if ($pendingReboot) { Write-Output 'Proceeding despite a pending restart as requested.' }
-        if ($plan.windows) {
+        if ($gateClosed) { Write-Output 'A restart is already pending: only applications set to ignore pending reboots will be patched.' }
+        elseif ($pendingReboot) { Write-Output 'Proceeding despite a pending restart as requested.' }
+        if ($plan.windows -and -not $gateClosed) {
             try {
                 $session = New-Object -ComObject Microsoft.Update.Session
                 $session.ClientApplicationID = 'MyPortal Patch Management'
@@ -302,23 +309,34 @@ try {
                         Run-ChocolateyPackage $chocoArgs
                         continue
                     }
+                    if ($gateClosed -and $app.ignore_pending_reboots -ne $true) {
+                        Write-Output "$id deferred: a restart is already pending."; continue
+                    }
                     $latest = Latest-ChocolateyVersion $id
                     $managed = @($local | Where-Object { "$_" -match "^$([regex]::Escape($id))\|" })
                     $chocoArgs = @('--yes', '--no-progress', '--use-package-exit-codes', '--ignore-detected-reboot',
                         "--version=$latest")
+                    if ($app.ignore_checksums -eq $true) { $chocoArgs += '--ignore-checksums' }
                     $external = @($installedApps | Where-Object { $_.DisplayName -ieq $app.display_name })
                     if ($external.Count -gt 1) { throw "Multiple installations match $($app.display_name); review before patching." }
+                    if ($managed.Count -gt 1) { throw "Multiple Chocolatey entries match $id." }
+                    $externalOrder = if ($external.Count -eq 1) { Compare-Version $external[0].DisplayVersion $latest } else { $null }
                     # Auto-updated binaries may be newer than Chocolatey's local metadata or catalog.
-                    if ($external.Count -eq 1 -and (Compare-Version $external[0].DisplayVersion $latest) -ge 0) {
+                    if ($managed.Count -eq 1 -and $null -ne $externalOrder -and $externalOrder -ge 0) {
                         Write-Output "$id is current ($($external[0].DisplayVersion))."; continue
                     }
-                    if ($managed.Count -gt 1) { throw "Multiple Chocolatey entries match $id." }
-                    if ($managed.Count -eq 1) {
+                    if ($managed.Count -eq 0 -and $externalOrder -gt 0) {
+                        # Bring a newer unmanaged install under Chocolatey without running
+                        # the older package installer, so the app is never downgraded.
+                        Write-Output "$id $($external[0].DisplayVersion) is newer than $latest and not managed by Chocolatey; registering it with Chocolatey."
+                        $chocoArgs = @('install', $id, '--force', '--skip-automation-scripts') + $chocoArgs
+                    } elseif ($managed.Count -eq 1) {
                         $version = ([string]$managed[0]).Split('|')[1]
                         if ((Compare-Version $version $latest) -ge 0) { Write-Output "$id is current ($version)."; continue }
                         $chocoArgs = @('upgrade', $id) + $chocoArgs
                     } else {
                         if ($external.Count -eq 0 -and -not $app.install_missing) { Write-Output "$id is not installed; skipped."; continue }
+                        if ($external.Count -eq 1) { Write-Output "$id $($external[0].DisplayVersion) is not managed by Chocolatey; force installing $latest." }
                         $chocoArgs = @('install', $id, '--force') + $chocoArgs
                     }
                     Run-ChocolateyPackage $chocoArgs

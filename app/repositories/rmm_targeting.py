@@ -15,6 +15,8 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from loguru import logger
+
 from app.core.database import db
 from app.services import asset_types
 
@@ -242,6 +244,9 @@ async def contexts_for_agents(agents: list[dict[str, Any]]) -> dict[int, dict[st
     software: dict[int, list[str] | None] = {key: None for key in candidates}
     software_versions: dict[int, dict[str, list[str]] | None] = {key: None for key in candidates}
     software_publishers: dict[int, dict[str, list[str]] | None] = {key: None for key in candidates}
+    # Open vulnerability findings follow software inventory: unknown software
+    # leaves them unknown rather than reporting a device as not vulnerable.
+    vulnerable_software: dict[int, list[str] | None] = {key: None for key in candidates}
     for batch in _batches(candidates):
         rows = await db.fetch_all(
             f"SELECT * FROM rmm_device_inventory WHERE agent_id IN ({_marks(batch)})", batch,  # nosec B608
@@ -276,6 +281,25 @@ async def contexts_for_agents(agents: list[dict[str, Any]]) -> dict[int, dict[st
                         collection = values[agent_id].setdefault(name, [])
                         if str(value) not in collection:
                             collection.append(str(value))
+            try:
+                rows = await db.fetch_all(
+                    "SELECT agent_id, company_id, software_name FROM vuln_findings "
+                    f"WHERE agent_id IN ({_marks(known_ids)}) AND status = 'open' "  # nosec B608 - bound IDs
+                    "ORDER BY software_name", known_ids,
+                )
+            except Exception as exc:  # noqa: BLE001 - vulnerability data stays unknown, other rules still work
+                logger.warning("Vulnerability findings unavailable for device targeting: {}", exc)
+                rows = None
+            else:
+                for agent_id in known_ids:
+                    vulnerable_software[agent_id] = []
+            for row in rows or []:
+                agent_id, name = int(row["agent_id"]), str(row["software_name"] or "")
+                company_id = _identifier(row.get("company_id"))
+                if not name or (company_id is not None and company_id != candidates[agent_id]["company_id"]):
+                    continue
+                if name not in vulnerable_software[agent_id]:
+                    vulnerable_software[agent_id].append(name)
 
     company_variables: dict[int, dict[str, Any]] = {key: {} for key in companies}
     company_tags: dict[int, set[str]] = {key: set() for key in companies}
@@ -445,6 +469,9 @@ async def contexts_for_agents(agents: list[dict[str, Any]]) -> dict[int, dict[st
             "software": software[agent_id],
             "software_versions": software_versions[agent_id],
             "software_publishers": software_publishers[agent_id],
+            "vulnerability": {"has_vulnerable_software": (
+                bool(vulnerable_software[agent_id]) if vulnerable_software[agent_id] is not None else None)},
+            "vulnerable_software": vulnerable_software[agent_id],
             "asset_tags": sorted(names) if names is not None else None,
             "company_tags": sorted(company_tags[company_id]),
             "asset_custom": asset_custom.get(asset_id) if canonical_asset is not None else None,
@@ -562,6 +589,7 @@ async def context_for_asset(
     return {
         "agent": public_agent, "asset": asset, "company": company,
         "software": None, "software_versions": None, "software_publishers": None,
+        "vulnerability": {"has_vulnerable_software": None}, "vulnerable_software": None,
         "asset_tags": asset_tags,
         "company_tags": sorted(set(company_tag_ids.values())),
         "asset_custom": asset_custom,

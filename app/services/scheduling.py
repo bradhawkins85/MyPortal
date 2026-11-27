@@ -41,12 +41,19 @@ from loguru import logger
 
 from app.repositories import appointments as repo
 
-KINDS = {
-    "onsite": "Onsite visit",
-    "remote": "Remote session",
-    "phone": "Phone call",
-    "meeting": "Meeting",
-}
+DEFAULT_KINDS = (
+    {"kind_key": "onsite", "label": "Onsite visit", "tone": "warning", "is_default": True},
+    {"kind_key": "remote", "label": "Remote session", "tone": "accent", "is_default": False},
+    {"kind_key": "phone", "label": "Phone call", "tone": "success", "is_default": False},
+    {"kind_key": "meeting", "label": "Meeting", "tone": "neutral", "is_default": False},
+)
+TONES = {"accent": "Blue", "warning": "Amber", "success": "Green", "danger": "Red", "neutral": "Grey"}
+MAX_KIND_LABEL = 80
+# Labels of every booking kind, archived ones included, so older appointments stay readable.
+# Kept up to date in place by refresh_kinds() (called by load_settings()).
+KINDS: dict[str, str] = {kind["kind_key"]: kind["label"] for kind in DEFAULT_KINDS}
+KIND_TONES: dict[str, str] = {kind["kind_key"]: kind["tone"] for kind in DEFAULT_KINDS}
+_kind_state: dict[str, Any] = {"active": [kind["kind_key"] for kind in DEFAULT_KINDS], "default": "onsite"}
 STATUSES = {"scheduled": "Scheduled", "completed": "Completed", "cancelled": "Cancelled"}
 SYNC_LABELS = {"off": "Not synced", "pending": "Syncing", "synced": "In calendar", "failed": "Calendar sync failed"}
 DURATIONS = (15, 30, 45, 60, 90, 120, 180, 240, 480)
@@ -142,6 +149,7 @@ def technician_name(user: Mapping[str, Any]) -> str:
 async def load_settings() -> Settings:
     from app.services import business_hours as business_hours_service
 
+    await refresh_kinds()
     row = await repo.get_settings()
     start = _int(row.get("day_start_hour"), 7, 0, 23)
     end = _int(row.get("day_end_hour"), 19, 1, 24)
@@ -154,6 +162,73 @@ async def load_settings() -> Settings:
         day_end_hour=end,
         default_duration_minutes=_int(row.get("default_duration_minutes"), 60, 5, MAX_DURATION_MINUTES),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Booking kinds
+# --------------------------------------------------------------------------- #
+
+
+async def refresh_kinds() -> list[dict[str, Any]]:
+    """Load the booking kinds, falling back to the built-in ones if none are stored."""
+
+    try:
+        rows = await repo.list_kinds()
+    except Exception as exc:  # noqa: BLE001 - before migration 585, or no database
+        logger.debug("Booking kinds unavailable, using the built-in kinds: {}", exc)
+        rows = []
+    if not rows:
+        rows = [{**kind, "id": None, "is_archived": False, "appointment_count": 0} for kind in DEFAULT_KINDS]
+    KINDS.clear()
+    KINDS.update({row["kind_key"]: row["label"] for row in rows})
+    KIND_TONES.clear()
+    KIND_TONES.update({row["kind_key"]: row["tone"] if row.get("tone") in TONES else "accent" for row in rows})
+    active = [row["kind_key"] for row in rows if not row.get("is_archived")] or [rows[0]["kind_key"]]
+    default = next((row["kind_key"] for row in rows if row.get("is_default") and not row.get("is_archived")), active[0])
+    _kind_state.update(active=active, default=default)
+    return rows
+
+
+def active_kinds() -> dict[str, str]:
+    """Kinds offered for new bookings, in display order."""
+
+    return {key: KINDS[key] for key in _kind_state["active"] if key in KINDS}
+
+
+def default_kind() -> str:
+    return str(_kind_state["default"])
+
+
+def kind_label(key: Any) -> str:
+    return KINDS.get(str(key), "Appointment")
+
+
+def kind_key_for(label: str, taken: Iterable[str]) -> str:
+    """A short unique key for a new kind, derived from its label."""
+
+    base = "".join(char if char.isalnum() else "-" for char in label.casefold()).strip("-")
+    base = "-".join(part for part in base.split("-") if part)[:12].strip("-") or "kind"
+    used = set(taken)
+    key, number = base, 2
+    while key in used:
+        key = f"{base}-{number}"
+        number += 1
+    return key
+
+
+def parse_kind_form(form: Mapping[str, Any]) -> dict[str, Any]:
+    label = " ".join(str(form.get("label") or "").split())
+    errors: dict[str, str] = {}
+    if not label:
+        errors["label"] = "Give the booking kind a name."
+    elif len(label) > MAX_KIND_LABEL:
+        errors["label"] = f"Keep the name to {MAX_KIND_LABEL} characters."
+    tone = str(form.get("tone") or "accent")
+    if tone not in TONES:
+        errors["tone"] = "Choose a colour."
+    if errors:
+        raise AppointmentError(errors)
+    return {"label": label, "tone": tone, "is_default": bool(form.get("is_default"))}
 
 
 def parse_settings_form(form: Mapping[str, Any]) -> dict[str, Any]:
@@ -198,7 +273,7 @@ def parse_form(form: Mapping[str, Any], settings: Settings, *, technician_ids: I
         technician_id = 0
     if technician_id not in set(technician_ids):
         errors["technician_user_id"] = "Choose a technician."
-    kind = str(form.get("kind") or "onsite")
+    kind = str(form.get("kind") or default_kind())
     if kind not in KINDS:
         errors["kind"] = "Choose the kind of appointment."
     try:
@@ -298,7 +373,7 @@ def unavailable_message(found: Sequence[Mapping[str, Any]], zone: ZoneInfo, *, t
 
 
 def _note(action: str, appointment: Mapping[str, Any], technician: str, zone: ZoneInfo) -> str:
-    kind = KINDS.get(str(appointment.get("kind")), "Appointment")
+    kind = kind_label(appointment.get("kind"))
     when = html.escape(describe_when(appointment, zone))
     parts = [f"<p><strong>{html.escape(kind)} {action}</strong> with {html.escape(technician)}: {when} ({zone.key}).</p>"]
     if appointment.get("location"):
@@ -348,7 +423,7 @@ def appointment_context(appointment: Mapping[str, Any], settings: Settings) -> d
     return {
         "id": appointment.get("id"),
         "kind": appointment.get("kind"),
-        "kind_label": KINDS.get(str(appointment.get("kind")), "Appointment"),
+        "kind_label": kind_label(appointment.get("kind")),
         "status": appointment.get("status"),
         "technician": technician_name(appointment),
         "technician_email": appointment.get("technician_email"),
@@ -419,7 +494,7 @@ def schedule_sync(appointment_id: int, *, remove_from: Mapping[str, Any] | None 
 
 
 def event_payload(appointment: Mapping[str, Any], *, portal_url: str) -> dict[str, Any]:
-    kind = KINDS.get(str(appointment.get("kind")), "Appointment")
+    kind = kind_label(appointment.get("kind"))
     number = appointment.get("ticket_number") or appointment.get("ticket_id")
     subject = f"{kind}: {appointment.get('ticket_subject') or 'Ticket'} (#{number})"
     lines = [f"<p><strong>{html.escape(kind)}</strong> for ticket #{html.escape(str(number))}"
@@ -674,7 +749,8 @@ def _block(appointment: Mapping[str, Any], day_start: datetime, day_end: datetim
         "width": round(max(1.5, 100 * (right - left)), 2),
         "start_label": f"{start:%H:%M}",
         "end_label": f"{end:%H:%M}",
-        "kind_label": KINDS.get(str(appointment.get("kind")), "Appointment"),
+        "kind_label": kind_label(appointment.get("kind")),
+        "kind_tone": KIND_TONES.get(str(appointment.get("kind")), "accent"),
         "starts_before": start < day_start,
         "ends_after": end > day_end,
         "when": describe_when(appointment, zone),
@@ -755,7 +831,8 @@ def group_by_day(appointments: Sequence[Mapping[str, Any]], zone: ZoneInfo) -> l
         start = to_local(appointment["starts_at"], zone)
         days.setdefault(start.date(), []).append({
             **dict(appointment), "when": describe_when(appointment, zone),
-            "kind_label": KINDS.get(str(appointment.get("kind")), "Appointment"),
+            "kind_label": kind_label(appointment.get("kind")),
+            "kind_tone": KIND_TONES.get(str(appointment.get("kind")), "accent"),
         })
     return [{"day": day, "items": items} for day, items in sorted(days.items())]
 
@@ -798,6 +875,6 @@ def editor_state(appointment: Mapping[str, Any] | None, settings: Settings, *, t
             "location": appointment.get("location") or "", "notes": appointment.get("notes") or "",
             "status": appointment["status"],
         }
-    return {"id": None, "ticket_id": ticket_id, "technician_user_id": technician_id, "kind": "onsite",
+    return {"id": None, "ticket_id": ticket_id, "technician_user_id": technician_id, "kind": default_kind(),
             "date": (day or datetime.now(settings.zone).date()).isoformat(), "start_time": start or "09:00",
             "duration_minutes": settings.default_duration_minutes, "location": "", "notes": "", "status": "scheduled"}

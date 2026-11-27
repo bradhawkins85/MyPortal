@@ -35,8 +35,8 @@ def _patch_script_copy(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize('managed,installed,missing,expected', [
-    ('1.0', '1.0', False, 'upgrade'), (None, '1.0', False, 'install'),
-    ('3.0', '3.0', False, None), ('1.0', '3.0', False, None), (None, '3.0', False, None),
+    ('1.0', '1.0', False, 'upgrade'), (None, '1.0', False, 'install'), (None, '2.0', False, 'install'),
+    ('3.0', '3.0', False, None), ('1.0', '3.0', False, None), (None, '3.0', False, 'register'),
     (None, None, False, None), (None, None, True, 'install'),
 ])
 @pytest.mark.parametrize('available_source', ['custom1', 'custom2', 'custom10', 'default'])
@@ -86,9 +86,11 @@ function Get-ItemProperty {
     assert all(f'--source={name}' in search for name, search in zip(order, searches))
     commands = log.read_text() if log.exists() else ''
     if expected:
-        assert commands.startswith(expected + ' testapp ')
+        # Unmanaged apps are brought under Chocolatey; a newer one is only registered, never downgraded.
+        assert commands.startswith(('install' if expected == 'register' else expected) + ' testapp ')
         assert '--version=2.0' in commands and '--source=' not in commands
-        assert ('--force' in commands) == (expected == 'install')
+        assert ('--force' in commands) == (expected in {'install', 'register'})
+        assert ('--skip-automation-scripts' in commands) == (expected == 'register')
     else:
         assert commands == ''
 
@@ -218,3 +220,44 @@ function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
         assert 'Proceeding despite a pending restart' in result.stdout
     else:
         assert not log.exists() and 'Installation deferred' in result.stdout
+
+
+@pytest.mark.parametrize('pending', [False, True])
+def test_app_policy_ignore_options_pass_the_reboot_gate_and_skip_checksums(tmp_path, pending):
+    """Only app policies set to ignore pending reboots run while a restart is pending."""
+    fake = tmp_path / 'choco.ps1'
+    fake.write_text('''
+$global:LASTEXITCODE = 0
+switch ($args[0]) {
+    '--version' { '2.3.0' }
+    'list' { }
+    'search' { if ($args[1] -eq 'skipapp') { 'skipapp|2.0' } else { 'testapp|2.0' } }
+    default { ($args -join ' ') | Add-Content $env:TEST_COMMAND_LOG }
+}
+''', encoding='utf-8')
+    harness = tmp_path / 'harness.ps1'
+    harness.write_text(r'''
+function Sync-ChocolateySources { param($sources); $script:choco = $env:TEST_CHOCO }
+function Test-Path { param($Path); ($env:TEST_PENDING -eq '1') -and ($Path -like '*RebootPending') }
+function Get-ItemProperty { param($Path, $Name, $ErrorAction) }
+''' + _patch_script_text(), encoding='utf-8')
+    plan = {'sources': [{'name': 'company', 'enabled': True, 'priority': 1}], 'windows': None,
+            'reboot': {'reboot_mode': 'never'},
+            'apps': [{'package_id': 'testapp', 'display_name': 'Test Application', 'install_missing': True,
+                      'ignore_pending_reboots': True, 'ignore_checksums': True},
+                     {'package_id': 'skipapp', 'display_name': 'Skip Application', 'install_missing': True}]}
+    log = tmp_path / 'commands.txt'
+    result = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-File', str(harness)],
+        env={**os.environ, 'TEST_CHOCO': str(fake), 'TEST_COMMAND_LOG': str(log),
+             'TEST_PENDING': '1' if pending else '0', 'MYPORTAL_PATCH_PLAN': json.dumps(plan)},
+        capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = log.read_text(encoding='utf-8-sig').splitlines()
+    test_app = next(line.split() for line in commands if line.startswith('install testapp '))
+    assert '--ignore-checksums' in test_app
+    skipped = [line for line in commands if line.startswith('install skipapp ')]
+    if pending:
+        assert skipped == []
+        assert 'skipapp deferred: a restart is already pending.' in result.stdout
+    else:
+        assert len(skipped) == 1 and '--ignore-checksums' not in skipped[0].split()

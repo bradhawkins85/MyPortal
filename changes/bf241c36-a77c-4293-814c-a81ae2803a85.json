@@ -1,0 +1,7 @@
+{
+  "guid": "bf241c36-a77c-4293-814c-a81ae2803a85",
+  "occurred_at": "2026-11-27T04:28Z",
+  "change_type": "Feature",
+  "summary": "Schedule: add, rename, recolour and remove booking kinds, and choose the default kind for new bookings, from the schedule page's Actions menu",
+  "content_hash": "ce03120b73f4b159da3571295ce6ffa69d7bef921bd0326bac0cf67b9b41c186"
+}

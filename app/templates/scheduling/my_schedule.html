@@ -33,7 +33,7 @@
       <h3 class="sch-day">{{ group.day.strftime("%A %d %B") }}</h3>
       <ul class="sch-agenda">
         {% for item in group["items"] %}
-        <li class="sch-agenda__item sch-block--{{ item.kind }} sch-agenda__item--{{ item.status }}">
+        <li class="sch-agenda__item sch-block--tone-{{ item.kind_tone }} sch-agenda__item--{{ item.status }}">
           <a href="/admin/schedule?appointment={{ item.id }}"><strong>{{ item.when.split(", ")[-1] }}</strong> {{ item.kind_label }}</a>
           <span>#{{ item.ticket_number or item.ticket_id }} {{ item.ticket_subject or "" }} <span class="text-muted">· {{ item.company_name or "No company" }}</span></span>
           {% if item.location %}<span class="text-muted">{{ item.location }}</span>{% endif %}

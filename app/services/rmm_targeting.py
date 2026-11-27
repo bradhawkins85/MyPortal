@@ -105,6 +105,8 @@ _FIELD_ROWS = (
     ("software.name", "Installed software name", "Software", "list"),
     ("software.version", "Installed software version", "Software", "version"),
     ("software.publisher", "Installed software publisher", "Software", "text"),
+    ("vulnerability.has_vulnerable_software", "Device has vulnerable software", "Vulnerabilities", "boolean"),
+    ("vulnerability.software", "Installed app with vulnerabilities", "Vulnerabilities", "list"),
     ("asset.tags", "Asset tag (including automatic tags)", "Tags", "list"),
     ("company.tags", "Company tag", "Tags", "list"),
     ("asset.custom", "Asset custom field", "Custom fields", "dynamic"),
@@ -365,7 +367,8 @@ def _normalize_key(field: str, key: str) -> str:
 
 def _resolve(condition: dict[str, Any], context: Mapping[str, Any]) -> Any:
     field = condition["field"]
-    collections = {"software.name": "software", "asset.tags": "asset_tags", "company.tags": "company_tags"}
+    collections = {"software.name": "software", "vulnerability.software": "vulnerable_software",
+                   "asset.tags": "asset_tags", "company.tags": "company_tags"}
     if field in collections:
         value = context.get(collections[field], _MISSING)
         # A string is not a complete software/tag inventory.
@@ -542,8 +545,9 @@ def compile_rules(rules: Any) -> Callable[[Any], bool]:
 def matches_rules(rules: Any, context: Any) -> bool:
     """Evaluate rules against scoped inventory, failing closed on bad rules.
 
-    Context contains asset/agent/company mappings, software/asset_tags/
-    company_tags lists (None means unavailable), and asset_custom/
+    Context contains asset/agent/company/vulnerability mappings, software/
+    vulnerable_software/asset_tags/company_tags lists (None means unavailable;
+    vulnerable_software names installed apps with open findings), and asset_custom/
     company_variables mappings keyed by definition ID or name. Optional
     software_versions/software_publishers map package names to value lists;
     package-name lookup is case insensitive. No lookup,

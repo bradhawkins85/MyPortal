@@ -1,10 +1,12 @@
-{#- The ticket page's Appointments card (ticket_appointments from app.features.scheduling.routes). -#}
+{#- The ticket page's Appointments card (ticket_appointments from app.features.scheduling.routes).
+    "Book appointment" opens the booking editor here; booking returns to this ticket. Without
+    JavaScript the link opens the editor on the schedule page, which also returns here. -#}
 {% set ta = ticket_appointments %}
 <details class="card card--panel card-collapsible" data-ticket-appointments-card {% if ta.upcoming %}open{% endif %}>
   <summary class="card__header card__header--collapsible">
     <h2 class="card__title">Appointments{% if ta.upcoming %} <span class="badge">{{ ta.upcoming }} upcoming</span>{% endif %}</h2>
     <div class="card__collapsible-meta">
-      <a class="button button--ghost button--small" href="/admin/schedule?new=1&amp;ticket_id={{ ticket.id }}{% if ticket.assigned_user_id %}&amp;technician_id={{ ticket.assigned_user_id }}{% endif %}">Book appointment</a>
+      <a class="button button--ghost button--small" href="/admin/schedule?new=1&amp;ticket_id={{ ticket.id }}{% if ticket.assigned_user_id %}&amp;technician_id={{ ticket.assigned_user_id }}{% endif %}&amp;return_to=/admin/tickets/{{ ticket.id }}" {% if ta.technicians is defined %}data-sch-open aria-haspopup="dialog" aria-controls="sch-modal"{% endif %}>Book appointment</a>
       <span class="card__toggle-icon" aria-hidden="true"></span>
     </div>
   </summary>
@@ -26,3 +28,12 @@
     {% endif %}
   </div></div>
 </details>
+{% if ta.technicians is defined %}
+<link rel="stylesheet" href="{{ static_url('/static/css/scheduling.css') }}">
+{% with day=ta.day, settings=ta.settings, technicians=ta.technicians, kinds=ta.kinds, default_kind=ta.default_kind,
+         durations=ta.durations, sync_labels=ta.sync_labels, unscheduled=[], editing=none, errors={},
+         sch_ticket=ta.ticket, sch_return_to=ta.return_to, sch_close_href=ta.return_to %}
+{% include "scheduling/_appointment_editor.html" %}
+{% endwith %}
+<script src="{{ static_url('/static/js/scheduling.js') }}" defer></script>
+{% endif %}
