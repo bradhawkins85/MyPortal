@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field
 from starlette.datastructures import ImmutableMultiDict
 
 from app.api.dependencies.auth import require_helpdesk_technician, require_super_admin
-from app.repositories import chat_auto_assign as technicians_repo
 from app.repositories import companies as company_repo
+from app.repositories import company_memberships as membership_repo
 from app.repositories import projects as repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
@@ -50,8 +50,15 @@ def _plain(values: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# The role "Technician" switch (``menu.admin.technician``) grants this
+# permission. ``helpdesk.technician`` is not used: any role with ticket access
+# carries it, so it would offer customer users as project managers and assignees.
+TECHNICIAN_PERMISSION = "company.switch_all"
+
+
 async def _technicians() -> list[dict[str, Any]]:
-    users = await technicians_repo.list_all_technicians()
+    """Return Super Admins and users whose active role has the Technician switch on."""
+    users = await membership_repo.list_users_with_permission(TECHNICIAN_PERMISSION)
     items = []
     for user in users:
         name = " ".join(part for part in (user.get("first_name"), user.get("last_name")) if part).strip()
